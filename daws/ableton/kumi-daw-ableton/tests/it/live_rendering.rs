@@ -42,6 +42,8 @@ struct Fixture {
     tag: RefCell<String>,
     releases: RefCell<Vec<Value>>,
     held_apply: Option<Rc<HeldApply>>,
+    /// A test's look at each call as it comes (the call, and what the case expects of it).
+    on_call: RefCell<Option<Box<dyn Fn(&Value, &mut Value)>>>,
 }
 struct HeldApply {
     dispatched: tokio::sync::Notify,
@@ -87,6 +89,9 @@ impl McpEndpoint for Fixture {
             && actual["args"]["fields"] == current_fields
         {
             expected["args"]["fields"] = current_fields;
+        }
+        if let Some(on_call) = &*self.on_call.borrow() {
+            on_call(&actual, &mut expected);
         }
         eq(&actual, &expected, &format!("{} dispatch {index}", self.case["label"]));
         self.calls.set(index + 1);
@@ -199,37 +204,22 @@ fn wav(folder: &Path, kind: &str) {
     }
     std::fs::write(folder.join(format!("{kind}.wav")), bytes).unwrap();
 }
-/// The oracle's cases in 16 tests that nextest runs side by side.
-mod source_audition_goal_passes_and_failure_cleanup_match {
-    kumi_testkit::chunked!(super::replay_cases; part_00 = 0, part_01 = 1, part_02 = 2, part_03 = 3, part_04 = 4, part_05 = 5,
-        part_06 = 6, part_07 = 7, part_08 = 8, part_09 = 9, part_10 = 10, part_11 = 11, part_12 = 12, part_13 = 13, part_14 = 14,
-        part_15 = 15);
+/// What a case runs on: its endpoint, and Kumi's side of its Set, as the oracle's cases have them.
+struct Bench {
+    endpoint: Rc<Fixture>,
+    events: Rc<RefCell<Vec<Value>>>,
+    actions: Rc<RefCell<Vec<Value>>>,
+    auditions: Rc<RefCell<Vec<Value>>>,
+    ears: Rc<EarsReplay>,
+    opened: Rc<Cell<u32>>,
+    restore: PathBuf,
+    connection: Rc<LiveConnection>,
+    history: Rc<History>,
+    observer: Rc<Observer>,
+    rendering: Rc<Rendering>,
 }
-/// The oracle's cases at index `chunk`, `chunk + chunks`, …, on a runtime whose clock starts paused.
-fn replay_cases(chunk: usize, chunks: usize) {
-    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap();
-    runtime.block_on(tokio::task::LocalSet::new().run_until(replay(chunk, chunks)));
-}
-async fn replay(chunk: usize, chunks: usize) {
-    // Rendering keeps its renders in kumi-ears/<the generation's first 8 characters> in the temporary folder, and
-    // closing removes that folder. Each chunk has a generation of its own, so chunks running side by side keep theirs.
-    // No result in the oracle carries the generation. Past chunk-99 it would run to 9 characters, and chunk-100 would
-    // share chunk-10's folder.
-    assert!(chunks <= 100, "each of at most 100 chunks has a render folder of its own");
-    let generation = format!("chunk-{chunk:02}");
-    EARS.with(|ears| *ears.borrow_mut() = std::env::temp_dir().join("kumi-ears").join(&generation));
-    let folder = tempfile::tempdir().unwrap();
-    // "vanishing" is a square wave a case can have taken away (removeAt).
-    for kind in ["square", "noise", "silence", "vanishing"] {
-        wav(folder.path(), kind);
-    }
-    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/rendering-oracle.json")).unwrap();
-    let fixture = fixture_paths::map_strings(&source, &|text| text.replace("$AUDIO", folder.path().to_str().unwrap()));
-    for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate().skip(chunk).step_by(chunks) {
-        if std::env::var("KUMI_RENDERING_CASE").is_ok_and(|label| case["label"].as_str() != Some(&label)) {
-            continue;
-        }
-        eprintln!("rendering case {case_index}: {}", case["label"]);
+impl Bench {
+    async fn new(case: &Value, generation: &str, folder: &Path) -> Self {
         let config = &case["config"];
         let endpoint = Rc::new(Fixture {
             case: case.clone(),
@@ -239,6 +229,7 @@ async fn replay(chunk: usize, chunks: usize) {
             tag: RefCell::new("tag".into()),
             releases: RefCell::new(vec![]),
             held_apply: None,
+            on_call: RefCell::new(None),
         });
         let events = Rc::new(RefCell::new(vec![]));
         let actions = Rc::new(RefCell::new(vec![]));
@@ -250,7 +241,7 @@ async fn replay(chunk: usize, chunks: usize) {
             async move { Ok(out) }.boxed_local()
         }));
         options.now = Some(Rc::new(|| chrono::DateTime::from_timestamp_millis(0).unwrap()));
-        options.generation = Some(generation.clone());
+        options.generation = Some(generation.to_owned());
         options.change_timeout_ms = Some(2000);
         options.fast = Some(false);
         options.ears = Some(EarsSetup::Disabled);
@@ -258,7 +249,7 @@ async fn replay(chunk: usize, chunks: usize) {
         let ears = Rc::new(EarsReplay {
             calls: case["earsCalls"].as_array().cloned().unwrap_or_default(),
             at: Cell::new(0),
-            folder: folder.path().into(),
+            folder: folder.into(),
         });
         // Ears that can't be set up (no Max for Live, say): each try is counted.
         let opened = Rc::new(Cell::new(0));
@@ -275,7 +266,7 @@ async fn replay(chunk: usize, chunks: usize) {
                 async move { Ok(link) }.boxed_local()
             })));
         }
-        let restore = folder.path().join("restore.json");
+        let restore = folder.join("restore.json");
         let _ = std::fs::remove_file(&restore);
         let _ = std::fs::remove_dir(&restore);
         // A journal that can't be written (as on a full disk): a folder stands in its place.
@@ -320,7 +311,7 @@ async fn replay(chunk: usize, chunks: usize) {
         let files = mutations.clone();
         let rendering = Rendering::new(
             history.clone(),
-            observer,
+            observer.clone(),
             &options,
             Rc::new(move |tool, args, signal| {
                 let step = step.clone();
@@ -331,6 +322,61 @@ async fn replay(chunk: usize, chunks: usize) {
                 async move { files.clip_file(&file, signal).await }.boxed_local()
             }),
         );
+        Self { endpoint, events, actions, auditions, ears, opened, restore, connection, history, observer, rendering }
+    }
+    /// One of a case's operations; what it comes to.
+    async fn run(&self, goal: &mut Option<Rc<dyn GoalRig>>, op: &Value, signal: Signal) -> Result<Value, RuntimeError> {
+        let (connection, rendering) = (&self.connection, &self.rendering);
+        let result:Result<Value,RuntimeError>=async{Ok(match op["type"].as_str().unwrap(){
+    "reset"=>{rendering.reset_turn(op["continuing"].as_bool().unwrap_or(false));Value::Null},
+    "bump"=>{connection.lease.set(connection.lease.get()+1);Value::Null},
+    "audition"=>match rendering.audition(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(mut value)=>{value.seconds=0.;json!(value)},Err(message)=>json!(message)},
+    "hear"=>match rendering.hear_in_set(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(value)=>json!(value),Err(message)=>json!(message)},
+    "restore"=>json!(rendering.restore_after_crash(op["identity"].as_str().unwrap(),op["path"].as_str(),signal).await?),
+    "open"=>match rendering.open_goal(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(value)=>{let result=json!({"slots":value.slots().into_iter().map(as_ported).collect::<Vec<_>>(),"screens":value.screens()});*goal=Some(value);result},Err(message)=>json!(message)},
+    "generation"=>{let trials=op["trials"].as_array().unwrap().iter().map(|trial|GenerationTrial{slot:trial["slot"].as_str().unwrap().into(),knobs:serde_json::from_value(trial["knobs"].clone()).unwrap(),values:serde_json::from_value(trial["values"].clone()).unwrap(),fresh:trial["fresh"].as_bool()}).collect::<Vec<_>>();let v=goal.as_ref().unwrap().generation(&trials,signal,Some(GenerationOptions{screen:op["options"]["screen"].as_bool()})).await?;json!({"scores":v.scores,"gaps":v.gaps,"silent":v.silent,"frozen":v.frozen,"structural":v.structural,"screened":v.screened,"cached":v.cached})},
+    "add"=>match goal.as_ref().unwrap().add(&serde_json::from_value(op["candidate"].clone()).unwrap(),signal).await?{Ok(value)=>json!(as_ported(value)),Err(error)=>json!(error)},
+    "settle"=>json!(goal.as_ref().unwrap().settle(op["slot"].as_str().unwrap(),&serde_json::from_value::<Vec<_>>(op["knobs"].clone()).unwrap(),&serde_json::from_value::<Vec<_>>(op["values"].clone()).unwrap(),signal).await?),
+    "keep"=>json!(goal.as_ref().unwrap().keep_best(op["slot"].as_str().unwrap(),&serde_json::from_value::<Vec<_>>(op["knobs"].clone()).unwrap(),&serde_json::from_value::<Vec<_>>(op["values"].clone()).unwrap(),signal).await?),
+    "tidy"=>json!(goal.as_ref().unwrap().tidy(&serde_json::from_value::<Vec<_>>(op.get("top").cloned().unwrap_or(json!([]))).unwrap(),signal).await?),
+    "close"=>json!(goal.as_ref().unwrap().close().await?),other=>panic!("unknown {other}")})}.await;
+        result
+    }
+}
+/// The oracle's cases in 16 tests that nextest runs side by side.
+mod source_audition_goal_passes_and_failure_cleanup_match {
+    kumi_testkit::chunked!(super::replay_cases; part_00 = 0, part_01 = 1, part_02 = 2, part_03 = 3, part_04 = 4, part_05 = 5,
+        part_06 = 6, part_07 = 7, part_08 = 8, part_09 = 9, part_10 = 10, part_11 = 11, part_12 = 12, part_13 = 13, part_14 = 14,
+        part_15 = 15);
+}
+/// The oracle's cases at index `chunk`, `chunk + chunks`, …, on a runtime whose clock starts paused.
+fn replay_cases(chunk: usize, chunks: usize) {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap();
+    runtime.block_on(tokio::task::LocalSet::new().run_until(replay(chunk, chunks)));
+}
+async fn replay(chunk: usize, chunks: usize) {
+    // Rendering keeps its renders in kumi-ears/<the generation's first 8 characters> in the temporary folder, and
+    // closing removes that folder. Each chunk has a generation of its own, so chunks running side by side keep theirs.
+    // No result in the oracle carries the generation. Past chunk-99 it would run to 9 characters, and chunk-100 would
+    // share chunk-10's folder.
+    assert!(chunks <= 100, "each of at most 100 chunks has a render folder of its own");
+    let generation = format!("chunk-{chunk:02}");
+    EARS.with(|ears| *ears.borrow_mut() = std::env::temp_dir().join("kumi-ears").join(&generation));
+    let folder = tempfile::tempdir().unwrap();
+    // "vanishing" is a square wave a case can have taken away (removeAt).
+    for kind in ["square", "noise", "silence", "vanishing"] {
+        wav(folder.path(), kind);
+    }
+    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/rendering-oracle.json")).unwrap();
+    let fixture = fixture_paths::map_strings(&source, &|text| text.replace("$AUDIO", folder.path().to_str().unwrap()));
+    for (case_index, case) in fixture["cases"].as_array().unwrap().iter().enumerate().skip(chunk).step_by(chunks) {
+        if std::env::var("KUMI_RENDERING_CASE").is_ok_and(|label| case["label"].as_str() != Some(&label)) {
+            continue;
+        }
+        eprintln!("rendering case {case_index}: {}", case["label"]);
+        let config = &case["config"];
+        let bench = Bench::new(case, &generation, folder.path()).await;
+        let Bench { endpoint, events, actions, auditions, ears, opened, restore, connection, history, rendering, .. } = &bench;
         let mut goal: Option<Rc<dyn GoalRig>> = None;
         for (index, op) in case["operations"].as_array().unwrap().iter().enumerate() {
             let signal = Signal::new();
@@ -338,19 +384,7 @@ async fn replay(chunk: usize, chunks: usize) {
                 signal.cancel();
             }
             *endpoint.original.borrow_mut() = signal.clone();
-            let result:Result<Value,RuntimeError>=async{Ok(match op["type"].as_str().unwrap(){
-    "reset"=>{rendering.reset_turn(op["continuing"].as_bool().unwrap_or(false));Value::Null},
-    "bump"=>{connection.lease.set(connection.lease.get()+1);Value::Null},
-    "audition"=>match rendering.audition(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(mut value)=>{value.seconds=0.;json!(value)},Err(message)=>json!(message)},
-    "hear"=>match rendering.hear_in_set(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(value)=>json!(value),Err(message)=>json!(message)},
-    "restore"=>json!(rendering.restore_after_crash(op["identity"].as_str().unwrap(),op["path"].as_str(),signal).await?),
-    "open"=>match rendering.open_goal(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(value)=>{let result=json!({"slots":value.slots().into_iter().map(as_ported).collect::<Vec<_>>(),"screens":value.screens()});goal=Some(value);result},Err(message)=>json!(message)},
-    "generation"=>{let trials=op["trials"].as_array().unwrap().iter().map(|trial|GenerationTrial{slot:trial["slot"].as_str().unwrap().into(),knobs:serde_json::from_value(trial["knobs"].clone()).unwrap(),values:serde_json::from_value(trial["values"].clone()).unwrap(),fresh:trial["fresh"].as_bool()}).collect::<Vec<_>>();let v=goal.as_ref().unwrap().generation(&trials,signal,Some(GenerationOptions{screen:op["options"]["screen"].as_bool()})).await?;json!({"scores":v.scores,"gaps":v.gaps,"silent":v.silent,"frozen":v.frozen,"structural":v.structural,"screened":v.screened,"cached":v.cached})},
-    "add"=>match goal.as_ref().unwrap().add(&serde_json::from_value(op["candidate"].clone()).unwrap(),signal).await?{Ok(value)=>json!(as_ported(value)),Err(error)=>json!(error)},
-    "settle"=>json!(goal.as_ref().unwrap().settle(op["slot"].as_str().unwrap(),&serde_json::from_value::<Vec<_>>(op["knobs"].clone()).unwrap(),&serde_json::from_value::<Vec<_>>(op["values"].clone()).unwrap(),signal).await?),
-    "keep"=>json!(goal.as_ref().unwrap().keep_best(op["slot"].as_str().unwrap(),&serde_json::from_value::<Vec<_>>(op["knobs"].clone()).unwrap(),&serde_json::from_value::<Vec<_>>(op["values"].clone()).unwrap(),signal).await?),
-    "tidy"=>json!(goal.as_ref().unwrap().tidy(&serde_json::from_value::<Vec<_>>(op.get("top").cloned().unwrap_or(json!([]))).unwrap(),signal).await?),
-    "close"=>json!(goal.as_ref().unwrap().close().await?),other=>panic!("unknown {other}")})}.await;
+            let result = bench.run(&mut goal, op, signal).await;
             let value = match result {
                 Ok(value) => value,
                 Err(RuntimeError::Aborted) => json!({"error":"cancelled"}),
@@ -379,6 +413,95 @@ async fn replay(chunk: usize, chunks: usize) {
         connection.close().await.unwrap();
         assert_eq!(ears.at.get(), ears.calls.len(), "{} Ears call count", case["label"]);
     }
+}
+
+/// One of the oracle's goal cases, with its audio in `folder`, for a test of its own on a paused clock.
+fn goal_case(folder: &Path, label: &str, generation: &str) -> Value {
+    EARS.with(|ears| *ears.borrow_mut() = std::env::temp_dir().join("kumi-ears").join(generation));
+    for kind in ["square", "noise", "silence", "vanishing"] {
+        wav(folder, kind);
+    }
+    let source: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/rendering-oracle.json")).unwrap();
+    let case = source["cases"].as_array().unwrap().iter().find(|case| case["label"] == label).unwrap();
+    fixture_paths::map_strings(case, &|text| text.replace("$AUDIO", folder.to_str().unwrap()))
+}
+fn on_a_paused_clock(work: impl std::future::Future<Output = ()>) {
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().start_paused(true).build().unwrap();
+    runtime.block_on(tokio::task::LocalSet::new().run_until(work));
+}
+/// (#399) An older best stays in the Set (kept in another session): the new one goes by a name of its own, and that's the
+/// name the goal says, not the older one's.
+#[test]
+fn a_best_kept_beside_an_older_one_is_told_by_the_name_it_was_given() {
+    const BEST: &str = "Kumi · Goal best";
+    on_a_paused_clock(async {
+        let folder = tempfile::tempdir().unwrap();
+        let mut case = goal_case(folder.path(), "held-goal-cache-settle-best", "goal-nam");
+        // The read that names the copy, two calls after the duplicate is asked for.
+        let duplicate = case["calls"].as_array().unwrap().iter().position(|call| call["args"]["action"] == "duplicate-track").unwrap();
+        let reply = &mut case["responses"][duplicate + 2]["reply"];
+        reply["structuredContent"]["items"].as_array_mut().unwrap().push(json!({"ref":"7:track:9","parentRef":"7:set:song","name":BEST}));
+        reply["content"][0]["text"] = json!(stringify(&reply["structuredContent"]));
+        let bench = Bench::new(&case, "goal-nam", folder.path()).await;
+        *bench.endpoint.on_call.borrow_mut() = Some(Box::new(|actual, expected| {
+            let given = actual["args"]["name"].as_str().unwrap_or_default();
+            if expected["args"]["name"] == BEST && given.starts_with(&format!("{BEST} ")) {
+                expected["args"]["name"] = given.into();
+            }
+        }));
+        let mut goal = None;
+        for op in case["operations"].as_array().unwrap() {
+            let value = bench.run(&mut goal, op, Signal::new()).await.unwrap();
+            if op["type"] == "keep" {
+                let told = value.as_str().unwrap();
+                assert_eq!(told.len(), BEST.len() + 4, "{told}");
+                assert!(told.starts_with(&format!("{BEST} ")), "{told}");
+                return;
+            }
+        }
+        panic!("the case keeps a best");
+    });
+}
+/// (#399) A trial or a winner for a slot the goal doesn't hold is a caller's bug: refused in plain words, and nothing is asked
+/// of Live.
+#[test]
+fn a_trial_or_a_winner_outside_the_goal_is_refused_in_words_before_live_is_asked() {
+    on_a_paused_clock(async {
+        let folder = tempfile::tempdir().unwrap();
+        let case = goal_case(folder.path(), "held-goal-cache-settle-best", "goal-slo");
+        let bench = Bench::new(&case, "goal-slo", folder.path()).await;
+        let mut goal = None;
+        bench.run(&mut goal, &case["operations"][0], Signal::new()).await.unwrap();
+        let goal = goal.unwrap();
+        let asked = bench.endpoint.calls.get();
+        let trial = GenerationTrial { slot: "Nobody".into(), knobs: vec![], values: vec![], fresh: None };
+        let refused = goal.generation(&[trial], Signal::new(), None).await.unwrap_err();
+        assert_eq!(refused.to_string(), "“Nobody” isn't in the search");
+        assert_eq!(goal.settle("Nobody", &[], &[], Signal::new()).await.unwrap().as_deref(), Some("“Nobody” isn't in the search"));
+        assert_eq!(bench.endpoint.calls.get(), asked, "nothing was asked of Live");
+    });
+}
+/// (#399) A look during the pass can't say the Set's tempo: the render is still heard for its part, at the tempo the goal
+/// opened with, and tells what the case recorded (never NaN seconds, which would hear the whole file).
+#[test]
+fn a_render_is_heard_for_its_part_when_a_look_loses_the_tempo() {
+    on_a_paused_clock(async {
+        let folder = tempfile::tempdir().unwrap();
+        let case = goal_case(folder.path(), "held-goal-cache-settle-best", "goal-tem");
+        let bench = Bench::new(&case, "goal-tem", folder.path()).await;
+        let mut goal = None;
+        bench.run(&mut goal, &case["operations"][0], Signal::new()).await.unwrap();
+        // (the pass has read the tempo it records by when it reads which tracks are armed)
+        let observer = bench.observer.clone();
+        *bench.endpoint.on_call.borrow_mut() = Some(Box::new(move |actual, _| {
+            if actual["args"]["fields"].as_array().is_some_and(|fields| fields.contains(&json!("armed"))) {
+                observer.tempo.set(None);
+            }
+        }));
+        let value = bench.run(&mut goal, &case["operations"][1], Signal::new()).await.unwrap();
+        assert_eq!(bench.observer.tempo.get(), None, "the look lost it");
+        eq(&value, &case["results"][1]["value"], "heard for its part");
+    });
 }
 
 struct EarsReplay {
@@ -529,6 +652,7 @@ async fn cancelled_kernel_audition_removes_scratch_tracks_and_clears_its_journal
                 tag: RefCell::new("tag".into()),
                 releases: RefCell::new(vec![]),
                 held_apply: Some(held.clone()),
+                on_call: RefCell::new(None),
             });
             let finished = Rc::new(tokio::sync::Notify::new());
             let completed = finished.clone();

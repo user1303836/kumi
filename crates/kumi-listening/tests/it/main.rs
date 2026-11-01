@@ -4,6 +4,7 @@ mod effects;
 mod embed;
 mod feel;
 mod form;
+mod goal;
 mod listener;
 mod music;
 mod music_scale;

@@ -87,9 +87,21 @@ pub fn tell(heard: &Analysis, against: &Analysis, focus: Option<Focus>) -> Optio
     Some(Told { score: close.score, gaps: close.gaps, structural })
 }
 
-/// Hears a render from where its part starts, for `seconds`.
-pub async fn hear(render: &Render, seconds: f64, focus: Option<Focus>, signal: Signal) -> Result<Analysis, audio::AudioError> {
-    audio::hear(&render.file, heard_options(render.start, seconds, focus, signal)).await
+/// How long a render's part is heard for: as long as the render says when it stopped short, else its `beats` at `tempo`.
+pub fn heard_seconds(render: &Render, beats: f64, tempo: f64) -> f64 {
+    render.seconds.unwrap_or(beats * 60. / tempo)
+}
+
+/// Hears a render from where its part starts, for [`heard_seconds`].
+pub async fn hear(render: &Render, beats: f64, tempo: f64, focus: Option<Focus>, signal: Signal) -> Result<Analysis, audio::AudioError> {
+    audio::hear(&render.file, heard_options(render.start, heard_seconds(render, beats, tempo), focus, signal)).await
+}
+
+/// With KUMI_TIMING set, how long a generation took to set, render and hear, in milliseconds, on stderr.
+pub fn tell_timing(trials: usize, set: i64, render: i64, heard: i64) {
+    if std::env::var("KUMI_TIMING").is_ok_and(|s| !s.is_empty()) {
+        eprintln!("[generation · {trials} trials] set {set} ms · render {render} ms · hear {heard} ms");
+    }
 }
 
 /// What a rig heard of its trials, by [`trial_key`], so the same values aren't heard twice: the oldest go past
