@@ -1322,6 +1322,39 @@ test("changes: lines are written as the tracker's own text, the columns they nee
   H.no_dialogs()
 end)
 
+-- (#399 N-N3) Kumi's lines back as they were while the tool's count of the pattern's changed lines hasn't moved: lines emptied
+-- in the mock's data with no line notifier told. No edit of the mock's reaches that state; a "back already" restore meets it.
+local function empty_quietly(p, t, k)
+  mock.data.patterns[p].tracks[t].lines[k] = nil
+end
+
+test("changes: lines back already, the columns Kumi showed still shown: Kumi's undo hides them in a step named as its own (#399 N-N3)", function()
+  local env, peer = setup()
+  local epoch, layout = place(peer)
+  local input = write_input(epoch)
+  local previewed = preview(peer, "notes-write", input)
+  local done = apply(peer, "notes-write", input, "Kumi: notes (kn03)", previewed.fence, epoch, layout).result
+  eq(mock.data.tracks[3].note_columns, 3)
+  empty_quietly(1, 3, 1)
+  empty_quietly(1, 3, 5)
+  eq(cell(1, 3, 1, 1), "--- .. .. .. .. 0000")
+  local undone = restore(peer, "notes-write", { target = previewed.target, prior = previewed.prior, applied = done.applied }, "Kumi: undo notes (kn04)", epoch, layout)
+  ok(undone.result, json.encode(undone.error or {}))
+  ok(undone.result.display.title:find("is back already: the columns Kumi showed are hidden again", 1, true), undone.result.display.title)
+  eq(undone.result.undo.entry, true)
+  eq(mock.data.tracks[3].note_columns, 2, "the columns Kumi showed are hidden again")
+  eq(mock.data.tracks[3].effect_columns, 1)
+  eq(mock.data.tracks[3].volume_column or false, false)
+  eq(steps(), 2, "the hiding is one step")
+  eq(newest(), "Kumi: undo notes (kn04)")
+  -- Asked again: back already, nothing to hide, nothing written.
+  local again = restore(peer, "notes-write", { target = previewed.target, prior = previewed.prior, applied = done.applied }, "Kumi: undo notes (kn05)", epoch, layout)
+  ok(again.result, json.encode(again.error or {}))
+  eq(again.result.undo.entry, false)
+  eq(steps(), 2)
+  H.no_dialogs()
+end)
+
 test("changes: the columns Kumi showed stay shown when the producer put something in them", function()
   local env, peer = setup()
   local epoch, layout = place(peer)
