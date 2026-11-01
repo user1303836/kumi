@@ -1845,3 +1845,25 @@ test("reads: a lines read that waits between every line looks the pattern up aga
   end
   H.no_dialogs()
 end)
+
+test("reads: a pattern track's automations come in the track's order, with none no parameter is read, and the walk ends at the last", function()
+  local walk = T.load_payload_module("rows").each_automation
+  local reads = 0
+  local function device_of(parameters)
+    return { parameters = parameters, parameter = function(self, k) reads = reads + 1; return self.parameters[k] end }
+  end
+  local a, b = { is_automated = true, lane = "a" }, { is_automated = true, lane = "b" }
+  local devices = { device_of({ { is_automated = false }, a }), device_of({ b, { is_automated = true } }), device_of({ { is_automated = true } }) }
+  local track = { devices = devices, device = function(self, d) return self.devices[d] end }
+  local function pattern_track(lanes)
+    return { automation = lanes, find_automation = function(_, parameter) return parameter.lane end }
+  end
+  local seen = {}
+  walk(track, pattern_track({ "a", "b" }), function(d, k, _, _, automation) seen[#seen + 1] = table.concat({ d, k, automation }, ":") end)
+  eq(table.concat(seen, " "), "1:2:a 2:1:b")
+  eq(reads, 3, "the last parameter read is the last automation's")
+  reads = 0
+  walk(track, pattern_track({}), function() error("no automation to give") end)
+  eq(reads, 0, "with none, no parameter is read")
+end)
+

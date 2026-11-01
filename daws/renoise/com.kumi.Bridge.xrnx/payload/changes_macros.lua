@@ -23,36 +23,26 @@ local M = {}
 M.MOST_FRAMES = 8000000
 local SCALINGS = { "log-fast", "log-slow", "linear", "exp-slow", "exp-fast" }
 
-local function label_of(i, instrument)
-  local name = instrument.name
-  if name == nil or name == "" then return string.format("Instrument %02X", i - 1) end
-  return name
-end
+local label_of = instruments_.instrument_label
 
 local function instrument_by_ref(song, env, reference, what)
-  if type(reference) ~= "string" then bad(what .. ": ref must be an instrument ref") end
-  local i = refs.expect(reference, "instrument", 1, env.epoch())[1]
-  if i < 1 or i > #song.instruments then fail("gone", "that instrument isn't in the song any more") end
-  return i, song:instrument(i)
+  local n = instruments_.numbers_of(env, "instrument", reference, what)
+  return n[1], instruments_.resolve(song, "instrument", n).instrument
 end
 
 -- The instrument a record keeps: its place, followed through the instruments' log (places.lua).
 local function instrument_by_place(song, env, kept)
-  if type(kept) ~= "table" or type(kept.n) ~= "number" then bad("material: where the instrument was") end
-  local i, why = kept.n, nil
-  if env.instrument_at then i, why = env.instrument_at(kept.n, kept.mark) end
-  if not i then
-    if why == "gone" then fail("gone", string.format("the instrument %s was deleted since", q(kept.label or "?"))) end
-    fail("stale", "the instruments changed in a way Kumi couldn't follow since: nothing was written")
-  end
-  if i > #song.instruments then fail("gone", "the instrument isn't in the song any more") end
-  return i, song:instrument(i)
+  local n, why, list = instruments_.follow(env, kept)
+  if not n then instruments_.follow_failed(why, list, type(kept) == "table" and kept.label or nil) end
+  return n[1], instruments_.resolve(song, "instrument", n).instrument
 end
 
-local function target_of(env, i) return { ref = refs.make(env.epoch(), "instrument", i), kind = "instrument" } end
+local function target_of(env, i) return instruments_.target_of(env, "instrument", { i }) end
 
 local function keep(env, i, instrument)
-  return { n = i, mark = env.instrument_mark and env.instrument_mark() or nil, label = label_of(i, instrument) }
+  local place = instruments_.place_of(env, "instrument", { i })
+  place.label = label_of(i, instrument)
+  return place
 end
 
 -- Its samples' frames (times channels), and how many are 32-bit (which FLAC keeps within 2^-31).

@@ -108,7 +108,7 @@ end
 
 -- The numbers a ref of `of` names (in this epoch).
 function M.numbers_of(env, of, reference, what)
-  if type(reference) ~= "string" then bad((what or "ref") .. ": ref must be a " .. of .. " ref") end
+  if type(reference) ~= "string" then bad((what or "ref") .. ": ref must be " .. (of == "instrument" and "an " or "a ") .. of .. " ref") end
   return refs.expect(reference, of, #SHAPES[of].lists, env.epoch())
 end
 
