@@ -1,6 +1,6 @@
 [package]
 name = "daw-mcp-server"
-version = "1.24.39"
+version = "1.24.40"
 description = "The REAPER and Renoise MCP host: MCP over stdio, speaking to Kumi's bridge inside the DAW."
 edition.workspace = true
 license.workspace = true
