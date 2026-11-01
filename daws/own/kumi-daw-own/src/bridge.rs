@@ -1634,6 +1634,10 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         }
         Ok(self.call("show_status", json!({"text": text}), signal).await?.is_ok())
     }
+    /// The saved project open in the DAW, by its file, as the last look read it: what setup's restart opens again.
+    fn open_set(&self) -> Option<String> {
+        self.file.borrow().clone()
+    }
     fn has_stop_live(&self) -> bool {
         true
     }

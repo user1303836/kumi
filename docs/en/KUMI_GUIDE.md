@@ -265,8 +265,9 @@ its extension (or tool) in place and opens the DAW.
 
 - **The DAW is open:** it loads Kumi's bridge only as it starts, and Kumi never
   quits it for you. Choose **I'll quit it** and quit it yourself (it asks to
-  save first); Kumi puts the bridge in and opens it again. A project or song
-  you saved is in the DAW's list of recent ones.
+  save first); Kumi puts the bridge in and opens it again, with the saved
+  project or song it had open when Kumi was connected to it. Otherwise, one you
+  saved is in the DAW's list of recent ones.
 - **It isn't installed:** Kumi says where to get it (reaper.fm, renoise.com);
   **Look again** checks once it's there. An older REAPER or Renoise that's open
   is named, and stays open.

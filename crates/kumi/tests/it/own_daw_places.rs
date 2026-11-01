@@ -479,6 +479,26 @@ async fn unsaved_reaper_projects_share_one_place_and_a_first_save_carries_the_co
         .await;
 }
 
+/// #399 (K13): what setup's restart opens again is the saved project the DAW has open, by its file, as the last look read
+/// it; an unsaved project has no file to open.
+#[tokio::test(flavor = "current_thread")]
+async fn the_saved_project_open_in_reaper_is_what_setups_restart_opens_again() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let dir = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(2, 0);
+            script.set_project(None, "", "sim:u1", "untitled");
+            let own = Own::open(dir.path(), Daw::Reaper, DawProfile::REAPER, reaper(&script), create_reaper_integration).await;
+            own.session.submit("Make a beat.", None).await.unwrap();
+            assert_eq!(own.session.open_set(), None, "an unsaved project has no file to open");
+            script.set_project(Some(SONG_A), "/lab/Beat.rpp", "sim:u1", "Beat.rpp");
+            own.session.submit("Saved it.", None).await.unwrap();
+            assert_eq!(own.session.open_set().as_deref(), Some("/lab/Beat.rpp"));
+            own.close().await;
+        })
+        .await;
+}
+
 /// Notes about the producer go with them into every REAPER project; a note about one project stays with that project,
 /// and comes back with it.
 #[tokio::test(flavor = "current_thread")]

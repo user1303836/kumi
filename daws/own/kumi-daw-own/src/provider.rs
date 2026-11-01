@@ -818,15 +818,38 @@ fn open_now(daw: Daw, env: &Env) -> bool {
     detected(env, |found| detect::list_processes(found.var)).iter().any(|(_, name)| detect::process_is(daw, name))
 }
 
-/// Opens the DAW's app apart from Kumi: on macOS through `open`, whose answer says whether it opened; elsewhere as a
-/// process of its own ([`start_apart`]).
-fn open_app(app: &Path) -> bool {
+/// Opens the DAW's app apart from Kumi, with `project` when one is given: on macOS through `open`, whose answer says
+/// whether it opened; elsewhere as a process of its own ([`start_apart`]).
+fn open_app(app: &Path, project: Option<&Path>) -> bool {
+    let mut command = open_command(app, project, cfg!(target_os = "macos"));
     if cfg!(target_os = "macos") {
-        let mut open = std::process::Command::new("open");
-        open.arg("-a").arg(app).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        return open.status().is_ok_and(|status| status.success());
+        command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        return command.status().is_ok_and(|status| status.success());
     }
-    start_apart(std::process::Command::new(app))
+    start_apart(command)
+}
+
+/// The command that opens `app`, with `project` as the file it opens when one is given: `open -a App project` on macOS
+/// (as a double-click on the file there), else the app with the project as its argument, which REAPER and Renoise open.
+fn open_command(app: &Path, project: Option<&Path>, macos: bool) -> std::process::Command {
+    let mut command = if macos {
+        let mut open = std::process::Command::new("open");
+        open.arg("-a").arg(app);
+        open
+    } else {
+        std::process::Command::new(app)
+    };
+    command.args(project);
+    command
+}
+
+/// Opens `app` with `project`, the saved project that was open: one that's gone (moved, or on a drive that's gone) isn't
+/// handed to the DAW, and setup then opens the DAW without it. Whether it opened.
+fn open_with(app: &Path, project: Option<&Path>) -> bool {
+    if project.is_some_and(|project| !project.is_file()) {
+        return false;
+    }
+    open_app(app, project)
 }
 
 /// Starts `command` with no terminal and in a process group of its own, so the DAW's output never prints over Kumi's,
@@ -898,10 +921,12 @@ impl DawSetup for OwnSetup {
         let seen = self.seen.borrow().clone();
         self.own().install_in(&self.env, seen).map(|put| put.version)
     }
-    async fn start(&self, app: Option<String>, _set: Option<String>) -> bool {
+    /// Opens the DAW: `app`, or the one setup would open; with `set`, the saved project it had open (#399, K13).
+    async fn start(&self, app: Option<String>, set: Option<String>) -> bool {
         // An app setup didn't find ("") is looked for again.
         let Some(app) = app.filter(|app| !app.is_empty()).map(PathBuf::from).or_else(|| self.app()) else { return false };
-        tokio::task::spawn_blocking(move || open_app(&app)).await.unwrap_or(false)
+        let project = set.filter(|set| !set.is_empty()).map(PathBuf::from);
+        tokio::task::spawn_blocking(move || open_with(&app, project.as_deref())).await.unwrap_or(false)
     }
     /// The bridge is in and the DAW is opening: the session takes the bridge and reconnects (as Live's setup does); one
     /// still starting is asked again shortly.
@@ -938,6 +963,10 @@ impl DawSetup for OwnSetup {
             Err(None) => Installed::Missing,
         }
     }
+    /// The saved project open in the DAW, as the session last read it: setup's restart opens it again.
+    fn open_set(&self) -> Option<String> {
+        self.session.borrow().as_ref().and_then(Weak::upgrade).and_then(|session| session.open_set())
+    }
 }
 
 #[cfg(test)]
@@ -949,7 +978,49 @@ mod tests {
     #[test]
     fn an_app_that_wont_open_says_so() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!open_app(&dir.path().join("Nowhere").join(if cfg!(target_os = "macos") { "REAPER.app" } else { "reaper" })));
+        assert!(!open_app(&dir.path().join("Nowhere").join(if cfg!(target_os = "macos") { "REAPER.app" } else { "reaper" }), None));
+    }
+
+    /// #399 (K13): setup's restart hands the DAW the saved project it had open, as a double-click on the file would on
+    /// macOS (`open -a`) and as the DAW's own argument elsewhere; with none, the DAW opens as before.
+    #[test]
+    fn the_daw_opens_with_the_project_it_had_open() {
+        let args = |command: &std::process::Command| -> (String, Vec<String>) {
+            let program = command.get_program().to_string_lossy().into_owned();
+            (program, command.get_args().map(|arg| arg.to_string_lossy().into_owned()).collect())
+        };
+        let (app, project) = (Path::new("/Applications/REAPER.app"), Path::new("/Music/Night Drive/Night Drive.rpp"));
+        assert_eq!(
+            args(&open_command(app, Some(project), true)),
+            ("open".into(), vec!["-a".into(), "/Applications/REAPER.app".into(), "/Music/Night Drive/Night Drive.rpp".into()])
+        );
+        assert_eq!(args(&open_command(app, None, true)), ("open".into(), vec!["-a".into(), "/Applications/REAPER.app".into()]));
+        let (app, project) = (Path::new("/opt/renoise/renoise"), Path::new("/home/me/Songs/Night.xrns"));
+        assert_eq!(
+            args(&open_command(app, Some(project), false)),
+            ("/opt/renoise/renoise".into(), vec!["/home/me/Songs/Night.xrns".into()])
+        );
+        assert_eq!(args(&open_command(app, None, false)), ("/opt/renoise/renoise".into(), vec![]));
+    }
+
+    /// A project that's gone isn't handed to the DAW, which setup then opens without it; one that's there is.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn a_project_thats_gone_isnt_handed_to_the_daw() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let (script, said) = (dir.path().join("daw"), dir.path().join("said"));
+        std::fs::write(&script, format!("#!/bin/sh\nprintf '%s' \"$1\" > '{0}.part' && mv '{0}.part' '{0}'\n", said.display())).unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(!open_with(&script, Some(&dir.path().join("Moved.rpp"))));
+        let project = dir.path().join("Night Drive.rpp");
+        std::fs::write(&project, "<REAPER_PROJECT\n>\n").unwrap();
+        assert!(open_with(&script, Some(&project)));
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        while !said.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(std::fs::read_to_string(&said).unwrap(), project.to_string_lossy(), "only the project that's there was handed over");
     }
 
     /// Review K21: the DAW starts with no terminal (its output can't print over Kumi's) and in a process group of its
