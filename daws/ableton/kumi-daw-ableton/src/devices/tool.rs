@@ -2,6 +2,8 @@
 
 use super::{
     amxd::{encode_amxd, DeviceType},
+    existing,
+    findings::Findings,
     gen::{audio_effect_patcher, instrument_patcher, GenSpec, MIX, OUTPUT},
     harness::{check_midi_device_isolated, IsolatedOptions},
     midi::midi_device_patcher,
@@ -257,6 +259,281 @@ fn unwritable(folder: &Path, error: &std::io::Error) -> String {
 fn io_error(error: std::io::Error) -> RuntimeError {
     RuntimeError::plain(error.to_string())
 }
+/// The name a device is saved under.
+struct Naming {
+    /// The name asked for: a device this conversation made by it is replaced.
+    asked: String,
+    /// The name it's made as, fitted, unless another device's file has it.
+    wanted: String,
+    /// Names it doesn't take, beside the folder's files: the device it's made from keeps its own.
+    reserved: Vec<String>,
+    /// The file it's never written over: the device it's made from.
+    never: Option<PathBuf>,
+}
+
+/// A device written to Live's User Library.
+struct Saved {
+    name: String,
+    file: PathBuf,
+    item_id: String,
+    /// The device of this conversation it replaced.
+    ours: Option<MadeDevice>,
+    /// Where the replaced device's file is kept.
+    kept: Option<PathBuf>,
+    /// Whether Live's Browser listed it before the wait was over.
+    seen: bool,
+}
+
+/// Whether two paths are one file.
+fn same_file(a: &Path, b: &Path) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(a), Ok(b)) => a == b,
+        _ => a == b,
+    }
+}
+
+impl DeviceTool {
+    /// Writes a device of `kind` to Kumi's folder in the User Library under its name (`make` makes its file for the name
+    /// it's given, and says what it found), records it for this conversation, and waits for Live's Browser to list it.
+    /// Err is the answer when it can't be written.
+    async fn save(
+        &self,
+        kind: DeviceType,
+        naming: Naming,
+        make: impl FnOnce(&str) -> (Vec<u8>, Findings),
+        found: &mut Findings,
+        signal: &Signal,
+    ) -> Result<Result<Saved, ToolResult>, RuntimeError> {
+        let folder = Path::new(&self.options.user_library).join("Kumi").join(kind_folder(kind));
+        let mut builder = tokio::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        builder.mode(0o755);
+        if let Err(error) = builder.create(&folder).await {
+            return Ok(Err(ToolResult::error(unwritable(&folder, &error))));
+        }
+        let ours = self.options.made.borrow().ours(&folder, &naming.asked, kind);
+        let windows = kumi_types::system::platform() == "win32";
+        // Kumi Ears is kept beside the audio effects, and Kumi writes it again whenever it differs: its name is its own.
+        let mut reserved: Vec<&str> = naming.reserved.iter().map(String::as_str).collect();
+        if kind == DeviceType::AudioEffect {
+            reserved.push(EARS_NAME);
+        }
+        let wanted = naming.wanted.as_str();
+        let name = match &ours {
+            Some(device) => device.file.clone(),
+            None => free_name(&folder, wanted, windows, &reserved),
+        };
+        if ours.is_none() && name != wanted {
+            let stem = wanted.split('.').next().unwrap_or_default();
+            let why = if windows && (windows_device_name(stem) || windows_device_name(wanted)) {
+                format!("Windows keeps the name {wanted} for a device")
+            } else if naming.reserved.iter().any(|kept| kept.eq_ignore_ascii_case(wanted)) {
+                format!("it's made from {wanted}, which keeps its name and its file")
+            } else if reserved.iter().any(|kept| kept.eq_ignore_ascii_case(wanted)) {
+                format!("{wanted} is the name of Kumi's own listening device")
+            } else {
+                format!("{wanted} is another device in Live's User Library, and a saved Set may use it")
+            };
+            found.changed.push(format!("name: made as \"{name}\": {why}."));
+        }
+        let file = folder.join(format!("{name}.amxd"));
+        // The device it's made from is never written over (a saved Set uses it by its file), unless it's one this
+        // conversation made, which is replaced as any of those is.
+        if let Some(never) = naming.never.as_deref().filter(|never| ours.is_none() && same_file(&file, never)) {
+            return Ok(Err(ToolResult::error(format!(
+                "Kumi didn't write the device: it would have been written over {}, the device it's made from. Give it another name.",
+                never.to_string_lossy()
+            ))));
+        }
+        let temporary = folder.join(format!(".{}.amxd", Uuid::new_v4()));
+        let (bytes, more) = make(&name);
+        found.append(more);
+        let kept_in = self.options.made.borrow().kept.clone();
+        let kept = match (&ours, kept_in) {
+            (Some(_), Some(kept_in)) => keep(&file, &name, &kept_in).await,
+            _ => None,
+        };
+        let written: Result<(), std::io::Error> = async {
+            let mut options = tokio::fs::OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            options.mode(0o644);
+            let mut out = options.open(&temporary).await?;
+            out.write_all(&bytes).await?;
+            out.flush().await?;
+            drop(out);
+            tokio::fs::rename(&temporary, &file).await
+        }
+        .await;
+        let removed = tokio::fs::remove_file(&temporary).await;
+        if let Err(error) = removed {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                return Err(io_error(error));
+            }
+        }
+        if let Err(error) = written {
+            return Ok(Err(ToolResult::error(unwritable(&folder, &error))));
+        }
+        self.options.made.borrow_mut().made(MadeDevice { asked: naming.asked, file: name.clone(), kind, written: hashed(&bytes) });
+        let item_id = format!("user_library/Kumi/{}/{name}", kind_folder(kind));
+        let deadline = now_ms().saturating_add(self.options.wait_ms.unwrap_or(20_000) as i64);
+        let mut seen = false;
+        while !seen && now_ms() < deadline {
+            seen = (self.options.browser_sees)(item_id.clone(), signal.clone()).await.unwrap_or(false);
+            if !seen {
+                tokio::time::sleep(Duration::from_millis(400)).await;
+            }
+            signal.check()?;
+        }
+        if seen {
+            self.options.made.borrow_mut().listed(&item_id);
+        } else {
+            self.options.made.borrow_mut().written_unlisted(&item_id);
+        }
+        Ok(Ok(Saved { name, file, item_id, ours, kept, seen }))
+    }
+
+    /// A device that's already there (`from`): opened and said in the notation when nothing's asked of it; else a new
+    /// device made from it with only what's asked changed, saved as a device of its own.
+    async fn from_existing(
+        &self,
+        from: &str,
+        input: &JsonObject,
+        given: &dyn Fn(&str) -> bool,
+        reference: Option<&'static reference::Reference>,
+        signal: Signal,
+    ) -> Result<ToolResult, RuntimeError> {
+        let original = match existing::find(from, Path::new(&self.options.user_library)).and_then(|path| existing::open(&path)) {
+            Ok(original) => original,
+            Err(why) => return Ok(ToolResult::error(why)),
+        };
+        if !["patch", "controls", "remove", "name", "about"].iter().any(|key| given(key)) {
+            let mut said = existing::describe(&original);
+            let aside: Vec<&str> = ["code", "tests", "objects", "guide"].into_iter().filter(|key| given(key)).collect();
+            if !aside.is_empty() {
+                said["aside"] = json!(format!(
+                    "{}: opening a device answers with the device alone; ask for these in a call of their own.",
+                    aside.join(", ")
+                ));
+            }
+            return Ok(ToolResult::text(stringify(&said)));
+        }
+        let mut found = Findings::default();
+        let kind = original.kind;
+        if let Some(asked) = input.get("type").and_then(Value::as_str).filter(|asked| *asked != kind.as_str()) {
+            found.changed.push(format!("type {asked}: it's made as a {}, as the device it's made from is one.", kind_name(kind)));
+        }
+        for key in ["code", "tests", "voices", "runs_free", "map"].into_iter().filter(|key| given(key)) {
+            found.changed.push(format!(
+                "{key}: a device made from another changes through patch, controls and remove, so {key} was left aside (a code box changes when it's given again by its name, with its new code in a {{ … }} block)."
+            ));
+        }
+        // Its name and controls, checked as a new device's are.
+        let asked_name = input.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
+        let mut probe = JsonObject::new();
+        probe.insert("type".into(), json!(kind.as_str()));
+        probe.insert("name".into(), json!(if asked_name.is_empty() { original.name.clone() } else { asked_name.clone() }));
+        probe.insert("about".into(), json!("-"));
+        probe.insert("patch".into(), json!("in -> out"));
+        if let Some(controls) = input.get("controls") {
+            probe.insert("controls".into(), controls.clone());
+        }
+        let (spec, checked) = check_spec(&probe);
+        found.changed.extend(checked.changed.into_iter().filter(|said| said.starts_with("name") || said.starts_with("controls")));
+        found.wrong.extend(checked.wrong.into_iter().filter(|said| said.starts_with("controls")));
+        let remove: Vec<String> = match input.get("remove") {
+            Some(Value::Array(items)) => items.iter().filter_map(Value::as_str).map(str::to_string).collect(),
+            Some(Value::String(one)) if !one.trim().is_empty() => vec![one.clone()],
+            _ => Vec::new(),
+        };
+        let patch = match input.get("patch") {
+            Some(Value::String(text)) => text.clone(),
+            Some(Value::Array(lines)) => lines.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n"),
+            _ => String::new(),
+        };
+        let about = input.get("about").and_then(Value::as_str).map(str::trim).filter(|about| !about.is_empty()).map(|about| {
+            if about.chars().count() > 400 {
+                found.changed.push("about: cut to its first 400 characters.".into());
+                about.chars().take(400).collect()
+            } else {
+                about.to_string()
+            }
+        });
+        let asked = existing::Asked { patch, remove, controls: spec.controls().to_vec(), name: spec.name().to_string(), about };
+        signal.check()?;
+        let naming = Naming {
+            asked: asked_name.clone(),
+            wanted: spec.name().to_string(),
+            // Unnamed, it's the original's name numbered: never the original's own, wherever that is.
+            reserved: if asked_name.is_empty() { vec![original.name.clone()] } else { Vec::new() },
+            never: Some(original.path.clone()),
+        };
+        let mut made = None;
+        let make = |name: &str| {
+            let changed = existing::change(&original, &existing::Asked { name: name.to_string(), ..asked.clone() }, reference);
+            let bytes = existing::device_bytes(&original, &changed.document);
+            let said = changed.found.clone();
+            made = Some(changed);
+            (bytes.unwrap_or_default(), said)
+        };
+        let Saved { name, file, item_id, ours, kept, seen } = match self.save(kind, naming, make, &mut found, &signal).await? {
+            Ok(saved) => saved,
+            Err(refused) => return Ok(refused),
+        };
+        let Some(made) = made else { return Ok(ToolResult::error("Kumi couldn't make the device.".to_string())) };
+        let mut result = json!({
+            "made": name, "type": kind_name(kind), "itemId": item_id, "file": file.to_string_lossy(),
+            "from": original.path.to_string_lossy(), "controls": made.controls,
+        });
+        let fields = result.as_object_mut().unwrap();
+        if let Some(device) = &ours {
+            let kept = kept.map_or(String::new(), |kept| format!("; the old one is kept at {}", kept.to_string_lossy()));
+            fields.insert(
+                "replaced".into(),
+                json!(format!("the {} this conversation made as {}{kept}", kind_name(device.kind), device.file)),
+            );
+        }
+        fields.insert(
+            "checks".into(),
+            json!("Kumi checked what the change brought (its objects, cords and their order, its controls, its timing) and kept everything else as it was; the original's file is as it was"),
+        );
+        for (key, said) in [("wrong", &found.wrong), ("changed", &found.changed), ("notes", &found.notes)] {
+            if !said.is_empty() {
+                fields.insert(key.into(), json!(said));
+            }
+        }
+        if !seen {
+            fields.insert("browser".into(), json!("Live's Browser hasn't listed it yet; load it in a moment."));
+        }
+        let load = match kind {
+            DeviceType::MidiEffect => "load_device with this itemId on the MIDI track",
+            DeviceType::AudioEffect => "load_device with this itemId on the track, then hear it with audition",
+            DeviceType::Instrument => "load_device with this itemId on a MIDI track, then hear it with audition",
+        };
+        let shared = if made.shared.is_empty() {
+            String::new()
+        } else {
+            format!(
+                " (the original has these too: {})",
+                made.shared.iter().map(|name| format!("\"{name}\"")).collect::<Vec<_>>().join(", ")
+            )
+        };
+        let again =
+            format!("call make_device again with from \"{}\" and the name \"{name}\", which replaces this one", file.to_string_lossy());
+        let swap = format!(
+            "Only when the producer asks for it in place of the original: load it on the original's track, move_device it beside the original, set_device_parameters its controls to the original's values{shared}, then delete_device the original. Automation and mappings stay with the original."
+        );
+        let next = if found.wrong.is_empty() {
+            format!("{load}. To change it more, {again}. {swap}")
+        } else {
+            format!("It's made, and it loads as it is, but what's under wrong needs fixing: fix it and {again}. Or {load}. {swap}")
+        };
+        fields.insert("next".into(), json!(next));
+        Ok(ToolResult::text(stringify(&result)))
+    }
+}
+
 #[async_trait(?Send)]
 impl KernelTool for DeviceTool {
     fn reach(&self) -> Reach {
@@ -307,6 +584,10 @@ impl KernelTool for DeviceTool {
         // off the thread the app runs on.
         let reference =
             if needs_reference(&input, &asked) { tokio::task::spawn_blocking(reference::installed).await.ok().flatten() } else { None };
+        // A device that's already there: opened, or made into a new one.
+        if let Some(from) = input.get("from").and_then(Value::as_str).map(str::trim).filter(|from| !from.is_empty()) {
+            return self.from_existing(from, &input, &given, reference, signal).await;
+        }
         // Max's objects as this machine's Max describes them, or a guide, with no device given to make beside them.
         if !given("code") && !given("patch") && (objects.is_some() || guide.is_some()) {
             let mut said: Vec<String> = Vec::new();
@@ -361,109 +642,40 @@ impl KernelTool for DeviceTool {
             midi.tests.clear();
         }
         signal.check()?;
-        let folder = Path::new(&self.options.user_library).join("Kumi").join(kind_folder(spec.kind()));
-        let mut builder = tokio::fs::DirBuilder::new();
-        builder.recursive(true);
-        #[cfg(unix)]
-        builder.mode(0o755);
-        if let Err(error) = builder.create(&folder).await {
-            return Ok(ToolResult::error(unwritable(&folder, &error)));
-        }
         // A device this conversation made is replaced; any other keeps its file, and this one is numbered past it.
-        let asked_name = input.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string();
-        let ours = self.options.made.borrow().ours(&folder, &asked_name, spec.kind());
-        let windows = kumi_types::system::platform() == "win32";
-        // Kumi Ears is kept beside the audio effects, and Kumi writes it again whenever it differs: its name is its own.
-        let reserved: &[&str] = if spec.kind() == DeviceType::AudioEffect { &[EARS_NAME] } else { &[] };
-        let name = match &ours {
-            Some(device) => device.file.clone(),
-            None => free_name(&folder, spec.name(), windows, reserved),
+        let naming = Naming {
+            asked: input.get("name").and_then(Value::as_str).unwrap_or("").trim().to_string(),
+            wanted: spec.name().to_string(),
+            reserved: Vec::new(),
+            never: None,
         };
-        if ours.is_none() && name != spec.name() {
-            let stem = spec.name().split('.').next().unwrap_or_default();
-            let why = if windows && (windows_device_name(stem) || windows_device_name(spec.name())) {
-                format!("Windows keeps the name {} for a device", spec.name())
-            } else if reserved.iter().any(|kept| kept.eq_ignore_ascii_case(spec.name())) {
-                format!("{} is the name of Kumi's own listening device", spec.name())
-            } else {
-                format!("{} is another device in Live's User Library, and a saved Set may use it", spec.name())
-            };
-            found.changed.push(format!("name: made as \"{name}\": {why}."));
-        }
-        let file = folder.join(format!("{name}.amxd"));
-        let temporary = folder.join(format!(".{}.amxd", Uuid::new_v4()));
-        let patcher = match &spec {
+        let make = |name: &str| match &spec {
             DeviceSpec::MidiEffect(s) => {
                 let mut s = s.clone();
-                s.name = name.clone();
-                midi_device_patcher(&s)
+                s.name = name.to_string();
+                (encode_amxd(DeviceType::MidiEffect, &midi_device_patcher(&s)), Findings::default())
             }
             DeviceSpec::AudioEffect(s) => {
                 let mut s = GenSpec::from(s);
-                s.name = name.clone();
-                audio_effect_patcher(&s)
+                s.name = name.to_string();
+                (encode_amxd(DeviceType::AudioEffect, &audio_effect_patcher(&s)), Findings::default())
             }
             DeviceSpec::Instrument(s) => {
                 let mut s = GenSpec::from(s);
-                s.name = name.clone();
-                instrument_patcher(&s)
+                s.name = name.to_string();
+                (encode_amxd(DeviceType::Instrument, &instrument_patcher(&s)), Findings::default())
             }
             DeviceSpec::Patch(s) => {
                 let mut s = s.clone();
-                s.name = name.clone();
+                s.name = name.to_string();
                 let (patcher, patched) = patched_device(&s, reference);
-                found.append(patched);
-                patcher
+                (encode_amxd(s.kind, &patcher), patched)
             }
         };
-        let bytes = encode_amxd(spec.kind(), &patcher);
-        let kept_in = self.options.made.borrow().kept.clone();
-        let kept = match (&ours, kept_in) {
-            (Some(_), Some(kept_in)) => keep(&file, &name, &kept_in).await,
-            _ => None,
+        let Saved { name, file, item_id, ours, kept, seen } = match self.save(spec.kind(), naming, make, &mut found, &signal).await? {
+            Ok(saved) => saved,
+            Err(refused) => return Ok(refused),
         };
-        let written: Result<(), std::io::Error> = async {
-            let mut options = tokio::fs::OpenOptions::new();
-            options.write(true).create(true).truncate(true);
-            #[cfg(unix)]
-            options.mode(0o644);
-            let mut out = options.open(&temporary).await?;
-            out.write_all(&bytes).await?;
-            out.flush().await?;
-            drop(out);
-            tokio::fs::rename(&temporary, &file).await
-        }
-        .await;
-        let removed = tokio::fs::remove_file(&temporary).await;
-        if let Err(error) = removed {
-            if error.kind() != std::io::ErrorKind::NotFound {
-                return Err(io_error(error));
-            }
-        }
-        if let Err(error) = written {
-            return Ok(ToolResult::error(unwritable(&folder, &error)));
-        }
-        self.options.made.borrow_mut().made(MadeDevice {
-            asked: asked_name,
-            file: name.clone(),
-            kind: spec.kind(),
-            written: hashed(&bytes),
-        });
-        let item_id = format!("user_library/Kumi/{}/{name}", kind_folder(spec.kind()));
-        let deadline = now_ms().saturating_add(self.options.wait_ms.unwrap_or(20_000) as i64);
-        let mut seen = false;
-        while !seen && now_ms() < deadline {
-            seen = (self.options.browser_sees)(item_id.clone(), signal.clone()).await.unwrap_or(false);
-            if !seen {
-                tokio::time::sleep(Duration::from_millis(400)).await;
-            }
-            signal.check()?;
-        }
-        if seen {
-            self.options.made.borrow_mut().listed(&item_id);
-        } else {
-            self.options.made.borrow_mut().written_unlisted(&item_id);
-        }
         // A silent render means the code didn't compile, or a patch passes no sound.
         let silent =
             if matches!(spec, DeviceSpec::Patch(_)) { "the patch passes no sound: fix it" } else { "the code didn't compile: fix it" };

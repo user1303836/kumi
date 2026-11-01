@@ -134,7 +134,7 @@ pub fn arrange_with(patcher: &mut Patcher, spacing: &Spacing) {
 }
 
 /// About how wide Max draws a line of text in Arial Bold at `size` points, with a box's margins.
-fn text_width(text: &str, size: f64) -> f64 {
+pub(crate) fn text_width(text: &str, size: f64) -> f64 {
     let at_ten: f64 = text
         .chars()
         .map(|c| match c {

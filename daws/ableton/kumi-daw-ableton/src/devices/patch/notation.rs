@@ -523,7 +523,13 @@ enum Ref {
 /// A patch written in the notation, read the nearest way it can be, and what was found reading it: each line that
 /// can't be read is left out, and said with its number.
 pub fn parse(text: &str) -> (Notation, Findings) {
-    parse_from(text, 1, true, 0)
+    parse_from(text, 1, true, 0, &HashSet::new())
+}
+
+/// A patch written beside boxes that are already there (a device being changed): a name of one of `existing` that the
+/// patch doesn't give a box of its own is that box, outside the patch, as in and out are.
+pub fn parse_beside(text: &str, existing: &HashSet<String>) -> (Notation, Findings) {
+    parse_from(text, 1, true, 0, existing)
 }
 
 /// Reads a patch's lines: `first_line` is its first line in the whole notation; `top` is the device's own patch,
@@ -589,7 +595,7 @@ impl Reader<'_> {
                         What::Patcher { text, inner: Notation::default() }
                     }
                     (Some((inner, from)), Some(_)) => {
-                        let (inner, found) = parse_from(&inner, from, false, self.depth + 1);
+                        let (inner, found) = parse_from(&inner, from, false, self.depth + 1, &HashSet::new());
                         self.found.append(found);
                         What::Patcher { text, inner }
                     }
@@ -620,7 +626,7 @@ impl Reader<'_> {
                     (None, None) if class.starts_with("kumi.") => match crate::devices::kit::expand(&text, line) {
                         // One of Kumi's building blocks: a subpatcher of Max's own objects, made the way it's tested.
                         Ok((head, patch)) => {
-                            let (inner, found) = parse_from(&patch, line, false, self.depth + 1);
+                            let (inner, found) = parse_from(&patch, line, false, self.depth + 1, &HashSet::new());
                             self.found.append(found);
                             What::Patcher { text: head, inner }
                         }
@@ -777,7 +783,7 @@ impl Reader<'_> {
     }
 }
 
-fn parse_from(text: &str, first_line: usize, top: bool, depth: usize) -> (Notation, Findings) {
+fn parse_from(text: &str, first_line: usize, top: bool, depth: usize, existing: &HashSet<String>) -> (Notation, Findings) {
     let (tokens, unread) = tokens(text, first_line);
     let mut reader = Reader {
         tokens: &tokens,
@@ -803,7 +809,7 @@ fn parse_from(text: &str, first_line: usize, top: bool, depth: usize) -> (Notati
             Ref::Control(name) => Some(End::Control(name)),
             Ref::Name(name) => match names.get(&name) {
                 Some((at, _)) => Some(End::Box(*at)),
-                None if OUTSIDE.contains(&name.as_str()) && top => Some(End::Outside(name)),
+                None if (OUTSIDE.contains(&name.as_str()) || existing.contains(&name)) && top => Some(End::Outside(name)),
                 None if OUTSIDE.contains(&name.as_str()) => {
                     found.wrong.push(format!("line {line}: {name} is the device's own, so the cord was left out: inside a [p], take what comes in from an [inlet] and send it on through an [outlet]."));
                     None
