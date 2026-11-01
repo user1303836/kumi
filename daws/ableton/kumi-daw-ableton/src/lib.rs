@@ -55,6 +55,7 @@ pub mod set_model;
 pub mod snapshots;
 pub mod track_ids;
 pub mod variations;
+pub mod waves;
 pub mod willington;
 
 /// The host-authorized bridge surface, ordered as in the source integration.

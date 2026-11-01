@@ -19,6 +19,7 @@ use crate::{
     http::{default_fetch, Fetch, FetchInit, Response},
     openai_compatible::{openai_compatible, CompatibleSettings},
     openai_responses::{openai_responses, ResponsesSettings},
+    socket::SocketFetch,
     types::*,
 };
 use async_trait::async_trait;
@@ -237,12 +238,16 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
     let provider = parsed.provider;
     let model = parsed.model;
     let row = provider.row();
+    let own_fetch = options.fetch.is_none();
     let base = options.fetch.unwrap_or_else(default_fetch);
     let identified: Rc<dyn Fetch> = Rc::new(IdentifiedFetch { fetch: base.clone(), provider });
     let (key, fetch): (String, Rc<dyn Fetch>) = match row.sign_in {
         SignIn::Chatgpt => {
-            let token = codex_token_source(options.store, TokenOptions { fetch: Some(base), now: None });
+            let token = codex_token_source(options.store, TokenOptions { fetch: Some(base.clone()), now: None });
             token().await?;
+            // Kumi's own HTTP (not a fetch given for a test or a probe): its Responses go over a WebSocket.
+            let identified: Rc<dyn Fetch> =
+                if own_fetch { Rc::new(IdentifiedFetch { fetch: Rc::new(SocketFetch::new(base)), provider }) } else { identified };
             ("kumi-oauth".into(), Rc::new(CodexFetch { fetch: identified, token }))
         }
         SignIn::ApiKey => {

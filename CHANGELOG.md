@@ -3,6 +3,116 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.40 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.39 did.
+
+- In Live, a goal's notice names the track its best is really on when an older "Kumi · Goal best" is
+  still in the Set.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.39 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.38 did.
+
+- A JavaScript regular expression with a quote in it no longer colours the rest of its line as a
+  string.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.38 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.37 did.
+
+- With several Lives installed, Kumi reads Max's objects from the Live that's open, the Max a device
+  made now runs in. `KUMI_MAX` names another.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.37 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.36 did.
+
+- `-r <name>` and the conversation picker see a conversation renamed or pinned twice in one second,
+  and a name or pin a rollback left behind follows its conversation again
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.36 — 2026-11-01
+
+Ships with bridge 1.0.102, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- HISTORY and NOW draw more of Kumi's changes: new tracks among the Set's, locators on the timeline, a
+  clip's warp markers, a WAV or AIFF clip's waveform with the part that plays, routing (tracks sent to
+  one bus meet there) and the transport's settings.
+- A change Kumi makes across several tracks in one go, such as muting the drums, the bass and the
+  keys, is one HISTORY entry, with one picture of each track's values and one undo.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.102
+
+- Automation previews name their parameter and its range, and an applied automation change returns the
+  points Live has, so HISTORY draws the lane exactly; audio clip previews say where the clip's sample
+  plays from.
+
+## 1.24.35 — 2026-11-01
+
+Ships with bridge 1.0.101, as 1.24.34 did. Ships with REAPER extension 0.1.8 and Renoise tool 1.0.7,
+which REAPER and Renoise load when they restart; `kumi update` puts them in.
+
+- REAPER and Renoise: a goal's search no longer stops moving a track's other knobs when the DAW
+  refuses one, and hears each generation's trials together.
+- In REAPER, FOCUS's arrange view shows the part of the project REAPER's arrange view shows, as you
+  scroll and zoom, with regions drawn from start to end and a row for each fixed lane.
+- Kumi creates and edits presets for current and legacy FabFilter VST3 plug-ins using built-in
+  formats.
+- Kumi recognizes suitable installed FabFilter processors for mastering, mixing and sound design.
+- Answers from ChatGPT come back sooner: Kumi keeps one connection open while you work and sends only
+  what's new at each step.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### REAPER extension 0.1.8
+
+- When an action replaces every track in a REAPER project at once, Kumi knows it's still the same
+  project, so what it read stays good.
+
+### Renoise tool 1.0.7
+
+- After Kumi maps a macro, Renoise's own undo of Kumi's earlier changes inside that instrument shows
+  in HISTORY again.
+- Kumi's watch of the Doofers, Splitters and Notepads it changed costs Renoise less: each device is
+  read once a round, a couple at a time.
+
+## 1.24.34 — 2026-11-01
+
+Ships with bridge 1.0.101, as 1.24.33 did.
+
+- Renoise on Windows: a change Kumi previewed before you quit and reopened Renoise isn't made in the
+  reopened one; Kumi asks to preview it again.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.33 — 2026-10-31
+
+Ships with bridge 1.0.101, as 1.24.32 did.
+
+- Code in Kumi's answers is coloured by its language (JavaScript, gen~, Lua, Python and REAPER's EEL):
+  its keywords, strings, numbers and comments, in every theme.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.32 — 2026-10-29
 
 Ships with bridge 1.0.101, as 1.24.31 did.

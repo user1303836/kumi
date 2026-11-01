@@ -28,6 +28,10 @@ pub static ARRANGE_SCHEMA: LazyLock<JsonObject> =
     LazyLock::new(|| serde_json::from_str::<Value>(include_str!("arrange-data.json")).unwrap()["schema"].as_object().unwrap().clone());
 pub static ARRANGE_DESCRIPTION: LazyLock<String> =
     LazyLock::new(|| serde_json::from_str::<Value>(include_str!("arrange-data.json")).unwrap()["description"].as_str().unwrap().into());
+/// How to arrange (two calls, a form at the length asked, transitions): the instructions' paragraph once, kept with the
+/// tool since it's deferred, so it comes with arrange's description when find_tools gives it rather than in every request.
+pub static ARRANGE_GUIDE: LazyLock<String> =
+    LazyLock::new(|| serde_json::from_str::<Value>(include_str!("arrange-data.json")).unwrap()["guide"].as_str().unwrap().into());
 const EPSILON: f64 = 1e-6;
 const SHORTEST: f64 = 0.25;
 const LISTING_BYTES: usize = 40_000;

@@ -995,7 +995,7 @@ fn redacted_change(change: &ChangeRecord, redact: &dyn Fn(&str) -> String) -> Ch
                     line.after = redact(&line.after);
                 }
             }
-            ChangePicture::Routes { routes } => {
+            ChangePicture::Routes { routes, .. } => {
                 for route in routes {
                     route.from = redact(&route.from);
                     route.to = redact(&route.to);
@@ -1014,6 +1014,18 @@ fn redacted_change(change: &ChangeRecord, redact: &dyn Fn(&str) -> String) -> Ch
                 }
                 values(list);
             }
+            ChangePicture::Tracks { tracks, .. } => {
+                for track in tracks {
+                    track.name = redact(&track.name);
+                }
+            }
+            ChangePicture::Marks { before, after, values: list } => {
+                for mark in before.iter_mut().chain(after.iter_mut()) {
+                    mark.name = redact(&mark.name);
+                }
+                values(list);
+            }
+            ChangePicture::Warp { values: list, .. } | ChangePicture::Wave { values: list, .. } => values(list),
         }
     }
     change
@@ -1115,7 +1127,17 @@ fn values_of(picture: &ChangePicture) -> Vec<String> {
         | ChangePicture::Eq { values, .. }
         | ChangePicture::Dynamics { values, .. }
         | ChangePicture::Zones { values, .. }
-        | ChangePicture::Items { values, .. } => values.iter().map(value).collect(),
+        | ChangePicture::Items { values, .. }
+        | ChangePicture::Marks { values, .. }
+        | ChangePicture::Warp { values, .. }
+        | ChangePicture::Wave { values, .. } => values.iter().map(value).collect(),
+        ChangePicture::Tracks { tracks, .. } => tracks
+            .iter()
+            .filter_map(|track| match track.mark? {
+                kumi_types::picture::TrackMark::Made => Some(one_line(&format!("{} (new)", track.name))),
+                kumi_types::picture::TrackMark::Removed => Some(one_line(&format!("{} (taken away)", track.name))),
+            })
+            .collect(),
         ChangePicture::Lines { lines, more } => {
             let mut said: Vec<String> = lines
                 .iter()
@@ -1129,7 +1151,7 @@ fn values_of(picture: &ChangePicture) -> Vec<String> {
             }
             said
         }
-        ChangePicture::Routes { routes } => routes
+        ChangePicture::Routes { routes, .. } => routes
             .iter()
             .flat_map(|route| {
                 let what = match route.change {

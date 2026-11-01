@@ -58,10 +58,15 @@ feeds = ["kumi-agent", "kumi"]
 [reaper-extension]
 paths = ["daws/reaper/reaper-kumi/**", "scripts/build-native-release.py", "scripts/daws.toml"]
 
+# What Kumi reads of REAPER's extension: its change code (Kumi's kinds and their fields are checked against it).
+[reaper-extension-read]
+paths = ["daws/reaper/reaper-kumi/src/changes/**"]
+feeds = ["kumi"]
+
 # What Kumi builds in as data: the standard Max patchers are held to, and the plug-in formats it reads.
 [data]
 paths = ["daws/ableton/max-standard/**", "plugin-formats/**"]
-feeds = ["kumi-agent", "kumi-library", "kumi-daw-ableton"]
+feeds = ["kumi-agent", "kumi-library", "kumi-daw-ableton", "daw-mcp-server"]
 
 # The recorded oracles, which the tests of the crates their folders name read (through kumi-testkit), and the list of
 # those only Extended's tests read.

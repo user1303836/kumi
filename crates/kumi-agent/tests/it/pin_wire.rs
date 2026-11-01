@@ -29,7 +29,8 @@ use kumi_listening::{
 use kumi_media::audio::matching::Focus;
 use kumi_net::cause::NetCause;
 use kumi_types::picture::{
-    Dynamics, EqBand, EqShape, MixLevels, MixSend, PictureItem, PictureLine, PictureRoute, PictureValue, PictureZone, RouteChange,
+    Dynamics, EqBand, EqShape, MixLevels, MixSend, PictureItem, PictureLine, PictureMark, PictureRoute, PictureTrack, PictureValue,
+    PictureZone, RouteChange, TrackMark,
 };
 use kumi_types::{
     contracts::{
@@ -351,6 +352,7 @@ fn change(id: &str, family: ChangeFamily, title: &str, state: ChangeState) -> Ch
         note: None,
         at: AT,
         picture: None,
+        batch: None,
     }
 }
 
@@ -1170,13 +1172,17 @@ fn the_views_focus_draws_keep_their_wire_shape() {
                 position: 64.5,
                 playing: true,
                 r#loop: Some(ArrangementLoop { start: 64.0, length: 16.0, enabled: true }),
-                locators: vec![Locator { name: "Drop".into(), position: 64.0 }, Locator { name: "Break".into(), position: 128.0 }],
+                locators: vec![
+                    Locator { name: "Drop".into(), position: 64.0, end: None },
+                    Locator { name: "Break".into(), position: 128.0, end: None },
+                ],
                 beats_per_bar: None,
                 lanes: None,
                 track_count: None,
                 lanes_from: None,
                 meter: vec![],
                 time_selection: None,
+                window: None,
             },
             ArrangementStrip {
                 length: 0.0,
@@ -1190,6 +1196,7 @@ fn the_views_focus_draws_keep_their_wire_shape() {
                 lanes_from: None,
                 meter: vec![],
                 time_selection: None,
+                window: None,
             },
             ArrangementStrip {
                 length: 32.0,
@@ -1203,6 +1210,7 @@ fn the_views_focus_draws_keep_their_wire_shape() {
                 lanes_from: None,
                 meter: vec![],
                 time_selection: None,
+                window: None,
             },
         ],
         connection_states: CONNECTION_STATES.to_vec(),
@@ -1494,6 +1502,7 @@ fn daw_pictures() -> Vec<ChangeRecord> {
                         ..Default::default()
                     }],
                 }],
+                more: 0,
             }),
             ..change("c902", ChangeFamily::Mixer, "Added send “Drums” → “Reverb”", ChangeState::Applied)
         },
@@ -1513,6 +1522,48 @@ fn daw_pictures() -> Vec<ChangeRecord> {
             }),
             ..change("c904", ChangeFamily::Clip, "Moved “vox.wav” to bar 6", ChangeState::Applied)
         },
+        ChangeRecord {
+            picture: Some(ChangePicture::Tracks {
+                tracks: vec![
+                    PictureTrack { name: "Drums".into(), color: Some("#ff5a00".into()), mark: None },
+                    PictureTrack { name: "Pads".into(), color: None, mark: Some(TrackMark::Made) },
+                    PictureTrack { name: "Old Bass".into(), color: None, mark: Some(TrackMark::Removed) },
+                ],
+                more: 5,
+            }),
+            ..change("c905", ChangeFamily::Structure, "Added MIDI track “Pads”", ChangeState::Applied)
+        },
+        ChangeRecord {
+            picture: Some(ChangePicture::Marks {
+                before: vec![PictureMark { name: "Intro".into(), at: 0.0 }],
+                after: vec![PictureMark { name: "Intro".into(), at: 0.0 }, PictureMark { name: "Drop".into(), at: 64.0 }],
+                values: vec![PictureValue { name: "Drop".into(), to_text: Some("bar 17".into()), ..Default::default() }],
+            }),
+            ..change("c906", ChangeFamily::Locators, "Locators “Drop” and “Outro”", ChangeState::Applied)
+        },
+        ChangeRecord {
+            picture: Some(ChangePicture::Warp {
+                before: vec![[0.0, 0.0], [4.0, 2.0]],
+                after: vec![[0.0, 0.0], [4.5, 2.0]],
+                values: vec![PictureValue {
+                    name: "Warp marker".into(),
+                    from_text: Some("bar 2".into()),
+                    to_text: Some("bar 2 beat 1.5".into()),
+                    ..Default::default()
+                }],
+            }),
+            ..change("c907", ChangeFamily::Clip, "Vox audio clip: warp marker moved", ChangeState::Applied)
+        },
+        ChangeRecord {
+            picture: Some(ChangePicture::Wave {
+                seconds: 12.5,
+                peaks: vec![0.0, 0.25, 1.0, 0.5],
+                before: Some([0.0, 12.5]),
+                after: Some([2.0, 8.0]),
+                values: vec![],
+            }),
+            ..change("c908", ChangeFamily::Clip, "Vox audio clip: loop", ChangeState::Applied)
+        },
     ]
 }
 
@@ -1528,6 +1579,10 @@ fn picture_kind(picture: &ChangePicture) -> &'static str {
         ChangePicture::Routes { .. } => "routes",
         ChangePicture::Zones { .. } => "zones",
         ChangePicture::Items { .. } => "items",
+        ChangePicture::Tracks { .. } => "tracks",
+        ChangePicture::Marks { .. } => "marks",
+        ChangePicture::Warp { .. } => "warp",
+        ChangePicture::Wave { .. } => "wave",
     }
 }
 
@@ -1538,7 +1593,22 @@ fn change_records_of_every_family_state_and_picture_keep_their_wire_shape() {
     let kinds: BTreeSet<&str> = records.iter().chain(&daw).filter_map(|record| record.picture.as_ref()).map(picture_kind).collect();
     assert_eq!(
         kinds,
-        BTreeSet::from(["automation", "dynamics", "eq", "items", "lines", "mix", "notes", "routes", "values", "zones"]),
+        BTreeSet::from([
+            "automation",
+            "dynamics",
+            "eq",
+            "items",
+            "lines",
+            "marks",
+            "mix",
+            "notes",
+            "routes",
+            "tracks",
+            "values",
+            "warp",
+            "wave",
+            "zones"
+        ]),
         "every picture kind is pinned"
     );
     for family in FAMILIES {

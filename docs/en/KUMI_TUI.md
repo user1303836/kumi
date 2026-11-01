@@ -34,8 +34,9 @@ closes, crashes or is stopped.
   it, or use **Ask Kumi about this** in Live) is pinned for your next messages.
 - **NOW** (middle right): what Kumi is doing, drawn as it happens: a value's
   before and after, an EQ's or a compressor's curve, an automation lane, a new
-  clip's notes, a colour swatch, a device landing in its chain, "▶ Playing from
-  the start marker". While Kumi waits for the model, it
+  clip's notes, a colour swatch, a device landing in its chain, new tracks among
+  the Set's, new locators on the timeline, "▶ Playing from the start marker".
+  While Kumi waits for the model, it
   says why and until when: "retrying in 5s · ChatGPT is busy", "carrying on at
   14:20 (in 2h 13m) · ChatGPT's plan limit", "offline · trying again in 20s"
   (Esc stops any of them). While the model thinks, NOW says for how long
@@ -45,8 +46,14 @@ closes, crashes or is stopped.
   (each with **forget**), then every change, newest first, each with **undo**,
   or **kept** / **no undo** / **check Live** when it can't be undone. A change
   opens to its picture: an EQ's curve, a compressor's, the notes (new ones in
-  colour, gone ones faint), an automation lane, or each value before and after,
-  with what was asked when Live set something else ("asked -2 dB"). **GOAL**
+  colour, gone ones faint), an automation lane (named, on its parameter's
+  range), a route (tracks sent to one bus drawn meeting there), the transport's
+  settings, locators, a clip's warp markers, a WAV or AIFF clip's waveform (the
+  part that plays in colour), or each value before and after, with what was asked
+  when Live set something else ("asked -2 dB"). A plan's change across several
+  tracks ("mute the drums, the bass and the keys") is one entry: its picture
+  shows each track's values, and its undo takes back each of them, newest
+  first, saying which it kept if one can't be. **GOAL**
   shows the `/goal` ("No goal yet" until there is one): the goal, its turns done
   and time against the budget (the status line counts the turn under way), the
   last check and what's next; for a sound-match
@@ -115,9 +122,11 @@ words and views.
   REAPER's time signature through its tempo map ("7/8"), Renoise's lines per
   beat ("LPB 4").
 - **FOCUS in REAPER** follows what has REAPER's focus:
-  - the **arrange view**: the tracks around the selected one, indented by folder
-    (a collapsed folder hides its tracks), their items as bars, markers and
-    regions, the loop and the playhead;
+  - the **arrange view**: the stretch it shows, scrolled and zoomed as in
+    REAPER ("bars 9–16 of 64"), and the tracks around the selected one, indented
+    by folder (a collapsed folder hides its tracks); their items as bars, a row
+    for each fixed lane (a lane that doesn't play is faint), markers, regions
+    from start to end with their names, the loop and the playhead;
   - the **MIDI editor**: the take's notes as a small piano roll, with up to three
     lanes under it (CC, pitch, program, channel pressure, poly aftertouch) and
     "and n more lanes";
@@ -495,16 +504,20 @@ what to draw as data, so another front end could draw the same things.
 one accent, mint `#86e3b5`, and Live's own track colours (very dark ones are
 lightened for display). Warning `#e7b45f`, error `#ee8479`, the beat light
 `#ffe14d`. What Kumi keeps has a colour per kind: notes `#8cc8ff`, techniques
-`#c7a6ff`, recipes `#f2a6c4`, lessons `#e7c88f`. Three themes draw it
+`#c7a6ff`, recipes `#f2a6c4`, lessons `#e7c88f`. Code in answers is coloured
+by the language its fence names (JavaScript and TypeScript, gen~, Lua, Python
+and REAPER's EEL): keywords `#7aa2f7`, strings `#b8d47e`, numbers `#e48ee0`,
+comments faint, the rest bright on the code's band. Three themes draw it
 (`theme`): dark, as above; light, made for a light terminal (dark words on a
 warm white `#f7f7f4`, the accent a deeper mint `#14764e`, the warning amber
-`#925b0d`, and track colours too pale to read deepened); and colorblind, the
+`#925b0d`, track colours too pale to read deepened, and code's colours deeper:
+keywords `#3a4fb8`, strings `#4a6a10`, numbers `#9c2f9a`); and colorblind, the
 dark one with colours that stay apart for red-green colour blindness (the accent
 sky blue `#56b4e9`, the warning orange `#e69f00`, the error vermilion
-`#d7650b`). Each theme keeps what its colours mean, and its words read at 4.5:1
-or more. With `system`, Kumi takes light or dark from the background the
-terminal reports as Kumi starts, and asks it to say when its colours turn dark or
-light, which some terminals do (mode 2031).
+`#d7650b`, code's numbers pink `#f0a8d8`). Each theme keeps what its colours
+mean, and its words read at 4.5:1 or more. With `system`, Kumi takes light or
+dark from the background the terminal reports as Kumi starts, and asks it to say
+when its colours turn dark or light, which some terminals do (mode 2031).
 
 **Foundations**, built from terminal primitives with no UI framework:
 
@@ -532,8 +545,6 @@ light, which some terminals do (mode 2031).
 tabs. Tests replay the renderer's output through a small terminal interpreter,
 which must reproduce the intended frame exactly.
 
-**Not done yet:** a picture in NOW for locators and new tracks; a fan-in or
-sidechain diagram for routing; an overview strip for very long clips; one
-expandable HISTORY entry for a change across many tracks; offering to undo the
-changes that depend on one; marking an entry "undone in Live"; FOCUS through
-macOS Accessibility (the exact control, the clip tab, the Browser item).
+**Not done yet:** offering to undo the changes that depend on one; marking an
+entry "undone in Live"; FOCUS through macOS Accessibility (the exact control,
+the clip tab, the Browser item).

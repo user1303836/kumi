@@ -645,6 +645,38 @@ scene!(reaper_mixer, DawId::Reaper, BODY_SHOTS, |h| {
     shows(&h, "FOCUS · Mixer").await;
 });
 
+scene!(reaper_arrange_window, DawId::Reaper, BODY_SHOTS, |h| {
+    // (#399 K35) The arrange view scrolled to bars 9–16 of 64: what it shows, the regions from start to end (the Verse
+    // began before it), and a track's fixed lanes, a row each, the lanes that don't play faint.
+    let item = |position: f64, length: f64, name: &str, more: Value| {
+        let mut row = json!({"ref": format!("r:item:{{{name}}}"), "position": position, "length": length, "name": name, "source": "audio",
+            "muted": false, "lane": 0, "lanePlays": null, "selected": false});
+        for (key, value) in more.as_object().unwrap() {
+            row[key] = value.clone();
+        }
+        row
+    };
+    let body = json!({"length": 256.0, "beatsPerBar": 4.0, "playhead": 40.0, "playing": true, "trackCount": 3, "from": 0,
+    "window": {"from": 32.0, "to": 64.0}, "view": {"from": 32.0, "to": 64.0}, "loop": {"on": true, "start": 48.0, "end": 56.0},
+    "markers": [{"name": "Drop", "position": 48.0}],
+    "regions": [{"name": "Verse", "position": 16.0, "end": 48.0}, {"name": "Chorus", "position": 48.0, "end": 80.0}],
+    "tracks": [
+        {"ref": "r:track:{D}", "name": "Drums", "depth": 0, "items": [item(32.0, 32.0, "Beat", json!({}))]},
+        {"ref": "r:track:{V}", "name": "Vox", "depth": 0, "fixedLanes": 3, "items": [
+            item(32.0, 16.0, "Take 1", json!({"lanePlays": "no"})),
+            item(36.0, 12.0, "Take 2", json!({"lane": 1, "lanePlays": "only", "selected": true})),
+            item(40.0, 8.0, "Take 3", json!({"lane": 2, "lanePlays": "no"}))]},
+        {"ref": "r:track:{B}", "name": "Bass", "depth": 0, "items": [item(32.0, 8.0, "Bass", json!({})), item(48.0, 16.0, "Bass 2", json!({"muted": true}))]}
+    ]});
+    let Some(FocusBody::Timeline(strip)) = (reaper::DAW.to_body)(&BodyRequest::Timeline, &body) else { panic!() };
+    *h.control.arrangement.borrow_mut() = Some(strip);
+    let focus = json!({"selection": {"track": {"name": "Vox", "type": "audio"}, "trackRef": "r:track:{V}"}});
+    h.emit(focus_of(reaper::DAW.fill_focus, focus));
+    shows(&h, "bars 9–16 of 64").await;
+    h.has("[Chorus");
+    h.has("lane 3");
+});
+
 scene!(renoise_mixer, DawId::Renoise, BODY_SHOTS, |h| {
     let strip = |n: u32, name: &str, kind: &str, volume: f64, pan: f64, mute: &str, solo: bool| json!({"ref": format!("e1:track:{n}"), "name": name, "type": kind, "volumeDb": volume, "pan": pan, "mute": mute, "solo": solo, "selected": n == 2});
     let body = json!({"strips": [

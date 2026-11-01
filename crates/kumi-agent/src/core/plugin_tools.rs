@@ -25,7 +25,7 @@ use serde_json::{json, Value};
 
 pub const GUIDANCE: &str = "vst3 (find_tools) discovers installed VST3 processors and creates/edits their presets locally; use it when choosing new processing, before native fallback or external research. Reuse suitable processors already in the project.";
 
-const MASTERING: &str = "Mastering and reference mastering: preserve routing and intentional processing; reuse suitable existing processors and adjust their exposed parameters. When adding processing, prefer an available Ozone 12 suite/module, then suitable installed VST3s, then native devices if no suitable plug-in can be used. A specific processor requested by the producer takes precedence. installed gives roles and verified write versions; catalog/inspect is for controls whose paths or units you need. Creating or reloading a preset is optional, not required for each measured pass. Use the DAW's changes for HISTORY and undo; a file on disk is not a loaded processor.\nUse listen on comparable sections before and after; compare any reference at matched loudness. Choose loudness from the material and the producer's goal, with an explicit true-peak ceiling. Check dynamics, tonal balance, transients, pumping, clipping, width and mono compatibility; put final limiting after gain-raising processing. Report the measured result, and reduce processing that damages the music. A simple track-level adjustment is not a request to master it.";
+const MASTERING: &str = "Mastering and reference mastering: preserve routing and intentional processing; reuse suitable existing processors and adjust their exposed parameters. When adding processing, prefer an available Ozone 12 suite/module, then suitable installed VST3s, then native devices if no suitable plug-in can be used. A specific processor requested by the producer takes precedence. installed gives roles and verified write versions; catalog/inspect is for controls whose paths or units you need. For FabFilter, choose Pro-Q for EQ, Pro-C/Pro-MB for compression, Pro-L for final limiting, Pro-DS for de-essing and Saturn for saturation; confirm the installed generation and its catalog before writing. Creating or reloading a preset is optional, not required for each measured pass. Use the DAW's changes for HISTORY and undo; a file on disk is not a loaded processor.\nUse listen on comparable sections before and after; compare any reference at matched loudness. Choose loudness from the material and the producer's goal, with an explicit true-peak ceiling. Check dynamics, tonal balance, transients, pumping, clipping, width and mono compatibility; put final limiting after gain-raising processing. Report the measured result, and reduce processing that damages the music. A simple track-level adjustment is not a request to master it.";
 
 #[derive(Clone)]
 pub struct PluginTool {
@@ -109,11 +109,11 @@ impl PluginTool {
                     .plugins
                     .iter()
                     .filter(|p| string("role").is_none_or(|r| inventory::matches_role(p, r)))
-                    .filter(|p| string("query").is_none_or(|q| p.name.to_lowercase().contains(&q.to_lowercase())))
+                    .filter(|p| string("query").is_none_or(|q| inventory_query(p, q)))
                     .collect();
                 Ok(
                     json!({"format":"VST3", "plugins":matching.iter().take(limit).collect::<Vec<_>>(), "more":matching.len().saturating_sub(limit),
-                    "unclassified":if string("role").is_some() { found.plugins.iter().filter(|p|p.roles.is_empty()).filter(|p|string("query").is_none_or(|q|p.name.to_lowercase().contains(&q.to_lowercase()))).take(limit.min(20)).map(|p|p.name.as_str()).collect::<Vec<_>>() } else { Vec::new() },
+                    "unclassified":if string("role").is_some() { found.plugins.iter().filter(|p|p.roles.is_empty()).filter(|p|string("query").is_none_or(|q|inventory_query(p,q))).take(limit.min(20)).map(|p|p.name.as_str()).collect::<Vec<_>>() } else { Vec::new() },
                     "warnings":found.warnings, "note":"Presence only; confirm loadability and the exact class/version in the DAW. Unclassified products may still do the requested job: inspect the DAW's browser/parameters before falling back to native devices. No VST2/AU/CLAP scan."}),
                 )
             }
@@ -233,7 +233,7 @@ impl PluginTool {
                 if edits.len() > 512 {
                     return Err("At most 512 edits per preset".into());
                 }
-                let options = preset::WriteOptions {
+                let mut options = preset::WriteOptions {
                     version: version.into(),
                     class_id: matches[0].class_id.clone(),
                     name: string("name").map(str::to_string),
@@ -241,7 +241,19 @@ impl PluginTool {
                 let result = if action == "create" {
                     preset::create(plugin, &options, &edits)
                 } else {
-                    preset::edit(plugin, &read_file(Path::new(required("input")?), plugin)?, &options, &edits)
+                    let source = Path::new(required("input")?);
+                    let bytes = read_file(source, plugin)?;
+                    if options.name.is_none()
+                        && !bytes.starts_with(b"VST3")
+                        && structure::builtin(plugin).is_some_and(|format| format.info.family == "fabfilter")
+                    {
+                        let name =
+                            source.file_stem().and_then(|stem| stem.to_str()).ok_or("Supply a display name for this native preset")?;
+                        kumi_library::plugins::formats::write_value::validate_display_name(name)
+                            .map_err(|error| format!("Native preset filename: {error}; supply an explicit name"))?;
+                        options.name = Some(name.into());
+                    }
+                    preset::edit(plugin, &bytes, &options, &edits)
                 }
                 .map_err(|e| e.to_string())?;
                 let bytes = result.write();
@@ -256,6 +268,13 @@ impl PluginTool {
             _ => Err("action is installed, catalog, guide, inspect, create, edit, edit-native or create-native-from-template".into()),
         }
     }
+}
+
+fn inventory_query(plugin: &inventory::InstalledPlugin, query: &str) -> bool {
+    let query = query.trim().to_lowercase();
+    format!("{} {} {}", plugin.vendor.as_deref().unwrap_or_default(), plugin.name, plugin.plugin.as_deref().unwrap_or_default())
+        .to_lowercase()
+        .contains(&query)
 }
 
 /// Whether a path a model gives is one Kumi opens: absolute, on this computer, and no device's or another machine's.
@@ -325,7 +344,7 @@ impl KernelTool for PluginTool {
         json!({"type":"object","additionalProperties":false,"required":["action"],"properties":{
         "action":{"type":"string","enum":["installed","catalog","guide","inspect","create","edit","edit-native","create-native-from-template"]},
         "plugin":{"type":"string","description":"Catalog ID, e.g. serum-2, ozone-12, valhalla-delay"},
-        "role":{"type":"string","description":"installed: mastering, limiting, eq, compression, stereo, delay, bbd, reverb, instrument…"},
+        "role":{"type":"string","description":"installed: mastering, limiting, eq, compression, de-essing, gate, saturation, filter, stereo, delay, bbd, reverb, instrument…"},
         "query":{"type":"string","description":"Name/control search; narrow catalog results before choosing paths"},
         "folders":{"type":"array","maxItems":16,"items":{"type":"string"},"description":"Additional absolute VST3 install directories"},
         "refresh":{"type":"boolean","description":"Rescan the session's installed inventory after installing or updating a plug-in"},
@@ -356,6 +375,84 @@ impl KernelTool for PluginTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fabfilter_native_import_uses_a_validated_filename_stem_unless_named_explicitly() {
+        use kumi_library::plugins::formats::{vstpreset::VstPreset, xml};
+
+        let temp = tempfile::tempdir().unwrap();
+        let plugin = "fabfilter-pro-q-4";
+        let format = structure::builtin(plugin).unwrap();
+        let resources = temp.path().join("Pro-Q 4.vst3/Contents/Resources");
+        std::fs::create_dir_all(&resources).unwrap();
+        std::fs::write(
+            resources.join("moduleinfo.json"),
+            serde_json::to_vec(&json!({"Classes":[{
+                "Name":"Pro-Q 4", "CID":format.info.ids.vst3[0].id,
+                "Category":"Audio Module Class", "Version":format.verified.writes[0].version
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let source = temp.path().join("Warm Bus.ffp");
+        let native = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/fabfilter-pro-q-4/format-1/fixtures/init.ffp"));
+        std::fs::write(&source, native).unwrap();
+        let tool = tool(temp.path());
+        let request = json!({"action":"edit","plugin":plugin,"input":source,"output":"Converted.vstpreset"});
+        let check_name = |path: &Path, expected: &str| {
+            let container = VstPreset::read(&std::fs::read(path).unwrap()).unwrap();
+            let controller = container.controller().unwrap();
+            let length = u32::from_le_bytes(controller[8..12].try_into().unwrap()) as usize;
+            assert_eq!(std::str::from_utf8(&controller[12..12 + length]).unwrap(), expected);
+            let metadata = xml::parse(std::str::from_utf8(container.chunk("Info").unwrap()).unwrap()).unwrap();
+            let name = metadata.root.children.iter().find(|child| child.attribute("id") == Some("Name")).unwrap();
+            assert_eq!(name.attribute("value"), Some(expected));
+        };
+        tool.run(&input(request.clone())).unwrap();
+        check_name(&tool.output.join("Converted.vstpreset"), "Warm Bus");
+        let mut explicit = request.clone();
+        explicit["name"] = json!("My Δ Bus");
+        explicit["output"] = json!("Explicit.vstpreset");
+        tool.run(&input(explicit)).unwrap();
+        check_name(&tool.output.join("Explicit.vstpreset"), "My Δ Bus");
+        let mut existing = request.clone();
+        existing["input"] = json!(tool.output.join("Converted.vstpreset"));
+        existing["output"] = json!("Edited.vstpreset");
+        tool.run(&input(existing)).unwrap();
+        check_name(&tool.output.join("Edited.vstpreset"), "Warm Bus");
+        let invalid = temp.path().join("Bad..Name.ffp");
+        std::fs::write(&invalid, native).unwrap();
+        let mut bad = request;
+        bad["input"] = json!(invalid);
+        bad["output"] = json!("Bad.vstpreset");
+        assert!(tool.run(&input(bad)).unwrap_err().contains("supply an explicit name"));
+        assert!(!tool.output.join("Bad.vstpreset").exists());
+    }
+
+    #[test]
+    fn installed_search_finds_fabfilter_by_vendor_when_host_names_omit_it() {
+        let temp = tempfile::tempdir().unwrap();
+        let format = structure::builtin("fabfilter-pro-l-2").unwrap();
+        let resources = temp.path().join("Renamed.vst3/Contents/Resources");
+        std::fs::create_dir_all(&resources).unwrap();
+        std::fs::write(
+            resources.join("moduleinfo.json"),
+            serde_json::to_vec(&json!({"Classes":[{
+                "Name":"Pro-L 2", "CID":format.info.ids.vst3[0].id,
+                "Category":"Audio Module Class", "Version":format.verified.writes[0].version
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let tool = tool(temp.path());
+        for query in ["FabFilter", "FabFilter Pro-L", "fabfilter-pro-l-2", "Pro-L 2"] {
+            let result = tool.run(&input(json!({"action":"installed","query":query,"role":"louder"}))).unwrap();
+            assert_eq!(result["plugins"][0]["plugin"], "fabfilter-pro-l-2", "{query}");
+        }
+        let unrelated = tool.run(&input(json!({"action":"installed","query":"FabFilter","role":"reverb"}))).unwrap();
+        assert!(unrelated["plugins"].as_array().unwrap().is_empty());
+    }
+
     fn input(value: Value) -> JsonObject {
         value.as_object().unwrap().clone()
     }

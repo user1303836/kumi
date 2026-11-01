@@ -196,12 +196,21 @@ fn same_version(a: &str, b: &str) -> bool {
     parts(a) == parts(b)
 }
 
-fn agreed_version(module: Option<&str>, binary: Option<&str>) -> Option<String> {
-    match (module, binary) {
-        (Some(a), Some(b)) if !same_version(a, b) => None,
-        (Some(a), _) => Some(a.to_string()),
-        (_, Some(b)) => Some(b.to_string()),
-        _ => None,
+fn agreed_version(format: Option<&PluginFormat>, module: Option<&str>, binary: Option<&str>) -> Result<Option<String>, ()> {
+    let canonical = |version: &str| {
+        format
+            .and_then(|format| {
+                format.verified.writes.iter().find(|known| {
+                    same_version(&known.version, version) || known.version_aliases.iter().any(|alias| same_version(alias, version))
+                })
+            })
+            .map(|known| known.version.clone())
+            .unwrap_or_else(|| version.to_owned())
+    };
+    match (module.map(canonical), binary.map(canonical)) {
+        (Some(a), Some(b)) if !same_version(&a, &b) => Err(()),
+        (Some(a), _) | (_, Some(a)) => Ok(Some(a)),
+        _ => Ok(None),
     }
 }
 
@@ -512,7 +521,7 @@ fn describe(path: &Path) -> Vec<InstalledPlugin> {
                     path,
                     name,
                     Some(id.to_uppercase()),
-                    agreed_version(class_version.or(version), binary_version.as_deref()),
+                    agreed_version(found, class_version.or(version), binary_version.as_deref()),
                     found,
                     "moduleinfo class ID",
                 )
@@ -533,7 +542,7 @@ fn describe(path: &Path) -> Vec<InstalledPlugin> {
         path,
         class.map(|id| id.name.as_str()).unwrap_or(stem),
         class.map(|id| id.id.clone()),
-        agreed_version(version, binary_version.as_deref()),
+        agreed_version(found, version, binary_version.as_deref()),
         found,
         "filename; confirm in the DAW",
     )]
@@ -543,11 +552,14 @@ fn described(
     path: &Path,
     name: &str,
     class_id: Option<String>,
-    version: Option<String>,
+    version: Result<Option<String>, ()>,
     format: Option<&PluginFormat>,
     identity: &str,
 ) -> InstalledPlugin {
-    let version = version.filter(|v| !v.trim().is_empty()).or_else(|| format.and_then(|f| fingerprint_version(path, f)));
+    // Missing metadata may use exact binary evidence; conflicting metadata may not.
+    let version = version
+        .ok()
+        .and_then(|version| version.filter(|v| !v.trim().is_empty()).or_else(|| format.and_then(|f| fingerprint_version(path, f))));
     let writes: Vec<_> = format
         .map(|p| {
             p.verified
@@ -663,7 +675,10 @@ pub fn is_limiter_name(name: &str) -> bool {
         }
         // A compressor that can also limit may have that stage disabled. Only dedicated
         // loudness/limiter products qualify without reading their internal signal path.
-        matches!(p.info.plugin.as_str(), "softube-weiss-mm-1-mastering-maximizer" | "zynaptiq-loud-1")
+        matches!(
+            p.info.plugin.as_str(),
+            "softube-weiss-mm-1-mastering-maximizer" | "zynaptiq-loud-1" | "fabfilter-pro-l-1" | "fabfilter-pro-l-2"
+        )
     }) || matches!(name_key.as_str(), "fabfilterprol2" | "prol2")
 }
 
@@ -681,13 +696,19 @@ pub fn matches_role(plugin: &InstalledPlugin, role: &str) -> bool {
 }
 
 fn normalize_role(s: &str) -> String {
-    match s.to_ascii_lowercase().as_str() {
+    let lower = s.trim().to_ascii_lowercase();
+    match lower.as_str() {
         "louder" | "loudness" | "limiter" | "maximizer" | "limiting" => "limiting",
         "wider" | "width" | "stereo" | "stereo-width" | "imaging" => "stereo",
         "compressor" | "compression" => "compression",
         "equalizer" | "equalization" | "eq" => "eq",
+        "deesser" | "de-esser" | "deess" | "de-ess" | "deessing" | "de-essing" => "de-essing",
+        "gate" | "gating" => "gate",
+        "expander" | "expansion" => "expansion",
+        "filter" | "filtering" => "filter",
+        "synth" | "synthesizer" | "synthesis" => "synthesis",
         "bbd" | "bucket brigade" | "bucket-brigade-delay" => "bucket-brigade-delay",
-        _ => return s.to_ascii_lowercase(),
+        _ => return lower,
     }
     .into()
 }
@@ -695,6 +716,109 @@ fn normalize_role(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fabfilter_os_version_aliases_identify_only_the_measured_product_release() {
+        let format = super::super::formats::structure::builtin("fabfilter-pro-q-4").unwrap();
+        assert_eq!(agreed_version(Some(format), Some("4.1.3.0"), Some("4.13")), Ok(Some("4.1.3.0".into())));
+        assert_eq!(agreed_version(Some(format), None, Some("4.13")), Ok(Some("4.1.3.0".into())));
+        assert!(agreed_version(Some(format), Some("4.1.3.0"), Some("4.02")).is_err());
+        assert!(agreed_version(None, Some("4.1.3.0"), Some("4.13")).is_err());
+
+        let temp = tempfile::tempdir().unwrap();
+        let bundle = temp.path().join("Renamed.vst3");
+        fs::create_dir_all(bundle.join("Contents/Resources")).unwrap();
+        fs::write(
+            bundle.join("Contents/Resources/moduleinfo.json"),
+            serde_json::to_vec(&serde_json::json!({"Classes":[{
+                "Name":"Pro-Q 4", "CID":format.info.ids.vst3[0].id,
+                "Version":"4.1.3.0", "Category":"Audio Module Class"
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let plist = bundle.join("Contents/Info.plist");
+        fs::write(&plist, r#"<plist><dict><key>CFBundleShortVersionString</key><string>4.13</string></dict></plist>"#).unwrap();
+        let found = scan(&[temp.path().into()]);
+        assert_eq!(found.plugins[0].version.as_deref(), Some("4.1.3.0"));
+        assert!(found.plugins[0].create_preset);
+        fs::write(&plist, r#"<plist><dict><key>CFBundleShortVersionString</key><string>4.02</string></dict></plist>"#).unwrap();
+        let conflict = scan(&[temp.path().into()]);
+        assert_eq!(conflict.plugins[0].version, None);
+        assert!(!conflict.plugins[0].create_preset);
+    }
+
+    #[test]
+    fn exact_binary_evidence_cannot_override_conflicting_version_metadata() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("ValhallaDelay.vst3");
+        fs::write(&path, b"synthetic captured binary").unwrap();
+        let mut format = super::super::formats::structure::builtin("valhalla-delay").unwrap().clone();
+        format.verified.writes[0].binary_sha256 = Some(hex::encode(Sha256::digest(b"synthetic captured binary")));
+        assert_eq!(fingerprint_version(&path, &format).as_deref(), Some("3.0.5"));
+        let found = described(
+            &path,
+            "ValhallaDelay",
+            Some(format.info.ids.vst3[0].id.clone()),
+            agreed_version(Some(&format), Some("99.0.0"), Some("3.0.5")),
+            Some(&format),
+            "moduleinfo class ID",
+        );
+        assert_eq!(found.version, None);
+        assert!(!found.create_preset);
+    }
+
+    #[test]
+    fn fabfilter_discovery_uses_each_products_roles_and_ignores_vst2_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let products = [
+            ("fabfilter-pro-q-4", "equalizer"),
+            ("fabfilter-pro-c-3", "compressor"),
+            ("fabfilter-pro-l-2", "louder"),
+            ("fabfilter-pro-r-2", "reverb"),
+            ("fabfilter-pro-mb", "compression"),
+            ("fabfilter-pro-ds", " DE-ESS "),
+            ("fabfilter-pro-g", "gating"),
+            ("fabfilter-saturn-2", "saturation"),
+            ("fabfilter-timeless-3", "delay"),
+            ("fabfilter-volcano-3", "filtering"),
+            ("fabfilter-twin-3", "instrument"),
+            ("fabfilter-one", "instrument"),
+            ("fabfilter-simplon", "filter"),
+            ("fabfilter-micro", "filter"),
+        ];
+        for (plugin, _) in products {
+            let format = super::super::formats::structure::builtin(plugin).expect("FabFilter product in the built-in catalog");
+            let filename = format.info.binaries.iter().find(|name| name.ends_with(".vst3")).unwrap();
+            fs::write(temp.path().join(filename), b"VST3 filename identity; never executed").unwrap();
+            fs::write(temp.path().join(filename).with_extension("dll"), b"VST2 ignored").unwrap();
+        }
+        let found = scan(&[temp.path().into()]);
+        assert_eq!(found.plugins.len(), products.len());
+        for (plugin, role) in products {
+            let installed = found.plugins.iter().find(|p| p.plugin.as_deref() == Some(plugin)).expect(plugin);
+            assert_eq!(installed.vendor.as_deref(), Some("FabFilter"));
+            assert!(matches_role(installed, role), "{plugin}: {role}");
+            assert!(!installed.create_preset, "filename alone cannot authorize {plugin} writes");
+            assert_eq!(matches_role(installed, "limiter"), plugin == "fabfilter-pro-l-2", "{plugin}");
+        }
+    }
+
+    #[test]
+    fn fabfilter_limiter_classification_excludes_compressors_and_other_processors() {
+        let mut limiters = 0;
+        for format in builtins().iter().filter(|p| p.info.family == "fabfilter") {
+            let is_limiter = matches!(format.info.plugin.as_str(), "fabfilter-pro-l-1" | "fabfilter-pro-l-2");
+            limiters += usize::from(is_limiter);
+            for class in &format.info.ids.vst3 {
+                assert_eq!(is_limiter_name(&class.name), is_limiter, "{}", class.name);
+                assert_eq!(is_limiter_class_id(&class.id), is_limiter, "{}", class.id);
+            }
+        }
+        assert!(limiters >= 1);
+        assert!(is_limiter_name("Pro-L 2"));
+        assert!(!is_limiter_name("FabFilter Pro-C 3"));
+    }
+
     #[test]
     fn version_resource_pointers_and_lengths_stay_inside_the_allocated_buffer() {
         let data = [0u32; 16];

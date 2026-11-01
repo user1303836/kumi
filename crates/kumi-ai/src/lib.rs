@@ -17,6 +17,7 @@ pub mod models;
 pub mod openai_compatible;
 pub mod openai_responses;
 pub mod providers;
+pub mod socket;
 pub mod sse;
 pub mod timing;
 pub mod types;

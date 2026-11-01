@@ -9,6 +9,12 @@ use kumi_types::system::{self, Env, SystemProgram};
 use regex::Regex;
 use std::{path::Path, sync::LazyLock, time::Duration};
 
+/// What `ps` is asked to list what's running, each by the program it runs (macOS).
+pub(crate) const RUNNING_PROGRAMS: [&str; 2] = ["-axo", "comm="];
+/// What PowerShell is asked for the program of the Live that's open; nothing when none is (Windows).
+pub(crate) const OPEN_LIVE_PROGRAM: &str =
+    "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Path";
+
 /// The Live that's open: its app, a `.app` on macOS and an `.exe` on Windows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenLive {
@@ -35,10 +41,9 @@ fn quoted(text: &str) -> String {
 /// Which Live is open, if one is.
 pub async fn open_live(run: &Run, platform: &str, env: &Env) -> Option<OpenLive> {
     match platform {
-        "darwin" => run("ps".into(), args(&["-axo", "comm="]), None).await.stdout.lines().find_map(live_app_of),
+        "darwin" => run("ps".into(), args(&RUNNING_PROGRAMS), None).await.stdout.lines().find_map(live_app_of),
         "win32" => {
-            let path = "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Path";
-            let ran = run(powershell(env, platform), args(&["-NoProfile", "-NonInteractive", "-Command", path]), None).await;
+            let ran = run(powershell(env, platform), args(&["-NoProfile", "-NonInteractive", "-Command", OPEN_LIVE_PROGRAM]), None).await;
             let app = ran.stdout.trim();
             (!app.is_empty()).then(|| OpenLive { app: app.into() })
         }

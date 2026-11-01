@@ -1,0 +1,19 @@
+{
+  "plugin": "fabfilter-timeless-2",
+  "name": "FabFilter Timeless 2",
+  "vendor": "FabFilter",
+  "kind": "effect",
+  "ids": {
+    "vst3": [{"id":"E45B65335E7D4E28B4CA15D7940A3A6D","name":"Timeless 2","status":"verified","parameters":842}]
+  },
+  "presets": {
+    "extensions": [".ffp",".vstpreset"],
+    "windows": [{"path":"~/Documents/FabFilter/Presets/Timeless 2","holds":"native user and installed presets","status":"verified"}],
+    "mac": [{"path":"~/Documents/FabFilter/Presets/Timeless 2","holds":"native presets; path not tested on this Windows capture","status":"guessed"}]
+  },
+  "formats": ["format-1"],
+  "family": "fabfilter",
+  "roles": ["delay","tape-delay"],
+  "binaries": ["FabFilter Timeless 2.vst3","Timeless 2.vst3"],
+  "notes": ["VST3 only. Processor class identity and versions were enumerated through the public VST3 factory.","Kumi creates from initialized component/controller state and preserves unrelated bytes. No manufacturer presets, samples or executable code are bundled.","Edit values use stored VST3 plain values. These may be logarithmic frequencies or normalized internal controls, not the displayed Hz, milliseconds or dB. Consult field ranges and captured display examples.","Only measured numeric controls are writable. Native .ffp schemas and conversion support are explicitly gated; historical factory schemas are not guessed."]
+}

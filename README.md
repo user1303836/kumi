@@ -49,7 +49,7 @@ Next time, open a terminal and type `kumi`, then open your DAW (Live, REAPER or 
 - **Build a sound from a tutorial.** Paste a YouTube link: Kumi watches it and builds what it shows on a new track.
 - **Fix the mix.** Ask “is the bass muddy?” and Kumi listens, finds what's clashing and fixes it, listening again after each change.
 - **Match a reference.** Give it a track you love: Kumi tries a few takes, scores each against it and refines the best.
-- **Create plug-in presets and master a track.** Kumi uses its built-in VST3 formats and checks suitable installed processors before native devices. Kumi can build presets in the background while you keep working. See [supported formats and limits](plugin-formats/README.md).
+- **Create plug-in presets and master a track.** Kumi uses its built-in VST3 formats, including FabFilter's current and legacy products, and checks suitable installed processors before native devices. Kumi can build presets in the background while you keep working. See [supported formats and limits](plugin-formats/README.md).
 - **Make a device.** Describe a Max for Live effect or instrument and Kumi builds it and puts it on your track.
 - **Find your sounds.** “A dusty snare like this one”, “my usual vocal chain”: Kumi knows your samples, presets and projects.
 - **Map your sounds.** `/map` lays out your samples and songs so similar ones sit together; point at one to hear it. Gather the ones you like into a palette, and Kumi picks from it when you ask for “a darker kick from my palette”, or loads the whole palette as a kit.
@@ -113,8 +113,8 @@ Audio is analysed locally; the model gets the measurements. Your library and mus
 
 ## Status
 
-- Kumi 1.24.32 is currently supported for Ableton Live 12.4.15b4 (beta) and above on macOS and Windows. You may run into issues on lower versions. If you do, **please file an issue!**
-- 1.24.32 is tested with Live on macOS. On Windows, installing and updating are tested; using it with Live there is still new. Please send a `kumi report` when something breaks.
+- Kumi 1.24.40 is currently supported for Ableton Live 12.4.15b4 (beta) and above on macOS and Windows. You may run into issues on lower versions. If you do, **please file an issue!**
+- 1.24.40 is tested with Live on macOS. On Windows, installing and updating are tested; using it with Live there is still new. Please send a `kumi report` when something breaks.
 - REAPER 7.82 and Renoise 3.5.4 are tested on macOS. On Windows and Linux, CI tests putting Kumi's extension and tool in place and loading the extension; using them with REAPER and Renoise there is new.
 
 ## Development

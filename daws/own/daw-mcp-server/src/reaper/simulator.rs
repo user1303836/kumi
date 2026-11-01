@@ -1207,7 +1207,8 @@ impl ReaperScript {
                 let mut snapshot = json!({
                     "epoch": epoch,
                     "project": Self::project(&state),
-                    "transport": {"playing": false, "recording": false, "beat": 0.0, "tempo": 120.0, "beatsPerBar": 4.0, "seconds": 0.0, "loop": {"on": false, "start": 0.0, "end": 0.0}},
+                    // (the transport plays at the project's tempo, as REAPER's reads it)
+                    "transport": {"playing": false, "recording": false, "beat": 0.0, "tempo": state.settings["bpm"], "beatsPerBar": 4.0, "seconds": 0.0, "loop": {"on": false, "start": 0.0, "end": 0.0}},
                     "tracks": tracks,
                     "selection": {"trackRef": "r:track:{T0001}", "itemRef": null, "takeRef": null, "fxRef": null, "cursor": 0.0},
                     "markers": [],
@@ -1222,7 +1223,7 @@ impl ReaperScript {
                 "epoch": epoch,
                 "view": "arrange",
                 "selection": {"trackRef": "r:track:{T0001}", "cursor": 0.0},
-                "transport": {"playing": state.playing, "recording": false, "beat": 0.0, "tempo": 120.0, "beatsPerBar": 4.0, "seconds": 0.0},
+                "transport": {"playing": state.playing, "recording": false, "beat": 0.0, "tempo": state.settings["bpm"], "beatsPerBar": 4.0, "seconds": 0.0},
                 "changed": state.changed,
                 "ageMs": 12,
             })),

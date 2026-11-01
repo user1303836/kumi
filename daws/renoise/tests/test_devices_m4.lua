@@ -495,6 +495,55 @@ test("devices m4: Renoise's own undo and redo of a value inside a Doofer (no not
   eq(told(), "", "told once")
 end)
 
+-- (a host-made edit of the Doofer at `ref`: its text with `from` replaced by `to` once, applied as `kind`)
+local function doofer_edit(peer, epoch, layout, ref, kind, from, to, desc)
+  local read = call(peer, "preset_read", { ref = ref, epoch = epoch, layout = layout }).result
+  local edited, n = read.presetData:gsub(from, to, 1)
+  eq(n, 1)
+  local done = call(peer, "change_apply", { kind = kind, input = { ref = ref, presetData = edited, shape = read.shape }, fence = { id = read.id }, desc = desc, epoch = epoch, layout = layout })
+  ok(done.result, json.encode(done.error or {}))
+end
+
+test("devices m4: the journal's poll reads a Doofer once a round for all the changes it keeps of it, whatever their kind (#361 N-S16)", function()
+  local _, peer = setup()
+  local epoch, layout = place(peer)
+  local ref = epoch .. ":device:3.2"
+  doofer_edit(peer, epoch, layout, ref, "doofer-device-set", "<Value>1.0</Value>", "<Value>0.5</Value>", "Kumi: inside (kp1)")
+  doofer_edit(peer, epoch, layout, ref, "doofer-macro", "<Name>Macro 1</Name>", "<Name>Drive</Name>", "Kumi: macro (kp2)")
+  doofer_edit(peer, epoch, layout, ref, "doofer-macro", "<Name>Drive</Name>", "<Name>Tone</Name>", "Kumi: macro (kp3)")
+  mock.advance(1100)
+  mock.preset_reads = 0
+  for _ = 1, 5 do mock.advance(1000) end -- five rounds
+  ok(mock.preset_reads >= 4 and mock.preset_reads <= 5, "one read a round for its three changes: " .. mock.preset_reads)
+  -- (and Renoise's undo inside it is still told, for the change it took back)
+  mock.song:undo()
+  mock.advance(1100)
+  call(peer, "ping")
+  local told = {}
+  for _, event in ipairs(peer.events or {}) do
+    if event.name == "undone_in_daw" then told[#told + 1] = event.data.how .. ":" .. event.data.descs[1] end
+  end
+  eq(table.concat(told, ","), "undo:Kumi: macro (kp3)")
+end)
+
+test("devices m4: the journal's poll reads at most two devices a tick, and a round reads each of them (#361 N-S16)", function()
+  local _, peer = setup({ { name = "A", devices = { doofer() } }, { name = "B", devices = { doofer() } }, { name = "C", devices = { doofer() } } })
+  local epoch, layout = place(peer)
+  for t = 1, 3 do
+    doofer_edit(peer, epoch, layout, epoch .. ":device:" .. t .. ".2", "doofer-macro", "<Name>Macro 1</Name>", "<Name>Drive</Name>", "Kumi: macro (kq" .. t .. ")")
+  end
+  mock.advance(1100)
+  -- (a round, a tick (50 ms) at a time)
+  local most, total = 0, 0
+  for _ = 1, 20 do
+    mock.preset_reads = 0
+    mock.advance(50)
+    most, total = math.max(most, mock.preset_reads), total + mock.preset_reads
+  end
+  eq(most, 2, "two devices in a tick, the third in the next")
+  eq(total, 3, "each device once in the round")
+end)
+
 test("devices m4: host-made edits go only to the devices they are for, with their own device type's data", function()
   local _, peer = setup()
   local epoch, layout = place(peer)
@@ -1007,6 +1056,38 @@ test("devices m4: Kumi's records inside an instrument still find their places af
     local back = restore(peer, "sample-set", tuned)
     ok(back.result, "the sample is where it was: " .. json.encode(back.error or {}))
     eq(mock.song:instrument(1):sample(1).transpose, 0)
+  end)
+end)
+
+test("devices m4: Renoise's undo of Kumi's change inside an instrument is still told after a macro map loads it again (#399 N-S5)", function()
+  local env, peer = mapped_song()
+  mock.song:instrument(1):insert_sample_at(1).name = "Saw"
+  with_instrument_files(function()
+    mock.data.song_fields.selected_instrument_index = 1
+    change(peer, "sample-set", { ref = place(peer) .. ":sample:1.1", transpose = 3 }, "Kumi: tune (ks52)")
+    local epoch, layout = place(peer)
+    local export = call(peer, "instrument_export", { ref = epoch .. ":instrument:1", epoch = epoch, layout = layout })
+    ok(export.result, json.encode(export.error or {}))
+    local mappings = { { param = "Cutoff", min = 0, max = 1, scaling = 3 }, { param = "Resonance", min = 0.2, max = 0.8, scaling = 3 }, { param = "Drive", min = 0, max = 0.5, scaling = 1 } }
+    local input = { ref = epoch .. ":instrument:1", macro = 1, file = host_edit(export.result.file, 1, mappings), print = export.result.print, display = { title = "Lead macro 1: mapped to Drive" } }
+    local done = call(peer, "change_apply", { kind = "instrument-macro-map", input = input, fence = {}, desc = "Kumi: map (ks53)", epoch = epoch, layout = layout })
+    ok(done.result, json.encode(done.error or {}))
+    H.tick(2)
+    call(peer, "ping")
+    peer.events = {}
+    mock.song:undo() -- (the load: the instrument as it was, told back in place)
+    H.tick(3)
+    mock.song:undo() -- (the sample's transpose)
+    H.tick(3)
+    eq(mock.song:instrument(1):sample(1).transpose, 0)
+    call(peer, "ping")
+    local told = {}
+    for _, event in ipairs(peer.events) do
+      if event.name == "undone_in_daw" then
+        for _, desc in ipairs(event.data.descs) do told[#told + 1] = event.data.how .. ":" .. desc end
+      end
+    end
+    ok(table.concat(told, ", "):find("undo:Kumi: tune (ks52)", 1, true), "the tune's undo is told: " .. table.concat(told, ", "))
   end)
 end)
 

@@ -4,8 +4,8 @@
   "label": "Inference-only — No Live access",
   "context": "{\"observedAt\":\"<observed at>\",\"mode\":\"inference-only\",\"access\":\"No Live access; do not describe remembered Set data as current. Kumi reconnects on its own when Live is back, and the conversation carries on.\"}",
   "instructions": {
-    "bytes": 24105,
-    "sha256": "5306b902be6230856c21545bda9cccfb88c5a506d6fdc8356ab4e50252ea5f66"
+    "bytes": 22340,
+    "sha256": "2f774f015d3e923bd80c2ef6dc111ad45f461fed7c5b4ef89359a0291646c708"
   },
   "tools": [],
   "project": null,

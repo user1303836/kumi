@@ -324,8 +324,8 @@ Kumi about this**), Live's own commands and Live's manual.
 
 **Versions.** Each Kumi release ships with an extension and a tool, which
 `kumi update` brings up to date ([updating](#updating-reporting-and-uninstalling)).
-Kumi 1.24.10 to 1.24.32 with REAPER extension 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
-Kumi 1.24.10 to 1.24.32 with Renoise tool 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
+Kumi 1.24.35 to 1.24.40 with REAPER extension 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
+Kumi 1.24.35 to 1.24.40 with Renoise tool 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
 
 ## Working with Kumi
 
@@ -792,6 +792,8 @@ See [how arranging works](KUMI_CHANGES.md#arrangements).
 
 - **Built-in VST3 presets.** Ask Kumi to create or edit a preset. It checks its local format catalog before external research, and can load supported presets with history and undo. Serum 2, Ozone 12 and its modules, Valhalla, Minimal Audio, Pulsar Modular and other catalogued products have versioned format support; see [capabilities and limits](../../plugin-formats/README.md).
 - **Installed processors first.** Mastering and reference mastering check Ozone 12, then other suitable installed VST3s, then native devices. Kumi measures and listens before and after; a reference is compared at matched loudness.
+- **FabFilter presets.** Kumi creates, inspects and edits VST3 presets for the 14 current FabFilter products and 11 legacy products, using verified installed versions. The same files work through Live, REAPER and Renoise's preset workflows. Older builds use their captured layouts; unknown versions stay read-only. The catalog explains each stored value's scale, which can differ from the number shown on a knob.
+- **Import a FabFilter preset.** Give Kumi a local `.ffp` file to convert or edit into a loadable `.vstpreset`. Its filename supplies the preset name unless you request another name; unsupported layouts or values are refused.
 - **Native file limits.** Softube and some Zynaptiq presets support inspection, template copies and renaming; unverified numeric controls remain read-only. VST3 state loading is not claimed for locally unverified products. Live loads a new preset instance from its browser; existing instances use exposed parameters.
 - **Verified writes.** The installed version must match a tested writer. Numeric edits need a verified write range; text and Boolean edits need verified semantics or an explicit allowlist. Resource paths stay read-only. New files stay in Kumi's preset folder; Live also saves a User Library copy, which remains when undo removes the loaded device.
 
@@ -1428,6 +1430,10 @@ and your provider's own retention are separate.
   checks that each address is public before it connects, and a proxy would look
   the name up again where Kumi can't check it. On a network that lets only a
   proxy out, they can't read pages.
+- **ChatGPT** answers over one WebSocket connection to chatgpt.com that Kumi
+  keeps open while you work, so each step of an answer sends only what's new.
+  With a proxy, or on a network that won't open one, Kumi asks over HTTPS as
+  before.
 
 ## Files and settings
 
@@ -1499,6 +1505,7 @@ Environment variables (paths must be absolute):
 | `KUMI_RENOISE_PREFS_DIR` | Renoise's preferences: a `V<x.y.z>` folder, or the folder that holds them |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Live's Remote Scripts folder, when Kumi doesn't find it |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Where `kumi bridge` puts Kumi's extension and `kumi doctor` looks for it, when Kumi doesn't find Live's Extensions folder |
+| `KUMI_MAX` | The Max whose objects Kumi reads when it makes a Max for Live device: its `C74` folder (`resources` on Windows), or a Max that holds one (`Max.app`, or the folder `Max.exe` is in). It's used alone: if it names no Max, Kumi says so and reads no other. Otherwise it's the Max of the Live that's open, then the newest Live's |
 | `KUMI_BRIDGE_WAIT_SECONDS` | How long `kumi bridge` waits for Live to connect; `0` doesn't wait |
 | `KUMI_NO_UPDATE_CHECK` | Any value turns off the check for a newer version at start |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` | The proxy Kumi goes through, and the addresses it doesn't ([proxies](#proxies-and-school-or-office-networks)) |

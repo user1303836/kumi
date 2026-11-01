@@ -308,6 +308,7 @@ pub async fn arrangement_strip(host: &dyn ViewHost, signal: Signal) -> Result<Op
                     Some(Locator {
                         name: row.get("name").and_then(Value::as_str).map(|s| head(s, 128)).unwrap_or_default(),
                         position: row.get("position")?.as_f64()?,
+                        end: None,
                     })
                 })
                 .collect::<Vec<_>>()
@@ -330,6 +331,7 @@ pub async fn arrangement_strip(host: &dyn ViewHost, signal: Signal) -> Result<Op
             lanes_from: None,
             meter: vec![],
             time_selection: None,
+            window: None,
         }))
     }
     .await;

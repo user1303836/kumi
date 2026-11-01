@@ -216,19 +216,24 @@ struct Moves {
     history_reset: bool,
     /// A saved project became unsaved: a project made from a template, never a Save As.
     went_unsaved: bool,
+    /// The undo history has more entries than at the last look: an edit made an undo point. (A load starts a history of
+    /// its own, which REAPER's load hook and `history_reset` catch first.)
+    history_grew: bool,
 }
 
 /// Whether the project now is another project than the one before. A load (the undo history gone), or a saved project
 /// that became unsaved, is one whatever the tracks (a template carries the GUIDs of the project it was made from);
-/// otherwise the tracks decide: they share none; or one side has none and the file changed or the counter went back;
-/// or neither has any and the file changed.
+/// otherwise the tracks decide: they share none, unless an edit replaced them all (the history grew, in the same file,
+/// the counter going on); or one side has none and the file changed or the counter went back; or neither has any and
+/// the file changed. Where REAPER can't count its history (before 7.79), at the history's limit, or after an undo, the
+/// history doesn't grow, and tracks that share none are another project as before.
 fn is_another_project(before: &HashSet<String>, now: &HashSet<String>, moves: Moves) -> bool {
-    let Moves { file_changed, counter_went_back, history_reset, went_unsaved } = moves;
+    let Moves { file_changed, counter_went_back, history_reset, went_unsaved, history_grew } = moves;
     if history_reset || went_unsaved {
         return true;
     }
     match (before.is_empty(), now.is_empty()) {
-        (false, false) => before.is_disjoint(now),
+        (false, false) => before.is_disjoint(now) && !(history_grew && !file_changed && !counter_went_back),
         (true, true) => file_changed,
         _ => file_changed || counter_went_back,
     }
@@ -739,13 +744,15 @@ impl Extension {
                 let file_changed = watch.path != info.path || watch.name != info.name;
                 let counter_went_back = matches!((watch.count, count), (Some(before), Some(now)) if now < before);
                 let history_reset = matches!((watch.undo, undo), (Some(before), Some(now)) if before >= 2 && now <= 1);
+                let history_grew = matches!((watch.undo, undo), (Some(before), Some(now)) if now > before);
                 let went_unsaved = !watch.path.is_empty() && info.path.is_empty();
                 let due = count != watch.count && watch.tracks_at.is_none_or(|at| at.elapsed() >= WATCH_REFRESH);
                 let mut replaced = false;
                 let look = loaded || file_changed || counter_went_back || history_reset || due;
                 if look {
                     let now = track_guids(reaper, info.ptr);
-                    let moves = Moves { file_changed, counter_went_back, history_reset: history_reset || loaded, went_unsaved };
+                    let moves =
+                        Moves { file_changed, counter_went_back, history_reset: history_reset || loaded, went_unsaved, history_grew };
                     replaced = is_another_project(&watch.tracks, &now, moves);
                     watch.tracks = now;
                     watch.tracks_at = Some(Instant::now());
@@ -1427,7 +1434,8 @@ mod tests {
         fake::lab_project();
         extension.tick(Driver::Timer);
         let before = epoch_and_identity(&extension, &tx);
-        // Every track replaced at once (a script, a paste of a whole project), a moment after the tracks were last read.
+        // Every track replaced at once with no undo point (a script that makes none), a moment after the tracks were last
+        // read.
         fake::with(|s| {
             s.tracks = vec![fake::FakeTrack::new("{NEW-1}", "Keys")];
             s.state_count += 1;
@@ -1438,6 +1446,26 @@ mod tests {
         extension.watch.borrow_mut().tracks_at = None;
         extension.tick(Driver::Timer);
         assert_ne!(epoch_and_identity(&extension, &tx).0, before.0);
+    }
+
+    #[test]
+    fn an_edit_that_replaces_every_track_is_the_same_project() {
+        let (extension, tx, recorder, _) = setup();
+        fake::lab_project();
+        extension.tick(Driver::Timer);
+        let before = epoch_and_identity(&extension, &tx);
+        recorder.take();
+        // An action that removes every track and inserts others, with its undo point: no track in common, but the history
+        // grew, in the same file.
+        fake::with(|s| {
+            s.tracks = vec![fake::FakeTrack::new("{NEW-1}", "Keys"), fake::FakeTrack::new("{NEW-2}", "Bass")];
+            fake::push_undo_point(s, "Replace tracks");
+            s.state_count += 1;
+        });
+        extension.watch.borrow_mut().tracks_at = None;
+        extension.tick(Driver::Timer);
+        assert_eq!(epoch_and_identity(&extension, &tx), before);
+        assert!(!recorder.take().iter().any(|(n, _)| n == "project"), "no new project is announced");
     }
 
     #[test]
@@ -1511,6 +1539,13 @@ mod tests {
         // the GUIDs of the project it was made from, and so does a copy of a file.
         assert!(is_another_project(&ab, &ab, Moves { history_reset: true, ..Moves::default() }));
         assert!(is_another_project(&ab, &ab, Moves { went_unsaved: true, file_changed: true, ..Moves::default() }));
+        // Tracks that share none are the same project when an edit replaced them: the history grew, in the same file, and
+        // the counter went on. With another file or the counter back, they are another project still.
+        let grew = Moves { history_grew: true, ..Moves::default() };
+        assert!(!is_another_project(&a, &c, grew), "every track replaced by an edit");
+        assert!(is_another_project(&a, &c, Moves { file_changed: true, ..grew }));
+        assert!(is_another_project(&a, &c, Moves { counter_went_back: true, ..grew }));
+        assert!(is_another_project(&a, &c, Moves { history_reset: true, ..grew }), "a load, whatever the history says");
     }
 
     /// A project the bridge sees, with the file it came from and how far its undo history has got.

@@ -984,5 +984,124 @@
         }
       ]
     }
+  },
+  {
+    "id": "c905",
+    "family": "structure",
+    "title": "Added MIDI track “Pads”",
+    "state": "applied",
+    "at": 1760000000000,
+    "picture": {
+      "kind": "tracks",
+      "tracks": [
+        {
+          "name": "Drums",
+          "color": "#ff5a00"
+        },
+        {
+          "name": "Pads",
+          "mark": "made"
+        },
+        {
+          "name": "Old Bass",
+          "mark": "removed"
+        }
+      ],
+      "more": 5
+    }
+  },
+  {
+    "id": "c906",
+    "family": "locators",
+    "title": "Locators “Drop” and “Outro”",
+    "state": "applied",
+    "at": 1760000000000,
+    "picture": {
+      "kind": "marks",
+      "before": [
+        {
+          "name": "Intro",
+          "at": 0.0
+        }
+      ],
+      "after": [
+        {
+          "name": "Intro",
+          "at": 0.0
+        },
+        {
+          "name": "Drop",
+          "at": 64.0
+        }
+      ],
+      "values": [
+        {
+          "name": "Drop",
+          "toText": "bar 17"
+        }
+      ]
+    }
+  },
+  {
+    "id": "c907",
+    "family": "clip",
+    "title": "Vox audio clip: warp marker moved",
+    "state": "applied",
+    "at": 1760000000000,
+    "picture": {
+      "kind": "warp",
+      "before": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          4.0,
+          2.0
+        ]
+      ],
+      "after": [
+        [
+          0.0,
+          0.0
+        ],
+        [
+          4.5,
+          2.0
+        ]
+      ],
+      "values": [
+        {
+          "name": "Warp marker",
+          "fromText": "bar 2",
+          "toText": "bar 2 beat 1.5"
+        }
+      ]
+    }
+  },
+  {
+    "id": "c908",
+    "family": "clip",
+    "title": "Vox audio clip: loop",
+    "state": "applied",
+    "at": 1760000000000,
+    "picture": {
+      "kind": "wave",
+      "seconds": 12.5,
+      "peaks": [
+        0,
+        0.25,
+        1,
+        0.5
+      ],
+      "before": [
+        0.0,
+        12.5
+      ],
+      "after": [
+        2.0,
+        8.0
+      ]
+    }
   }
 ]

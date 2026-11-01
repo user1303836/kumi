@@ -1662,6 +1662,66 @@ impl TuiApp {
         self.0.state.borrow_mut().undoing = false;
         self.0.scheduler.request();
     }
+    /// Undoes a plan's change across several tracks (`ids`, newest first) as one: each of its changes, stopping at one
+    /// Kumi keeps, then says once what it took back, which it kept and that the ones before it are as they were.
+    pub(super) async fn undo_run(&self, ids: &[String], title: &str) {
+        if self.0.state.borrow().closing || self.0.state.borrow().undoing {
+            return;
+        }
+        if self.busy() {
+            let words = self.key_words(
+                "app.stop",
+                "Kumi is still working. Press {} to stop it first, then undo.",
+                "Kumi is still working: undo once it's done.",
+            );
+            self.notice(&words, NoticeTone::Info);
+            return;
+        }
+        {
+            let mut state = self.0.state.borrow_mut();
+            state.undoing = true;
+            state.activity = "undoing".into();
+        }
+        self.0.scheduler.request();
+        let (mut undone, mut kept) = (0, None);
+        for id in ids {
+            match self.session().op(op::Undo { id: Some(id.clone()) }).await {
+                Ok(Some(change)) if change.state != ChangeState::Undone => {
+                    kept = Some(change);
+                    break;
+                }
+                Ok(_) => undone += 1,
+                Err(error) => {
+                    if !self.0.state.borrow().closing {
+                        self.error(&error);
+                        if undone > 0 {
+                            self.notice(&format!("Undid {undone} of {} before that.", ids.len()), NoticeTone::Warn);
+                        }
+                    }
+                    self.0.state.borrow_mut().undoing = false;
+                    self.0.scheduler.request();
+                    return;
+                }
+            }
+        }
+        match kept {
+            // "Undid 1 of 3. Kept: Bass muted. (why) The 1 before it is as it was."
+            Some(change) => {
+                let before = ids.len() - undone - 1;
+                let left = match before {
+                    0 => String::new(),
+                    1 => " The 1 before it is as it was.".into(),
+                    n => format!(" The {n} before it are as they were."),
+                };
+                let why = change.note.as_deref().map(|note| format!(" {note}")).unwrap_or_default();
+                let said = format!("Undid {undone} of {}. Kept: {}.{why}{left}", ids.len(), change.title);
+                self.notice(string::trim(&said), NoticeTone::Warn)
+            }
+            None => self.notice(&format!("Undid: {title}"), NoticeTone::Info),
+        }
+        self.0.state.borrow_mut().undoing = false;
+        self.0.scheduler.request();
+    }
     pub(super) fn scroll_by(&self, lines: i32) {
         let mut state = self.0.state.borrow_mut();
         let State { view, transcript, .. } = &mut *state;

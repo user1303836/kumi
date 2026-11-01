@@ -1,0 +1,109 @@
+{
+  "plugin": "fabfilter-simplon",
+  "format": "format-1",
+  "about": "Product-specific VST3 component floats, measured from public host APIs. Values are stored VST3 plain values, which need not equal displayed physical units. Component and controller envelopes, unknown float slots and private tails are retained. Parameter links give the component float slot; edits use these stored values, not normalized automation or display text.",
+  "paths": "exact",
+  "files": {
+    "state": {
+      "layers": ["VST3 Comp chunk","FabFilter little-endian component header","stored float32 controls and opaque tail"],
+      "constants": {
+        "magic": "FabF",
+        "schema": 2,
+        "parameter_count": 19,
+        "parameter_indices": {
+          "Filter Routing": 0,
+          "Filter 1 Freq": 1,
+          "Filter 1 Peak": 2,
+          "Filter 1 Characteristic": 3,
+          "Filter 1 Response": 4,
+          "Filter 1 Slope": 5,
+          "Filter 1 Enabled": 6,
+          "Filter 2 Freq": 7,
+          "Filter 2 Peak": 8,
+          "Filter 2 Characteristic": 9,
+          "Filter 2 Response": 10,
+          "Filter 2 Slope": 11,
+          "Filter 2 Enabled": 12,
+          "Input Level": 13,
+          "Output Level": 14,
+          "Effect Mix": 15,
+          "Receive Midi": 16,
+          "Correct Gain Behavior": 17,
+          "Bypass": 18
+        },
+        "native_conversion": "identity"
+      }
+    },
+    "preset": {
+      "extension": ".ffp",
+      "layers": ["FabFilter product signature and schema","native binary control document"],
+      "constants": {
+        "magic": "FSim",
+        "schema": 1,
+        "encoding": "binary",
+        "parameter_count": 18
+      }
+    }
+  },
+  "opaque": ["state"],
+  "field_defaults": {
+    "float": {
+      "unit": "stored VST3 plain value",
+      "in": ["state","preset"]
+    }
+  },
+  "option_tables": {
+    "options-1": {"0.0":"Serial","1.0":"Parallel"},
+    "options-2": {"0.0":"FabFilter One","1.0":"Gentle","2.0":"Raw"},
+    "options-3": {"0.0":"Low Pass","1.0":"High Pass","2.0":"Band Pass"},
+    "options-4": {"1.0":"12 dB","2.0":"24 dB","3.0":"48 dB"},
+    "options-5": {"0.0":"Disabled","1.0":"Enabled"},
+    "options-6": {"0.0":"Enabled","1.0":"Disabled"},
+    "options-7": {"0.0":"No","1.0":"Yes"},
+    "options-8": {"0.0":"Not Bypassed","1.0":"Bypassed"}
+  },
+  "fields": {
+    "": {"type":"map","status":"verified"},
+    "parameters": {"type":"map","status":"verified"},
+    "parameters/Filter Routing": {"type":"float","status":"verified","default":0.0,"range":[0.0,1.0],"range_status":"verified","options_ref":"options-1"},
+    "parameters/Filter 1 Freq": {"type":"float","status":"verified","default":0.14744316041469574,"range":[0.0,1.0],"range_status":"verified","about":"Host display: 0 = 4.812 Hz; 0.25 = 53.875 Hz; 0.5 = 603.20 Hz; 0.75 = 6753.6 Hz; 1 = 75616 Hz."},
+    "parameters/Filter 1 Peak": {"type":"float","status":"verified","default":0.10000000149011612,"range":[0.0,1.0],"range_status":"verified","about":"Host display: 0 = 0.000; 0.25 = 0.250; 0.5 = 0.500; 0.75 = 0.750; 1 = 1.000."},
+    "parameters/Filter 1 Characteristic": {"type":"float","status":"verified","default":1.0,"range":[0.0,2.0],"range_status":"verified","options_ref":"options-2"},
+    "parameters/Filter 1 Response": {"type":"float","status":"verified","default":1.0,"range":[0.0,2.0],"range_status":"verified","options_ref":"options-3"},
+    "parameters/Filter 1 Slope": {"type":"float","status":"verified","default":1.0,"range":[1.0,3.0],"range_status":"verified","options_ref":"options-4"},
+    "parameters/Filter 1 Enabled": {"type":"float","status":"verified","default":1.0,"range":[0.0,1.0],"range_status":"verified","options_ref":"options-5"},
+    "parameters/Filter 2 Freq": {"type":"float","status":"verified","default":0.8623589873313904,"range":[0.0,1.0],"range_status":"verified","about":"Host display: 0 = 4.812 Hz; 0.25 = 53.875 Hz; 0.5 = 603.20 Hz; 0.75 = 6753.6 Hz; 1 = 75616 Hz."},
+    "parameters/Filter 2 Peak": {"type":"float","status":"verified","default":0.10000000149011612,"range":[0.0,1.0],"range_status":"verified","about":"Host display: 0 = 0.000; 0.25 = 0.250; 0.5 = 0.500; 0.75 = 0.750; 1 = 1.000."},
+    "parameters/Filter 2 Characteristic": {"type":"float","status":"verified","default":1.0,"range":[0.0,2.0],"range_status":"verified","options_ref":"options-2"},
+    "parameters/Filter 2 Response": {"type":"float","status":"verified","default":0.0,"range":[0.0,2.0],"range_status":"verified","options_ref":"options-3"},
+    "parameters/Filter 2 Slope": {"type":"float","status":"verified","default":1.0,"range":[1.0,3.0],"range_status":"verified","options_ref":"options-4"},
+    "parameters/Filter 2 Enabled": {"type":"float","status":"verified","default":1.0,"range":[0.0,1.0],"range_status":"verified","options_ref":"options-5"},
+    "parameters/Input Level": {"type":"float","status":"verified","default":0.0,"range":[-20.0,20.0],"range_status":"verified","about":"Host display: -20 = -20.00 dB; -10 = -10.00 dB; 0 = 0.00 dB; 10 = +10.00 dB; 20 = +20.00 dB."},
+    "parameters/Output Level": {"type":"float","status":"verified","default":0.0,"range":[-20.0,20.0],"range_status":"verified","about":"Host display: -20 = -20.00 dB; -10 = -10.00 dB; 0 = 0.00 dB; 10 = +10.00 dB; 20 = +20.00 dB."},
+    "parameters/Effect Mix": {"type":"float","status":"verified","default":1.0,"range":[-1.0,1.0],"range_status":"verified","about":"Host display: -1 = 0.00%; -0.5 = 25.0%; 0 = 50.0%; 0.5 = 75.0%; 1 = 100%."},
+    "parameters/Receive Midi": {"type":"float","status":"verified","default":0.0,"range":[0.0,1.0],"range_status":"verified","options_ref":"options-6"},
+    "parameters/Correct Gain Behavior": {"type":"float","status":"verified","default":0.0,"range":[0.0,1.0],"range_status":"verified","options_ref":"options-7"},
+    "parameters/Bypass": {"type":"float","status":"verified","default":0.0,"range":[0.0,1.0],"range_status":"verified","options_ref":"options-8"}
+  },
+  "parameters": {
+    "Filter Routing [VST3 0]": {"field":"parameters/Filter Routing","status":"verified","note":"Component float slot 0."},
+    "Filter 1 Freq [VST3 1]": {"field":"parameters/Filter 1 Freq","status":"verified","note":"Component float slot 1."},
+    "Filter 1 Peak [VST3 2]": {"field":"parameters/Filter 1 Peak","status":"verified","note":"Component float slot 2."},
+    "Filter 1 Characteristic [VST3 3]": {"field":"parameters/Filter 1 Characteristic","status":"verified","note":"Component float slot 3."},
+    "Filter 1 Response [VST3 4]": {"field":"parameters/Filter 1 Response","status":"verified","note":"Component float slot 4."},
+    "Filter 1 Slope [VST3 5]": {"field":"parameters/Filter 1 Slope","status":"verified","note":"Component float slot 5."},
+    "Filter 1 Enabled [VST3 6]": {"field":"parameters/Filter 1 Enabled","status":"verified","note":"Component float slot 6."},
+    "Filter 2 Freq [VST3 7]": {"field":"parameters/Filter 2 Freq","status":"verified","note":"Component float slot 7."},
+    "Filter 2 Peak [VST3 8]": {"field":"parameters/Filter 2 Peak","status":"verified","note":"Component float slot 8."},
+    "Filter 2 Characteristic [VST3 9]": {"field":"parameters/Filter 2 Characteristic","status":"verified","note":"Component float slot 9."},
+    "Filter 2 Response [VST3 10]": {"field":"parameters/Filter 2 Response","status":"verified","note":"Component float slot 10."},
+    "Filter 2 Slope [VST3 11]": {"field":"parameters/Filter 2 Slope","status":"verified","note":"Component float slot 11."},
+    "Filter 2 Enabled [VST3 12]": {"field":"parameters/Filter 2 Enabled","status":"verified","note":"Component float slot 12."},
+    "Input Level [VST3 13]": {"field":"parameters/Input Level","status":"verified","note":"Component float slot 13."},
+    "Output Level [VST3 14]": {"field":"parameters/Output Level","status":"verified","note":"Component float slot 14."},
+    "Effect Mix [VST3 15]": {"field":"parameters/Effect Mix","status":"verified","note":"Component float slot 15."},
+    "Receive Midi [VST3 16]": {"field":"parameters/Receive Midi","status":"verified","note":"Component float slot 16."},
+    "Correct Gain Behavior [VST3 17]": {"field":"parameters/Correct Gain Behavior","status":"verified","note":"Component float slot 17."},
+    "Bypass [VST3 18]": {"field":"parameters/Bypass","status":"verified","note":"Component float slot 18."}
+  }
+}

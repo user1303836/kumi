@@ -471,6 +471,7 @@ local function device(data)
     display_name = function() return data.display_name or data.name end,
     is_maximized = function() return data.maximized == true end,
     active_preset_data = function()
+      M.preset_reads = (M.preset_reads or 0) + 1 -- (counted: how often the tool reads a device's data, as a test asks)
       if data.slot then return preset_text(data) end
       return data.preset_data or ""
     end,

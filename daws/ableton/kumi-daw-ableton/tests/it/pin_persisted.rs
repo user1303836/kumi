@@ -155,6 +155,7 @@ fn change(id: &str, family: ChangeFamily, title: &str, state: ChangeState, at: i
         note: None,
         at,
         picture: None,
+        batch: None,
     }
 }
 
@@ -321,8 +322,8 @@ fn baseline() -> Baseline {
     }
 }
 
-/// The conversation index with the file times it keeps (a stamp's ns, a baseline's) as 1 when there is one, and the
-/// times conversations went (now) as 0.
+/// The conversation index with the file times it keeps (a stamp's ns, a baseline's) as 1 when there is one, the times
+/// conversations went (now) as 0, and without whether a stamp was taken just after a write (how long the test took).
 fn normalised_index(text: &str) -> String {
     let mut index: Value = serde_json::from_str(text).unwrap();
     let some = |value: &mut Value| {
@@ -333,6 +334,7 @@ fn normalised_index(text: &str) -> String {
     for entry in index["conversations"].as_object_mut().unwrap().values_mut() {
         some(&mut entry["stamp"]["modified"]);
         some(&mut entry["stamp"]["meta"]);
+        entry["stamp"].as_object_mut().unwrap().remove("recent");
     }
     for place in index["places"].as_object_mut().unwrap().values_mut() {
         some(&mut place["modified"]);
@@ -824,6 +826,7 @@ fn set_entry() -> SetEntry {
             arrangement_beats: Some(512.0),
             live: Some("12.2".into()),
             daw: None,
+            made_in: None,
         }),
         error: None,
     }

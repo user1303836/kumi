@@ -135,8 +135,9 @@ local function layout_now()
   return b.layout
 end
 
--- How often the journal reads again what no notifier tells (a container's contents), and how many of those at most each time.
-M.POLL_MS, M.POLL_MOST = 1000, 8
+-- How often the journal reads again what no notifier tells (a container's contents), how many of those at most each time,
+-- and how many devices of them a tick reads (a round goes on over the next ticks: #361 N-S16).
+M.POLL_MS, M.POLL_MOST, M.POLL_EACH = 1000, 8, 2
 
 -- How many shifts of the track list the tool keeps to carry refs through.
 -- (a restore that puts a track back into a big group makes two swaps per member itself: 1024 covers groups of 500)
@@ -704,7 +705,7 @@ local function on_structural(reason, kind, op, owner, token)
     end
   end
   bump_epoch(reason, true, BREAKS[kind])
-  local placed = op
+  local placed, own = op, false
   -- (what moved, for the places a change keeps: a track's devices, the pool, the instruments; anything not told is a gap)
   if kind == "devices" and token and token.dlog then
     places.note(token.dlog, op)
@@ -712,8 +713,9 @@ local function on_structural(reason, kind, op, owner, token)
     places.note(b.plog, op)
   elseif kind == "instruments" then
     -- (M4 n-devices: Kumi's own load of an instrument file into slot i is told as an insert after it and a remove of it, but
-    -- the slot keeps its instrument (pattern notes keep playing it, measured in 3.5.4): no delete in the places log)
-    local r, own = b.replacing, false
+    -- the slot keeps its instrument (pattern notes keep playing it, measured in 3.5.4): no delete in the places log, and none
+    -- in the journal below)
+    local r = b.replacing
     if r and r.deadline and os.clock() > r.deadline then b.replacing, r = nil, nil end
     if r and op then
       if r.insert and op.type == "insert" and op.index == r.i + 1 then
@@ -735,8 +737,9 @@ local function on_structural(reason, kind, op, owner, token)
     lists.devices, lists.samples, lists.phrases = token.devices, token.samples, token.phrases
     lists.modsets, lists.chains, lists.moddevices, lists.chaindevices = token.modsets, token.chains, token.devices, token.devices
   end
-  -- (n-instruments: the journal's places of instruments and what is in them move with the list's operations)
-  if op and INSTRUMENT_JOURNAL[kind] then
+  -- (n-instruments: the journal's places of instruments and what is in them move with the list's operations; #399 N-S5: not
+  -- Kumi's own load's pair, or its remove would drop the entries of Kumi's changes inside the instrument the slot keeps)
+  if op and INSTRUMENT_JOURNAL[kind] and not own then
     local scope = instrument_scope(kind, token)
     if scope then
       changes.journal_list_event(b.journal, INSTRUMENT_JOURNAL[kind], scope, placed.type, placed.index, placed.index2, song:is_undo_redoing(),
@@ -871,11 +874,12 @@ local function flush_events()
     b.undone = false
     changes.journal_check(b.journal)
   end
-  -- (what Renoise's undo changes inside a Doofer, a Splitter or a Notepad no notifier tells: read again about once a second)
+  -- (what Renoise's undo changes inside a Doofer, a Splitter or a Notepad no notifier tells: read again about once a second,
+  -- POLL_EACH devices a tick until the round is done)
   local now_ms = M.now_ms()
-  if changes.journal_active(b.journal) and now_ms - (b.polled_ms or 0) >= M.POLL_MS then
-    b.polled_ms = now_ms
-    changes.journal_poll(b.journal, M.POLL_MOST)
+  if changes.journal_active(b.journal) and (b.polling or now_ms - (b.polled_ms or 0) >= M.POLL_MS) then
+    if not b.polling then b.polled_ms = now_ms end
+    b.polling = not changes.journal_poll(b.journal, M.POLL_MOST, M.POLL_EACH)
   end
   for _, event in ipairs(changes.journal_take(b.journal)) do
     conns:event("undone_in_daw", { descs = json.array(event.descs), how = event.how, epoch = epoch() })
