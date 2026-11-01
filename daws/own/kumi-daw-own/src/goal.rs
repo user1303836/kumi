@@ -8,13 +8,16 @@ use indexmap::IndexMap;
 use kumi_agent::core::{
     contracts::*,
     evolve::Knob,
-    goal_rig::{device_label, knob_key as key, moved, tell_generation, GoalDaw},
+    goal_rig::{check_slots, device_label, knob_key as key, moved, not_in_the_search, tell_generation, GoalDaw},
     refs::RefScheme,
 };
-use kumi_common::abort::{self, Signal, SignalExt};
+use kumi_common::{
+    abort::{self, Signal, SignalExt},
+    time::now_ms,
+};
 use kumi_listening::{
     engine::Listening,
-    goal::{hear, screen_pick, tell, trial_key, HeardCache, Told},
+    goal::{hear, screen_pick, tell, tell_timing, trial_key, HeardCache, Told},
     renderer::{Renderer, Window},
 };
 use kumi_media::audio::{analyze::Analysis, matching::Focus};
@@ -171,7 +174,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         }
         // A long part is screened on its most characteristic three seconds while the search is young.
         let slice = rig.reference.seconds / rig.reference.over_time.lufs.len().max(1) as f64;
-        if let Some(pick) = screen_pick(&rig.reference, tempo, window.beats, slice) {
+        if let Some(pick) = screen_pick(&rig.reference.over_time.lufs, tempo, window.beats, slice) {
             match listening.heard_reference(named, &pick.request(request, tempo), signal).await {
                 Ok(reference) => rig.screen = Some(Screen { offset: pick.offset, beats: pick.beats, reference }),
                 Err(error) => {
@@ -338,7 +341,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         let (scratch, copy, places) = {
             let slots = self.slots.borrow();
             let Some(found) = slots.iter().find(|found| found.info.name == slot) else {
-                return Ok(Err(format!("“{slot}” isn't in the search")));
+                return Ok(Err(not_in_the_search(slot)));
             };
             let Some(copy) = r.copy_ref(&found.copy_name) else { return Ok(Err(format!("“{slot}”'s copy is gone"))) };
             (found.scratch.clone(), copy, found.places.clone())
@@ -439,7 +442,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
     async fn track_now(&self, slot: &str, signal: &Signal) -> Result<String, String> {
         let found =
             self.slots.borrow().iter().find(|found| found.info.name == slot).map(|found| (found.track.clone(), found.short.clone()));
-        let Some((stored, short)) = found else { return Err(format!("“{slot}” isn't in the search")) };
+        let Some((stored, short)) = found else { return Err(not_in_the_search(slot)) };
         let followed = {
             let book = self.renderer.link.book.borrow();
             if !book.scheme.positional() {
@@ -632,6 +635,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
         given: Signal,
         options: Option<GenerationOptions>,
     ) -> Result<Generation, RuntimeError> {
+        check_slots(trials, |slot| self.current.borrow().contains_key(slot))?;
         let r = &self.renderer;
         let signal = abort::any([given, r.lifetime()]);
         let screened = options.and_then(|options| options.screen) == Some(true) && self.screen.is_some();
@@ -640,6 +644,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
             return Err(RuntimeError::Observation("Another render is running.".into()));
         }
         let _rendering = r.flag().begin();
+        let set_from = now_ms();
         let mut generation = Generation { screened, ..Default::default() };
         // Each trial's values on its slot's copy (only what moved).
         for trial in trials {
@@ -665,6 +670,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 }
             }
         }
+        let render_from = now_ms();
         // Rendered unless every trial was heard before at these values.
         let fresh: Vec<&GenerationTrial> =
             trials.iter().filter(|trial| trial.fresh == Some(true) || !self.heard.borrow().contains(&cache_key(trial))).collect();
@@ -707,6 +713,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 }
             }
         }
+        let heard_from = now_ms();
         let against = if screened { &self.screen.as_ref().unwrap().reference } else { &self.reference };
         // Each trial heard before is told from what was heard; the rest are heard together, as Live's goal hears them.
         let told: Vec<(&GenerationTrial, String, Option<Cached>)> = trials
@@ -721,7 +728,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
             .iter()
             .filter(|(_, _, known)| known.is_none())
             .filter_map(|(trial, _, _)| files.get(&trial.slot))
-            .map(|rendered| hear(rendered, rendered.seconds.unwrap_or(beats * 60. / self.tempo), self.focus, signal.clone()));
+            .map(|rendered| hear(rendered, beats, self.tempo, self.focus, signal.clone()));
         let mut heard = futures::future::try_join_all(hearing).await.map_err(|error| RuntimeError::plain(error.to_string()))?.into_iter();
         for (trial, cache_key, known) in told {
             if let Some(known) = known {
@@ -740,6 +747,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
             tell_generation(&mut generation, &trial.slot, told.clone(), false);
             self.heard.borrow_mut().insert(cache_key, Cached { told, render: rendered.clone() });
         }
+        tell_timing(trials.len(), render_from - set_from, heard_from - render_from, now_ms() - heard_from);
         Ok(generation)
     }
     async fn keep_best(&self, slot: &str, knobs: &[Knob], values: &[f64], given: Signal) -> Result<String, RuntimeError> {
@@ -904,16 +912,10 @@ struct OwnTidy<'a, S: RefScheme + 'static> {
 
 #[async_trait(?Send)]
 impl<S: RefScheme + 'static> GoalDaw for OwnTidy<'_, S> {
-    /// Last in the song first: taking one away moves the refs of those after it.
-    async fn tidy_order(&self, slots: Vec<String>) -> Vec<String> {
+    async fn track_names(&self) -> Option<Vec<String>> {
         match self.rig.renderer.track_rows(&self.signal).await {
-            Ok(Ok(rows)) => {
-                let mut named: Vec<(usize, String)> =
-                    slots.into_iter().map(|name| (rows.iter().position(|row| row.name == name).unwrap_or(0), name)).collect();
-                named.sort_by(|a, b| b.0.cmp(&a.0));
-                named.into_iter().map(|(_, name)| name).collect()
-            }
-            _ => slots.into_iter().rev().collect(),
+            Ok(Ok(rows)) => Some(rows.iter().map(|row| row.name.clone()).collect()),
+            _ => None,
         }
     }
     async fn track_of(&self, slot: &str) -> Option<String> {

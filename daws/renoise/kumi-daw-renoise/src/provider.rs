@@ -6,7 +6,7 @@ use daw_bridge::{
     detect,
     install::{renoise_target, renoise_targets, RENOISE_TOOL_FOLDER},
 };
-use kumi_daw::provider::WatchWords;
+use kumi_daw::{provider::WatchWords, setup::Reopens};
 use kumi_daw_own::provider::{detected, Own};
 use kumi_types::daw::{DawId, DawProfile};
 
@@ -38,6 +38,7 @@ pub static PROVIDER: Own = Own {
     placed: |_, env| renoise_target(&detected(env, detect::detect_renoise)).map_err(Some),
     // Renoise's version folders from 3.5, where a newer Renoise may have copied Kumi's tool.
     elsewhere: |env| renoise_targets(&detected(env, detect::detect_renoise)),
+    reopens: |_| Reopens::Unknown,
     unloadable: |_, _, _| None,
     used: |_, env| !detected(env, detect::detect_renoise).prefs.is_empty(),
     here: |_, env| {

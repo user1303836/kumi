@@ -787,6 +787,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                             }
                             .boxed_local()
                         })),
+                        ..Default::default()
                     },
                 )
             })

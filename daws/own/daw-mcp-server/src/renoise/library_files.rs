@@ -94,10 +94,18 @@ impl Libraries {
     }
 }
 
+/// The producer's home folder, by the variable this system keeps it in.
+fn home() -> Option<PathBuf> {
+    std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|home| !home.is_empty()).map(PathBuf::from)
+}
+
+/// The User Library most likely Renoise's, for the tool, which can't ask Windows where Documents is.
+pub fn user_library() -> Option<String> {
+    daw_bridge::detect::renoise_user_libraries(&home()?).first()?.to_str().map(str::to_owned)
+}
+
 pub fn library_roots() -> Libraries {
-    let Some(home) =
-        std::env::var_os(if cfg!(windows) { "USERPROFILE" } else { "HOME" }).filter(|home| !home.is_empty()).map(PathBuf::from)
-    else {
+    let Some(home) = home() else {
         return Libraries::default();
     };
     let var = |name: &str| std::env::var(name).ok();
@@ -109,7 +117,7 @@ pub fn library_roots() -> Libraries {
             own.push(home.join("Library").join("Application Support").join("Renoise").join(version).join("Library"));
         }
     }
-    Libraries { own, user: vec![home.join("Documents").join("Renoise").join("User Library")] }
+    Libraries { own, user: daw_bridge::detect::renoise_user_libraries(&home) }
 }
 
 /// A document's root element and its `doc_version` (after the XML declaration and comments).

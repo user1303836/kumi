@@ -503,6 +503,9 @@ end
 -- Builds a fresh Renoise: the tool at bundle_path, no song yet.
 function M.reset(options)
   options = options or {}
+  -- A fresh table, or nothing a test made is ever freed: a weak key doesn't let go of a value that reaches its key, and an
+  -- object's fields do (a notifier's closure), so the whole tool each test loaded stayed alive, about 4 MB a test.
+  impl_of = setmetatable({}, { __mode = "k" })
   M.errors, M.modals, M.statuses, M.popen_calls = {}, {}, {}, {}
   M.triggers, M.saves = {}, {}
   M.idle_work = {} -- (n-instruments)

@@ -2361,6 +2361,11 @@ impl crate::host::Host {
                 params[field] = value.clone();
             }
         }
+        if method == "preset_save" {
+            if let Some(library) = crate::renoise::library_files::user_library() {
+                params["library"] = library.into();
+            }
+        }
         match self.call(method, params, &pick, crate::changes::CHANGE_TIMEOUT).await {
             Ok(answer) => (answer, false),
             Err(error) => (self.call_error(&error), true),

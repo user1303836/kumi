@@ -1,7 +1,7 @@
-//! Reading Live's own files (Sets, presets, racks): gzipped XML, read as a stream of tags without
-//! building a tree, so a 30 MB Set takes a fraction of a second and little memory. Only tags and
-//! their attributes are seen: Live keeps its values in attributes, and text (sample data, plug-in
-//! state) is skipped over.
+//! Reading Live's own files (Sets, presets, racks) and a DAW's project in an archive: XML, read as a stream of tags
+//! without building a tree, so a 30 MB Set takes a fraction of a second and little memory. A handler sees tags and their
+//! attributes, where Live keeps its values, and the text between them if it asks (CDATA isn't given: sample data, plug-in
+//! state).
 
 use std::io::{self, Read};
 use std::path::Path;
@@ -16,6 +16,9 @@ pub trait TagHandler {
     /// A tag opened; `attrs` is its raw attribute text, read with attribute(). `empty`: it closed itself (<Tag />).
     fn open(&mut self, name: &str, attrs: &str, empty: bool);
     fn close(&mut self, name: &str);
+    /// Text between tags, as written (read with decode()), maybe in pieces as a stream cuts it. Live keeps its values in
+    /// attributes; Renoise here.
+    fn text(&mut self, _text: &str) {}
     /// `stop?()`: whether to end a file's read early.
     fn stop(&mut self) -> bool {
         false
@@ -55,7 +58,8 @@ fn entity(name: &str) -> &'static str {
     }
 }
 
-fn decode(value: &str) -> String {
+/// Text or an attribute's value as it reads, its entities decoded.
+pub fn decode(value: &str) -> String {
     if !value.contains('&') {
         return value.to_string();
     }
@@ -106,8 +110,14 @@ pub fn scan_tags<H: TagHandler + ?Sized>(text: &str, handler: &mut H) -> usize {
     let length = bytes.len();
     let mut at = 0;
     while at < length {
-        let Some(found) = memchr::memchr(b'<', &bytes[at..]) else { return length };
+        let Some(found) = memchr::memchr(b'<', &bytes[at..]) else {
+            handler.text(&text[at..]);
+            return length;
+        };
         let start = at + found;
+        if found > 0 {
+            handler.text(&text[at..start]);
+        }
         if start + 1 >= length {
             return start;
         }
@@ -238,11 +248,95 @@ const CHUNK: usize = 256 * 1024;
 /// one this long is a damaged or hostile file's, and reading it again with each piece would cost the square of it.
 const MAX_TAG: usize = 8 * 1024 * 1024;
 
+/// What a stream's pieces scan through: the tag and the character a piece's end cut, kept for the next, the end of a CDATA
+/// section or comment being passed over, and the bounds.
+struct Pieces {
+    decoder: Utf8Decoder,
+    pending: String,
+    passing: Option<&'static str>,
+    read: u64,
+    max_bytes: u64,
+    signal: Option<Signal>,
+}
+
+impl Pieces {
+    fn new(options: ScanOptions) -> Self {
+        Self {
+            decoder: Utf8Decoder::default(),
+            pending: String::new(),
+            passing: None,
+            read: 0,
+            max_bytes: options.max_bytes.unwrap_or(512 * 1024 * 1024),
+            signal: options.signal,
+        }
+    }
+    fn scan<H: TagHandler + ?Sized>(&mut self, chunk: &[u8], handler: &mut H) -> Result<(), XmlError> {
+        if let Some(signal) = &self.signal {
+            signal.check()?;
+        }
+        self.read += chunk.len() as u64;
+        if self.read > self.max_bytes {
+            return Err(XmlError::TooLarge);
+        }
+        let mut text = std::mem::take(&mut self.pending);
+        text.push_str(&self.decoder.write(chunk));
+        // A CDATA section or a comment isn't a tag and nothing reads it (a plug-in's state, an impulse: megabytes), so it's
+        // passed over rather than held: only what may be the start of its end stays for the next piece.
+        loop {
+            if let Some(closer) = self.passing {
+                let Some(end) = text.find(closer) else {
+                    let mut keep = text.len().saturating_sub(closer.len() - 1);
+                    while !text.is_char_boundary(keep) {
+                        keep -= 1;
+                    }
+                    text.drain(..keep);
+                    break;
+                };
+                text.drain(..end + closer.len());
+                self.passing = None;
+            }
+            let used = scan_tags(&text, handler);
+            text.drain(..used);
+            let Some((opener, closer)) = [("<![CDATA[", "]]>"), ("<!--", "-->")].into_iter().find(|(opener, _)| text.starts_with(opener))
+            else {
+                break;
+            };
+            text.drain(..opener.len());
+            self.passing = Some(closer);
+        }
+        self.pending = text;
+        if self.pending.len() > MAX_TAG {
+            return Err(XmlError::TagTooLong);
+        }
+        Ok(())
+    }
+}
+
+/// Every tag of a plain XML stream, in order, read on this thread (one that may wait: a file inside an archive). The same
+/// bounds as a file's.
+pub fn scan_xml_stream<H: TagHandler + ?Sized>(mut stream: impl Read, handler: &mut H, options: ScanOptions) -> Result<(), XmlError> {
+    let mut pieces = Pieces::new(options);
+    let mut chunk = vec![0u8; CHUNK];
+    loop {
+        let count = match stream.read(&mut chunk) {
+            Ok(count) => count,
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if count == 0 {
+            return Ok(());
+        }
+        pieces.scan(&chunk[..count], handler)?;
+        if handler.stop() {
+            return Ok(());
+        }
+    }
+}
+
 /// Every tag of a gzipped (or plain) XML file, in order, as the file streams in. `maxBytes` bounds the
 /// XML read, so a damaged or hostile file can't fill memory; `stop()` ends the read early.
 pub async fn scan_xml_file<H: TagHandler + ?Sized>(path: &Path, handler: &mut H, options: ScanOptions) -> Result<(), XmlError> {
     let head = read_head(path, 2).await?;
-    let max_bytes = options.max_bytes.unwrap_or(512 * 1024 * 1024);
     let unzip = gzipped(&head);
     // The file streams in on a thread of its own, a chunk at a time, unzipped as it comes; dropping the receiver ends it.
     let (sender, mut receiver) = tokio::sync::mpsc::channel::<io::Result<Vec<u8>>>(2);
@@ -272,26 +366,9 @@ pub async fn scan_xml_file<H: TagHandler + ?Sized>(path: &Path, handler: &mut H,
             let _ = sender.blocking_send(Err(error));
         }
     });
-    let mut decoder = Utf8Decoder::default();
-    let mut pending = String::new();
-    let mut read: u64 = 0;
+    let mut pieces = Pieces::new(options);
     while let Some(chunk) = receiver.recv().await {
-        let chunk = chunk?;
-        if let Some(signal) = &options.signal {
-            signal.check()?;
-        }
-        read += chunk.len() as u64;
-        if read > max_bytes {
-            return Err(XmlError::TooLarge);
-        }
-        let mut text = std::mem::take(&mut pending);
-        text.push_str(&decoder.write(&chunk));
-        let used = scan_tags(&text, handler);
-        text.drain(..used);
-        pending = text;
-        if pending.len() > MAX_TAG {
-            return Err(XmlError::TagTooLong);
-        }
+        pieces.scan(&chunk?, handler)?;
         if handler.stop() {
             break;
         }

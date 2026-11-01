@@ -826,6 +826,8 @@ fn set_entry() -> SetEntry {
             arrangement_beats: Some(512.0),
             live: Some("12.2".into()),
             daw: None,
+            made_in: None,
+            instruments: None,
         }),
         error: None,
     }

@@ -368,17 +368,20 @@ async fn find_sounds_in_each_daw_holds_only_the_sounds_offered_there() {
         .await;
 }
 
-/// my_sets finds the producer's Live Sets (the library reads only .als): REAPER and Renoise aren't offered it as their own
-/// projects or songs.
+/// my_sets finds the producer's own projects where Kumi reads their files, as the registered DAWs say: Live's Sets and
+/// Renoise's songs. REAPER isn't offered it, nor Live's Sets as its own projects.
 #[test]
 fn my_sets_is_offered_only_where_kumi_reads_the_daws_projects() {
     let access = Rc::new(Learned { presets: vec![] });
     let offered = |profile: &DawProfile| {
-        library_tools_for(profile, access.clone(), LibraryToolsOptions::default()).iter().any(|tool| tool.name() == "my_sets")
+        let projects = profile.id.and_then(|daw| kumi::daw::registry::libraries().projects_of(daw));
+        library_tools_for(profile, access.clone(), LibraryToolsOptions { projects, ..Default::default() })
+            .iter()
+            .any(|tool| tool.name() == "my_sets")
     };
     assert!(offered(&DawProfile::ABLETON));
     assert!(!offered(&DawProfile::REAPER));
-    assert!(!offered(&DawProfile::RENOISE));
+    assert!(offered(&DawProfile::RENOISE));
 }
 
 /// (#361 review K31) A DAW library inside a folder the producer named (or a Live Place): what the library's layout reads
