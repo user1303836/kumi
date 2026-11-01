@@ -260,6 +260,14 @@ fn body_request(request: &BodyRequest) -> Option<JsonObject> {
             args.insert("limit".into(), ARRANGE_LANES.into());
             args
         }
+        BodyRequest::Levels { track_ref } => {
+            let mut args = body_args("levels", None);
+            if let Some(track_ref) = track_ref {
+                args.insert("around".into(), track_ref.as_str().into());
+            }
+            args.insert("limit".into(), ARRANGE_LANES.into());
+            args
+        }
         _ => return None,
     })
 }
@@ -271,6 +279,7 @@ fn to_body(request: &BodyRequest, body: &Value) -> Option<FocusBody> {
         BodyRequest::Timeline => FocusBody::Timeline(own_views::timeline(body)),
         BodyRequest::Routing { track_ref } => FocusBody::Routing(own_views::routing(track_ref, body)),
         BodyRequest::Mixer { .. } => FocusBody::Mixer(own_views::mixer(body)),
+        BodyRequest::Levels { .. } => FocusBody::Levels(own_views::levels(body)),
         _ => return None,
     })
 }

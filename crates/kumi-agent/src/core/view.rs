@@ -232,6 +232,8 @@ pub enum FocusBody {
     Routing(RoutingView),
     /// The mixer: each track's strip.
     Mixer(MixerView),
+    /// The mixer's meters alone (`BodyRequest::Levels`).
+    Levels(Vec<TrackLevel>),
 }
 
 /// The kind of a body FOCUS draws.
@@ -302,6 +304,12 @@ pub enum BodyRequest {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         track_ref: Option<String>,
     },
+    /// The meters alone of the strips `Mixer` lists for the same track: cheap enough to read often. A DAW (or an extension)
+    /// that can't read them apart answers nothing.
+    Levels {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        track_ref: Option<String>,
+    },
 }
 
 impl BodyRequest {
@@ -315,7 +323,7 @@ impl BodyRequest {
             BodyRequest::Matrix => BodyKind::Matrix,
             BodyRequest::Keyzones { .. } => BodyKind::Keyzones,
             BodyRequest::Routing { .. } => BodyKind::Routing,
-            BodyRequest::Mixer { .. } => BodyKind::Mixer,
+            BodyRequest::Mixer { .. } | BodyRequest::Levels { .. } => BodyKind::Mixer,
         }
     }
 }
@@ -693,6 +701,13 @@ pub struct MixerView {
     pub track_count: Option<usize>,
     #[serde(default)]
     pub levels: bool,
+}
+
+/// One track's meter now: its peak level (dB, left and right), by the track's ref.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TrackLevel {
+    pub track_ref: String,
+    pub peak_db: [f64; 2],
 }
 
 /// One track's strip: its fader (dB), pan (-1 left to 1 right), mute (in the DAW's word when it has kinds of mute:

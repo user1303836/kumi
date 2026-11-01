@@ -446,6 +446,22 @@ async fn reapers_focus_is_read_while_focus_shows_and_its_bodies_come_neutral() {
                 panic!("routing")
             };
             assert_eq!((routing.routes[0].kind, routing.routes[0].tap.as_deref()), (RouteKind::Send, Some("post-fader")));
+            // The meters alone, around the mixer's track. An extension without that read refuses it: nothing, not an error,
+            // so FOCUS goes on with the mixer's own read.
+            let meters = BodyRequest::Levels { track_ref: Some(BASS.into()) };
+            host.answers.borrow_mut().push((
+                "focus_body",
+                json!({"levels": [{"ref": BASS, "peakDb": [-6.0, -9.0]}], "trackCount": 1, "from": 0}),
+                false,
+            ));
+            let Some(FocusBody::Levels(levels)) = reaper.focus_body(&meters, Signal::new()).await.unwrap() else {
+                panic!("the meters")
+            };
+            assert_eq!((levels[0].track_ref.as_str(), levels[0].peak_db), (BASS, [-6.0, -9.0]));
+            let asked = host.asked.borrow().last().unwrap().1.clone();
+            assert_eq!((asked["kind"].as_str(), asked["around"].as_str()), (Some("levels"), Some(BASS)), "{asked}");
+            host.answers.borrow_mut().push(("focus_body", json!("REAPER has no body of that kind"), true));
+            assert_eq!(reaper.focus_body(&meters, Signal::new()).await.unwrap(), None);
             assert_eq!((routing.routes[1].kind, routing.routes[1].muted), (RouteKind::Receive, true));
             assert_eq!(routing.parent_send, Some(true));
 
