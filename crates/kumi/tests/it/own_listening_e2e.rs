@@ -664,6 +664,26 @@ async fn a_goals_renders_are_heard_at_the_tempo_it_opened_with() {
         .await;
 }
 
+/// (#399) A trial for a slot the goal doesn't hold is a caller's bug: refused in plain words, nothing set or rendered.
+#[tokio::test(flavor = "current_thread")]
+async fn a_trial_outside_the_goal_is_refused_in_words() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            let (reaper, rig, slots) = two_slot_goal(home.path(), &script).await;
+            let mut trial = gain_trial(&slots[0], 0.5, false);
+            trial.slot = "Nobody".into();
+            let refused = rig.generation(&[trial], Signal::new(), None).await.unwrap_err();
+            assert_eq!(refused.to_string(), "“Nobody” isn't in the search");
+            rig.close().await.unwrap();
+            reaper.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn each_candidate_is_heard_over_its_own_part_in_an_audition_and_in_a_goal() {
     tokio::task::LocalSet::new()
