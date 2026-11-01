@@ -1208,6 +1208,9 @@ impl AsyncLiveAdapter for RemoteScriptLiveAdapter {
     fn has_expect_state_digest(&self) -> bool {
         true
     }
+    fn forget_cleanup_ownership(&self, transaction: &str, reference: &str) {
+        self.remove_ownership(transaction, reference);
+    }
     fn expect_state_digest(&self, transaction: &str, invocation: &LiveInvocation) {
         if !self.retires_on_its_own()
             || !self.0.cached.borrow().has_operation("authority.digest")

@@ -619,7 +619,9 @@ def scenario_a_large_clip_takes_its_notes_in_more_calls_and_the_last_checks_them
     track = {k: kept[k] for k in ("track", "trackName")}
     added = run(song, {}, dict(track, op="notes", clip=done["made"][0]["identity"], notes=rest, notesHash=kept["notesHash"]))
     clip = drums.arrangement_clips[0]
-    if added != {"added": 725, "exact": True} or sorted([n.pitch, n.start_time] for n in clip.notes) != sorted([n[0], n[1]] for n in notes):
+    # The last says what the clip is now, which a later undo checks in place of what it was.
+    now = run(song, {"r:hats": clip}, {"op": "capture", "clips": ["r:hats"]})["clips"][0]["hash"]
+    if added != {"added": 725, "exact": True, "hash": now} or sorted([n.pitch, n.start_time] for n in clip.notes) != sorted([n[0], n[1]] for n in notes):
         fail("notes: %r, %d" % (added, len(clip.notes)))
     # A note Live drops on the way is found by the last call.
     drums.delete_clip(clip)

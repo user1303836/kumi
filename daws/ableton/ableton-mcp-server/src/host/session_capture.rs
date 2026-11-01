@@ -155,6 +155,11 @@ impl McpHost {
         } else {
             adapter.invoke_async(&LiveInvocation::new(operation, args), Some(context)).await?;
         }
+        // A clip deleted where it moved to: the Remote Script retires its ledger row by the clip's identity, and the
+        // cleanup ownership kept for it at the ref it was made at goes too, as an owned delete's would.
+        if let (true, Some(transaction)) = (moved, &context.transaction_id) {
+            adapter.forget_cleanup_ownership(transaction, reference);
+        }
         let parent = located.track.as_ref().and_then(|row| row.get("ref")).filter(|v| !v.is_null()).cloned().unwrap_or(json!(reference));
         let after = self.views.view_for(Some(context), &[parent], None, &[]).await?;
         if clip_remains(&after, identity) {

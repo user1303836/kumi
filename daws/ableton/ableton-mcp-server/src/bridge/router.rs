@@ -196,4 +196,7 @@ impl AsyncLiveAdapter for RoutedLiveAdapter {
     fn expect_state_digest(&self, transaction: &str, invocation: &LiveInvocation) {
         self.0.remote.expect_state_digest(transaction, invocation);
     }
+    fn forget_cleanup_ownership(&self, transaction: &str, reference: &str) {
+        self.0.remote.forget_cleanup_ownership(transaction, reference);
+    }
 }

@@ -2537,6 +2537,9 @@ pub trait AsyncLiveAdapter: LiveAdapter {
         false
     }
     fn expect_state_digest(&self, _transaction_id: &str, _invocation: &LiveInvocation) {}
+    /// What the transaction made at `reference` went another way (deleted where it moved to, by its identity), so the
+    /// cleanup ownership kept for it at that ref goes too.
+    fn forget_cleanup_ownership(&self, _transaction_id: &str, _reference: &str) {}
 }
 
 /// Kinds of reference that name something outside every track (the Set, a scene, a locator...): reading

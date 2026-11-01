@@ -187,6 +187,9 @@ impl AsyncLiveAdapter for Adapter {
         self.calls.borrow_mut().push(clean(json!({"method":"status","context":context(c)})));
         self.sim.status()
     }
+    fn forget_cleanup_ownership(&self, transaction: &str, reference: &str) {
+        self.calls.borrow_mut().push(json!({"method":"forget","transactionId":transaction,"reference":reference}));
+    }
 }
 
 fn context(c: Option<&LiveOperationContext>) -> Value {
@@ -404,6 +407,7 @@ async fn undoing_an_arrangement_copy_a_clip_was_added_before_takes_it_from_where
             .filter(|call| call["invocation"]["operation"] == "arrangement.clip.delete")
             .map(|call| call["invocation"]["args"].clone())
             .collect();
+        let forgotten: Vec<Value> = adapter.calls.borrow().iter().filter(|call| call["method"] == "forget").cloned().collect();
         if edited {
             let text = result["result"]["content"][0]["text"].as_str().unwrap();
             assert!(
@@ -411,6 +415,7 @@ async fn undoing_an_arrangement_copy_a_clip_was_added_before_takes_it_from_where
                 "{result}"
             );
             assert!(deletes.is_empty(), "{deletes:?}");
+            assert!(forgotten.is_empty(), "{forgotten:?}");
             assert_eq!(record.borrow()["state"], "applied", "{result}");
             assert!(identities.contains(&copy), "{identities:?}");
         } else {
@@ -419,6 +424,8 @@ async fn undoing_an_arrangement_copy_a_clip_was_added_before_takes_it_from_where
             assert_eq!(deletes[0]["ref"], "arrangement-clip:track-1:moved");
             assert_eq!(deletes[0]["expectedObjectIdentity"], copy);
             assert_eq!(deletes[0]["explicitDeletion"], true);
+            // The ownership kept for the copy at the ref it was made at goes with it.
+            assert_eq!(forgotten, vec![json!({"method":"forget","transactionId":body["transactionId"],"reference":made_at})]);
             assert!(!identities.contains(&copy), "{identities:?}");
         }
     }
