@@ -179,7 +179,7 @@ Kumi は見るたびにソングの設定を読み、それに従います。BPM
 ### 制限
 
 - **Renoise の取り消しだけが** `run_lua` を戻せます。
-- **Kumi の取り消しだけが**、Renoise の取り消しが飛ばすものを戻せます。ミュートとソロ（`track_mute`、`track_solo`）、ループとパターンループ（`loop_range`、`loop_pattern`）、メトロノームのオンオフ（`metronome_switch`）、編集の設定（`edit_settings`）、プラグインの自動サスペンド（`plugin_suspend`）です。
+- **Kumi の取り消しだけが**、Renoise の取り消しが飛ばすものを戻せます。ミュートとソロ（`track_mute`、`track_solo`）、ループとパターンループ（`loop_range`、`loop_pattern`）、メトロノームのオンオフ（`metronome_switch`）、編集の設定（`edit_settings`）です。
 - 行の編集（`notes_write`、`lines_copy`、`phrase_write` など）を Renoise 自身の取り消しとやり直しにかけたあとは、Kumi の取り消しは断られます。Renoise のやり直しと、あなたが書いた同じ行を区別できないためです。Renoise の取り消しでは戻せます。
 - 長いセッションで、AU インストゥルメントを読み込んだり外したりしたあと、Renoise の取り消し履歴が空になることがありました（原因はわかっていません）。
 - FOCUS の Mixer にはメーターがありません。Renoise の API にないためです。

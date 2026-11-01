@@ -1173,6 +1173,8 @@ local function plugin_device_object(instrument)
       -- (a plug-in that keeps its program reads none chosen, its state as it was: Apple's DLSMusicDevice, lab)
       if plugin.keeps_program then return end
       write(plugin, "preset", value, plugin.preset_not_a_step)
+      -- (a program that changes what the plug-in holds, as Dexed's do: lab)
+      if plugin.program_states and plugin.program_states[value] then write(plugin, "preset_data", plugin.program_states[value]) end
       -- (a program sets the plug-in's parameters: the mock moves the first to the program's number)
       if plugin.params[1] and value > 0 then plugin.params[1].value = math.min(plugin.params[1].max or 1, value / 10) end
     end,
@@ -1193,8 +1195,7 @@ local function plugin_props_object(instrument)
   local props = instrument.plugin_props
   local getters, setters, fields = fields_of(props, {
     channel = { 1, range(1, 16, true) }, transpose = { 0, range(-120, 120, true) }, volume = { 1, range(0, 4) },
-    -- (auto-suspend is no undo step: lab)
-    auto_suspend = { false, boolean, true },
+    auto_suspend = { false, boolean },
   })
   fields.plugin_device_observable = obs(instrument, "plugin")
   fields.alias_instrument_index, fields.alias_fx_track_index, fields.alias_fx_device_index, fields.midi_output_routing_index = 0, 0, 0, 0

@@ -470,8 +470,17 @@ local function watch_instrument(song, i)
   token.slog, token.phlog = places.new(b.run .. "s" .. b.ids), places.new(b.run .. "ph" .. b.ids)
   token.mlog, token.clog = places.new(b.run .. "ms" .. b.ids), places.new(b.run .. "cs" .. b.ids)
   token.modsets, token.chains = {}, {}
+  -- (a plug-in's program: Renoise's undo takes it back and fires this, lab 2026-11-01. The instrument's name tells only while
+  -- Renoise names it after the program)
+  local function watch_program()
+    local device = instrument.plugin_properties.plugin_device
+    if device then observers:owned(token, nil, function() observers:watch_changes(device.active_preset_observable) end) end
+  end
+  watch_program()
   observers:owned(token, nil, function()
+    observers:watch_undo_with(instrument.plugin_properties.plugin_device_observable, guard("notifier an instrument's plug-in program", watch_program))
     observers:watch_changes(instrument.name_observable)
+    observers:watch_changes(instrument.plugin_properties.auto_suspend_observable)
     for k = 1, #instrument.macros do
       local macro = instrument:macro(k)
       observers:watch_changes(macro.value_observable)
