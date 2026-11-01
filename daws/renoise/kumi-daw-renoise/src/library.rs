@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 
-use daw_bridge::detect::{detect_renoise, Env, Os};
+use daw_bridge::detect::{detect_renoise, renoise_user_libraries, user_libraries_in, Env, Os};
 use daw_bridge::install::RENOISE_TOOL_FOLDER;
 use kumi_daw_own::library::{os_of, source};
 use kumi_library::daws::{Layout, LibrarySources, ProjectFormat};
@@ -58,8 +58,10 @@ impl LibrarySources for RenoiseLibrary {
             if let Some(library) = own.into_iter().find(|path| path.is_dir()) {
                 found.push(source(library, "Renoise Library".into(), SourceKind::Daw(DawId::Renoise)));
             }
-            let user = PathBuf::from(join(&join(&join(&home.to_string_lossy(), "Documents"), "Renoise"), "User Library"));
-            if is_folder(&user.to_string_lossy()) {
+            // The folder the tool saves presets in: Windows' Documents when it's there. (Windows answers whatever home it's
+            // asked about, so a home that was given, a test's, only looks in itself.)
+            let candidates = if options.home.is_some() { user_libraries_in(None, &home) } else { renoise_user_libraries(&home) };
+            if let Some(user) = first_folder(candidates) {
                 found.push(source(user, "Renoise User Library".into(), SourceKind::Daw(DawId::Renoise)));
             }
         }
@@ -72,5 +74,26 @@ impl LibrarySources for RenoiseLibrary {
 
     fn projects(&self) -> Option<&'static ProjectFormat> {
         Some(&crate::songs::FORMAT)
+    }
+}
+
+/// The first of `candidates` that's a folder.
+fn first_folder(candidates: Vec<PathBuf>) -> Option<PathBuf> {
+    candidates.into_iter().find(|candidate| is_folder(&candidate.to_string_lossy()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_user_library_learned_is_the_first_of_its_folders_there_as_the_tool_chooses() {
+        let home = tempfile::tempdir().unwrap();
+        let (moved, in_home) = (home.path().join("OneDrive"), home.path().join("Documents"));
+        assert_eq!(first_folder(vec![moved.clone(), in_home.clone()]), None);
+        std::fs::create_dir(&in_home).unwrap();
+        assert_eq!(first_folder(vec![moved.clone(), in_home.clone()]), Some(in_home.clone()));
+        std::fs::create_dir(&moved).unwrap();
+        assert_eq!(first_folder(vec![moved.clone(), in_home]), Some(moved));
     }
 }
