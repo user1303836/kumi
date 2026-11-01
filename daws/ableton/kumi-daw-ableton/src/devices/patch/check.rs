@@ -196,7 +196,7 @@ impl Checker<'_> {
         for item in &patcher.boxes {
             let inner = match (&item.patcher, &item.file) {
                 (Some(inner), _) => inner,
-                (None, Some((name, inner))) if self.files_seen.insert(name.clone()) => inner,
+                (None, Some((name, inner))) if self.files_seen.insert(name.clone()) => inner.as_ref(),
                 _ => continue,
             };
             let kit = is_kit(item);

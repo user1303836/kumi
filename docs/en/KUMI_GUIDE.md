@@ -899,6 +899,23 @@ Kumi can't see. When a device from your User Library loads, Kumi reads its face
 and is told what a panel hides there (a backdrop listed before the rest covers
 them), so it doesn't describe a design you won't see.
 
+Kumi also changes a device that's already there: one it made, one you made, or
+one you downloaded.
+
+> add a sync switch to my Echo
+
+It reads the device, makes only that change, and saves the result as a new
+device in the Kumi folder ("Echo 2" unless you name it). The original's file is
+never written, so every Set that uses it stays as it was. What the change doesn't
+touch stays as Max saved it, a frozen device keeps the files frozen into it, and
+the new device notes which device it came from (by its place in the User Library,
+or its file's name, never your computer's folders). Live's own Max for Live
+devices (LFO, Shaper and the like) are locked, so Kumi can't open them. Ask for
+the new device in place of the original, and Kumi loads it beside the original,
+sets the knobs they share to the same values, and turns the original off. The
+original's automation and mappings don't move to the new device, so Kumi removes
+the original only when you say so.
+
 It needs Max for Live (Live Suite, or Standard with the add-on).
 
 ## Looking things up

@@ -48,6 +48,18 @@ static DEFINITION: LazyLock<Regex> = LazyLock::new(|| {
 const KEYWORDS: [&str; 9] = ["if", "for", "while", "switch", "catch", "function", "return", "with", "else"];
 
 impl Code {
+    /// The script file a box's code is read from, when it's read from one (not a [v8.codebox]'s own, nor code a box
+    /// embeds): what boxes running the same code share.
+    pub fn file_of(item: &MaxBox) -> Option<String> {
+        let embedded = item.fields.get("textfile").is_some_and(|file| file.get("embed").and_then(Value::as_i64) == Some(1));
+        let name = match item.class() {
+            "v8ui" | "jsui" if !embedded => item.str("filename"),
+            "js" | "v8" if item.maxclass() == "newobj" && !embedded => item.args().first().copied().unwrap_or(""),
+            _ => return None,
+        };
+        (!name.is_empty() && name != "none").then(|| name.to_string())
+    }
+
     /// The code a box runs (a [v8.codebox]'s own, a [v8ui]'s or a [js]'s file, or what it embeds) with what it
     /// includes and requires, read through `files`; None for a box that runs none, or whose file can't be read.
     pub fn read(item: &MaxBox, files: &dyn Files) -> Option<Code> {

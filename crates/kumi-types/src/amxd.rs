@@ -107,3 +107,77 @@ pub fn patcher_chunk(bytes: &[u8]) -> Option<(&[u8], &[u8])> {
     }
     None
 }
+
+/// Whether a device file keeps its patcher encrypted, in a "ciph" chunk in place of "ptch", as Live's own Max for Live
+/// devices do (LFO, Shaper, the Drum Synths…): nothing can read it but Live.
+pub fn encrypted(bytes: &[u8]) -> bool {
+    if bytes.len() < 12 || &bytes[0..4] != b"ampf" {
+        return false;
+    }
+    let read_u32 = |at: usize| u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]) as usize;
+    let mut at = 8usize.saturating_add(read_u32(4));
+    while at.saturating_add(8) <= bytes.len() {
+        match &bytes[at..at + 4] {
+            b"ciph" => return true,
+            b"ptch" => return false,
+            _ => at = at.saturating_add(8).saturating_add(read_u32(at + 4)),
+        }
+    }
+    false
+}
+
+/// The device file with `chunk` in place of its "ptch" chunk, and every other byte as it was (its type, its "meta" and
+/// any other chunk); None when it isn't one.
+pub fn with_patcher_chunk(bytes: &[u8], chunk: &[u8]) -> Option<Vec<u8>> {
+    if bytes.len() < 12 || &bytes[0..4] != b"ampf" {
+        return None;
+    }
+    let read_u32 = |at: usize| u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]]) as usize;
+    let mut at = 8usize.saturating_add(read_u32(4));
+    while at.saturating_add(8) <= bytes.len() {
+        let size = read_u32(at + 4);
+        if &bytes[at..at + 4] == b"ptch" {
+            let rest = bytes.get(at.saturating_add(8).saturating_add(size)..)?;
+            let mut out = Vec::with_capacity(bytes.len() + chunk.len());
+            out.extend_from_slice(&bytes[..at + 4]);
+            out.extend_from_slice(&u32le(u32::try_from(chunk.len()).ok()?));
+            out.extend_from_slice(chunk);
+            out.extend_from_slice(rest);
+            return Some(out);
+        }
+        at = at.saturating_add(8).saturating_add(size);
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn a_new_patcher_chunk_keeps_every_other_byte_of_the_file() {
+        let mut file = encode_amxd(DeviceType::AudioEffect, &json!({ "patcher": { "title": "Old" } }));
+        // A meta of Max's own, and a chunk after the patcher that Kumi doesn't know.
+        file[20..24].copy_from_slice(&7u32.to_le_bytes());
+        file.extend_from_slice(b"xtra\x02\x00\x00\x00ok");
+        let chunk = b"{\"patcher\":{\"title\":\"New\"}}\n\0";
+        let changed = with_patcher_chunk(&file, chunk).unwrap();
+        assert_eq!(patcher_chunk(&changed), Some((&b"aaaa"[..], &chunk[..])));
+        assert_eq!(decode_amxd(&changed).unwrap().patcher["patcher"]["title"], "New");
+        assert_eq!(&changed[..28], &file[..28], "its type and meta as they were");
+        assert!(changed.ends_with(b"xtra\x02\x00\x00\x00ok"));
+        assert_eq!(with_patcher_chunk(b"not a device", chunk), None);
+        assert!(!encrypted(&file));
+    }
+
+    #[test]
+    fn a_device_whose_patcher_is_encrypted_is_known_as_one() {
+        let mut lfo = b"ampf\x04\x00\x00\x00aaaameta\x04\x00\x00\x00\x00\x00\x00\x00ciph".to_vec();
+        lfo.extend_from_slice(&4u32.to_le_bytes());
+        lfo.extend_from_slice(b"\x01\x02\x03\x04");
+        assert!(encrypted(&lfo));
+        assert_eq!(patcher_chunk(&lfo), None);
+        assert!(!encrypted(b"ampf"));
+    }
+}

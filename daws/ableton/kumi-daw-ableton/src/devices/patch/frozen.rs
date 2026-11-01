@@ -53,8 +53,7 @@ pub fn read_device(bytes: &[u8]) -> Option<DeviceFile> {
     let code = String::from_utf8_lossy(code).into_owned();
     match Frozen::read(chunk) {
         Some(frozen) => {
-            let main = frozen.files.iter().find(|file| file.main()).or(frozen.files.iter().find(|file| file.kind == "JSON"))?;
-            let patcher = parse(frozen.bytes(main)?)?;
+            let patcher = parse(frozen.bytes(frozen.main_file()?)?)?;
             Some(DeviceFile { code, patcher, frozen: Some(frozen) })
         }
         None => Some(DeviceFile { code, patcher: parse(chunk)?, frozen: None }),
@@ -67,49 +66,127 @@ fn parse(bytes: &[u8]) -> Option<Value> {
     serde_json::from_slice(&bytes[..end]).ok()
 }
 
+/// A big-endian number in the container.
+fn number(chunk: &[u8], at: usize) -> Option<usize> {
+    Some(u32::from_be_bytes(chunk.get(at..at.checked_add(4)?)?.try_into().ok()?) as usize)
+}
+
+/// A field of a directory entry: its tag and where its value lies in the container.
+struct Field {
+    tag: [u8; 4],
+    value: std::ops::Range<usize>,
+}
+
+/// Where the container's directory starts, and each entry's fields; None when the chunk isn't a container.
+fn directory(chunk: &[u8]) -> Option<(usize, Vec<Vec<Field>>)> {
+    if chunk.get(0..4)? != b"mx@c" {
+        return None;
+    }
+    let directory = number(chunk, 12)?;
+    if chunk.get(directory..directory.checked_add(4)?)? != b"dlst" {
+        return None;
+    }
+    let end = directory.saturating_add(number(chunk, directory + 4)?).min(chunk.len());
+    let mut entries = Vec::new();
+    let mut at = directory + 8;
+    while at + 8 <= end && chunk.get(at..at + 4) == Some(b"dire") {
+        let size = number(chunk, at + 4)?;
+        if size < 8 {
+            break;
+        }
+        let mut fields = Vec::new();
+        let mut field = at + 8;
+        while field + 8 <= at.saturating_add(size).min(end) {
+            let length = number(chunk, field + 4)?;
+            if length < 8 {
+                break;
+            }
+            chunk.get(field + 8..field + length)?;
+            fields.push(Field { tag: chunk[field..field + 4].try_into().ok()?, value: field + 8..field + length });
+            field += length;
+        }
+        entries.push(fields);
+        at += size;
+    }
+    Some((directory, entries))
+}
+
 impl Frozen {
     /// The files of a frozen device's container; None when the chunk isn't one.
     pub fn read(chunk: &[u8]) -> Option<Frozen> {
-        let number = |at: usize| -> Option<usize> { Some(u32::from_be_bytes(chunk.get(at..at + 4)?.try_into().ok()?) as usize) };
-        if chunk.get(0..4)? != b"mx@c" {
-            return None;
-        }
-        let directory = number(12)?;
-        if chunk.get(directory..directory + 4)? != b"dlst" {
-            return None;
-        }
-        let end = directory.saturating_add(number(directory + 4)?).min(chunk.len());
-        let mut files = Vec::new();
-        let mut at = directory + 8;
-        while at + 8 <= end && chunk.get(at..at + 4) == Some(b"dire") {
-            let size = number(at + 4)?;
-            if size < 8 {
-                break;
-            }
-            let mut file = FrozenFile::default();
-            let mut field = at + 8;
-            while field + 8 <= (at + size).min(end) {
-                let length = number(field + 4)?;
-                if length < 8 {
-                    break;
+        let (_, entries) = directory(chunk)?;
+        let files = entries
+            .iter()
+            .map(|fields| {
+                let mut file = FrozenFile::default();
+                for field in fields {
+                    let value = &chunk[field.value.clone()];
+                    let text = || String::from_utf8_lossy(value.split(|byte| *byte == 0).next().unwrap_or_default()).into_owned();
+                    let whole = || value.get(0..4).and_then(|bytes| bytes.try_into().ok()).map(u32::from_be_bytes).unwrap_or(0);
+                    match &field.tag {
+                        b"type" => file.kind = text(),
+                        b"fnam" => file.name = text(),
+                        b"sz32" => file.size = whole() as usize,
+                        b"of32" => file.start = whole() as usize,
+                        b"flag" => file.flags = whole(),
+                        _ => {}
+                    }
                 }
-                let value = chunk.get(field + 8..field + length)?;
-                let text = || String::from_utf8_lossy(value.split(|byte| *byte == 0).next().unwrap_or_default()).into_owned();
-                let whole = || value.get(0..4).and_then(|bytes| bytes.try_into().ok()).map(u32::from_be_bytes).unwrap_or(0);
-                match &chunk[field..field + 4] {
-                    b"type" => file.kind = text(),
-                    b"fnam" => file.name = text(),
-                    b"sz32" => file.size = whole() as usize,
-                    b"of32" => file.start = whole() as usize,
-                    b"flag" => file.flags = whole(),
+                file
+            })
+            .collect();
+        Some(Frozen { container: chunk.to_vec(), files })
+    }
+
+    /// The container with `bytes` in place of `replaced`'s, and every other file, and every other field of the
+    /// directory, as they were: each file's place moves by what the replaced one grew or shrank. None when two files
+    /// overlap or one lies outside the files' part, which Kumi can't rewrite safely.
+    pub fn with_file(&self, replaced: &FrozenFile, bytes: &[u8]) -> Option<Vec<u8>> {
+        let chunk = &self.container;
+        let (listed, entries) = directory(chunk)?;
+        // Each file's place once, however many entries name it, in the order they lie.
+        let mut places: Vec<(usize, usize)> = self.files.iter().map(|file| (file.start, file.size)).collect();
+        places.sort_unstable();
+        places.dedup();
+        let mut out = chunk.get(0..16)?.to_vec();
+        let mut moved: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+        let mut cursor = 16;
+        for (start, size) in places {
+            let end = start.checked_add(size)?;
+            if start < cursor || end > listed {
+                return None;
+            }
+            out.extend_from_slice(&chunk[cursor..start]);
+            moved.insert(start, out.len());
+            if (start, size) == (replaced.start, replaced.size) {
+                out.extend_from_slice(bytes);
+            } else {
+                out.extend_from_slice(&chunk[start..end]);
+            }
+            cursor = end;
+        }
+        out.extend_from_slice(&chunk[cursor..listed]);
+        let shift = |at: usize| -> Option<[u8; 4]> { Some(u32::try_from(at).ok()?.to_be_bytes()) };
+        let directory_at = out.len();
+        out[12..16].copy_from_slice(&shift(directory_at)?);
+        out.extend_from_slice(&chunk[listed..]);
+        for fields in &entries {
+            let whole = |tag: &[u8; 4]| fields.iter().find(|field| &field.tag == tag).and_then(|field| number(chunk, field.value.start));
+            let (start, size) = (whole(b"of32").unwrap_or(0), whole(b"sz32").unwrap_or(0));
+            for field in fields.iter().filter(|field| field.value.len() >= 4) {
+                let at = field.value.start - listed + directory_at;
+                match &field.tag {
+                    b"of32" => {
+                        if let Some(new) = moved.get(&start) {
+                            out[at..at + 4].copy_from_slice(&shift(*new)?);
+                        }
+                    }
+                    b"sz32" if (start, size) == (replaced.start, replaced.size) => out[at..at + 4].copy_from_slice(&shift(bytes.len())?),
                     _ => {}
                 }
-                field += length;
             }
-            files.push(file);
-            at += size;
         }
-        Some(Frozen { container: chunk.to_vec(), files })
+        Some(out)
     }
 
     /// A file's bytes, as they lie in the container.
@@ -120,6 +197,11 @@ impl Frozen {
     /// The first file of a name.
     pub fn file(&self, name: &str) -> Option<&FrozenFile> {
         self.files.iter().find(|file| file.name == name)
+    }
+
+    /// The device's own patcher: the file flagged as it, else the first patcher.
+    pub fn main_file(&self) -> Option<&FrozenFile> {
+        self.files.iter().find(|file| file.main()).or(self.files.iter().find(|file| file.kind == "JSON"))
     }
 }
 
@@ -137,13 +219,13 @@ impl Files for Frozen {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::devices::amxd::{encode_amxd, DeviceType};
     use serde_json::json;
 
     /// A frozen device as Max lays one out: the container's header, the files, then the directory.
-    fn frozen_device(files: &[(&str, &str, u32, &[u8])]) -> Vec<u8> {
+    pub(crate) fn frozen_device(files: &[(&str, &str, u32, &[u8])]) -> Vec<u8> {
         let mut container = b"mx@c".to_vec();
         container.extend_from_slice(&16u32.to_be_bytes());
         container.extend_from_slice(&0u32.to_be_bytes());
@@ -200,5 +282,38 @@ mod tests {
         // A device that isn't frozen is its JSON.
         let plain = read_device(&encode_amxd(DeviceType::MidiEffect, &json!({ "patcher": { "title": "x" } }))).unwrap();
         assert_eq!((plain.code.as_str(), plain.patcher["patcher"]["title"].as_str(), plain.frozen.is_none()), ("mmmm", Some("x"), true));
+    }
+
+    #[test]
+    fn a_frozen_devices_patcher_is_replaced_and_its_other_files_kept_as_they_were() {
+        let main = br#"{ "patcher": { "title": "Echo", "boxes": [], "lines": [] } }"#;
+        let dial = br#"{ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "jsui" } }], "lines": [] } }"#;
+        let bytes = frozen_device(&[
+            ("JSON", "Echo.amxd", 0x11, main),
+            ("JSON", "dial.maxpat", 0, dial),
+            ("TEXT", "dial.js", 0, b"mgraphics"),
+            ("WAVE", "click.wav", 0, b"RIFF....WAVE"),
+        ]);
+        let device = read_device(&bytes).unwrap();
+        let frozen = device.frozen.unwrap();
+        let longer = br#"{ "patcher": { "title": "Echo Sync", "boxes": [{ "box": { "id": "obj-1", "maxclass": "newobj", "text": "metro 16n" } }], "lines": [] } }"#;
+        let container = frozen.with_file(frozen.main_file().unwrap(), longer).unwrap();
+        let again = Frozen::read(&container).unwrap();
+        assert_eq!(again.files.len(), 4);
+        assert_eq!(again.bytes(again.main_file().unwrap()), Some(&longer[..]));
+        for (name, was) in [("dial.maxpat", &dial[..]), ("dial.js", &b"mgraphics"[..]), ("click.wav", &b"RIFF....WAVE"[..])] {
+            assert_eq!(again.bytes(again.file(name).unwrap()), Some(was), "{name} as it was");
+        }
+        let flags: Vec<u32> = again.files.iter().map(|file| file.flags).collect();
+        assert_eq!(flags, [0x11, 0, 0, 0], "every other field of the directory as it was");
+        // Shorter works as well; files that overlap aren't rewritten.
+        let shorter = frozen.with_file(frozen.main_file().unwrap(), b"{}").unwrap();
+        assert_eq!(
+            Frozen::read(&shorter).unwrap().bytes(Frozen::read(&shorter).unwrap().file("dial.js").unwrap()),
+            Some(&b"mgraphics"[..])
+        );
+        let mut overlapping = frozen.clone();
+        overlapping.files[2].start = overlapping.files[1].start + 1;
+        assert_eq!(overlapping.with_file(overlapping.main_file().unwrap(), longer), None);
     }
 }

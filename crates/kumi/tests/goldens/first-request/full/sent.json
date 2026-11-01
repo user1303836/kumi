@@ -62,7 +62,7 @@
   {
     "type": "function",
     "name": "make_device",
-    "description": "Make a Max for Live device the producer asks for: a MIDI effect, an audio effect or an instrument. Kumi writes it to their User Library for load_device. Read the guide for the kind first (guide: true, type): how to patch it, where code belongs, the rules Kumi checks, and what makes a device good. To learn Max's objects (what each is for, its arguments, its inlets and outlets for the arguments given, its messages and attributes), give objects: [\"pipe\", \"makenote 60 100 250\"]: Kumi answers from this machine's Max, faster than the web and right for the Max the device runs in, and makes nothing. Then give its type, name, what it does, its controls (knobs, menus, switches and triggers, which become ordinary Live parameters, each in its group) and its patch: Max's own objects in Kumi's notation, with code only in the boxes that need it (GenExpr in [gen~], JavaScript in [v8] and [v8ui]). A device that's one box of code can be given as code instead: JavaScript for a MIDI effect, with tests Kumi runs; GenExpr for an audio effect, or for one voice of an instrument, which Kumi plays as many voices. Kumi builds the device around the patch or the code, lays its face out in Live's own style, keeps what plays in time on Live's grid with its building blocks ([kumi.clock], [kumi.notes], [kumi.transport]), gives a device that modulates a Map page of slots, checks it and always makes it: what's wrong comes back beside it, by line, with what Kumi changed to make it, and making it again in this conversation with the same name replaces it. Build what the producer asks for, as fully as they ask: as many controls as it needs, and the original's behaviour when recreating one. Kumi's rules keep a device safe and loadable; they don't limit its scope, and its ceilings are generous. Then load it with load_device and the itemId it returns, and hear an audio effect or instrument with audition.",
+    "description": "Make a Max for Live device the producer asks for: a MIDI effect, an audio effect or an instrument. Kumi writes it to their User Library for load_device. Read the guide for the kind first (guide: true, type): how to patch it, where code belongs, the rules Kumi checks, and what makes a device good. To learn Max's objects (what each is for, its arguments, its inlets and outlets for the arguments given, its messages and attributes), give objects: [\"pipe\", \"makenote 60 100 250\"]: Kumi answers from this machine's Max, faster than the web and right for the Max the device runs in, and makes nothing. Then give its type, name, what it does, its controls (knobs, menus, switches and triggers, which become ordinary Live parameters, each in its group) and its patch: Max's own objects in Kumi's notation, with code only in the boxes that need it (GenExpr in [gen~], JavaScript in [v8] and [v8ui]). A device that's one box of code can be given as code instead: JavaScript for a MIDI effect, with tests Kumi runs; GenExpr for an audio effect, or for one voice of an instrument, which Kumi plays as many voices. Kumi builds the device around the patch or the code, lays its face out in Live's own style, keeps what plays in time on Live's grid with its building blocks ([kumi.clock], [kumi.notes], [kumi.transport]), gives a device that modulates a Map page of slots, checks it and always makes it: what's wrong comes back beside it, by line, with what Kumi changed to make it, and making it again in this conversation with the same name replaces it. Build what the producer asks for, as fully as they ask: as many controls as it needs, and the original's behaviour when recreating one. Kumi's rules keep a device safe and loadable; they don't limit its scope, and its ceilings are generous. Then load it with load_device and the itemId it returns, and hear an audio effect or instrument with audition. To change a device that's already there, Kumi's or anyone's, give from: alone, Kumi answers with the device in its notation, each box by name; with patch, controls or remove saying only what changes, it makes a new device from it and never writes the original's file.",
     "inputSchema": {
       "type": "object",
       "additionalProperties": false,
@@ -79,6 +79,10 @@
             "type": "string"
           },
           "description": "Max objects to learn, each as it's typed in a box (\"makenote 60 100 250\"): Kumi answers from this machine's Max and makes nothing"
+        },
+        "from": {
+          "type": "string",
+          "description": "A device that's already there to start from: its file, its item in Live's Browser (user_library/…) or its name in the User Library"
         },
         "type": {
           "type": "string",
@@ -203,6 +207,13 @@
           "minimum": 1,
           "maximum": 32,
           "description": "An instrument's voices: how many notes play at once, 1 for mono (8 when left out)"
+        },
+        "remove": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "With from: its boxes or controls by name, or its cords (\"a.1 -> b\"), to take out"
         },
         "runs_free": {
           "type": "boolean",

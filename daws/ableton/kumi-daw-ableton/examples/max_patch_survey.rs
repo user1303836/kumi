@@ -187,7 +187,7 @@ impl Survey {
             }
             let inner = match (&item.patcher, &item.file) {
                 (Some(inner), _) => inner,
-                (None, Some((name, inner))) if seen.insert(name.clone()) => inner,
+                (None, Some((name, inner))) if seen.insert(name.clone()) => inner.as_ref(),
                 _ => continue,
             };
             self.walk(inner, seen, saved_by);
