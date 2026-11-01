@@ -1186,6 +1186,22 @@ async fn make_device_makes_audio_effect_and_instrument_with_kumis_knobs() {
     );
 }
 
+// Each test runs in a process of its own: the KUMI_MAX this one sets is its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_kumi_max_that_names_no_max_says_its_the_thing_to_fix() {
+    use kumi_common::abort::Signal;
+    std::env::set_var("KUMI_MAX", "/no/such/max");
+    let folder = tempfile::tempdir().unwrap();
+    let tool = tool_in(&folder.path().join("library"), Default::default());
+    let said = "KUMI_MAX names no Max (/no/such/max): point it at Max's C74 folder or a Max that holds one, or unset it.";
+    let answer = tool.execute(json!({"objects": ["metro"]}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+    assert_eq!(answer.text, said);
+    // A patch is made without it, and says so among its notes.
+    let patch = with(grit(), json!({ "code": null, "patch": "in.0 -> out.0\nin.1 -> out.1\n" }));
+    let made: Value = serde_json::from_str(&tool.execute(patch, Signal::new()).await.unwrap().text).unwrap();
+    assert!(made["notes"].as_array().is_some_and(|notes| notes.iter().any(|note| note.as_str() == Some(said))), "{made}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn make_device_makes_a_device_from_a_patch_of_max_objects_and_says_whats_wrong_with_one() {
     use futures::FutureExt;
