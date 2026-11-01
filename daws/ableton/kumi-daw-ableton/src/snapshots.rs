@@ -135,6 +135,45 @@ pub struct KeptClip {
     pub name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notes_hash: Option<String>,
+    /// Its identity in Live and its hash when Kumi read it: what a clip made again from it was (see `Remade`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub identity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hash: Option<String>,
+}
+
+/// The clips Kumi's undo made again this session: each clip as Kumi read it before it went (its identity in Live and
+/// the hash of what it was), and the one made again from that (Live gives it an identity of its own, and its hash once
+/// made). A change kept before (a clear, keeping the piece Live left of a clip) names that piece by its identity then;
+/// once a later change deleted it and Kumi's undo of that one made it again, it's the clip Kumi made, as long as it's
+/// as Kumi made it.
+#[derive(Debug, Default)]
+pub struct Remade(RefCell<HashMap<(String, String), (String, String)>>);
+impl Remade {
+    /// What a restore made again: each of `kept`, in order, as each of `made` (its identity and hash, as the restore
+    /// answered).
+    pub fn note(&self, kept: &[KeptClip], made: &[Value]) {
+        let mut remade = self.0.borrow_mut();
+        for (kept, made) in kept.iter().zip(made) {
+            let (Some(before), Some(was)) = (&kept.identity, &kept.hash) else { continue };
+            let (Some(identity), Some(hash)) = (made["identity"].as_str(), made["hash"].as_str()) else { continue };
+            remade.insert((before.clone(), was.clone()), (identity.to_owned(), hash.to_owned()));
+        }
+    }
+    /// The clip a piece Live left (`identity`, as `hash` then) is now: the one Kumi's undo made again from it, when it
+    /// was as the change left it until it went, and the one made again from that, and so on; or itself.
+    pub fn now(&self, identity: &str, hash: &str) -> (String, String) {
+        let remade = self.0.borrow();
+        let mut now = (identity.to_owned(), hash.to_owned());
+        // A clip made again is never one it was made from: the bound is for safety only.
+        for _ in 0..64 {
+            match remade.get(&now) {
+                Some(again) => now = again.clone(),
+                None => break,
+            }
+        }
+        now
+    }
 }
 
 /// A piece Live left of a clip a change cut: deleted before the clip is made again, once it's as the change left it.
@@ -172,6 +211,13 @@ impl Material {
             1 => names[0].clone(),
             n => format!("{} and {}", names[..n - 1].join(", "), names[n - 1]),
         }
+    }
+    /// The same, its remnants as they are now: any Kumi's undo of a later change made again (`Remade::now`).
+    pub fn followed(mut self, remade: &Remade) -> Self {
+        for remnant in &mut self.remnants {
+            (remnant.identity, remnant.hash) = remade.now(&remnant.identity, &remnant.hash);
+        }
+        self
     }
     /// The track, as every call names it.
     fn track_args(&self, op: &str) -> Value {
@@ -379,15 +425,23 @@ pub async fn restore(
             if rest.is_empty() {
                 continue;
             }
-            if let Err(why) = more_notes(history, material, clip, rest, hash, bound, &mut done).await {
-                return Err(Stopped::Partway(why, done));
+            match more_notes(history, material, clip, rest, hash, bound, &mut done).await {
+                // The clip's hash once every note is in.
+                Ok(Some(hash)) => {
+                    if let Some(made) = done.made.iter_mut().find(|made| made["identity"] == clip["identity"]) {
+                        made["hash"] = json!(hash);
+                    }
+                }
+                Ok(None) => {}
+                Err(why) => return Err(Stopped::Partway(why, done)),
             }
         }
     }
     Ok(done)
 }
 
-/// The rest of a made clip's notes, in as many calls as they take; the last checks the clip holds every note it had.
+/// The rest of a made clip's notes, in as many calls as they take; the last checks the clip holds every note it had, and
+/// says its hash then.
 async fn more_notes(
     history: &History,
     material: &Material,
@@ -396,12 +450,13 @@ async fn more_notes(
     hash: Option<String>,
     bound: &dyn Fn() -> Signal,
     done: &mut Restored,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let mut base = material.track_args("notes");
     base["clip"] = made["identity"].clone();
     base["notesHash"] = json!(hash);
     let calls = packed(&base, "notes", notes);
     let count = calls.len();
+    let mut now = None;
     for (index, chunk) in calls.into_iter().enumerate() {
         let mut args = base.clone();
         args["notes"] = json!(chunk);
@@ -409,14 +464,16 @@ async fn more_notes(
             args["notesHash"] = Value::Null;
         }
         match call(history, &args, bound()).await {
-            Said::Done(answer) if answer["exact"] == json!(false) => {
-                done.partial.push(json!({"name":made["name"],"missing":["its notes"]}));
+            Said::Done(answer) => {
+                if answer["exact"] == json!(false) {
+                    done.partial.push(json!({"name":made["name"],"missing":["its notes"]}));
+                }
+                now = answer["hash"].as_str().map(str::to_owned);
             }
-            Said::Done(_) => {}
             Said::Refused(why) | Said::Failed(why) => return Err(why),
         }
     }
-    Ok(())
+    Ok(now)
 }
 
 /// What `material`'s track holds where Kumi's undo works (from its first clip's start on, and its Session clips'
