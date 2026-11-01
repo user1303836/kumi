@@ -146,6 +146,13 @@ impl McpHost {
             );
 
             self.retain_bounded_transaction(&self.clip_lifecycle_transactions, t.clone(), "audio clip")?;
+            // The clip's sample, where it plays from and how it's warped, for the change's picture.
+            let mut sample = json!({});
+            for field in ["filePath", "warping", "warpMarkers", "startMarker", "endMarker", "loopStart", "loopEnd", "looping"] {
+                if !row.clip[field].is_null() {
+                    sample[field] = row.clip[field].clone();
+                }
+            }
             Ok(success_text(
                 id,
                 &json!({
@@ -154,6 +161,7 @@ impl McpHost {
                 "clipRef":params["clipRef"],
                 "prior":prior,
                 "proposed":proposed,
+                "sample":sample,
                 "impact":"edits-audio-clip",
                 "confirmation":"apply",
                 "expiresAt":t["expiresAt"]}

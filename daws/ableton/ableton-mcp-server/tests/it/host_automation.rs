@@ -58,7 +58,13 @@ fn same(a: &Value, b: &Value, label: &str) {
 }
 fn clean(mut v: Value) -> Value {
     if let Some(s) = v["result"]["content"][0]["text"].as_str() {
-        if let Ok(body) = serde_json::from_str::<Value>(s) {
+        if let Ok(mut body) = serde_json::from_str::<Value>(s) {
+            // What the answers carry for a change's picture, which the source's didn't: a preview's lane parameter and an
+            // apply's lane as Live has it (`a_lane_answers_with_its_parameter_and_the_points_live_has`).
+            if let Some(body) = body.as_object_mut() {
+                body.remove("parameter");
+                body.remove("envelope");
+            }
             v["result"]["content"][0]["text"] = body;
         }
     }
@@ -488,6 +494,26 @@ async fn clearing_envelopes_fences_on_what_live_reports_not_the_snapshot() {
     let applied = text(host.live_automation_apply_async(&json!(2), &apply, None).await.unwrap());
     assert_eq!((applied["state"].clone(), applied["cleared"].clone()), (json!("applied"), json!(1)), "{applied}");
     assert_eq!(live.0.state.borrow()["tracks"][0]["clips"][0]["envelopes"], json!({}));
+}
+#[tokio::test]
+async fn a_lane_answers_with_its_parameter_and_the_points_live_has() {
+    let adapter = Rc::new(Adapter::new("insert-absent"));
+    setup(&adapter.sim, "insert-absent");
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let text = |result: Value| -> Value { serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap() };
+    let args = json!({"action":"insert","clipRef":"clip:clip-1","parameterRef":PREF,"points":[{"time":0,"value":0},{"time":4,"value":1}]});
+    let preview = text(host.live_automation_preview_async(&json!(1), &args).await);
+    let parameter = &preview["parameter"];
+    assert!(parameter["name"].is_string() && parameter["min"].is_number() && parameter["max"].is_number(), "{preview}");
+    let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    let applied = text(host.live_automation_apply_async(&json!(2), &apply, None).await.unwrap());
+    assert_eq!(applied["envelope"], json!({"exists":true,"points":[{"time":0,"value":0},{"time":4,"value":1}]}), "{applied}");
+    // Set aside only those: an answer that differs otherwise still differs.
+    let mut other = applied.clone();
+    other["state"] = json!("uncertain");
+    let wrap = |body: &Value| json!({"result":{"content":[{"text":body.to_string()}]}});
+    assert_ne!(clean(wrap(&applied)), clean(wrap(&other)));
+    assert_eq!(clean(wrap(&applied))["result"]["content"][0]["text"].get("envelope"), None);
 }
 #[tokio::test]
 async fn undoing_an_insert_into_an_envelope_that_was_not_there_deletes_the_envelope() {

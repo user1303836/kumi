@@ -16,7 +16,12 @@ fn same(a: &Value, b: &Value, label: &str) {
 }
 fn clean(mut v: Value) -> Value {
     if let Some(s) = v["result"]["content"][0]["text"].as_str() {
-        if let Ok(body) = serde_json::from_str::<Value>(s) {
+        if let Ok(mut body) = serde_json::from_str::<Value>(s) {
+            // What a preview carries for the change's picture, which the source's didn't: where the clip's sample plays
+            // from (`a_preview_says_where_the_clips_sample_plays_from`).
+            if let Some(body) = body.as_object_mut() {
+                body.remove("sample");
+            }
             v["result"]["content"][0]["text"] = body;
         }
     }
@@ -250,6 +255,25 @@ fn source<'a>(s: &'a mut Value, kind: &str) -> &'a mut Value {
     } else {
         &mut s["tracks"][0]["clips"][0]
     }
+}
+#[tokio::test]
+async fn a_preview_says_where_the_clips_sample_plays_from() {
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "session");
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let preview = host.live_audio_clip_preview_async(&json!(1), &params("session")).await;
+    let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let sample = &body["sample"];
+    assert!(sample.is_object(), "{body}");
+    for field in ["loopStart", "loopEnd"] {
+        assert!(sample[field].is_number(), "{field}: {body}");
+    }
+    // Set aside only that: a preview that differs otherwise still differs.
+    let mut other = body.clone();
+    other["clipRef"] = json!("clip:other");
+    let wrap = |body: &Value| json!({"result":{"content":[{"text":body.to_string()}]}});
+    assert_ne!(clean(wrap(&body)), clean(wrap(&other)));
+    assert_eq!(clean(wrap(&body))["result"]["content"][0]["text"].get("sample"), None);
 }
 #[tokio::test]
 async fn audio_clip_validation_matches_source() {
