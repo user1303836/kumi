@@ -50,6 +50,10 @@ const TRACK_PAGES: usize = 50;
 const GRID: u64 = 49;
 /// The longest a job is waited for before Kumi stops it (a whole song with heavy plug-ins).
 const JOB_LIMIT: Duration = Duration::from_secs(30 * 60);
+/// How long a render the DAW answers busy is asked again, and how often: Renoise's tool answers busy while it reads a dense
+/// song's tempo commands, a slice each time it's asked and more between, so a moment later it goes on from there.
+const BUSY_WAIT: Duration = Duration::from_secs(20);
+const BUSY_PACE: Duration = Duration::from_secs(1);
 
 /// What Kumi knows of one DAW's listening: what its sources hold, the master's devices that don't make masking unfair,
 /// its gain stage, its equaliser, and the change kinds the listening tools use.
@@ -433,6 +437,20 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
         self.link.call(tool, args, signal).await
     }
 
+    /// `ask`, of a request that reads a song's tempo commands (a render, a part's audio, scratch copies), asked again on
+    /// `asked_on`'s signal while the DAW answers busy, until `signal` stops the wait. The status line says once what it's
+    /// waiting for.
+    async fn ask_while_busy(
+        &self,
+        tool: &str,
+        args: Value,
+        signal: &Signal,
+        asked_on: impl Fn() -> Signal,
+    ) -> Result<Result<Value, Refused>, RuntimeError> {
+        let waiting = |why: &str| self.tell_app(&format!("{}: Kumi is waiting for it", why.trim_end_matches(": ask again in a moment")));
+        while_busy(signal, waiting, || self.ask(tool, args.clone(), asked_on())).await
+    }
+
     /// A read's arguments placed as the model's read places them: the layout Renoise's track refs were made in, and the
     /// epoch a lasting ref (REAPER's) was read in.
     pub fn read_placed(&self, mut args: Value) -> Value {
@@ -750,11 +768,11 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
     ) -> Result<Result<(IndexMap<String, (Render, Value)>, Vec<String>), String>, RuntimeError> {
         let pre_roll = self.beats_per_bar.get().min(window.from).max(0.);
         let args = json!({"sources": sources, "range": {"fromBeat": window.from, "beats": window.beats}, "preRollBeats": pre_roll});
-        let own_playing = self.own_playing();
-        let started = match self.ask("render", args, signal.clone()).await? {
+        let started = match self.ask_while_busy("render", args, signal, || signal.clone()).await? {
             Ok(started) => started,
             Err(refused) => return Ok(Err(refused.why)),
         };
+        let own_playing = self.own_playing();
         let done = match self.wait(&started, signal).await? {
             Ok(done) => done,
             Err(why) => return Ok(Err(why)),
@@ -1302,11 +1320,11 @@ impl<S: RefScheme + 'static> Renderer for OwnRenderer<S> {
             }
             return Ok(None);
         }
-        let own_playing = self.own_playing();
-        let answer = match self.ask("audio_file", json!({"ref": long}), signal.clone()).await? {
+        let answer = match self.ask_while_busy("audio_file", json!({"ref": long}), &signal, || signal.clone()).await? {
             Ok(answer) => answer,
             Err(refused) => return Err(RuntimeError::Observation(refused.why)),
         };
+        let own_playing = self.own_playing();
         // (a part rendered, as Renoise renders a pattern: its notes and the tempo it moved, as every render's are)
         if answer.get("jobId").is_some() {
             return match self.wait(&answer, &signal).await? {
@@ -1734,8 +1752,9 @@ impl<S: RefScheme + 'static> Renderer for OwnRenderer<S> {
             Err(why) => return Ok(Err(why)),
         };
         let args = json!({"action": "make", "ref": track, "count": count, "label": label, "range": {"fromBeat": window.from, "beats": window.beats}});
-        // Asked in the clean-up's own time: copies made while the producer stopped are dropped, never left behind.
-        let made = match self.ask("scratch", args, self.cleanup_signal()).await? {
+        // Asked in the clean-up's own time: copies made while the producer stopped are dropped, never left behind. (A stop
+        // while Kumi waits for a busy DAW has nothing to drop: a refusal made nothing.)
+        let made = match self.ask_while_busy("scratch", args, &signal, || self.cleanup_signal()).await? {
             Ok(made) => made,
             Err(refused) => return Ok(Err(refused.why)),
         };
@@ -1949,11 +1968,11 @@ impl<S: RefScheme + 'static> Renderer for OwnRenderer<S> {
         };
         let source = json!({"id": "items", "what": "track", "ref": reference, "stage": "items"});
         let args = json!({"sources": [source], "range": {"fromBeat": from, "beats": beats}, "preRollBeats": 0});
-        let own_playing = self.own_playing();
-        let started = match self.ask("render", args, signal.clone()).await? {
+        let started = match self.ask_while_busy("render", args, &signal, || signal.clone()).await? {
             Ok(started) => started,
             Err(refused) => return Ok(Err(refused.why)),
         };
+        let own_playing = self.own_playing();
         let done = match self.wait(&started, &signal).await? {
             Ok(done) => done,
             Err(why) => return Ok(Err(why)),
@@ -2522,6 +2541,32 @@ impl<S: RefScheme + 'static> KernelTool for ListeningTool<S> {
     }
 }
 
+/// `ask`'s answer, asked again while the DAW refuses as busy, up to `BUSY_WAIT`: still busy then, that's the answer. `waiting`
+/// hears why, once. Any other answer comes at once, and a stop ends the wait. That includes the host's own word that the DAW
+/// didn't answer in time, which is busy with no code: that's no refusal, and what was asked may have started.
+async fn while_busy<F>(signal: &Signal, waiting: impl Fn(&str), mut ask: impl FnMut() -> F) -> Result<Result<Value, Refused>, RuntimeError>
+where
+    F: std::future::Future<Output = Result<Result<Value, Refused>, RuntimeError>>,
+{
+    let began = tokio::time::Instant::now();
+    let told = Cell::new(false);
+    loop {
+        match ask().await? {
+            Err(refused) if refused.there && refused.code.as_deref() == Some("busy") && began.elapsed() < BUSY_WAIT => {
+                if !told.replace(true) {
+                    waiting(&refused.why);
+                }
+                tokio::select! {
+                    biased;
+                    _ = signal.cancelled() => return Err(RuntimeError::Aborted),
+                    _ = tokio::time::sleep(BUSY_PACE) => {}
+                }
+            }
+            answer => return Ok(answer),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -2554,6 +2599,97 @@ mod tests {
         assert!(!super::verified_plugin_limiter(&device));
     }
     use super::*;
+
+    fn refused(busy: bool, there: bool, code: Option<&str>) -> Refused {
+        Refused { why: "Renoise is still reading".into(), there, busy, code: code.map(str::to_owned), answered: true }
+    }
+
+    fn busy() -> Refused {
+        refused(true, true, Some("busy"))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_render_answered_busy_is_asked_again_until_it_starts_and_says_why_once() {
+        let (asked, heard) = (Cell::new(0), RefCell::new(vec![]));
+        let began = tokio::time::Instant::now();
+        let waiting = |why: &str| heard.borrow_mut().push(why.to_string());
+        let answer = while_busy(&Signal::new(), waiting, || {
+            asked.set(asked.get() + 1);
+            let refuse = asked.get() <= 2;
+            async move { Ok(if refuse { Err(busy()) } else { Ok(json!({"jobId": "1"})) }) }
+        })
+        .await
+        .unwrap();
+        assert_eq!(answer.ok(), Some(json!({"jobId": "1"})));
+        assert_eq!(asked.get(), 3);
+        assert_eq!(began.elapsed(), BUSY_PACE * 2);
+        assert_eq!(*heard.borrow(), ["Renoise is still reading"]);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_daw_still_busy_is_said_once_the_wait_is_over() {
+        let asked = Cell::new(0);
+        let began = tokio::time::Instant::now();
+        let answer = while_busy(
+            &Signal::new(),
+            |_| {},
+            || {
+                asked.set(asked.get() + 1);
+                async { Ok(Err(busy())) }
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(answer.err().map(|refused| refused.why).as_deref(), Some("Renoise is still reading"));
+        assert_eq!(began.elapsed(), BUSY_WAIT);
+        assert_eq!(asked.get(), 21, "once at the start and once a second");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn any_other_refusal_is_said_at_once() {
+        // Not busy; a DAW that's gone; and the host's "didn't answer in time", busy with no code, where the render may
+        // have started and a second would queue behind it.
+        for (busy, there, code) in [(false, true, None), (true, false, Some("busy")), (true, true, None)] {
+            let (asked, heard) = (Cell::new(0), Cell::new(false));
+            let answer = while_busy(
+                &Signal::new(),
+                |_| heard.set(true),
+                || {
+                    asked.set(asked.get() + 1);
+                    async move { Ok(Err(refused(busy, there, code))) }
+                },
+            )
+            .await
+            .unwrap();
+            assert!(answer.is_err());
+            assert_eq!(asked.get(), 1, "busy {busy}, there {there}, code {code:?}");
+            assert!(!heard.get());
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stop_ends_the_wait_for_a_busy_daw_at_once() {
+        let signal = Signal::new();
+        let asked = Cell::new(0);
+        let began = tokio::time::Instant::now();
+        let stopping = signal.clone();
+        let wait = while_busy(
+            &signal,
+            |_| {},
+            || {
+                asked.set(asked.get() + 1);
+                async { Ok(Err(busy())) }
+            },
+        );
+        let stop = async {
+            tokio::time::sleep(BUSY_PACE + BUSY_PACE / 2).await;
+            stopping.cancel();
+        };
+        let (answer, ()) = tokio::join!(wait, stop);
+        assert!(matches!(answer, Err(RuntimeError::Aborted)));
+        assert_eq!(began.elapsed(), BUSY_PACE + BUSY_PACE / 2, "at once, not at the next ask");
+        assert_eq!(asked.get(), 2);
+    }
 
     fn knob(name: &str, raw: f64) -> DeviceKnob {
         DeviceKnob { reference: format!("p:{name}"), name: name.into(), raw, min: 0., max: 1., items: vec![], scale: None }
