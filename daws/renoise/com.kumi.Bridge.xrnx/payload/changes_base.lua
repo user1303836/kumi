@@ -841,22 +841,60 @@ check_read = function(journal, song, entry)
   end
 end
 
+-- (#361 N-S16) The entries of one device, checked as `check_read` checks each, with one read of the device: each through its
+-- own spec, but for `read`, which gives them all the first entry's read.
+local function read_device(journal, song, entries)
+  local read = entries[1].spec.read
+  local done, value = false, nil
+  local function once(object, applied)
+    if not done then done, value = true, read(object, applied) end
+    return value
+  end
+  for _, entry in ipairs(entries) do
+    local spec = entry.spec
+    entry.spec = setmetatable({ read = once }, { __index = spec })
+    local ok, err = pcall(check_read, journal, song, entry)
+    entry.spec = spec
+    if not ok then error(err, 0) end
+  end
+end
+
 -- (accept round 2) What Renoise tells no notifier of when its undo or redo changes it (what a Doofer, Splitter or Notepad holds:
--- `spec.polled`) is read again now and then instead (the tool's timer, about once a second): at most `most` of the newest such
--- entries, each one read of the device's preset data.
-function M.journal_poll(journal, most)
+-- `spec.polled`) is read again now and then instead (the tool's timer, about once a second): the newest `most` such entries.
+-- (#361 N-S16) A device is read once for all its entries, and a call reads at most `each` devices, going on from where the
+-- last call stopped, so a round of reads is spread over the tool's ticks. True when the round is done. (Entries that come
+-- or go between calls are taken as the list is then: a device a round misses, the next one reads.)
+function M.journal_poll(journal, most, each)
   local song = renoise.song()
-  if not song then return 0 end
-  local read = 0
+  if not song then
+    journal.poll_next = nil
+    return true
+  end
+  local devices, by_read, count = {}, {}, 0
   for i = #journal.entries, 1, -1 do
     local entry = journal.entries[i]
-    if read >= (most or 8) then break end
-    if entry.spec and entry.spec.polled and entry.spec.reread and not entry.shape and (entry.state == "applied" or entry.state == "undone") then
-      check_read(journal, song, entry)
-      read = read + 1
+    if count >= (most or 8) then break end
+    local spec = entry.spec
+    if spec and spec.polled and spec.reread and not entry.shape and (entry.state == "applied" or entry.state == "undone") then
+      count = count + 1
+      -- (entries at one place that read alike read one device: a polled kind's `read` takes only the device)
+      local place = entry.place
+      local key = entry
+      if type(place) == "table" and type(place.track) == "number" and type(place.device) == "number" then key = place.track .. "." .. place.device end
+      local of = by_read[spec.read] or {}
+      by_read[spec.read] = of
+      if not of[key] then
+        of[key] = {}
+        devices[#devices + 1] = of[key]
+      end
+      table.insert(of[key], entry)
     end
   end
-  return read
+  local first = journal.poll_next or 1
+  local last = math.min(#devices, first + (each or 2) - 1)
+  for k = first, last do read_device(journal, song, devices[k]) end
+  journal.poll_next = last < #devices and last + 1 or nil
+  return journal.poll_next == nil
 end
 
 -- n-instruments: an operation on a list of instruments, or of what is in one (its samples, phrases, sets, chains, a set's or a

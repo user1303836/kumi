@@ -557,6 +557,14 @@ local function display_from(given, fallback)
   return { title = fallback }
 end
 
+-- (the journal polls each container it keeps about once a second and on every undo: a text read again unchanged is the
+-- same string, whose prints changes_material keeps, so a poll costs Renoise's read of the data and two lookups. One read
+-- for every kind: the poll reads a device once for all the kinds it keeps of it, #361 N-S16)
+local function polled_read(device)
+  local xml = device.active_preset_data
+  return { shape = M.shape_of(xml), content = M.content_of(xml) }
+end
+
 for _, spec in ipairs(XML_KINDS) do
   local kind = spec.kind
   -- (`was`: the device's preset data as the caller read it a moment ago, else it is read here)
@@ -607,12 +615,7 @@ for _, spec in ipairs(XML_KINDS) do
       }
     end,
     reread = reread,
-    -- (the journal polls each container it keeps about once a second and on every undo: a text read again unchanged is the
-    -- same string, whose prints changes_material keeps, so a poll costs Renoise's read of the data and two lookups)
-    read = function(device)
-      local xml = device.active_preset_data
-      return { shape = M.shape_of(xml), content = M.content_of(xml) }
-    end,
+    read = polled_read,
     -- (by content where both say it: a value inside changes it, which no shape tells)
     same = function(a, b)
       if a.content and b.content then return a.content == b.content end

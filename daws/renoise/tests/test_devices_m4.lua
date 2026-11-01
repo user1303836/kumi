@@ -495,6 +495,55 @@ test("devices m4: Renoise's own undo and redo of a value inside a Doofer (no not
   eq(told(), "", "told once")
 end)
 
+-- (a host-made edit of the Doofer at `ref`: its text with `from` replaced by `to` once, applied as `kind`)
+local function doofer_edit(peer, epoch, layout, ref, kind, from, to, desc)
+  local read = call(peer, "preset_read", { ref = ref, epoch = epoch, layout = layout }).result
+  local edited, n = read.presetData:gsub(from, to, 1)
+  eq(n, 1)
+  local done = call(peer, "change_apply", { kind = kind, input = { ref = ref, presetData = edited, shape = read.shape }, fence = { id = read.id }, desc = desc, epoch = epoch, layout = layout })
+  ok(done.result, json.encode(done.error or {}))
+end
+
+test("devices m4: the journal's poll reads a Doofer once a round for all the changes it keeps of it, whatever their kind (#361 N-S16)", function()
+  local _, peer = setup()
+  local epoch, layout = place(peer)
+  local ref = epoch .. ":device:3.2"
+  doofer_edit(peer, epoch, layout, ref, "doofer-device-set", "<Value>1.0</Value>", "<Value>0.5</Value>", "Kumi: inside (kp1)")
+  doofer_edit(peer, epoch, layout, ref, "doofer-macro", "<Name>Macro 1</Name>", "<Name>Drive</Name>", "Kumi: macro (kp2)")
+  doofer_edit(peer, epoch, layout, ref, "doofer-macro", "<Name>Drive</Name>", "<Name>Tone</Name>", "Kumi: macro (kp3)")
+  mock.advance(1100)
+  mock.preset_reads = 0
+  for _ = 1, 5 do mock.advance(1000) end -- five rounds
+  ok(mock.preset_reads >= 4 and mock.preset_reads <= 5, "one read a round for its three changes: " .. mock.preset_reads)
+  -- (and Renoise's undo inside it is still told, for the change it took back)
+  mock.song:undo()
+  mock.advance(1100)
+  call(peer, "ping")
+  local told = {}
+  for _, event in ipairs(peer.events or {}) do
+    if event.name == "undone_in_daw" then told[#told + 1] = event.data.how .. ":" .. event.data.descs[1] end
+  end
+  eq(table.concat(told, ","), "undo:Kumi: macro (kp3)")
+end)
+
+test("devices m4: the journal's poll reads at most two devices a tick, and a round reads each of them (#361 N-S16)", function()
+  local _, peer = setup({ { name = "A", devices = { doofer() } }, { name = "B", devices = { doofer() } }, { name = "C", devices = { doofer() } } })
+  local epoch, layout = place(peer)
+  for t = 1, 3 do
+    doofer_edit(peer, epoch, layout, epoch .. ":device:" .. t .. ".2", "doofer-macro", "<Name>Macro 1</Name>", "<Name>Drive</Name>", "Kumi: macro (kq" .. t .. ")")
+  end
+  mock.advance(1100)
+  -- (a round, a tick (50 ms) at a time)
+  local most, total = 0, 0
+  for _ = 1, 20 do
+    mock.preset_reads = 0
+    mock.advance(50)
+    most, total = math.max(most, mock.preset_reads), total + mock.preset_reads
+  end
+  eq(most, 2, "two devices in a tick, the third in the next")
+  eq(total, 3, "each device once in the round")
+end)
+
 test("devices m4: host-made edits go only to the devices they are for, with their own device type's data", function()
   local _, peer = setup()
   local epoch, layout = place(peer)
