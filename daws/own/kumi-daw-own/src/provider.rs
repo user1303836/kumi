@@ -843,10 +843,12 @@ fn open_command(app: &Path, project: Option<&Path>, macos: bool) -> std::process
     command
 }
 
-/// Opens `app` with `project`, the saved project that was open: one that's gone (moved, or on a drive that's gone) isn't
-/// handed to the DAW, and setup then opens the DAW without it. Whether it opened.
+/// Opens `app` with `project`, the saved project that was open. Only a whole path to a file that's there is handed to the
+/// DAW: one that's gone (moved, or on a drive that's gone) isn't, nor a relative one, which would be looked for from
+/// Kumi's own folder and, starting with `-`, reach the DAW (or `open`) as an option. Setup then opens the DAW without
+/// it. Whether it opened.
 fn open_with(app: &Path, project: Option<&Path>) -> bool {
-    if project.is_some_and(|project| !project.is_file()) {
+    if project.is_some_and(|project| !project.is_absolute() || !project.is_file()) {
         return false;
     }
     open_app(app, project)
@@ -1003,7 +1005,8 @@ mod tests {
         assert_eq!(args(&open_command(app, None, false)), ("/opt/renoise/renoise".into(), vec![]));
     }
 
-    /// A project that's gone isn't handed to the DAW, which setup then opens without it; one that's there is.
+    /// A project that's gone, or named by a relative path, isn't handed to the DAW, which setup then opens without it; a
+    /// whole path to one that's there is.
     #[cfg(all(unix, not(target_os = "macos")))]
     #[test]
     fn a_project_thats_gone_isnt_handed_to_the_daw() {
@@ -1013,6 +1016,11 @@ mod tests {
         std::fs::write(&script, format!("#!/bin/sh\nprintf '%s' \"$1\" > '{0}.part' && mv '{0}.part' '{0}'\n", said.display())).unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(!open_with(&script, Some(&dir.path().join("Moved.rpp"))));
+        // A relative path, even to a file there from Kumi's own folder, and one that would read as an option.
+        let here =
+            std::fs::read_dir(".").unwrap().flatten().find(|entry| entry.path().is_file()).map(|entry| PathBuf::from(entry.file_name()));
+        assert!(here.is_some_and(|here| !open_with(&script, Some(&here))));
+        assert!(!open_with(&script, Some(Path::new("-psn_0_1.rpp"))));
         let project = dir.path().join("Night Drive.rpp");
         std::fs::write(&project, "<REAPER_PROJECT\n>\n").unwrap();
         assert!(open_with(&script, Some(&project)));
