@@ -297,8 +297,8 @@ const PLUGIN: &str = "local i = new_instrument('K plugin', 0) song:instrument(i)
 const SLOT: &str = "local q, p = new_slot() return {q = q, p = p}";
 /// What a Doofer holds: its devices' types and their gains, as its preset data says.
 const INSIDE: &str = r#"local x = pdata(song:track($t):device(2)) local out = {} for k in x:gmatch('type="(%w+)"') do out[#out + 1] = k end for v in x:gmatch('<Volume>%s*<Value>([^<]*)</Value>') do out[#out + 1] = v end return out"#;
-/// Why Kumi's undo of lines refuses after Renoise's undo and redo of them.
-const LINES_REDO: &str = "Renoise's redo of lines can't be told from its undo bringing back the producer's like lines (review MUST 6, 10): Kumi's undo refuses after it, and HISTORY says Renoise put them back";
+/// When Kumi's undo of lines works after Renoise's undo and redo of them, and when it refuses.
+const LINES_REDO: &str = "Renoise's redo of lines is told for sure when it leaves nothing to redo (#393: an undo past Kumi's step would have left that step to redo), and Kumi's undo then works; with something left to redo it can't be told from Renoise's undo bringing back the producer's like lines (review MUST 6, 10): Kumi's undo refuses, and HISTORY says Renoise may have put them back";
 /// Why Renoise's undo can't take a plug-in instrument's change back now and then.
 const AU_UNDO: &str = "Renoise's undo history goes empty now and then once AU plug-in instruments load and unload (can_undo() false before its undo; as after n-devices' device inventory): its undo takes nothing back, HISTORY stays as it was, Kumi's undo works";
 

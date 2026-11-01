@@ -807,6 +807,14 @@ function M.journal_check(journal)
   check_slots(journal, song)
 end
 
+-- (#393) Whether Renoise's last undo or redo was a redo: nothing is left to redo. An undo always leaves the step it took back
+-- to redo, and an edit since empties the redo list and is told by `redoable`. So lines that read as a change of Kumi's wrote
+-- them again, with nothing left to redo, are Renoise's redo of that change: an undo past it would have left it to redo.
+local function redo_sure(song)
+  local ok, sure = pcall(function() return song:can_undo() and not song:can_redo() end)
+  return ok and sure == true
+end
+
 -- An entry the journal reads again (its spec's `reread`, `read`, `same`): undone when it reads as before the change and not as
 -- the change left it, redone when it reads as the change left it again.
 check_read = function(journal, song, entry)
@@ -826,10 +834,12 @@ check_read = function(journal, song, entry)
       -- (what Kumi wrote is there again, from Renoise's redo: the lines' count of edits since Kumi's step starts again here,
       -- so Kumi's undo isn't refused for the redo's own writes; an edit after it still is. Not where the redo is unsure:
       -- lines the producer had and Renoise's undo brought back read the same as Kumi's, review MUST 10)
-      if journal.retouched and not spec.unsure_redo and type(entry.applied) == "table" then journal.retouched(entry.applied) end
-      if spec.unsure_redo then
+      local unsure = spec.unsure_redo and not redo_sure(song)
+      if journal.retouched and not unsure and type(entry.applied) == "table" then journal.retouched(entry.applied) end
+      if unsure then
         -- (Renoise doesn't say which step its undo or redo took: lines that read as Kumi wrote them again may be its redo
-        -- of Kumi's step, or its undo past it of an older row insert that put the producer's like lines there)
+        -- of Kumi's step, or its undo past it of an older row insert that put the producer's like lines there. With
+        -- something left to redo, either may be so)
         entry.state = "unsure"
         queue(journal, entry.desc, "unsure")
       else
