@@ -354,7 +354,8 @@ instruments_.instrument_spec(instruments_.settings_kind({
 
 instruments_.instrument_spec(instruments_.settings_kind({
   kind = "plugin-suspend", noun = "auto-suspend", undoable = true, order = { "autoSuspend" },
-  -- (Renoise's undo takes it back and no notifier tells, lab 2026-11-01: read again now and then)
+  -- (Renoise's undo takes it back and no notifier tells, lab 2026-11-01: read again now and then. A poll can't tell that from a
+  -- hand switching it back, or a plug-in swapped in that reads off: the row then says Renoise's undo, for so rare a setting)
   polled = true,
   object = function(objects) return objects.instrument.plugin_properties end,
   label = function(label) return label .. "'s plug-in" end,
