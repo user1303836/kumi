@@ -487,6 +487,38 @@ fn failed(message: &str) -> Value {
     json!({"error": message, "code": "failed"})
 }
 
+/// The instrument file the host wrote for the tool to load ([`write_beside`]), as what the bridge's `change_apply`
+/// (`input.file`) or `change_restore` (`material.write.file`) is sent names it: the host removes it once the bridge has
+/// answered. The tool removes it too, but with Lua's `os.remove`, which on Windows can't reach a folder whose name
+/// isn't in the system's code page (#399, N-N9).
+pub(crate) fn host_file(params: &Value) -> Option<std::path::PathBuf> {
+    if params.get("kind").and_then(Value::as_str) != Some(KIND) {
+        return None;
+    }
+    let file = params.pointer("/input/file").or_else(|| params.pointer("/material/write/file")).and_then(Value::as_str)?;
+    file.ends_with(".kumi.xrni").then(|| file.into())
+}
+
+/// How old an instrument file in Kumi's work folder is before the host takes it for one left behind: one in use lasts a
+/// change's few seconds (the tool's own sweep waits as long).
+const STALE_WORK: std::time::Duration = std::time::Duration::from_secs(3600);
+
+/// Removes the instrument files (`*.xrni`) left in Kumi's work folder (`<bridge root>/work`) before `now` by
+/// [`STALE_WORK`] or more: a host or Renoise that quit mid-change, or a tool that couldn't remove its own (#399, N-N9).
+/// Anything else in the folder stays. How many it removed.
+pub fn sweep_work(dir: &std::path::Path, now: std::time::SystemTime) -> usize {
+    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    entries
+        .flatten()
+        .filter(|entry| entry.path().extension().is_some_and(|extension| extension.eq_ignore_ascii_case("xrni")))
+        .filter(|entry| {
+            let modified = entry.metadata().ok().filter(std::fs::Metadata::is_file).and_then(|metadata| metadata.modified().ok());
+            modified.is_some_and(|modified| now.duration_since(modified).is_ok_and(|age| age >= STALE_WORK))
+        })
+        .filter(|entry| std::fs::remove_file(entry.path()).is_ok())
+        .count()
+}
+
 /// The edited Instrument.xml packed with the saved file's other entries, written beside it for the tool to load.
 fn write_beside(export: &Value, bytes: &[u8], text: &str) -> Result<String, Value> {
     let file = export.get("file").and_then(Value::as_str).ok_or_else(|| failed("the bridge didn't say where it saved the instrument"))?;

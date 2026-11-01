@@ -610,6 +610,21 @@ fn apply_params(record: &Record) -> Value {
     params
 }
 
+/// Removes the file the host wrote for the bridge to load (`file`) once the bridge has answered, done or refused. A call
+/// that may still run in the DAW (no answer in time, the connection lost, the bridge unsure how it ended) leaves it, as
+/// the DAW may yet load it: the next host's sweep of the work folder removes it.
+fn remove_once_answered(file: Option<std::path::PathBuf>, outcome: &Result<Value, crate::host::CallError>) {
+    let Some(file) = file else { return };
+    let may_still_run = match outcome {
+        Err(crate::host::CallError::Closed(_) | crate::host::CallError::Timeout) => true,
+        Err(crate::host::CallError::Bridge { code, .. }) => code == daw_bridge::wire::code::UNCERTAIN,
+        _ => false,
+    };
+    if !may_still_run {
+        let _ = std::fs::remove_file(file);
+    }
+}
+
 fn refusal(refusal: Refusal) -> (Value, bool) {
     (json!({"error": refusal.message, "code": refusal.code}), true)
 }
@@ -772,7 +787,10 @@ impl crate::host::Host {
         } else {
             apply_params(&record)
         };
-        match self.call("change_apply", params, &record.instance, CHANGE_TIMEOUT).await {
+        let host_file = crate::renoise::instruments::host_file(&params);
+        let outcome = self.call("change_apply", params, &record.instance, CHANGE_TIMEOUT).await;
+        remove_once_answered(host_file, &outcome);
+        match outcome {
             Ok(answer) => {
                 let answer = self.with_added_content(&record, answer).await;
                 self.journal().end_apply(&id, &key, Ok(&answer))
@@ -835,7 +853,10 @@ impl crate::host::Host {
             place(&mut params, record.epoch.as_deref(), record.layout);
             params
         };
-        match self.call("change_restore", params, &record.instance, CHANGE_TIMEOUT).await {
+        let host_file = crate::renoise::instruments::host_file(&params);
+        let outcome = self.call("change_restore", params, &record.instance, CHANGE_TIMEOUT).await;
+        remove_once_answered(host_file, &outcome);
+        match outcome {
             Ok(answer) => self.journal().end_undo(&id, &key, Ok(&answer)),
             // Sent, and no answer (or the bridge couldn't say how it ended): the restore may have run. Kumi won't undo it
             // blindly again.
