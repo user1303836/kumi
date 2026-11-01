@@ -59,7 +59,7 @@ pub struct Patcher {
 pub struct MaxBox {
     /// The box's fields as Max wrote them; an embedded patcher keeps its place as a null.
     pub fields: Map<String, Value>,
-    /// The patcher embedded in the box: a [p], a bpatcher with its patcher embedded, a gen~.
+    /// The patcher embedded in the box: a [p], a bpatcher with its patcher embedded, a gen~, an mc.gen~'s (in its data).
     pub patcher: Option<Patcher>,
     /// The file the box loads (an abstraction, a bpatcher, a poly~'s voice), read through [`Files`]: its name and
     /// patcher. It's never written back into the box.
@@ -142,10 +142,10 @@ impl MaxBox {
             },
             _ => return None,
         };
-        let patcher = match fields.get_mut("patcher") {
-            Some(inner) if inner.is_object() => Some(Patcher::read_within(&inner.take(), files, open)),
-            _ => None,
-        };
+        // An mc.gen~'s wrapper keeps its patcher in its data, which keeps its place as a null too.
+        let wrapper = fields.get("text").and_then(Value::as_str).and_then(|text| text.split_whitespace().next()) == Some("mc.gen~");
+        let embedded = if wrapper { fields.get_mut("data").and_then(|data| data.get_mut("patcher")) } else { fields.get_mut("patcher") };
+        let patcher = embedded.filter(|inner| inner.is_object()).map(|inner| Patcher::read_within(&inner.take(), files, open));
         let mut item = MaxBox { fields, patcher, file: None, code: None };
         item.code = Code::read(&item, files);
         if item.patcher.is_none() && open.len() < MAX_DEPTH {
@@ -170,7 +170,7 @@ impl MaxBox {
                 let words = self.words();
                 match words.first().copied()? {
                     "poly~" | "mc.poly~" => words.get(1).map(|name| with_extension(name, ".maxpat")),
-                    "gen~" | "gen" | "mc.gen~" => words
+                    "gen~" | "gen" | "mc.gen~" | "mcs.gen~" => words
                         .iter()
                         .position(|word| *word == "@gen")
                         .and_then(|at| words.get(at + 1))
@@ -187,7 +187,10 @@ impl MaxBox {
         let mut fields = self.fields.clone();
         match &self.patcher {
             Some(patcher) => {
-                fields.insert("patcher".into(), patcher.to_value());
+                match fields.get_mut("data").and_then(Value::as_object_mut).filter(|data| data.get("patcher") == Some(&Value::Null)) {
+                    Some(data) => data.insert("patcher".into(), patcher.to_value()),
+                    None => fields.insert("patcher".into(), patcher.to_value()),
+                };
             }
             None => {
                 if fields.get("patcher") == Some(&Value::Null) {
@@ -418,5 +421,25 @@ mod tests {
         assert!(inner.boxes[0].file.is_none(), "an abstraction inside itself isn't read again");
         assert!(patcher.boxes[2].inner().is_none());
         assert_eq!(patcher.to_document(), device, "files read aren't written into the boxes");
+    }
+
+    /// #310: gen~'s multichannel forms load the file @gen names, and none is an abstraction named like the form.
+    #[test]
+    fn gens_multichannel_forms_load_the_file_their_at_gen_names() {
+        let file = |text: &str| json!({ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "comment", "text": text } }], "lines": [] } });
+        let files = Library(HashMap::from([
+            ("shared.gendsp".to_string(), file("the code")),
+            ("mc.gen~.maxpat".to_string(), file("not this")),
+            ("mcs.gen~.maxpat".to_string(), file("not this")),
+        ]));
+        let device = json!({ "patcher": { "boxes": [
+            { "box": { "id": "obj-1", "maxclass": "newobj", "text": "mc.gen~ @gen shared @chans 4" } },
+            { "box": { "id": "obj-2", "maxclass": "newobj", "text": "mcs.gen~ @gen shared" } },
+            { "box": { "id": "obj-3", "maxclass": "newobj", "text": "mc.gen~ @chans 4" } },
+            { "box": { "id": "obj-4", "maxclass": "newobj", "text": "mcs.gen~" } }
+        ], "lines": [] } });
+        let patcher = Patcher::read(&device, &files);
+        let loads = |at: usize| patcher.boxes[at].file.as_ref().map(|(name, _)| name.as_str());
+        assert_eq!([loads(0), loads(1), loads(2), loads(3)], [Some("shared.gendsp"), Some("shared.gendsp"), None, None]);
     }
 }

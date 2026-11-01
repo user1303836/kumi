@@ -234,7 +234,10 @@ impl Survey {
 /// How the survey counts a box: a Max object by its class, a gen operator as gen:…, an abstraction as one, never by
 /// its own name.
 fn object_class(patcher: &Patcher, item: &MaxBox) -> String {
-    if item.maxclass() == "newobj" && item.file.is_some() && !matches!(item.class(), "poly~" | "mc.poly~" | "gen~" | "gen" | "mc.gen~") {
+    if item.maxclass() == "newobj"
+        && item.file.is_some()
+        && !matches!(item.class(), "poly~" | "mc.poly~" | "gen~" | "gen" | "mc.gen~" | "mcs.gen~")
+    {
         return "(abstraction)".into();
     }
     let class = catalog().canonical(item.class()).to_string();

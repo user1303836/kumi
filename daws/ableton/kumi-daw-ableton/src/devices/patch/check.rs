@@ -1281,6 +1281,26 @@ mod tests {
         assert_eq!(report.looked_at[PARAM_TWICE], 3);
     }
 
+    /// #310: what an mc.gen~ holds is read from its wrapper's data, checked as a gen~'s is, and goes back where it was.
+    #[test]
+    fn an_mc_gens_code_is_checked_as_a_gens_is() {
+        let gen = json!({ "classnamespace": "dsp.gen", "boxes": [{ "box": { "id": "obj-1", "maxclass": "codebox",
+            "code": "Param drive(1);\nParam drive(10);\nout1 = in1 * drive;" } }], "lines": [] });
+        let patcher = read(json!({ "boxes": [
+            { "box": { "id": "obj-1", "maxclass": "newobj", "text": "mc.gen~ @chans 2", "patching_rect": [40., 60., 110., 22.], "numinlets": 1, "numoutlets": 1,
+                "outlettype": ["multichannelsignal"], "data": { "patcher": gen.clone() }, "wrapper_uniquekey": "u1" } },
+            { "box": { "id": "obj-2", "maxclass": "newobj", "text": "dict", "patching_rect": [240., 60., 40., 22.], "numinlets": 2, "numoutlets": 4,
+                "outlettype": ["", "", "", ""], "data": { "patcher": { "a thing of its own": 1 } } } },
+        ], "lines": [] }));
+        let report = check(&patcher);
+        assert!(rules(&report).contains(&PARAM_TWICE), "{:?}", report.findings);
+        assert_eq!(report.looked_at[PARAM_TWICE], 2, "both of its declarations, and none in the dict's data");
+        let boxes = patcher.to_value();
+        assert_eq!(boxes["boxes"][0]["box"]["data"]["patcher"]["boxes"], gen["boxes"], "back in its data");
+        assert_eq!(boxes["boxes"][0]["box"]["patcher"], Value::Null, "not moved out of it");
+        assert_eq!(boxes["boxes"][1]["box"]["data"]["patcher"], json!({ "a thing of its own": 1 }), "another object's data stays its own");
+    }
+
     #[test]
     fn a_parameter_the_device_banks_while_it_runs_is_in_a_bank() {
         let device = |cords: Vec<Value>| {
