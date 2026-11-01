@@ -619,7 +619,7 @@ impl Reads {
         let row = match Ref::parse(reference).map_err(bad)? {
             Ref::Track(id) => rows::track_row_detailed(reaper, self.track_by_id(reaper, proj, &id)?, &self.groups_under(reaper, proj)),
             Ref::Item(guid) => rows::item_row(reaper, proj, self.item_by_guid(reaper, proj, &guid)?),
-            Ref::Take(guid) => take_row(reaper, self.take_by_guid(reaper, proj, &guid)?, None),
+            Ref::Take(guid) => take_row(reaper, proj, self.take_by_guid(reaper, proj, &guid)?, None),
             Ref::Fx(guid) => {
                 let fx = self.fx_by_guid(reaper, proj, &guid)?;
                 // m4-r-fxenv: one FX read alone also says its state chunk, presets, wet and delta.
@@ -844,7 +844,7 @@ impl Reads {
                 break;
             }
             if let Some(take) = reaper.take_at(item, position as i32) {
-                if !pager.push(take_row(reaper, take, Some((position, active == Some(take))))) {
+                if !pager.push(take_row(reaper, proj, take, Some((position, active == Some(take))))) {
                     next = Some(position);
                     break;
                 }
@@ -1198,7 +1198,7 @@ fn chain_position(reaper: &Reaper, fx: Fx) -> usize {
     siblings.iter().position(|s| *s == fx).unwrap_or(0)
 }
 
-fn take_row(reaper: &Reaper, take: Take, place: Option<(usize, bool)>) -> Value {
+fn take_row(reaper: &Reaper, proj: Project, take: Take, place: Option<(usize, bool)>) -> Value {
     let mut row = json!({
         "ref": refs::take_ref(&reaper.take_guid(take)),
         "name": rows::clip(&reaper.take_name(take)),
@@ -1212,6 +1212,7 @@ fn take_row(reaper: &Reaper, take: Take, place: Option<(usize, bool)>) -> Value 
     if let Some((notes, ccs, _)) = reaper.midi_counts(take).filter(|_| reaper.take_is_midi(take)) {
         row["noteCount"] = notes.into();
         row["ccCount"] = ccs.into();
+        item_rows::midi_ticks(reaper, proj, take, &mut row);
     }
     item_rows::take_details(reaper, take, &mut row, place.is_none());
     row
@@ -1845,6 +1846,51 @@ mod tests {
             (&takes[0]["ref"], &takes[0]["source"], &takes[0]["active"], &takes[0]["noteCount"]),
             (&json!("r:take:{TAKE-S1}"), &json!("mid"), &json!(true), &json!(2))
         );
+    }
+
+    /// (#606) A MIDI take says the ticks REAPER puts its notes on: 960 a quarter note at playrate 1 from its item's start, a
+    /// start offset's tick where it has one, whatever its playrate; an audio take says nothing of ticks.
+    #[test]
+    fn a_midi_take_says_where_its_ticks_fall() {
+        let lab = Lab::new();
+        let ticks = |reference: &str| {
+            let row = lab.rows(json!({"ref": reference}))[0].clone();
+            (row.get("ticksPerQuarter").cloned(), row.get("tickAtStart").cloned())
+        };
+        assert_eq!(ticks("r:take:{TAKE-S1}"), (Some(json!(960.0)), Some(json!(0.0))));
+        fake::with(|s| {
+            let take = &mut s.tracks[2].items[0].takes[0];
+            take.extra.insert("D_STARTOFFS".into(), 0.0123);
+            take.extra.insert("D_PLAYRATE".into(), 1.07);
+        });
+        assert_eq!(ticks("r:take:{TAKE-S1}"), (Some(json!(960.0)), Some(json!(23.616))));
+        let listed = &lab.rows(json!({"kind": "take", "parent": "r:item:{ITEM-S1}"}))[0];
+        assert_eq!((&listed["ticksPerQuarter"], &listed["tickAtStart"]), (&json!(960.0), &json!(23.616)));
+        assert_eq!(ticks("r:take:{TAKE-K1}"), (None, None));
+    }
+
+    /// A pooled MIDI take is a MIDI take: REAPER calls its source MIDIPOOL (lab, 7.82), and it was read as something else, its
+    /// notes refused.
+    #[test]
+    fn a_pooled_midi_take_is_a_midi_take() {
+        let lab = Lab::new();
+        fake::with(|s| s.tracks[2].items[0].takes[0].source = Some("MIDIPOOL".into()));
+        let row = &lab.rows(json!({"ref": "r:take:{TAKE-S1}"}))[0];
+        assert_eq!((&row["source"], &row["noteCount"], &row["ticksPerQuarter"]), (&json!("mid"), &json!(2), &json!(960.0)));
+        assert_eq!(lab.rows(json!({"kind": "note", "parent": "r:take:{TAKE-S1}"})).len(), 2);
+        assert_eq!(lab.rows(json!({"kind": "item", "parent": "r:track:{CCCC}"}))[0]["source"], "mid");
+    }
+
+    /// (#606, lab 7.82) Ticks that bend across an item have no straight line: an item that ignores the project tempo bent by
+    /// hundreds of ticks at a tempo change inside it; ones that keep to the project's beats run straight, a short item's too.
+    #[test]
+    fn ticks_that_bend_across_an_item_have_no_line() {
+        let (per_quarter, first) = item_rows::straight(|qn| 23.616 + (qn - 16.0) * 1027.2, 16.0, 24.0).unwrap();
+        assert!((per_quarter - 1027.2).abs() < 1e-9 && (first - 23.616).abs() < 1e-9, "{per_quarter} {first}");
+        let bent = |qn: f64| if qn < 18.0 { (qn - 16.0) * 1024.0 } else { 2048.0 + (qn - 18.0) * 768.0 };
+        assert_eq!(item_rows::straight(bent, 16.0, 24.0), None);
+        assert!(item_rows::straight(|qn| qn * 960.0, 4.0, 4.25).is_some());
+        assert_eq!(item_rows::straight(|_| f64::NAN, 0.0, 4.0), None);
     }
 
     #[test]

@@ -249,7 +249,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
             .filter(|name| !name.is_empty())
             .map_or("the MIDI item".to_owned(), |name| format!("“{name}”"));
         let take = row.get("takeRef").and_then(Value::as_str).ok_or_else(|| format!("{name} has no take"))?.to_owned();
-        if row.get("source").and_then(Value::as_str) != Some("mid") {
+        if row.get("source").and_then(Value::as_str) != Some(daw_bridge::contract::MIDI_SOURCE) {
             return Err(format!("{name} isn't MIDI: groove reads {}'s notes", self.profile().vocab.midi_clip));
         }
         let length = row.get("lengthBeats").and_then(Value::as_f64).unwrap_or(f64::INFINITY);

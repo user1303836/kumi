@@ -324,7 +324,6 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             ));
         }
         // (the directions the model left to Kumi: distinct from the ones it gave and from each other)
-        let words = self.backend.words();
         let directions = self.backend.directions(&set.source);
         let mut used: Vec<String> = given.iter().map(|recipe| recipe.direction.clone()).collect();
         let mut recipes = given;
@@ -353,7 +352,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 }
             };
             if self.backend.digest(&current) != take.digest {
-                skipped.push(format!("V{number} was edited in {} since Kumi wrote it: left as it is", words.app));
+                skipped.push(format!("{}: left as it is", edited_line(&self.backend, number, &current)));
                 continue;
             }
             // (a take of a source with nothing in it varies itself)
@@ -485,7 +484,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             let current = self.backend.current(&set, &row, signal).await?;
             if self.backend.digest(&current) != set.take(number).expect("a picked take").digest {
                 if !named.contains(&number) {
-                    skipped.push(format!("V{number} was edited in {app} since Kumi wrote it: left as it is (name it to drop it anyway)"));
+                    skipped.push(format!("{}: left as it is (name it to drop it anyway)", edited_line(&self.backend, number, &current)));
                     continue;
                 }
                 edited.push(format!("V{number}"));
@@ -997,6 +996,16 @@ fn bounds_of(input: &JsonObject) -> Bounds {
 
 /// A rewrite's change, what the take holds now and its line: what was drawn, or (when only part of it went in) what the backend
 /// says it holds, the line saying why.
+/// A found take that holds other than Kumi kept it: edited since, or, where the DAW put what Kumi wrote where Kumi can't follow
+/// it, maybe (and why).
+fn edited_line<B: VariationsBackend>(backend: &B, number: usize, current: &B::Material) -> String {
+    let app = backend.words().app;
+    match backend.unsure(current) {
+        Some(why) => format!("Kumi can't tell whether V{number} was edited in {app} since it wrote it ({why})"),
+        None => format!("V{number} was edited in {app} since Kumi wrote it"),
+    }
+}
+
 fn holding<M: Clone>(drawn: &Drawn<M>, done: Rewritten<M>) -> (String, M, String) {
     let (change, instead) = done;
     let mut line = take_line(drawn, &change);

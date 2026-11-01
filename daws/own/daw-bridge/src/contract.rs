@@ -28,6 +28,9 @@ const REF_KINDS: [&str; 18] = [
     "line",
 ];
 
+/// What an item's or a take's row says of a MIDI source (`source`): REAPER's extension writes it, Kumi's REAPER side reads it.
+pub const MIDI_SOURCE: &str = "mid";
+
 /// Whether text is shaped like a ref: `<prefix>:<kind>:<rest>`, one word with no spaces.
 pub fn looks_like_ref(text: &str) -> bool {
     if text.chars().any(char::is_whitespace) {

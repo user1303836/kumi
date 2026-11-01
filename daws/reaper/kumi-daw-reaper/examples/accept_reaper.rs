@@ -428,7 +428,8 @@ struct Case {
     again: Option<&'static str>,
     /// Why an undo brings it back under new ids (said in its note): undos are compared without GUIDs.
     new_ids: Option<&'static str>,
-    /// Why Kumi's undo leaves more than the switch as it was (REAPER keeps a parameter's modulation settings once made):
+    /// Why Kumi's undo leaves more than the switch as it was (REAPER lists a parameter's modulation settings until it next loads
+    /// the track, though none of them is saved):
     /// Kumi's undo is compared on the `active` probes only.
     switch_only: Option<&'static str>,
 }
@@ -534,7 +535,8 @@ const TEMPO_MARK: &str =
     r#"local t = T() out("t", tref(t)) reaper.SetTempoTimeSigMarker(0, -1, 30, -1, -1, 125, 0, 0, false) reaper.UpdateTimeline()"#;
 const NOTHING: &str = r#"local t = T() out("t", tref(t))"#;
 
-const MOD_KEPT: &str = "REAPER keeps a parameter's modulation settings once made: Kumi's undo turns them off (said)";
+const MOD_KEPT: &str =
+    "REAPER lists a parameter's modulation settings until it next loads the track: Kumi's undo puts them back, off (said)";
 
 const ENV_REF: &[(&str, &str, &str)] = &[("e", r#"{"kind":"envelope","parent":"$t"}"#, "0:ref")];
 const AITEM_REF: &[(&str, &str, &str)] =
