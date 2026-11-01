@@ -115,9 +115,11 @@ words and views.
   REAPER's time signature through its tempo map ("7/8"), Renoise's lines per
   beat ("LPB 4").
 - **FOCUS in REAPER** follows what has REAPER's focus:
-  - the **arrange view**: the tracks around the selected one, indented by folder
-    (a collapsed folder hides its tracks), their items as bars, markers and
-    regions, the loop and the playhead;
+  - the **arrange view**: the stretch it shows, scrolled and zoomed as in
+    REAPER ("bars 9–16 of 64"), and the tracks around the selected one, indented
+    by folder (a collapsed folder hides its tracks); their items as bars, a row
+    for each fixed lane (a lane that doesn't play is faint), markers, regions
+    from start to end with their names, the loop and the playhead;
   - the **MIDI editor**: the take's notes as a small piano roll, with up to three
     lanes under it (CC, pitch, program, channel pressure, poly aftertouch) and
     "and n more lanes";

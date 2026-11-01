@@ -458,6 +458,33 @@ async fn reapers_focus_is_read_while_focus_shows_and_its_bodies_come_neutral() {
             let Some(FocusBody::Timeline(strip)) = reaper.focus_body(&BodyRequest::Timeline, Signal::new()).await.unwrap() else { panic!("the arrange view") };
             assert_eq!(host.asked.borrow().last().unwrap().1, json!({"kind": "arrange", "limit": 24, "around": BASS}), "centred on the selected track");
             assert_eq!((strip.lanes.as_ref().map(Vec::len), strip.track_count), (Some(1), Some(200)));
+
+            // (#399 K35) The stretch REAPER's arrange view shows, as the producer scrolled and zoomed it: read at once
+            // when REAPER first says what it shows, and from then on; a small scroll waits for the next read, and a far
+            // one is read again at once.
+            let arrange = |[from, to]: [f64; 2]| {
+                json!({"length": 256, "view": {"from": from, "to": to}, "window": {"from": from, "to": to}, "trackCount": 1,
+                    "tracks": [{"ref": BASS, "name": "Bass", "depth": 0, "items": []}]})
+            };
+            let windows = |view: [f64; 2]| {
+                host.answers.borrow_mut().push(("focus_body", arrange(view), false));
+                let before = host.asked.borrow().len();
+                let reaper = reaper.clone();
+                let host = host.clone();
+                async move {
+                    let Some(FocusBody::Timeline(strip)) = reaper.focus_body(&BodyRequest::Timeline, Signal::new()).await.unwrap() else {
+                        panic!("the arrange view")
+                    };
+                    let asked: Vec<Option<Value>> = host.asked.borrow()[before..].iter().map(|(_, args)| args.get("window").cloned()).collect();
+                    (asked, strip.window)
+                }
+            };
+            let window = |from: f64, to: f64| Some(json!({"from": from, "to": to}));
+            assert_eq!(windows([32., 64.]).await, (vec![None, window(32., 64.)], Some([32., 64.])), "the view, once REAPER says it");
+            assert_eq!(windows([32., 64.]).await, (vec![window(32., 64.)], Some([32., 64.])), "then that stretch only");
+            assert_eq!(windows([36., 68.]).await.0, vec![window(32., 64.)], "a small scroll: read next time");
+            assert_eq!(windows([36., 68.]).await.0, vec![window(36., 68.)]);
+            assert_eq!(windows([128., 160.]).await.0, vec![window(36., 68.), window(128., 160.)], "far: read again at once");
             reaper.close().await.unwrap();
         })
         .await;

@@ -436,6 +436,9 @@ pub struct ArrangementLoop {
 pub struct Locator {
     pub name: String,
     pub position: f64,
+    /// Where it ends, for a span of the timeline (REAPER's region); none for a point (a marker, Live's locator).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<f64>,
 }
 
 /// The Arrangement at a glance, in beats. Names are data.
@@ -467,6 +470,10 @@ pub struct ArrangementStrip {
     /// The time selection's start and end (REAPER's), in beats.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub time_selection: Option<[f64; 2]>,
+    /// The stretch of the timeline its lanes and marks were read for, in beats, where the DAW shows a window of it
+    /// (REAPER's arrange view, as scrolled and zoomed there); none for all of it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window: Option<[f64; 2]>,
 }
 
 /// A place the meter is known from: the bar it falls in (1 for the first, as the DAW counts), how far into that bar it
@@ -513,6 +520,9 @@ pub struct TimelineLane {
     /// A folder collapsed all the way: its tracks are hidden.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub collapsed: bool,
+    /// How many fixed lanes its items sit on (REAPER's fixed item lanes); none when they share one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fixed_lanes: Option<u32>,
 }
 
 /// An item on a lane: where it starts and how long it is, in beats, its name, and whether it's muted or selected.
@@ -525,6 +535,12 @@ pub struct TimelineItem {
     pub muted: bool,
     #[serde(default)]
     pub selected: bool,
+    /// The fixed lane it sits on (0 the first), on a track with them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lane: Option<u32>,
+    /// Its lane doesn't play (REAPER's comping: another lane plays instead).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub silent: bool,
 }
 
 /// A tracker pattern (or phrase) around its cursor, as FOCUS draws it: each track's lines in the DAW's own notation.
