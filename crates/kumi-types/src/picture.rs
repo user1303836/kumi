@@ -1297,6 +1297,31 @@ mod tests {
     }
 
     #[test]
+    fn a_record_saved_before_runs_and_counted_routes_reads_and_one_saved_now_reads_back_the_same() {
+        // As an older Kumi saved it: no run, routes without a count.
+        let older: crate::contracts::ChangeRecord = serde_json::from_value(serde_json::json!({
+            "id":"c1","family":"mixer","title":"Kick: output to Drum Bus","state":"applied","at":1,"track":{"name":"Kick"},
+            "picture":{"kind":"routes","routes":[{"from":"Kick","to":"Drum Bus","change":"changed"}]}
+        }))
+        .unwrap();
+        assert_eq!(older.batch, None);
+        let Some(ChangePicture::Routes { routes, more }) = &older.picture else { panic!("{:?}", older.picture) };
+        assert_eq!((routes.len(), *more), (1, 0));
+        // As this one saves it: its run and a new kind, read back as they were.
+        let mut now = older.clone();
+        now.batch = Some("0123456789ab:set_routing".into());
+        now.picture =
+            Some(ChangePicture::Marks { before: vec![], after: vec![PictureMark { name: "Drop".into(), at: 64. }], values: vec![] });
+        let saved = serde_json::to_value(&now).unwrap();
+        assert_eq!(serde_json::from_value::<crate::contracts::ChangeRecord>(saved.clone()).unwrap(), now);
+        // And without the run and the picture (what an older Kumi keeps of it, saving again), it's the record it was.
+        let mut kept = saved;
+        kept.as_object_mut().unwrap().retain(|key, _| !matches!(key.as_str(), "batch" | "picture"));
+        let read: crate::contracts::ChangeRecord = serde_json::from_value(kept).unwrap();
+        assert_eq!(read, crate::contracts::ChangeRecord { batch: None, picture: None, ..now });
+    }
+
+    #[test]
     fn a_picture_this_kumi_cant_read_leaves_its_record_readable() {
         let record = |picture: serde_json::Value| {
             serde_json::from_value::<crate::contracts::ChangeRecord>(serde_json::json!({
