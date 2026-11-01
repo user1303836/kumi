@@ -1866,4 +1866,3 @@ test("reads: a pattern track's automations come in the track's order, with none 
   walk(track, pattern_track({}), function() error("no automation to give") end)
   eq(reads, 0, "with none, no parameter is read")
 end)
-
