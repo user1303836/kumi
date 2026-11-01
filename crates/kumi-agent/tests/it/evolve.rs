@@ -62,6 +62,16 @@ fn crossover_only_mixes_one_chain_and_stuck_slots_are_reseeded() {
     assert_eq!(e.slots.iter().find(|s| s.name == "B").unwrap().score, None);
     assert_eq!(e.propose().iter().find(|t| t.slot == "B").unwrap().how, TrialHow::Start);
 }
+/// Gain a plug-in adds after its sound isn't its sound: it only drives what's after it harder.
+#[test]
+fn a_search_leaves_a_plugins_output_and_makeup_gain_alone() {
+    let mut all = knobs("Compressor", &[0.5; 6]);
+    for (k, name) in all.iter_mut().zip(["Output Gain", "Global Gain", "Adjustment (dB)", "Auto Makeup Gain", "Makeup", "Gain Reduction"]) {
+        k.name = name.into();
+    }
+    assert_eq!(searchable(&all, MOST_KNOBS).iter().map(|k| k.name.as_str()).collect::<Vec<_>>(), vec!["Gain Reduction"]);
+}
+
 #[test]
 fn search_leaves_silencing_switches_levels_and_safety_limiter_alone_and_snaps_steps() {
     let mut all = knobs("Operator", &[1.0, 0.8, 0.5, 0.5, 3.0, 1.0]);

@@ -25,13 +25,14 @@ pub struct ScreenPick {
 }
 
 /// A part six seconds or longer is screened on its most characteristic three seconds of the reference (of its loudness
-/// over time, `lufs`, the slices of `slice` seconds whose loudness is highest and moves most); None for a shorter part.
-/// `part_beats` is the part's length in beats at `tempo`.
-pub fn screen_pick(lufs: &[Option<f64>], tempo: f64, part_beats: f64, slice: f64) -> Option<ScreenPick> {
+/// over time, `lufs`, spread evenly over its `seconds`, the slices whose loudness is highest and moves most); None for a
+/// shorter part. `part_beats` is the part's length in beats at `tempo`.
+pub fn screen_pick(lufs: &[Option<f64>], seconds: f64, tempo: f64, part_beats: f64) -> Option<ScreenPick> {
     if part_beats * 60. / tempo < 6. {
         return None;
     }
     let beats = round(3. * tempo / 60.).max(2.);
+    let slice = seconds / lufs.len().max(1) as f64;
     let across = round(beats * 60. / tempo / slice).max(1.);
     let mut best = (0, f64::NEG_INFINITY);
     if across.is_finite() && across <= lufs.len() as f64 {

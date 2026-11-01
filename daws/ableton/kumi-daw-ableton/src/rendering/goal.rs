@@ -4,15 +4,17 @@ use super::*;
 use async_trait::async_trait;
 use kumi_agent::core::{
     evolve::Knob,
-    goal_rig::{check_slots, device_label, knob_key as key, moved as moved_knobs, not_in_the_search, tell_generation, GoalDaw},
+    goal_rig::{
+        check_slots, device_label, given_values, knob_key as key, moved as moved_knobs, moved_or_went, not_in_the_search, tell_generation,
+        GoalDaw,
+    },
 };
-use kumi_common::js::number::parse;
 use kumi_listening::{
     engine::Listening,
     goal::{hear, screen_pick, tell, tell_timing, trial_key, HeardCache, Told},
 };
 use kumi_media::audio::analyze::Analysis;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 #[derive(Clone)]
 struct Knobs {
     reference: String,
@@ -87,23 +89,31 @@ fn is_final_limiter(device: &JsonObject) -> bool {
         _ => false,
     }
 }
-fn by_device(read: &Knobs, moved: &[(Knob, f64)]) -> IndexMap<String, Vec<Value>> {
-    let by_key: HashMap<_, _> = read.knobs.iter().map(|knob| (key(knob), knob)).collect();
+/// A knob as the chain has it now, with its device's ref: on its device at its place under the same name, else on the one
+/// device of that name, where the chain moved (Live's refs are places, and a device put in above shifts them). None when it
+/// went, or when several could be it.
+fn knob_now<'a>(read: &'a Knobs, knob: &Knob) -> Option<(&'a str, &'a Knob)> {
+    let (at, name) = knob.device.split_once(':')?;
+    let named = |at: &usize| read.devices.get(*at).is_some_and(|device| device_name(device) == name);
+    let place = at.parse().ok().filter(|at| named(at)).or_else(|| {
+        let mut same = (0..read.devices.len()).filter(|at| named(at));
+        same.next().filter(|_| same.next().is_none())
+    })?;
+    let label = device_label(place, name);
+    let now = read.knobs.iter().find(|now| now.device == label && now.name == knob.name)?;
+    Some((read.devices[place].get("ref")?.as_str()?, now))
+}
+/// Knobs at their values, by the device each is on now; and the ones that moved or went.
+fn by_device(read: &Knobs, moved: &[(Knob, f64)]) -> (IndexMap<String, Vec<Value>>, Vec<Knob>) {
     let mut devices: IndexMap<String, Vec<Value>> = IndexMap::new();
+    let mut lost = vec![];
     for (knob, value) in moved {
-        let Some(now) = by_key.get(&key(knob)) else {
-            continue;
-        };
-        let Some(index) = parse(knob.device.split(':').next().unwrap_or("")).filter(|n| *n >= 0. && n.fract() == 0. && n.is_finite())
-        else {
-            continue;
-        };
-        let Some(reference) = read.devices.get(index as usize).and_then(|device| device.get("ref")).and_then(Value::as_str) else {
-            continue;
-        };
-        devices.entry(reference.into()).or_default().push(json!({"parameterRef":now.r#ref,"value":value}));
+        match knob_now(read, knob) {
+            Some((reference, now)) => devices.entry(reference.into()).or_default().push(json!({"parameterRef":now.r#ref,"value":value})),
+            None => lost.push(knob.clone()),
+        }
     }
-    devices
+    (devices, lost)
 }
 impl LiveRenderer {
     async fn read_knobs(&self, name: &str, signal: Signal) -> Result<Knobs, RuntimeError> {
@@ -206,11 +216,7 @@ impl LiveRenderer {
             }
         }
         let rig = goal.rig.get_mut();
-        // (Live's slices are as long as the analysis says, to the tenth of a second)
-        let slice = parse_float(&goal.reference.over_time.every)
-            .filter(|v| *v != 0. && !v.is_nan())
-            .unwrap_or(goal.reference.seconds / goal.reference.over_time.lufs.len().max(1) as f64);
-        if let Some(pick) = screen_pick(&goal.reference.over_time.lufs, tempo, rig.beats, slice) {
+        if let Some(pick) = screen_pick(&goal.reference.over_time.lufs, goal.reference.seconds, tempo, rig.beats) {
             // A stop or a failed read here leaves the rig as much as one before: it's taken down, as above.
             let reference = match listening.heard_reference(named, &pick.request(request, tempo), signal).await {
                 Ok(reference) => reference,
@@ -283,9 +289,14 @@ impl Goal {
             return Err(RuntimeError::plain(not_in_the_search(slot)));
         }
         let fresh = self.render.read_knobs(slot, signal.clone()).await?;
-        let moved: Vec<_> =
-            knobs.iter().enumerate().map(|(index, knob)| (knob.clone(), values.get(index).copied().unwrap_or(f64::NAN))).collect();
-        let devices = by_device(&fresh, &moved);
+        let moved = given_values(knobs, values);
+        let (devices, lost) = by_device(&fresh, &moved);
+        if !lost.is_empty() {
+            let mut names: Vec<String> =
+                lost.iter().map(|knob| knob.device.split_once(':').map_or(&*knob.device, |(_, name)| name).to_owned()).collect();
+            names.dedup();
+            return Err(RuntimeError::plain(moved_or_went(slot, &names)));
+        }
         self.render
             .history
             .quietly(None, async {
@@ -403,17 +414,17 @@ impl GoalRig for Goal {
         let result: Result<IndexMap<String, Render>, RuntimeError> = async {
             let mut plans = vec![];
             for trial in trials {
-                // (a value a trial doesn't give is sent as it is, as Live's goal has always sent it)
-                let moved = moved_knobs(trial, self.current.borrow().get(&trial.slot), false);
+                let moved = moved_knobs(trial, self.current.borrow().get(&trial.slot));
                 if moved.is_empty() {
                     continue;
                 }
                 let fresh = self.knobs_now(&trial.slot, signal.clone()).await?;
-                let devices = by_device(&fresh, &moved);
-                plans.push((trial, moved, fresh, devices));
+                let (devices, lost) = by_device(&fresh, &moved);
+                plans.push((trial, moved, fresh, devices, lost));
             }
-            for (trial, moved, fresh, devices) in plans {
-                let mut refused = HashSet::new();
+            for (trial, moved, fresh, devices, lost) in plans {
+                // (a knob whose device moved or went can't be set: the search leaves it be)
+                let mut refused: HashSet<String> = lost.iter().map(key).collect();
                 r.history
                     .quietly(None, async {
                         for (reference, values) in devices {
@@ -429,11 +440,8 @@ impl GoalRig for Goal {
                                 {
                                     signal.check()?;
                                     if let Some((knob, _)) = moved.iter().find(|(knob, _)| {
-                                        fresh
-                                            .knobs
-                                            .iter()
-                                            .find(|fresh| key(fresh) == key(knob))
-                                            .is_some_and(|fresh| Some(fresh.r#ref.as_str()) == value["parameterRef"].as_str())
+                                        knob_now(&fresh, knob)
+                                            .is_some_and(|(_, now)| Some(now.r#ref.as_str()) == value["parameterRef"].as_str())
                                     }) {
                                         refused.insert(key(knob));
                                     }
@@ -643,12 +651,6 @@ impl GoalDaw for LiveTidy<'_> {
     }
 }
 
-fn parse_float(text: &str) -> Option<f64> {
-    let text = kumi_common::js::string::trim_start(text);
-    let expression = regex::Regex::new(r"^[+-]?(?:Infinity|(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)").unwrap();
-    expression.find(text).and_then(|found| found.as_str().parse().ok())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -659,6 +661,46 @@ mod tests {
         for lost in [None, Some(0.), Some(f64::NAN)] {
             assert_eq!(heard_tempo(lost, 120.), 120., "{lost:?}");
         }
+    }
+
+    fn chain(names: &[&str]) -> Knobs {
+        let device = |at: usize, name: &&str| object(json!({"ref": format!("7:device:0:d{at}"), "name": name}));
+        let knob = |at: usize, name: &&str| Knob {
+            r#ref: format!("7:parameter:0:{at}:0"),
+            device: device_label(at, name),
+            name: "Tone".into(),
+            value: 0.5,
+            min: 0.,
+            max: 1.,
+            step: None,
+        };
+        Knobs {
+            reference: "7:track:0".into(),
+            chain: String::new(),
+            devices: names.iter().enumerate().map(|(at, name)| device(at, name)).collect(),
+            knobs: names.iter().enumerate().map(|(at, name)| knob(at, name)).collect(),
+        }
+    }
+
+    #[test]
+    fn a_knob_is_found_at_its_place_or_on_the_one_device_of_its_name_once_the_chain_moved() {
+        let tone = chain(&["Synth", "EQ"]).knobs[1].clone();
+        let found = |names: &[&str]| knob_now(&chain(names), &tone).map(|(device, now)| (device.to_owned(), now.r#ref.clone()));
+        let at = |n: usize| Some((format!("7:device:0:d{n}"), format!("7:parameter:0:{n}:0")));
+        assert_eq!(found(&["Synth", "EQ"]), at(1));
+        assert_eq!(found(&["New", "Synth", "EQ"]), at(2), "a device put in above moved it");
+        assert_eq!(found(&["EQ", "EQ", "Synth"]), at(1), "still at its place, under its name");
+        assert_eq!(found(&["EQ", "Synth", "EQ"]), None, "moved, and either could be it");
+        assert_eq!(found(&["Synth"]), None, "it went");
+    }
+
+    #[test]
+    fn a_knob_whose_device_went_isnt_sent() {
+        let (read, tone) = (chain(&["Synth"]), chain(&["Synth", "EQ"]).knobs.clone());
+        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)]);
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices["7:device:0:d0"], [json!({"parameterRef": "7:parameter:0:0:0", "value": 0.7})]);
+        assert_eq!(lost, [tone[1].clone()]);
     }
 
     #[test]

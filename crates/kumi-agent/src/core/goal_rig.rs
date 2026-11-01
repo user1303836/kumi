@@ -35,18 +35,26 @@ pub fn check_slots(trials: &[GenerationTrial], holds: impl Fn(&str) -> bool) -> 
     }
 }
 
-/// A trial's knobs at its values (NaN where it gives none), those that moved from `last` (the values last set on its
-/// slot, by key): one with no value set yet always moves. With `finite_only`, a value that isn't a number never does.
-pub fn moved(trial: &GenerationTrial, last: Option<&IndexMap<String, f64>>, finite_only: bool) -> Vec<(Knob, f64)> {
-    trial
-        .knobs
-        .iter()
-        .enumerate()
-        .map(|(at, knob)| (knob.clone(), trial.values.get(at).copied().unwrap_or(f64::NAN)))
-        .filter(|(knob, value)| {
-            (!finite_only || value.is_finite())
-                && last.and_then(|last| last.get(&knob_key(knob))).is_none_or(|last| (last - value).abs() > 1e-6)
-        })
+/// Knobs at their values: what may be sent to a DAW, so none where a value isn't given or isn't a number.
+pub fn given_values(knobs: &[Knob], values: &[f64]) -> Vec<(Knob, f64)> {
+    knobs.iter().zip(values).filter(|(_, value)| value.is_finite()).map(|(knob, value)| (knob.clone(), *value)).collect()
+}
+
+/// Why nothing was set: the devices of a slot that the search moved knobs of moved or went meanwhile.
+pub fn moved_or_went(slot: &str, devices: &[String]) -> String {
+    let named: Vec<String> = devices.iter().map(|name| format!("“{name}”")).collect();
+    format!(
+        "{} moved or went on “{slot}” since the search began, so Kumi set nothing there: start the goal again to search the chain as it is now",
+        named.join(", ")
+    )
+}
+
+/// A trial's knobs at its values, those that moved from `last` (the values last set on its slot, by key): one with no value
+/// set yet always moves.
+pub fn moved(trial: &GenerationTrial, last: Option<&IndexMap<String, f64>>) -> Vec<(Knob, f64)> {
+    given_values(&trial.knobs, &trial.values)
+        .into_iter()
+        .filter(|(knob, value)| last.and_then(|last| last.get(&knob_key(knob))).is_none_or(|last| (last - value).abs() > 1e-6))
         .collect()
 }
 

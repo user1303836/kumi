@@ -67,7 +67,7 @@ pub struct Trial {
     pub how: TrialHow,
 }
 static LEAVE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(device on|on|power|output|out|volume|gain|input|master|global volume|limiter.*|ceiling|macro [0-9]+|chain selector|pan|panorama)$").unwrap()
+    Regex::new(r"(?i)^(device on|on|power|output|out|volume|gain|input|master|global volume|global gain|adjustment \(db\)|output gain|.*makeup.*|limiter.*|ceiling|macro [0-9]+|chain selector|pan|panorama)$").unwrap()
 });
 static SHAPING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(filter|freq|cutoff|res(onance)?|q\b|attack|decay|sustain|release|\benv|shape|wave|tone|timbre|bright|color|colour|drive|dist|sat|detune|fine|coarse|level|mix|amount|depth|rate|spread|width|noise|body|decay|damp|stiff|mallet|feedback|morph|position|pw\b|pulse|glide)").unwrap()
