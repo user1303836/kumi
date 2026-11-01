@@ -618,7 +618,7 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | `KUMI_RENOISE_PREFS_DIR` | Renoise の設定：`V<x.y.z>` フォルダー、またはそれを収めたフォルダー |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Kumi が見つけられないときの、Live の Remote Scripts フォルダー |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Kumi が Live の Extensions フォルダーを見つけられないときに、`kumi bridge` が Kumi の拡張機能を入れ、`kumi doctor` がそれを探す場所 |
-| `KUMI_MAX` | Max for Live デバイスを作るときに Kumi がオブジェクトを読む Max：その `C74` フォルダー（Windows では `resources`）、またはそれを含む Max（`Max.app`、または `Max.exe` のあるフォルダー）。指定がなければ、開いている Live の Max、次に最新の Live の Max |
+| `KUMI_MAX` | Max for Live デバイスを作るときに Kumi がオブジェクトを読む Max：その `C74` フォルダー（Windows では `resources`）、またはそれを含む Max（`Max.app`、または `Max.exe` のあるフォルダー）。これだけが使われ、そこに Max がなければ Kumi はそう伝え、ほかの Max は読みません。指定がなければ、開いている Live の Max、次に最新の Live の Max |
 | `KUMI_BRIDGE_WAIT_SECONDS` | `kumi bridge` が Live の接続を待つ時間。`0` で待たない |
 | `KUMI_NO_UPDATE_CHECK` | 任意の値で起動時の新バージョン確認を無効にする |
 | `HTTPS_PROXY`、`HTTP_PROXY`、`ALL_PROXY`、`NO_PROXY` | Kumi が経由するプロキシと、経由しないアドレス（[プロキシ](#プロキシと学校や職場のネットワーク)） |

@@ -281,6 +281,20 @@ pub const LOOKS: [&str; 10] = ["Appearance", "Color", "Description", "Font", "Im
 pub const NO_MAX: &str = "Max wasn't found on this machine, so Kumi can't read its reference pages: \
 docs.cycling74.com/reference/<object>/ has them on the web.";
 
+/// What to say when KUMI_MAX is set and holds no Max: it's used alone, so it's the thing to fix. None when it isn't set.
+pub fn wrong_kumi_max() -> Option<String> {
+    let named = std::env::var_os("KUMI_MAX").filter(|named| !named.is_empty())?;
+    Some(format!(
+        "KUMI_MAX names no Max ({}): point it at Max's C74 folder or a Max that holds one, or unset it.",
+        Path::new(&named).display()
+    ))
+}
+
+/// What to say when there's no Max to read: why, if KUMI_MAX is why.
+pub fn no_max() -> String {
+    wrong_kumi_max().unwrap_or_else(|| NO_MAX.to_string())
+}
+
 /// A description cut to `most` characters at a word.
 fn brief(text: &str, most: usize) -> String {
     if text.chars().count() <= most {
