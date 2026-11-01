@@ -137,7 +137,7 @@ words and views.
     their levels, and its MIDI hardware output;
   - the **mixer** window, undocked (a docked mixer can't be told apart): the
     master and the tracks around the selected one, with volume, pan, mute, solo,
-    arm and a peak meter.
+    arm and a peak meter that moves as the track sounds.
 - **FOCUS in Renoise** follows its middle frame and panels (Renoise doesn't say
   which has the keyboard, so FOCUS goes by what changes):
   - the **Pattern Editor**: the lines around the cursor (or the playhead,

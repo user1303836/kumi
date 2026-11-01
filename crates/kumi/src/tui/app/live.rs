@@ -10,6 +10,14 @@ pub(super) struct Beat {
     /// The DAW's words for its time ("7/8", "LPB 4").
     pub meter: Option<String>,
 }
+/// How long the mixer's meters wait for their next read: while something sounds, while it's all quiet, and after a DAW
+/// that doesn't answer them (an older extension: the meters still move with the mixer's own, slower read).
+const LEVELS_SOUNDING: Duration = Duration::from_millis(200);
+const LEVELS_QUIET: Duration = Duration::from_secs(1);
+const LEVELS_REFUSED: Duration = Duration::from_secs(5);
+/// Below this a meter draws as silence.
+const LEVELS_SILENT_DB: f64 = -60.0;
+
 impl TuiApp {
     pub(super) fn read_tree(&self, again: bool) {
         if !self.session().can_show(BodyKind::Tree) {
@@ -215,6 +223,28 @@ impl TuiApp {
             }
         }
         state.refreshing = shown;
+        // The mixer's meters move apart from its body, in a read of their own.
+        if shown != Some(BodyKind::Mixer) {
+            if let Some(timer) = state.levels_refresh.take() {
+                timer.abort();
+            }
+        } else if state.levels_refresh.is_none() {
+            let weak = Rc::downgrade(&self.0);
+            state.levels_refresh = Some(tokio::task::spawn_local(async move {
+                let mut wait = LEVELS_QUIET;
+                loop {
+                    tokio::time::sleep(wait).await;
+                    let Some(inner) = weak.upgrade() else {
+                        return;
+                    };
+                    let app = TuiApp(inner);
+                    if app.0.state.borrow().closing {
+                        return;
+                    }
+                    wait = app.read_levels().await;
+                }
+            }));
+        }
         if let Some(shown) = shown {
             if state.tree_refresh.is_none() {
                 let weak = Rc::downgrade(&self.0);
@@ -247,6 +277,34 @@ impl TuiApp {
             }
         } else if let Some(timer) = state.tree_refresh.take() {
             timer.abort();
+        }
+    }
+    /// Reads the meters of the mixer FOCUS shows, where it has meters, into its strips; how long to wait before the next read.
+    /// One read at a time: the wait starts when this one is answered, so a slow DAW is asked less.
+    async fn read_levels(&self) -> Duration {
+        let metered = matches!(&self.0.state.borrow().own.body, Some(FocusBody::Mixer(mixer)) if mixer.levels);
+        let Some(BodyRequest::Mixer { track_ref }) = self.own_request().filter(|_| metered) else { return LEVELS_QUIET };
+        let answer = self.session().op(op::FocusBody { request: BodyRequest::Levels { track_ref } }).await;
+        let Ok(Some(FocusBody::Levels(levels))) = answer else { return LEVELS_REFUSED };
+        let mut state = self.0.state.borrow_mut();
+        let playing = state.transport.as_ref().is_some_and(|transport| transport.playing);
+        let Some(FocusBody::Mixer(mixer)) = state.own.body.as_mut() else { return LEVELS_QUIET };
+        let mut moved = false;
+        for level in &levels {
+            if let Some(strip) = mixer.strips.iter_mut().find(|strip| strip.track_ref.as_ref() == Some(&level.track_ref)) {
+                moved |= strip.peak_db.replace(level.peak_db) != Some(level.peak_db);
+            }
+        }
+        // (a track monitored while the DAW is stopped sounds too)
+        let sounding = playing || levels.iter().any(|level| level.peak_db.iter().any(|db| *db > LEVELS_SILENT_DB));
+        drop(state);
+        if moved {
+            self.0.scheduler.request();
+        }
+        if sounding {
+            LEVELS_SOUNDING
+        } else {
+            LEVELS_QUIET
         }
     }
     /// The body of a DAW's own view FOCUS shows now: what the producer touched last, where they are, when the DAW
