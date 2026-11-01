@@ -146,6 +146,67 @@ async fn a_tool_that_cant_come_out_is_named_with_what_to_delete_by_hand() {
     assert!(said.contains(&format!("): delete {} by hand.", tool.display())), "{said}");
 }
 
+/// #399 K13: setup's restart hands REAPER no project, because its own start-up setting says what comes back: read from
+/// the reaper.ini of the REAPER setup saw open, not the default folder's, and only as measured.
+#[tokio::test(flavor = "current_thread")]
+async fn what_reaper_opens_by_itself_goes_by_the_setting_of_the_reaper_setup_saw_open() {
+    use kumi_daw::setup::Reopens;
+    let dir = tempfile::tempdir().unwrap();
+    let resource = dir.path().join("Portable REAPER");
+    std::fs::create_dir_all(&resource).unwrap();
+    // Another REAPER's setting, in the default folder, says otherwise.
+    for default in ["Library/Application Support/REAPER", "AppData/Roaming/REAPER", ".config/REAPER"] {
+        std::fs::create_dir_all(dir.path().join(default)).unwrap();
+        std::fs::write(dir.path().join(default).join("reaper.ini"), "[REAPER]\nloadlastproj=16\n").unwrap();
+    }
+    let env = Env::from([
+        ("HOME".into(), dir.path().to_string_lossy().into_owned()),
+        ("USERPROFILE".into(), dir.path().to_string_lossy().into_owned()),
+        ("APPDATA".into(), dir.path().join("AppData/Roaming").to_string_lossy().into_owned()),
+        ("KUMI_HOME".into(), dir.path().join(".kumi").to_string_lossy().into_owned()),
+        ("KUMI_REAPER_RESOURCE_DIR".into(), resource.to_string_lossy().into_owned()),
+        ("KUMI_PROCESSES".into(), format!("7 {}", dir.path().join("reaper").display())),
+    ]);
+    let ini = resource.join("reaper.ini");
+    let rows: [(&[u8], Reopens); 13] = [
+        (b"", Reopens::Everything),
+        (b"[REAPER]\nlastproject=/a.rpp\n", Reopens::Everything),
+        (b"[REAPER]\nloadlastproj=17\n", Reopens::Everything),
+        (b"[REAPER]\r\nloadlastproj=17\r\n", Reopens::Everything),
+        // (an older value REAPER hasn't rewritten yet)
+        (b"[REAPER]\nloadlastproj=1\n", Reopens::Everything),
+        (b"[REAPER]\nloadlastproj=3\n", Reopens::Everything),
+        (b"[REAPER]\nloadlastproj=16\n", Reopens::Front),
+        (b"[REAPER]\nloadlastproj=18\n", Reopens::Unknown),
+        (b"[REAPER]\nloadlastproj=19\n", Reopens::Unknown),
+        (b"[REAPER]\nloadlastproj=20\n", Reopens::Unknown),
+        // One path that isn't UTF-8 doesn't get in the way.
+        (b"[REAPER]\nlastproject=/caf\xe9.rpp\nloadlastproj=16\n", Reopens::Front),
+        // Only [REAPER]'s setting counts.
+        (b"[Recent]\nloadlastproj=16\n[REAPER]\nloadlastproj=19\n", Reopens::Unknown),
+        // A file that isn't REAPER's own doesn't say.
+        (b"not an ini file\n", Reopens::Unknown),
+    ];
+    for (file, reopens) in rows {
+        std::fs::write(&ini, file).unwrap();
+        let setup = kumi_daw_reaper::PROVIDER.setup(&env, Rc::default(), false, Rc::default());
+        assert_eq!(setup.reopens(), Reopens::Unknown, "no REAPER seen open yet");
+        assert!(setup.open_live().await.is_some());
+        assert_eq!(setup.reopens(), reopens, "{}", String::from_utf8_lossy(file));
+    }
+    // It can't be read: nothing is claimed.
+    std::fs::remove_file(&ini).unwrap();
+    let setup = kumi_daw_reaper::PROVIDER.setup(&env, Rc::default(), false, Rc::default());
+    assert!(setup.open_live().await.is_some());
+    assert_eq!(setup.reopens(), Reopens::Unknown);
+    // Renoise's says nothing yet.
+    let (_renoise_dir, mut renoise_env) = renoise_home();
+    renoise_env.insert("KUMI_PROCESSES".into(), format!("7 {}", _renoise_dir.path().join("Renoise").display()));
+    let setup = kumi_daw_renoise::PROVIDER.setup(&renoise_env, Rc::default(), false, Rc::default());
+    assert!(setup.open_live().await.is_some());
+    assert_eq!(setup.reopens(), Reopens::Unknown);
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn the_doctor_says_nothing_of_a_daw_this_user_never_used() {
     let dir = tempfile::tempdir().unwrap();

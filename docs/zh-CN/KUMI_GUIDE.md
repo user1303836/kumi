@@ -127,7 +127,11 @@ Kumi 可以在 REAPER 7 及更高版本和 Renoise 3.5 及更高版本中工作�
 
 **设置。** 运行 `kumi`，然后打开 REAPER 或 Renoise，在 Kumi 之前或之后打开都可以：Kumi 使用开着的那个 DAW。第一次时，设置会先登录，再进行 **Connect to REAPER**（或 **Connect to Renoise**），在 Linux 上也一样：Kumi 放好扩展（或工具）并打开这个 DAW。
 
-- **DAW 正开着时：** DAW 只在启动时加载 Kumi 的桥接，而 Kumi 从不替你退出它。选择 **I'll quit it**，自己退出 DAW（它会先提示保存）；Kumi 放好桥接后会重新打开它。你保存过的工程或歌曲在 DAW 的最近文件列表中。
+- **DAW 正开着时：** DAW 只在启动时加载 Kumi 的桥接，而 Kumi 从不替你退出它。选择 **I'll quit it**，自己退出 DAW（它会先提示保存）；Kumi 放好桥接后会重新打开它。打开什么由 DAW 自己的启动设置决定：
+  - REAPER（初始设置）：你打开的所有工程标签页都会回来。
+  - REAPER（设为打开上一个工程）：回来的是你放在最前面的工程，其他工程在它的最近工程列表中。
+  - REAPER（设为以新工程开始）：按你的选择从新工程开始，保存过的工程在它的最近工程列表中。
+  - Renoise：你保存过的歌曲在它的最近歌曲列表中。
 - **没有安装时：** Kumi 会告诉你去哪里获取（reaper.fm、renoise.com）；装好后选 **Look again** 重新检查。如果开着的是旧版 REAPER 或 Renoise，Kumi 会说明，并让它保持打开。
 - **从未打开过时：** Kumi 会打开它一次，让它建立自己的文件夹；Kumi 请你退出时退出它，Kumi 会带着桥接再次打开。
 - 按 **Esc** 和在 Live 中一样，会把这一步留到以后：Kumi 暂时在不连接 DAW 的情况下聊天。

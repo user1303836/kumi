@@ -18,7 +18,7 @@ use kumi_ai::providers::{table, SignIn};
 use kumi_common::abort;
 use kumi_daw::{
     provider::{older_than, EnableStep, Installed as LiveInstalled},
-    setup::DawSetup,
+    setup::{DawSetup, Reopens},
 };
 use kumi_types::version::KUMI_VERSION;
 use tokio::sync::oneshot;
@@ -176,6 +176,19 @@ fn open_recent() -> String {
         "If you saved your Set, it's in Live's File › Open Recent Set.".into()
     } else {
         format!("If you saved your {}, {} lists it with its recent {}.", words.place, words.app, words.places)
+    }
+}
+
+/// What's said of the Set after Kumi's restart didn't hand it over: nothing where the DAW brings it all back by itself.
+fn after_restart(live: &Rc<dyn DawSetup>) -> Option<String> {
+    let words = crate::daw::words();
+    match live.reopens() {
+        Reopens::Unknown => Some(open_recent()),
+        Reopens::Everything => None,
+        Reopens::Front => Some(format!(
+            "{} opens the {} you had in front, if you saved it; it lists any others with its recent {}.",
+            words.app, words.place, words.places
+        )),
     }
 }
 
@@ -678,7 +691,8 @@ impl TuiApp {
                     let app = open.or(held);
                     let (opened, with_set) = reopen(&live, app.clone(), set).await;
                     if closed_by_kumi && !with_set {
-                        self.setup_show(|s| s.set_note = Some(open_recent()));
+                        let note = after_restart(&live);
+                        self.setup_show(|s| s.set_note = note);
                     }
                     self.setup_show(|s| s.holding = false);
                     let connecting = live.clone();
@@ -810,7 +824,7 @@ impl TuiApp {
         let Some(app) = held else { return LiveStep::Later(None) };
         if live.open_live().await.is_none() {
             let (opened, with_set) = reopen(live, Some(app), set).await;
-            let recent = if with_set { String::new() } else { format!(" {}", open_recent()) };
+            let recent = after_restart(live).filter(|_| !with_set).map_or(String::new(), |note| format!(" {note}"));
             let app = crate::daw::words().app;
             return LiveStep::Later(Some(if opened {
                 format!("{app} is opening again.{recent}")
