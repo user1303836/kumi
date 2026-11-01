@@ -323,20 +323,30 @@ test("phrases: lines back already, the columns Kumi showed still shown: Kumi's u
   eq(newest(), "Kumi: undo arp (k602)")
 end)
 
-test("phrases: after Renoise's undo and redo of Kumi's lines, with nothing left to redo, Kumi's undo puts the cells back (#393)", function()
-  local env, peer = setup()
-  local record = change(peer, "phrase-write", { ref = pref(place(peer), 2, 1), lines = { { line = 1, notes = { { col = 1, note = "D-4" } } } } })
-  H.tick(2)
-  mock.song:undo()
-  H.tick(3)
-  eq(cell(2, 1, 2).note_string, "---", "Renoise's undo")
-  mock.song:redo()
-  H.tick(3)
-  eq(cell(2, 1, 2).note_string, "D-4", "Renoise's redo")
-  local undone = restore(peer, "phrase-write", record)
-  ok(undone.result, json.encode(undone.error or {}))
-  eq(cell(2, 1, 2).note_string, "---")
-end)
+-- (#393) Each kind of change to a phrase's lines, the newest step, after Renoise's undo and redo: Kumi's undo works.
+for _, case in ipairs({
+  { "phrase-write", "---", "D-4", function(E) return { ref = pref(E, 2, 1), lines = { { line = 1, notes = { { col = 1, note = "D-4" } } } } } end },
+  { "phrase-clear", "D-4", "---", function(E) return { ref = pref(E, 2, 1) } end, function() mock.ops.set_phrase_note(2, 1, 2, 1, { note = 50 }) end },
+}) do
+  test("phrases: " .. case[1] .. ", then Renoise's undo and redo: Kumi's undo puts the cells back (#393)", function()
+    local env, peer = setup()
+    if case[5] then
+      case[5]()
+      H.tick(2)
+    end
+    local record = change(peer, case[1], case[4](place(peer)))
+    H.tick(2)
+    mock.song:undo()
+    H.tick(3)
+    eq(cell(2, 1, 2).note_string, case[2], "Renoise's undo")
+    mock.song:redo()
+    H.tick(3)
+    eq(cell(2, 1, 2).note_string, case[3], "Renoise's redo")
+    local undone = restore(peer, case[1], record)
+    ok(undone.result, json.encode(undone.error or {}))
+    eq(cell(2, 1, 2).note_string, case[2])
+  end)
+end
 
 test("phrases: an older sample-offset spelling is written as Renoise's 0Sxx, and the change says so", function()
   local env, peer = setup()

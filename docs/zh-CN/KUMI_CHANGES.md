@@ -275,7 +275,7 @@ Kumi 在连接时读取桥接的版本，不会提供桥接版本过旧而无法
 
 每种情况下 HISTORY 都如实记录：Kumi 会拒绝，或说明它做不到什么。
 
-- **Renoise：** 对行的编辑（`notes_write`、`notes_clear`、`notes_transpose`、`notes_humanize`、`lines_copy`、`phrase_write`、`phrase_clear`）在 Renoise 中撤销再重做之后，如果已没有可重做的步骤，Kumi 对它们的撤销可以正常进行。如果还有（你连之后的步骤也撤销了，只重做了一部分），Kumi 分不清是 Renoise 的重做，还是你自己写下的相同的行，它的撤销会被拒绝。该行会显示 "Renoise may have redone it"；Renoise 的撤销可以撤回它。
+- **Renoise：** 对行的编辑（`notes_write`、`notes_clear`、`notes_transpose`、`notes_humanize`、`lines_copy`、`phrase_write`、`phrase_clear`）在 Renoise 中撤销再重做之后，Kumi 的撤销只对最新的那次改动有效：之后没有其他编辑，也没有可重做的步骤。其他情况下，Kumi 分不清是 Renoise 的重做，还是你自己写下的相同的行，它的撤销会被拒绝。该行会显示 "Renoise may have redone it"；Renoise 的撤销可以撤回它。
 - **Renoise：** 在长时间的使用中，载入并移除 AU 插件乐器之后，它的撤销历史有时会变空（原因尚不清楚）；这时 Renoise 的撤销无法撤回 `plugin_load`、`plugin_param` 或 `plugin_set`。`plugin_preset` 尚未在有多个音色（program）的插件上测试过。
 - **REAPER：** 所有轨道一次全部被替换时，如果这个改动创建了撤销点（例如删除所有轨道再插入其他轨道的动作），工程仍是同一个工程。没有迹象表明这是一次编辑时，它会被当作另一个工程：不创建撤销点的脚本、REAPER 对这类改动的撤销或重做、7.79 之前的 REAPER，或撤销历史已到上限。这时 Kumi 对它的引用会失效，由模型重新读取。
 - **REAPER：** Kumi 撤销参数调制时会关闭它的开关，但会保留调制设置，因为 REAPER 一旦建立就会保留它们；该行会注明。

@@ -151,22 +151,52 @@ test("lines: a block copied to later lines, to another track and to another patt
   H.no_dialogs()
 end)
 
-test("lines: after Renoise's undo and redo of a copy, with nothing left to redo, Kumi's undo puts the destination back (#393)", function()
-  local _, peer = setup()
-  local E = K.place(peer)
-  local record = K.change(peer, "lines-copy", { pattern = K.ref(E, "pattern", 1), track = K.ref(E, "track", 3), first = 0, last = 3, line = 8 }, "Kumi: copy (kn25)")
-  eq(notes(1, 3, 1, 16), "1=C-4 3=E-4 5=OFF 9=C-4 11=E-4")
-  H.tick(2)
-  mock.song:undo()
-  H.tick(3)
-  eq(notes(1, 3, 1, 16), "1=C-4 3=E-4 5=OFF", "Renoise's undo")
-  mock.song:redo()
-  H.tick(3)
-  eq(notes(1, 3, 1, 16), "1=C-4 3=E-4 5=OFF 9=C-4 11=E-4", "Renoise's redo")
-  ok(K.restore(peer, record).result)
-  eq(notes(1, 3, 1, 16), "1=C-4 3=E-4 5=OFF")
-  H.no_dialogs()
-end)
+-- (#393) Each kind of change to a pattern's lines, the newest step, after Renoise's undo and redo: told, and Kumi's undo works.
+for _, case in ipairs({
+  { "notes-write", function(E, P, T3) return { pattern = P, track = T3, lines = { { line = 8, notes = { { col = 1, note = "D-4", instrument = "00" } } } } } end },
+  { "notes-clear", function(E, P, T3) return { pattern = P, track = T3 } end },
+  { "notes-transpose", function(E, P, T3) return { pattern = P, track = T3, semitones = 3 } end },
+  { "notes-humanize", function(E, P, T3) return { pattern = P, track = T3, delay = 20, volume = 16, seed = 7 } end },
+  { "lines-copy", function(E, P, T3) return { pattern = P, track = T3, first = 0, last = 3, line = 8 } end },
+  { "lines-copy", function(E, P, T3) return { pattern = P, track = T3, first = 0, last = 3, toPattern = K.ref(E, "pattern", 2), move = true } end, "moved to a pattern" },
+  { "lines-copy", function(E, P, T3) return { pattern = P, track = T3, first = 0, last = 3, toTrack = K.ref(E, "track", 2), move = true } end, "moved to a track" },
+}) do
+  test("lines: " .. case[1] .. (case[3] and " " .. case[3] or "") .. ", then Renoise's undo and redo: told, and Kumi's undo puts it all back (#393)", function()
+    local _, peer = setup()
+    local function now()
+      local out = {}
+      for _, p in ipairs({ 1, 2 }) do
+        for _, t in ipairs({ 2, 3 }) do
+          for l = 1, 16 do
+            for c = 1, 2 do
+              local cell = column(p, t, l, c)
+              out[#out + 1] = cell.note_string .. cell.volume_string .. cell.delay_string
+            end
+          end
+        end
+      end
+      return table.concat(out)
+    end
+    local E = K.place(peer)
+    local before = now()
+    local record = K.change(peer, case[1], case[2](E, K.ref(E, "pattern", 1), K.ref(E, "track", 3)))
+    local after = now()
+    ok(before ~= after, "the change changed the lines")
+    H.tick(2)
+    K.told(peer)
+    mock.song:undo()
+    H.tick(3)
+    eq(now(), before, "Renoise's undo")
+    ok(K.told(peer):find("^undo:"), "told undone")
+    mock.song:redo()
+    H.tick(3)
+    eq(now(), after, "Renoise's redo")
+    ok(K.told(peer):find("^redo:"), "told redone")
+    ok(K.restore(peer, record).result)
+    eq(now(), before)
+    H.no_dialogs()
+  end)
+end
 
 test("lines: a block moved leaves its lines empty, an overlapping move too, and Kumi's undo puts both places back", function()
   local _, peer = setup()

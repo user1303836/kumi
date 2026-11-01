@@ -503,6 +503,7 @@ function M.journal_reset(journal)
 end
 
 function M.remember(journal, entry)
+  entry.edits_made = journal.edits and journal.edits() or nil -- (#393: `redo_sure`)
   local entries = journal.entries
   entries[#entries + 1] = entry
   while #entries > M.JOURNAL_MAX do table.remove(entries, 1) end
@@ -807,10 +808,12 @@ function M.journal_check(journal)
   check_slots(journal, song)
 end
 
--- (#393) Whether Renoise's last undo or redo was a redo: nothing is left to redo. An undo always leaves the step it took back
--- to redo, and an edit since empties the redo list and is told by `redoable`. So lines that read as a change of Kumi's wrote
--- them again, with nothing left to redo, are Renoise's redo of that change: an undo past it would have left it to redo.
-local function redo_sure(song)
+-- (#393) Whether Renoise's last undo or redo was its redo of this change, for sure. Kumi's step was the newest when Renoise's
+-- undo took it: nothing was edited from the change to the undo, or that undo may have been of a later step of the producer's
+-- that left the lines as before the change, and its redo the producer's own lines. And nothing is left to redo: an undo always
+-- leaves the step it took back to redo, so an undo past Kumi's step would have left Kumi's step there.
+local function redo_sure(journal, entry, song)
+  if entry.edits_made == nil or entry.edits_made ~= entry.edits_at then return false end
   local ok, sure = pcall(function() return song:can_undo() and not song:can_redo() end)
   return ok and sure == true
 end
@@ -833,13 +836,13 @@ check_read = function(journal, song, entry)
     elseif entry.state == "undone" and spec.same(now, entry.applied) and redoable(journal, entry) then
       -- (what Kumi wrote is there again, from Renoise's redo: the lines' count of edits since Kumi's step starts again here,
       -- so Kumi's undo isn't refused for the redo's own writes; an edit after it still is. Not where the redo is unsure:
-      -- lines the producer had and Renoise's undo brought back read the same as Kumi's, review MUST 10)
-      local unsure = spec.unsure_redo and not redo_sure(song)
+      -- lines the producer had or typed read the same as Kumi's, review MUST 10)
+      local unsure = spec.unsure_redo and not redo_sure(journal, entry, song)
       if journal.retouched and not unsure and type(entry.applied) == "table" then journal.retouched(entry.applied) end
       if unsure then
         -- (Renoise doesn't say which step its undo or redo took: lines that read as Kumi wrote them again may be its redo
-        -- of Kumi's step, or its undo past it of an older row insert that put the producer's like lines there. With
-        -- something left to redo, either may be so)
+        -- of Kumi's step, its undo past it of an older row insert that put the producer's like lines there, or its redo of
+        -- the producer's own later lines)
         entry.state = "unsure"
         queue(journal, entry.desc, "unsure")
       else

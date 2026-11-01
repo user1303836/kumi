@@ -297,8 +297,9 @@ const PLUGIN: &str = "local i = new_instrument('K plugin', 0) song:instrument(i)
 const SLOT: &str = "local q, p = new_slot() return {q = q, p = p}";
 /// What a Doofer holds: its devices' types and their gains, as its preset data says.
 const INSIDE: &str = r#"local x = pdata(song:track($t):device(2)) local out = {} for k in x:gmatch('type="(%w+)"') do out[#out + 1] = k end for v in x:gmatch('<Volume>%s*<Value>([^<]*)</Value>') do out[#out + 1] = v end return out"#;
-/// When Kumi's undo of lines works after Renoise's undo and redo of them, and when it refuses.
-const LINES_REDO: &str = "Renoise's redo of lines is told for sure when it leaves nothing to redo (#393: an undo past Kumi's step would have left that step to redo), and Kumi's undo then works; with something left to redo it can't be told from Renoise's undo bringing back the producer's like lines (review MUST 6, 10): Kumi's undo refuses, and HISTORY says Renoise may have put them back";
+/// Lines that Renoise's undo and redo took back and put again. Each case makes Kumi's step the newest, so the redo must be told
+/// for sure and Kumi's undo must work: an unsure redo or a refused undo fails the case.
+const LINES_REDO: &str = "Kumi's step is the newest (#393): Renoise's redo of it is told for sure, and Kumi's undo works";
 /// Why Renoise's undo can't take a plug-in instrument's change back now and then.
 const AU_UNDO: &str = "Renoise's undo history goes empty now and then once AU plug-in instruments load and unload (can_undo() false before its undo; as after n-devices' device inventory): its undo takes nothing back, HISTORY stays as it was, Kumi's undo works";
 
@@ -810,7 +811,12 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
             Some(ChangeState::Unsure) => format!("unsure “{}”", short(&told.and_then(|r| r.note).unwrap_or_default(), 50)),
             _ => format!("{state:?}"),
         };
-        let ok = same(&p3, &p5) && matches!(state, Some(ChangeState::Applied | ChangeState::Unsure));
+        let ok = same(&p3, &p5)
+            && match state {
+                Some(ChangeState::Applied) => true,
+                Some(ChangeState::Unsure) => case.note != LINES_REDO,
+                _ => false,
+            };
         out.step("daw redo", ok, if same(&p3, &p5) { told } else { format!("{told} → {p5}") });
     }
     // 4. Kumi's undo once more: puts it back, or refuses and says why
@@ -828,7 +834,7 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
             let note = row.and_then(|r| r.note).unwrap_or_default();
             out.step(
                 "last undo",
-                !note.is_empty(),
+                !note.is_empty() && case.note != LINES_REDO,
                 format!("refused{}: “{}”", if unsure { " (after an unsure redo)" } else { "" }, short(&note, 80)),
             );
             // (the bridge's own words, under HISTORY's)

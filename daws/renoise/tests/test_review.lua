@@ -2595,6 +2595,101 @@ test("#393: Kumi's step isn't the newest: the producer's redo of it leaves a ste
   eq(bass_column(1, 30), "10:C-4 11:C-4 12:C-4 13:C-4")
 end)
 
+test("#393: the producer's redo of Kumi's newest step, twice over: told redone each time, and Kumi's undo takes the lines back", function()
+  local env, peer = setup(nil, { pattern_lines = 128 })
+  local previewed, done = bass_notes(peer, 10, 13, "km6k")
+  H.tick(2)
+  for _ = 1, 2 do
+    mock.song:undo()
+    H.tick(3)
+    mock.song:redo()
+    H.tick(3)
+  end
+  local undone = restore(peer, "notes-write", record_of(previewed, done), "Kumi: undo n (km6l)", done.epoch, done.layout)
+  ok(undone.result, json.encode(undone.error or {}))
+  eq(bass_column(1, 30), "")
+end)
+
+test("#393: a track muted after Kumi's step isn't an edit (no step of Renoise's): the redo is told, and Kumi's undo works", function()
+  local env, peer = setup(nil, { pattern_lines = 128 })
+  local previewed, done = bass_notes(peer, 10, 13, "km6m")
+  H.tick(2)
+  mock.song:track(1):mute()
+  H.tick(2)
+  mock.song:undo()
+  H.tick(3)
+  mock.song:redo()
+  H.tick(3)
+  local undone = restore(peer, "notes-write", record_of(previewed, done), "Kumi: undo n (km6n)", done.epoch, done.layout)
+  ok(undone.result, json.encode(undone.error or {}))
+  eq(bass_column(1, 30), "")
+end)
+
+-- (#393) A later step of the producer's can leave the lines as before Kumi's change, and its redo leaves them as Kumi wrote them
+-- with nothing left to redo: Renoise's undo and redo of that step mustn't lift the refusal, or Kumi's undo takes the producer's
+-- lines.
+local function cells_step(edit)
+  mock.callback_begin()
+  edit(function(l) return mock.song:pattern(1):track(3):line(l):note_column(1) end)
+  mock.callback_end()
+  H.tick(2)
+end
+
+local function still_refused(peer, previewed, done, tag, expected)
+  failure(restore(peer, "notes-write", record_of(previewed, done), "Kumi: undo n (" .. tag .. ")", done.epoch, done.layout), "changed")
+  eq(bass_column(90, 115), expected, "the producer's lines kept")
+end
+
+local function undo_and_redo_refused(peer, previewed, done, tag, before_redo)
+  local expected = bass_column(90, 115)
+  still_refused(peer, previewed, done, tag .. "a", expected)
+  mock.song:undo()
+  H.tick(3)
+  eq(bass_column(90, 115), before_redo, "Renoise's undo")
+  mock.song:redo()
+  H.tick(3)
+  eq(bass_column(90, 115), expected, "Renoise's redo")
+  still_refused(peer, previewed, done, tag .. "b", expected)
+end
+
+test("#393: the producer clears Kumi's lines and moves their own like notes there, then undoes and redoes that: Kumi's undo refuses", function()
+  local env, peer = setup(nil, { pattern_lines = 128 })
+  bass_set({ 104, 105, 106, 107 }, C4)
+  local previewed, done = bass_notes(peer, 100, 103, "km6o")
+  H.tick(2)
+  cells_step(function(column_at) for l = 100, 103 do column_at(l):clear() end end)
+  cells_step(function(column_at)
+    for l = 104, 107 do column_at(l):clear() end
+    for l = 100, 103 do
+      column_at(l).note_string = "C-4"
+      column_at(l).instrument_string = "00"
+    end
+  end)
+  undo_and_redo_refused(peer, previewed, done, "km6p", "104:C-4 105:C-4 106:C-4 107:C-4")
+end)
+
+test("#393: the producer clears Kumi's line and types the same note, then undoes and redoes that: Kumi's undo refuses", function()
+  local env, peer = setup(nil, { pattern_lines = 128 })
+  local previewed, done = bass_notes(peer, 100, 100, "km6q")
+  H.tick(2)
+  cells_step(function(column_at) column_at(100):clear() end)
+  cells_step(function(column_at)
+    column_at(100).note_string = "C-4"
+    column_at(100).instrument_string = "00"
+  end)
+  undo_and_redo_refused(peer, previewed, done, "km6r", "")
+end)
+
+test("#393: over the producer's E-4, Kumi's C-4; the producer types E-4, then C-4, then undoes and redoes that: Kumi's undo refuses and E-4 doesn't come back", function()
+  local env, peer = setup(nil, { pattern_lines = 128 })
+  bass_set({ 100 }, E4)
+  local previewed, done = bass_notes(peer, 100, 100, "km6s")
+  H.tick(2)
+  cells_step(function(column_at) column_at(100).note_string = "E-4" end)
+  cells_step(function(column_at) column_at(100).note_string = "C-4" end)
+  undo_and_redo_refused(peer, previewed, done, "km6t", "100:E-4")
+end)
+
 test("#393: Renoise's undo past Kumi's step to the producer's clear (unsure), then the producer redoes both: told redone, Kumi's undo works", function()
   local env, peer = setup(nil, { pattern_lines = 128 })
   local column = function() return mock.song:pattern(1):track(3):line(100):note_column(1) end
