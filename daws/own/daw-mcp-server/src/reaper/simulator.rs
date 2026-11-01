@@ -55,6 +55,8 @@ struct State {
     /// Each track's FX chain, by the track's ref ("r:track:master" is the first row's): M5's listening reads and sets them.
     fx: std::collections::HashMap<String, Vec<SimFx>>,
     next_fx: u32,
+    /// The most rows a page holds, whatever it's asked for: a busy REAPER's pages stop at their time (`short_pages`).
+    page_rows: Option<usize>,
     /// MIDI items a test adds (`add_midi_item`): groove reads their notes and moves them with notes-change.
     midi: Vec<SimMidi>,
 }
@@ -272,6 +274,7 @@ impl ReaperScript {
                 playing: false,
                 fx: std::collections::HashMap::new(),
                 next_fx: 0,
+                page_rows: None,
                 midi: vec![],
             })),
             listening: SimListening::new(daw_bridge::Daw::Reaper),
@@ -455,6 +458,11 @@ impl ReaperScript {
     pub fn midi_notes(&self, reference: &str) -> Vec<(i64, f64, f64, i64)> {
         let state = self.state.lock().unwrap();
         Self::find_midi(&state, reference).map(|at| state.midi[at].notes.clone()).unwrap_or_default()
+    }
+
+    /// Pages of at most `rows` rows, as a busy REAPER's are.
+    pub fn short_pages(&self, rows: usize) {
+        self.state.lock().unwrap().page_rows = Some(rows);
     }
 
     /// The producer starts or stops REAPER: its transport says so, and a capture can hear it.
@@ -1483,6 +1491,7 @@ impl ReaperScript {
             return Err(bad(&format!("REAPER has no kind {kind:?} to read")));
         }
         let limit = params.get("limit").and_then(Value::as_u64).map_or(DEFAULT_LIMIT, |n| (n as usize).clamp(1, MAX_LIMIT));
+        let limit = state.page_rows.map_or(limit, |rows| limit.min(rows));
         let start = match params.get("cursor").and_then(Value::as_str) {
             None => 0,
             Some(cursor) => {

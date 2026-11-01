@@ -52,8 +52,8 @@ pub static WORDS: Words = Words {
 const GAP: f64 = 0.5;
 /// Pages of rows read (200 a page).
 const PAGES: usize = 20;
-/// Pages of a MIDI take's notes read: as many as one change writes (10 000), so a take never loses the rest.
-const NOTE_PAGES: usize = 50;
+/// The most notes of a MIDI take Kumi varies: as many as one change writes.
+const MOST_NOTES: u64 = 10_000;
 /// What an item's row says of a MIDI take's source (reaper-kumi's `rows::source_word`).
 const MIDI_SOURCE: &str = "mid";
 /// How far an audio take's start moves at most (seconds): past that its attack isn't the sound's any more.
@@ -133,10 +133,15 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
         let take = self.one(take_ref, signal).await?;
         let midi = item.get("source").and_then(Value::as_str) == Some(MIDI_SOURCE);
         let (indexes, notes) = if midi {
-            let rows = self.plan.rows_through(json!({"kind": "note", "parent": take_ref, "limit": 200}), NOTE_PAGES, signal).await?;
             let count = take.get("noteCount").and_then(Value::as_u64).unwrap_or(0);
-            if count > rows.len() as u64 {
-                return Err(format!("that take has {count} notes, and Kumi varies a MIDI take of at most {}", rows.len()));
+            if count > MOST_NOTES {
+                return Err(format!("that take has {count} notes, and Kumi varies a MIDI take of at most {MOST_NOTES}"));
+            }
+            // (read to the end: a page holds what REAPER read in its time, a busy REAPER's fewer; every page holds one at least)
+            let rows =
+                self.plan.rows_through(json!({"kind": "note", "parent": take_ref, "limit": 200}), count as usize + 1, signal).await?;
+            if (rows.len() as u64) < count {
+                return Err(format!("Kumi read {} of that take's {count} notes: try again", rows.len()));
             }
             played(&rows).into_iter().unzip()
         } else {
@@ -210,6 +215,27 @@ fn played(rows: &[Value]) -> Vec<(usize, Note)> {
             Some((row.get("index").and_then(Value::as_u64).map_or(at, |index| index as usize), note))
         })
         .collect()
+}
+
+/// The notes `wanted` by their index as read, of a take's notes that play and their indexes: which index isn't one of them.
+fn anchors_of(indexes: &[usize], notes: &[Note], wanted: &[usize]) -> Result<Vec<Note>, String> {
+    wanted
+        .iter()
+        .map(|n| {
+            let at = indexes.iter().position(|index| index == n);
+            at.map(|at| notes[at].clone()).ok_or_else(|| {
+                format!("anchor {n}: no note that plays has that index (the take plays {} notes; read their indexes)", indexes.len())
+            })
+        })
+        .collect()
+}
+
+/// Why an item can't be a source: its words. A pooled MIDI item's notes can't be read yet (reaper-kumi takes only "MIDI" for a
+/// MIDI source, and REAPER says "MIDIPOOL"), and read as audio its takes would keep every note.
+fn refused_source(item: &Value) -> Option<String> {
+    (item.get("source").and_then(Value::as_str) == Some("midipool")).then(|| {
+        "that MIDI item is pooled with others, and Kumi can't read a pooled item's notes yet: take it out of the pool in REAPER (the action \"Item: Remove active take from MIDI source data pool (unpool)\"), or vary another".to_string()
+    })
 }
 
 /// A take as REAPER holds it once written: its settings as `settings` writes them and REAPER's reads give them back (times,
@@ -376,6 +402,9 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
             .ok()
             .and_then(|row| row.get("name").and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_default();
+        if let Some(why) = refused_source(&item) {
+            return Err(why);
+        }
         let (mut material, indexes) = self.material_now(&item, &[], signal).await?;
         // (the anchors: a MIDI take's notes by their index as read, which counts the ones that don't play)
         let anchors: Vec<usize> =
@@ -383,14 +412,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
         if !anchors.is_empty() && !material.midi {
             return Err("anchors are a MIDI take's notes: an audio take keeps its attack anyway".into());
         }
-        let mut kept = Vec::with_capacity(anchors.len());
-        for n in &anchors {
-            let at = indexes.iter().position(|index| index == n);
-            kept.push(at.map(|at| material.notes[at].clone()).ok_or_else(|| {
-                format!("anchor {n}: no note that plays has that index (the take plays {} notes; read their indexes)", indexes.len())
-            })?);
-        }
-        material.anchors = kept;
+        material.anchors = anchors_of(&indexes, &material.notes, &anchors)?;
         let name = item.get("name").and_then(Value::as_str).unwrap_or("").to_string();
         let short = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem).trim().to_string();
         let short = if short.is_empty() { track_name.clone() } else { short };
@@ -816,6 +838,29 @@ mod tests {
         let rows = [row(0, -0.5, 0.25, false), row(1, -0.25, 0.75, false), row(2, 0.5, 0.25, true), row(3, 1., 0.25, false)];
         let notes: Vec<(usize, f64, f64)> = played(&rows).into_iter().map(|(at, note)| (at, note.start, note.length)).collect();
         assert_eq!(notes, [(1, 0., 0.5), (3, 1., 0.25)]);
+    }
+
+    /// Anchors go by REAPER's own index, which counts the notes that don't play: past a muted note, the old count named the next.
+    #[test]
+    fn anchors_are_by_the_index_reaper_reads_past_a_muted_note() {
+        let row = |index: u64, pitch: i64, muted: bool| json!({"index": index, "pitch": pitch, "start": index as f64, "length": 0.25, "velocity": 90, "channel": 1, "selected": false, "muted": muted});
+        let (indexes, notes): (Vec<usize>, Vec<Note>) =
+            played(&[row(0, 60, false), row(1, 61, true), row(2, 62, false), row(3, 63, false)]).into_iter().unzip();
+        let pitches =
+            |wanted: &[usize]| anchors_of(&indexes, &notes, wanted).map(|kept| kept.iter().map(|note| note.pitch).collect::<Vec<_>>());
+        assert_eq!(pitches(&[0, 3]).unwrap(), [60, 63], "index 3 is the note at 3, not the fourth that plays");
+        assert!(pitches(&[1]).unwrap_err().contains("anchor 1: no note that plays"), "a muted note can't be one");
+        assert!(pitches(&[9]).unwrap_err().contains("anchor 9"));
+    }
+
+    /// A pooled MIDI item says why it can't be varied yet (lab, 7.82: REAPER calls its source MIDIPOOL), where read as audio its
+    /// takes would keep every note; any other item is no matter of this.
+    #[test]
+    fn a_pooled_midi_item_is_refused_in_words() {
+        assert!(refused_source(&json!({"source": "midipool"})).unwrap().contains("take it out of the pool"));
+        for source in ["mid", "wav", "empty"] {
+            assert_eq!(refused_source(&json!({"source": source})), None, "{source}");
+        }
     }
 
     /// A MIDI take's operators are those that move something: REAPER writes notes at the project's beats whatever its playrate

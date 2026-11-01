@@ -1029,9 +1029,22 @@ async fn a_reaper_midi_items_takes_move_their_notes_through_the_host() {
             let long: Vec<(i64, f64, f64, i64)> = (0..4200).map(|k| (40 + k % 40, k as f64 / 500., 0.001, 100)).collect();
             let (item, _) = script.add_midi_item("r:track:{T0003}", "Long", 0., 16., &long);
             let softer = json!({"direction": "softer", "ops": [{"op": "velocity", "amount": 1}]});
-            let made = run_tool(&variations, json!({"action": "make", "source": {"itemRef": item}, "takes": [softer], "seed": 7, "listen": false})).await;
+            let made = run_tool(&variations, json!({"action": "make", "source": {"itemRef": item}, "takes": [softer.clone()], "seed": 7, "listen": false})).await;
             assert_eq!(made["skipped"], json!([]), "{made}");
             assert_eq!(notes_of(3).len(), 4200);
+            // (nor does a busy REAPER's short pages cost it any: it reads to the end)
+            script.short_pages(10);
+            let made = run_tool(&variations, json!({"action": "make", "source": {"itemRef": item}, "takes": [softer.clone()], "seed": 8, "listen": false})).await;
+            assert_eq!(made["skipped"], json!([]), "{made}");
+            assert_eq!(notes_of(4).len(), 4200);
+            // (a take with more than one change can write says so, by the real limit)
+            let huge: Vec<(i64, f64, f64, i64)> = (0..10_001).map(|k| (40 + k % 40, k as f64 / 2000., 0.001, 100)).collect();
+            let (item, _) = script.add_midi_item("r:track:{T0003}", "Huge", 16., 8., &huge);
+            let refused = variations
+                .execute(input(json!({"action": "make", "source": {"itemRef": item}, "takes": [softer], "listen": false})), Signal::new())
+                .await
+                .unwrap();
+            assert!(refused.is_error && refused.text.contains("10001 notes") && refused.text.contains("at most 10000"), "{}", refused.text);
         })
         .await;
 }
