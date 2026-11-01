@@ -159,7 +159,7 @@ pub fn plugin_preset_folders(home: Option<&str>, platform: Option<&str>) -> Vec<
 use super::{
     classify::{classify, name_hints},
     daw_sources,
-    daws::{Daws, Layout},
+    daws::{Daws, Layout, ProjectFormat},
     features::{measure_sound, MeasureOptions, FEATURES_VERSION},
     measure_worker::{MeasureJob, MeasurePool},
     presets::{plugin_preset_facts, read_daw_preset, read_live_preset, read_max_device, PresetFacts, PRESET_EXTENSIONS},
@@ -176,12 +176,13 @@ use kumi_common::{
     time::now_ms,
 };
 use kumi_media::audio::decode::AudioError;
-use kumi_types::errors::RuntimeError;
+use kumi_types::{daw::DawId, errors::RuntimeError};
 use regex::Regex;
 use std::{
     cell::{Cell, RefCell},
     collections::HashSet,
     io,
+    path::PathBuf,
     rc::Rc,
     sync::LazyLock,
     time::{SystemTime, UNIX_EPOCH},
@@ -271,6 +272,28 @@ fn backup_set(path: &str) -> bool {
     static RE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)\.backup-|\[[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{6}\]\.als$").unwrap());
     RE.is_match(path)
 }
+/// Whether a file's extension (lower case) is one the library learns as a project: a Live Set's, or that of a DAW whose
+/// files Kumi reads.
+fn set_extension(daws: Daws, ext: &str) -> bool {
+    ext == ".als" || daws.project_format(ext).is_some()
+}
+/// Whether a project file is a copy or backup the library leaves out: Live's backups by their name, or what its DAW's
+/// format says by its path.
+fn skipped_set(daws: Daws, path: &str) -> bool {
+    match daws.project_format(&extension(&path.to_lowercase())) {
+        Some((_, format)) => (format.skip)(Path::new(path)),
+        None => backup_set(&basename(path)),
+    }
+}
+/// A DAW's project, read by its format off Kumi's thread: the set it is, as that DAW's.
+async fn read_project(daw: DawId, format: &'static ProjectFormat, path: &str, signal: &Signal) -> Result<SetSummary, RuntimeError> {
+    let (file, signal) = (PathBuf::from(path), signal.clone());
+    let mut set = tokio::task::spawn_blocking(move || (format.read)(&file, &signal))
+        .await
+        .map_err(|error| RuntimeError::plain(error.to_string()))??;
+    set.daw = Some(daw);
+    Ok(set)
+}
 /// A file's modification time as the library names it (in ms since 1970, rounded): what anything that names a file by
 /// its time beside the library's (a palette) takes too.
 pub fn mtime(time: SystemTime) -> i64 {
@@ -286,6 +309,7 @@ fn io_error(error: io::Error) -> RuntimeError {
 async fn walk(
     source: &Source,
     layout: &Layout,
+    daws: Daws,
     kinds: Kinds,
     found: &mut Finds,
     signal: &Signal,
@@ -349,7 +373,7 @@ async fn walk(
                 continue;
             }
             let ext = extension(&lower);
-            if ext == ".als" && backup_set(&lower) {
+            if set_extension(daws, &ext) && skipped_set(daws, &full) {
                 continue;
             }
             let list = if daw_library {
@@ -370,7 +394,7 @@ async fn walk(
                 &mut found.sounds
             } else if kinds.presets && PRESET_EXTENSIONS.contains(&ext.as_str()) {
                 &mut found.presets
-            } else if kinds.sets && ext == ".als" {
+            } else if kinds.sets && set_extension(daws, &ext) {
                 &mut found.sets
             } else {
                 continue;
@@ -491,7 +515,7 @@ async fn gone<T: LogEntry>(
     seen: &[Found],
     log: &Log<T>,
     roots: &[String],
-    outside: bool,
+    outside: Option<&dyn Fn(&str) -> bool>,
 ) -> Result<(), RuntimeError> {
     let present: HashSet<_> = seen.iter().map(|file| &file.file.path).collect();
     let lost: Vec<_> = known
@@ -499,7 +523,9 @@ async fn gone<T: LogEntry>(
         .filter(|path| {
             !present.contains(path)
                 && (roots.iter().any(|root| below(path, root).is_some())
-                    || (outside && ((!Path::new(path).exists() && Path::new(&dirname(&dirname(path))).exists()) || backup_set(path))))
+                    || outside.is_some_and(|skipped| {
+                        (!Path::new(path).exists() && Path::new(&dirname(&dirname(path))).exists()) || skipped(path)
+                    }))
         })
         .cloned()
         .collect();
@@ -554,7 +580,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         let own = matches!(source.kind, SourceKind::UserLibrary | SourceKind::Place | SourceKind::Folder);
         let skip = if source.is_daw_library() { HashSet::new() } else { daw_libraries.clone() };
         let layout = options.daws.layout(source);
-        if walk(source, layout, Kinds { sounds: true, presets: true, sets: own }, &mut found, &options.signal, 16, &skip).await? {
+        if walk(source, layout, options.daws, Kinds { sounds: true, presets: true, sets: own }, &mut found, &options.signal, 16, &skip)
+            .await?
+        {
             walked_sounds.push(source.path.clone());
             walked_presets.push(source.path.clone());
             if own {
@@ -568,14 +596,23 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             continue;
         }
         let source = Source { path: path.clone(), label: basename(path), kind: SourceKind::Folder };
-        if walk(&source, &Layout::NONE, Kinds { sounds: false, presets: false, sets: true }, &mut found, &options.signal, 6, &source_paths)
-            .await?
+        if walk(
+            &source,
+            &Layout::NONE,
+            options.daws,
+            Kinds { sounds: false, presets: false, sets: true },
+            &mut found,
+            &options.signal,
+            6,
+            &source_paths,
+        )
+        .await?
         {
             walked_sets.push(path.clone());
         }
     }
     for path in &plan.set_files {
-        if found.seen.contains(path) || backup_set(&basename(path)) {
+        if found.seen.contains(path) || !set_extension(options.daws, &extension(&path.to_lowercase())) || skipped_set(options.daws, path) {
             continue;
         }
         let Ok(info) = tokio::fs::metadata(path).await else { continue };
@@ -592,6 +629,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         if walk(
             &source,
             &Layout::NONE,
+            options.daws,
             Kinds { sounds: false, presets: true, sets: false },
             &mut found,
             &options.signal,
@@ -603,9 +641,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             walked_presets.push(path.clone());
         }
     }
-    gone(&mut sounds, &found.sounds, &logs.sounds, &walked_sounds, false).await?;
-    gone(&mut presets, &found.presets, &logs.presets, &walked_presets, false).await?;
-    gone(&mut sets, &found.sets, &logs.sets, &walked_sets, true).await?;
+    gone(&mut sounds, &found.sounds, &logs.sounds, &walked_sounds, None).await?;
+    gone(&mut presets, &found.presets, &logs.presets, &walked_presets, None).await?;
+    gone(&mut sets, &found.sets, &logs.sets, &walked_sets, Some(&|path| skipped_set(options.daws, path))).await?;
     let todo_sounds: Vec<_> = found
         .sounds
         .into_iter()
@@ -679,7 +717,11 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     let mut set_writer = Writer::new(logs.sets.clone());
     for file in &todo_sets {
         gated(&options).await?;
-        let entry = match read_set(&file.file.path, Some(options.signal.clone())).await {
+        let read = match options.daws.project_format(&extension(&file.file.path.to_lowercase())) {
+            Some((daw, format)) => read_project(daw, format, &file.file.path, &options.signal).await,
+            None => read_set(&file.file.path, Some(options.signal.clone())).await,
+        };
+        let entry = match read {
             Ok(set) => SetEntry { file: file.file.clone(), set: Some(set), error: None },
             Err(error) => {
                 options.signal.check()?;
@@ -698,7 +740,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         tokio::task::yield_now().await;
     }
     set_writer.flush().await;
-    write_json(&Path::new(&plan.dir).join("taste.json"), &build_taste(&songs_of(sets.values()), None)).await.map_err(io_error)?;
+    // The producer's habits are learned from Live's Sets: another DAW's projects don't count towards them yet.
+    let live_sets = sets.values().filter(|entry| entry.set.as_ref().is_some_and(|set| set.daw.is_none()));
+    write_json(&Path::new(&plan.dir).join("taste.json"), &build_taste(&songs_of(live_sets), None)).await.map_err(io_error)?;
     progress.phase(LearnPhase::Sounds);
     let size = plan
         .workers
