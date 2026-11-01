@@ -16,6 +16,7 @@ use serde_json::Value;
 
 use super::catalog::catalog;
 use super::page::{self, Element, LOOKS};
+use crate::app::live_app::{OPEN_LIVE_PROGRAM, RUNNING_PROGRAMS};
 
 /// How many of an object's inlets or outlets there are, for the arguments it's given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -526,13 +527,19 @@ fn sources(c74: &Path) -> Sources {
 /// How Kumi learns the reference: a new way is learned anew, as a new Max is.
 const LEARNER: u32 = 10;
 
-/// What the reference is learned from in a Max's C74 folder, and how, as one line: a new Max reads differently.
+/// What the reference is learned from in a Max's C74 folder, and how, as one line: a new Max reads differently. Its
+/// newest file's time is in it, so a Max updated with as many files and bytes as before is learned anew too.
 pub fn fingerprint(c74: &Path) -> String {
     let found = sources(c74);
     let all = found.pages.iter().chain(&found.help).chain(&found.abstractions);
-    let bytes: u64 = all.filter_map(|file| std::fs::metadata(file).ok()).map(|meta| meta.len()).sum();
+    let (mut bytes, mut newest) = (0u64, 0u128);
+    for meta in all.filter_map(|file| std::fs::metadata(file).ok()) {
+        bytes += meta.len();
+        let modified = meta.modified().ok().and_then(|when| when.duration_since(std::time::UNIX_EPOCH).ok());
+        newest = newest.max(modified.map_or(0, |since| since.as_nanos()));
+    }
     format!(
-        "learner {LEARNER}: {} pages, {} help patchers, {} abstractions, {bytes} bytes",
+        "learner {LEARNER}: {} pages, {} help patchers, {} abstractions, {bytes} bytes, newest {newest}",
         found.pages.len(),
         found.help.len(),
         found.abstractions.len()
@@ -573,7 +580,7 @@ pub fn learn(c74: &Path) -> Reference {
     // when Max's help shows it and no page names it. (An operator's page is named for its sign: bitand's is [&].)
     let mut misnamed: Vec<(String, Object)> = Vec::new();
     for file in &found.pages {
-        if let Some((name, mut object)) = std::fs::read_to_string(file).ok().as_deref().and_then(read_page) {
+        if let Some((name, mut object)) = page::text_of(file).as_deref().and_then(read_page) {
             object.page = file.strip_prefix(c74).unwrap_or(file).to_string_lossy().into_owned();
             let stem = page_stem(file);
             // Of two pages that name an object, the one whose file is named for it.
@@ -641,8 +648,97 @@ pub fn learn(c74: &Path) -> Reference {
     Reference { fingerprint: fingerprint(c74), objects, root: c74.to_path_buf() }
 }
 
-/// The installed Max's C74 folder: Live's own Max (the newest Live first), or a Max installed by itself.
+/// The installed Max's C74 folder: the one KUMI_MAX names, else the open Live's own Max (the one a device made now runs
+/// in), else Live's own Max (the newest Live first), or a Max installed by itself.
 pub fn find_c74() -> Option<PathBuf> {
+    chosen_c74(std::env::var_os("KUMI_MAX"), open_live_max, installed_maxes)
+}
+
+/// [`find_c74`]'s choice, each of its places asked only when the one before gives none: what's `named` (a C74 folder,
+/// or a Max holding one), the `open` Live's Max, then the `installed` ones.
+fn chosen_c74(
+    named: Option<std::ffi::OsString>,
+    open: impl FnOnce() -> Option<PathBuf>,
+    installed: impl FnOnce() -> Vec<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(named) = named.filter(|named| !named.is_empty()) {
+        // The Max named is the one used, or none: never another in its place.
+        return c74_within(Path::new(&named), 4);
+    }
+    open().and_then(|root| c74_within(&root, 4)).or_else(|| installed().into_iter().find_map(|root| c74_within(&root, 4)))
+}
+
+/// The open Live's own Max: from the app `ps` names on a Mac, or the program PowerShell names on Windows.
+fn open_live_max() -> Option<PathBuf> {
+    // A cold PowerShell takes seconds, and one that's slower only means the installed Maxes are looked at instead.
+    let within = std::time::Duration::from_secs(5);
+    if cfg!(target_os = "macos") {
+        live_max_in(&bounded("/bin/ps", &RUNNING_PROGRAMS, within)?)
+    } else if cfg!(windows) {
+        use kumi_types::system::{process_env, system_program, SystemProgram};
+        let powershell = system_program(SystemProgram::Powershell, &process_env(), "win32");
+        windows_live_max(&bounded(&powershell, &["-NoProfile", "-NonInteractive", "-Command", OPEN_LIVE_PROGRAM], within)?)
+    } else {
+        None
+    }
+}
+
+/// The Max of the Live in a `ps -axo comm=` listing: "/Applications/Ableton Live 12 Suite.app/Contents/MacOS/Live" is
+/// that app, and its Max is in its App-Resources.
+fn live_max_in(listing: &str) -> Option<PathBuf> {
+    let open = listing.lines().find_map(crate::app::live_app::live_app_of)?;
+    Some(Path::new(&open.app).join("Contents").join("App-Resources").join("Max"))
+}
+
+/// The Max of the Live whose program is `exe`: "…\Live 12 Suite\Program\Ableton Live 12 Suite.exe" keeps it in
+/// "…\Live 12 Suite\Resources\Max", as an installed Live does.
+fn windows_live_max(exe: &str) -> Option<PathBuf> {
+    let exe = exe.trim();
+    if exe.is_empty() {
+        return None;
+    }
+    Some(Path::new(exe).parent()?.parent()?.join("Resources").join("Max"))
+}
+
+/// What `program` prints, waited for `within`: None when it can't run, fails, or takes longer (it's ended then).
+fn bounded(program: &str, args: &[&str], within: std::time::Duration) -> Option<String> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+    let started = std::time::Instant::now();
+    let mut command = Command::new(program);
+    command.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    // No console of its own, or a share of the one the screen is drawn on, as every child Kumi hides.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000);
+    }
+    let mut child = command.spawn().ok()?;
+    let mut out = child.stdout.take()?;
+    // Read beside the wait, so a long listing never fills the pipe and holds the program up. The reader sends its text
+    // rather than being joined: a child of the program can hold the pipe long after it's gone, and it ends when the pipe does.
+    let (send, reading) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut bytes = Vec::new();
+        let _ = send.send(out.read_to_end(&mut bytes).map(|_| String::from_utf8_lossy(&bytes).into_owned()));
+    });
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) if status.success() => break,
+            Ok(None) if started.elapsed() < within => std::thread::sleep(std::time::Duration::from_millis(10)),
+            Ok(Some(_)) => return None,
+            _ => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return None;
+            }
+        }
+    }
+    reading.recv_timeout(within.saturating_sub(started.elapsed())).ok()?.ok()
+}
+
+/// The Maxes installed: Live's own (the newest Live first), then a Max installed by itself.
+fn installed_maxes() -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     let mut named = |folder: PathBuf, prefix: &str, then: &[&str]| {
         let mut names: Vec<String> = std::fs::read_dir(&folder)
@@ -666,7 +762,7 @@ pub fn find_c74() -> Option<PathBuf> {
         named(PathBuf::from(&program_files).join("Ableton"), "Live", &["Resources", "Max"]);
         named(PathBuf::from(program_files).join("Cycling '74"), "Max", &[]);
     }
-    roots.into_iter().find_map(|root| c74_within(&root, 4))
+    roots
 }
 
 /// A folder named C74 holding Max's reference pages, within `depth` folders of `root`.
@@ -977,6 +1073,80 @@ mod tests {
         }
         let overflowing = Count::Arguments { plus: usize::MAX - 2, bare: 1 };
         assert_eq!(overflowing.of(&["a".into(), "b".into(), "c".into()]), MOST_PORTS, "a count from a broken help file can't overflow");
+    }
+
+    #[test]
+    fn a_max_updated_with_as_many_files_and_bytes_as_before_is_learned_anew() {
+        let c74 = tempfile::tempdir().unwrap();
+        let pages = c74.path().join("docs").join("refpages").join("max-ref");
+        std::fs::create_dir_all(&pages).unwrap();
+        let page = pages.join("thing.maxref.xml");
+        std::fs::write(&page, r#"<c74object name="thing" module="max"><digest>One</digest></c74object>"#).unwrap();
+        let before = fingerprint(c74.path());
+        assert_eq!(fingerprint(c74.path()), before, "the same Max is the same");
+        // Rewritten by an update to as many bytes, later.
+        std::fs::write(&page, r#"<c74object name="thing" module="max"><digest>Two</digest></c74object>"#).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(60);
+        std::fs::File::options().write(true).open(&page).unwrap().set_modified(later).unwrap();
+        assert_ne!(fingerprint(c74.path()), before);
+    }
+
+    #[test]
+    fn the_max_kumi_max_names_is_learned_else_the_open_lives_else_the_newest_installed() {
+        let root = tempfile::tempdir().unwrap();
+        let max = |folder: &str| {
+            let c74 = root.path().join(folder).join("Max.app").join("Contents").join("Resources").join("C74");
+            std::fs::create_dir_all(c74.join("docs").join("refpages")).unwrap();
+            c74
+        };
+        let (open, newest, named) = (max("Live 12 Suite/Max"), max("Live 12 Beta/Max"), max("Mine"));
+        let open_live = || Some(root.path().join("Live 12 Suite/Max"));
+        let installed = || vec![root.path().join("Live 12 Beta/Max"), root.path().join("Live 12 Suite/Max")];
+        assert_eq!(chosen_c74(None, open_live, installed), Some(open.clone()), "the open Live's, the one a device runs in");
+        assert_eq!(chosen_c74(None, || None, installed), Some(newest), "no Live open: the newest installed, as before");
+        assert_eq!(chosen_c74(Some(named.clone().into()), open_live, installed), Some(named.clone()), "KUMI_MAX's C74");
+        assert_eq!(chosen_c74(Some(root.path().join("Mine/Max.app").into()), open_live, installed), Some(named), "a Max holding one");
+        assert_eq!(chosen_c74(Some(root.path().join("Nothing").into()), open_live, installed), None, "no other in its place");
+        assert_eq!(chosen_c74(Some("".into()), open_live, installed), Some(open), "set empty, as if unset");
+        // Where each system says the open Live is.
+        let listing = "/usr/sbin/cfprefsd\n/Applications/Ableton Live 12 Suite.app/Contents/MacOS/Live\n";
+        assert_eq!(live_max_in(listing), Some(PathBuf::from("/Applications/Ableton Live 12 Suite.app/Contents/App-Resources/Max")));
+        assert_eq!(live_max_in("/usr/sbin/cfprefsd\n"), None);
+        let live = Path::new("Ableton").join("Live 12 Suite");
+        let exe = live.join("Program").join("Ableton Live 12 Suite.exe");
+        assert_eq!(windows_live_max(&format!("{}\r\n", exe.display())), Some(live.join("Resources").join("Max")));
+        assert_eq!(windows_live_max("\r\n"), None, "none open");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_listing_is_waited_for_only_so_long() {
+        // What should finish has all the time a busy runner could take: it's back as soon as it's done.
+        let plenty = std::time::Duration::from_secs(30);
+        assert_eq!(bounded("/bin/echo", &["Live"], plenty).as_deref(), Some("Live\n"));
+        assert_eq!(bounded("/bin/sh", &["-c", "exit 1"], plenty), None, "one that fails says nothing");
+        // Longer than a pipe holds: it's read as it comes, so the program isn't held up until its time is over.
+        let long = bounded("/bin/sh", &["-c", "head -c 200000 /dev/zero"], plenty);
+        assert_eq!(long.map(|text| text.len()), Some(200_000));
+        // One that takes too long is ended at its bound, and one gone whose child holds the pipe isn't waited for past it.
+        for script in ["sleep 10", "sleep 10 & exit 0", "sleep 10 & sleep 10"] {
+            let started = std::time::Instant::now();
+            assert_eq!(bounded("/bin/sh", &["-c", script], std::time::Duration::from_millis(500)), None, "{script}");
+            assert!(started.elapsed() < std::time::Duration::from_secs(8), "{script}: {:?}", started.elapsed());
+        }
+    }
+
+    #[test]
+    fn a_page_that_isnt_utf_8_is_learned_and_told_its_stray_bytes_replaced() {
+        let c74 = tempfile::tempdir().unwrap();
+        let pages = c74.path().join("docs").join("refpages").join("max-ref");
+        std::fs::create_dir_all(&pages).unwrap();
+        // Saved in Latin-1: its é is the one byte 0xE9.
+        let latin = [&br#"<c74object name="thing" module="max"><digest>Caf"#[..], &[0xE9], &br#" sound</digest></c74object>"#[..]].concat();
+        std::fs::write(pages.join("thing.maxref.xml"), latin).unwrap();
+        let reference = learn(c74.path());
+        assert_eq!(reference.objects.get("thing").map(|thing| thing.digest.as_str()), Some("Caf\u{fffd} sound"));
+        assert!(page::describe(&reference, "thing").starts_with("[thing] Caf\u{fffd} sound"), "and its page told");
     }
 
     #[test]
