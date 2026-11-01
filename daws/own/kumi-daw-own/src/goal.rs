@@ -174,7 +174,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         }
         // A long part is screened on its most characteristic three seconds while the search is young.
         let slice = rig.reference.seconds / rig.reference.over_time.lufs.len().max(1) as f64;
-        if let Some(pick) = screen_pick(&rig.reference, tempo, window.beats, slice) {
+        if let Some(pick) = screen_pick(&rig.reference.over_time.lufs, tempo, window.beats, slice) {
             match listening.heard_reference(named, &pick.request(request, tempo), signal).await {
                 Ok(reference) => rig.screen = Some(Screen { offset: pick.offset, beats: pick.beats, reference }),
                 Err(error) => {
