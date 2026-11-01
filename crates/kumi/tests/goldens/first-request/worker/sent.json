@@ -322,7 +322,7 @@
         },
         "role": {
           "type": "string",
-          "description": "installed: mastering, limiting, eq, compression, stereo, delay, bbd, reverb, instrument…"
+          "description": "installed: mastering, limiting, eq, compression, de-essing, gate, saturation, filter, stereo, delay, bbd, reverb, instrument…"
         },
         "query": {
           "type": "string",
