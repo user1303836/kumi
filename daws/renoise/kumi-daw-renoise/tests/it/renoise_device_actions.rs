@@ -84,6 +84,14 @@ async fn a_device_action_names_its_device_by_a_short_ref_and_says_what_renoise_d
             let saved = tool(&observed, "save_device_preset").execute(input(json!({"ref": device, "name": "Bright"})), Signal::new()).await.unwrap();
             assert!(!saved.is_error, "{}", saved.text);
             assert!(saved.text.contains("Effect Presets/EQ 10/Bright.xrdp") && saved.text.contains("\"listed\":true"), "{}", saved.text);
+            // The tool is told where the user library is, whatever the call's own words say: the host resolves it.
+            let told = asked.lock().unwrap().last().cloned().unwrap().1;
+            assert_eq!(told["library"].as_str(), daw_mcp_server::renoise::library_files::user_library().as_deref(), "{told}");
+            assert!(told["library"].is_string(), "{told}");
+            tool(&observed, "save_device_preset").execute(input(json!({"ref": device, "name": "Dark", "library": "/elsewhere"})), Signal::new()).await.unwrap();
+            let told = asked.lock().unwrap().last().cloned().unwrap().1;
+            assert_eq!(told["name"], "Dark", "{told}");
+            assert_ne!(told["library"], "/elsewhere", "{told}");
 
             // A ref that isn't one of this turn's: refused in Kumi's words, nothing sent.
             let before = asked.lock().unwrap().len();
