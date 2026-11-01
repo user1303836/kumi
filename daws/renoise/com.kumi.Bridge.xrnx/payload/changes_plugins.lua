@@ -199,7 +199,7 @@ base.register({
     local plan = preset_plan(song, env, input)
     local display = { title = string.format("%s plays program %s", q(plan.label), q(plan.name)) }
     if plan.now == plan.index then display.unchanged = true end
-    return { target = places_.target_of(env, "instrument", plan.n), prior = { preset = plan.now }, fence = { preset = plan.now, hash = state_hash(plan.state) }, display = display }
+    return { target = places_.target_of(env, "instrument", plan.n), prior = { preset = plan.now, hash = state_hash(plan.state) }, fence = { preset = plan.now, hash = state_hash(plan.state) }, display = display }
   end,
   apply = function(song, env, input, fence, desc)
     local ok, plan = pcall(preset_plan, song, env, input)
@@ -208,7 +208,7 @@ base.register({
     local display = { title = string.format("%s plays program %s", q(plan.label), q(plan.name)) }
     if plan.now == plan.index then
       display.unchanged = true
-      return { applied = { preset = plan.now, hash = fence.hash }, display = display, undo = { desc = desc, entry = false }, prior = { preset = plan.now }, target = places_.target_of(env, "instrument", plan.n) }
+      return { applied = { preset = plan.now, hash = fence.hash }, display = display, undo = { desc = desc, entry = false }, prior = { preset = plan.now, hash = fence.hash }, target = places_.target_of(env, "instrument", plan.n) }
     end
     if M.UNDO_COVERS.preset then song:describe_undo(desc) end
     plan.device.active_preset = plan.index
@@ -217,13 +217,14 @@ base.register({
     local kept_hash = state_hash(plan.device.active_preset_data or "")
     if plan.device.active_preset ~= plan.index and kept_hash == fence.hash then
       display.unchanged, display.note = true, "the plug-in kept its program as it was (Renoise reads none chosen), so nothing changed"
-      return { applied = { preset = plan.device.active_preset, hash = kept_hash }, display = display, undo = { desc = desc, entry = false }, prior = { preset = plan.now }, target = places_.target_of(env, "instrument", plan.n) }
+      return { applied = { preset = plan.device.active_preset, hash = kept_hash }, display = display, undo = { desc = desc, entry = false }, prior = { preset = plan.now, hash = fence.hash }, target = places_.target_of(env, "instrument", plan.n) }
     end
     if not M.UNDO_COVERS.preset then display.note = NOT_IN_UNDO end
     return {
       applied = { preset = plan.device.active_preset, hash = kept_hash }, material = { state = plan.state, path = plan.path },
       target = places_.target_of(env, "instrument", plan.n), display = display, undo = { desc = desc, entry = M.UNDO_COVERS.preset },
-      prior = { preset = plan.now }, place = places_.journal_place("instrument", plan.n),
+      -- (the state too: the journal reads a program and a state, and tells Renoise's undo by finding both as they were)
+      prior = { preset = plan.now, hash = fence.hash }, place = places_.journal_place("instrument", plan.n),
     }
   end,
   restore = function(song, env, restore, desc)
@@ -349,10 +350,13 @@ instruments_.instrument_spec(instruments_.settings_kind({
   },
 }))
 
--- plugin-suspend {ref: instrument, autoSuspend}: whether the plug-in sleeps when silent. Renoise's own undo skips it (lab).
+-- plugin-suspend {ref: instrument, autoSuspend}: whether the plug-in sleeps when silent. A step of Renoise's undo (lab 2026-11-01).
 
 instruments_.instrument_spec(instruments_.settings_kind({
-  kind = "plugin-suspend", noun = "auto-suspend", undoable = false, order = { "autoSuspend" },
+  kind = "plugin-suspend", noun = "auto-suspend", undoable = true, order = { "autoSuspend" },
+  -- (Renoise's undo takes it back and no notifier tells, lab 2026-11-01: read again now and then. A poll can't tell that from a
+  -- hand switching it back, or a plug-in swapped in that reads off: the row then says Renoise's undo, for so rare a setting)
+  polled = true,
   object = function(objects) return objects.instrument.plugin_properties end,
   label = function(label) return label .. "'s plug-in" end,
   fields = {

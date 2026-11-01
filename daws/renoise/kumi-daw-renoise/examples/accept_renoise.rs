@@ -252,10 +252,12 @@ struct Case {
     /// A known limit of Renoise's: failures of the steps after the second apply (Renoise's undo and redo, and Kumi's undo
     /// after them) make the case a limit, with this reason.
     limit: &'static str,
+    /// How long the plug-in needs after Kumi's undo before the change is made again.
+    settle_ms: u64,
 }
 
 const fn case(tool: &'static str, setup: &'static str, input: &'static str, probe: &'static str) -> Case {
-    Case { tool, label: "", setup, host: &[], input, probe, note: "", limit: "" }
+    Case { tool, label: "", setup, host: &[], input, probe, note: "", limit: "", settle_ms: 0 }
 }
 
 impl Case {
@@ -273,6 +275,10 @@ impl Case {
     }
     const fn limit(mut self, why: &'static str) -> Self {
         self.limit = why;
+        self
+    }
+    const fn settle(mut self, ms: u64) -> Self {
+        self.settle_ms = ms;
         self
     }
     fn name(&self) -> String {
@@ -294,13 +300,17 @@ const CHAIN: &str =
     "local i = new_instrument('K chain', 1) local c = song:instrument(i):insert_sample_device_chain_at(1) c.name = 'K ch' return {i = i}";
 const CHAIN_DEVICES: &str = "local i = new_instrument('K chain', 1) local c = song:instrument(i):insert_sample_device_chain_at(1) c:insert_device_at('Audio/Effects/Native/Gainer', 2) c:insert_device_at('Audio/Effects/Native/Delay', 3) return {i = i}";
 const PLUGIN: &str = "local i = new_instrument('K plugin', 0) song:instrument(i).plugin_properties:load_plugin('Audio/Generators/AU/aumu:dls :appl') local pp = song:instrument(i).plugin_properties return {i = i, s = not pp.auto_suspend}";
+/// A plug-in with several programs: Dexed, free, if it's installed. Apple's AU instruments have one each.
+const PROGRAMS: &str = "local i = new_instrument('K programs', 0) local pp = song:instrument(i).plugin_properties if not pp:load_plugin('Audio/Generators/AU/aumu:Dexd:DGSB') then error('NO_PROGRAMS') end return {i = i}";
+/// What the plug-in holds and its program, for a change of program.
+const PROGRAM_NOW: &str = "local d = song:instrument($i).plugin_properties.plugin_device local x, h = d.active_preset_data, 0 for k = 1, #x do h = (h * 31 + x:byte(k)) % 2147483647 end return {d.active_preset, h, values(d)}";
 const SLOT: &str = "local q, p = new_slot() return {q = q, p = p}";
 /// What a Doofer holds: its devices' types and their gains, as its preset data says.
 const INSIDE: &str = r#"local x = pdata(song:track($t):device(2)) local out = {} for k in x:gmatch('type="(%w+)"') do out[#out + 1] = k end for v in x:gmatch('<Volume>%s*<Value>([^<]*)</Value>') do out[#out + 1] = v end return out"#;
 /// Why Kumi's undo of lines refuses after Renoise's undo and redo of them.
 const LINES_REDO: &str = "Renoise's redo of lines can't be told from its undo bringing back the producer's like lines (review MUST 6, 10): Kumi's undo refuses after it, and HISTORY says Renoise put them back";
 /// Why Renoise's undo can't take a plug-in instrument's change back now and then.
-const AU_UNDO: &str = "Renoise's undo history goes empty now and then once AU plug-in instruments load and unload (can_undo() false before its undo; as after n-devices' device inventory): its undo takes nothing back, HISTORY stays as it was, Kumi's undo works";
+const AU_UNDO: &str = "Renoise sometimes holds its undo step open after an AU instrument loads, until it loses the app focus (can_undo() false, later changes folded into that step; #393): the runner moves the focus away and back, and where a step was folded before that, Renoise's undo takes more back; Kumi's undo works";
 
 static CASES: &[Case] = &[
     // Mixer, names, structure (M3 kinds, now through the whole stack)
@@ -410,11 +420,13 @@ static CASES: &[Case] = &[
     case("phrase_script", PHRASE, r#"{"ref":"$E:phrase:$i.1","code":"return pattern { unit = \"1/8\", event = { \"c4\", \"e4\" } }"}"#, "local ph = song:instrument($i):phrase(1) return {ph.playback_mode, table.concat(ph.script.paragraphs, '\\n')}"),
     case("phrase_render", "local i = new_instrument('K render', 1) local ph = song:instrument(i):insert_phrase_at(1) ph.playback_mode = R.InstrumentPhrase.PLAY_SCRIPT ph.script.paragraphs = {'return pattern { unit = \"1/8\", event = { \"c4\", \"e4\", \"g4\" } }'} ph.script:commit() return {i = i}", r#"{"ref":"$E:phrase:$i.1"}"#, "local ph = song:instrument($i):phrase(1) return {ph.playback_mode, ph.number_of_lines, phnotes($i, 1, 8)}"),
     case("plugin_load", "return {i = new_instrument('K plugin', 0)}", r#"{"ref":"$E:instrument:$i","path":"DLSMusicDevice"}"#, "local ins = song:instrument($i) local pp = ins.plugin_properties return {pp.plugin_loaded, pp.plugin_device and pp.plugin_device.name or false, ins.name}").limit(AU_UNDO),
-    case("plugin_param", PLUGIN, r#"{"ref":"$E:instrument:$i","param":"Volume","value":0.5}"#, "return values(song:instrument($i).plugin_properties.plugin_device)").limit(AU_UNDO),
+    case("plugin_param", PLUGIN, r#"{"ref":"$E:instrument:$i","param":"Volume","value":0.5}"#, "return values(song:instrument($i).plugin_properties.plugin_device)"),
     case("plugin_preset", PLUGIN, r#"{"ref":"$E:instrument:$i","preset":1}"#, "local d = song:instrument($i).plugin_properties.plugin_device local x, h = d.active_preset_data, 0 for k = 1, #x do h = (h * 31 + x:byte(k)) % 2147483647 end return {d.active_preset, h, values(d)}")
-        .limit("This Mac's AU instruments (DLSMusicDevice, AUMIDISynth, AUSampler, MS2000 Emulator) have one program each, which Renoise keeps: the answer is unchanged with no HISTORY row (checked); another program can't be tried here"),
-    case("plugin_set", PLUGIN, r#"{"ref":"$E:instrument:$i","channel":2}"#, "return song:instrument($i).plugin_properties.channel").limit(AU_UNDO),
-    case("plugin_suspend", PLUGIN, r#"{"ref":"$E:instrument:$i","autoSuspend":"$s"}"#, "return song:instrument($i).plugin_properties.auto_suspend").limit(AU_UNDO),
+        .limit("Apple's AU instruments (DLSMusicDevice, AUMIDISynth, AUSampler) have one program each, which Renoise keeps: the answer is unchanged with no HISTORY row (checked); `plugin_preset (programs)` tries another program"),
+    // (Dexed ignores a program for two seconds after its state is written: its `lastStateSave`)
+    case("plugin_preset", PROGRAMS, r#"{"ref":"$E:instrument:$i","preset":3}"#, PROGRAM_NOW).label("programs").settle(2_500),
+    case("plugin_set", PLUGIN, r#"{"ref":"$E:instrument:$i","channel":2}"#, "return song:instrument($i).plugin_properties.channel"),
+    case("plugin_suspend", PLUGIN, r#"{"ref":"$E:instrument:$i","autoSuspend":"$s"}"#, "return song:instrument($i).plugin_properties.auto_suspend"),
     case("midi_set", "return {i = new_instrument('K midi', 0)}", r#"{"ref":"$E:instrument:$i","channel":10}"#, "return song:instrument($i).midi_output_properties.channel"),
     // Devices (n-devices)
     case("device_preset", EQ5, r#"{"ref":"$E:device:$t.2","preset":2}"#, "local d = song:track($t):device(2) return {d.active_preset, values(d)}"),
@@ -518,6 +530,20 @@ impl Lab {
         }
         let song = host_call(&self.host, "read", json!({"kind": "song"})).await.unwrap_or_default();
         song["epoch"].as_str().unwrap_or_default().to_owned()
+    }
+
+    /// An AU instrument's load sometimes leaves Renoise holding its undo step open: `can_undo()` reads false and later changes
+    /// fold into that step, until Renoise loses the app focus (#393, measured). Moves the focus away and back when so.
+    async fn close_held_step(&self) {
+        if self.lua("return song:can_undo()").await != Ok(json!(false)) {
+            return;
+        }
+        let open = |app: &str| std::process::Command::new("open").args(["-a", app]).status();
+        if open(&std::env::var("KUMI_LAB_BACK_APP").unwrap_or_else(|_| "Finder".into())).is_ok() {
+            tokio::time::sleep(Duration::from_millis(1_200)).await;
+            open("Renoise").ok();
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        }
     }
 
     async fn pause(&self) {
@@ -664,6 +690,9 @@ async fn setup(lab: &Lab, case: &Case) -> Result<BTreeMap<String, Value>, String
         host_call(&lab.host, "change_apply", args).await.map_err(|(why, _)| format!("setup {kind}: {why}"))?;
         host_call(&lab.host, "change_release", json!({"transactionIds": [preview["transactionId"]]})).await.ok();
     }
+    if case.setup.contains("load_plugin") {
+        lab.close_held_step().await;
+    }
     vars.insert("E".into(), json!(lab.epoch().await));
     Ok(vars)
 }
@@ -692,6 +721,12 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
     out.note = case.note.to_owned();
     let mut vars = match setup(lab, case).await {
         Ok(vars) => vars,
+        // (the machine has no plug-in for the case: nothing was tried)
+        Err(why) if why.contains("NO_PROGRAMS") => {
+            out.verdict = Verdict::Limit;
+            out.note = "not run: no plug-in with several programs here (install Dexed for it)".into();
+            return out;
+        }
         Err(why) => return out.fail("setup", why),
     };
     let p0 = probe(lab, case, &vars).await;
@@ -740,6 +775,7 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
     }
     // 3. Again, then Renoise's own undo and redo
     lab.pause().await;
+    tokio::time::sleep(Duration::from_millis(case.settle_ms)).await;
     if outside_undo {
         // (a step Renoise's undo takes instead: this change makes none)
         if let Err(why) = lab.lua("song.artist = 'K sentinel ' .. tostring(os.clock())").await {
@@ -758,6 +794,9 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
         out.info("again", format!("took otherwise: {p3}"));
     }
     lab.pause().await;
+    if case.tool.starts_with("plugin_") {
+        lab.close_held_step().await;
+    }
     let stack = lab.lua("return {song:can_undo(), song:can_redo()}").await.unwrap_or_default();
     // (Renoise keeps no undo step now and then for a whole session: its undo then takes nothing back, which is no case's doing)
     let kept_none = stack[0] == json!(false);

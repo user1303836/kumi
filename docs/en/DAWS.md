@@ -373,12 +373,13 @@ saves the song, instruments and device presets.
 - **Only Renoise's undo** takes back `run_lua`.
 - **Only Kumi's undo** takes back what Renoise's undo skips: mute and solo
   (`track_mute`, `track_solo`), the loop and the pattern loop (`loop_range`,
-  `loop_pattern`), the metronome switch (`metronome_switch`), editing settings
-  (`edit_settings`) and a plug-in's auto-suspend (`plugin_suspend`).
+  `loop_pattern`), the metronome switch (`metronome_switch`) and editing settings
+  (`edit_settings`).
 - After Renoise's own undo and redo of line edits (`notes_write`, `lines_copy`,
   `phrase_write` and the like), Kumi's undo of them is refused: it can't tell
   Renoise's redo from your own identical lines. Renoise's undo still can.
-- In long sessions Renoise's undo history has sometimes emptied after AU
-  instruments were loaded and unloaded (cause unknown).
+- After an AU instrument loads, Renoise sometimes holds its undo step open until
+  you switch to another app. Afterwards one undo takes back the load and the
+  changes made since, together. Kumi's undo still works change by change.
 - FOCUS's Mixer has no meters: Renoise's API has none.
 - A render of a dense song can be refused as busy for a moment; ask again.

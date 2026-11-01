@@ -8,6 +8,7 @@ local H = T.harness
 local I = T.instruments
 local setup, place, preview, apply, change, restore, failure, call = I.setup, I.place, I.preview, I.apply, I.change, I.restore, I.failure, I.call
 local steps, newest, instrument, iref = I.steps, I.newest, I.instrument, I.iref
+local K = assert(loadfile(T.tests_dir .. "change_kit.lua"))(T)
 
 local function pref(epoch, i, p) return epoch .. ":phrase:" .. i .. "." .. p end
 local function phrase(i, p) return mock.data.instruments[i].phrases[p] end
@@ -635,6 +636,52 @@ test("plugins: a plug-in's parameter by name or by its ref, its program, its set
   failure(call(peer, "change_preview", { kind = "plugin-param", input = { ref = iref(place(peer), 1), param = 1, value = 0 }, epoch = place(peer) }), "bad-params")
 end)
 
+test("plugins: a program that changes what the plug-in holds: Renoise's undo and redo are told, and Kumi's undo puts both back (#393)", function()
+  plugin_catalog()
+  local env, peer = setup()
+  change(peer, "plugin-load", { ref = iref(place(peer), 3), path = "DLSMusicDevice" })
+  mock.data.undo.stack = {}
+  local plugin = instrument(3).plugin
+  plugin.preset, plugin.preset_data, plugin.program_states = 1, "<first program/>", { [2] = "<second program/>" }
+  H.tick(2)
+  local record = change(peer, "plugin-preset", { ref = iref(place(peer), 3), preset = 2 }, "Kumi: program (k641)")
+  eq(plugin.preset_data, "<second program/>")
+  H.tick(2)
+  K.told(peer)
+  mock.song:undo()
+  eq(K.told(peer), "undo:Kumi: program (k641)")
+  eq(plugin.preset, 1)
+  eq(plugin.preset_data, "<first program/>")
+  mock.song:redo()
+  eq(K.told(peer), "redo:Kumi: program (k641)")
+  eq(plugin.preset, 2)
+  local undone = restore(peer, "plugin-preset", record)
+  ok(undone.result, json.encode(undone.error or {}))
+  eq(plugin.preset, 1)
+  eq(plugin.preset_data, "<first program/>")
+  -- another plug-in loaded since: its program is watched too
+  mock.song:instrument(3).plugin_properties:load_plugin("Audio/Generators/AU/aumu:dls :appl")
+  H.tick(2)
+  plugin = instrument(3).plugin
+  plugin.preset, plugin.preset_data, plugin.program_states = 1, "<first program/>", { [2] = "<second program/>" }
+  H.tick(2)
+  change(peer, "plugin-preset", { ref = iref(place(peer), 3), preset = 2 }, "Kumi: program (k642)")
+  H.tick(2)
+  K.told(peer)
+  mock.song:undo()
+  eq(K.told(peer), "undo:Kumi: program (k642)")
+  -- a song opened with the plug-in already in it: its program is watched from the start
+  mock.fire(mock.tool.app_release_document_observable)
+  mock.fire(mock.tool.app_new_document_observable)
+  H.tick(2)
+  plugin.preset, plugin.preset_data = 1, "<first program/>"
+  change(peer, "plugin-preset", { ref = iref(place(peer), 3), preset = 2 }, "Kumi: program (k643)")
+  H.tick(2)
+  K.told(peer)
+  mock.song:undo()
+  eq(K.told(peer), "undo:Kumi: program (k643)")
+end)
+
 test("plugins: Kumi's undo of a parameter or a program never writes into another plug-in loaded since, discard or not (#361 N5)", function()
   plugin_catalog()
   local env, peer = setup()
@@ -657,21 +704,30 @@ test("plugins: Kumi's undo of a parameter or a program never writes into another
   eq(steps(), before)
 end)
 
-test("plugins: auto-suspend is no step of Renoise's undo (lab): Kumi says so, makes no step, and puts it back itself; refused once changed", function()
+test("plugins: auto-suspend is a step of Renoise's undo (lab): its undo and redo are told, and Kumi's undo puts it back; refused once changed", function()
   plugin_catalog()
   local env, peer = setup()
   change(peer, "plugin-load", { ref = iref(place(peer), 3), path = "DLSMusicDevice" })
   mock.data.undo.stack = {}
   local record, done = change(peer, "plugin-suspend", { ref = iref(place(peer), 3), autoSuspend = true })
   eq(instrument(3).plugin_props.auto_suspend, true)
-  eq(done.undo.entry, false)
-  ok(done.display.note and done.display.note:find("Renoise's own undo won't take this back", 1, true), json.encode(done.display))
-  eq(steps(), 0, "no step in Renoise")
+  ok(not (done.display.note and done.display.note:find("Renoise's own undo won't take this back", 1, true)), json.encode(done.display))
+  eq(steps(), 1, "a step in Renoise")
+  H.tick(2)
+  K.told(peer)
+  -- (no notifier tells Renoise's undo of it, lab: the journal's poll does)
+  instrument(3).plugin_props.obs.auto_suspend = mock.observable()
+  mock.song:undo()
+  mock.advance(1100)
+  ok(K.told(peer):find("^undo:"), "told undone")
+  eq(instrument(3).plugin_props.auto_suspend, false)
+  mock.song:redo()
+  mock.advance(1100)
+  ok(K.told(peer):find("^redo:"), "told redone")
+  eq(instrument(3).plugin_props.auto_suspend, true)
   local undone = restore(peer, "plugin-suspend", record)
   ok(undone.result, json.encode(undone.error or {}))
-  eq(undone.result.undo.entry, false)
   eq(instrument(3).plugin_props.auto_suspend, false)
-  eq(steps(), 0)
   record = change(peer, "plugin-suspend", { ref = iref(place(peer), 3), autoSuspend = true })
   -- (the plug-in replaced since: its auto-suspend is another's)
   change(peer, "plugin-load", { ref = iref(place(peer), 3), path = "Audio/Generators/VST3/Synth" })

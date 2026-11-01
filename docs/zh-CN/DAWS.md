@@ -179,8 +179,8 @@ Kumi 每次查看时都会读取这首歌曲的设置并照着做：BPM（2 倍�
 ### 限制
 
 - **只有 Renoise 的撤销**能撤回 `run_lua`。
-- **只有 Kumi 的撤销**能撤回 Renoise 的撤销跳过的内容：静音和独奏（`track_mute`、`track_solo`）、循环和模式循环（`loop_range`、`loop_pattern`）、节拍器开关（`metronome_switch`）、编辑设置（`edit_settings`）和插件的自动休眠（`plugin_suspend`）。
+- **只有 Kumi 的撤销**能撤回 Renoise 的撤销跳过的内容：静音和独奏（`track_mute`、`track_solo`）、循环和模式循环（`loop_range`、`loop_pattern`）、节拍器开关（`metronome_switch`）和编辑设置（`edit_settings`）。
 - 行的编辑（`notes_write`、`lines_copy`、`phrase_write` 等）经过 Renoise 自己的撤销和重做之后，Kumi 对它们的撤销会被拒绝：它分不清 Renoise 的重做和你自己写下的相同的行。Renoise 的撤销仍然可以撤回。
-- 在长时间的会话中，载入和卸下 AU 乐器之后，Renoise 的撤销历史有时会变空（原因不明）。
+- 载入 AU 乐器之后，Renoise 有时会让撤销步骤一直开着，直到你切换到别的应用。之后一次撤销会把载入和其后的改动一起撤回。Kumi 的撤销仍可按每次改动撤回。
 - FOCUS 的 Mixer 没有电平表：Renoise 的 API 不提供。
 - 渲染内容很密的歌曲时，可能会短暂地以忙碌为由被拒绝；请再试一次。

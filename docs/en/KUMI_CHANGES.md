@@ -413,8 +413,7 @@ picture. What differs:
   so. REAPER: repeat, the metronome switch, a ReaEQ band's type or switch, the
   automation override, the project's notes, title, author, grid and timebase,
   and parameter modulation with nothing on. Renoise: mute, solo, the loop, the
-  pattern loop, the metronome switch, editing settings and a plug-in's
-  auto-suspend.
+  pattern loop, the metronome switch and editing settings.
 - **What only the DAW's undo takes back:** Lua (`run_lua`), REAPER's API
   (`api_call`) and REAPER's actions (`run_action`, when REAPER makes an undo
   point of it). Saving a project, song, template, chain, instrument or preset
@@ -493,10 +492,10 @@ HISTORY stays honest in each case: Kumi refuses, or says what it can't do.
   `phrase_write`, `phrase_clear`), Kumi's undo of them is refused: Kumi can't
   tell Renoise's redo from your own identical lines. The row says "Renoise may
   have redone it"; Renoise's undo can take it back.
-- **Renoise:** in long sessions its undo history has sometimes emptied after
-  AU plug-in instruments were loaded and unloaded (the cause isn't known); then
-  Renoise's undo can't take back `plugin_load`, `plugin_param` or `plugin_set`.
-  `plugin_preset` is untested with plug-ins that have more than one program.
+- **Renoise:** after an AU plug-in instrument loads, Renoise sometimes holds its
+  undo step open until you switch to another app. Until then its undo has
+  nothing to take back, and afterwards one undo takes back the load and the
+  changes made since, together. Kumi's undo still works change by change.
 - **REAPER:** a project whose tracks are all replaced at once stays the same
   project when the change made an undo point (an action that removes every
   track and inserts others). It reads as another project when nothing shows it

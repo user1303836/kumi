@@ -220,7 +220,7 @@ Kumi 在连接时读取桥接的版本，不会提供桥接版本过旧而无法
 
 - **Kumi 的撤销**会精确恢复修改所设置的内容，作为 DAW 撤销历史中的新一步（"Kumi: undo …"）。它从不按 DAW 自己的撤销，所以你之后做的操作会保留。如果你之后改动过同一处，或对象已经不在，它会被拒绝（显示 **kept** 和原因）；如果已经恢复原样，它什么都不做。与 Live 不同，它也能撤回删除：被删除的轨道、对象（item）、take、FX、发送、硬件输出、标记、槽位、设备、乐器、采样或乐句，会从 Kumi 保留的内容中恢复。
 - **DAW 自己的撤销**（Cmd-Z，Windows 和 Linux 上为 Ctrl-Z）在 REAPER 中撤回一个计划，在 Renoise 中撤回一项修改。HISTORY 会跟着更新："Undone with REAPER's own undo"、"Put back with REAPER" 或 "REAPER may have redone it; Kumi can't tell"。
-- **DAW 的撤销会跳过的内容**只有 Kumi 的撤销能撤回，该行会注明。REAPER：循环播放开关、节拍器开关、ReaEQ 频段的类型或开关、自动化覆盖、工程的备注、标题、作者、网格和时基，以及没有任何调制开启的参数调制。Renoise：静音、独奏、循环、模式循环、节拍器开关、编辑设置，以及插件的自动休眠。
+- **DAW 的撤销会跳过的内容**只有 Kumi 的撤销能撤回，该行会注明。REAPER：循环播放开关、节拍器开关、ReaEQ 频段的类型或开关、自动化覆盖、工程的备注、标题、作者、网格和时基，以及没有任何调制开启的参数调制。Renoise：静音、独奏、循环、模式循环、节拍器开关和编辑设置。
 - **只有 DAW 的撤销能撤回的内容：** Lua（`run_lua`）、REAPER 的 API（`api_call`）和 REAPER 的动作（`run_action`，在 REAPER 为它建立撤销点时）。保存工程、歌曲、模板、FX 链、乐器或预设只是写文件，没有 HISTORY 行。
 - **能保留多久：** Kumi 为撤销保留最新的 400 项修改，只在它与 DAW 的连接持续期间有效（[当 Live 断开时](KUMI_GUIDE.md#当-live-断开时)）。
 - **删除之前的副本。** 在删除或覆盖内容的修改之前，Kumi 会把最后一次保存的工程或歌曲复制到同一文件夹中它的旁边（`Song (Kumi copy 2026-10-20 14.05.31 +0900).rpp`，这样 REAPER 工程的媒体也能从副本找到），每个保存的版本只复制一次，每个工程保留最新的 5 份。保存的文件超过 512 MB，或者无法复制（文件夹不可写、磁盘已满）时不复制，并会在修改中说明；未保存的工程或歌曲没有副本。
@@ -276,7 +276,7 @@ Kumi 在连接时读取桥接的版本，不会提供桥接版本过旧而无法
 每种情况下 HISTORY 都如实记录：Kumi 会拒绝，或说明它做不到什么。
 
 - **Renoise：** 对行的编辑（`notes_write`、`notes_clear`、`notes_transpose`、`notes_humanize`、`lines_copy`、`phrase_write`、`phrase_clear`）用 Renoise 自己的撤销再重做之后，Kumi 对它们的撤销会被拒绝：Kumi 分不清是 Renoise 的重做，还是你自己写下的相同的行。该行会显示 "Renoise may have redone it"；Renoise 的撤销可以撤回它。
-- **Renoise：** 在长时间的使用中，载入并移除 AU 插件乐器之后，它的撤销历史有时会变空（原因尚不清楚）；这时 Renoise 的撤销无法撤回 `plugin_load`、`plugin_param` 或 `plugin_set`。`plugin_preset` 尚未在有多个音色（program）的插件上测试过。
+- **Renoise：** 载入 AU 插件乐器之后，Renoise 有时会让撤销步骤一直开着，直到你切换到别的应用。在此之前它的撤销没有可撤回的内容；之后一次撤销会把载入和其后的改动一起撤回。Kumi 的撤销仍可按每次改动撤回。
 - **REAPER：** 所有轨道一次全部被替换时，如果这个改动创建了撤销点（例如删除所有轨道再插入其他轨道的动作），工程仍是同一个工程。没有迹象表明这是一次编辑时，它会被当作另一个工程：不创建撤销点的脚本、REAPER 对这类改动的撤销或重做、7.79 之前的 REAPER，或撤销历史已到上限。这时 Kumi 对它的引用会失效，由模型重新读取。
 - **REAPER：** Kumi 撤销参数调制时会关闭它的开关，但会保留调制设置，因为 REAPER 一旦建立就会保留它们；该行会注明。
 - **REAPER：** `track_midi_out` 需要在 REAPER 的偏好设置中有一个 MIDI 输出设备。
