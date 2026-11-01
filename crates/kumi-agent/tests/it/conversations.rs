@@ -291,9 +291,13 @@ async fn the_index_made_again_from_the_files_is_the_one_kept() {
     store.move_conversation("kq01aa000000", "unsaved", B).await.unwrap();
     store.delete(B, "mv66zz0m3fa91c").await.unwrap();
     let file = dir.path().join("conversation-index.json");
+    // Whether a file was read just after it was written depends on how long the test took.
     let entries = |text: &str| {
         let mut value: Value = serde_json::from_str(text).unwrap();
         value.as_object_mut().unwrap().remove("gone");
+        for entry in value["conversations"].as_object_mut().unwrap().values_mut() {
+            entry["stamp"].as_object_mut().unwrap().remove("recent");
+        }
         value
     };
     let kept = entries(&std::fs::read_to_string(&file).unwrap());
@@ -390,6 +394,12 @@ async fn where_the_file_system_cant_lock_the_lock_file_names_the_kumi_that_has_i
     store.tidy(A).await.unwrap();
     assert!(store.load(A, "mv66me0m3fa91c").await.unwrap().is_some());
     assert!(store.delete(A, "mv66me0m3fa91c").await.unwrap_err().to_string().contains("open in another Kumi window"));
+    // Another Kumi making the file this moment (nothing in it yet) is naming itself: it has it. Left so, it names nobody.
+    std::fs::write(&lock, "").unwrap();
+    assert_eq!(store.claim(A, "mv66me0m3fa91c"), Claim::Taken);
+    age(&lock, Duration::from_secs(60));
+    assert_eq!(store.claim(A, "mv66me0m3fa91c"), Claim::Ours);
+    store.release(A, "mv66me0m3fa91c");
     // That Kumi is gone, and its pid went to a process started later: this one names itself.
     std::fs::write(&lock, json!({"pid":named["pid"],"started":1}).to_string()).unwrap();
     assert_eq!(store.claim(A, "mv66me0m3fa91c"), Claim::Ours);
@@ -398,6 +408,21 @@ async fn where_the_file_system_cant_lock_the_lock_file_names_the_kumi_that_has_i
     // Let go, the file goes; a store dropped lets go of what it held.
     store.release(A, "mv66me0m3fa91c");
     assert!(!lock.exists());
+    // On Linux, a Kumi's start is reckoned from its boot as well: one still running is so after the clock was set (its
+    // start by the clock moved with it), and one from another boot is gone.
+    #[cfg(target_os = "linux")]
+    {
+        let boot = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").unwrap().trim().to_owned();
+        let pid = named["pid"].as_u64().unwrap();
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).unwrap();
+        let ticks: u64 = stat[stat.rfind(')').unwrap() + 1..].split_whitespace().nth(19).unwrap().parse().unwrap();
+        std::fs::write(&lock, json!({"pid":pid,"started":1,"boot":boot,"ticks":ticks}).to_string()).unwrap();
+        assert_eq!(store.claim(A, "mv66me0m3fa91c"), Claim::Taken);
+        let other_boot = json!({"pid":pid,"started":named["started"],"boot":"another boot","ticks":ticks});
+        std::fs::write(&lock, other_boot.to_string()).unwrap();
+        assert_eq!(store.claim(A, "mv66me0m3fa91c"), Claim::Ours);
+        store.release(A, "mv66me0m3fa91c");
+    }
     assert_eq!(store.claim(A, "mv66me0m3fa91c"), Claim::Ours);
     drop(store);
     assert!(!lock.exists());
@@ -695,6 +720,8 @@ async fn what_a_later_kumi_adds_to_the_index_or_beside_a_conversation_is_read_pa
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());
     store.save(A, "mv66me0m3fa91c", &said("make the bass wider", 10)).await.unwrap();
+    // Not read just after it was written: what the index says of it is taken as it is.
+    age(&dir.path().join(A).join("conversations/mv66me0m3fa91c.json"), Duration::from_secs(3600));
     store.all().await.unwrap();
     // The index is versioned, and a field more at any level (a DAW, say) is the same version.
     let file = dir.path().join("conversation-index.json");
@@ -704,11 +731,23 @@ async fn what_a_later_kumi_adds_to_the_index_or_beside_a_conversation_is_read_pa
     index["daw"] = json!("Live");
     index["conversations"][&key]["daw"] = json!("Live");
     index["places"][A]["noun"] = json!("Set");
-    // What the index says of a file that hasn't changed is taken as it is: here, a first request only it holds.
+    // What the index says of a file that hasn't changed is taken as it is: here, a first request only it holds, from a
+    // later Kumi that holds more of the files than this one.
     index["conversations"][&key]["first"] = json!("as the index has it");
+    index["conversations"][&key]["stamp"]["reads"] = json!(2);
     std::fs::write(&file, index.to_string()).unwrap();
     let rows = store.all().await.unwrap();
     assert_eq!(rows[0].first, "as the index has it", "the index was read, not made again");
+    // Written again (another conversation saved), it keeps what the later Kumi added, at every level.
+    store.save(B, "mv66zz0m3fa91c", &said("tighten the drums", 15)).await.unwrap();
+    let written: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+    assert_eq!(written["daw"], "Live");
+    assert_eq!((&written["conversations"][&key]["daw"], &written["places"][A]["noun"]), (&json!("Live"), &json!("Set")));
+    assert_eq!(
+        (&written["conversations"][&key]["first"], &written["conversations"][&key]["stamp"]["reads"]),
+        (&json!("as the index has it"), &json!(2))
+    );
+    assert!(store.delete(B, "mv66zz0m3fa91c").await.unwrap());
     // A sidecar with a field more keeps what's known in it, and what isn't when it's written again.
     let meta = dir.path().join(A).join("conversations/mv66me0m3fa91c.meta");
     std::fs::write(&meta, r#"{"version":1,"name":"Bass ideas","daw":"Live"}"#).unwrap();
@@ -900,4 +939,159 @@ async fn a_log_goes_with_its_conversation_and_one_left_behind_follows_it_or_goes
 fn a_long_title_is_cut_between_characters() {
     let a = |n: usize| "a".repeat(n);
     assert_eq!(kumi_agent::core::conversations::title(None, &format!("{}🎹{}", a(58), a(10))), format!("{}…", a(58)));
+}
+
+/// Under an index a later Kumi wrote where this one keeps its own, this one keeps its own beside it, read at each look
+/// as it is, never writing over the later one (#349).
+#[tokio::test(flavor = "current_thread")]
+async fn under_a_later_kumis_index_this_one_keeps_its_own_beside_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    store.save(A, "mv66me0m3fa91c", &said("make the bass wider", 10)).await.unwrap();
+    age(&dir.path().join(A).join("conversations/mv66me0m3fa91c.json"), Duration::from_secs(3600));
+    let file = dir.path().join("conversation-index.json");
+    let later = json!({"version":2,"conversations":{},"keepDays":0,"daw":"Live"}).to_string();
+    std::fs::write(&file, &later).unwrap();
+    assert_eq!(store.all().await.unwrap().len(), 1);
+    let beside = dir.path().join("conversation-index-v1.json");
+    let mut index: Value = serde_json::from_str(&std::fs::read_to_string(&beside).unwrap()).unwrap();
+    assert_eq!((&index["version"], &index["keepDays"]), (&json!(1), &json!(0)), "{index}");
+    // Read as it is at the next look, not made again from the files.
+    let key = format!("{A}/mv66me0m3fa91c");
+    index["conversations"][&key]["first"] = json!("as this Kumi's own index has it");
+    std::fs::write(&beside, index.to_string()).unwrap();
+    assert_eq!(store.all().await.unwrap()[0].first, "as this Kumi's own index has it");
+    // Saved, named and deleted in its own; the later one's as it was, and says what settings said.
+    store.save(B, "mv66zz0m3fa91c", &said("tighten the drums", 20)).await.unwrap();
+    assert!(store.rename(A, "mv66me0m3fa91c", Some("Bass ideas")).await.unwrap());
+    assert!(matches!(store.find("bass ideas").await.unwrap(), ConversationMatch::One(_)));
+    assert!(store.delete(B, "mv66zz0m3fa91c").await.unwrap());
+    assert_eq!(store.find("mv66zz0m3fa91c").await.unwrap(), ConversationMatch::None);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), later);
+    assert_eq!(store.days_kept().await, 0);
+    // Where its own name holds a later version too, it writes nowhere, and still lists every conversation.
+    std::fs::write(&beside, &later).unwrap();
+    store.save(B, "mv66zz0m9newer", &said("and brighter", 30)).await.unwrap();
+    assert_eq!(store.all().await.unwrap().len(), 2);
+    assert_eq!((std::fs::read_to_string(&file).unwrap(), std::fs::read_to_string(&beside).unwrap()), (later.clone(), later));
+}
+
+/// Where the file system keeps times to the second (HFS+, exFAT, SMB), two changes in one second leave a file the same
+/// time: a look just after a write reads it again at the next one, and a pin changes the size as well (#349).
+#[tokio::test(flavor = "current_thread")]
+async fn two_changes_in_the_second_the_file_system_keeps_are_both_seen() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let kept = dir.path().join(A).join("conversations");
+    store.save(A, "mv66me0m3fa91c", &said("make the bass wider", 10)).await.unwrap();
+    age(&kept.join("mv66me0m3fa91c.json"), Duration::from_secs(3600));
+    // Another Kumi writes its name and pin, each write given the time `at`, as a file system that keeps seconds would.
+    let meta = kept.join("mv66me0m3fa91c.meta");
+    let write = |text: &str, at: SystemTime| {
+        std::fs::write(&meta, text).unwrap();
+        std::fs::OpenOptions::new().write(true).open(&meta).unwrap().set_modified(at).unwrap();
+    };
+    let row = || async { store.all().await.unwrap().into_iter().next().unwrap() };
+    // Two names as long in the second this one looks: the same time and size, and the second is seen.
+    let second = SystemTime::now();
+    write(r#"{"version":1,"name":"Bass"}"#, second);
+    assert_eq!(row().await.name.as_deref(), Some("Bass"));
+    write(r#"{"version":1,"name":"Keys"}"#, second);
+    assert_eq!(row().await.name.as_deref(), Some("Keys"));
+    // A name then a pin in a second long before this one looks: the same time, but not the same size.
+    let long_ago = SystemTime::now() - Duration::from_secs(3600);
+    write(r#"{"version":1,"name":"Keys"}"#, long_ago);
+    assert!(!row().await.pinned);
+    write(r#"{"version":1,"name":"Keys","pinned":true}"#, long_ago);
+    assert!(row().await.pinned);
+    let ConversationMatch::One(found) = store.find("keys").await.unwrap() else { panic!("not found by its name") };
+    assert!(found.pinned);
+}
+
+/// A file named like a conversation that doesn't read as one is read once, and again only once it changes (#349).
+#[tokio::test(flavor = "current_thread")]
+async fn a_file_that_doesnt_read_as_a_conversation_is_read_again_only_once_it_changes() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    store.save(A, "mv66me0m3fa91c", &said("make the bass wider", 10)).await.unwrap();
+    let kept = dir.path().join(A).join("conversations");
+    let broken = kept.join("mv66me0m0broke.json");
+    let readable = serde_json::to_string(&said("a broken one, mended", 20)).unwrap();
+    // As long as a conversation that reads, but not one.
+    std::fs::write(&broken, format!("{{{}", " ".repeat(readable.len() - 1))).unwrap();
+    age(&broken, Duration::from_secs(3600));
+    let when = std::fs::metadata(&broken).unwrap().modified().unwrap();
+    assert_eq!(store.all().await.unwrap().len(), 1);
+    let index: Value = serde_json::from_str(&std::fs::read_to_string(dir.path().join("conversation-index.json")).unwrap()).unwrap();
+    assert!(index["unreadable"].get(format!("{A}/mv66me0m0broke")).is_some(), "{index}");
+    // Its time and size as they were: not read again.
+    std::fs::write(&broken, &readable).unwrap();
+    std::fs::OpenOptions::new().write(true).open(&broken).unwrap().set_modified(when).unwrap();
+    assert_eq!(store.all().await.unwrap().len(), 1);
+    // Changed, it's read again: a conversation now.
+    age(&broken, Duration::from_secs(1800));
+    assert_eq!(store.all().await.unwrap().len(), 2);
+    let index: Value = serde_json::from_str(&std::fs::read_to_string(dir.path().join("conversation-index.json")).unwrap()).unwrap();
+    assert!(index.get("unreadable").is_none(), "{index}");
+}
+
+/// A lock left beside no conversation goes once no Kumi holds it, and a conversation never kept (a copy taken up only to
+/// look) leaves none when it's let go; a kept one's stays, a place to lock (#349).
+#[tokio::test(flavor = "current_thread")]
+async fn a_lock_beside_no_conversation_goes_once_no_kumi_holds_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let kept = dir.path().join(A).join("conversations");
+    let lock = |id: &str| kept.join(format!("{id}.lock"));
+    // Kept, held and let go: its lock stays.
+    store.save(A, "mv66me0m3fa91c", &said("make the bass wider", 10)).await.unwrap();
+    assert_eq!(store.claim(A, "mv66me0m3fa91c"), Claim::Ours);
+    store.release(A, "mv66me0m3fa91c");
+    assert!(lock("mv66me0m3fa91c").exists());
+    // Taken up only to look, and let go before a request: nothing's left of it.
+    assert_eq!(store.claim(A, "mv66me0m0copy1"), Claim::Ours);
+    assert!(lock("mv66me0m0copy1").exists());
+    store.release(A, "mv66me0m0copy1");
+    assert!(!lock("mv66me0m0copy1").exists());
+    // Its conversation gone by hand (or by Kumi 1.16 after a rollback), a lock stays a while, then goes at a look.
+    std::fs::remove_file(kept.join("mv66me0m3fa91c.json")).unwrap();
+    store.all().await.unwrap();
+    assert!(lock("mv66me0m3fa91c").exists(), "left a moment ago");
+    age(&lock("mv66me0m3fa91c"), Duration::from_secs(3600));
+    // Another window's new conversation, not kept yet, an hour on: its lock stays while that window has it.
+    let window = create_conversation_store(dir.path());
+    assert_eq!(window.claim(A, "mv66me0m0new01"), Claim::Ours);
+    age(&lock("mv66me0m0new01"), Duration::from_secs(3600));
+    store.all().await.unwrap();
+    assert!(!lock("mv66me0m3fa91c").exists(), "nobody held it");
+    assert!(lock("mv66me0m0new01").exists(), "that window has it");
+    assert_eq!(store.claim(A, "mv66me0m0new01"), Claim::Taken);
+    drop(window);
+    assert!(!lock("mv66me0m0new01").exists(), "let go, never kept");
+    // Deleted while this Kumi has it, its lock goes when it's let go.
+    store.save(A, "mv66me0m9gone1", &said("one", 20)).await.unwrap();
+    assert_eq!(store.claim(A, "mv66me0m9gone1"), Claim::Ours);
+    assert!(store.delete(A, "mv66me0m9gone1").await.unwrap());
+    assert!(lock("mv66me0m9gone1").exists());
+    store.release(A, "mv66me0m9gone1");
+    assert!(!lock("mv66me0m9gone1").exists());
+}
+
+/// A name and pin an earlier Kumi left in an unsaved Set's place, when it moved the conversation to the Set's own once
+/// the Set was saved, follow it at a look: nothing need be saved in the unsaved Set's place again (#349).
+#[tokio::test(flavor = "current_thread")]
+async fn a_name_and_pin_left_behind_follow_their_conversation_at_a_look() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let unsaved = dir.path().join("unsaved").join("conversations");
+    let kept = dir.path().join(A).join("conversations");
+    store.save("unsaved", "mv66me0m0moved", &said("a new song", 20)).await.unwrap();
+    assert!(store.rename("unsaved", "mv66me0m0moved", Some("Night drive")).await.unwrap());
+    assert!(store.pin("unsaved", "mv66me0m0moved", true).await.unwrap());
+    std::fs::create_dir_all(&kept).unwrap();
+    std::fs::rename(unsaved.join("mv66me0m0moved.json"), kept.join("mv66me0m0moved.json")).unwrap();
+    age(&unsaved.join("mv66me0m0moved.meta"), Duration::from_secs(3600));
+    let ConversationMatch::One(row) = store.find("night drive").await.unwrap() else { panic!("not found by its name") };
+    assert_eq!((row.place.as_str(), row.pinned), (A, true));
+    assert!(!unsaved.join("mv66me0m0moved.meta").exists() && kept.join("mv66me0m0moved.meta").exists());
 }
