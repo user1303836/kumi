@@ -663,7 +663,10 @@ pub fn is_limiter_name(name: &str) -> bool {
         }
         // A compressor that can also limit may have that stage disabled. Only dedicated
         // loudness/limiter products qualify without reading their internal signal path.
-        matches!(p.info.plugin.as_str(), "softube-weiss-mm-1-mastering-maximizer" | "zynaptiq-loud-1")
+        matches!(
+            p.info.plugin.as_str(),
+            "softube-weiss-mm-1-mastering-maximizer" | "zynaptiq-loud-1" | "fabfilter-pro-l" | "fabfilter-pro-l-1" | "fabfilter-pro-l-2"
+        )
     }) || matches!(name_key.as_str(), "fabfilterprol2" | "prol2")
 }
 
@@ -681,13 +684,19 @@ pub fn matches_role(plugin: &InstalledPlugin, role: &str) -> bool {
 }
 
 fn normalize_role(s: &str) -> String {
-    match s.to_ascii_lowercase().as_str() {
+    let lower = s.trim().to_ascii_lowercase();
+    match lower.as_str() {
         "louder" | "loudness" | "limiter" | "maximizer" | "limiting" => "limiting",
         "wider" | "width" | "stereo" | "stereo-width" | "imaging" => "stereo",
         "compressor" | "compression" => "compression",
         "equalizer" | "equalization" | "eq" => "eq",
+        "deesser" | "de-esser" | "deess" | "de-ess" | "deessing" | "de-essing" => "de-essing",
+        "gate" | "gating" => "gate",
+        "expander" | "expansion" => "expansion",
+        "filter" | "filtering" => "filter",
+        "synth" | "synthesizer" | "synthesis" => "synthesis",
         "bbd" | "bucket brigade" | "bucket-brigade-delay" => "bucket-brigade-delay",
-        _ => return s.to_ascii_lowercase(),
+        _ => return lower,
     }
     .into()
 }
@@ -695,6 +704,58 @@ fn normalize_role(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fabfilter_discovery_uses_each_products_roles_and_ignores_vst2_files() {
+        let temp = tempfile::tempdir().unwrap();
+        let products = [
+            ("fabfilter-pro-q-4", "equalizer"),
+            ("fabfilter-pro-c-3", "compressor"),
+            ("fabfilter-pro-l-2", "louder"),
+            ("fabfilter-pro-r-2", "reverb"),
+            ("fabfilter-pro-mb", "compression"),
+            ("fabfilter-pro-ds", " DE-ESS "),
+            ("fabfilter-pro-g", "gating"),
+            ("fabfilter-saturn-2", "saturation"),
+            ("fabfilter-timeless-3", "delay"),
+            ("fabfilter-volcano-3", "filtering"),
+            ("fabfilter-twin-3", "instrument"),
+            ("fabfilter-one", "instrument"),
+            ("fabfilter-simplon", "filter"),
+            ("fabfilter-micro", "filter"),
+        ];
+        for (plugin, _) in products {
+            let format = super::super::formats::structure::builtin(plugin).expect("FabFilter product in the built-in catalog");
+            let filename = format.info.binaries.iter().find(|name| name.ends_with(".vst3")).unwrap();
+            fs::write(temp.path().join(filename), b"VST3 filename identity; never executed").unwrap();
+            fs::write(temp.path().join(filename).with_extension("dll"), b"VST2 ignored").unwrap();
+        }
+        let found = scan(&[temp.path().into()]);
+        assert_eq!(found.plugins.len(), products.len());
+        for (plugin, role) in products {
+            let installed = found.plugins.iter().find(|p| p.plugin.as_deref() == Some(plugin)).expect(plugin);
+            assert_eq!(installed.vendor.as_deref(), Some("FabFilter"));
+            assert!(matches_role(installed, role), "{plugin}: {role}");
+            assert!(!installed.create_preset, "filename alone cannot authorize {plugin} writes");
+            assert_eq!(matches_role(installed, "limiter"), plugin == "fabfilter-pro-l-2", "{plugin}");
+        }
+    }
+
+    #[test]
+    fn fabfilter_limiter_classification_excludes_compressors_and_other_processors() {
+        let mut limiters = 0;
+        for format in builtins().iter().filter(|p| p.info.family == "fabfilter") {
+            let is_limiter = matches!(format.info.plugin.as_str(), "fabfilter-pro-l" | "fabfilter-pro-l-1" | "fabfilter-pro-l-2");
+            limiters += usize::from(is_limiter);
+            for class in &format.info.ids.vst3 {
+                assert_eq!(is_limiter_name(&class.name), is_limiter, "{}", class.name);
+                assert_eq!(is_limiter_class_id(&class.id), is_limiter, "{}", class.id);
+            }
+        }
+        assert!(limiters >= 1);
+        assert!(is_limiter_name("Pro-L 2"));
+        assert!(!is_limiter_name("FabFilter Pro-C 3"));
+    }
+
     #[test]
     fn version_resource_pointers_and_lengths_stay_inside_the_allocated_buffer() {
         let data = [0u32; 16];

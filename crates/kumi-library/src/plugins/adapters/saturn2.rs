@@ -37,7 +37,7 @@ pub static SATURN2: LazyLock<PluginAdapter> = LazyLock::new(|| {
         PluginRecipe { name: "Broken lo-fi", how: "An effect style (Rectify, Smudge), Drive high, Feedback up with its frequency at 1–3 kHz, an XLFO slowly moving Drive; global Mix 50%." },
         PluginRecipe { name: "Parallel on the mix bus", how: "Global Mix 15–25%, a tape style, Drive moderate, High Quality on: density without losing transients." },
     ],
-    beyond: "In Saturn's window (Kumi can open it), or the producer's to do: adding and removing bands (click in the band area, drag crossovers), connecting modulation (drag a source's handle onto a knob), XLFO steps and envelope shapes, MIDI learn, presets (.ffp files, its preset menu). A band that hasn't been made does nothing, whatever its parameters say.",
+    beyond: "For presets, use vst3 catalog/inspect to find verified controls, create/edit to write a new .vstpreset, and the DAW's loading tools to apply it. Check the catalog before changing band structure, crossovers, modulation routing, XLFO steps or envelope shapes; a host parameter name alone does not establish a writable preset field. MIDI learn is in Saturn's window. A band that hasn't been made does nothing, whatever its parameters say.",
     folders: Some(PluginFolders { presets: Some(OsPaths { mac: Some("~/Documents/FabFilter/Presets/Saturn 2"), windows: Some("~/Documents/FabFilter/Presets/Saturn 2") }), wavetables: None }),
     wavetable: None,
 }
