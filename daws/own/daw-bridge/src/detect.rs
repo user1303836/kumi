@@ -532,7 +532,8 @@ pub fn renoise_user_libraries(home: &Path) -> Vec<PathBuf> {
     user_libraries_in(documents, home)
 }
 
-fn user_libraries_in(documents: Option<PathBuf>, home: &Path) -> Vec<PathBuf> {
+/// [`renoise_user_libraries`] with the system's Documents folder given: None to look only in `home`.
+pub fn user_libraries_in(documents: Option<PathBuf>, home: &Path) -> Vec<PathBuf> {
     let library = |documents: &Path| documents.join("Renoise").join("User Library");
     let guess = library(&home.join("Documents"));
     let mut libraries: Vec<PathBuf> = documents.map(|documents| library(&documents)).into_iter().collect();
