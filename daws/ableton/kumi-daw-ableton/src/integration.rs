@@ -632,7 +632,8 @@ impl ObservationHost for Ableton {
             offered.push(self.tool("make_changes", &description, schema));
         }
         if ["live_undo", "live_clip_duplicate_preview", "live_clip_duplicate_apply"].iter().all(|n| tools.has(n)) {
-            offered.push(self.tool(arrange::ARRANGE_TOOL, &arrange::ARRANGE_DESCRIPTION, arrange::ARRANGE_SCHEMA.clone()));
+            let description = format!("{} {}", *arrange::ARRANGE_DESCRIPTION, *arrange::ARRANGE_GUIDE);
+            offered.push(self.tool(arrange::ARRANGE_TOOL, &description, arrange::ARRANGE_SCHEMA.clone()));
         }
         if tools.has("live_undo") {
             offered.push(self.static_tool("undo_change"));

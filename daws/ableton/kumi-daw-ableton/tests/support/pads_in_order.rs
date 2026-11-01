@@ -36,9 +36,26 @@ const SINCE: &[(&str, &str)] = &[
     ("in a new Simpler on… (deviceRef, sample, note?, instrument?)", "in a new Simpler on… (deviceRef, note, sample, instrument?)"),
 ];
 
+/// The paragraph after the one on arranging, which arrange's own description carries since #324: it's sent only when
+/// arrange is looked up.
+const AFTER_ARRANGING: &str = "
+You can watch a video with watch_video:";
+
+/// The instructions' paragraph on arranging, as the source had it: arrange's guide, worded for the instructions.
+fn arranging() -> String {
+    let guide = kumi_daw_ableton::arrange::ARRANGE_GUIDE.as_str();
+    let rest = guide.strip_prefix("Use it in two calls: first without sections to see the material").expect("arrange's guide");
+    format!(
+        "
+To turn a loop, scenes or a few bars into a track (\"arrange this\", \"make a 3-minute track from these scenes\", \"arrange          it like this reference\"), use arrange: first without sections to see the material{}",
+        rest.replacen("; then once with the whole form", "; then call arrange once with the whole form", 1)
+    )
+}
+
 /// A text as the source had it.
 pub fn legacy(text: &str) -> String {
-    SINCE.iter().fold(text.to_owned(), |text, (now, then)| text.replace(now, then))
+    let text = SINCE.iter().fold(text.to_owned(), |text, (now, then)| text.replace(now, then));
+    text.replacen(AFTER_ARRANGING, &format!("{}{AFTER_ARRANGING}", arranging()), 1)
 }
 
 /// A catalog (the change kinds, the tools' definitions) as the source had it: its words, and load_sample_to_pad's note
