@@ -3,6 +3,26 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.36 — 2026-11-01
+
+Ships with bridge 1.0.102, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- HISTORY and NOW draw more of Kumi's changes: new tracks among the Set's, locators on the timeline, a
+  clip's warp markers, a WAV or AIFF clip's waveform with the part that plays, routing (tracks sent to
+  one bus meet there) and the transport's settings.
+- A change Kumi makes across several tracks in one go, such as muting the drums, the bass and the
+  keys, is one HISTORY entry, with one picture of each track's values and one undo.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.102
+
+- Automation previews name their parameter and its range, and an applied automation change returns the
+  points Live has, so HISTORY draws the lane exactly; audio clip previews say where the clip's sample
+  plays from.
+
 ## 1.24.35 — 2026-11-01
 
 Ships with bridge 1.0.101, as 1.24.34 did. Ships with REAPER extension 0.1.8 and Renoise tool 1.0.7,
