@@ -303,6 +303,26 @@ test("phrases: lines written in Renoise's own text, columns shown first; Kumi's 
   eq(phrase(2, 1).delay_column_visible, false)
 end)
 
+test("phrases: lines back already, the columns Kumi showed still shown: Kumi's undo hides them in a step named as its own (#399 N-N3)", function()
+  local env, peer = setup()
+  local input = { ref = pref(place(peer), 2, 1), lines = {
+    { line = 0, notes = { { col = 1, note = "C-4", instrument = "00", volume = "40" }, { col = 2, note = "G-4", delay = "10" } } },
+  } }
+  local record = change(peer, "phrase-write", input, "Kumi: arp (k601)")
+  eq(phrase(2, 1).note_columns, 2)
+  -- (the line back as it was with no line notifier told: the tool's count of the phrase's changed lines doesn't move, a
+  -- state no edit of the mock's reaches)
+  phrase(2, 1).data[1] = nil
+  local undone = restore(peer, "phrase-write", record, "Kumi: undo arp (k602)")
+  ok(undone.result, json.encode(undone.error or {}))
+  ok(undone.result.display.title:find("are back already: the columns Kumi showed are hidden again", 1, true), undone.result.display.title)
+  eq(undone.result.undo.entry, true)
+  eq(phrase(2, 1).note_columns, 1, "hidden again")
+  eq(phrase(2, 1).delay_column_visible, false)
+  eq(steps(), 2, "the hiding is one step")
+  eq(newest(), "Kumi: undo arp (k602)")
+end)
+
 test("phrases: an older sample-offset spelling is written as Renoise's 0Sxx, and the change says so", function()
   local env, peer = setup()
   local input = { ref = pref(place(peer), 2, 1), lines = { { line = 2, effects = { { col = 1, number = "09", amount = "40" } } } } }
