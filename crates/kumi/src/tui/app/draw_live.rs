@@ -376,21 +376,24 @@ impl TuiApp {
     fn draw_timeline(&self, screen: &mut Screen, x: i32, y: i32, width: i32, strip: &TimelineStrip) -> i32 {
         self.track_header(screen, x, y, width, None);
         let cells = width.max(8);
-        let span = strip.locators.iter().map(|l| l.position + 4.).fold(strip.length.max(strip.position + 4.), f64::max);
-        let at = |beats: f64| (beats / span * cells as f64).floor().clamp(0., (cells - 1) as f64) as usize;
+        let stretch = Stretch::of(strip, cells);
         let mut line = vec![sp("─", st::FAINT); cells as usize];
         if let Some(loop_) = &strip.r#loop {
-            for cell in &mut line[at(loop_.start)..=at(loop_.start + loop_.length)] {
-                *cell = sp("━", if loop_.enabled { st::DIM } else { st::FAINT });
+            if let Some(range) = stretch.span(loop_.start, loop_.start + loop_.length) {
+                for cell in &mut line[range] {
+                    *cell = sp("━", if loop_.enabled { st::DIM } else { st::FAINT });
+                }
             }
         }
-        for locator in &strip.locators {
-            line[at(locator.position)] = sp("┼", st::DIM);
+        for at in strip.locators.iter().filter_map(|locator| stretch.point(locator.position)) {
+            line[at] = sp("┼", st::DIM);
         }
-        line[at(strip.position)] = sp("┃", st::ACCENT);
+        if let Some(at) = stretch.point(strip.position) {
+            line[at] = sp("┃", st::ACCENT);
+        }
         // The time selection, as REAPER shades it.
-        if let Some([start, end]) = strip.time_selection {
-            for cell in &mut line[at(start)..=at(end)] {
+        if let Some(range) = strip.time_selection.and_then(|[start, end]| stretch.span(start, end)) {
+            for cell in &mut line[range] {
                 *cell = sp(cell.text.clone(), Style { bg: st::SELECTED.bg, ..*cell.style });
             }
         }
@@ -411,18 +414,28 @@ impl TuiApp {
         if let Some([start, end]) = strip.time_selection {
             whole.push(format!("selection {}–{}", number::to_string(bar(start)), number::to_string(bar(end))));
         }
-        whole.push(format!("{} bars", number::to_string(bar(strip.length) - 1.)));
+        let bars = number::to_string(bar(strip.length) - 1.);
+        if stretch.window && (stretch.from > 0. || stretch.to < strip.length) {
+            // The bars the DAW's view shows: the first and the last it reaches into.
+            let (first, last) = (bar(stretch.from), bar(stretch.to - 1e-3).max(bar(stretch.from)));
+            whole.push(format!("bars {}–{} of {bars}", number::to_string(first), number::to_string(last)));
+        } else {
+            whole.push(format!("{bars} bars"));
+        }
         screen.put(x, y + 2, &truncate(&where_.join(" · "), width), &st::DIM);
         screen.put(x, y + 3, &truncate(&whole.join(" · "), width), &st::FAINT);
-        4 + self.draw_lanes(screen, x, y + 4, width, strip, span)
+        4 + self.draw_lanes(screen, x, y + 4, width, strip, stretch)
     }
     /// A timeline's tracks (REAPER's arrange view), each with its items as bars on the strip's scale: the selected
-    /// track's lanes first in view, as many as fit.
-    fn draw_lanes(&self, screen: &mut Screen, x: i32, y: i32, width: i32, strip: &TimelineStrip, span: f64) -> i32 {
+    /// track's lanes first in view, as many as fit. A track with fixed lanes has a row per lane (a lane that doesn't play
+    /// is faint), and the regions have a row of their own above them, each from its start to its end.
+    fn draw_lanes(&self, screen: &mut Screen, x: i32, y: i32, width: i32, strip: &TimelineStrip, stretch: Stretch) -> i32 {
+        /// A track's fixed lanes drawn one to a row: the last row holds the rest.
+        const MOST_LANES: u32 = 4;
         let Some(lanes) = strip.lanes.as_ref().filter(|lanes| !lanes.is_empty()) else { return 0 };
         let name_width = (width / 3).clamp(6, 16);
         let cells = (width - name_width - 1).max(4);
-        let at = |beats: f64| (beats / span * cells as f64).floor().clamp(0., (cells - 1) as f64) as usize;
+        let stretch = stretch.with_cells(cells);
         // The selected track by its ref (two tracks can share a name), by name where the DAW gives no refs.
         let (selected_ref, selected_name) = {
             let state = self.0.state.borrow();
@@ -434,30 +447,107 @@ impl TuiApp {
         if visible.is_empty() {
             return 0;
         }
-        let shown = visible.len().min(8);
-        let first = visible
+        let mut drawn = 0;
+        let regions: Vec<(&Locator, f64)> = strip
+            .locators
             .iter()
-            .position(|at| lanes[*at].track_ref.is_some() && lanes[*at].track_ref == selected_ref)
-            .or_else(|| {
-                selected_name.and_then(|name| visible.iter().position(|at| lanes[*at].track_ref.is_none() && lanes[*at].name == name))
-            })
-            .map(|at| at.saturating_sub(shown / 2).min(visible.len() - shown))
-            .unwrap_or(0);
-        for (row, lane) in visible[first..first + shown].iter().map(|at| &lanes[*at]).enumerate() {
-            let row = y + row as i32;
-            let indent = "  ".repeat(lane.depth.min(4) as usize);
-            let sign = if lane.collapsed { "▸ " } else { "" };
-            screen.put(x, row, &truncate(&format!("{indent}{sign}{}", lane.name), name_width), &st::DIM);
+            .filter_map(|l| l.end.map(|end| (l, end)))
+            .filter(|(l, end)| stretch.span(l.position, *end).is_some())
+            .collect();
+        if !regions.is_empty() {
             let mut line = vec![sp(" ", st::FAINT); cells as usize];
-            for item in &lane.items {
+            let mut names = vec![];
+            for (region, end) in &regions {
+                let Some(range) = stretch.span(region.position, *end) else { continue };
+                let (first, last) = (*range.start(), *range.end());
+                for cell in &mut line[range] {
+                    *cell = sp("─", st::FAINT);
+                }
+                // Brackets where it starts and ends in view; past an edge of the view, it runs to the edge.
+                let (opens, closes) = (region.position >= stretch.from, *end <= stretch.to && last > first);
+                if opens {
+                    line[first] = sp("[", st::FAINT);
+                }
+                if closes {
+                    line[last] = sp("]", st::FAINT);
+                }
+                let (from, to) = (first + opens as usize, if closes { last } else { last + 1 });
+                if to > from && !region.name.is_empty() {
+                    names.push((from, truncate(&region.name, (to - from) as i32)));
+                }
+            }
+            screen.put(x, y, &truncate("Regions", name_width), &st::FAINT);
+            let at = x + name_width + 1;
+            spans(screen, at, y, &line, None);
+            for (from, name) in names {
+                screen.put(at + from as i32, y, &name, &st::DIM);
+            }
+            drawn += 1;
+        }
+        // A row per track, or per fixed lane: (the track, its lane).
+        let rows: Vec<(usize, Option<u32>)> = visible
+            .iter()
+            .flat_map(|&at| match lanes[at].fixed_lanes.filter(|lanes| *lanes > 1) {
+                Some(count) => (0..count.min(MOST_LANES)).map(|lane| (at, Some(lane))).collect::<Vec<_>>(),
+                None => vec![(at, None)],
+            })
+            .collect();
+        let shown = rows.len().min(8 - drawn as usize);
+        let first = rows
+            .iter()
+            .position(|(at, _)| lanes[*at].track_ref.is_some() && lanes[*at].track_ref == selected_ref)
+            .or_else(|| {
+                selected_name.and_then(|name| rows.iter().position(|(at, _)| lanes[*at].track_ref.is_none() && lanes[*at].name == name))
+            })
+            .map(|at| at.saturating_sub(shown / 2).min(rows.len() - shown))
+            .unwrap_or(0);
+        for (index, &(at, lane)) in rows[first..first + shown].iter().enumerate() {
+            let row = y + drawn + index as i32;
+            let track = &lanes[at];
+            let indent = "  ".repeat(track.depth.min(4) as usize);
+            let sign = if track.collapsed { "▸ " } else { "" };
+            let count = track.fixed_lanes.unwrap_or(1).max(1);
+            // (the last row of a track with many lanes holds the rest of them)
+            let rest = lane.is_some_and(|lane| lane + 1 == MOST_LANES && count > MOST_LANES);
+            let lane_word = lane.filter(|lane| *lane > 0).map(|lane| {
+                if rest {
+                    format!("lanes {}–{count}", lane + 1)
+                } else {
+                    format!("lane {}", lane + 1)
+                }
+            });
+            match &lane_word {
+                // (a lane at the top of the rows says whose it is)
+                Some(word) if index == 0 => {
+                    screen.put(x, row, &truncate(&format!("{indent}{} · {word}", track.name), name_width), &st::DIM);
+                }
+                Some(word) => {
+                    screen.put(x, row, &truncate(&format!("{indent}  {word}"), name_width), &st::FAINT);
+                }
+                None => {
+                    screen.put(x, row, &truncate(&format!("{indent}{sign}{}", track.name), name_width), &st::DIM);
+                }
+            }
+            let on_row = |item: &&TimelineItem| match lane {
+                None => true,
+                Some(lane) => {
+                    let on = item.lane.unwrap_or(0).min(count - 1);
+                    on == lane || (rest && on > lane)
+                }
+            };
+            let mut line = vec![sp(" ", st::FAINT); cells as usize];
+            // (lanes that don't play first: where lanes share a row, what plays is drawn over them)
+            let items = track.items.iter().filter(on_row);
+            for item in items.clone().filter(|item| item.silent).chain(items.filter(|item| !item.silent)) {
                 let style = if item.selected {
                     st::ACCENT
-                } else if item.muted {
+                } else if item.muted || item.silent {
                     st::FAINT
                 } else {
                     st::TEXT
                 };
-                for cell in &mut line[at(item.start)..=at(item.start + item.length.max(0.))] {
+                let Some(range) = stretch.span(item.start, item.start + item.length.max(0.)) else { continue };
+                for cell in &mut line[range] {
                     *cell = sp("▬", style);
                 }
             }
@@ -465,7 +555,7 @@ impl TuiApp {
         }
         // The DAW sends a page of lanes, says where it starts and how many tracks it has in all: the rest are above or
         // below.
-        let (top, bottom) = (visible[first], visible[first + shown - 1]);
+        let (top, bottom) = (rows[first].0, rows[first + shown - 1].0);
         let above = strip.lanes_from.unwrap_or(0) + top;
         let total = strip.track_count.unwrap_or(0).max(strip.lanes_from.unwrap_or(0) + lanes.len());
         let below = total.saturating_sub(strip.lanes_from.unwrap_or(0) + bottom + 1);
@@ -479,12 +569,13 @@ impl TuiApp {
         if hidden > 0 {
             more.push(format!("{hidden} hidden"));
         }
+        let drawn = drawn + shown as i32;
         if more.is_empty() {
-            return shown as i32;
+            return drawn;
         }
         let more = more.join(" · ");
-        screen.put(x, y + shown as i32, &truncate(&more, width), &st::FAINT);
-        shown as i32 + 1
+        screen.put(x, y + drawn, &truncate(&more, width), &st::FAINT);
+        drawn + 1
     }
     /// A tracker's pattern or phrase around its cursor: line numbers (beats brighter), then each track's cells, the
     /// focused track first, as many tracks as fit.
@@ -1369,5 +1460,44 @@ fn short_name(name: &str) -> &str {
     match name.rfind(" (") {
         Some(at) if at > 0 && name.ends_with(')') => &name[..at],
         _ => name,
+    }
+}
+
+/// The stretch of the timeline FOCUS draws across its cells, in beats: the window the DAW's view shows (REAPER's arrange
+/// view, as scrolled and zoomed there), whose marks outside it aren't drawn; else all of it, a few beats past its last
+/// mark.
+#[derive(Clone, Copy)]
+struct Stretch {
+    from: f64,
+    to: f64,
+    cells: i32,
+    window: bool,
+}
+
+impl Stretch {
+    fn of(strip: &TimelineStrip, cells: i32) -> Self {
+        match strip.window {
+            Some([from, to]) if to > from => Stretch { from, to, cells, window: true },
+            _ => {
+                let to = strip.locators.iter().map(|l| l.position + 4.).fold(strip.length.max(strip.position + 4.), f64::max);
+                Stretch { from: 0., to, cells, window: false }
+            }
+        }
+    }
+    fn with_cells(self, cells: i32) -> Self {
+        Stretch { cells, ..self }
+    }
+    /// The cell a place falls in, the first or last past an edge.
+    fn at(&self, beats: f64) -> usize {
+        ((beats - self.from) / (self.to - self.from) * self.cells as f64).floor().clamp(0., (self.cells - 1) as f64) as usize
+    }
+    /// The cell of a place; none for one outside the window.
+    fn point(&self, beats: f64) -> Option<usize> {
+        (!self.window || (self.from..=self.to).contains(&beats)).then(|| self.at(beats))
+    }
+    /// The cells a span covers; none for one outside the window.
+    fn span(&self, start: f64, end: f64) -> Option<std::ops::RangeInclusive<usize>> {
+        let inside = if end > start { end > self.from && start < self.to } else { (self.from..=self.to).contains(&start) };
+        (!self.window || inside).then(|| self.at(start)..=self.at(end))
     }
 }

@@ -123,6 +123,9 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     watching: Cell<bool>,
     /// The track the producer has selected, as the last focus said: the timeline's page is centred on it.
     selected: Rc<RefCell<Option<String>>>,
+    /// What the DAW's own view of the timeline showed at the last read of it (REAPER's arrange view): the next read is
+    /// of that stretch.
+    timeline_view: Cell<Option<[f64; 2]>>,
     /// The project's identity as last observed: another one in the same tab (or another song) is another project.
     identity: Rc<RefCell<Option<String>>>,
     /// The layout the book's refs are at (Renoise's track shifts, each raising it): every request names it, so the
@@ -466,6 +469,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         closed: Rc::new(Cell::new(false)),
         watching: Cell::new(false),
         selected: Rc::default(),
+        timeline_view: Cell::new(None),
         identity: link.project.clone(),
         layout: link.layout.clone(),
         seen_in: link.seen_in.clone(),
@@ -1728,14 +1732,36 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         if let Some(layout) = self.layout.get().filter(|_| names_tracks(&self.book.borrow().scheme, &args)) {
             args.insert("layout".into(), layout.into());
         }
-        let args = Value::Object(args);
-        Ok(match self.call("focus_body", args, signal).await? {
-            Ok(body) => {
-                follow_epoch(&self.book, &self.epoch, &self.layout, &body);
-                (self.daw.to_body)(request, &body)
+        // The stretch of the timeline the DAW's view showed last, as the producer scrolled and zoomed it there: its
+        // items and marks, not a whole long project's.
+        let timeline = matches!(request, BodyRequest::Timeline);
+        let asked = self.timeline_view.get().filter(|_| timeline);
+        if let Some([from, to]) = asked {
+            args.insert("window".into(), json!({"from": from, "to": to}));
+        }
+        let mut answer = self.call("focus_body", Value::Object(args.clone()), signal.clone()).await?;
+        if answer.is_err() && asked.is_some() {
+            // (a stretch the DAW won't read: the whole timeline, as before)
+            args.remove("window");
+            answer = self.call("focus_body", Value::Object(args.clone()), signal.clone()).await?;
+        }
+        let Ok(mut body) = answer else { return Ok(None) };
+        follow_epoch(&self.book, &self.epoch, &self.layout, &body);
+        if timeline {
+            let view = crate::views::view_of(&body);
+            self.timeline_view.set(view);
+            // The first read, or the view moved far since (another part of the song, another zoom): read again for
+            // what it shows now. A small scroll (REAPER following the playhead) waits for the next read.
+            if let Some([from, to]) = view.filter(|view| asked.is_none_or(|asked| !near(asked, *view))) {
+                args.insert("window".into(), json!({"from": from, "to": to}));
+                if let Ok(again) = self.call("focus_body", Value::Object(args), signal).await? {
+                    follow_epoch(&self.book, &self.epoch, &self.layout, &again);
+                    self.timeline_view.set(crate::views::view_of(&again).or(view));
+                    body = again;
+                }
             }
-            Err(_) => None,
-        })
+        }
+        Ok((self.daw.to_body)(request, &body))
     }
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
         let pinned = hints.as_ref().and_then(|hints| hints.pinned.as_ref());
@@ -1945,6 +1971,13 @@ pub fn follow_epoch<S: RefScheme>(book: &RefCell<Book<S>>, epoch: &RefCell<Optio
     }
     *epoch.borrow_mut() = Some(now.to_owned());
     layout.set(answer.get("layout").and_then(Value::as_u64));
+}
+
+/// Two stretches of the timeline (in beats) close enough to draw one for the other: neither end moved by more than a
+/// quarter of the stretch.
+fn near([from, to]: [f64; 2], [now_from, now_to]: [f64; 2]) -> bool {
+    let room = (to - from).abs() / 4.;
+    (from - now_from).abs() <= room && (to - now_to).abs() <= room
 }
 
 /// Whether a request names something on a track (a track, a device or a parameter), the refs a track shift moves: only
