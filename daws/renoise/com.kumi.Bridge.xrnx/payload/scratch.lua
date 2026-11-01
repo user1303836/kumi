@@ -293,6 +293,9 @@ end
 -- One copy is one callback: one that would hold Renoise longer than this is refused (Renoise's watchdog speaks after ~10 s; by the
 -- model above, and at worst about 4.6 s of Renoise's own, lab 2026-11-01).
 M.MOST_COPY_MS = 6000
+-- And a make of several: under the host's wait for it (SCRATCH_TIMEOUT, 30 s), past which it would answer a timeout while the
+-- copies go on being made, with nobody left to take them back.
+M.MOST_MAKE_MS = 25000
 
 -- The song, if Renoise isn't busy (set and drop name no refs of an epoch of their own: a copy's ref is checked by its name).
 local function ready(env)
@@ -349,6 +352,10 @@ local function make(params, env)
   if per_copy > M.MOST_COPY_MS then
     fail("too-big", string.format("one copy of %s would hold Renoise about %.1f s (its lines in %d patterns, in a song of %d tracks): give a range, a few bars of it",
       q(source_name), per_copy / 1000, #patterns, rows.track_count(song)))
+  end
+  if per_copy * count > M.MOST_MAKE_MS then
+    fail("too-big", string.format("%d copies of %s would hold Renoise about %.0f s in all, longer than Kumi waits: give a range, a few bars of it",
+      count, q(source_name), per_copy * count / 1000))
   end
   local names = {}
   for n = 1, count do names[n] = M.PREFIX .. tag .. " " .. n end

@@ -727,12 +727,14 @@ fn gain_trial(slot: &GoalSlotInfo, value: f64, fresh: bool) -> GenerationTrial {
     GenerationTrial { slot: slot.name.clone(), knobs, values: vec![value], fresh: fresh.then_some(true) }
 }
 
-/// The best of a goal is kept whole; when the whole track is too much to copy at once, from what the goal listened to, and said.
+/// The best of a goal is kept whole; when the whole track is too much to copy at once, from what the goal listened to, and that's
+/// said: on a finished goal, with what its A/B's mute leaves silent.
 #[tokio::test(flavor = "current_thread")]
 async fn a_goals_best_too_big_to_copy_whole_is_kept_from_what_it_listened_to() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            for too_big in [false, true] {
+            for (too_big, finished) in [(false, true), (true, false), (true, true)] {
+                let case = format!("too big {too_big}, finished {finished}");
                 let home = tempfile::tempdir().unwrap();
                 let script = ReaperScript::new(3, 0);
                 let asked: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
@@ -743,7 +745,7 @@ async fn a_goals_best_too_big_to_copy_whole_is_kept_from_what_it_listened_to() {
                         if method == "scratch" && params["action"] == "make" && params["label"] == "Kumi: goal best" {
                             into.lock().unwrap().push(params.clone());
                             if too_big && params.get("range").is_none() {
-                                let why = "one copy of Track 2 would hold Renoise about 3.6 s: give a range, a few bars of it";
+                                let why = "one copy of Track 2 would hold Renoise about 6.6 s: give a range, a few bars of it";
                                 return Some(Err(("too-big".to_string(), why.to_string())));
                             }
                         }
@@ -752,23 +754,28 @@ async fn a_goals_best_too_big_to_copy_whole_is_kept_from_what_it_listened_to() {
                 })
                 .await;
                 let (reaper, rig, slots, told) = two_slot_goal_told(home.path(), &script).await;
+                if finished {
+                    rig.tidy(&[slots[0].name.clone()], Signal::new()).await.unwrap();
+                }
                 let knobs: Vec<Knob> = slots[0].knobs.iter().filter(|knob| knob.name == "Gain-Band 2").cloned().collect();
-                assert_eq!(
-                    rig.keep_best(&slots[0].name, &knobs, &[0.7], Signal::new()).await.unwrap(),
-                    "Kumi · Goal best",
-                    "too big: {too_big}"
-                );
+                assert_eq!(rig.keep_best(&slots[0].name, &knobs, &[0.7], Signal::new()).await.unwrap(), "Kumi · Goal best", "{case}");
                 let asked = asked.lock().unwrap();
-                let said: Vec<String> = told.borrow().iter().filter(|title| title.contains("holds beats")).cloned().collect();
+                let said: Vec<String> = told.borrow().iter().filter(|title| title.contains("holds only")).cloned().collect();
+                let kept_only = rig.kept_only();
                 if too_big {
-                    assert_eq!(asked.len(), 2, "{asked:?}");
-                    assert!(asked[0].get("range").is_none() && asked[1]["range"] == json!({"fromBeat": 0.0, "beats": 4.0}), "{asked:?}");
-                    assert_eq!(said.len(), 1, "{said:?}");
-                    assert!(said[0].contains("beats 0 to 4 of") && said[0].contains("the rest stays on"), "{said:?}");
+                    assert_eq!(asked.len(), 2, "{case}: {asked:?}");
+                    assert!(
+                        asked[0].get("range").is_none() && asked[1]["range"] == json!({"fromBeat": 0.0, "beats": 4.0}),
+                        "{case}: {asked:?}"
+                    );
+                    assert_eq!(said.len(), 1, "{case}: {said:?}");
+                    assert_eq!(kept_only.as_ref(), said.first(), "{case}: what the model is told is what's said");
+                    assert!(said[0].contains("the patterns of beats 0 to 4 of"), "{case}: {said:?}");
+                    assert_eq!(said[0].contains("silent until you unmute it"), finished, "{case}: {said:?}");
                 } else {
-                    assert_eq!(asked.len(), 1, "the whole copy, once: {asked:?}");
-                    assert!(asked[0].get("range").is_none(), "{asked:?}");
-                    assert!(said.is_empty(), "{said:?}");
+                    assert_eq!(asked.len(), 1, "{case}: the whole copy, once: {asked:?}");
+                    assert!(asked[0].get("range").is_none(), "{case}: {asked:?}");
+                    assert!(said.is_empty() && kept_only.is_none(), "{case}: {said:?}");
                 }
                 reaper.close().await.unwrap();
                 simulator.stop();

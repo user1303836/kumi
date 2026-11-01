@@ -100,6 +100,8 @@ pub struct OwnGoalRig<S: RefScheme + 'static> {
     heard: RefCell<HeardCache<Cached>>,
     /// The finished goal's candidates were tidied (the top ones muted for an A/B): its best plays on its own.
     tidied: Cell<bool>,
+    /// What the best last kept leaves out: it holds only a part of its track.
+    kept_only: RefCell<Option<String>>,
     /// The safety limiters this rig put on candidates: taken back if the goal never opens (or a candidate never joins), and
     /// only these are put back at unity when a slot settles.
     limiters: RefCell<Vec<Limiter>>,
@@ -153,6 +155,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             screen: None,
             heard: RefCell::new(HeardCache::default()),
             tidied: Cell::new(false),
+            kept_only: RefCell::new(None),
             limiters: RefCell::new(vec![]),
         };
         renderer.tell_app(&format!(
@@ -854,13 +857,18 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 Ok((id, _)) => vec![id],
                 Err(why) => return Ok(Err(why)),
             };
-            if let Some(window) = only_part {
-                r.tell_app(&format!(
-                    "“{BEST}” holds beats {} to {} of “{slot}”, what the goal listened to: the whole track is too much to copy at once, and the rest stays on “{slot}”",
+            *self.kept_only.borrow_mut() = only_part.map(|window| {
+                // (Whole patterns: what the range plays, wherever else the song plays them. A finished goal has muted its
+                // leader for an A/B, which a whole copy stands in for and a part doesn't.)
+                let muted = if self.tidied.get() { format!(" “{slot}” is muted for the A/B, so the rest of it is silent until you unmute it.") } else { String::new() };
+                let said = format!(
+                    "“{BEST}” holds only the patterns of beats {} to {} of “{slot}”, what the goal listened to (the whole track is too much to copy at once).{muted}",
                     window.from,
                     window.from + window.beats
-                ));
-            }
+                );
+                r.tell_app(&said);
+                said
+            });
             // A paused goal's candidates weren't tidied: the producer's track still plays as it was, so the best waits
             // muted beside it rather than playing the part twice. (A finished goal muted its candidates for an A/B.)
             if !self.tidied.get() {
@@ -898,6 +906,9 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 Ok(error.to_string())
             }
         }
+    }
+    fn kept_only(&self) -> Option<String> {
+        self.kept_only.borrow().clone()
     }
     async fn settle(&self, slot: &str, knobs: &[Knob], values: &[f64], given: Signal) -> Result<Option<String>, RuntimeError> {
         let signal = abort::any([given, self.renderer.lifetime()]);

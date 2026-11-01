@@ -315,6 +315,16 @@ test("scratch: a copy's cost counts its patterns' lines, and one copy too big fo
   end
   -- About 3.2 s by the model: made (Renoise took 2.6 s for this many lines, every column full; lab 2026-11-01).
   result(make(song_of(100), "s8", 1), "make")
+  -- A make of several is held to the host's wait in all: seven of those, about 22 s, are made, and seven at 4 s each, about 28 s,
+  -- though one is allowed, are refused with nothing made.
+  result(make(song_of(100), "s10", 7), "make")
+  result(make(song_of(125), "s11", 1), "make")
+  local peer = song_of(125)
+  local before = #mock.data.tracks
+  local refused_all = make(peer, "s12", 7)
+  ok(refused_all.error and refused_all.error.code == "too-big", json.encode(refused_all.result or refused_all.error))
+  ok(refused_all.error.message:find("in all", 1, true), refused_all.error.message)
+  eq(#mock.data.tracks, before, "no copy made")
   -- About 6.4 s: refused.
   local peer = song_of(200)
   local tracks = #mock.data.tracks

@@ -806,6 +806,10 @@ pub trait GoalRig {
     ) -> Result<Generation, RuntimeError>;
     /// The best so far on a track of its own ("Kumi · Goal best"), replacing the last copy; its name, or why not.
     async fn keep_best(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<String, RuntimeError>;
+    /// What the best just kept leaves out, when it holds only a part of its track: said beside where the best is.
+    fn kept_only(&self) -> Option<String> {
+        None
+    }
     /// A slot left where it is at these values, its safety limiter's input back at 0 dB (a match's winner, tuned); why not, if it couldn't be.
     async fn settle(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<Option<String>, RuntimeError>;
     /// A finished goal's candidates: the top ones muted for the producer to A/B, the rest removed; what it did.
