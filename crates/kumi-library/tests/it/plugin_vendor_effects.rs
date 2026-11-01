@@ -230,6 +230,18 @@ fn endpoint_bounds(record: &Value) -> [f64; 2] {
     bounds
 }
 
+fn evidence_table<'a>(evidence: &'a Value, record: &'a Value, inline: &str, reference: &str, tables: &str) -> Option<&'a Value> {
+    match (record.get(inline), record.get(reference)) {
+        (Some(value), None) => Some(value),
+        (None, Some(name)) => {
+            let name = name.as_str().expect("evidence table reference is a name");
+            Some(evidence[tables].get(name).unwrap_or_else(|| panic!("missing {tables}/{name}")))
+        }
+        (None, None) => None,
+        _ => panic!("evidence must use either {inline} or {reference}, not both"),
+    }
+}
+
 fn capture_covers_product(evidence: &Value, record: &Value) -> bool {
     record["captureIds"].as_array().is_some_and(|ids| {
         ids.iter().any(|id| {
@@ -256,10 +268,51 @@ fn every_verified_numeric_interval_has_committed_endpoint_evidence() {
         }
         let plugin = &format.info.plugin;
         let evidence = range_evidence(plugin, 0);
+        if format.info.family == "fabfilter" {
+            assert_eq!(evidence["fields"].as_object().unwrap().len(), fields.len(), "{plugin}: every field keeps its evidence");
+        }
         for (path, field) in fields {
             let bounds = field.range.expect("verified range needs bounds");
             assert!(bounds.iter().all(|n| n.is_finite()) && bounds[0] <= bounds[1]);
             match format.info.family.as_str() {
+                "fabfilter" => {
+                    let record = &evidence["fields"][path];
+                    assert_eq!(endpoint_bounds(record), bounds, "{plugin}/{path}");
+                    assert_eq!(evidence["plugin"], *plugin);
+                    assert!(format.verified.writes.iter().any(|version| evidence["version"] == version.version));
+                    let mapping = evidence_table(&evidence, record, "hostMapping", "hostMappingRef", "hostMappings")
+                        .and_then(Value::as_array)
+                        .expect("captured host display mapping");
+                    assert!(!mapping.is_empty());
+                    for point in mapping {
+                        assert!(point["normalized"].as_f64().is_some_and(|value| value.is_finite() && (0.0..=1.0).contains(&value)));
+                        assert!(point["plain"].as_f64().is_some_and(f64::is_finite));
+                        assert!(point["text"].as_str().is_some());
+                    }
+                    let options = evidence_table(&evidence, record, "options", "optionsRef", "optionTables");
+                    if let Some(documented) = &field.options {
+                        let measured = options.and_then(Value::as_array).expect("captured option meanings");
+                        assert_eq!(documented.len(), measured.len(), "{plugin}/{path}: option count");
+                        for option in measured {
+                            let value = option["plain"].as_f64().expect("numeric option value");
+                            let meaning = documented.iter().find(|(key, _)| key.parse::<f64>().ok() == Some(value)).map(|(_, text)| text);
+                            assert_eq!(meaning.map(String::as_str), option["text"].as_str(), "{plugin}/{path}: option {value}");
+                        }
+                    } else {
+                        assert!(options.is_none(), "{plugin}/{path}: captured options are missing from the catalog");
+                    }
+                    let observations = std::iter::once(record).chain(record["variants"].as_array().into_iter().flatten());
+                    for observed in observations {
+                        let measured = endpoint_bounds(observed);
+                        assert!(bounds[0] >= measured[0] && bounds[1] <= measured[1], "{plugin}/{path}: exceeds a measured version");
+                        assert_eq!(observed["roundtrip"], json!([true, true, true]));
+                        assert_eq!(observed["stored"], observed["reread"], "{plugin}/{path}: stored value changed on reload");
+                    }
+                    let id = record["parameterId"].as_u64().unwrap();
+                    assert!(format.structure.parameters.iter().any(|(name, link)| link.field == *path
+                        && link.status == structure::Status::Verified
+                        && name.ends_with(&format!("[VST3 {id}]"))));
+                }
                 "valhalla" | "minimal-audio" | "pulsar-modular" => {
                     let record = &evidence["fields"][path];
                     assert_eq!(endpoint_bounds(record), bounds, "{plugin}/{path}");

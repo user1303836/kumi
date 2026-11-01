@@ -5,7 +5,8 @@
 //! folders it ships with (`builtin`), so the reader, a later writer and the tests all run off the same data.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::LazyLock;
+use std::io::Read;
+use std::sync::{Arc, LazyLock};
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -139,8 +140,8 @@ pub struct Field {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unit: Option<String>,
     /// An option list's values, each with its meaning ("" while unknown).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub options: Option<BTreeMap<String, String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none", with = "shared_options")]
+    pub options: Option<Arc<BTreeMap<String, String>>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub about: Option<String>,
     pub status: Status,
@@ -160,6 +161,7 @@ pub struct ParameterLink {
 
 /// `structure.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(try_from = "StructureSource")]
 pub struct Structure {
     pub plugin: String,
     pub format: String,
@@ -183,10 +185,107 @@ pub struct Structure {
     pub parameters: BTreeMap<String, ParameterLink>,
 }
 
+// The source may share repetitive metadata; the public Structure and Field
+// serializers keep the expanded catalog shape used by existing callers.
+#[derive(Deserialize)]
+struct StructureSource {
+    plugin: String,
+    format: String,
+    about: String,
+    paths: PathRule,
+    files: BTreeMap<String, FileKind>,
+    #[serde(default)]
+    survey: Value,
+    fields: BTreeMap<String, Value>,
+    #[serde(default)]
+    range_scope_required: bool,
+    #[serde(default)]
+    opaque: Vec<String>,
+    #[serde(default)]
+    parameters: BTreeMap<String, ParameterLink>,
+    #[serde(default)]
+    field_defaults: BTreeMap<String, FieldDefaults>,
+    #[serde(default)]
+    option_tables: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+/// Defaults may describe units and file membership, never grant write evidence.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FieldDefaults {
+    #[serde(default)]
+    unit: Option<String>,
+    #[serde(rename = "in", default)]
+    seen_in: Option<Vec<String>>,
+}
+
+impl TryFrom<StructureSource> for Structure {
+    type Error = String;
+
+    fn try_from(source: StructureSource) -> Result<Self, Self::Error> {
+        let tables: BTreeMap<_, _> = source.option_tables.into_iter().map(|(name, options)| (name, Arc::new(options))).collect();
+        let mut fields = BTreeMap::new();
+        for (path, mut value) in source.fields {
+            let object = value.as_object_mut().ok_or_else(|| format!("field {path} must be an object"))?;
+            if let Some(defaults) = object.get("type").and_then(Value::as_str).and_then(|kind| source.field_defaults.get(kind)) {
+                if let Some(unit) = &defaults.unit {
+                    object.entry("unit").or_insert_with(|| json!(unit));
+                }
+                if let Some(seen_in) = &defaults.seen_in {
+                    object.entry("in").or_insert_with(|| json!(seen_in));
+                }
+            }
+            let shared = match object.remove("options_ref") {
+                Some(reference) => {
+                    if object.contains_key("options") {
+                        return Err(format!("field {path} has both options and options_ref"));
+                    }
+                    let reference = reference.as_str().ok_or_else(|| format!("field {path} options_ref must name a table"))?;
+                    Some(Arc::clone(tables.get(reference).ok_or_else(|| format!("field {path} has unknown option table {reference}"))?))
+                }
+                None => None,
+            };
+            let mut field: Field = serde_json::from_value(value).map_err(|error| format!("field {path}: {error}"))?;
+            if shared.is_some() {
+                field.options = shared;
+            }
+            fields.insert(path, field);
+        }
+        Ok(Self {
+            plugin: source.plugin,
+            format: source.format,
+            about: source.about,
+            paths: source.paths,
+            files: source.files,
+            survey: source.survey,
+            fields,
+            range_scope_required: source.range_scope_required,
+            opaque: source.opaque,
+            parameters: source.parameters,
+        })
+    }
+}
+
+mod shared_options {
+    use super::*;
+
+    pub fn serialize<S: serde::Serializer>(options: &Option<Arc<BTreeMap<String, String>>>, serializer: S) -> Result<S::Ok, S::Error> {
+        options.as_deref().serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<Option<Arc<BTreeMap<String, String>>>, D::Error> {
+        Option::<BTreeMap<String, String>>::deserialize(deserializer).map(|options| options.map(Arc::new))
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VerifiedVersion {
     /// The plug-in's version ("2.1.5").
     pub version: String,
+    /// Other version strings observed in this same release's OS metadata.
+    /// These are product-specific aliases, not a rule for reinterpreting decimals.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub version_aliases: Vec<String>,
     /// The kinds of file checked ("preset", "processor").
     pub files: Vec<String>,
     /// What was done to check it.
@@ -382,7 +481,7 @@ fn resolve_structure(text: &str, depth: usize) -> Result<Value, FormatError> {
         .find(|(plugin, _, _, _)| *plugin == parent)
         .ok_or_else(|| FormatError::new(format!("unknown shared format {parent}")))?
         .2;
-    let mut base = resolve_structure(source, depth + 1)?;
+    let mut base = resolve_structure(&bundled_json(source), depth + 1)?;
     merge_format_patch(&mut base, &patch);
     Ok(base)
 }
@@ -408,14 +507,26 @@ pub fn merge_format_patch(base: &mut Value, patch: &Value) {
     }
 }
 
-// Generated from the readable product folders, with JSON whitespace removed.
+// Generated from readable product folders, compacted and compressed once per
+// source file. The bounded decoder is for our bundled resources, not user files.
 include!(concat!(env!("OUT_DIR"), "/plugin_formats.rs"));
+
+fn bundled_json(bytes: &[u8]) -> String {
+    let mut decoded = Vec::new();
+    flate2::read::ZlibDecoder::new(bytes)
+        .take(super::MAX_DECODED_BYTES as u64 + 1)
+        .read_to_end(&mut decoded)
+        .expect("bundled format decompresses");
+    assert!(decoded.len() <= super::MAX_DECODED_BYTES, "bundled format exceeds its size limit");
+    String::from_utf8(decoded).expect("bundled format is UTF-8")
+}
 
 static BUILTIN: LazyLock<Vec<PluginFormat>> = LazyLock::new(|| {
     BUILTIN_FILES
         .iter()
         .map(|(plugin, info, structure, verified)| {
-            PluginFormat::parse(info, structure, verified).unwrap_or_else(|error| panic!("plugin-formats/{plugin}: {error}"))
+            PluginFormat::parse(&bundled_json(info), &bundled_json(structure), &bundled_json(verified))
+                .unwrap_or_else(|error| panic!("plugin-formats/{plugin}: {error}"))
         })
         .collect()
 });
@@ -525,6 +636,72 @@ fn order_field(field: Value) -> Value {
 mod tests {
     use super::*;
     use crate::plugins::formats::survey::Survey;
+
+    fn shared_source() -> Value {
+        json!({
+            "plugin": "x", "format": "format-1", "about": "", "paths": "exact", "files": {},
+            "field_defaults": {"float": {"unit": "stored value", "in": ["state", "preset"]}},
+            "option_tables": {"toggle": {"0": "Off", "1": "On"}},
+            "fields": {
+                "a": {"type": "float", "status": "verified", "range": [0, 1], "range_status": "verified", "options_ref": "toggle"},
+                "b": {"type": "float", "status": "verified", "range": [0, 1], "range_status": "verified", "options_ref": "toggle"},
+                "c": {"type": "float", "status": "guessed", "seen": [0, 1], "unit": null, "in": []},
+                "map": {"type": "map", "status": "verified"}
+            }
+        })
+    }
+
+    #[test]
+    fn shared_metadata_keeps_the_expanded_catalog_and_write_evidence() {
+        let structure: Structure = serde_json::from_value(shared_source()).unwrap();
+        let a = &structure.fields["a"];
+        let b = &structure.fields["b"];
+        assert!(Arc::ptr_eq(a.options.as_ref().unwrap(), b.options.as_ref().unwrap()));
+        assert_eq!(a.unit.as_deref(), Some("stored value"));
+        assert_eq!(a.seen_in, ["state", "preset"]);
+        assert_eq!(structure.fields["c"].unit, None);
+        assert!(structure.fields["c"].seen_in.is_empty());
+        assert_eq!(structure.fields["map"].unit, None);
+        assert!(structure.fields["map"].seen_in.is_empty());
+        assert!(structure.validate_number("a", 1.0).is_ok());
+        assert!(structure.validate_number("a", 2.0).is_err());
+        assert!(structure.validate_number("c", 0.5).is_err());
+
+        let public = serde_json::to_value(&structure).unwrap();
+        assert_eq!(public["fields"]["a"]["options"], json!({"0": "Off", "1": "On"}));
+        assert!(public.get("option_tables").is_none());
+        assert!(public["fields"]["a"].get("options_ref").is_none());
+        assert_eq!(serde_json::from_value::<Structure>(public).unwrap(), structure);
+    }
+
+    #[test]
+    fn inherited_tables_and_defaults_resolve_after_product_overrides() {
+        let mut source = shared_source();
+        merge_format_patch(
+            &mut source,
+            &json!({"plugin": "child", "field_defaults": {"float": {"unit": "%"}}, "option_tables": {"toggle": {"1": "Enabled"}}}),
+        );
+        let structure: Structure = serde_json::from_value(source).unwrap();
+        let a = &structure.fields["a"];
+        let b = &structure.fields["b"];
+        assert_eq!(a.unit.as_deref(), Some("%"));
+        assert_eq!(a.options.as_ref().unwrap()["1"], "Enabled");
+        assert!(Arc::ptr_eq(a.options.as_ref().unwrap(), b.options.as_ref().unwrap()));
+        assert_eq!(a.range, Some([0.0, 1.0]));
+    }
+
+    #[test]
+    fn shared_metadata_rejects_missing_or_ambiguous_options_and_default_write_evidence() {
+        let mut missing = shared_source();
+        missing["fields"]["a"]["options_ref"] = json!("missing");
+        assert!(serde_json::from_value::<Structure>(missing).unwrap_err().to_string().contains("unknown option table missing"));
+        let mut ambiguous = shared_source();
+        ambiguous["fields"]["a"]["options"] = json!({"0": "Disabled"});
+        assert!(serde_json::from_value::<Structure>(ambiguous).unwrap_err().to_string().contains("both options and options_ref"));
+        let mut grants_writes = shared_source();
+        grants_writes["field_defaults"]["float"]["range_status"] = json!("verified");
+        assert!(serde_json::from_value::<Structure>(grants_writes).is_err());
+    }
 
     #[test]
     fn checks_and_describes_a_tree() {

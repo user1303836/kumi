@@ -21,8 +21,29 @@ static TEMPLATES: LazyLock<Vec<(&'static str, Vec<u8>)>> = LazyLock::new(|| {
         .collect()
 });
 
+static VERSION_TEMPLATES: LazyLock<Vec<(&'static str, &'static str, Vec<u8>)>> = LazyLock::new(|| {
+    COMPRESSED_VERSION_TEMPLATES
+        .iter()
+        .map(|(plugin, version, bytes)| {
+            let mut state = Vec::new();
+            flate2::read::ZlibDecoder::new(*bytes)
+                .take(super::formats::MAX_DECODED_BYTES as u64 + 1)
+                .read_to_end(&mut state)
+                .expect("bundled version state decompresses");
+            assert!(state.len() <= super::formats::MAX_DECODED_BYTES, "bundled version state exceeds its size budget");
+            (*plugin, *version, state)
+        })
+        .collect()
+});
+
 pub fn initial(plugin: &str) -> Option<&'static [u8]> {
     TEMPLATES.iter().find(|(id, _)| *id == plugin).map(|(_, bytes)| bytes.as_slice())
+}
+
+/// An initialized state captured from an exact older build. Some products append
+/// parameters between releases; their new default must not reach an older host.
+pub fn initial_for_version(plugin: &str, version: &str) -> Option<&'static [u8]> {
+    VERSION_TEMPLATES.iter().find(|(id, captured, _)| *id == plugin && *captured == version).map(|(_, _, bytes)| bytes.as_slice())
 }
 
 /// Whether a product has a creation template, without decompressing any state.
