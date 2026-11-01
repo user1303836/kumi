@@ -9,6 +9,24 @@ local json = T.load_payload_module("json")
 
 local ENTRY, BINDING = "Main Menu:Tools:Kumi:Hats - tidy", "Global:Kumi:Hats - tidy"
 
+-- The run's memory: an object's fields can reach the object (a notifier's closure does), and a weak key doesn't let go of such
+-- a value, so without this a whole run grew about 4 MB a test, past 5 GB.
+test("mock: a reset lets go of what the last test made", function()
+  mock.reset({})
+  local held = setmetatable({}, { __mode = "v" })
+  local function made()
+    local observable = mock.observable()
+    local marker = {}
+    held.marker = marker
+    observable:add_notifier(function() return observable, marker end)
+  end
+  made()
+  mock.reset({})
+  collectgarbage("collect")
+  collectgarbage("collect")
+  eq(held.marker, nil, "still held after the reset")
+end)
+
 test("chores: a script kept is a menu entry and a shortcut running its file, again after a reload, and removed whole", function()
   local env, peer = K.setup()
   local asked = { slug = "tidy-hats", name = "Hats: tidy", description = "Names the hat track", code = "song:track(2).name = 'Hat (kept)'" }
