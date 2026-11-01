@@ -1,4 +1,5 @@
 use kumi_library::{
+    daws::Daws,
     learn::{plugin_preset_folders, set_folders, Counts, LearnPhase, LearnProgress},
     plan::{kumi_sets, plan_learning, remembered_folders, PlanOptions},
     sources::SourceOptions,
@@ -139,9 +140,9 @@ async fn plan_reads_bounded_project_records_remembers_folders_and_excludes_pack_
     ] {
         put(&projects.join(id).join("last-seen.json"), body);
     }
-    let found = kumi_sets(projects.to_str()).await;
+    let found = kumi_sets(projects.to_str(), Daws::default()).await;
     assert_eq!(found, vec![song.to_string_lossy(), pack_demo.to_string_lossy()]);
-    assert!(kumi_sets(None).await.is_empty());
+    assert!(kumi_sets(None, Daws::default()).await.is_empty());
     let named = home.join("Named");
     let remembered = home.join("Remembered");
     let ignored = home.join("Ignored source option");

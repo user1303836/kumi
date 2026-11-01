@@ -4,12 +4,12 @@ use super::*;
 use async_trait::async_trait;
 use kumi_agent::core::{
     evolve::Knob,
-    goal_rig::{device_label, knob_key as key, moved as moved_knobs, tell_generation, GoalDaw},
+    goal_rig::{check_slots, device_label, knob_key as key, moved as moved_knobs, not_in_the_search, tell_generation, GoalDaw},
 };
 use kumi_common::js::number::parse;
 use kumi_listening::{
     engine::Listening,
-    goal::{hear, screen_pick, tell, trial_key, HeardCache, Told},
+    goal::{hear, screen_pick, tell, tell_timing, trial_key, HeardCache, Told},
 };
 use kumi_media::audio::analyze::Analysis;
 use std::collections::{HashMap, HashSet};
@@ -31,6 +31,8 @@ struct Goal {
     slots: RefCell<Vec<GoalSlotInfo>>,
     current: RefCell<IndexMap<String, IndexMap<String, f64>>>,
     known: RefCell<IndexMap<String, (u64, Knobs)>>,
+    /// The Set's tempo as the goal opened: what a render is heard at when a look since can't say what it is now.
+    tempo: f64,
     reference: Analysis,
     focus: Option<Focus>,
     screen: Option<Screen>,
@@ -65,6 +67,12 @@ fn gain(read: &Knobs) -> Option<&Knob> {
         knob.device == format!("{}:{name}", read.devices.len() - 1)
             && matches!(knob.name.to_ascii_lowercase().as_str(), "gain" | "input" | "input gain")
     })
+}
+
+/// The tempo a render is heard at: the Set's as it is now, which Live plays and records it at (REAPER's and Renoise's offline
+/// renders keep the tempo a goal opened with); the goal's own when a look can't say what it is.
+fn heard_tempo(now: Option<f64>, opened: f64) -> f64 {
+    now.filter(|tempo| *tempo > 0.).unwrap_or(opened)
 }
 
 fn is_final_limiter(device: &JsonObject) -> bool {
@@ -158,9 +166,9 @@ impl LiveRenderer {
         let Some(named) = request.reference.as_deref().filter(|s| !s.is_empty()) else {
             return Ok(Err("A goal needs a reference to reach.".into()));
         };
-        if self.observer.tempo.get().is_none_or(|v| v == 0. || v.is_nan()) {
+        let Some(tempo) = self.observer.tempo.get().filter(|v| *v != 0. && !v.is_nan()) else {
             return Ok(Err("Kumi doesn't know the Set's tempo yet; try again.".into()));
-        }
+        };
         let signal = abort::any([original, self.connection().lifetime.clone()]);
         let reference = listening.heard_reference(named, request, signal.clone()).await?;
         let mut rig = self.open_rig(&request.candidates, request.from_beat, request.beats, signal.clone()).await?;
@@ -185,6 +193,7 @@ impl LiveRenderer {
             slots: RefCell::new(vec![]),
             current: RefCell::new(IndexMap::new()),
             known: RefCell::new(IndexMap::new()),
+            tempo,
             reference,
             focus: request.focus,
             screen: None,
@@ -197,12 +206,11 @@ impl LiveRenderer {
             }
         }
         let rig = goal.rig.get_mut();
-        let tempo = self.observer.tempo.get().unwrap();
         // (Live's slices are as long as the analysis says, to the tenth of a second)
         let slice = parse_float(&goal.reference.over_time.every)
             .filter(|v| *v != 0. && !v.is_nan())
             .unwrap_or(goal.reference.seconds / goal.reference.over_time.lufs.len().max(1) as f64);
-        if let Some(pick) = screen_pick(&goal.reference, tempo, rig.beats, slice) {
+        if let Some(pick) = screen_pick(&goal.reference.over_time.lufs, tempo, rig.beats, slice) {
             // A stop or a failed read here leaves the rig as much as one before: it's taken down, as above.
             let reference = match listening.heard_reference(named, &pick.request(request, tempo), signal).await {
                 Ok(reference) => reference,
@@ -271,6 +279,9 @@ impl Goal {
         Ok(slot)
     }
     async fn set_slot(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<(), RuntimeError> {
+        if !self.current.borrow().contains_key(slot) {
+            return Err(RuntimeError::plain(not_in_the_search(slot)));
+        }
         let fresh = self.render.read_knobs(slot, signal.clone()).await?;
         let moved: Vec<_> =
             knobs.iter().enumerate().map(|(index, knob)| (knob.clone(), values.get(index).copied().unwrap_or(f64::NAN))).collect();
@@ -286,10 +297,10 @@ impl Goal {
                 Ok::<_, RuntimeError>(())
             })
             .await?;
-        let mut current = self.current.borrow_mut();
-        let last = current.get_mut(slot).ok_or_else(|| RuntimeError::plain("Cannot read properties of undefined (reading 'set')"))?;
-        for (knob, value) in moved {
-            last.insert(key(&knob), value);
+        if let Some(last) = self.current.borrow_mut().get_mut(slot) {
+            for (knob, value) in moved {
+                last.insert(key(&knob), value);
+            }
         }
         Ok(())
     }
@@ -376,6 +387,7 @@ impl GoalRig for Goal {
         given: Signal,
         options: Option<GenerationOptions>,
     ) -> Result<Generation, RuntimeError> {
+        check_slots(trials, |slot| self.current.borrow().contains_key(slot))?;
         let signal = self.signal(given);
         let r = &self.render;
         let screened = options.and_then(|v| v.screen) == Some(true) && self.screen.is_some();
@@ -391,14 +403,8 @@ impl GoalRig for Goal {
         let result: Result<IndexMap<String, Render>, RuntimeError> = async {
             let mut plans = vec![];
             for trial in trials {
-                let moved = {
-                    let current = self.current.borrow();
-                    let last = current
-                        .get(&trial.slot)
-                        .ok_or_else(|| RuntimeError::plain("Cannot read properties of undefined (reading 'get')"))?;
-                    // (a value a trial doesn't give is sent as it is, as Live's goal has always sent it)
-                    moved_knobs(trial, Some(last), false)
-                };
+                // (a value a trial doesn't give is sent as it is, as Live's goal has always sent it)
+                let moved = moved_knobs(trial, self.current.borrow().get(&trial.slot), false);
                 if moved.is_empty() {
                     continue;
                 }
@@ -462,7 +468,7 @@ impl GoalRig for Goal {
         drop(rendering);
         let files = result?;
         let heard_from = now_ms();
-        let tempo = r.observer.tempo.get().unwrap_or(f64::NAN);
+        let tempo = heard_tempo(r.observer.tempo.get(), self.tempo);
         let against = if screened { &self.screen.as_ref().unwrap().reference } else { &self.reference };
         let beats = if screened { self.screen.as_ref().unwrap().beats } else { rig.beats };
         drop(rig);
@@ -483,8 +489,7 @@ impl GoalRig for Goal {
                     generation.borrow_mut().silent.push(trial.slot.clone());
                     return Ok(());
                 };
-                let heard =
-                    hear(rendered, beats * 60. / tempo, self.focus, signal).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
+                let heard = hear(rendered, beats, tempo, self.focus, signal).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
                 // (each slot is told as its hearing ends, as Live's goal has always told them)
                 match tell(&heard, against, self.focus) {
                     None => generation.borrow_mut().silent.push(trial.slot.clone()),
@@ -497,15 +502,7 @@ impl GoalRig for Goal {
             }
         }))
         .await?;
-        if std::env::var("KUMI_TIMING").is_ok_and(|s| !s.is_empty()) {
-            eprintln!(
-                "[generation · {} trials] set {} ms · render {} ms · hear {} ms",
-                trials.len(),
-                render_from - set_from,
-                heard_from - render_from,
-                now_ms() - heard_from
-            );
-        }
+        tell_timing(trials.len(), render_from - set_from, heard_from - render_from, now_ms() - heard_from);
         Ok(generation.into_inner())
     }
     async fn settle(&self, slot: &str, knobs: &[Knob], values: &[f64], given: Signal) -> Result<Option<String>, RuntimeError> {
@@ -541,14 +538,14 @@ impl GoalRig for Goal {
                 .await;
             let name = "Kumi · Goal best";
             let mut steps = vec![];
-            let result: Result<(), RuntimeError> = r
+            let result: Result<String, RuntimeError> = r
                 .history
                 .quietly(Some(&mut steps), async {
                     let before = r.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
                     let at = before
                         .iter()
                         .position(|row| row.get("name").and_then(Value::as_str) == Some(slot))
-                        .ok_or_else(|| RuntimeError::plain("Cannot read properties of undefined (reading 'ref')"))?;
+                        .ok_or_else(|| observation(format!("The track “{slot}” is gone.")))?;
                     r.step("change_structure", json!({"action":"duplicate-track","ref":before[at].get("ref")}), signal.clone()).await?;
                     let after = r.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
                     let copy = after
@@ -570,14 +567,14 @@ impl GoalRig for Goal {
                         .and_then(|row| row.get("name"))
                         .filter(|v| !v.is_null())
                         .map(js_string)
-                        .unwrap_or_else(|| name.into());
+                        .unwrap_or_else(|| name_new.clone());
                     let _ = self.limiter_at_unity(&name_now, signal.clone()).await;
-                    Ok(())
+                    // (the name it was given, which the goal says: an older best may hold the plain one)
+                    Ok(name_new)
                 })
                 .await;
             r.best_steps.borrow_mut().extend(steps);
-            result?;
-            Ok(name.into())
+            result
         }
         .await;
         match result {
@@ -611,14 +608,11 @@ struct LiveTidy<'a> {
 
 #[async_trait(?Send)]
 impl GoalDaw for LiveTidy<'_> {
-    async fn tidy_order(&self, mut slots: Vec<String>) -> Vec<String> {
-        let tracks = self.render.rows("track", json!({"fields":["name"]}), self.signal.clone()).await.unwrap_or_default();
-        let index = |name: &str| {
-            tracks.iter().position(|row| row.get("name").and_then(Value::as_str) == Some(name)).map(|i| i as i64).unwrap_or(-1)
-        };
-        slots.sort_by_key(|slot| std::cmp::Reverse(index(slot)));
+    async fn track_names(&self) -> Option<Vec<String>> {
+        let tracks = self.render.rows("track", json!({"fields":["name"]}), self.signal.clone()).await.ok()?;
+        let names = tracks.iter().filter_map(|row| row.get("name").and_then(Value::as_str).map(str::to_owned)).collect();
         *self.tracks.borrow_mut() = tracks;
-        slots
+        Some(names)
     }
     async fn track_of(&self, slot: &str) -> Option<String> {
         let fresh = match self.render.rows("track", json!({"fields":["name"]}), self.signal.clone()).await {
@@ -658,6 +652,14 @@ fn parse_float(text: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_render_is_heard_at_the_sets_tempo_now_and_the_goals_when_a_look_cant_say() {
+        assert_eq!(heard_tempo(Some(90.), 120.), 90., "a tempo that moved wins");
+        for lost in [None, Some(0.), Some(f64::NAN)] {
+            assert_eq!(heard_tempo(lost, 120.), 120., "{lost:?}");
+        }
+    }
 
     #[test]
     fn a_renamed_device_cannot_impersonate_an_enabled_plugin_limiter() {

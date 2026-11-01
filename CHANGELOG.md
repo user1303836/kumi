@@ -3,6 +3,36 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.41 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.40 did.
+
+- A listen in a dense Renoise song waits while Renoise reads its tempo commands, instead of asking to
+  be tried again.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.40 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.39 did.
+
+- In Live, a goal's notice names the track its best is really on when an older "Kumi · Goal best" is
+  still in the Set.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+## 1.24.39 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.38 did.
+
+- A JavaScript regular expression with a quote in it no longer colours the rest of its line as a
+  string.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.38 — 2026-11-01
 
 Ships with bridge 1.0.102, as 1.24.37 did.

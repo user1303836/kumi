@@ -347,6 +347,9 @@ impl Harness {
     }
 }
 macro_rules! local_test { ($name:ident,$body:block) => { #[tokio::test(flavor="current_thread")] async fn $name() { tokio::task::LocalSet::new().run_until(async $body).await; } }; }
+// On tokio's paused clock: time moves only to the next timer, once nothing else can run, so a busy machine's delays
+// can't eat into a test's margins (blocking work holds the clock still too).
+macro_rules! paused_test { ($name:ident,$body:block) => { #[tokio::test(flavor="current_thread",start_paused=true)] async fn $name() { tokio::task::LocalSet::new().run_until(async $body).await; } }; }
 fn hang_once() -> Run {
     let n = Rc::new(Cell::new(0));
     Rc::new(move |_, _, _| {
@@ -534,9 +537,10 @@ local_test!(uncooperative_timeout_is_bounded_and_quarantines_kernel, {
     assert_eq!(h.record.created.borrow().len(), 2);
     h.session.close().await.unwrap();
 });
-// Live's test as on main; on Windows, whose timer ticks every 15.6 ms, the same with wider margins (below).
-#[cfg(not(windows))]
-local_test!(progress_refreshes_quiet_timer_and_tool_work_suspends_it, {
+// The quiet timer (40 ms) runs from the turn's start, so on the real clock a loaded runner's late start could use it up
+// before the first progress came (#357). On the paused clock the gaps are exact: progress every 15 ms keeps it going,
+// tool work three times as long as the timer doesn't count, and a turn with no progress stops at 40 ms.
+paused_test!(progress_refreshes_quiet_timer_and_tool_work_suspends_it, {
     for tool in [false, true] {
         let h = harness(
             Some(Rc::new(move |_, _, emit| {
@@ -571,52 +575,6 @@ local_test!(progress_refreshes_quiet_timer_and_tool_work_suspends_it, {
             .boxed_local()
         })),
         |o| o.idle_timeout_ms = Some(40),
-    );
-    h.session.start().await.unwrap();
-    h.session.submit("think", None).await.unwrap();
-    assert!(h.error("Kumi stopped after 1 second without progress."));
-    assert_eq!(h.record.created.borrow().len(), 1);
-    h.session.close().await.unwrap();
-});
-// On Windows, the same test with wider margins.
-#[cfg(windows)]
-local_test!(progress_refreshes_quiet_timer_and_tool_work_suspends_it_with_windows_timer_margins, {
-    // The quiet timer (100 ms) is well past the gap between two pieces of progress (15 ms asked, about 31 ms on Windows,
-    // whose timer ticks every 15.6 ms), and the work outlasts it three times over, so only the refreshes keep it going.
-    for tool in [false, true] {
-        let h = harness(
-            Some(Rc::new(move |_, _, emit| {
-                async move {
-                    if tool {
-                        emit(KernelEvent::ToolStart { id: "t1".into(), name: "make_changes".into() })?;
-                        delay(300).await;
-                        emit(KernelEvent::ToolEnd { id: "t1".into(), name: "make_changes".into(), elapsed_ms: 300, is_error: false })?;
-                    } else {
-                        for _ in 0..20 {
-                            delay(15).await;
-                            emit(KernelEvent::Text { text: ".".into() })?;
-                        }
-                    }
-                    Ok(complete())
-                }
-                .boxed_local()
-            })),
-            |o| o.idle_timeout_ms = Some(100),
-        );
-        h.session.start().await.unwrap();
-        h.session.submit("work", None).await.unwrap();
-        assert!(!h.error(""), "{:?}", h.events.borrow());
-        h.session.close().await.unwrap();
-    }
-    let h = harness(
-        Some(Rc::new(|_, signal, _| {
-            async move {
-                signal.cancelled().await;
-                Ok(cancelled())
-            }
-            .boxed_local()
-        })),
-        |o| o.idle_timeout_ms = Some(100),
     );
     h.session.start().await.unwrap();
     h.session.submit("think", None).await.unwrap();
