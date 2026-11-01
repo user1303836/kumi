@@ -154,12 +154,14 @@ fn fan_in(routes: &[PictureRoute]) -> bool {
 /// Snare ─┼→ Drum Bus
 /// Hats  ─┘
 /// ```
-fn fan_in_lines(routes: &[PictureRoute], cols: usize) -> Vec<Vec<Span>> {
+/// Under them, where they went from (once, when it was one place for each) and what else moved on each, and how many
+/// more routes there were.
+fn fan_in_lines(routes: &[PictureRoute], more: usize, cols: usize) -> Vec<Vec<Span>> {
     let room = cols.saturating_sub(4 + text_width(&routes[0].to) as usize).clamp(4, 24);
     let names: Vec<String> = routes.iter().map(|route| truncate(&route.from, room as i32)).collect();
     let wide = names.iter().map(|name| text_width(name) as usize).max().unwrap_or(0);
     let (last, arrow) = (routes.len() - 1, (routes.len() - 1) / 2);
-    names
+    let mut lines = names
         .iter()
         .enumerate()
         .map(|(row, name)| {
@@ -178,7 +180,34 @@ fn fan_in_lines(routes: &[PictureRoute], cols: usize) -> Vec<Vec<Span>> {
             }
             fit(line, cols)
         })
-        .collect()
+        .collect::<Vec<_>>();
+    lines.extend(more_routes(more, cols));
+    // The route's own move (to where it goes now) says where it went from; the rest is what else moved on it.
+    let moved = |route: &PictureRoute, value: &PictureValue| value.to_text.as_deref() == Some(route.to.as_str());
+    let was: Vec<Option<&String>> = routes
+        .iter()
+        .map(|route| route.values.iter().find(|value| moved(route, value)).and_then(|value| value.from_text.as_ref()))
+        .collect();
+    if was.iter().all(|place| place.is_some() && *place == was[0]) {
+        lines.push(fit(vec![styled(format!("was {}", was[0].map(String::as_str).unwrap_or_default()), palette::DIM)], cols));
+    } else {
+        for (route, place) in routes.iter().zip(&was) {
+            if let Some(place) = place {
+                lines.push(fit(vec![styled(route.from.clone(), palette::TEXT), styled(format!(" was {place}"), palette::DIM)], cols));
+            }
+        }
+    }
+    for route in routes {
+        for value in route.values.iter().filter(|value| !moved(route, value)) {
+            lines.extend(value_lines(&PictureValue { name: format!("{} · {}", route.from, value.name), ..value.clone() }, cols));
+        }
+    }
+    lines
+}
+
+/// "and 4 more routes", when there were.
+fn more_routes(more: usize, cols: usize) -> Option<Vec<Span>> {
+    (more > 0).then(|| fit(vec![styled(format!("and {more} more {}", if more == 1 { "route" } else { "routes" }), palette::FAINT)], cols))
 }
 
 /// The project's tracks in a row, as many as fit around the first one the change made or took away: "Bass · Keys ·
@@ -278,8 +307,8 @@ pub fn lines_of(picture: &ChangePicture, cols: usize) -> Vec<Vec<Span>> {
             }
             rows
         }
-        ChangePicture::Routes { routes } if fan_in(routes) => fan_in_lines(routes, cols),
-        ChangePicture::Routes { routes } => routes
+        ChangePicture::Routes { routes, more } if fan_in(routes) => fan_in_lines(routes, *more, cols),
+        ChangePicture::Routes { routes, more } => routes
             .iter()
             .flat_map(|route| {
                 std::iter::once(route_line(route, cols)).chain(
@@ -290,6 +319,7 @@ pub fn lines_of(picture: &ChangePicture, cols: usize) -> Vec<Vec<Span>> {
                         .map(|line| [vec![styled("  ", palette::TEXT)], line].concat()),
                 )
             })
+            .chain(more_routes(*more, cols))
             .collect(),
         ChangePicture::Notes { before, after, .. } => {
             let same = |a: &kumi_types::contracts::ClipNote, b: &kumi_types::contracts::ClipNote| {
@@ -390,9 +420,9 @@ fn bars_of(picture: &ChangePicture, cols: usize) -> Option<Vec<Vec<Span>>> {
     };
     match picture {
         ChangePicture::Values { values } => Some(value_bars(values, cols)),
-        ChangePicture::Routes { routes } if fan_in(routes) => Some(fan_in_lines(routes, cols)),
+        ChangePicture::Routes { routes, more } if fan_in(routes) => Some(fan_in_lines(routes, *more, cols)),
         // Each route's ends, then its values as bars under them.
-        ChangePicture::Routes { routes } => Some(
+        ChangePicture::Routes { routes, more } => Some(
             routes
                 .iter()
                 .flat_map(|route| {
@@ -402,6 +432,7 @@ fn bars_of(picture: &ChangePicture, cols: usize) -> Option<Vec<Vec<Span>>> {
                             .map(|line| [vec![styled("  ", palette::TEXT)], line].concat()),
                     )
                 })
+                .chain(more_routes(*more, cols))
                 .collect(),
         ),
         ChangePicture::Mix { before, after } => {
@@ -472,10 +503,24 @@ mod tests {
         assert!(rows[0].starts_with("… · ") && rows[0].contains("Pad") && rows[0].chars().count() <= 40, "{rows:?}");
         assert_eq!(rows[1], "1 track new");
         let route = |from: &str| PictureRoute { from: from.into(), to: "Drum Bus".into(), change: RouteChange::Changed, values: vec![] };
-        let picture = ChangePicture::Routes { routes: vec![route("Kick"), route("Snare"), route("Hats")] };
+        let picture = ChangePicture::Routes { routes: vec![route("Kick"), route("Snare"), route("Hats")], more: 0 };
         let rows = text(&draw(&picture, 40, 2, Graphics::Cells, 1, palette::GROUND).lines);
         assert_eq!(rows, ["Kick  ─┐", "Snare ─┼→ Drum Bus", "Hats  ─┘"]);
-        let two = ChangePicture::Routes { routes: vec![route("Kick"), route("Snare")] };
+        // Where they went from, once, what else moved on each, and how many more there were.
+        let output = |from: &str| PictureValue {
+            name: "Output".into(),
+            from_text: Some(from.into()),
+            to_text: Some("Drum Bus".into()),
+            ..Default::default()
+        };
+        let arm = PictureValue { name: "Arm".into(), from_text: Some("off".into()), to_text: Some("on".into()), ..Default::default() };
+        let with = |from: &str, values: Vec<PictureValue>| PictureRoute { values, ..route(from) };
+        let routes = vec![with("Kick", vec![output("Main"), arm]), with("Snare", vec![output("Main")])];
+        let rows = text(&lines_of(&ChangePicture::Routes { routes, more: 4 }, 40));
+        assert_eq!(rows[2..], ["and 4 more routes", "was Main", "Kick · Arm off → on"]);
+        let apart = vec![with("Kick", vec![output("Main")]), with("Snare", vec![output("Room")])];
+        assert_eq!(text(&lines_of(&ChangePicture::Routes { routes: apart, more: 0 }, 40))[2..], ["Kick was Main", "Snare was Room"]);
+        let two = ChangePicture::Routes { routes: vec![route("Kick"), route("Snare")], more: 0 };
         assert_eq!(text(&lines_of(&two, 40)), ["Kick  ─┬→ Drum Bus", "Snare ─┘"], "in words too");
     }
 
@@ -591,6 +636,7 @@ mod tests {
         };
         let route = |change| ChangePicture::Routes {
             routes: vec![PictureRoute { from: "Bass".into(), to: "Reverb".into(), change, values: vec![volume.clone()] }],
+            more: 0,
         };
         let lines = text(&draw(&route(RouteChange::Changed), 40, 6, Graphics::Cells, 1, palette::GROUND).lines);
         assert_eq!(lines[0], "Bass → Reverb");

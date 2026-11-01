@@ -93,8 +93,9 @@ fn marks_scene(before: &[PictureMark], after: &[PictureMark]) -> Option<Scene> {
     Some(Scene { shapes, lines: true })
 }
 
-/// Warp markers as Live's warp view ties them: each a line from the moment of the sample it holds (above) to its place
-/// in the clip (below), before ghosted and after in colour. Lines leaning apart are the sample sped up or slowed there.
+/// Warp (or stretch) markers as a DAW's warp view ties them: each a line from the moment of the sample it holds (above)
+/// to its place in the clip (below), before ghosted and after in colour. Lines leaning apart are the sample sped up or
+/// slowed there.
 fn warp_scene(before: &[[f64; 2]], after: &[[f64; 2]]) -> Option<Scene> {
     let all = || before.iter().chain(after);
     let extent = |at: usize| {

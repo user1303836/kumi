@@ -777,8 +777,9 @@ fn beats(value: Option<&Value>) -> Option<f64> {
     value.and_then(Value::as_f64).filter(|n| n.is_finite())
 }
 impl Mutations {
-    /// The Set's tracks as the last look read them (with the colours Kumi knows), the ones a change made or took away
-    /// marked: new tracks, a group, a copy, a deleted track and the tracks in it. None for any other change.
+    /// The Set's tracks as the change's preview read them (new tracks' previews do), else as the last look read them, with
+    /// the colours Kumi knows; the ones a change made or took away marked: new tracks, a group, a copy, a deleted track
+    /// and the tracks in it. None for any other change.
     fn tracks_picture(&self, tool: &str, args: &JsonObject, preview: &JsonObject, result: &JsonObject) -> Option<ChangePicture> {
         static TRACK: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[0-9]+:track:([0-9]+)$").unwrap());
         let index = |reference: Option<&Value>| {
@@ -797,16 +798,29 @@ impl Mutations {
             }
             _ => return None,
         };
-        let model = self.observer.model();
         let book = self.parameters.history.connection.references.borrow();
-        let mut tracks: Vec<(usize, String, Option<String>)> = model
-            .tracks
-            .iter()
-            .filter_map(|node| {
-                let color = book.known.get(&node.reference).and_then(|track| track.color.clone());
-                Some((index(Some(&json!(node.reference)))?, node.name.clone(), color))
+        let color = |reference: &str| book.known.get(reference).and_then(|track| track.color.clone());
+        let read: Vec<(usize, String, Option<String>)> = preview
+            .get("prior")
+            .and_then(|prior| prior.get("tracks"))
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|row| {
+                let reference = row.get("ref").and_then(Value::as_str)?;
+                Some((index(row.get("ref"))?, row.get("name").and_then(Value::as_str)?.to_owned(), color(reference)))
             })
             .collect();
+        let mut tracks = if read.is_empty() {
+            self.observer
+                .model()
+                .tracks
+                .iter()
+                .filter_map(|node| Some((index(Some(&json!(node.reference)))?, node.name.clone(), color(&node.reference))))
+                .collect()
+        } else {
+            read
+        };
         tracks.sort_by_key(|(at, ..)| *at);
         let tracks: Vec<(String, Option<String>)> = tracks.into_iter().map(|(_, name, color)| (name, color)).collect();
         super::changes::pictures::track_list(&tracks, &made, &removed)

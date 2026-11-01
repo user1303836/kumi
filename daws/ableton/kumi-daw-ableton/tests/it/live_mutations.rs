@@ -632,3 +632,180 @@ fn oracle_comparisons_set_aside_only_a_change_records_picture() {
     // and a "picture" that isn't on a change record stays.
     assert_ne!(normalized(&json!({"picture":1})), normalized(&json!({})));
 }
+
+/// A bridge that answers each preview and apply as the test says (`answer`), and lists the tools the test names: any other
+/// it refuses.
+struct PictureFixture {
+    tools: Vec<&'static str>,
+    answer: Box<dyn Fn(&str, &JsonObject) -> Value>,
+    calls: Rc<RefCell<Vec<String>>>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for PictureFixture {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.99"})).unwrap())
+    }
+    async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
+        let tools: Vec<Value> = self.tools.iter().map(|name| json!({"name":name,"inputSchema":{"type":"object"}})).collect();
+        Ok(serde_json::from_value(json!({ "tools": tools })).unwrap())
+    }
+    async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+        self.calls.borrow_mut().push(name.to_owned());
+        if !self.tools.contains(&name) {
+            return Ok(serde_json::from_value(json!({"content":[{"type":"text","text":"unknown tool"}],"isError":true})).unwrap());
+        }
+        let body =
+            if name == "live_status" { json!({"connected":true,"adapter":"real-live","epoch":7}) } else { (self.answer)(name, &args) };
+        Ok(serde_json::from_value(json!({"content":[{"type":"text","text":body.to_string()}],"structuredContent":body})).unwrap())
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// Live's integration on a `PictureFixture`, connected, with the refs a test's changes name.
+/// The tools it was called with go to `calls`.
+async fn pictured(
+    tools: Vec<&'static str>,
+    answer: impl Fn(&str, &JsonObject) -> Value + 'static,
+    refs: &[(&str, &str)],
+    calls: Rc<RefCell<Vec<String>>>,
+) -> Rc<Ableton> {
+    let endpoint: Rc<dyn McpEndpoint> = Rc::new(PictureFixture { tools, answer: Box::new(answer), calls });
+    let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
+    options.connect = Some(Rc::new(move |_| {
+        let endpoint = endpoint.clone();
+        async move { Ok(endpoint) }.boxed_local()
+    }));
+    let integration = Ableton::new(options);
+    let connection = integration.connection.clone();
+    connection.start(Signal::new()).await.unwrap();
+    connection.tools().unwrap().refresh(Signal::new()).await.unwrap();
+    connection.available.set(true);
+    connection.epoch.set(Some(7.));
+    for (reference, kind) in refs {
+        connection.references.borrow_mut().refs.insert((*reference).into(), (*kind).into());
+    }
+    integration
+}
+
+fn plan(steps: Value) -> JsonObject {
+    json!({ "steps": steps }).as_object().unwrap().clone()
+}
+
+/// The newest change's picture.
+fn newest_picture(integration: &Ableton) -> Option<kumi_types::contracts::ChangePicture> {
+    integration.history.entries.borrow().values().last().unwrap().borrow().record.picture.clone()
+}
+
+/// A lane is named, on its parameter's range, as the bridge's preview read the parameter; a bridge that doesn't say
+/// leaves it to what discovery read. Live's points after the change are drawn as the apply answered them.
+#[tokio::test(flavor = "current_thread")]
+async fn a_lane_is_named_by_the_preview_or_else_by_discovery() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (clip, parameter) = ("7:clip:0:0", "7:parameter:7:device:0:0:3");
+            let says = Rc::new(Cell::new(true));
+            let told = says.clone();
+            let integration = pictured(
+                vec!["live_status", "live_automation_preview", "live_automation_apply"],
+                move |name, _| match name {
+                    "live_automation_preview" => {
+                        let mut preview = json!({"transactionId":"a1","epoch":7,"confirmation":"apply","action":"insert",
+                            "current":{"exists":true,"points":[{"time":0,"value":0}]}});
+                        if told.get() {
+                            preview["parameter"] = json!({"name":"Filter Freq","min":-1,"max":135});
+                        }
+                        preview
+                    }
+                    "live_automation_apply" => json!({"transactionId":"a1","state":"applied","result":{},
+                        "envelope":{"exists":true,"points":[{"time":0,"value":0},{"time":4,"value":0.75}]}}),
+                    _ => json!({}),
+                },
+                &[(clip, "clip"), (parameter, "parameter")],
+                Rc::default(),
+            )
+            .await;
+            // Discovery read it by Live's own name, on 0–1.
+            let discovered = kumi_agent::core::refs::KnownParameter { name: "Frequency".into(), min: 0., max: 1. };
+            integration.connection.references.borrow_mut().parameters.insert(parameter.into(), discovered);
+            let draw = json!([{"tool":"set_automation","input":{"action":"insert","clipRef":clip,"parameterRef":parameter,
+                "points":[{"time":4,"value":0.8}]}}]);
+            let lane = |integration: &Ableton| match newest_picture(integration) {
+                Some(kumi_types::contracts::ChangePicture::Automation { parameter, min, max, after, .. }) => (parameter, min, max, after),
+                other => panic!("{other:?}"),
+            };
+            let result = integration.mutations.make_changes(plan(draw.clone()), Signal::new()).await.unwrap();
+            assert!(!result.is_error, "{}", result.text);
+            assert_eq!(lane(&integration), ("Filter Freq".into(), -1., 135., vec![[0., 0.], [4., 0.75]]), "the preview's, not discovery's");
+            says.set(false);
+            let result = integration.mutations.make_changes(plan(draw), Signal::new()).await.unwrap();
+            assert!(!result.is_error, "{}", result.text);
+            assert_eq!(lane(&integration), ("Frequency".into(), 0., 1., vec![[0., 0.], [4., 0.75]]), "discovery's");
+        })
+        .await;
+}
+
+/// New tracks are drawn among the Set's; a plan's change across tracks marks each record with its run.
+#[tokio::test(flavor = "current_thread")]
+async fn new_tracks_have_their_picture_and_a_plans_run_is_marked() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let tools = vec![
+                "live_status",
+                "live_session_structure_preview",
+                "live_session_structure_apply",
+                "live_mixer_preview",
+                "live_mixer_apply",
+            ];
+            let calls: Rc<RefCell<Vec<String>>> = Rc::default();
+            let integration = pictured(
+                tools,
+                |name, args| match name {
+                    "live_session_structure_preview" => json!({"transactionId":"s1","epoch":7,"confirmation":"apply",
+                        "prior":{"tracks":[{"ref":"7:track:0","name":"Drums","kind":"midi","index":0},
+                            {"ref":"7:track:1","name":"Bass","kind":"midi","index":1}],"scenes":[]},
+                        "proposed":[{"kind":"track","trackKind":"midi","name":"Pad"}]}),
+                    "live_session_structure_apply" => json!({"transactionId":"s1","state":"applied",
+                        "created":[{"ref":"7:track:2","kind":"track","name":"Pad"}]}),
+                    "live_mixer_preview" => json!({"transactionId":format!("m-{}", args["trackRef"]),"epoch":7,"confirmation":"apply",
+                        "trackRef":args["trackRef"],"prior":{"mute":false},"proposed":{"mute":true}}),
+                    "live_mixer_apply" => json!({"transactionId":args["transactionId"],"state":"applied"}),
+                    _ => json!({}),
+                },
+                &[("7:track:0", "track"), ("7:track:1", "track")],
+                calls.clone(),
+            )
+            .await;
+            let add = json!([{"tool":"add_tracks_and_scenes","input":{"tracks":[{"type":"midi","name":"Pad"}]}}]);
+            let result = integration.mutations.make_changes(plan(add), Signal::new()).await.unwrap();
+            assert!(!result.is_error, "{} {:?}", result.text, calls.borrow());
+            let Some(kumi_types::contracts::ChangePicture::Tracks { tracks, .. }) = newest_picture(&integration) else {
+                panic!("{:?}", newest_picture(&integration))
+            };
+            let marks: Vec<(&str, bool)> = tracks.iter().map(|track| (track.name.as_str(), track.mark.is_some())).collect();
+            assert_eq!(marks, [("Drums", false), ("Bass", false), ("Pad", true)], "among the Set's tracks as the preview read them");
+            let mute = json!([{"tool":"set_mixer","input":{"trackRef":"7:track:0","mute":true}},
+                {"tool":"set_mixer","input":{"trackRef":"7:track:1","mute":true}}]);
+            let result = integration.mutations.make_changes(plan(mute), Signal::new()).await.unwrap();
+            assert!(!result.is_error, "{}", result.text);
+            let batches: Vec<Option<String>> =
+                integration.history.entries.borrow().values().map(|entry| entry.borrow().record.batch.clone()).collect();
+            let [Some(made), Some(first), Some(second)] = batches.as_slice() else { panic!("{batches:?}") };
+            assert_eq!(first, second, "one run across the two tracks");
+            assert!(first.ends_with(":set_mixer") && made.ends_with(":add_tracks_and_scenes") && made != first, "{batches:?}");
+        })
+        .await;
+}

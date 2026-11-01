@@ -1496,6 +1496,7 @@ fn daw_pictures() -> Vec<ChangeRecord> {
                         ..Default::default()
                     }],
                 }],
+                more: 0,
             }),
             ..change("c902", ChangeFamily::Mixer, "Added send “Drums” → “Reverb”", ChangeState::Applied)
         },

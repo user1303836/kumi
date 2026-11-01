@@ -995,7 +995,7 @@ fn redacted_change(change: &ChangeRecord, redact: &dyn Fn(&str) -> String) -> Ch
                     line.after = redact(&line.after);
                 }
             }
-            ChangePicture::Routes { routes } => {
+            ChangePicture::Routes { routes, .. } => {
                 for route in routes {
                     route.from = redact(&route.from);
                     route.to = redact(&route.to);
@@ -1151,7 +1151,7 @@ fn values_of(picture: &ChangePicture) -> Vec<String> {
             }
             said
         }
-        ChangePicture::Routes { routes } => routes
+        ChangePicture::Routes { routes, .. } => routes
             .iter()
             .flat_map(|route| {
                 let what = match route.change {

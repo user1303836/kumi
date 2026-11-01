@@ -52,7 +52,8 @@ closes, crashes or is stopped.
   that plays in colour), or each value before and after, with what was asked
   when Live set something else ("asked -2 dB"). A plan's change across several
   tracks ("mute the drums, the bass and the keys") is one entry: its picture
-  shows each track's values, and its undo takes back all of them. **GOAL**
+  shows each track's values, and its undo takes back each of them, newest
+  first, saying which it kept if one can't be. **GOAL**
   shows the `/goal` ("No goal yet" until there is one): the goal, its turns done
   and time against the budget (the status line counts the turn under way), the
   last check and what's next; for a sound-match

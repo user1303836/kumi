@@ -28,9 +28,18 @@ const DRAWN_KEPT: usize = 64;
 impl Images {
     /// A change's picture changed (its curve came after it): what was drawn of it, and its images, go.
     pub(super) fn forget(&mut self, change: &str) {
-        let prefix = format!("{change} ");
-        self.drawn.retain(|key, _| !key.starts_with(&prefix));
-        let gone: Vec<String> = self.shown.keys().filter(|key| key.starts_with(&prefix)).cloned().collect();
+        self.forget_keys(&format!("{change} "));
+    }
+
+    /// What was drawn of HISTORY's runs (a plan's change across tracks, `run:…`): any change to a record may change a
+    /// run's picture (one more of its changes landed, one undone apart).
+    pub(super) fn forget_runs(&mut self) {
+        self.forget_keys("run:");
+    }
+
+    fn forget_keys(&mut self, prefix: &str) {
+        self.drawn.retain(|key, _| !key.starts_with(prefix));
+        let gone: Vec<String> = self.shown.keys().filter(|key| key.starts_with(prefix)).cloned().collect();
         for key in gone {
             if let Some((id, _)) = self.shown.remove(&key) {
                 self.writes.push_str(&kitty::delete(id));

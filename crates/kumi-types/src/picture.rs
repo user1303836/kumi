@@ -87,8 +87,12 @@ pub enum ChangePicture {
         more: usize,
     },
     /// Routes made, taken away or changed (sends, receives, outputs), each from one end to the other with the values
-    /// that moved.
-    Routes { routes: Vec<PictureRoute> },
+    /// that moved; `more` routes past those kept.
+    Routes {
+        routes: Vec<PictureRoute>,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        more: usize,
+    },
     /// An instrument's keyzones before and after: each zone's notes (across) and velocities (up), with the values that
     /// moved.
     Zones {
@@ -111,16 +115,16 @@ pub enum ChangePicture {
         #[serde(default, skip_serializing_if = "is_zero")]
         more: usize,
     },
-    /// Markers on the timeline (locators) before and after, each where it is in beats from the start, with where the
-    /// ones that moved are in the DAW's words.
+    /// Markers on the timeline (locators, cue points, markers) before and after, each where it is in beats from the
+    /// start, with where the ones that moved are in the DAW's words.
     Marks {
         before: Vec<PictureMark>,
         after: Vec<PictureMark>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         values: Vec<PictureValue>,
     },
-    /// A clip's warp markers before and after, each as `[beat, second]`: where it is in the clip, in beats, and the
-    /// moment of the sample it holds there, in seconds. With the values that moved.
+    /// A clip's warp (or stretch) markers before and after, each as `[beat, second]`: where it is in the clip, in beats,
+    /// and the moment of the sample it holds there, in seconds. With the values that moved.
     Warp {
         before: Vec<[f64; 2]>,
         after: Vec<[f64; 2]>,
@@ -414,10 +418,9 @@ impl ChangePicture {
                 lines.truncate(MAX_LINES);
                 ChangePicture::Lines { lines, more: more + past }
             }
-            ChangePicture::Routes { routes } => ChangePicture::Routes {
-                routes: routes
+            ChangePicture::Routes { routes, more } => {
+                let routes: Vec<PictureRoute> = routes
                     .into_iter()
-                    .take(MAX_ROUTES)
                     .map(|route| PictureRoute {
                         from: cut(&route.from, MAX_NAME),
                         to: cut(&route.to, MAX_NAME),
@@ -425,8 +428,10 @@ impl ChangePicture {
                         values: values(route.values),
                     })
                     .filter(|route| !route.from.is_empty() || !route.to.is_empty())
-                    .collect(),
-            },
+                    .collect();
+                let past = routes.len().saturating_sub(MAX_ROUTES);
+                ChangePicture::Routes { routes: routes.into_iter().take(MAX_ROUTES).collect(), more: more + past }
+            }
             ChangePicture::Zones { before, after, values: list } => {
                 let zones = |zones: Vec<PictureZone>| zones.into_iter().take(MAX_ZONES).map(PictureZone::bounded).collect::<Vec<_>>();
                 ChangePicture::Zones { before: zones(before), after: zones(after), values: values(list) }
@@ -449,19 +454,20 @@ impl ChangePicture {
                         .map(|mark| PictureMark { name: cut(&mark.name, MAX_NAME), at: mark.at })
                         .collect();
                     marks.sort_by(|a, b| a.at.total_cmp(&b.at));
-                    marks.truncate(MAX_MARKS);
                     marks
                 };
-                ChangePicture::Marks { before: marks(before), after: marks(after), values: values(list) }
+                let (before, after) = around_change(marks(before), marks(after), MAX_MARKS, |mark| mark.at);
+                ChangePicture::Marks { before, after, values: values(list) }
             }
             ChangePicture::Warp { before, after, values: list } => {
                 let markers = |markers: Vec<[f64; 2]>| {
                     let mut markers: Vec<[f64; 2]> =
                         markers.into_iter().filter(|[beat, second]| beat.is_finite() && second.is_finite()).collect();
                     markers.sort_by(|a, b| a[0].total_cmp(&b[0]));
-                    thin(markers, MAX_WARPS)
+                    markers
                 };
-                ChangePicture::Warp { before: markers(before), after: markers(after), values: values(list) }
+                let (before, after) = around_change(markers(before), markers(after), MAX_WARPS, |marker| marker[0]);
+                ChangePicture::Warp { before, after, values: values(list) }
             }
             ChangePicture::Wave { seconds, peaks, before, after, values: list } => {
                 if !seconds.is_finite() || seconds <= 0. {
@@ -513,7 +519,10 @@ impl ChangePicture {
                 let kept = half(lines.len());
                 ChangePicture::Lines { more: more + lines.len() - kept, lines: lines.into_iter().take(kept).collect() }
             }
-            ChangePicture::Routes { routes } => ChangePicture::Routes { routes: routes.iter().take(half(routes.len())).cloned().collect() },
+            ChangePicture::Routes { routes, more } => {
+                let kept = half(routes.len());
+                ChangePicture::Routes { more: more + routes.len() - kept, routes: routes.into_iter().take(kept).collect() }
+            }
             ChangePicture::Zones { before, after, values } => ChangePicture::Zones {
                 before: before.iter().take(half(before.len())).cloned().collect(),
                 after: after.iter().take(half(after.len())).cloned().collect(),
@@ -529,16 +538,16 @@ impl ChangePicture {
                 let (tracks, past) = around_marks(tracks, most);
                 ChangePicture::Tracks { tracks, more: more + past }
             }
-            ChangePicture::Marks { before, after, values } => ChangePicture::Marks {
-                before: before.iter().take(half(before.len())).cloned().collect(),
-                after: after.iter().take(half(after.len())).cloned().collect(),
-                values: values.iter().take(values.len() / 2).cloned().collect(),
-            },
-            ChangePicture::Warp { before, after, values } => ChangePicture::Warp {
-                before: thin(before.clone(), half(before.len())),
-                after: thin(after.clone(), half(after.len())),
-                values: values.iter().take(values.len() / 2).cloned().collect(),
-            },
+            ChangePicture::Marks { before, after, values } => {
+                let most = half(before.len().max(after.len()));
+                let (before, after) = around_change(before, after, most, |mark| mark.at);
+                ChangePicture::Marks { before, after, values: values.iter().take(values.len() / 2).cloned().collect() }
+            }
+            ChangePicture::Warp { before, after, values } => {
+                let most = half(before.len().max(after.len()));
+                let (before, after) = around_change(before, after, most, |marker| marker[0]);
+                ChangePicture::Warp { before, after, values: values.iter().take(values.len() / 2).cloned().collect() }
+            }
             ChangePicture::Wave { seconds, peaks, before, after, values } => ChangePicture::Wave {
                 seconds,
                 peaks: pooled(&peaks, half(peaks.len())),
@@ -559,7 +568,7 @@ impl ChangePicture {
             ChangePicture::Automation { before, after, .. } => before.is_empty() && after.is_empty(),
             ChangePicture::Mix { before, after } => before == &MixLevels::default() && after == &MixLevels::default(),
             ChangePicture::Lines { lines, .. } => lines.is_empty(),
-            ChangePicture::Routes { routes } => routes.is_empty(),
+            ChangePicture::Routes { routes, .. } => routes.is_empty(),
             ChangePicture::Zones { before, after, .. } => before.is_empty() && after.is_empty(),
             ChangePicture::Items { before, after, .. } => before.is_empty() && after.is_empty(),
             ChangePicture::Tracks { tracks, .. } => tracks.is_empty(),
@@ -592,6 +601,24 @@ fn around_marks(tracks: Vec<PictureTrack>, most: usize) -> (Vec<PictureTrack>, u
     let start = first.saturating_sub(2).min(tracks.len() - most);
     let past = tracks.len() - most;
     (tracks.into_iter().skip(start).take(most).collect(), past)
+}
+
+/// At most `most` of each side's items, the same stretch of the timeline on both (each item where `at` says): from a little
+/// before the first that the change made, moved or took away, so what changed stays, and what stayed reads as it was.
+/// The items are in order, one at a time on each side.
+fn around_change<T: PartialEq>(before: Vec<T>, after: Vec<T>, most: usize, at: impl Fn(&T) -> f64) -> (Vec<T>, Vec<T>) {
+    if before.len() <= most && after.len() <= most {
+        return (before, after);
+    }
+    let mut times: Vec<f64> = before.iter().chain(&after).map(&at).collect();
+    times.sort_by(f64::total_cmp);
+    times.dedup();
+    let changed = before.iter().filter(|item| !after.contains(item)).chain(after.iter().filter(|item| !before.contains(item)));
+    let first = changed.map(&at).fold(f64::INFINITY, f64::min);
+    let start = times.iter().position(|time| *time >= first).unwrap_or(0).saturating_sub(2).min(times.len().saturating_sub(most.max(1)));
+    let (low, high) = (times[start], times[(start + most.max(1) - 1).min(times.len() - 1)]);
+    let keep = |items: Vec<T>| items.into_iter().filter(|item| (low..=high).contains(&at(item))).collect();
+    (keep(before), keep(after))
 }
 
 /// At most `most` levels, each the highest of the ones it stands for: a waveform's peaks stay where they were.
@@ -800,18 +827,19 @@ pub fn across(parts: &[(String, ChangePicture)]) -> Option<ChangePicture> {
         let routes = parts
             .iter()
             .flat_map(|(_, picture)| match picture {
-                ChangePicture::Routes { routes } => routes.clone(),
+                ChangePicture::Routes { routes, .. } => routes.clone(),
                 _ => Vec::new(),
             })
             .collect();
-        return ChangePicture::Routes { routes }.bounded();
+        let more = parts.iter().map(|(_, picture)| if let ChangePicture::Routes { more, .. } = picture { *more } else { 0 }).sum();
+        return ChangePicture::Routes { routes, more }.bounded();
     }
     let mut values = Vec::new();
     for (track, picture) in parts {
         let named = |value: &PictureValue| PictureValue { name: format!("{track} · {}", value.name), ..value.clone() };
         match picture {
             ChangePicture::Values { values: list } => values.extend(list.iter().map(named)),
-            ChangePicture::Routes { routes } => {
+            ChangePicture::Routes { routes, .. } => {
                 for route in routes {
                     values.extend(route.values.iter().map(named));
                 }
@@ -1117,13 +1145,13 @@ mod tests {
         };
         assert_eq!((after[0].notes, after[0].velocities, after[0].base), ([48, 60], Some([0, 127]), Some(127)));
         let route = |from: &str| PictureRoute { from: from.into(), to: "Reverb".into(), change: RouteChange::Changed, values: vec![] };
-        let ChangePicture::Routes { routes } =
-            (ChangePicture::Routes { routes: (0..20).map(|_| route("Bass")).collect() }).bounded().unwrap()
+        let ChangePicture::Routes { routes, more } =
+            (ChangePicture::Routes { routes: (0..20).map(|_| route("Bass")).collect(), more: 0 }).bounded().unwrap()
         else {
             panic!()
         };
-        assert_eq!(routes.len(), MAX_ROUTES);
-        let json = serde_json::to_value(ChangePicture::Routes { routes: vec![route("Bass")] }).unwrap();
+        assert_eq!((routes.len(), more), (MAX_ROUTES, 20 - MAX_ROUTES), "the first, and how many more");
+        let json = serde_json::to_value(ChangePicture::Routes { routes: vec![route("Bass")], more: 0 }).unwrap();
         assert_eq!(json, serde_json::json!({"kind": "routes", "routes": [{"from": "Bass", "to": "Reverb", "change": "changed"}]}));
     }
 
@@ -1181,11 +1209,15 @@ mod tests {
     fn tracks_marks_warps_and_waves_stay_within_their_bounds() {
         let track = |n: usize, mark: Option<TrackMark>| PictureTrack { name: format!("Track {n}"), color: Some("#ff8800".into()), mark };
         // 60 tracks, two new ones deep in the list: the ones kept are around them, and the rest counted.
-        let tracks: Vec<PictureTrack> = (0..60).map(|n| track(n, (n == 40 || n == 41).then_some(TrackMark::Made))).collect();
+        let tracks: Vec<PictureTrack> = (0..60).map(|n| track(n, (n == 20 || n == 21).then_some(TrackMark::Made))).collect();
         let ChangePicture::Tracks { tracks, more } = (ChangePicture::Tracks { tracks, more: 0 }).bounded().unwrap() else { panic!() };
         assert_eq!((tracks.len(), more), (MAX_TRACKS, 60 - MAX_TRACKS));
-        assert_eq!(tracks[2].name, "Track 40", "two tracks before the first new one, for where it is");
+        assert_eq!(tracks[2].name, "Track 20", "two tracks before the first new one, for where it is");
         assert!(tracks.iter().filter(|track| track.mark == Some(TrackMark::Made)).count() == 2);
+        // Near the end, the last ones.
+        let tracks: Vec<PictureTrack> = (0..60).map(|n| track(n, (n == 58).then_some(TrackMark::Made))).collect();
+        let ChangePicture::Tracks { tracks, .. } = (ChangePicture::Tracks { tracks, more: 0 }).bounded().unwrap() else { panic!() };
+        assert_eq!(tracks.last().unwrap().name, "Track 59");
         let odd = PictureTrack { name: "Bass".into(), color: Some("orange".into()), mark: None };
         let ChangePicture::Tracks { tracks, .. } = (ChangePicture::Tracks { tracks: vec![odd], more: 0 }).bounded().unwrap() else {
             panic!()
@@ -1200,14 +1232,25 @@ mod tests {
         assert_eq!(before.iter().map(|m| m.name.as_str()).collect::<Vec<_>>(), ["A", "B"], "in their order on the timeline");
         assert!(after.is_empty(), "nowhere is no marker");
 
-        let warp = ChangePicture::Warp {
-            before: vec![[4., 2.], [0., 0.]],
-            after: (0..500).map(|n| [n as f64, n as f64 / 2.]).collect(),
-            values: vec![],
-        };
+        // A marker moved among 500: the same stretch kept on both sides, around it, so the others still read as they were.
+        let markers: Vec<[f64; 2]> = (0..500).map(|n| [n as f64, n as f64 / 2.]).collect();
+        let mut moved = markers.clone();
+        moved[300][0] = 300.5;
+        let warp = ChangePicture::Warp { before: markers, after: moved, values: vec![] };
         let ChangePicture::Warp { before, after, .. } = warp.bounded().unwrap() else { panic!() };
-        assert_eq!(before, vec![[0., 0.], [4., 2.]]);
-        assert!(after.len() <= MAX_WARPS && after.first() == Some(&[0., 0.]) && after.last() == Some(&[499., 249.5]));
+        assert!(before.len() <= MAX_WARPS && after.len() <= MAX_WARPS);
+        assert_eq!((before[0], after[0]), ([298., 149.], [298., 149.]), "from a little before the one moved");
+        assert!(after.contains(&[300.5, 150.]) && before.contains(&[300., 150.]));
+        assert_eq!(before.iter().filter(|marker| !after.contains(marker)).count(), 1, "only the one moved reads as moved");
+        // A late new locator in a long Set stays.
+        let many: Vec<PictureMark> = (0..100).map(|n| mark("L", n as f64 * 16.)).collect();
+        let mut more = many.clone();
+        more.push(mark("Coda", 1601.));
+        let ChangePicture::Marks { after, .. } = (ChangePicture::Marks { before: many, after: more, values: vec![] }).bounded().unwrap()
+        else {
+            panic!()
+        };
+        assert!(after.iter().any(|mark| mark.name == "Coda"), "{after:?}");
 
         // A long sample's peaks, pooled: each column keeps the loudest of what it stands for.
         let mut peaks = vec![0.1; 10_000];
@@ -1244,10 +1287,10 @@ mod tests {
         assert_eq!((values[1].from_text.as_deref(), values[1].to_text.as_deref()), (Some("off"), Some("on")));
         let route = |from: &str| PictureRoute { from: from.into(), to: "Bus".into(), change: RouteChange::Changed, values: vec![] };
         let routes = vec![
-            ("Drums".to_string(), ChangePicture::Routes { routes: vec![route("Drums")] }),
-            ("Perc".to_string(), ChangePicture::Routes { routes: vec![route("Perc")] }),
+            ("Drums".to_string(), ChangePicture::Routes { routes: vec![route("Drums")], more: 0 }),
+            ("Perc".to_string(), ChangePicture::Routes { routes: vec![route("Perc")], more: 0 }),
         ];
-        let ChangePicture::Routes { routes } = across(&routes).unwrap() else { panic!() };
+        let ChangePicture::Routes { routes, .. } = across(&routes).unwrap() else { panic!() };
         assert_eq!(routes.len(), 2, "routes stay routes");
         let notes = ChangePicture::Notes { length: 4., before: vec![], after: vec![note(0.)], partial: false };
         assert_eq!(across(&[("Keys".to_string(), notes)]), None, "notes aren't values");

@@ -6,6 +6,8 @@ use kumi_common::{
 };
 use sha2::{Digest, Sha256};
 const MAX_SET_COLLECTION: usize = 10_000_000;
+/// The most points an apply returns of the lane it changed (a change's picture draws 128): past them, none.
+const MAX_ANSWERED_POINTS: usize = 1024;
 const ACTIONS: [&str; 6] = ["create-envelope", "delete-envelope", "insert", "insert-step", "delete-range", "clear-envelopes"];
 fn hash(value: &Value) -> Result<String, LiveError> {
     Ok(hex::encode(Sha256::digest(canonical_mutation_identity(value)?)))
@@ -458,14 +460,18 @@ impl McpHost {
             created["authorityDigest"] = authority;
             record.borrow_mut()["created"] = created;
             record.borrow_mut()["state"] = json!("applied");
+            // The lane as Live has it now, for the change's picture: its points, when there aren't too many.
+            let mut envelope = copy_fields(&after, &["exists"]);
+            if after["points"].as_array().is_some_and(|points| points.len() <= MAX_ANSWERED_POINTS) {
+                envelope["points"] = after["points"].clone();
+            }
             Ok(success_text(
                 id,
                 &json!({
                 "transactionId":t["id"],
                 "state":"applied",
                 "result":result,
-                // The lane as Live has it now, for the change's picture.
-                "envelope":copy_fields(&after, &["exists", "points"]),
+                "envelope":envelope,
                 "idempotent":false}
                 ),
             ))

@@ -462,11 +462,19 @@ pub async fn read_stereo(path: impl AsRef<Path>, signal: &Signal, from: f64, mos
     Ok(([left, right], rate))
 }
 
+/// The most channels a file's peaks are read across: more than any sound file Kumi meets.
+const MAX_CHANNELS: usize = 64;
+
 /// A file at a glance: how long it is in seconds, and its level along it as `columns` peaks, each the loudest sample
 /// (of any channel) in its stretch, scaled so the file's loudest is 1. Read a block at a time, so a song isn't held
 /// in memory.
 pub async fn peaks(path: impl AsRef<Path>, columns: usize, signal: &Signal) -> Result<(f64, Vec<f32>), AudioError> {
     let mut source = open_audio(path, Some(signal.clone())).await?;
+    // (a header claiming thousands of channels would make each block as big as the file)
+    if source.channels > MAX_CHANNELS {
+        let _ = source.close().await;
+        return Err(AudioError(format!("That file says it has {} channels.", source.channels)));
+    }
     let frames = source.frames.max(1);
     let columns = columns.clamp(1, frames);
     let mut peaks = vec![0f32; columns];

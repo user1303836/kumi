@@ -298,8 +298,9 @@ struct Blocked {
 }
 type Settled = Shared<LocalBoxFuture<'static, Result<Option<Stop>, RuntimeError>>>;
 pub struct Plan<H: PlanHost> {
-    /// Unique in this Kumi: the runs of one kind of change it makes are named by it (`ChangeRecord::batch`).
-    id: u64,
+    /// Unique to it, in any Kumi: the runs of one kind of change it makes are named by it (`ChangeRecord::batch`), and
+    /// a conversation carried on keeps its records, so another Kumi's plans mustn't share it.
+    id: String,
     host: Rc<H>,
     signal: Signal,
     on_start: Option<Rc<dyn Fn()>>,
@@ -314,9 +315,8 @@ pub struct Plan<H: PlanHost> {
 }
 impl<H: PlanHost> Plan<H> {
     pub fn new(host: Rc<H>, signal: Signal, on_start: Option<Rc<dyn Fn()>>) -> Rc<Self> {
-        static PLANS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let this = Rc::new(Self {
-            id: PLANS.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1,
+            id: uuid::Uuid::new_v4().simple().to_string()[..12].to_owned(),
             host,
             signal,
             on_start,

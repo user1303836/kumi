@@ -508,6 +508,14 @@ async fn a_lane_answers_with_its_parameter_and_the_points_live_has() {
     let apply = json!({"transactionId":preview["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
     let applied = text(host.live_automation_apply_async(&json!(2), &apply, None).await.unwrap());
     assert_eq!(applied["envelope"], json!({"exists":true,"points":[{"time":0,"value":0},{"time":4,"value":1}]}), "{applied}");
+    // A lane of more points than a picture could use answers without them.
+    let many: Vec<Value> = (0..1100).map(|n| json!({"time":n as f64 * 0.003,"value":0.5})).collect();
+    adapter.sim.state.borrow_mut()["tracks"][0]["clips"][0]["envelopes"][PREF] = json!(many);
+    let args = json!({"action":"insert","clipRef":"clip:clip-1","parameterRef":PREF,"points":[{"time":3.5,"value":0.25}]});
+    let again = text(host.live_automation_preview_async(&json!(3), &args).await);
+    let apply = json!({"transactionId":again["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key-2"});
+    let crowded = text(host.live_automation_apply_async(&json!(4), &apply, None).await.unwrap());
+    assert_eq!(crowded["envelope"], json!({"exists":true}), "{again} {crowded}");
     // Set aside only those: an answer that differs otherwise still differs.
     let mut other = applied.clone();
     other["state"] = json!("uncertain");

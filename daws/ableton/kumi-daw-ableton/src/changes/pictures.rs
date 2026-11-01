@@ -46,6 +46,9 @@ pub(crate) fn picture(
         "delete_locator" => deleted_locator(preview),
         "set_warp_markers" => warp_markers(preview, input, applied),
         "set_sidechain" => device_input(preview, input, track),
+        // (the clip's waveform comes once its sample is read, `waves::wave_later`, with these values under it)
+        "set_audio_clip" => Some(ChangePicture::Values { values: audio_values(preview, input) })
+            .filter(|p| !matches!(p, ChangePicture::Values { values } if values.is_empty())),
         _ => None,
     }
 }
@@ -68,9 +71,15 @@ fn routing(preview: &JsonObject, input: &JsonObject, track: Option<&str>) -> Opt
             None => name,
         })
     };
+    // What wasn't asked stays, but a new input or output takes Live's channel for it, which the preview doesn't know.
     let mut after = prior.clone();
     for (key, value) in proposed {
         after.insert(key.clone(), value.clone());
+    }
+    for (kind, sub) in [("inputType", "inputSubRouting"), ("outputType", "outputSubRouting")] {
+        if proposed.contains_key(kind) && !proposed.contains_key(sub) {
+            after.shift_remove(sub);
+        }
     }
     let mut routes = Vec::new();
     for (ends, word, into) in [(("inputType", "inputSubRouting"), "Input", true), (("outputType", "outputSubRouting"), "Output", false)] {
@@ -107,7 +116,7 @@ fn routing(preview: &JsonObject, input: &JsonObject, track: Option<&str>) -> Opt
     match routes.first_mut() {
         Some(first) => {
             first.values.extend(values);
-            Some(ChangePicture::Routes { routes })
+            Some(ChangePicture::Routes { routes, more: 0 })
         }
         None => (!values.is_empty()).then_some(ChangePicture::Values { values }),
     }
@@ -130,7 +139,7 @@ fn device_input(preview: &JsonObject, input: &JsonObject, track: Option<&str>) -
         ..Default::default()
     };
     let to = track.unwrap_or("Device").to_owned();
-    Some(ChangePicture::Routes { routes: vec![PictureRoute { from, to, change: RouteChange::Changed, values: vec![value] }] })
+    Some(ChangePicture::Routes { routes: vec![PictureRoute { from, to, change: RouteChange::Changed, values: vec![value] }], more: 0 })
 }
 
 fn capital_first(text: &str) -> String {
@@ -1176,7 +1185,7 @@ mod tests {
             "prior":{"outputType":"Main","outputSubRouting":"","arm":false,"monitoring":1},
             "proposed":{"outputType":"Drum Bus","arm":true,"monitoring":"in"}}));
         let routed = super::picture(kind("set_routing"), &preview, &object(json!({})), None, Some("Kick")).unwrap();
-        let ChangePicture::Routes { routes } = routed else { panic!() };
+        let ChangePicture::Routes { routes, .. } = routed else { panic!() };
         let [route] = routes.as_slice() else { panic!("{routes:?}") };
         assert_eq!((route.from.as_str(), route.to.as_str()), ("Kick", "Drum Bus"), "from the track to where it goes now");
         let said: Vec<(&str, Option<&str>, Option<&str>)> =
@@ -1188,7 +1197,7 @@ mod tests {
         // An input comes into the track; arming alone is values.
         let preview = object(json!({"prior":{"inputType":"Ext. In","inputSubRouting":"1"},"proposed":{"inputType":"Resampling"}}));
         let routed = super::picture(kind("set_routing"), &preview, &object(json!({})), None, Some("Rec")).unwrap();
-        let ChangePicture::Routes { routes } = routed else { panic!() };
+        let ChangePicture::Routes { routes, .. } = routed else { panic!() };
         assert_eq!((routes[0].from.as_str(), routes[0].to.as_str()), ("Resampling", "Rec"));
         assert_eq!(routes[0].values[0].from_text.as_deref(), Some("Ext. In (1)"));
         let armed = object(json!({"prior":{"arm":false},"proposed":{"arm":true}}));
@@ -1199,7 +1208,8 @@ mod tests {
     fn a_sidechain_is_a_route_into_the_devices_track() {
         let preview = object(json!({"action":"sidechain","prior":{"routingType":"No Input"}}));
         let input = object(json!({"deviceRef":"d","action":"sidechain","routingType":"Kick","routingChannel":"Post FX"}));
-        let ChangePicture::Routes { routes } = super::picture(kind("set_sidechain"), &preview, &input, None, Some("Bass")).unwrap() else {
+        let ChangePicture::Routes { routes, .. } = super::picture(kind("set_sidechain"), &preview, &input, None, Some("Bass")).unwrap()
+        else {
             panic!()
         };
         assert_eq!((routes[0].from.as_str(), routes[0].to.as_str()), ("Kick (Post FX)", "Bass"));
@@ -1263,15 +1273,15 @@ mod tests {
 
     #[test]
     fn a_lane_is_named_as_the_preview_read_it_and_drawn_as_live_answered() {
-        let preview = object(json!({"action":"insert","current":{"exists":true,"points":[{"time":0,"value":0}]},
+        let preview = object(json!({"action":"insert","current":{"exists":true,"points":[{"time":0,"value":30}]},
             "parameter":{"name":"Filter Freq","min":20,"max":135}}));
         let input = object(json!({"action":"insert","points":[{"time":1,"value":60},{"time":3,"value":100}]}));
         let applied =
-            object(json!({"envelope":{"exists":true,"points":[{"time":0,"value":0},{"time":1,"value":60.2},{"time":3,"value":100}]}}));
+            object(json!({"envelope":{"exists":true,"points":[{"time":0,"value":30},{"time":1,"value":60.2},{"time":3,"value":100}]}}));
         let drawn = picture(kind("set_automation"), &preview, &input, Some(&applied)).unwrap();
         let ChangePicture::Automation { parameter, min, max, after, .. } = drawn else { panic!() };
         assert_eq!((parameter.as_str(), min, max), ("Filter Freq", 20., 135.));
-        assert_eq!(after, vec![[0., 0.], [1., 60.2], [3., 100.]], "Live's points, not the ones asked for");
+        assert_eq!(after, vec![[0., 30.], [1., 60.2], [3., 100.]], "Live's points, not the ones asked for");
         // A lane Live took away is empty after.
         let gone = object(json!({"envelope":{"exists":false}}));
         let removed = picture(kind("set_automation"), &preview, &object(json!({"action":"delete-envelope"})), Some(&gone)).unwrap();

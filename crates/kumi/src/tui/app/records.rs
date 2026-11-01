@@ -205,7 +205,7 @@ mod tests {
             change("c1", "Drums", "Drums volume 0 dB → -3 dB", Some("p1:set_mixer")),
             change("c2", "Bass", "Bass volume 0 dB → -6 dB", Some("p1:set_mixer")),
         ];
-        assert_eq!(shown(&different), ["Drums and Bass: 2 changes"]);
+        assert_eq!(shown(&different), ["Drums and Bass: 2 changes [2]"]);
         let many: Vec<ChangeRecord> = ["Kick", "Snare", "Hats", "Perc", "Toms"]
             .iter()
             .enumerate()
