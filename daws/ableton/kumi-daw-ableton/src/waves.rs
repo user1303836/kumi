@@ -23,8 +23,11 @@ const WAVE_WAIT_MS: u64 = 20_000;
 /// How many samples' waveforms are kept, so a run of changes to one clip reads its sample once.
 const KEPT: usize = 16;
 
-/// A file as it was when its waveform was read: its path, size and last change.
-type Read = (String, u64, Option<SystemTime>);
+/// A file as it was when its waveform was read: its path, size, last change, and a digest of its first and last bytes
+/// (a file put in its place with the same size and time, by a copy that keeps times or a sync, is another).
+type Read = (String, u64, Option<SystemTime>, u64);
+/// How many bytes of each end of a file its digest reads.
+const DIGESTED: u64 = 65_536;
 /// Waveforms read, by the file as it was: its length in seconds and its peaks.
 static WAVES: LazyLock<Mutex<IndexMap<Read, (f64, Vec<f32>)>>> = LazyLock::new(Mutex::default);
 /// One sample read at a time: a plan changing twenty clips reads their samples one after another.
@@ -59,11 +62,11 @@ pub fn wave_later(history: &Rc<History>, kind: &ChangeKind, preview: &JsonObject
         if kind.tool == "import_audio" { (JsonObject::new(), JsonObject::new()) } else { (sample.clone(), proposed.clone()) };
     let (history, id) = (history.clone(), id.to_owned());
     tokio::task::spawn_local(timing::background(async move {
-        let signal = abort::any([history.connection.lifetime.clone(), abort::timeout(WAVE_WAIT_MS)]);
+        let lifetime = history.connection.lifetime.clone();
         let read = tokio::select! {
             biased;
-            () = signal.cancelled() => return,
-            read = waveform(&path, &signal) => read,
+            () = lifetime.cancelled() => return,
+            read = waveform(&path, &lifetime) => read,
         };
         let Some((seconds, peaks)) = read else { return };
         let peaks = peaks.into_iter().map(f64::from).collect();
@@ -73,21 +76,49 @@ pub fn wave_later(history: &Rc<History>, kind: &ChangeKind, preview: &JsonObject
     }));
 }
 
-/// A sample's length and peaks, read once while the file is unchanged, one sample at a time.
-async fn waveform(path: &str, signal: &abort::Signal) -> Option<(f64, Vec<f32>)> {
-    let _turn = READING.lock().await;
-    let meta = tokio::fs::metadata(path).await.ok()?;
-    let read: Read = (path.to_owned(), meta.len(), meta.modified().ok());
-    if let Some(kept) = WAVES.lock().ok()?.get(&read).cloned() {
-        return Some(kept);
+/// A sample's length and peaks, read once while the file is unchanged, one sample at a time; one kept already doesn't
+/// wait its turn. A read has its time limit once its turn comes, not while it waits for it.
+async fn waveform(path: &str, lifetime: &abort::Signal) -> Option<(f64, Vec<f32>)> {
+    let read = read_as(path).await?;
+    let kept = || WAVES.lock().ok().and_then(|waves| waves.get(&read).cloned());
+    if let Some(wave) = kept() {
+        return Some(wave);
     }
-    let wave = kumi_media::audio::decode::peaks(path, MAX_PEAKS, signal).await.ok()?;
+    let _turn = READING.lock().await;
+    if let Some(wave) = kept() {
+        return Some(wave);
+    }
+    let signal = abort::any([lifetime.clone(), abort::timeout(WAVE_WAIT_MS)]);
+    let wave = tokio::select! {
+        biased;
+        () = signal.cancelled() => return None,
+        wave = kumi_media::audio::decode::peaks(path, MAX_PEAKS, &signal) => wave.ok()?,
+    };
     let mut waves = WAVES.lock().ok()?;
     waves.insert(read, wave.clone());
     if waves.len() > KEPT {
         waves.shift_remove_index(0);
     }
     Some(wave)
+}
+
+/// The file as it is now: its size, last change, and its ends' digest.
+async fn read_as(path: &str) -> Option<Read> {
+    use std::hash::{Hash, Hasher};
+    use tokio::io::{AsyncReadExt, AsyncSeekExt};
+    let meta = tokio::fs::metadata(path).await.ok()?;
+    let mut file = tokio::fs::File::open(path).await.ok()?;
+    let mut digest = std::collections::hash_map::DefaultHasher::new();
+    let mut head = vec![0; DIGESTED.min(meta.len()) as usize];
+    file.read_exact(&mut head).await.ok()?;
+    head.hash(&mut digest);
+    if meta.len() > DIGESTED {
+        file.seek(std::io::SeekFrom::Start(meta.len().saturating_sub(DIGESTED).max(DIGESTED))).await.ok()?;
+        let mut tail = Vec::new();
+        file.read_to_end(&mut tail).await.ok()?;
+        tail.hash(&mut digest);
+    }
+    Some((path.to_owned(), meta.len(), meta.modified().ok(), digest.finish()))
 }
 
 #[cfg(test)]
@@ -154,9 +185,17 @@ mod tests {
         let (seconds, peaks) = waveform(&path, &signal).await.unwrap();
         assert_eq!((seconds, peaks.len()), (2., MAX_PEAKS));
         // Kept by the file as it was: read again unchanged, it isn't read from the file.
-        let meta = std::fs::metadata(&path).unwrap();
-        assert!(WAVES.lock().unwrap().contains_key(&(path.clone(), meta.len(), meta.modified().ok())));
+        let read = read_as(&path).await.unwrap();
+        assert!(WAVES.lock().unwrap().contains_key(&read));
         assert_eq!(waveform(&path, &signal).await.unwrap().0, 2.);
+        // Another sound put in its place with the same size and time is another file.
+        let modified = std::fs::metadata(&path).unwrap().modified().unwrap();
+        let mut quieter = std::fs::read(&path).unwrap();
+        let end = quieter.len() - 2;
+        quieter[end] ^= 0x01;
+        std::fs::write(&path, &quieter).unwrap();
+        std::fs::File::options().write(true).open(&path).unwrap().set_modified(modified).unwrap();
+        assert_ne!(read_as(&path).await.unwrap(), read);
         std::fs::remove_dir_all(&folder).unwrap();
         assert_eq!(waveform(&path, &signal).await, None, "a file gone has none");
     }

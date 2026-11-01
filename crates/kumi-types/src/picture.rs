@@ -603,22 +603,39 @@ fn around_marks(tracks: Vec<PictureTrack>, most: usize) -> (Vec<PictureTrack>, u
     (tracks.into_iter().skip(start).take(most).collect(), past)
 }
 
-/// At most `most` of each side's items, the same stretch of the timeline on both (each item where `at` says): from a little
-/// before the first that the change made, moved or took away, so what changed stays, and what stayed reads as it was.
-/// The items are in order, one at a time on each side.
+/// At most `most` of each side's items: every one the change made, moved or took away, on both sides however far it
+/// moved (a locator moved from the start to the end reads as moved, not as gone), and around them the same stretch of
+/// the timeline on both (each item where `at` says), from a little before the first of them, so what stayed reads as it
+/// was. The items are in order, one at a time on each side.
 fn around_change<T: PartialEq>(before: Vec<T>, after: Vec<T>, most: usize, at: impl Fn(&T) -> f64) -> (Vec<T>, Vec<T>) {
     if before.len() <= most && after.len() <= most {
         return (before, after);
     }
-    let mut times: Vec<f64> = before.iter().chain(&after).map(&at).collect();
+    let most = most.max(1);
+    let changed = |item: &T| !before.contains(item) || !after.contains(item);
+    let moved = before.iter().chain(&after).filter(|item| changed(item)).count();
+    let mut times: Vec<f64> = before.iter().chain(&after).filter(|item| !changed(item)).map(&at).collect();
     times.sort_by(f64::total_cmp);
     times.dedup();
-    let changed = before.iter().filter(|item| !after.contains(item)).chain(after.iter().filter(|item| !before.contains(item)));
-    let first = changed.map(&at).fold(f64::INFINITY, f64::min);
-    let start = times.iter().position(|time| *time >= first).unwrap_or(0).saturating_sub(2).min(times.len().saturating_sub(most.max(1)));
-    let (low, high) = (times[start], times[(start + most.max(1) - 1).min(times.len() - 1)]);
-    let keep = |items: Vec<T>| items.into_iter().filter(|item| (low..=high).contains(&at(item))).collect();
-    (keep(before), keep(after))
+    let first = before.iter().chain(&after).filter(|item| changed(item)).map(&at).fold(f64::INFINITY, f64::min);
+    // (what stayed fills the room the changed ones leave, on the side with more of them)
+    let room = most.saturating_sub(moved.div_ceil(2)).max(1);
+    let start = times.iter().position(|time| *time >= first).unwrap_or(times.len()).saturating_sub(2).min(times.len().saturating_sub(room));
+    let window = times.get(start).zip(times.get((start + room - 1).min(times.len().saturating_sub(1))));
+    let keep = |items: &[T]| -> Vec<usize> {
+        items
+            .iter()
+            .enumerate()
+            .filter(|(_, item)| changed(item) || window.is_some_and(|(low, high)| (*low..=*high).contains(&at(item))))
+            .map(|(index, _)| index)
+            .take(most)
+            .collect()
+    };
+    let (keep_before, keep_after) = (keep(&before), keep(&after));
+    let pick = |items: Vec<T>, kept: Vec<usize>| {
+        items.into_iter().enumerate().filter(|(index, _)| kept.contains(index)).map(|(_, item)| item).collect()
+    };
+    (pick(before, keep_before), pick(after, keep_after))
 }
 
 /// At most `most` levels, each the highest of the ones it stands for: a waveform's peaks stay where they were.
@@ -1251,6 +1268,18 @@ mod tests {
             panic!()
         };
         assert!(after.iter().any(|mark| mark.name == "Coda"), "{after:?}");
+        // One moved from the start to the end of a long Set reads as moved: there on both sides.
+        let many: Vec<PictureMark> = (0..100).map(|n| mark(&format!("L{n}"), n as f64 * 16.)).collect();
+        let mut later = many.clone();
+        later[0].at = 1590.;
+        let ChangePicture::Marks { before, after, .. } =
+            (ChangePicture::Marks { before: many, after: later, values: vec![] }).bounded().unwrap()
+        else {
+            panic!()
+        };
+        assert!(before.iter().any(|mark| mark.name == "L0" && mark.at == 0.), "{before:?}");
+        assert!(after.iter().any(|mark| mark.name == "L0" && mark.at == 1590.), "{after:?}");
+        assert!(before.len() <= MAX_MARKS && after.len() <= MAX_MARKS);
 
         // A long sample's peaks, pooled: each column keeps the loudest of what it stands for.
         let mut peaks = vec![0.1; 10_000];
@@ -1309,7 +1338,7 @@ mod tests {
         assert_eq!((routes.len(), *more), (1, 0));
         // As this one saves it: its run and a new kind, read back as they were.
         let mut now = older.clone();
-        now.batch = Some("0123456789ab:set_routing".into());
+        now.batch = Some("p0123456789ab:set_routing".into());
         now.picture =
             Some(ChangePicture::Marks { before: vec![], after: vec![PictureMark { name: "Drop".into(), at: 64. }], values: vec![] });
         let saved = serde_json::to_value(&now).unwrap();

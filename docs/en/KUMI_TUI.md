@@ -48,8 +48,8 @@ closes, crashes or is stopped.
   opens to its picture: an EQ's curve, a compressor's, the notes (new ones in
   colour, gone ones faint), an automation lane (named, on its parameter's
   range), a route (tracks sent to one bus drawn meeting there), the transport's
-  settings, locators, a clip's warp markers, an audio clip's waveform (the part
-  that plays in colour), or each value before and after, with what was asked
+  settings, locators, a clip's warp markers, a WAV or AIFF clip's waveform (the
+  part that plays in colour), or each value before and after, with what was asked
   when Live set something else ("asked -2 dB"). A plan's change across several
   tracks ("mute the drums, the bass and the keys") is one entry: its picture
   shows each track's values, and its undo takes back each of them, newest

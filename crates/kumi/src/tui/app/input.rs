@@ -1694,6 +1694,9 @@ impl TuiApp {
                 Err(error) => {
                     if !self.0.state.borrow().closing {
                         self.error(&error);
+                        if undone > 0 {
+                            self.notice(&format!("Undid {undone} of {} before that.", ids.len()), NoticeTone::Warn);
+                        }
                     }
                     self.0.state.borrow_mut().undoing = false;
                     self.0.scheduler.request();
