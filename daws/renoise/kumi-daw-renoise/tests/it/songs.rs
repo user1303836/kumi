@@ -298,21 +298,46 @@ fn a_large_plugin_state_doesnt_lose_the_song() {
 #[test]
 fn an_instruments_samples_and_a_chains_devices_are_named_up_to_their_limits() {
     let samples: String = (0..33).map(|k| format!("<Sample><Name>S{k}</Name></Sample>")).collect();
-    let inside: String = (0..17).map(|_| "<GainerDevice/>".to_owned()).collect();
+    let plugin = "<AudioPluginDevice><PluginShortDisplayName>Warm</PluginShortDisplayName></AudioPluginDevice>";
+    // (the 16th's name is its plug-in's; the 17th, past the limit, isn't taken for it)
+    let inside = format!(
+        "{}{plugin}<AudioPluginDevice><PluginShortDisplayName>Not this</PluginShortDisplayName></AudioPluginDevice>",
+        "<GainerDevice/>".repeat(15)
+    );
     let song = format!(
         "<RenoiseSong><Instruments><Instrument><Name>Many</Name><Samples>{samples}</Samples></Instrument></Instruments><Tracks><SequencerTrack><Name>T</Name><FilterDevices><Devices><DooferDevice><DeviceChain><Devices>{inside}</Devices></DeviceChain></DooferDevice></Devices></FilterDevices></SequencerTrack></Tracks></RenoiseSong>"
     );
     let set = read(&archive(&[("Song.xml", song.as_bytes(), true, false)])).unwrap();
     assert_eq!(set.instruments.unwrap()[0].inside.as_ref().map(Vec::len), Some(32));
-    assert_eq!(set.tracks[0].devices[0].inside.as_ref().map(Vec::len), Some(16));
+    let named = set.tracks[0].devices[0].inside.clone().unwrap();
+    assert_eq!((named.len(), named[15].as_str()), (16, "Warm"));
 }
 
 /// A damaged or hostile file: a small archive of millions of tracks isn't kept.
 #[test]
 fn a_song_of_more_than_renoise_could_hold_isnt_one() {
-    let tracks = "<SequencerTrack/>".repeat(100_001);
-    let song = format!("<RenoiseSong><Tracks>{tracks}</Tracks></RenoiseSong>");
-    assert_eq!(read(&archive(&[("Song.xml", song.as_bytes(), true, false)])).unwrap_err(), "That isn't a Renoise song.");
+    // The read ends there: what comes after is never reached, a tag that never ends and would say so.
+    let never_ends = format!("{}<Never Value=\"{}", " ".repeat(512 * 1024), "x".repeat(9 * 1024 * 1024));
+    for (open, one, close) in [
+        ("<Tracks>", "<SequencerTrack/>", "</Tracks>"),
+        ("<PatternSequence><PatternSequence>", "<Pattern>0</Pattern>", "</PatternSequence></PatternSequence>"),
+        ("<Instruments>", "<Instrument><Name>I</Name><Samples><Sample><Name>S</Name></Sample></Samples></Instrument>", "</Instruments>"),
+    ] {
+        let song = format!("<RenoiseSong>{open}{}{close}{never_ends}", one.repeat(100_001));
+        assert_eq!(read(&archive(&[("Song.xml", song.as_bytes(), true, false)])).unwrap_err(), "That isn't a Renoise song.", "{one}");
+    }
+}
+
+/// A value or an element's name past what Renoise writes isn't kept whole.
+#[test]
+fn a_long_name_and_a_long_element_keep_little() {
+    let name = "\u{263a}".repeat(100_000);
+    let tag = format!("Long{}Device", "x".repeat(1024));
+    let song = format!("<RenoiseSong><Tracks><SequencerTrack><Name>{name}</Name><FilterDevices><Devices><{tag}/><GainerDevice/></Devices></FilterDevices></SequencerTrack></Tracks></RenoiseSong>");
+    let set = read(&archive(&[("Song.xml", song.as_bytes(), true, false)])).unwrap();
+    assert!(set.tracks[0].name.len() <= 1024 && set.tracks[0].name.ends_with('\u{263a}'), "{}", set.tracks[0].name.len());
+    let devices: Vec<_> = set.tracks[0].devices.iter().map(|device| device.name.as_str()).collect();
+    assert_eq!(devices, ["Gainer"], "an element no device has");
 }
 
 #[test]

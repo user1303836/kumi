@@ -143,7 +143,7 @@ fn a_stream_gives_its_text_whatever_cuts_it_within_the_same_bounds() {
             assert_eq!(values, [("A", "1"), ("B", "2")], "{open} {size} bytes at a time");
         }
         // The closer cut by every small piece.
-        let short = format!("<A>1</A>{open}abc{close}<B>2</B>");
+        let short = format!("<A>1</A>{open}a☺c{close}<B>2</B>");
         let mut texts = Texts::default();
         scan_xml_stream(Pieces(short.as_bytes(), 1), &mut texts, ScanOptions::default()).unwrap();
         assert_eq!(texts.values.len(), 2, "{open}");

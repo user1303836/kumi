@@ -208,6 +208,12 @@ struct ReadTrack {
     track: SetTrack,
 }
 
+/// One more kept: past what a song could hold, the read ends.
+fn keeping(kept: &mut usize, done: &mut bool) {
+    *kept += 1;
+    *done |= *kept > MOST_KEPT;
+}
+
 /// A plug-in's type and names, as a song has them: "AU", "AU: Apple: DLSMusicDevice" and "DLSMusicDevice".
 #[derive(Default)]
 struct ReadPlugin {
@@ -239,6 +245,8 @@ struct ReadDevice {
     preset: Option<String>,
     plugin: ReadPlugin,
     inside: Vec<String>,
+    /// Whether the device inside it being read is named in `inside`.
+    naming: bool,
 }
 
 impl ReadDevice {
@@ -285,6 +293,8 @@ struct ReadInstrument {
     sample_count: usize,
 }
 
+/// The longest element a device has in Renoise's schema, and more: longer is a damaged or hostile file's, not kept as a name.
+const MOST_TAG: usize = 64;
 /// The most of one value kept: a name, a number.
 const MOST_VALUE: usize = 1024;
 
@@ -306,13 +316,13 @@ fn read_inside(path: &[&str], name: &str) -> bool {
         ["Tracks"] => matches!(name, "SequencerTrack" | "SequencerGroupTrack" | "SequencerSendTrack" | "SequencerMasterTrack"),
         ["Tracks", _] => matches!(name, "Name" | "GroupNestingLevel" | "FilterDevices"),
         ["Tracks", _, "FilterDevices"] => name == "Devices",
-        ["Tracks", _, "FilterDevices", "Devices"] => !is_mixer(name),
+        ["Tracks", _, "FilterDevices", "Devices"] => !is_mixer(name) && name.len() <= MOST_TAG,
         ["Tracks", _, "FilterDevices", "Devices", _] => {
             plugin || matches!(name, "CustomDeviceName" | "SelectedPresetName" | "DeviceChain" | "DeviceChain0" | "DeviceChain1")
         }
         // A Doofer's or a Splitter's chains: what's inside, by name.
         ["Tracks", _, "FilterDevices", "Devices", _, "DeviceChain" | "DeviceChain0" | "DeviceChain1"] => name == "Devices",
-        ["Tracks", _, "FilterDevices", "Devices", _, _, "Devices"] => true,
+        ["Tracks", _, "FilterDevices", "Devices", _, _, "Devices"] => name.len() <= MOST_TAG,
         ["Tracks", _, "FilterDevices", "Devices", _, _, "Devices", _] => name == "PluginShortDisplayName",
         ["PatternPool"] => name == "Patterns",
         ["PatternPool", "Patterns"] => name == "Pattern",
@@ -342,8 +352,7 @@ impl TagHandler for Song {
         }
         if matches!(path.as_slice(), ["Instruments"] | ["Tracks"] | ["Tracks", _, "FilterDevices", "Devices"] | ["PatternPool", "Patterns"])
         {
-            self.kept += 1;
-            self.done |= self.kept > MOST_KEPT;
+            keeping(&mut self.kept, &mut self.done);
         }
         match path.as_slice() {
             ["Instruments"] => self.instruments.push(ReadInstrument::default()),
@@ -361,8 +370,11 @@ impl TagHandler for Song {
                 self.device = Some(ReadDevice { name: device_name(name), ..Default::default() });
             }
             ["Tracks", _, "FilterDevices", "Devices", _, _, "Devices"] => {
-                if let Some(device) = self.device.as_mut().filter(|device| device.inside.len() < MOST_INSIDE) {
-                    device.inside.push(device_name(name));
+                if let Some(device) = &mut self.device {
+                    device.naming = device.inside.len() < MOST_INSIDE;
+                    if device.naming {
+                        device.inside.push(device_name(name));
+                    }
                 }
             }
             ["PatternPool", "Patterns"] => self.pattern_lines.push(64.),
@@ -389,8 +401,12 @@ impl TagHandler for Song {
     }
 
     fn text(&mut self, text: &str) {
-        if self.passing == 0 && self.text.len() < MOST_VALUE {
-            self.text.push_str(text);
+        if self.passing == 0 {
+            let mut room = text.len().min(MOST_VALUE.saturating_sub(self.text.len()));
+            while !text.is_char_boundary(room) {
+                room -= 1;
+            }
+            self.text.push_str(&text[..room]);
         }
     }
 
@@ -423,8 +439,7 @@ impl Song {
                     instrument.sample_count += 1;
                     if instrument.samples.len() < MOST_SAMPLES && !value.is_empty() {
                         instrument.samples.push(value);
-                        self.kept += 1;
-                        self.done |= self.kept > MOST_KEPT;
+                        keeping(&mut self.kept, &mut self.done);
                     }
                 }
             }
@@ -453,7 +468,7 @@ impl Song {
             }
             (["Tracks", _, "FilterDevices", "Devices", _, _, "Devices", _], "PluginShortDisplayName") => {
                 if let (Some(device), Some(plugin)) = (&mut self.device, named()) {
-                    if device.inside.len() < MOST_INSIDE {
+                    if device.naming {
                         if let Some(last) = device.inside.last_mut() {
                             *last = plugin;
                         }
@@ -468,8 +483,7 @@ impl Song {
             ([.., "SequenceEntry"] | ["PatternSequence", "PatternSequence"], "Pattern") => {
                 if let Some(pattern) = number().filter(|pattern| *pattern >= 0.) {
                     self.sequence.push(pattern as usize);
-                    self.kept += 1;
-                    self.done |= self.kept > MOST_KEPT;
+                    keeping(&mut self.kept, &mut self.done);
                 }
             }
             // All that's read comes before what's after the sequence (the pattern coder's, the mixer's view).
