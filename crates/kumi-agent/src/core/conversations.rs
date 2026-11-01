@@ -377,43 +377,80 @@ fn lock_file(file: &Path, make: bool) -> std::io::Result<Option<std::fs::File>> 
 }
 /// `lock_file`, asked again for a moment while another Kumi holds it only to look (a Kumi tidying takes it for an
 /// instant to see whether anyone has it, and one letting go of the file removes it while holding it), and again when
-/// the file it locked was removed meanwhile: that one is nobody's to hold, the one made in its place is. At the last
-/// try what it locks is taken as it is, so a file system whose files don't keep one id still lets one Kumi hold it.
+/// the file it locked was removed meanwhile: that one is nobody's to hold, the one made in its place is. Still removed
+/// at the last try, it's another Kumi's to have; one whose id can't be read (a file system that keeps none) is taken as
+/// it is.
 fn take_lock(file: &Path) -> std::io::Result<Option<std::fs::File>> {
+    take_lock_with(file, |file| lock_file(file, true))
+}
+/// `take_lock`, locking with `lock`.
+fn take_lock_with(
+    file: &Path,
+    mut lock: impl FnMut(&Path) -> std::io::Result<Option<std::fs::File>>,
+) -> std::io::Result<Option<std::fs::File>> {
     const TRIES: u32 = 4;
     let mut tries = 0;
     loop {
         tries += 1;
         let last = tries == TRIES;
-        match lock_file(file, true) {
-            Ok(Some(handle)) if last || is_at(&handle, file) => return Ok(Some(handle)),
+        match lock(file) {
+            Ok(Some(handle)) => match is_at(&handle, file) {
+                Some(true) | None => return Ok(Some(handle)),
+                Some(false) => {
+                    unlock(handle);
+                    if last {
+                        return Ok(None);
+                    }
+                }
+            },
             Ok(None) if last => return Ok(None),
+            Ok(None) => {}
             // Windows refuses to open a file removed while something still has it open, until that lets go.
             Err(error) if last || error.kind() != std::io::ErrorKind::PermissionDenied => return Err(error),
-            _ => std::thread::sleep(std::time::Duration::from_millis(1 << tries)),
+            Err(_) => {}
         }
+        std::thread::sleep(std::time::Duration::from_millis(1 << tries));
     }
+}
+/// Lets go of a lock now: Windows frees a closed file's lock only in time, and a process started a moment ago still
+/// shares the handle.
+fn unlock(handle: std::fs::File) {
+    let _ = handle.unlock();
 }
 /// Whether another Kumi holds the lock on `file` (taking it to see lets it go again at once).
 fn locked_elsewhere(file: &Path) -> bool {
-    matches!(lock_file(file, false), Ok(None))
+    match lock_file(file, false) {
+        Ok(None) => true,
+        Ok(Some(handle)) => {
+            unlock(handle);
+            false
+        }
+        Err(_) => false,
+    }
 }
-/// Whether the open `handle` is still the file at `path`, not one removed since (and maybe made again).
-fn is_at(handle: &std::fs::File, path: &Path) -> bool {
+/// Whether the open `handle` is still the file at `path`, not one removed since (and maybe made again); None when that
+/// can't be told: the file system keeps no ids, or they can't be read.
+fn is_at(handle: &std::fs::File, path: &Path) -> Option<bool> {
+    let there = match std::fs::File::open(path) {
+        Ok(there) => there,
+        // Gone, or (on Windows) going: removed while something still has it open.
+        Err(error) if matches!(error.kind(), std::io::ErrorKind::NotFound | std::io::ErrorKind::PermissionDenied) => return Some(false),
+        Err(_) => return None,
+    };
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
-        matches!((handle.metadata(), std::fs::metadata(path)), (Ok(held), Ok(there)) if (held.dev(), held.ino()) == (there.dev(), there.ino()))
+        let (held, there) = (handle.metadata().ok()?, there.metadata().ok()?);
+        Some((held.dev(), held.ino()) == (there.dev(), there.ino()))
     }
     #[cfg(windows)]
     {
-        let there = std::fs::File::open(path).ok().and_then(|there| file_id::of(&there));
-        there.is_some() && there == file_id::of(handle)
+        Some(file_id::of(handle)? == file_id::of(&there)?)
     }
     #[cfg(not(any(unix, windows)))]
     {
-        let _ = (handle, path);
-        true
+        let _ = (handle, there);
+        None
     }
 }
 /// A file's volume and index there, which no other file on that volume has while it's there. Windows reuses a removed
@@ -472,11 +509,14 @@ enum Named {
 }
 /// Names this Kumi in a conversation's lock `file`, made only where there's none: of two Kumis naming themselves at
 /// once, one makes it and the other finds it. One naming a Kumi that's gone, this one, or nobody, is made again; one
-/// with nothing in it yet, made a moment ago, is another Kumi's being written. Two Kumis replacing, at the same instant,
-/// one that a Kumi that's gone left behind can still both have it: only the system's lock tells them apart then.
+/// with nothing in it yet, made a moment ago, is another Kumi's being written. Each reads its file back once it's
+/// written; two Kumis replacing, at the same instant, one that a Kumi that's gone left behind can still both have it, when
+/// each reads its own back before the other removes it: only the system's lock tells them apart then.
 fn name_myself(file: &Path) -> Named {
     for again in [false, true] {
         match make_named(file) {
+            // Read back: another Kumi replacing the file at the same instant may have put its own name there.
+            Ok(()) if read_lock(file).is_some_and(|lock| lock.other()) => return Named::Taken,
             Ok(()) => return Named::Mine,
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(_) => return Named::Neither,
@@ -508,12 +548,13 @@ fn make_named(file: &Path) -> std::io::Result<()> {
     }
     written
 }
-/// A lock file with nothing in it yet, made a moment ago: another Kumi between making it and naming itself in it.
+/// A lock file with nothing in it yet, made a moment ago: another Kumi between making it and naming itself in it. A time
+/// ahead of this computer's clock counts as a moment ago: on a network drive it's the server's clock.
 fn being_written(file: &Path) -> bool {
     std::fs::metadata(file).is_ok_and(|metadata| {
         metadata.is_file()
             && metadata.len() == 0
-            && metadata.modified().ok().and_then(|at| at.elapsed().ok()).is_some_and(|age| age < std::time::Duration::from_secs(2))
+            && metadata.modified().is_ok_and(|at| at.elapsed().map_or(true, |age| age < std::time::Duration::from_secs(2)))
     })
 }
 
@@ -664,8 +705,11 @@ impl FileConversationStore {
         Ok(self.kept(place)?.join(format!("{id}.json")))
     }
     async fn read(file: &Path) -> Option<SavedConversation> {
-        let bytes = tokio::fs::read(file).await.ok()?;
-        let value: Value = serde_json::from_slice(&bytes).ok()?;
+        Self::parse(&tokio::fs::read(file).await.ok()?)
+    }
+    /// A conversation from a file's bytes; None when they aren't one.
+    fn parse(bytes: &[u8]) -> Option<SavedConversation> {
+        let value: Value = serde_json::from_slice(bytes).ok()?;
         if !value["savedAt"].is_number()
             || value["checkpoint"]["version"].as_f64() != Some(1.0)
             || !value["checkpoint"]["messages"].is_array()
@@ -872,9 +916,7 @@ impl FileConversationStore {
                         let _ = std::fs::remove_file(kept.join(format!("{id}.lock")));
                     }
                 }
-                // Let go now: Windows frees a closed file's lock only in time, and a process started a moment ago
-                // still shares the handle.
-                let _ = handle.unlock();
+                unlock(handle);
             }
             Hold::Named => {
                 let Ok(kept) = self.kept(place) else { return };
@@ -894,10 +936,11 @@ impl FileConversationStore {
                 Ok(Some(mut handle)) => {
                     // Another Kumi that couldn't lock named itself in it, and still runs.
                     if said(&mut handle).is_some_and(|lock| lock.other()) {
+                        unlock(handle);
                         return false;
                     }
                     let removed = std::fs::remove_file(file).is_ok();
-                    let _ = handle.unlock();
+                    unlock(handle);
                     return removed;
                 }
                 Ok(None) => return false,
@@ -933,7 +976,8 @@ impl FileConversationStore {
         key.split_once('/').map(|(place, id)| (place.to_owned(), id.to_owned()))
     }
     /// Every place's conversation files as they are now ("<place>/<id>" → stamp), and the places where something's been
-    /// left a while beside no conversation: `sweep` sees to it.
+    /// left a while beside no conversation: `sweep` sees to it. A lock a Kumi holds isn't left (one held a while for a
+    /// conversation not kept yet would have every look sweep that place again).
     async fn scan(&self) -> (BTreeMap<String, Stamp>, Vec<String>) {
         let mut found = BTreeMap::new();
         let mut left = vec![];
@@ -953,7 +997,7 @@ impl FileConversationStore {
                 } else if let Some((id, kind)) = beside(&name) {
                     let age = metadata.modified().ok().and_then(|at| at.elapsed().ok());
                     if age.is_some_and(|age| age.as_secs_f64() * 1000.0 >= ORPHAN_MS) {
-                        beside_a_while.push(id.to_owned());
+                        beside_a_while.push((id.to_owned(), kind));
                     }
                     if kind == Beside::Meta {
                         metas.insert(id.to_owned(), metadata);
@@ -961,7 +1005,8 @@ impl FileConversationStore {
                 }
             }
             let ids: HashSet<&str> = files.iter().map(|(id, _)| id.as_str()).collect();
-            if beside_a_while.iter().any(|id| !ids.contains(id.as_str())) {
+            let held = |id: &str| self.held.borrow().contains_key(&(place.clone(), id.to_owned())) || self.open_elsewhere(&place, id);
+            if beside_a_while.iter().any(|(id, kind)| !ids.contains(id.as_str()) && (*kind != Beside::Lock || !held(id))) {
                 left.push(place.clone());
             }
             for (id, json) in &files {
@@ -1046,7 +1091,10 @@ impl FileConversationStore {
             let Ok(kept) = self.kept(&place) else { continue };
             // Reading many files: the app keeps drawing between them.
             tokio::task::yield_now().await;
-            let Some(value) = Self::read(&kept.join(format!("{id}.json"))).await else {
+            // Not read this time (a backup or a scanner holding it, say): listed as it was last read, if it was, and read
+            // again at the next look. Only one whose bytes aren't a conversation waits for the file to change.
+            let Ok(bytes) = tokio::fs::read(kept.join(format!("{id}.json"))).await else { continue };
+            let Some(value) = Self::parse(&bytes) else {
                 index.conversations.remove(key);
                 index.unreadable.insert(key.clone(), *stamp);
                 continue;
@@ -1592,6 +1640,7 @@ impl ConversationStore for FileConversationStore {
             Ok(Some(mut handle)) => {
                 // Another Kumi that couldn't lock (from another computer, say) named itself here, and still runs.
                 if said(&mut handle).is_some_and(|lock| lock.other()) {
+                    unlock(handle);
                     return Claim::Taken;
                 }
                 let _ = say(&mut handle, Some(&Lock::mine()));
@@ -1616,7 +1665,7 @@ impl ConversationStore for FileConversationStore {
 
 #[cfg(test)]
 mod tests {
-    use super::{is_at, keeps_longer, lock_file};
+    use super::{is_at, keeps_longer, lock_file, take_lock_with};
 
     /// A lock file removed and made again under its name is another file to a handle on the first: Windows gives the new
     /// one the old one's creation time, so only their ids tell them apart.
@@ -1625,12 +1674,47 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("mv66me0m3fa91c.lock");
         let first = lock_file(&file, true).unwrap().expect("nobody else holds it");
-        assert!(is_at(&first, &file));
+        assert_eq!(is_at(&first, &file), Some(true));
         // Removed while held, as a Kumi letting go of it does.
         std::fs::remove_file(&file).unwrap();
-        assert!(!is_at(&first, &file), "removed");
+        assert_eq!(is_at(&first, &file), Some(false), "removed");
         let again = lock_file(&file, true).unwrap().expect("a new file, nobody's");
-        assert!(is_at(&again, &file) && !is_at(&first, &file), "made again");
+        assert_eq!((is_at(&again, &file), is_at(&first, &file)), (Some(true), Some(false)), "made again");
+    }
+
+    /// A claim that locks a file removed (and made again) since it opened it locks the one there now; one that finds
+    /// the file it locked removed at every try is another Kumi's to have.
+    #[test]
+    fn a_claim_holds_the_lock_file_thats_there_not_one_removed_meanwhile() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("mv66me0m3fa91c.lock");
+        // The first try opens and locks a file that a Kumi letting go removes meanwhile, and another Kumi's claim makes
+        // again.
+        let mut tries = 0;
+        let mut stale = vec![];
+        let held = take_lock_with(&file, |file| {
+            tries += 1;
+            let handle = lock_file(file, true);
+            if tries == 1 {
+                std::fs::remove_file(file).unwrap();
+                stale.push(std::fs::File::create(file).unwrap());
+            }
+            handle
+        })
+        .unwrap()
+        .expect("the file there now");
+        assert_eq!((tries, is_at(&held, &file)), (2, Some(true)));
+        drop((held, stale));
+        // Removed at every try: taken.
+        let mut tries = 0;
+        let taken = take_lock_with(&file, |file| {
+            tries += 1;
+            let handle = lock_file(file, true);
+            std::fs::remove_file(file).unwrap();
+            handle
+        })
+        .unwrap();
+        assert!(taken.is_none() && tries == 4, "{tries}");
     }
 
     #[test]

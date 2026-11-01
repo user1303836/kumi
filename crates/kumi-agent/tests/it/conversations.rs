@@ -801,14 +801,17 @@ async fn a_conversation_from_a_file_keeps_its_set_and_an_earlier_kumi_writing_th
     let rows = store.all().await.unwrap();
     assert_eq!(row(&rows, "imported0001").set.as_deref(), Some("Their Song and more"));
     assert!(row(&rows, "copied000001").imported);
-    // Written back by a Kumi that knew neither: the entries are read again.
+    // Written back by a Kumi that knew neither: the entries are read again, for what they hold (`reads`), though their
+    // files haven't changed since (that Kumi drops `recent` too).
     let file = dir.path().join("conversation-index.json");
     let mut index: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
     for entry in index["conversations"].as_object_mut().unwrap().values_mut() {
         let entry = entry.as_object_mut().unwrap();
         entry.remove("imported");
         entry.remove("set");
-        entry["stamp"].as_object_mut().unwrap().remove("reads");
+        let stamp = entry["stamp"].as_object_mut().unwrap();
+        stamp.remove("reads");
+        stamp.remove("recent");
     }
     std::fs::write(&file, index.to_string()).unwrap();
     let rows = create_conversation_store(dir.path()).all().await.unwrap();
@@ -1075,6 +1078,13 @@ async fn a_lock_beside_no_conversation_goes_once_no_kumi_holds_it() {
     assert!(lock("mv66me0m9gone1").exists());
     store.release(A, "mv66me0m9gone1");
     assert!(!lock("mv66me0m9gone1").exists());
+    // Moved to its Set's place once the Set is saved: its lock goes with it, none left where it was.
+    let unsaved = dir.path().join("unsaved").join("conversations");
+    store.save("unsaved", "mv66me0m0moved", &said("a new song", 30)).await.unwrap();
+    assert_eq!(store.claim("unsaved", "mv66me0m0moved"), Claim::Ours);
+    store.move_conversation("mv66me0m0moved", "unsaved", A).await.unwrap();
+    assert!(!unsaved.join("mv66me0m0moved.lock").exists() && lock("mv66me0m0moved").exists());
+    assert_eq!(create_conversation_store(dir.path()).claim(A, "mv66me0m0moved"), Claim::Taken, "still this Kumi's");
 }
 
 /// A name and pin an earlier Kumi left in an unsaved Set's place, when it moved the conversation to the Set's own once
