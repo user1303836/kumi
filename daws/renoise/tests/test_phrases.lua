@@ -159,10 +159,8 @@ test("phrases: Kumi's undo of a phrase delete writes its 0Z back where its own i
     mock.ops.set_effect(1, 1, k, 1, 256 + 35, k)
   end
   mock.data.undo.stack = {}
-  mock.renumber_touches = true
   local record = change(peer, "phrase-delete", { ref = pref(place(peer), 2, 2) })
   local undone = restore(peer, "phrase-delete", record)
-  mock.renumber_touches = nil
   ok(undone.result, json.encode(undone.error or {}))
   local function zero_z(k) return mock.song:pattern(1):track(1):line(k):effect_column(1).number_string .. mock.song:pattern(1):track(1):line(k):effect_column(1).amount_string end
   eq(zero_z(2), "0Z02", "written again, naming it")

@@ -259,6 +259,34 @@ test("kits: Kumi's undo of a kit made into an empty instrument empties it again 
   eq(I.note_value(1), 2, "the producer's notes stay")
 end)
 
+test("kits: Kumi's undo gives an empty instrument back its own settings, which clear() would reset, or says it can't (#361 N-S12)", function()
+  local env, peer = setup()
+  local function slot() return mock.song:instrument(3) end
+  slot().volume, slot().transpose = 0.5, 3
+  slot().midi_output_properties.channel = 5
+  local input = kit_input({ ref = iref(place(peer), 3) })
+  input.name = nil
+  local record = change(peer, "instrument-kit", input)
+  eq(#instrument(3).samples, 4)
+  local undone = restore(peer, "instrument-kit", record)
+  ok(undone.result, json.encode(undone.error or {}))
+  eq(undone.result.display.note, nil)
+  eq(#instrument(3).samples, 0)
+  eq(slot().volume, 0.5, "its volume")
+  eq(slot().transpose, 3, "its transpose")
+  eq(slot().midi_output_properties.channel, 5, "its MIDI channel")
+  eq(slot().name, "Pad", "its name, not the file's")
+  eq(#mock.data.instruments, 3, "and no instrument more")
+  -- Without the file (Renoise emptied its temporary folder as it quit), it's emptied and that's said.
+  record = change(peer, "instrument-kit", kit_input({ ref = iref(place(peer), 3), name = "Kit" }))
+  os.remove(record.material.slot)
+  undone = restore(peer, "instrument-kit", record)
+  ok(undone.result, json.encode(undone.error or {}))
+  ok((undone.result.display.note or ""):find("settings", 1, true), tostring(undone.result.display.note))
+  eq(slot().volume, 1, "reset")
+  eq(slot().name, "Pad")
+end)
+
 test("kits: an instrument with a MIDI output device isn't empty, so no kit goes into it (#361 N-S12)", function()
   local env, peer = setup()
   mock.midi_outputs = { "IAC Driver Bus 1" }

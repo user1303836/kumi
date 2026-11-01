@@ -485,7 +485,11 @@ local function device(data)
     end
     -- (M4 n-devices: a device with an XML slot type takes preset data as Renoise does, and a preset choice sets its values)
     if data.slot then setters.active_preset_data = function(text) write_preset_xml(data, text) end end
-    setters.active_preset = function(n) choose_preset(data, n) end
+    setters.active_preset = function(n)
+      -- (a test's Renoise that doesn't take a preset, as a plug-in may not)
+      if M.presets_refused then return end
+      choose_preset(data, n)
+    end
     return setters
   end)())
   return proxy
@@ -1380,8 +1384,14 @@ function M.make_song(options)
       if v == p then return nil end
     end
     if not pattern_object(p).is_empty then return nil end
-    -- (measured: Renoise removes the last pattern of the pool, whatever its name or length, and keeps an earlier one)
+    -- (measured: Renoise removes the last pattern of the pool, whatever its name or length, and keeps an earlier one, and one
+    -- another pattern's track aliases: lab 2026-11-01)
     if p ~= #d.patterns then return nil end
+    for _, other in ipairs(d.patterns) do
+      for _, pattern_track in pairs(other.tracks) do
+        if pattern_track.alias == p then return nil end
+      end
+    end
     local data = table.remove(d.patterns, p)
     for k, v in ipairs(d.sequence) do
       if v > p then d.sequence[k] = v - 1 end
@@ -1877,6 +1887,8 @@ local function destinations_of(device)
   end
   return out
 end
+
+M.destinations_of = destinations_of
 
 local function follow_routes(removed, index)
   local tracks = M.data.tracks
