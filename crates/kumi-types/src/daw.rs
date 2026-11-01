@@ -164,6 +164,8 @@ pub struct PromptVocab {
     /// What to do with a MIDI file given as groove's reference: "put it on a MIDI track in Live (drag it in) and give that
     /// clip as reference".
     pub midi_file_import: &'static str,
+    /// What `my_sets` shows of a project, beside its tempo, key and length.
+    pub project_parts: &'static str,
     /// The tools a found sound's path goes to, as find_sounds' results name them: "load_sample and the other sample tools".
     pub sample_tools: &'static str,
     /// How a found preset is loaded, by its kind, for a DAW whose presets aren't Browser items, after find_presets'
@@ -750,6 +752,7 @@ impl DawProfile {
             move_notes_tool: "the tool that moves notes",
             swing_tool: "the tool that swings notes",
             midi_file_import: "put it on a MIDI track in the DAW (drag it in) and give that clip as reference",
+            project_parts: "every track with its devices in order and what it plays",
             sample_tools: "the sample tools",
             preset_loading: "",
             preset_kinds: &[],
@@ -865,6 +868,7 @@ impl DawProfile {
             move_notes_tool: crate::live_word!(move_notes_tool),
             swing_tool: crate::live_word!(swing_tool),
             midi_file_import: crate::live_word!(midi_file_import),
+            project_parts: "every track with its devices in order, colour, clips and the samples it plays",
             sample_tools: "load_sample and the other sample tools",
             preset_loading: "",
             preset_kinds: crate::live_word!(preset_kinds),
@@ -966,6 +970,7 @@ impl DawProfile {
             move_notes_tool: "notes_change",
             swing_tool: "notes_change (the off-beat notes later)",
             midi_file_import: "put it on a track in REAPER (drag it in) and give that item as reference",
+            project_parts: "every track with its devices in order, colour, clips and the samples it plays",
             sample_tools: "item_import, drum_kit and the other sample steps",
             preset_loading: ". Load one by its kind: an fx chain with fx_chain_load (file: its path); a track template with track_template_insert (path); a jsfx with fx_add (name: its add, \"JS: midi/midi_choke\"); fx presets are one plug-in's presets (in presets): add that FX, then fx_preset by one's name; a plug-in preset with fx_preset on that plug-in (preset: its path); a project template is a whole project to start from, opened in REAPER",
             preset_kinds: &["fx chain", "track template", "project template", "jsfx", "fx presets", "plug-in"],
@@ -1066,6 +1071,7 @@ impl DawProfile {
             move_notes_tool: "notes_write: their lines and delays",
             swing_tool: "notes_write (the off-beat lines' delays)",
             midi_file_import: "import it into Renoise (drag it in) and give the pattern track it lands on as reference",
+            project_parts: "every track with its devices in order, its sends and master, and every instrument with its samples or plug-in",
             sample_tools: "sample_load, instrument_kit and the other sample steps",
             preset_loading: ". Load one by its kind, with its path: an instrument or a multi-sample with instrument_load; an effect preset is for one device (device): add that device with device_add, then device_preset_data (ref: the new device, path); an effect chain onto a track with device_chain_load (trackRef, path; a track that has devices needs replace: true, and they are replaced); a phrase into an instrument with phrase_load (ref, path); a modulation set into an instrument with modset_load (ref, path); a phrase script into a phrase with phrase_script (ref: the phrase, path), after phrase_add when the instrument needs a new one",
             preset_kinds: &["instrument", "multi-sample", "effect chain", "effect preset", "phrase", "phrase script", "modulation set"],

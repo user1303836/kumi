@@ -5,7 +5,7 @@ use super::{
     features::{VECTOR_GROUPS, VECTOR_LENGTH},
     learn::{extension, PresetEntry, SetEntry, SoundEntry},
     presets::PresetCategory,
-    sets::{SetSummary, SetTrack},
+    sets::{SetDevice, SetSummary, SetTrack},
     sources::{basename, below, Source},
     store::unpack_vector,
     taste::{colour_name, track_role},
@@ -881,6 +881,12 @@ fn set_words(set: &SetSummary) -> Vec<(String, String)> {
             words.push((format!("“{}” plays {name}", track.name), name));
         }
     }
+    for instrument in set.instruments.iter().flatten() {
+        words.push((format!("instrument “{}”", instrument.name), instrument.name.clone()));
+        for inside in instrument.inside.iter().flatten() {
+            words.push((format!("instrument “{}” has {inside}", instrument.name), inside.clone()));
+        }
+    }
     words
 }
 pub fn search_sets<'a>(entries: impl IntoIterator<Item = &'a SetEntry>, query: &SetQuery) -> SearchResult<SetHit> {
@@ -922,12 +928,20 @@ pub fn search_sets<'a>(entries: impl IntoIterator<Item = &'a SetEntry>, query: &
         hits: top_by(found, query.limit, |a, b| compare(b.score, a.score).then(b.entry.mtime.cmp(&a.entry.mtime))),
     }
 }
+/// A device in a line: its preset, name, plug-in type and what's inside it.
+pub fn describe_device(device: &SetDevice) -> String {
+    let mut text =
+        device.preset.as_ref().filter(|p| !p.is_empty()).map(|p| format!("{p} ({})", device.name)).unwrap_or_else(|| device.name.clone());
+    if let Some(plugin) = device.plugin.as_ref().filter(|p| !p.is_empty() && p.as_str() != "Max for Live") {
+        text.push_str(&format!(" [{plugin}]"));
+    }
+    if let Some(inside) = device.inside.as_ref().filter(|i| !i.is_empty()) {
+        text.push_str(&format!(": {}", inside.join(", ")));
+    }
+    text
+}
 pub fn describe_track(track: &SetTrack) -> Value {
-    let mut row = json!({"name":track.name,"kind":track.kind,"devices":track.devices.iter().map(|device|{
-        let mut text=device.preset.as_ref().filter(|p|!p.is_empty()).map(|p|format!("{p} ({})",device.name)).unwrap_or_else(||device.name.clone());
-        if let Some(plugin)=device.plugin.as_ref().filter(|p|!p.is_empty()&&p.as_str()!="Max for Live"){text.push_str(&format!(" [{plugin}]"));}
-        if let Some(inside)=device.inside.as_ref().filter(|i|!i.is_empty()){text.push_str(&format!(": {}",inside.join(", ")));}text
-    }).collect::<Vec<_>>(),"clips":track.clips});
+    let mut row = json!({"name":track.name,"kind":track.kind,"devices":track.devices.iter().map(describe_device).collect::<Vec<_>>(),"clips":track.clips});
     if let Some(role) = track_role(track) {
         row["role"] = json!(role);
     }
