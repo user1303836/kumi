@@ -2,9 +2,10 @@
 //! a melody and reads its output meter dry. Then, each made with make_device: a MIDI effect loads before Drift and the
 //! melody still plays; an instrument plays on a MIDI track of its own and is refused on Drift's track (Live would replace
 //! Drift); each audio effect (as code, and as a patch of Max's own objects) loads after Drift and lets the sound
-//! through. Each make says whether Live's Browser listed the device before make_device answered, and each load whether
-//! it had to wait for the Browser. A device file can be checked too (--file <path>.amxd): a copy goes in its kind's
-//! folder. No model and no sign-in. It works in the open Set (it never opens or closes one): name it, and use a
+//! through; gens with code of their own, at once and given their code in their text, are as loud as two [gen~]. Each make
+//! says whether Live's Browser listed the device before make_device answered, and each load whether it had to wait for
+//! the Browser. A device file can be checked too (--file <path>.amxd): a copy goes in its kind's folder. No model and no
+//! sign-in. It works in the open Set (it never opens or closes one): name it, and use a
 //! disposable one. It plays about 5 seconds of sound for each device, and takes everything back, the kind folders it
 //! made in the User Library included, so each run makes them as a producer's first device does.
 //!   cargo build -p ableton-mcp-server -p kumi-daw-ableton --bins
@@ -39,6 +40,9 @@ use std::{
 
 /// How long Live's meter takes to rise to a new level and fall from full, in milliseconds.
 const SETTLE_MS: u64 = 2500;
+/// How far apart two devices' meter readings can be and still be as loud: Live's meter moves about 0.013 a dB, and devices
+/// that change nothing read within 0.01 of each other.
+const AS_LOUD: f64 = 0.03;
 
 fn main() {
     let argv: Vec<String> = std::env::args().skip(1).collect();
@@ -186,6 +190,51 @@ fn effects(stamp: u128) -> Vec<(String, Value)> {
                 "parts.1 -> out.1\n",
                 "\"Gain\" -> [prepend gain] -> fx\n",
             )}),
+        ),
+    ]
+}
+
+/// Effects heard together, each list on the track at once, all as loud as the first: two [gen~], at gains of 0.25 and 2 for
+/// about -6 dB. A second gen that ran the first's code would read about -24 dB, and one that ran the second's about +12 dB.
+/// What's given its code in its text is at 0.5.
+fn at_once(stamp: u128) -> Vec<(String, Vec<Value>)> {
+    let effect = |label: &str, patch: String| device("audio_effect", label, stamp, json!({"controls": [], "patch": patch})).1;
+    // A multichannel signal through what's between in and out, and back to two.
+    let wrapped = |boxes: &str, chain: &str| {
+        format!("{boxes}both = [mc.pack~ 2]\nparts = [mc.unpack~ 2]\nin.0 -> both\nin.1 -> both.1\nboth -> {chain} -> parts\nparts -> out.0\nparts.1 -> out.1\n")
+    };
+    let each = |name: &str, gain: &str| format!("{name} = [mc.gen~ @chans 2] {{\n  out1 = in1 * {gain};\n}}\n");
+    let whole = |name: &str, gain: &str| format!("{name} = [mcs.gen~] {{\n  out1 = in1 * {gain};\n  out2 = in2 * {gain};\n}}\n");
+    vec![
+        (
+            "two [gen~] in one device".to_string(),
+            vec![effect(
+                "two gen",
+                concat!(
+                    "a = [gen~] {\n  out1 = in1 * 0.25;\n  out2 = in2 * 0.25;\n}\n",
+                    "b = [gen~] {\n  out1 = in1 * 2;\n  out2 = in2 * 2;\n}\n",
+                    "in.0 -> a\nin.1 -> a.1\na -> b\na.1 -> b.1\nb -> out.0\nb.1 -> out.1\n",
+                )
+                .to_string(),
+            )],
+        ),
+        (
+            "two [mc.gen~] in one device".to_string(),
+            vec![effect("two mc.gen", wrapped(&format!("{}{}", each("a", "0.25"), each("b", "2")), "a -> b"))],
+        ),
+        (
+            "two [mc.gen~] devices at once".to_string(),
+            vec![effect("mc.gen quarter", wrapped(&each("a", "0.25"), "a")), effect("mc.gen double", wrapped(&each("a", "2"), "a"))],
+        ),
+        (
+            "two [mcs.gen~] in one device".to_string(),
+            vec![effect("two mcs.gen", wrapped(&format!("{}{}", whole("a", "0.25"), whole("b", "2")), "a -> b"))],
+        ),
+        ("[mc.gen~ @expr …]".to_string(), vec![effect("mc.gen expr", wrapped("a = [mc.gen~ @expr out1 = in1 * 0.5 @chans 2]\n", "a"))]),
+        ("[mcs.gen~ @expr …]".to_string(), vec![effect("mcs.gen expr", wrapped("a = [mcs.gen~ @expr out1 = in1 * 0.5]\n", "a"))]),
+        (
+            "[gen~ @expr …]".to_string(),
+            vec![effect("gen expr", "a = [gen~ @expr out1 = in1 * 0.5]\nin.0 -> a\na -> out.0\na -> out.1\n".to_string())],
         ),
     ]
 }
@@ -459,6 +508,27 @@ impl Run {
         Ok(())
     }
 
+    /// Effects loaded on the track together, in order: how loud it reads with all of them, then they're taken away.
+    async fn heard_together(&self, track: &str, items: &[String]) -> Result<Option<f64>, RuntimeError> {
+        let mut changes = Vec::new();
+        for item in items {
+            match self.load(track, item).await {
+                Ok(made) => changes.extend(made),
+                Err(why) => {
+                    println!("    FAIL  not loaded: {}", head(&why, 400));
+                    self.take_back(&changes).await;
+                    self.observe().await?;
+                    return Ok(None);
+                }
+            }
+        }
+        let level = self.level(track).await?;
+        println!("    devices: {}", self.devices(track).await);
+        self.take_back(&changes).await;
+        self.observe().await?;
+        Ok(Some(level))
+    }
+
     async fn check(&self, wanted: &str, files: &[String]) -> Result<(), RuntimeError> {
         self.integration.start(signal()).await?;
         let observation = self.observe().await?;
@@ -553,6 +623,26 @@ impl Run {
                 }
                 None => self.fail(&label),
             }
+        }
+        let mut first = None;
+        for (label, specs) in at_once(stamp as u128) {
+            println!("\n{label}");
+            let wanted = specs.len();
+            let mut items = Vec::new();
+            for spec in specs {
+                items.extend(self.make(spec).await.map(|made| made.item));
+            }
+            let level = if items.len() == wanted { self.heard_together(&drift, &items).await? } else { None };
+            let Some(level) = level else {
+                self.fail(&label);
+                continue;
+            };
+            let first = *first.get_or_insert(level);
+            let as_loud = (level - first).abs() < AS_LOUD;
+            if !as_loud {
+                self.fail(&label);
+            }
+            println!("    {}  the meter reads {level:.3} (two [gen~] {first:.3}, dry {dry:.3})", if as_loud { "ok  " } else { "DIFFERS" });
         }
         for (at, file) in files.iter().enumerate() {
             let label = format!("file {file}");
