@@ -330,8 +330,8 @@ Kumi about this**), Live's own commands and Live's manual.
 
 **Versions.** Each Kumi release ships with an extension and a tool, which
 `kumi update` brings up to date ([updating](#updating-reporting-and-uninstalling)).
-Kumi 1.24.35 to 1.24.42 with REAPER extension 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
-Kumi 1.24.35 to 1.24.42 with Renoise tool 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
+Kumi 1.24.35 to 1.24.43 with REAPER extension 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
+Kumi 1.24.43 with Renoise tool 1.0.8, 1.24.35 to 1.24.42 with 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
 
 ## Working with Kumi
 

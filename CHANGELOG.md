@@ -3,6 +3,24 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.43 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.42 did. Ships with Renoise tool 1.0.8, which Renoise loads when it
+restarts; `kumi update` puts it in.
+
+- When Kumi restarts REAPER to put its extension in, it no longer sends you to the recent list when
+  REAPER brings your project back by itself.
+- In Renoise, Kumi can look through your own songs: find one by words, tempo or a sound in it, and see
+  its tracks, devices and instruments, as `my_sets` does for Live Sets.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Renoise tool 1.0.8
+
+- On Windows, a preset Kumi saves goes to the Documents folder Windows says, so a Documents folder
+  kept in OneDrive gets it.
+
 ## 1.24.42 — 2026-11-01
 
 Ships with bridge 1.0.102, as 1.24.41 did.
