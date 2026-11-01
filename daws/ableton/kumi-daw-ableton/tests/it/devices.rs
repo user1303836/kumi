@@ -1496,7 +1496,9 @@ async fn make_device_makes_a_new_device_from_another_with_only_whats_asked_chang
         hex::encode(sha2::Sha256::digest(&before))
     };
     let said = record["text"].as_str().unwrap();
-    assert!(said.contains(&*echo.to_string_lossy()) && said.contains(&hash[..16]), "{said}");
+    // Not where it was on this computer: its file's name, as anyone it's shared with may read it.
+    assert!(said.starts_with(&format!("Kumi made this device from Echo (Echo.amxd, SHA-256 {})", &hash[..16])), "{said}");
+    assert!(!said.contains(&*downloads.path().to_string_lossy()), "{said}");
     // Opened, the new device says what it was made from.
     let opened = call(&tool, json!({ "from": file.to_string_lossy() })).await;
     assert_eq!(opened["madeFrom"].as_str(), Some(said));
@@ -1518,8 +1520,8 @@ async fn make_device_makes_a_new_device_from_another_with_only_whats_asked_chang
         .collect();
     assert_eq!(records.len(), 1, "one record, saying what each was made from: {records:?}");
     assert!(
-        records[0].starts_with("Kumi made this device from Echo 2 (")
-            && records[0].contains("Before that: Kumi made this device from Echo ("),
+        records[0].starts_with("Kumi made this device from Echo 2 (user_library/Kumi/MIDI Effects/Echo 2.amxd, SHA-256 ")
+            && records[0].contains("Before that: Kumi made this device from Echo (Echo.amxd, "),
         "{records:?}"
     );
     // In another conversation it's another's: made from it under its own name, the new device is numbered past it.
@@ -1603,6 +1605,15 @@ async fn a_frozen_device_made_into_a_new_one_keeps_its_files_frozen_into_it() {
     let pipe = device.patcher["patcher"]["boxes"].as_array().unwrap().iter().find(|entry| entry["box"]["id"] == "obj-4").unwrap();
     assert_eq!(pipe["box"]["text"], "pipe 0 0 2000");
     assert_eq!(&bytes[..24], &before[..24], "its type and meta as the original's");
+    // Every directory field but where each file lies and how long the patcher is stays byte for byte.
+    let fields = |bytes: &[u8], tag: &[u8]| -> Vec<Vec<u8>> {
+        let listed = bytes.windows(4).rposition(|window| window == b"dlst").unwrap();
+        let directory = &bytes[listed..];
+        directory.windows(4).enumerate().filter(|(_, window)| *window == tag).map(|(at, _)| directory[at..at + 12].to_vec()).collect()
+    };
+    for tag in [&b"vers"[..], b"mdat", b"flag", b"type", b"fnam"] {
+        assert_eq!(fields(&bytes, tag), fields(&before, tag), "{}", String::from_utf8_lossy(tag));
+    }
     assert_eq!(std::fs::read(&path).unwrap(), before);
 }
 
@@ -1647,4 +1658,69 @@ fn code_of_box(item: &Value) -> String {
         .as_str()
         .unwrap()
         .to_string()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_device_whose_file_cant_be_made_again_whole_is_refused_and_nothing_is_written() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let good = downloads.path().join("Echo.amxd");
+    std::fs::write(&good, encode_amxd(DeviceType::MidiEffect, &downloaded_echo())).unwrap();
+    assert_eq!(
+        call(&tool, json!({ "from": good.to_string_lossy(), "name": "Echo Long", "patch": "pipe_4 = [pipe 0 0 900]" })).await["made"],
+        "Echo Long"
+    );
+    let draft = library.path().join("Kumi/MIDI Effects/Echo Long.amxd");
+    let drafted = std::fs::read(&draft).unwrap();
+    // A frozen device whose files overlap: the last starts inside the one before it.
+    let mut main = stringify(&downloaded_echo()).into_bytes();
+    main.push(0);
+    let mut overlapping =
+        frozen("mmmm", &[("JSON", "Echo.amxd", 0x11, &main), ("TEXT", "a.js", 0, b"post(1);"), ("TEXT", "b.js", 0, b"post(2);")]);
+    let places: Vec<usize> = overlapping.windows(4).enumerate().filter(|(_, window)| *window == b"of32").map(|(at, _)| at + 8).collect();
+    let start = u32::from_be_bytes(overlapping[places[1]..places[1] + 4].try_into().unwrap()) + 1;
+    overlapping[places[2]..places[2] + 4].copy_from_slice(&start.to_be_bytes());
+    // And a device cut short: its patcher's chunk says it's longer than the file.
+    let mut short = std::fs::read(&good).unwrap();
+    let size = u32::from_le_bytes(short[28..32].try_into().unwrap()) + 100;
+    short[28..32].copy_from_slice(&size.to_le_bytes());
+    for (name, bytes, said) in [("Overlapping.amxd", overlapping, "frozen files overlap"), ("Short.amxd", short, "is cut short")] {
+        let path = downloads.path().join(name);
+        std::fs::write(&path, &bytes).unwrap();
+        let opened = call(&tool, json!({ "from": path.to_string_lossy() })).await;
+        assert!(opened.get("error").is_none(), "it opens to be read: {opened}");
+        let refused = call(&tool, json!({ "from": path.to_string_lossy(), "name": "Echo Long", "patch": "pipe_4 = [pipe 0 0 10]" })).await;
+        assert!(refused["error"].as_str().unwrap().contains(said), "{refused}");
+        assert_eq!(std::fs::read(&draft).unwrap(), drafted, "the draft of that name is as it was");
+        let other = call(&tool, json!({ "from": path.to_string_lossy(), "patch": "pipe_4 = [pipe 0 0 10]" })).await;
+        assert!(other["error"].is_string(), "{other}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+    let written: Vec<String> = std::fs::read_dir(library.path().join("Kumi/MIDI Effects"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(written, ["Echo Long.amxd"], "nothing else is written, not even an empty file");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_device_is_only_ever_opened_from_this_computer_and_a_name_in_another_case_is_another_device() {
+    let library = tempfile::tempdir().unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    for from in ["\\\\host\\share\\Echo.amxd", "//host/share/Echo.amxd", "Presets/Echo.amxd", "C:Echo", "Echo\u{7}"] {
+        let refused = call(&tool, json!({ "from": from })).await;
+        assert!(refused["error"].is_string(), "{from}: {refused}");
+    }
+    // Kumi's own device, made in another conversation, changed under its name in another case.
+    let first = tool_in(library.path(), Default::default());
+    let made = call(&first, json!({ "type": "midi_effect", "name": "Echo", "about": "Passes MIDI.", "patch": "in -> out" })).await;
+    assert_eq!(made["made"], "Echo", "{made}");
+    let original = library.path().join("Kumi/MIDI Effects/Echo.amxd");
+    let before = std::fs::read(&original).unwrap();
+    let again = call(&tool, json!({ "from": "Echo", "name": "ECHO", "patch": "in -> [t i] -> out" })).await;
+    let file = std::path::PathBuf::from(again["file"].as_str().unwrap());
+    assert!(file.exists() && std::fs::read(&original).unwrap() == before, "{again}");
+    let same = std::fs::canonicalize(&file).unwrap() == std::fs::canonicalize(&original).unwrap();
+    assert!(!same, "a name in another case is never the original's file, whatever the disk makes of case: {again}");
 }

@@ -46,6 +46,15 @@ impl Files for NoFiles {
 
 /// How deep files are read inside each other: an abstraction that holds itself stops here.
 const MAX_DEPTH: usize = 16;
+/// The most boxes read from files for one patcher, however its abstractions nest: each box that uses an abstraction
+/// reads it again, so a few abstractions each holding a few boxes of the next would otherwise be read millions of times.
+const MOST_FILE_BOXES: usize = 20_000;
+
+/// The files being read, innermost last, and how many more boxes may be read from files.
+struct Reading {
+    open: Vec<String>,
+    left: usize,
+}
 
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Patcher {
@@ -85,10 +94,10 @@ impl Patcher {
     /// A patcher from Max's JSON, `{ "patcher": {...} }` or the patcher itself, with the files it names read through
     /// `files`.
     pub fn read(value: &Value, files: &dyn Files) -> Patcher {
-        Patcher::read_within(value, files, &mut Vec::new())
+        Patcher::read_within(value, files, &mut Reading { open: Vec::new(), left: MOST_FILE_BOXES })
     }
 
-    fn read_within(value: &Value, files: &dyn Files, open: &mut Vec<String>) -> Patcher {
+    fn read_within(value: &Value, files: &dyn Files, reading: &mut Reading) -> Patcher {
         let object = value.get("patcher").filter(|inner| inner.is_object()).unwrap_or(value);
         let mut fields = object.as_object().cloned().unwrap_or_default();
         let boxes = match fields.get_mut("boxes").map(Value::take) {
@@ -99,7 +108,7 @@ impl Patcher {
             Some(Value::Array(lines)) => lines,
             _ => Vec::new(),
         };
-        let boxes = boxes.into_iter().filter_map(|entry| MaxBox::read(entry, files, open)).collect();
+        let boxes = boxes.into_iter().filter_map(|entry| MaxBox::read(entry, files, reading)).collect();
         let cords = lines.iter().filter_map(Cord::read).collect();
         Patcher { boxes, cords, fields }
     }
@@ -134,7 +143,7 @@ impl Patcher {
 }
 
 impl MaxBox {
-    fn read(entry: Value, files: &dyn Files, open: &mut Vec<String>) -> Option<MaxBox> {
+    fn read(entry: Value, files: &dyn Files, reading: &mut Reading) -> Option<MaxBox> {
         let mut fields = match entry {
             Value::Object(mut entry) => match entry.remove("box") {
                 Some(Value::Object(fields)) => fields,
@@ -143,18 +152,25 @@ impl MaxBox {
             _ => return None,
         };
         let patcher = match fields.get_mut("patcher") {
-            Some(inner) if inner.is_object() => Some(Patcher::read_within(&inner.take(), files, open)),
+            Some(inner) if inner.is_object() => Some(Patcher::read_within(&inner.take(), files, reading)),
             _ => None,
         };
         let mut item = MaxBox { fields, patcher, file: None, code: None };
         item.code = Code::read(&item, files);
-        if item.patcher.is_none() && open.len() < MAX_DEPTH {
+        if item.patcher.is_none() && reading.open.len() < MAX_DEPTH && reading.left > 0 {
             if let Some(name) = item.file_name() {
-                if !open.contains(&name) {
+                if !reading.open.contains(&name) {
                     if let Some(value) = files.patcher(&name) {
-                        open.push(name.clone());
-                        item.file = Some((name, Patcher::read_within(&value, files, open)));
-                        open.pop();
+                        // Its boxes, at any depth, count against what's left to read from files, and the file one more.
+                        let count = boxes_in(&value) + 1;
+                        if count <= reading.left {
+                            reading.left -= count;
+                            reading.open.push(name.clone());
+                            item.file = Some((name, Patcher::read_within(&value, files, reading)));
+                            reading.open.pop();
+                        } else {
+                            reading.left = 0;
+                        }
                     }
                 }
             }
@@ -352,6 +368,12 @@ fn points(value: &Value) -> Vec<[f64; 2]> {
     numbers.chunks_exact(2).map(|pair| [pair[0], pair[1]]).collect()
 }
 
+/// How many boxes a patcher's JSON holds, its subpatchers' too.
+fn boxes_in(value: &Value) -> usize {
+    let patcher = value.get("patcher").filter(|inner| inner.is_object()).unwrap_or(value);
+    patcher.get("boxes").and_then(Value::as_array).map_or(0, |boxes| boxes.iter().map(|entry| 1 + boxes_in(&entry["box"]["patcher"])).sum())
+}
+
 fn with_extension(name: &str, extension: &str) -> String {
     if name.contains('.') {
         name.to_string()
@@ -400,6 +422,28 @@ mod tests {
         assert_eq!(patcher.boxes[1].args(), ["b", "f"]);
         assert_eq!(patcher.boxes[1].label(), "[t b f]");
         assert_eq!(patcher.to_document(), document, "keys stay in Max's order");
+    }
+
+    #[test]
+    fn abstractions_nested_in_threes_are_read_up_to_a_bound_not_millions_of_times() {
+        // Sixteen abstractions, each holding three boxes of the next: 3^16 reads, were each read every time it's used.
+        let mut library = HashMap::new();
+        for level in 0..16 {
+            let next = format!("level{}", level + 1);
+            let boxes: Vec<Value> =
+                (1..=3).map(|n| json!({ "box": { "id": format!("obj-{n}"), "maxclass": "newobj", "text": next } })).collect();
+            library.insert(format!("level{level}.maxpat"), json!({ "patcher": { "boxes": boxes, "lines": [] } }));
+        }
+        let device = json!({ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "newobj", "text": "level0" } }], "lines": [] } });
+        let started = std::time::Instant::now();
+        let patcher = Patcher::read(&device, &Library(library));
+        fn boxes(patcher: &Patcher) -> usize {
+            patcher.boxes.iter().map(|item| 1 + item.inner().map_or(0, boxes)).sum()
+        }
+        let read = boxes(&patcher);
+        assert!(read <= MOST_FILE_BOXES + 1, "{read} boxes read");
+        assert!(patcher.boxes[0].inner().is_some(), "the first files are read");
+        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
     }
 
     #[test]

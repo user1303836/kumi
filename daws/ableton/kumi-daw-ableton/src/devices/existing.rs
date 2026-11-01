@@ -26,13 +26,20 @@ use super::patch::standard::{standard, Level};
 use super::patch::{Cord, Files, MaxBox, NoFiles, Patcher};
 use super::spec::Control;
 use super::tool::kind_folder;
+use kumi_agent::core::plugin_tools::local_path;
+use kumi_common::path::reserved_device;
 
 /// The most a device file Kumi opens can weigh: one with samples frozen in is big, and it's read whole.
 const MOST_BYTES: u64 = 256 * 1024 * 1024;
-/// How many files and folders of the User Library are looked through for a device by its name.
+/// How many folders and device files of the User Library are looked through for a device by its name (samples and other
+/// files don't count).
 const MOST_LOOKED: usize = 50_000;
 /// The most of a device's patch the answer that opens it says, in characters.
 const MOST_SAID: usize = 60_000;
+/// The most of what a device says it was made from that's passed on, in characters.
+const MOST_RECORD: usize = 1_000;
+/// The most controls an answer lists.
+const MOST_CONTROLS: usize = 128;
 /// The scripting name of the comment that records what a device was made from.
 pub const FROM_NAME: &str = "kumi-from";
 /// What a patch says of the boxes Kumi rewrites a field of when one is given again (its object, its code, its ports);
@@ -45,12 +52,21 @@ const REPORTED: [&str; 8] = ["patch.", "order.", "names.", "timing.", "map.", "p
 /// Marks a box id that's already the device's own (an existing box, a control) while a change's patch is expanded.
 const OWN: char = '\u{1}';
 
-/// The device file `from` names: a path to one, its item in Live's Browser (`user_library/…`), or the name of one in
-/// the User Library, as Live names a Max for Live device by its file (Kumi's own folders first).
+/// The device file `from` names: an absolute path to one on this computer, its item in Live's Browser
+/// (`user_library/…`), or the name of one in the User Library, as Live names a Max for Live device by its file (Kumi's own
+/// folders first, then Presets, where Live keeps devices, then the rest). A path is held to Kumi's rules for a local
+/// one: absolute, and never another machine's or a device's (`\\host\share`), which Windows would connect to.
 pub fn find(from: &str, user_library: &Path) -> Result<PathBuf, String> {
+    find_within(from, user_library, MOST_LOOKED)
+}
+
+fn find_within(from: &str, user_library: &Path, most: usize) -> Result<PathBuf, String> {
     let from = from.trim().trim_matches('"').trim();
     if from.is_empty() {
         return Err("from: give the device's file, its item in Live's Browser (user_library/…) or its name.".into());
+    }
+    if from.chars().any(char::is_control) || reserved_device(from) {
+        return Err(format!("from {from}: that isn't a device's file, its Browser item or its name."));
     }
     if let Some(relative) = from.strip_prefix("user_library/") {
         // A Browser id for a second item at one path ends "#2" (#183): the file is the path's.
@@ -70,9 +86,14 @@ pub fn find(from: &str, user_library: &Path) -> Result<PathBuf, String> {
         let file = parts.iter().fold(user_library.to_path_buf(), |path, part| path.join(part));
         return if file.is_file() { Ok(file) } else { Err(format!("from {from}: the User Library has no device there.")) };
     }
-    let path = Path::new(from);
-    if path.is_absolute() || from.contains(['/', '\\']) {
+    if from.contains(['/', '\\']) || Path::new(from).is_absolute() {
+        let path = Path::new(from);
+        local_path(path).map_err(|why| format!("from {from}: {why}."))?;
         return if path.is_file() { Ok(path.to_path_buf()) } else { Err(format!("from: there's no device file at {from}.")) };
+    }
+    // A name: a file's, so nothing a path reads as a drive or a stream ("C:Echo").
+    if from.contains(':') {
+        return Err(format!("from {from}: a device's name has no \":\" (give its file's whole path instead)."));
     }
     let wanted = format!("{}.amxd", from.strip_suffix(".amxd").unwrap_or(from));
     let ours: Vec<PathBuf> = DeviceType::ALL
@@ -80,12 +101,19 @@ pub fn find(from: &str, user_library: &Path) -> Result<PathBuf, String> {
         .map(|kind| user_library.join("Kumi").join(kind_folder(kind)).join(&wanted))
         .filter(|file| file.is_file())
         .collect();
-    let found = if ours.is_empty() { look_for(user_library, &wanted) } else { ours };
+    let (found, whole) = if ours.is_empty() { look_for(user_library, &wanted, most) } else { (ours, true) };
     match found.len() {
-        0 => Err(format!(
+        0 if whole => Err(format!(
             "from {from}: the User Library has no device of that name. Give its file's path (a device from a Pack or elsewhere), or its item in Live's Browser."
         )),
-        1 => Ok(found.into_iter().next().unwrap_or_default()),
+        0 => Err(format!(
+            "from {from}: Kumi looked through {most} of the User Library's folders and devices and found none of that name: give its file's path, or its item in Live's Browser."
+        )),
+        1 if whole => Ok(found.into_iter().next().unwrap_or_default()),
+        1 => Err(format!(
+            "from {from}: the User Library is too big to look through whole, so there may be others of that name besides {}: give the path of the one meant.",
+            found[0].to_string_lossy()
+        )),
         _ => Err(format!(
             "from {from}: the User Library has {} devices of that name; give the one meant by its path: {}.",
             found.len(),
@@ -94,33 +122,54 @@ pub fn find(from: &str, user_library: &Path) -> Result<PathBuf, String> {
     }
 }
 
-/// The files named `wanted` (in any case) in the folder and the folders in it, up to [`MOST_LOOKED`] looked at.
-fn look_for(folder: &Path, wanted: &str) -> Vec<PathBuf> {
+/// The files named `wanted` (in any case) in the folder and the folders in it, the whole of a Presets folder first (where
+/// Live keeps a Max for Live device), then the rest nearest first; and whether it was looked through whole, up to `most`
+/// folders and device files.
+fn look_for(folder: &Path, wanted: &str, most: usize) -> (Vec<PathBuf>, bool) {
     let mut found = Vec::new();
-    let mut folders = vec![folder.to_path_buf()];
+    // Each folder to look in, and whether it's in a Presets folder: those go before the rest.
+    let mut folders: std::collections::VecDeque<(PathBuf, bool)> = std::collections::VecDeque::from([(folder.to_path_buf(), false)]);
     let mut looked = 0;
-    while let Some(folder) = folders.pop() {
+    while let Some((folder, presets)) = folders.pop_front() {
+        let mut inside: Vec<(String, PathBuf)> = Vec::new();
         for entry in std::fs::read_dir(&folder).into_iter().flatten().flatten() {
-            looked += 1;
-            if looked > MOST_LOOKED {
-                return found;
-            }
             let name = entry.file_name().to_string_lossy().into_owned();
-            match entry.file_type() {
-                Ok(kind) if kind.is_dir() && !name.starts_with('.') => folders.push(entry.path()),
-                Ok(kind) if kind.is_file() && name.eq_ignore_ascii_case(wanted) => found.push(entry.path()),
-                _ => {}
+            let (inner, device) = match entry.file_type() {
+                Ok(kind) => (kind.is_dir() && !name.starts_with('.'), kind.is_file() && name.to_lowercase().ends_with(".amxd")),
+                Err(_) => continue,
+            };
+            if !inner && !device {
+                continue;
+            }
+            looked += 1;
+            if looked > most {
+                found.sort();
+                return (found, false);
+            }
+            if inner {
+                inside.push((name, entry.path()));
+            } else if name.eq_ignore_ascii_case(wanted) {
+                found.push(entry.path());
             }
         }
+        inside.sort();
+        let (first, rest): (Vec<_>, Vec<_>) = inside.into_iter().partition(|(name, _)| presets || name.eq_ignore_ascii_case("Presets"));
+        for (_, path) in first.into_iter().rev() {
+            folders.push_front((path, true));
+        }
+        folders.extend(rest.into_iter().map(|(_, path)| (path, false)));
     }
     found.sort();
-    found
+    (found, true)
 }
 
 /// A device file opened to be made into a new one: what it is, as it lies on disk.
 #[derive(Debug, Clone)]
 pub struct Original {
     pub path: PathBuf,
+    /// Where it is as anyone the new device is shared with may read it: its place in the User Library
+    /// (`user_library/Presets/…`), else its file's name alone, never the folders of this computer.
+    pub known_as: String,
     pub bytes: Vec<u8>,
     pub kind: DeviceType,
     /// Its name: its file's, as Live names it.
@@ -133,14 +182,35 @@ pub struct Original {
     pub frozen: Option<Frozen>,
 }
 
-/// The device file at `path`, opened, or why it can't be.
-pub fn open(path: &Path) -> Result<Original, String> {
+/// A file's bytes, read once through one handle that's checked to be a file's, up to [`MOST_BYTES`].
+fn read_limited(path: &Path) -> Result<Vec<u8>, String> {
+    use std::io::Read;
     let shown = path.to_string_lossy();
-    let size = std::fs::metadata(path).map_err(|error| format!("Kumi couldn't read {shown}: {error}."))?.len();
-    if size > MOST_BYTES {
-        return Err(format!("{shown} is {} MB, past the {} MB Kumi opens.", size / 1_048_576, MOST_BYTES / 1_048_576));
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    // A pipe named like a device isn't waited on.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NONBLOCK);
     }
-    let bytes = std::fs::read(path).map_err(|error| format!("Kumi couldn't read {shown}: {error}."))?;
+    let file = options.open(path).map_err(|error| format!("Kumi couldn't read {shown}: {error}."))?;
+    let size = file.metadata().map_err(|error| format!("Kumi couldn't read {shown}: {error}."))?;
+    if !size.is_file() {
+        return Err(format!("{shown} isn't a file."));
+    }
+    let mut bytes = Vec::new();
+    file.take(MOST_BYTES + 1).read_to_end(&mut bytes).map_err(|error| format!("Kumi couldn't read {shown}: {error}."))?;
+    if bytes.len() as u64 > MOST_BYTES {
+        return Err(format!("{shown} is past the {} MB Kumi opens.", MOST_BYTES / 1_048_576));
+    }
+    Ok(bytes)
+}
+
+/// The device file at `path`, opened, or why it can't be. `user_library` is where it's known from, when it's in it.
+pub fn open(path: &Path, user_library: &Path) -> Result<Original, String> {
+    let shown = path.to_string_lossy();
+    let bytes = read_limited(path)?;
     if encrypted(&bytes) {
         return Err(format!(
             "{shown} is one of Live's own Max for Live devices, whose patch is encrypted: only Live can read it, so Kumi can't make a device from it. Make a new one that does what's wanted instead."
@@ -154,8 +224,18 @@ pub fn open(path: &Path) -> Result<Original, String> {
         )
     })?;
     let name = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()).unwrap_or_default();
+    let file_name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    let known_as = path
+        .strip_prefix(user_library)
+        .ok()
+        .filter(|relative| !relative.as_os_str().is_empty())
+        .map(|relative| {
+            let parts: Vec<String> = relative.components().map(|part| part.as_os_str().to_string_lossy().into_owned()).collect();
+            format!("user_library/{}", parts.join("/"))
+        })
+        .unwrap_or(file_name);
     let hash = hex::encode(Sha256::digest(&bytes));
-    Ok(Original { path: path.to_path_buf(), bytes, kind, name, hash, document: device.patcher, frozen: device.frozen })
+    Ok(Original { path: path.to_path_buf(), known_as, bytes, kind, name, hash, document: device.patcher, frozen: device.frozen })
 }
 
 impl Original {
@@ -439,14 +519,21 @@ fn said_control(name: &str, item: &MaxBox) -> String {
     format!("\"{name}\" ({class}: {}–{}{unit}{default})", to_string(min), to_string(max))
 }
 
-/// The device's controls as Live shows them, in the order they're on its face.
+/// The device's controls as Live shows them, in the order they're on its face: the first [`MOST_CONTROLS`], and how
+/// many more there are.
 pub fn said_controls(patcher: &Patcher) -> Vec<String> {
     let mut seen = HashSet::new();
-    patcher
+    let mut said: Vec<String> = patcher
         .boxes
         .iter()
         .filter_map(|item| parameter(item).filter(|name| seen.insert(name.to_string())).map(|name| said_control(name, item)))
-        .collect()
+        .collect();
+    if said.len() > MOST_CONTROLS {
+        let more = said.len() - MOST_CONTROLS;
+        said.truncate(MOST_CONTROLS);
+        said.push(format!("… and {more} more"));
+    }
+    said
 }
 
 /// What the device records it was made from, when Kumi made it from another.
@@ -516,12 +603,13 @@ pub fn describe(original: &Original) -> Value {
         );
     }
     if let Some(from) = provenance(&patcher) {
+        let (from, _) = cut(&from.replace('\n', " "), MOST_RECORD);
         fields.insert("madeFrom".into(), json!(from));
     }
     fields.insert(
         "next".into(),
         json!(
-            "To make a new device from it, call make_device with this from and only what changes; everything else stays as it is, and this file is never written. patch: new boxes and cords in the notation, naming its boxes by the names above (in and out are its way in and out, its controls go by their names); a box given again by its name (name = [new text], or its code in a { … } block) changes in place. controls: new controls for its face, or one of its own by name to change it. remove: boxes by name, or cords (\"a.1 -> b\"). name: the new device's name (the original's, numbered, when left out); about: its description. It's saved in Kumi's folder of the User Library. What's kept can be wired to and removed, not changed."
+            "To make a new device from it, call make_device with this from and only what changes; everything else stays as it is, and this file is never written (unless it's a device this conversation made, and the change keeps its name, which replaces it as making it again does). patch: new boxes and cords in the notation, naming its boxes by the names above (in and out are its way in and out, its controls go by their names); a box given again by its name (name = [new text], or its code in a { … } block) changes in place. controls: new controls for its face, or one of its own by name to change it. remove: boxes by name, or cords (\"a.1 -> b\"). name: the new device's name (the original's, numbered, when left out); about: its description. It's saved in Kumi's folder of the User Library. What's kept can be wired to and removed, not changed."
         ),
     );
     result
@@ -604,10 +692,16 @@ fn retyped(old: &MaxBox, new: Map<String, Value>) -> MaxBox {
     for key in WHAT_IT_IS {
         fields.shift_remove(key);
     }
+    let same_class = MaxBox { fields: new.clone(), ..MaxBox::default() }.class() == old.class();
     for (key, value) in new {
         if WHAT_IT_IS.contains(&key.as_str()) {
             fields.insert(key, value);
         }
+    }
+    // The same object keeps its own saved attributes when the new one gives none.
+    if let Some(saved) = old.fields.get("saved_object_attributes").filter(|_| same_class && !fields.contains_key("saved_object_attributes"))
+    {
+        fields.insert("saved_object_attributes".into(), saved.clone());
     }
     let mut item = max_box(fields);
     // A subpatcher made anew from the notation is laid out as Kumi lays out its own.
@@ -697,6 +791,16 @@ pub fn change(original: &Original, asked: &Asked, reference: Option<&Reference>)
     let names = names(&base, original.kind);
     let mut patcher = base.clone();
     let mut found = Findings::default();
+    // What Kumi couldn't read of the original (a box without its fields, a cord with a port that isn't a number) isn't in
+    // the new device.
+    let top = original.document.get("patcher").filter(|inner| inner.is_object()).unwrap_or(&original.document);
+    let listed = |key: &str| top.get(key).and_then(Value::as_array).map_or(0, Vec::len);
+    let (unread_boxes, unread_cords) = (listed("boxes").saturating_sub(base.boxes.len()), listed("lines").saturating_sub(base.cords.len()));
+    if unread_boxes + unread_cords > 0 {
+        found.notes.push(format!(
+            "Kumi couldn't read {unread_boxes} of the original's boxes and {unread_cords} of its cords, so the new device is without them."
+        ));
+    }
     let mut ids = Ids::of(&patcher);
     let varnames: HashSet<String> =
         patcher.boxes.iter().map(|item| item.str("varname").to_string()).filter(|name| !name.is_empty()).collect();
@@ -1110,11 +1214,11 @@ fn record(patcher: &mut Patcher, original: &Original, ids: &mut Ids) {
     let mut text = format!(
         "Kumi made this device from {} ({}, SHA-256 {}).",
         original.name,
-        original.path.to_string_lossy(),
+        original.known_as,
         &original.hash[..16.min(original.hash.len())]
     );
     if let Some(earlier) = provenance(&original.patcher()) {
-        let earlier: String = earlier.chars().take(600).collect();
+        let (earlier, _) = cut(&earlier.replace('\n', " "), 600);
         text = format!("{text} Before that: {earlier}");
     }
     if let Some(item) = patcher.boxes.iter_mut().find(|item| item.str("varname") == FROM_NAME) {
@@ -1135,15 +1239,25 @@ fn record(patcher: &mut Patcher, original: &Original, ids: &mut Ids) {
 }
 
 /// The new device's file: the original's, with the new patcher in place of its own and every other byte as it was. A
-/// frozen device keeps every file frozen into it. None when a frozen device's files can't be rewritten safely.
-pub fn device_bytes(original: &Original, document: &Value) -> Option<Vec<u8>> {
+/// frozen device keeps every file frozen into it. Err says why it can't be made: nothing is written then.
+pub fn device_bytes(original: &Original, document: &Value) -> Result<Vec<u8>, String> {
     let mut json = format!("{}\n", stringify_with_indent(document, "\t")).into_bytes();
     json.push(0);
     let chunk = match &original.frozen {
         None => json,
-        Some(frozen) => frozen.with_file(frozen.main_file()?, &json)?,
+        Some(frozen) => frozen.main_file().and_then(|main| frozen.with_file(main, &json)).ok_or_else(|| {
+            format!(
+                "Kumi didn't make the device: {}'s frozen files overlap or lie outside their place, so Kumi can't rewrite them safely. Make it from an unfrozen copy (open it in Max, unfreeze it and save it), or make a new device.",
+                original.known_as
+            )
+        })?,
     };
-    with_patcher_chunk(&original.bytes, &chunk)
+    with_patcher_chunk(&original.bytes, &chunk).ok_or_else(|| {
+        format!(
+            "Kumi didn't make the device: {} is cut short (its patcher runs past the file's end), so its file can't be made again whole. Download or save it again, then make it from that.",
+            original.known_as
+        )
+    })
 }
 
 #[cfg(test)]
@@ -1171,6 +1285,30 @@ mod tests {
         );
         assert_eq!(names.by_name.get("clock").map(String::as_str), Some("obj-2"));
         assert!(!names.by_name.contains_key("in"), "in and out are the notation's own");
+    }
+
+    #[test]
+    fn a_device_is_found_by_name_in_presets_first_and_a_search_cut_short_doesnt_claim_its_the_only_one() {
+        let library = tempfile::tempdir().unwrap();
+        for folder in ["Samples/a", "Samples/b", "Samples/c", "Templates/x", "Presets/MIDI Effects/Max MIDI Effect"] {
+            std::fs::create_dir_all(library.path().join(folder)).unwrap();
+        }
+        let echo = library.path().join("Presets/MIDI Effects/Max MIDI Effect/Echo.amxd");
+        std::fs::write(&echo, b"").unwrap();
+        for n in 0..50 {
+            std::fs::write(library.path().join(format!("Samples/a/{n}.wav")), b"").unwrap();
+        }
+        // Ten folders and devices in all: samples don't count.
+        assert_eq!(find_within("Echo", library.path(), 10), Ok(echo.clone()));
+        // Another of that name past where the search stops: the one found first isn't said to be the only one.
+        std::fs::write(library.path().join("Templates/x/Echo.amxd"), b"").unwrap();
+        let cut = find_within("Echo", library.path(), 10).unwrap_err();
+        assert!(cut.contains("too big to look through whole") && cut.contains("Echo.amxd"), "{cut}");
+        let whole = find_within("echo", library.path(), 1000).unwrap_err();
+        assert!(whole.contains("has 2 devices of that name"), "{whole}");
+        for refused in ["C:Echo", "Presets/Echo.amxd", "\\\\host\\share\\Echo.amxd", "user_library/../Echo"] {
+            assert!(find_within(refused, library.path(), 1000).is_err(), "{refused}");
+        }
     }
 
     #[test]

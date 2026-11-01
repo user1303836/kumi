@@ -258,7 +258,8 @@ impl PluginTool {
     }
 }
 
-fn local_path(path: &Path) -> Result<(), String> {
+/// Whether a path a model gives is one Kumi opens: absolute, on this computer, and no device's or another machine's.
+pub fn local_path(path: &Path) -> Result<(), String> {
     let text = path.to_string_lossy();
     if text.chars().any(char::is_control) || network_or_device(&text) || reserved_device(&text) || !path.is_absolute() {
         return Err("Use an absolute local path; network and device paths are not supported".into());

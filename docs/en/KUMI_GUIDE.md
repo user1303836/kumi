@@ -903,13 +903,16 @@ one you downloaded.
 > add a sync switch to my Echo
 
 It reads the device, makes only that change, and saves the result as a new
-device in the Kumi folder ("Echo 2", or the name it gives it). The original's
-file is never written, so every Set that uses it stays as it was. What the change
-doesn't touch stays as Max saved it, a frozen device keeps the files frozen into
-it, and the new device notes the file it came from. Live's own Max for Live
+device in the Kumi folder ("Echo 2" unless you name it). The original's file is
+never written, so every Set that uses it stays as it was. What the change doesn't
+touch stays as Max saved it, a frozen device keeps the files frozen into it, and
+the new device notes which device it came from (by its place in the User Library,
+or its file's name, never your computer's folders). Live's own Max for Live
 devices (LFO, Shaper and the like) are locked, so Kumi can't open them. Ask for
 the new device in place of the original, and Kumi loads it beside the original,
-sets the knobs they share to the same values, and removes the original.
+sets the knobs they share to the same values, and turns the original off. The
+original's automation and mappings don't move to the new device, so Kumi removes
+the original only when you say so.
 
 It needs Max for Live (Live Suite, or Standard with the add-on).
 
