@@ -5,12 +5,14 @@
 
 use serde_json::{json, Value};
 
-use crate::reaper::{Item, Reaper, Take, Track};
+use crate::reaper::{Item, Project, Reaper, Take, Track};
 use crate::refs::{self, EnvelopeId};
 use crate::rows;
 
 /// The most stretch or take markers a take's own read lists (the rest are counted).
 const MARKERS_LISTED: usize = 256;
+/// How far (ticks) a MIDI take's ticks may stray from a straight line across its item and still keep to the project's beats.
+const BENT: f64 = 1e-3;
 
 const CHANNEL_MODES: [&str; 5] = ["normal", "reverse", "mono", "left", "right"];
 
@@ -108,6 +110,46 @@ pub fn take_details(reaper: &Reaper, take: Take, row: &mut Value, alone: bool) {
         })
         .collect::<Vec<_>>()
         .into();
+}
+
+/// A MIDI take's ticks (#606), so a client knows the tick REAPER puts a note it writes on: `ticksPerQuarter`, how many a
+/// quarter note of the project at playrate 1 (its MIDI's own, unless it ignores the project tempo), and `tickAtStart`, the one
+/// at its item's start (a start offset moves it). Both null when its ticks don't keep to the project's beats across the item:
+/// one that ignores the project tempo follows time, which a tempo change inside it bends. Nothing from a REAPER that can't say.
+pub fn midi_ticks(reaper: &Reaper, proj: Project, take: Take, row: &mut Value) {
+    let Some(item) = reaper.take_item(take) else { return };
+    let position = reaper.item_value(item, "D_POSITION");
+    let at = |time: f64| reaper.quarter_notes_at(proj, time);
+    let (Some(start), Some(end)) = (at(position), at(position + reaper.item_value(item, "D_LENGTH"))) else { return };
+    if reaper.quarter_notes_to_ppq(take, start).is_none() {
+        return;
+    }
+    let playrate = reaper.take_value(take, "D_PLAYRATE");
+    match straight(|qn| reaper.quarter_notes_to_ppq(take, qn).unwrap_or(f64::NAN), start, end) {
+        Some((per_quarter, at_start)) if playrate > 0.0 => {
+            row["ticksPerQuarter"] = round(per_quarter / playrate).into();
+            row["tickAtStart"] = round(at_start).into();
+        }
+        _ => {
+            row["ticksPerQuarter"] = Value::Null;
+            row["tickAtStart"] = Value::Null;
+        }
+    }
+}
+
+/// How many ticks a quarter note `tick` (a position in quarter notes from the project start, to ticks) runs from `start` to
+/// `end` and the tick at `start`, when it runs straight there: within `BENT` of that line at seven points inside (uneven ones,
+/// so tempo markers on bar lines can't all fall on them). None when it bends.
+pub(crate) fn straight(tick: impl Fn(f64) -> f64, start: f64, end: f64) -> Option<(f64, f64)> {
+    let span = (end - start).max(1.0);
+    let first = tick(start);
+    let per_quarter = (tick(start + span) - first) / span;
+    let bends = [0.13, 0.29, 0.41, 0.53, 0.67, 0.79, 0.91].iter().any(|share| {
+        let qn = start + span * share;
+        let off = (tick(qn) - (first + (qn - start) * per_quarter)).abs();
+        off.is_nan() || off > BENT
+    });
+    (!bends && per_quarter.is_finite() && per_quarter > 0.0).then_some((per_quarter, first))
 }
 
 /// A track's razor areas, when it has any: start and end in seconds, the envelope's ref (null for the media lane) and

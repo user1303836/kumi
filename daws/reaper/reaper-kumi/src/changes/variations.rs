@@ -161,8 +161,11 @@ pub fn add_apply(ctx: &Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     }
     reaper.set_item_value(item, "D_POSITION", position);
     reaper.set_item_value(item, "B_UISEL", 0.0);
-    // (a take is one sound: looped, its source's attack would play again inside it past the sound's end)
-    reaper.set_item_value(item, "B_LOOPSRC", 0.0);
+    // (an audio take is one sound: looped, its source's attack would play again inside it past the sound's end; a MIDI take
+    // loops as its source does, or a looped pattern would play once, then nothing)
+    if !reaper.active_take(item).is_some_and(|take| reaper.take_is_midi(take)) {
+        reaper.set_item_value(item, "B_LOOPSRC", 0.0);
+    }
     if let Err(fault) = write(ctx, item, reaper.active_take(item), &settings) {
         // Nothing half-made stays.
         reaper.delete_item(found.track, item);
