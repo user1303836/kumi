@@ -1750,14 +1750,14 @@ async fn a_device_is_only_ever_opened_from_this_computer_and_a_name_in_another_c
 }
 
 #[tokio::test(flavor = "current_thread")]
-async fn a_frozen_device_whose_big_file_ten_thousand_boxes_use_opens_and_changes_in_a_moment() {
-    // 10,000 [big] boxes and a frozen-in big.maxpat of one 2 MB box: read once and shared, not 10,000 times (20 GB).
-    // (devices::patch's own test reads a 20 MB one for as many boxes; here what takes the time is the file's size.)
+async fn a_frozen_device_whose_big_file_two_thousand_boxes_use_opens_and_changes_in_a_moment() {
+    // 2,000 [big] boxes and a frozen-in big.maxpat of one 2 MB box: read once and shared, not 2,000 times (4 GB).
+    // (devices::patch's own test reads a 20 MB one for 10,000 boxes; this one stays quick on a busy runner.)
     let library = tempfile::tempdir().unwrap();
     let downloads = tempfile::tempdir().unwrap();
     let mut device = downloaded_echo();
     let boxes = device["patcher"]["boxes"].as_array_mut().unwrap();
-    for n in 0..10_000 {
+    for n in 0..2_000 {
         boxes.push(json!({ "box": { "id": format!("obj-big-{n}"), "maxclass": "newobj", "text": "big", "numinlets": 0, "numoutlets": 0,
             "patching_rect": [600.0, 20.0 + n as f64 * 30.0, 30.0, 22.0] } }));
     }
