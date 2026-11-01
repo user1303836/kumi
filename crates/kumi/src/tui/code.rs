@@ -195,6 +195,14 @@ impl Lexer<'_> {
         if slashes && rest.starts_with(b"/*") {
             return self.open(at, at + 2, Within::BlockComment);
         }
+        // JavaScript's regular expression: a `/` where a value begins, to its closing `/` and its flags. Any other `/`
+        // divides, and so does one whose line ends first.
+        if language == Language::JavaScript && byte == b'/' && self.value_begins(at) {
+            if let Some(end) = self.regex_end(at) {
+                self.runs.push((at..end, Token::String));
+                return Ok(end);
+            }
+        }
         if language == Language::Lua && rest.starts_with(b"--") {
             return match long_bracket(&rest[2..]) {
                 Some((level, opener)) => self.open(at, at + 2 + opener, Within::LongComment(level)),
@@ -333,6 +341,37 @@ impl Lexer<'_> {
         Ok(end)
     }
 
+    /// Whether a JavaScript value, not a division, begins at `at`: at the line's start, after an opening or an operator,
+    /// or after a keyword that takes one (`return /x/`). Not after `}`, which more often closes a value (TSX's `<a b={c} />`).
+    fn value_begins(&self, at: usize) -> bool {
+        let before = self.text[..at].trim_ascii_end();
+        let Some(last) = before.last() else { return true };
+        if b"(,=:[!&|?{;".contains(last) {
+            return true;
+        }
+        let start = before.iter().rposition(|byte| !self.language.names(*byte)).map_or(0, |at| at + 1);
+        let word = std::str::from_utf8(&before[start..]).unwrap_or("");
+        self.language.keywords().contains(&word) && !["this", "super", "true", "false", "null", "undefined"].contains(&word)
+    }
+
+    /// Where the regular expression from `at` (its opening `/`) ends: past its closing `/` and its flags. A `/` escaped
+    /// or inside a class (`[/]`) doesn't close it; None when the line ends first.
+    fn regex_end(&self, at: usize) -> Option<usize> {
+        let text = self.text;
+        let (mut end, mut class) = (at + 1, false);
+        while end < text.len() {
+            match text[end] {
+                b'\\' => end += 1,
+                b'[' => class = true,
+                b']' => class = false,
+                b'/' if !class => return Some(end + 1 + text[end + 1..].iter().take_while(|byte| byte.is_ascii_alphabetic()).count()),
+                _ => {}
+            }
+            end += 1;
+        }
+        None
+    }
+
     /// EEL's constant at `at` (its `$`): a number when it's one, else the `$` alone as plain code.
     fn eel_constant(&mut self, at: usize) -> usize {
         let text = self.text;
@@ -450,6 +489,16 @@ mod tests {
         );
         // A name that holds a keyword or a digit is a name, and so is one with `$`.
         assert!(runs(Language::JavaScript, "iffy in1 $if _for").is_empty());
+        // A regular expression where a value begins is one string, a quote in it included; a `/` after a value divides.
+        assert_eq!(
+            runs(Language::JavaScript, "s.replace(/\"/g, \"\"); x = /[/]+$/i.test(y)\nz = a / b / 2"),
+            [("/\"/g".into(), Quoted), ("\"\"".into(), Quoted), ("/[/]+$/i".into(), Quoted), ("2".into(), Number),]
+        );
+        // After a keyword that takes a value it's one too; after a value that's a keyword, or a `}`, it divides or closes.
+        assert_eq!(
+            runs(Language::JavaScript, "return /\"/.test(s)\nthis / a / b\n<A b={c} /><D e={f} />"),
+            [("return".into(), Keyword), ("/\"/".into(), Quoted), ("this".into(), Keyword)]
+        );
     }
 
     #[test]
@@ -545,7 +594,7 @@ mod tests {
     fn any_line_is_read_without_slicing_a_character_or_reading_past_it() {
         let pieces = [
             "\"", "'", "`", "/*", "*/", "--[[", "]]", "#", "\\", "$", "$x", "$'", "@", "0x", "1e", ".5", "é", "名", "🥁", " ", "r", "f'",
-            "[=", "--",
+            "[=", "--", "/", "[",
         ];
         for language in [Language::JavaScript, Language::GenExpr, Language::Lua, Language::Python, Language::Eel] {
             for a in pieces {
