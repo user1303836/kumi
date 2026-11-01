@@ -503,7 +503,15 @@ HISTORY stays honest in each case: Kumi refuses, or says what it can't do.
   was an edit: a script that makes no undo point, REAPER's undo or redo of such
   a change, REAPER before 7.79, or an undo history at its limit. Kumi's
   references to it then go stale and the model reads again.
-- **REAPER:** Kumi's undo of parameter modulation turns its switches off but
-  leaves the modulation settings, which REAPER keeps once made; the row says so.
+- **REAPER:** after Kumi's undo of parameter modulation, its settings are back
+  at REAPER's defaults and switched off, and none of them is saved with the
+  project; REAPER still lists them until it next loads the track. An undone MIDI
+  learn leaves an empty entry on the FX, saved with it, that listens to nothing.
+  The row says so.
+- **REAPER:** a MIDI take that reads other than Kumi kept it counts as edited,
+  and a change or "drop the rest" leaves it (naming it drops it). Kumi can't
+  tell an edit from REAPER's placing where a take ignores the project tempo and
+  a tempo change falls under it, and says so. Takes of a MIDI item made before
+  Kumi read MIDI items as MIDI read as edited.
 - **REAPER:** `track_midi_out` needs a MIDI output device in REAPER's
   preferences.

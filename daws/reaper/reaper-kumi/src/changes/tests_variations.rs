@@ -44,6 +44,17 @@ fn an_audio_take_is_its_items_copy_with_its_own_settings_and_its_undo_takes_it_a
     assert!(state(|s| s.tracks.clone()) == before, "nothing half-made stays");
 }
 
+/// A looped MIDI item's take goes on looping: REAPER plays a MIDI source once, then nothing, when its item doesn't loop (lab,
+/// 7.82), so a take of an eight-second loop of a two-second pattern played it once. An audio take never loops (above).
+#[test]
+fn a_looped_midi_items_take_goes_on_looping() {
+    let lab = Lab::new();
+    state(|s| s.tracks[2].items[0].extra.insert("B_LOOPSRC".into(), 1.0));
+    let (_, made) = lab.make("item-variation", json!({"ref": S1, "position": 20.0, "notes": [{"pitch": 38, "start": 0.0, "length": 0.5}]}));
+    let (_, take) = item(&guid_in(&made["created"]["ref"])).unwrap();
+    assert_eq!(take.extra.get("B_LOOPSRC").copied(), Some(1.0));
+}
+
 #[test]
 fn a_midi_take_has_its_own_notes_and_a_rewrite_is_put_back_whole() {
     let lab = Lab::new();
@@ -57,6 +68,7 @@ fn a_midi_take_has_its_own_notes_and_a_rewrite_is_put_back_whole() {
     let notes: Vec<(i32, i32)> = take.takes[0].notes.iter().map(|n| (n.pitch, n.velocity)).collect();
     assert_eq!(notes, [(38, 90), (38, 40)], "the copy's notes are the take's, its source's left as they were");
     assert_eq!(item("{ITEM-S1}").unwrap().1.takes[0].notes.len(), 2);
+    assert_ne!(take.extra.get("B_LOOPSRC").copied(), Some(0.0), "a MIDI take isn't made not to loop");
     // Rewritten: other notes and a quieter take; its undo puts back the whole take as it was.
     let reference = made["created"]["ref"].clone();
     let rewrite = json!({"ref": reference, "volumeDb": -6.0, "notes": [{"pitch": 40, "start": 0.0, "length": 1.0, "velocity": 70}]});

@@ -152,6 +152,12 @@ pub trait VariationsBackend: Sized {
     /// What a take holds, to tell later whether anyone changed it.
     fn digest(&self, material: &Self::Material) -> String;
 
+    /// Why Kumi can't tell a found take that holds other than it was kept (`current`) from one edited since: the DAW put what
+    /// Kumi wrote where Kumi can't follow it there (#606). None by default: it was edited.
+    fn unsure(&self, _current: &Self::Material) -> Option<String> {
+        None
+    }
+
     /// Writes take `number` (one change): its change id, its place and its long ref.
     async fn write_new(
         &self,

@@ -580,7 +580,7 @@ pub fn source_word(reaper: &Reaper, take: Option<Take>) -> String {
         None => "empty".into(),
         Some(kind) => match kind.to_ascii_lowercase().as_str() {
             "wave" => "wav".into(),
-            "midi" => "mid".into(),
+            "midi" | "midipool" => daw_bridge::contract::MIDI_SOURCE.into(),
             other => other.to_string(),
         },
     }
