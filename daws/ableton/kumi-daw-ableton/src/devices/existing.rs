@@ -325,7 +325,10 @@ fn embedded_code(item: &MaxBox) -> Option<String> {
 /// of Max's objects or a message (a panel, a comment, a bpatcher), a gen~ patched with gen's operators, code in a file
 /// of its own, or a subpatcher holding any of these.
 fn written(item: &MaxBox) -> Result<String, String> {
-    let block = |head: &str, inside: &str| format!("[{head}] {{\n{}\n}}", inside.trim_end_matches('\n'));
+    let block = |head: &str, inside: &str| {
+        let inside = inside.trim_matches('\n');
+        format!("[{head}] {{\n{}\n}}", if inside.contains('\n') { inside.trim_end() } else { inside.trim() })
+    };
     match item.maxclass() {
         "message" if !item.text().contains('\n') => Ok(format!("({})", item.text())),
         "newobj" => {
@@ -1181,7 +1184,7 @@ mod tests {
     #[test]
     fn a_block_of_new_controls_goes_where_the_face_has_room() {
         let shown = [Rect::new(8.0, 8.0, 44.0, 48.0), Rect::new(60.0, 8.0, 44.0, 48.0)];
-        assert_eq!(free_spot(&shown, 200.0, (44.0, 60.0)), Some((0.0, 64.0)), "under what's there");
+        assert_eq!(free_spot(&shown, 200.0, (44.0, 60.0)), Some((0.0, 60.0)), "under what's there, 4 pixels clear");
         assert_eq!(free_spot(&shown, 120.0, (44.0, 169.0)), None, "a full-height block in a full face");
         assert_eq!(free_spot(&[], 40.0, (44.0, 60.0)), None, "wider than the face");
     }

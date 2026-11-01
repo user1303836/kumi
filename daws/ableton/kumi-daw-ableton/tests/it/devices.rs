@@ -1405,7 +1405,7 @@ async fn make_device_opens_a_device_thats_already_there_and_says_it_in_the_notat
     assert!(by_name["frozen"].as_str().unwrap().starts_with("Frozen, with 2 files of its own (notes.js, tick.wav)"), "{by_name}");
     let by_item = call(&tool, json!({ "from": "user_library/Presets/MIDI Effects/Max MIDI Effect/Frozen Echo.amxd" })).await;
     assert_eq!(by_item["patch"], by_name["patch"]);
-    let mut lfo = b"ampf\x04\x00\x00\x00aaaameta\x04\x00\x00\x00\x00\x00\x00\x00ciph\x04\x00\x00\x00\x01\x02\x03\x04".to_vec();
+    let lfo = b"ampf\x04\x00\x00\x00aaaameta\x04\x00\x00\x00\x00\x00\x00\x00ciph\x04\x00\x00\x00\x01\x02\x03\x04".to_vec();
     std::fs::write(downloads.path().join("LFO.amxd"), &lfo).unwrap();
     let encrypted = call(&tool, json!({ "from": downloads.path().join("LFO.amxd").to_string_lossy() })).await;
     assert!(encrypted["error"].as_str().unwrap().contains("encrypted"), "{encrypted}");
