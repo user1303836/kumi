@@ -657,17 +657,17 @@ scene!(reaper_arrange_window, DawId::Reaper, BODY_SHOTS, |h| {
         row
     };
     let body = json!({"length": 256.0, "beatsPerBar": 4.0, "playhead": 40.0, "playing": true, "trackCount": 3, "from": 0,
-        "window": {"from": 32.0, "to": 64.0}, "view": {"from": 32.0, "to": 64.0}, "loop": {"on": true, "start": 48.0, "end": 56.0},
-        "markers": [{"name": "Drop", "position": 48.0}],
-        "regions": [{"name": "Verse", "position": 16.0, "end": 48.0}, {"name": "Chorus", "position": 48.0, "end": 80.0}],
-        "tracks": [
-            {"ref": "r:track:{D}", "name": "Drums", "depth": 0, "items": [item(32.0, 32.0, "Beat", json!({}))]},
-            {"ref": "r:track:{V}", "name": "Vox", "depth": 0, "fixedLanes": 3, "items": [
-                item(32.0, 16.0, "Take 1", json!({"lanePlays": "no"})),
-                item(36.0, 12.0, "Take 2", json!({"lane": 1, "lanePlays": "only", "selected": true})),
-                item(40.0, 8.0, "Take 3", json!({"lane": 2, "lanePlays": "no"}))]},
-            {"ref": "r:track:{B}", "name": "Bass", "depth": 0, "items": [item(32.0, 8.0, "Bass", json!({})), item(48.0, 16.0, "Bass 2", json!({"muted": true}))]}
-        ]});
+    "window": {"from": 32.0, "to": 64.0}, "view": {"from": 32.0, "to": 64.0}, "loop": {"on": true, "start": 48.0, "end": 56.0},
+    "markers": [{"name": "Drop", "position": 48.0}],
+    "regions": [{"name": "Verse", "position": 16.0, "end": 48.0}, {"name": "Chorus", "position": 48.0, "end": 80.0}],
+    "tracks": [
+        {"ref": "r:track:{D}", "name": "Drums", "depth": 0, "items": [item(32.0, 32.0, "Beat", json!({}))]},
+        {"ref": "r:track:{V}", "name": "Vox", "depth": 0, "fixedLanes": 3, "items": [
+            item(32.0, 16.0, "Take 1", json!({"lanePlays": "no"})),
+            item(36.0, 12.0, "Take 2", json!({"lane": 1, "lanePlays": "only", "selected": true})),
+            item(40.0, 8.0, "Take 3", json!({"lane": 2, "lanePlays": "no"}))]},
+        {"ref": "r:track:{B}", "name": "Bass", "depth": 0, "items": [item(32.0, 8.0, "Bass", json!({})), item(48.0, 16.0, "Bass 2", json!({"muted": true}))]}
+    ]});
     let Some(FocusBody::Timeline(strip)) = (reaper::DAW.to_body)(&BodyRequest::Timeline, &body) else { panic!() };
     *h.control.arrangement.borrow_mut() = Some(strip);
     let focus = json!({"selection": {"track": {"name": "Vox", "type": "audio"}, "trackRef": "r:track:{V}"}});

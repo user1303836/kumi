@@ -1170,7 +1170,10 @@ fn the_views_focus_draws_keep_their_wire_shape() {
                 position: 64.5,
                 playing: true,
                 r#loop: Some(ArrangementLoop { start: 64.0, length: 16.0, enabled: true }),
-                locators: vec![Locator { name: "Drop".into(), position: 64.0, end: None }, Locator { name: "Break".into(), position: 128.0, end: None }],
+                locators: vec![
+                    Locator { name: "Drop".into(), position: 64.0, end: None },
+                    Locator { name: "Break".into(), position: 128.0, end: None },
+                ],
                 beats_per_bar: None,
                 lanes: None,
                 track_count: None,

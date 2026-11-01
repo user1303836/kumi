@@ -622,20 +622,24 @@ mod tests {
     fn a_timeline_read_for_the_arrange_view_keeps_its_window_region_ends_and_fixed_lanes() {
         // (#399 K35) REAPER's arrange view scrolled to bars 9–16: the body was read for that stretch.
         let body = json!({"length": 256.0, "window": {"from": 32.0, "to": 64.0}, "view": {"from": 32.0, "to": 64.0},
-            "markers": [{"name": "Drop", "position": 40.0}],
-            "regions": [{"name": "Verse", "position": 24.0, "end": 48.0}, {"name": "Odd", "position": 50.0, "end": 50.0}],
-            "tracks": [
-                {"ref": "r:track:{V}", "name": "Vox", "depth": 0, "fixedLanes": 3, "items": [
-                    {"position": 32.0, "length": 8.0, "name": "Take 1", "lane": 0, "lanePlays": "no"},
-                    {"position": 32.0, "length": 8.0, "name": "Take 2", "lane": 1, "lanePlays": "only"},
-                    {"position": 40.0, "length": 4.0, "name": "Take 3", "lane": 2, "lanePlays": "hidden"}
-                ]},
-                {"ref": "r:track:{B}", "name": "Bass", "depth": 0, "items": [{"position": 32.0, "length": 16.0, "name": "Bass", "lane": 0, "lanePlays": null}]}
-            ]});
+        "markers": [{"name": "Drop", "position": 40.0}],
+        "regions": [{"name": "Verse", "position": 24.0, "end": 48.0}, {"name": "Odd", "position": 50.0, "end": 50.0}],
+        "tracks": [
+            {"ref": "r:track:{V}", "name": "Vox", "depth": 0, "fixedLanes": 3, "items": [
+                {"position": 32.0, "length": 8.0, "name": "Take 1", "lane": 0, "lanePlays": "no"},
+                {"position": 32.0, "length": 8.0, "name": "Take 2", "lane": 1, "lanePlays": "only"},
+                {"position": 40.0, "length": 4.0, "name": "Take 3", "lane": 2, "lanePlays": "hidden"}
+            ]},
+            {"ref": "r:track:{B}", "name": "Bass", "depth": 0, "items": [{"position": 32.0, "length": 16.0, "name": "Bass", "lane": 0, "lanePlays": null}]}
+        ]});
         let strip = timeline(&body);
         assert_eq!(strip.window, Some([32., 64.]));
         let marks: Vec<(&str, f64, Option<f64>)> = strip.locators.iter().map(|l| (l.name.as_str(), l.position, l.end)).collect();
-        assert_eq!(marks, [("Verse", 24., Some(48.)), ("Drop", 40., None), ("Odd", 50., None)], "a region keeps its end, a marker has none");
+        assert_eq!(
+            marks,
+            [("Verse", 24., Some(48.)), ("Drop", 40., None), ("Odd", 50., None)],
+            "a region keeps its end, a marker has none"
+        );
         let lanes = strip.lanes.unwrap();
         assert_eq!((lanes[0].fixed_lanes, lanes[1].fixed_lanes), (Some(3), None));
         let vox: Vec<(Option<u32>, bool)> = lanes[0].items.iter().map(|item| (item.lane, item.silent)).collect();
