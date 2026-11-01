@@ -83,3 +83,21 @@ test("mock: a closed server closes its clients with it", function()
   ok(not peer.open)
   eq(#mock.crashes, 0, "which is not a client being closed")
 end)
+
+-- About the mock itself, not something seen in Renoise. An object's fields can reach the object (a notifier's closure does),
+-- and a weak key doesn't let go of such a value, so without this a whole run grew about 4 MB a test, past 5 GB.
+test("mock: a reset lets go of what the last test made", function()
+  mock.reset({})
+  local held = setmetatable({}, { __mode = "v" })
+  local function made()
+    local observable = mock.observable()
+    local marker = {}
+    held.marker = marker
+    observable:add_notifier(function() return observable, marker end)
+  end
+  made()
+  mock.reset({})
+  collectgarbage("collect")
+  collectgarbage("collect")
+  eq(held.marker, nil, "still held after the reset")
+end)
