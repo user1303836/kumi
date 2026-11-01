@@ -103,12 +103,14 @@ fn knob_now<'a>(read: &'a Knobs, knob: &Knob) -> Option<(&'a str, &'a Knob)> {
     let now = read.knobs.iter().find(|now| now.device == label && now.name == knob.name)?;
     Some((read.devices[place].get("ref")?.as_str()?, now))
 }
-/// Knobs at their values, by the device each is on now; and the ones that moved or went.
+/// Knobs at their values, by the device each is on now; and the ones that moved or went, or whose parameter another knob
+/// already took (of two devices of one name with one gone, either could be the one that's left).
 fn by_device(read: &Knobs, moved: &[(Knob, f64)]) -> (IndexMap<String, Vec<Value>>, Vec<Knob>) {
     let mut devices: IndexMap<String, Vec<Value>> = IndexMap::new();
     let mut lost = vec![];
+    let mut taken = HashSet::new();
     for (knob, value) in moved {
-        match knob_now(read, knob) {
+        match knob_now(read, knob).filter(|(_, now)| taken.insert(now.r#ref.clone())) {
             Some((reference, now)) => devices.entry(reference.into()).or_default().push(json!({"parameterRef":now.r#ref,"value":value})),
             None => lost.push(knob.clone()),
         }
@@ -117,6 +119,11 @@ fn by_device(read: &Knobs, moved: &[(Knob, f64)]) -> (IndexMap<String, Vec<Value
 }
 impl LiveRenderer {
     async fn read_knobs(&self, name: &str, signal: Signal) -> Result<Knobs, RuntimeError> {
+        let (reference, devices) = self.track_and_devices(name, signal.clone()).await?;
+        self.knobs_on(reference, devices, signal).await
+    }
+    /// Where a track is now, and the devices on it.
+    async fn track_and_devices(&self, name: &str, signal: Signal) -> Result<(String, Vec<JsonObject>), RuntimeError> {
         let tracks = self.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
         let reference = tracks
             .iter()
@@ -125,9 +132,12 @@ impl LiveRenderer {
             .and_then(Value::as_str)
             .ok_or_else(|| observation(format!("The track “{name}” is gone.")))?
             .to_owned();
-        let devices = self
-            .rows("device", json!({"parent":reference,"fields":["name","className","classDisplayName","enabled"]}), signal.clone())
-            .await?;
+        let devices =
+            self.rows("device", json!({"parent":reference,"fields":["name","className","classDisplayName","enabled"]}), signal).await?;
+        Ok((reference, devices))
+    }
+    /// The knobs of these devices, as a track at `reference` has them now.
+    async fn knobs_on(&self, reference: String, devices: Vec<JsonObject>, signal: Signal) -> Result<Knobs, RuntimeError> {
         let mut knobs = vec![];
         for (index, device) in devices.iter().enumerate() {
             let mut input = object(json!({"fields":["name","value","min","max","quantization"]}));
@@ -182,6 +192,8 @@ impl LiveRenderer {
         let signal = abort::any([original, self.connection().lifetime.clone()]);
         let reference = listening.heard_reference(named, request, signal.clone()).await?;
         let mut rig = self.open_rig(&request.candidates, request.from_beat, request.beats, signal.clone()).await?;
+        // (hearing a long reference takes a while: the goal and its rig go by the one tempo the rig opened with)
+        let tempo = *rig.tempo.get_or_insert(tempo);
         rig.hold = Some(Held::default());
         // The candidates are tried where only Kumi hears them; the best goes on “Kumi · Goal best” once the search
         // pauses or ends (`keep_best`, after the rig is closed).
@@ -234,14 +246,18 @@ impl Goal {
     fn signal(&self, given: Signal) -> Signal {
         abort::any([given, self.render.connection().lifetime.clone()])
     }
+    /// A slot's knobs as its track has them now, for a trial to set. Where the track is and its devices are read each time,
+    /// because a device or a track put in above moves Live's refs, which are places, and changes neither the lease nor the
+    /// epoch; the knobs themselves are read again only when those differ from what's known.
     async fn knobs_now(&self, name: &str, signal: Signal) -> Result<Knobs, RuntimeError> {
+        let (reference, devices) = self.render.track_and_devices(name, signal.clone()).await?;
         let lease = self.render.connection().lease.get();
         if let Some((known, read)) = self.known.borrow().get(name) {
-            if *known == lease {
+            if *known == lease && read.reference == reference && read.devices == devices {
                 return Ok(read.clone());
             }
         }
-        let read = self.render.read_knobs(name, signal).await?;
+        let read = self.render.knobs_on(reference, devices, signal).await?;
         self.known.borrow_mut().insert(name.into(), (self.render.connection().lease.get(), read.clone()));
         Ok(read)
     }
@@ -292,10 +308,7 @@ impl Goal {
         let moved = given_values(knobs, values);
         let (devices, lost) = by_device(&fresh, &moved);
         if !lost.is_empty() {
-            let mut names: Vec<String> =
-                lost.iter().map(|knob| knob.device.split_once(':').map_or(&*knob.device, |(_, name)| name).to_owned()).collect();
-            names.dedup();
-            return Err(RuntimeError::plain(moved_or_went(slot, &names)));
+            return Err(RuntimeError::plain(moved_or_went(slot, &lost)));
         }
         self.render
             .history
@@ -699,6 +712,15 @@ mod tests {
         let (read, tone) = (chain(&["Synth"]), chain(&["Synth", "EQ"]).knobs.clone());
         let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)]);
         assert_eq!(devices.len(), 1);
+        assert_eq!(devices["7:device:0:d0"], [json!({"parameterRef": "7:parameter:0:0:0", "value": 0.7})]);
+        assert_eq!(lost, [tone[1].clone()]);
+    }
+
+    #[test]
+    fn of_two_knobs_that_come_to_one_parameter_the_second_isnt_sent() {
+        // Two devices of one name, one of them gone: both knobs find the one that's left.
+        let (read, tone) = (chain(&["EQ"]), chain(&["EQ", "EQ"]).knobs.clone());
+        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)]);
         assert_eq!(devices["7:device:0:d0"], [json!({"parameterRef": "7:parameter:0:0:0", "value": 0.7})]);
         assert_eq!(lost, [tone[1].clone()]);
     }

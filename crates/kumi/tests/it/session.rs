@@ -2246,6 +2246,8 @@ struct SearchRig {
     ms: u64,
     values_score: bool,
     settled: RefCell<Vec<f64>>,
+    /// What keeping the best answers: the best's name, unless the test says why not.
+    keep_says: &'static str,
 }
 impl SearchRig {
     fn new(scores: Vec<f64>) -> Self {
@@ -2259,6 +2261,7 @@ impl SearchRig {
             ms: 1,
             values_score: false,
             settled: RefCell::new(vec![]),
+            keep_says: "Kumi · Goal best",
         }
     }
     fn knob() -> Knob {
@@ -2311,7 +2314,7 @@ impl GoalRig for SearchRig {
     async fn keep_best(&self, slot: &str, _: &[Knob], _: &[f64], signal: Signal) -> Result<String, RuntimeError> {
         assert!(!signal.is_cancelled());
         self.cleanup.borrow_mut().push(format!("keep:{slot}"));
-        Ok("Kumi · Goal best".into())
+        Ok(self.keep_says.into())
     }
     async fn settle(&self, _: &str, _: &[Knob], values: &[f64], signal: Signal) -> Result<Option<String>, RuntimeError> {
         assert!(!signal.is_cancelled());
@@ -2384,6 +2387,17 @@ local_test!(goal_reaches_target_cleans_in_order_keeps_best_and_lesson, {
     assert_eq!(h.session.lessons().await.unwrap().len(), 1);
     h.session.close().await.unwrap();
     assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Done);
+});
+local_test!(a_goal_says_why_its_best_wasnt_kept, {
+    let mut raw = SearchRig::new(vec![96.]);
+    raw.keep_says = "“EQ” moved or went on “Candidate” since the search began.";
+    let rig = Rc::new(raw);
+    let h = goal_harness(rig.clone(), true, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+    assert!(h.notice("Its best wasn't kept: “EQ” moved or went on “Candidate” since the search began."));
+    assert!(!h.notice("the best is on"), "no best is named");
+    h.session.close().await.unwrap();
 });
 local_test!(a_sound_match_loop_without_a_reference_is_a_regular_request_and_other_loops_run_judged_rounds, {
     let rig = Rc::new(SearchRig::new(vec![]));

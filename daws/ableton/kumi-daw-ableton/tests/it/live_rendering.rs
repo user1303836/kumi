@@ -45,6 +45,15 @@ struct Fixture {
     /// A test's look at each call as it comes (the call, and what the case expects of it).
     on_call: RefCell<Option<Box<dyn Fn(&Value, &mut Value)>>>,
 }
+/// The oracle's cases that search: what a goal's trial reads differs from theirs (see `Fixture::call`).
+const GOAL_CASES: [&str; 5] = ["held-goal-cache-settle-best", "goal-screen", "goal-refused-knob", "goal-add-and-tidy", "goal-ears-held"];
+impl Fixture {
+    /// The reply the case recorded for its call `at`.
+    fn answer(&self, at: usize) -> Result<CallToolResult, RuntimeError> {
+        let body = serde_json::to_string(&self.case["responses"][at]["reply"]).unwrap().replace("<tag>", &self.tag.borrow());
+        serde_json::from_str(&body).map_err(|e| RuntimeError::plain(e.to_string()))
+    }
+}
 struct HeldApply {
     dispatched: tokio::sync::Notify,
     reply: RefCell<Option<tokio::sync::oneshot::Receiver<()>>>,
@@ -88,10 +97,30 @@ impl McpEndpoint for Fixture {
             && expected["args"]["fields"] == json!(["ref", "parentRef", "name", "className"])
             && actual["args"]["fields"] == current_fields
         {
-            expected["args"]["fields"] = current_fields;
+            expected["args"]["fields"] = current_fields.clone();
         }
         if let Some(on_call) = &*self.on_call.borrow() {
             on_call(&actual, &mut expected);
+        }
+        // (#399) A goal's trial now reads where its slot is and its devices each time it moves knobs, because a device or a
+        // track put in above moves Live's refs and changes neither lease nor epoch; the TypeScript Kumi kept its first read
+        // until the lease changed. Where the case recorded no such read, it's answered as the case last answered that very
+        // read, without using up a recorded call. Everything else a goal does stays as recorded.
+        if name == "live_discover"
+            && GOAL_CASES.contains(&self.case["label"].as_str().unwrap_or(""))
+            && matches!(actual["args"]["kind"].as_str(), Some("track" | "device"))
+            && canonical(&actual) != canonical(&expected)
+        {
+            let read = (0..index).rev().find(|at| {
+                let mut call = self.case["calls"][*at].clone();
+                if actual["args"]["kind"] == "device" && call["args"]["kind"] == "device" {
+                    call["args"]["fields"] = current_fields.clone();
+                }
+                canonical(&call) == canonical(&actual)
+            });
+            if let Some(at) = read {
+                return self.answer(at);
+            }
         }
         eq(&actual, &expected, &format!("{} dispatch {index}", self.case["label"]));
         self.calls.set(index + 1);
@@ -112,8 +141,7 @@ impl McpEndpoint for Fixture {
             return Err(if message == "cancelled" { RuntimeError::Aborted } else { RuntimeError::plain(message) });
         }
         tokio::task::yield_now().await;
-        let body = serde_json::to_string(&response["reply"]).unwrap().replace("<tag>", &self.tag.borrow());
-        serde_json::from_str(&body).map_err(|e| RuntimeError::plain(e.to_string()))
+        self.answer(index)
     }
     fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
         Box::new(|| {})
@@ -519,6 +547,22 @@ fn a_pass_records_at_the_tempo_its_rig_opened_with_when_a_look_lost_it() {
         bench.observer.tempo.set(None);
         let value = bench.run(&mut goal, &case["operations"][1], Signal::new()).await.unwrap();
         eq(&value, &case["results"][1]["value"], "recorded and heard as the case did");
+    });
+}
+
+/// (#789) The same in a pass Kumi Ears hears: both its reads of the tempo fall back on the rig's.
+#[test]
+fn an_ears_pass_goes_by_the_tempo_its_rig_opened_with_when_a_look_lost_it() {
+    on_a_paused_clock(async {
+        let folder = tempfile::tempdir().unwrap();
+        let case = goal_case(folder.path(), "goal-ears-held", "goal-ear");
+        let bench = Bench::new(&case, "goal-ear", folder.path()).await;
+        let mut goal = None;
+        bench.run(&mut goal, &case["operations"][0], Signal::new()).await.unwrap();
+        bench.observer.tempo.set(None);
+        let value = bench.run(&mut goal, &case["operations"][1], Signal::new()).await.unwrap();
+        eq(&value, &case["results"][1]["value"], "heard as the case did");
+        assert!(bench.ears.at.get() > 0, "Kumi Ears heard it");
     });
 }
 

@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use kumi_agent::core::{
     contracts::{Generation, GenerationTrial},
     evolve::Knob,
-    goal_rig::{check_slots, device_label, given_values, knob_key, moved, tell_generation, tidy, GoalDaw},
+    goal_rig::{check_slots, device_label, given_values, knob_key, moved, moved_or_went, tell_generation, tidy, GoalDaw},
 };
 use kumi_listening::goal::Told;
 use kumi_types::contracts::StructuralMove;
@@ -181,4 +181,17 @@ async fn a_candidate_that_went_is_left_out() {
     let said = tidy(&daw, names(&["Gone"]), &[]).await;
     assert!(daw.done.borrow().is_empty());
     assert!(said.is_empty());
+}
+
+#[test]
+fn what_moved_or_went_names_each_device_once_first_seen_first() {
+    let on = |device: &str, name: &str| Knob { device: device.into(), name: name.into(), ..knob_for_words() };
+    // (a slot's knobs come shaping knobs first, so they interleave by device)
+    let knobs = [on("0:Synth", "Tone"), on("1:EQ", "Gain"), on("0:Synth", "Drive"), on("1:EQ", "Q")];
+    let said = moved_or_went("Pad", &knobs);
+    assert!(said.starts_with("“Synth”, “EQ” moved or went on “Pad” since the search began"), "{said}");
+}
+
+fn knob_for_words() -> Knob {
+    Knob { r#ref: "1".into(), device: String::new(), name: String::new(), value: 0., min: 0., max: 1., step: None }
 }

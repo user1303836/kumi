@@ -506,6 +506,9 @@ impl Session {
             let kept = rig.keep_best(&leader.name, &leader.knobs, &leader.elite, cleanup).await.unwrap_or_default();
             if kept.starts_with("Kumi · Goal best") {
                 state.best_track = Some(kept);
+            } else if !kept.is_empty() {
+                // (its name, or why not: a long search's result doesn't go with no word)
+                notes.push(format!("Its best wasn't kept: {}.", kept.trim_end_matches('.')));
             }
         }
         sync(&mut state, &evolution, started);

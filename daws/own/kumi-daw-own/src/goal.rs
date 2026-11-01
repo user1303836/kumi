@@ -514,14 +514,12 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         let named = |knob: &Knob| knob.device.split_once(':').map_or(knob.device.as_str(), |(_, name)| name).to_owned();
         // (by device as it is now: one change for each, as a device's knobs are set; nothing when one moved or went)
         let mut by_device: IndexMap<String, Vec<(&str, f64)>> = IndexMap::new();
-        let mut moved: Vec<String> = vec![];
+        let mut moved: Vec<Knob> = vec![];
         let mut turned: Vec<String> = vec![];
         let mut read: IndexMap<String, Vec<Value>> = IndexMap::new();
         for (knob, value) in won {
             let Some((_, row)) = self.device_now(knob, &chain) else {
-                if !moved.contains(&named(knob)) {
-                    moved.push(named(knob));
-                }
+                moved.push(knob.clone());
                 continue;
             };
             if !read.contains_key(&row.reference) {
@@ -753,14 +751,13 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
             let places =
                 self.slots.borrow().iter().find(|found| found.info.name == slot).map(|found| found.places.clone()).unwrap_or_default();
             let mut set_at: Vec<(u64, u64, f64)> = vec![];
-            let mut moved: Vec<String> = vec![];
+            let mut moved: Vec<Knob> = vec![];
             for (knob, value) in &given_values(knobs, values) {
                 match (self.device_now(knob, &chain), places.get(&key(knob))) {
                     (Some((_, row)), Some((_, param))) => set_at.push((row.index, *param, *value)),
-                    _ => moved.push(knob.device.split_once(':').map_or(knob.device.as_str(), |(_, name)| name).to_owned()),
+                    _ => moved.push(knob.clone()),
                 }
             }
-            moved.dedup();
             if !moved.is_empty() {
                 return Ok(Err(moved_or_went(slot, &moved)));
             }

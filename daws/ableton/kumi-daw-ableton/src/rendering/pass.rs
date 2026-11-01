@@ -281,7 +281,7 @@ impl LiveRenderer {
     /// Why a pass can't go ahead for lack of disk, when it can't. Kumi's own folder holds every take; a record pass's
     /// are Live's recordings first, in the project.
     async fn no_room_for(&self, rig: &Rig) -> Option<String> {
-        let tempo = self.observer.tempo.get().filter(|tempo| *tempo > 0.)?;
+        let tempo = self.pass_tempo(rig).ok()?;
         let seconds = rig.window().beats * 60. / tempo;
         let takes = rig.sources.len();
         if let Some(why) = self.no_room(seconds, takes, &std::env::temp_dir()).await {

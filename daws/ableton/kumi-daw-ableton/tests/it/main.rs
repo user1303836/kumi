@@ -21,6 +21,7 @@ mod live_away;
 mod live_command_tools;
 mod live_connection;
 mod live_conversions;
+mod live_goal;
 mod live_history;
 mod live_integration;
 mod live_mutations;
