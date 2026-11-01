@@ -66,29 +66,30 @@ fn reopens_in(ini: &Path) -> Reopens {
 }
 
 /// REAPER's start-up setting as 7.82 keeps it (`loadlastproj` in `[REAPER]`, as measured):
-/// - no key, as a new reaper.ini has it, or 17: every project tab comes back, the same one in front;
+/// - no key, or 17: every project tab comes back, the same one in front;
 /// - 16: the project in front comes back, not the other tabs;
 /// - 18 and 19: a new project, and `lastproject` goes stale, so nothing says what was open.
 ///
 /// REAPER rewrites its older values as it starts: 1 and 3 become 17, 0 becomes 19, 2 becomes 18. Anything else wasn't
-/// measured, so it says nothing, and so does a file with no `[REAPER]` that isn't empty.
+/// measured, so it says nothing. Neither does a file with no `[REAPER]`, which a REAPER that has quit always wrote: an
+/// empty one is a write cut short.
 fn reopens_from(ini: &str) -> Reopens {
     let mut in_section = false;
     let mut section = false;
     let mut value = None;
     for line in ini.lines().map(str::trim) {
         if let Some(name) = line.strip_prefix('[').and_then(|line| line.strip_suffix(']')) {
-            in_section = name == "REAPER";
+            in_section = name.eq_ignore_ascii_case("REAPER");
             section |= in_section;
-        } else if in_section {
-            if let Some(found) = line.strip_prefix("loadlastproj=") {
+        } else if let Some((key, found)) = line.split_once('=').filter(|_| in_section) {
+            if key.trim().eq_ignore_ascii_case("loadlastproj") {
                 value = Some(found.trim());
                 break;
             }
         }
     }
     match value {
-        None if section || ini.trim().is_empty() => Reopens::Everything,
+        None if section => Reopens::Everything,
         Some("1" | "3" | "17") => Reopens::Everything,
         Some("16") => Reopens::Front,
         _ => Reopens::Unknown,

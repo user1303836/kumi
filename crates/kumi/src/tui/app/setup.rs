@@ -689,9 +689,10 @@ impl TuiApp {
                     // Open Recent); one that wasn't open opens as the newest installed.
                     let closed_by_kumi = held.is_some();
                     let app = open.or(held);
+                    // (read before the DAW starts again and rewrites its settings)
+                    let note = after_restart(&live);
                     let (opened, with_set) = reopen(&live, app.clone(), set).await;
                     if closed_by_kumi && !with_set {
-                        let note = after_restart(&live);
                         self.setup_show(|s| s.set_note = note);
                     }
                     self.setup_show(|s| s.holding = false);
@@ -823,8 +824,10 @@ impl TuiApp {
         });
         let Some(app) = held else { return LiveStep::Later(None) };
         if live.open_live().await.is_none() {
+            // (read before the DAW starts again and rewrites its settings)
+            let note = after_restart(live);
             let (opened, with_set) = reopen(live, Some(app), set).await;
-            let recent = after_restart(live).filter(|_| !with_set).map_or(String::new(), |note| format!(" {note}"));
+            let recent = note.filter(|_| !with_set).map_or(String::new(), |note| format!(" {note}"));
             let app = crate::daw::words().app;
             return LiveStep::Later(Some(if opened {
                 format!("{app} is opening again.{recent}")

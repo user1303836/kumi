@@ -168,8 +168,9 @@ async fn what_reaper_opens_by_itself_goes_by_the_setting_of_the_reaper_setup_saw
         ("KUMI_PROCESSES".into(), format!("7 {}", dir.path().join("reaper").display())),
     ]);
     let ini = resource.join("reaper.ini");
-    let rows: [(&[u8], Reopens); 13] = [
-        (b"", Reopens::Everything),
+    let rows: [(&[u8], Reopens); 15] = [
+        // (a write cut short: a REAPER that has quit always wrote [REAPER])
+        (b"", Reopens::Unknown),
         (b"[REAPER]\nlastproject=/a.rpp\n", Reopens::Everything),
         (b"[REAPER]\nloadlastproj=17\n", Reopens::Everything),
         (b"[REAPER]\r\nloadlastproj=17\r\n", Reopens::Everything),
@@ -180,6 +181,9 @@ async fn what_reaper_opens_by_itself_goes_by_the_setting_of_the_reaper_setup_saw
         (b"[REAPER]\nloadlastproj=18\n", Reopens::Unknown),
         (b"[REAPER]\nloadlastproj=19\n", Reopens::Unknown),
         (b"[REAPER]\nloadlastproj=20\n", Reopens::Unknown),
+        // The key in another form is still the key.
+        (b"[REAPER]\nloadlastproj = 19\n", Reopens::Unknown),
+        (b"[REAPER]\nLoadLastProj=16\n", Reopens::Front),
         // One path that isn't UTF-8 doesn't get in the way.
         (b"[REAPER]\nlastproject=/caf\xe9.rpp\nloadlastproj=16\n", Reopens::Front),
         // Only [REAPER]'s setting counts.
