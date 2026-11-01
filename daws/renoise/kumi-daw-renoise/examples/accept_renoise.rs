@@ -297,8 +297,9 @@ const PLUGIN: &str = "local i = new_instrument('K plugin', 0) song:instrument(i)
 const SLOT: &str = "local q, p = new_slot() return {q = q, p = p}";
 /// What a Doofer holds: its devices' types and their gains, as its preset data says.
 const INSIDE: &str = r#"local x = pdata(song:track($t):device(2)) local out = {} for k in x:gmatch('type="(%w+)"') do out[#out + 1] = k end for v in x:gmatch('<Volume>%s*<Value>([^<]*)</Value>') do out[#out + 1] = v end return out"#;
-/// Why Kumi's undo of lines refuses after Renoise's undo and redo of them.
-const LINES_REDO: &str = "Renoise's redo of lines can't be told from its undo bringing back the producer's like lines (review MUST 6, 10): Kumi's undo refuses after it, and HISTORY says Renoise put them back";
+/// Lines that Renoise's undo and redo took back and put again. Each case makes Kumi's step the newest, so the redo must be told
+/// for sure and Kumi's undo must work: an unsure redo or a refused undo fails the case.
+const LINES_REDO: &str = "Kumi's step is the newest (#393): Renoise's redo of it is told for sure, and Kumi's undo works";
 /// Why Renoise's undo can't take a plug-in instrument's change back now and then.
 const AU_UNDO: &str = "Renoise's undo history goes empty now and then once AU plug-in instruments load and unload (can_undo() false before its undo; as after n-devices' device inventory): its undo takes nothing back, HISTORY stays as it was, Kumi's undo works";
 
@@ -810,7 +811,12 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
             Some(ChangeState::Unsure) => format!("unsure “{}”", short(&told.and_then(|r| r.note).unwrap_or_default(), 50)),
             _ => format!("{state:?}"),
         };
-        let ok = same(&p3, &p5) && matches!(state, Some(ChangeState::Applied | ChangeState::Unsure));
+        let ok = same(&p3, &p5)
+            && match state {
+                Some(ChangeState::Applied) => true,
+                Some(ChangeState::Unsure) => case.note != LINES_REDO,
+                _ => false,
+            };
         out.step("daw redo", ok, if same(&p3, &p5) { told } else { format!("{told} → {p5}") });
     }
     // 4. Kumi's undo once more: puts it back, or refuses and says why
@@ -828,7 +834,7 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
             let note = row.and_then(|r| r.note).unwrap_or_default();
             out.step(
                 "last undo",
-                !note.is_empty(),
+                !note.is_empty() && case.note != LINES_REDO,
                 format!("refused{}: “{}”", if unsure { " (after an unsure redo)" } else { "" }, short(&note, 80)),
             );
             // (the bridge's own words, under HISTORY's)
@@ -1118,7 +1124,7 @@ mod extras {
             done(outcomes, selection(lab).await);
         }
         println!("== edge cases");
-        for name in ["edge changed", "edge copy", "edge alias", "edge group", "edge hidden"] {
+        for name in ["edge changed", "edge copy", "edge alias", "edge group", "edge hidden", "edge later step"] {
             if !wanted(name) {
                 continue;
             }
@@ -1127,7 +1133,8 @@ mod extras {
                 "edge copy" => copy(lab).await,
                 "edge alias" => alias(lab).await,
                 "edge group" => group(lab).await,
-                _ => hidden(lab).await,
+                "edge hidden" => hidden(lab).await,
+                _ => later_step(lab).await,
             };
             done(outcomes, out);
         }
@@ -1343,6 +1350,44 @@ mod extras {
         out.step("refused", said.error && added.is_empty(), short(&said.text, 140));
         out.step("producer's value kept", same(&now, &json!(0.3)), format!("{now}"));
         out.step("edit made", !lab.hooked.armed(), "");
+        out
+    }
+
+    /// #393: the producer clears Kumi's note and types the same one. Renoise's undo and redo of that later step leave the lines
+    /// as Kumi wrote them with nothing left to redo, but it isn't Kumi's step: its undo refuses, and the typed note stays.
+    async fn later_step(lab: &Lab) -> Outcome {
+        let mut out = Outcome::new("edge redo of a later step".into());
+        let Ok(vars) = fresh(lab, "return {t = new_track('K later')}").await else { return out.fail("setup", "") };
+        let write = r#"{"patternRef":"$E:pattern:1","trackRef":"$E:track:$t","lines":[{"line":0,"notes":[{"col":1,"note":"C-4","instrument":0}]}]}"#;
+        let (said, added) = lab.plan(json!([{"tool": "notes_write", "input": input(write, &vars)}])).await;
+        let Some(id) = added.last().map(|row| row.id.clone()) else { return out.fail("apply", short(&said.text, 140)) };
+        let notes = fill_lua("return notes(1, $t, 4)", &vars);
+        let kumis = read(lab, &notes).await;
+        lab.pause().await;
+        let clear = fill_lua("song:pattern(1):track($t):line(1):note_column(1):clear()", &vars);
+        let typed = fill_lua("put(1, $t, 1, 'C-4')", &vars);
+        for edit in [clear, typed] {
+            if let Err(why) = lab.lua(&edit).await {
+                return out.fail("the producer's steps", why);
+            }
+            lab.pause().await;
+        }
+        out.step("reads as Kumi wrote", same(&read(lab, &notes).await, &kumis), "");
+        if let Err(why) = lab.lua("song:undo()").await {
+            return out.fail("daw undo", why);
+        }
+        let undone = lab.wait_state(&id, ChangeState::Undone, TOLD_MS).await;
+        out.step("daw undo told", undone.is_some(), "");
+        lab.pause().await;
+        if let Err(why) = lab.lua("song:redo()").await {
+            return out.fail("daw redo", why);
+        }
+        let unsure = lab.wait_state(&id, ChangeState::Unsure, TOLD_MS).await;
+        let stack = read(lab, "return {song:can_undo(), song:can_redo()}").await;
+        out.step("daw redo unsure", unsure.is_some(), format!("can_undo, can_redo: {stack}"));
+        let refused = lab.undo(&id).await;
+        out.step("refused", refused.error || lab.row(&id).is_some_and(|row| row.state == ChangeState::Kept), short(&refused.text, 100));
+        out.step("typed note kept", same(&read(lab, &notes).await, &kumis), "");
         out
     }
 

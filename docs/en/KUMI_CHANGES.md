@@ -488,11 +488,13 @@ sample FX chains.
 
 HISTORY stays honest in each case: Kumi refuses, or says what it can't do.
 
-- **Renoise:** after Renoise's own undo and redo of line edits (`notes_write`,
+- **Renoise:** after you undo and redo line edits (`notes_write`,
   `notes_clear`, `notes_transpose`, `notes_humanize`, `lines_copy`,
-  `phrase_write`, `phrase_clear`), Kumi's undo of them is refused: Kumi can't
-  tell Renoise's redo from your own identical lines. The row says "Renoise may
-  have redone it"; Renoise's undo can take it back.
+  `phrase_write`, `phrase_clear`) in Renoise, Kumi's undo of them works for the
+  newest change only: nothing edited after it, and nothing left to redo. In any
+  other case Kumi can't tell Renoise's redo from your own identical lines, and
+  its undo is refused. The row says "Renoise may have redone it"; Renoise's undo
+  can take it back.
 - **Renoise:** in long sessions its undo history has sometimes emptied after
   AU plug-in instruments were loaded and unloaded (the cause isn't known); then
   Renoise's undo can't take back `plugin_load`, `plugin_param` or `plugin_set`.
