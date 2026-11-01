@@ -1126,11 +1126,17 @@ function M.editor(params, env)
   return { epoch = env.epoch(), layout = env.layout(), visible = device.external_editor_visible, label = label }
 end
 
--- Renoise's user library, where it was made at its first start (Documents/Renoise/User Library).
-function M.user_library()
+-- Renoise's user library, where it was made at its first start (Documents/Renoise/User Library). The host says where that
+-- is (`given`), since Windows can keep Documents outside the home folder (OneDrive) and only the host can ask it: taken when
+-- it's there. Otherwise the home folder's, for an older host or a Renoise that made it there, and `given` to name when
+-- neither is there.
+function M.user_library(given)
+  if type(given) ~= "string" or given == "" then given = nil end
+  if given and io.exists(given) then return given end
   local home = os.getenv("HOME") or os.getenv("USERPROFILE")
-  if not home then return nil end
-  return home .. "/Documents/Renoise/User Library"
+  local guess = home and home .. "/Documents/Renoise/User Library"
+  if guess and io.exists(guess) then return guess end
+  return given or guess
 end
 
 -- The folder a native device's presets go in, as Renoise's library names them: its name without its * or # ("LFO", "Send").
@@ -1152,7 +1158,7 @@ function M.save(params, env)
   if type(name) ~= "string" or name == "" or #name > 128 or name:find('[%c/\\:%*%?"<>|]') or name:match("^%.") or name:match("[%. ]$") then
     bad('name: a preset\'s name, one line without / \\ : * ? " < > | that doesn\'t start with a dot or end with a dot or space')
   end
-  local library = M.user_library()
+  local library = M.user_library(params.library)
   if not library or not io.exists(library) then
     fail("failed", string.format("Kumi can't find Renoise's user library at %s", tostring(library)))
   end
@@ -1180,8 +1186,8 @@ function M.save(params, env)
   for _, preset in ipairs(device.presets) do
     if preset == name then listed = true end
   end
-  -- (where it went, said: Kumi takes the user library from where Renoise makes it, which its preferences can move)
-  local note = string.format("Saved in %s. Renoise lists it from its next start if that is the user library its preferences name.", dir)
+  -- (where it went, said, since Kumi works out where the user library is rather than asking Renoise)
+  local note = string.format("Saved in %s. Renoise lists it from its next start.", dir)
   return { epoch = env.epoch(), layout = env.layout(), file = file, listed = listed, label = label, note = note }
 end
 

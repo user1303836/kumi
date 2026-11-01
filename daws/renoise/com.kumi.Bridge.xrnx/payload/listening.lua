@@ -571,25 +571,8 @@ local function same_state(a, b)
   return a ~= nil and b ~= nil and a.mute == b.mute and a.solo == b.solo
 end
 
-local SOLO_ROUNDS = 64 -- (un-solo rounds: a solo takes two at most, the first making a track soloed along with another the soloed one)
 
--- Every solo taken away (Renoise turns every track Active); false when one stays. The setter toggles a track's own solo, so `false`
--- on a track soloed only along with another (a group's member) solos it on its own first (measured, 3.5.4).
-local function unsolo_all(song)
-  for _ = 1, SOLO_ROUNDS do
-    local first
-    for t = 1, rows.track_count(song) do
-      local track = song:track(t)
-      if track.type ~= MASTER() and track.solo_state then
-        first = track
-        break
-      end
-    end
-    if not first then return true end
-    first.solo_state = false
-  end
-  return false
-end
+local unsolo_all = rows.unsolo_all
 
 -- The tracks that read soloed now, as a key ("2,6"), and how close they are to `set` (each wanted one counts, each other against).
 local function soloed_now(song, set)

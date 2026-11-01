@@ -19,6 +19,8 @@ kumi-types.workspace = true
 # Where Renoise keeps its library: the same detection as its bridge's setup.
 daw-bridge.workspace = true
 async-trait.workspace = true
+# A song is a zip archive: its Song.xml, unpacked as it's read.
+flate2.workspace = true
 regex.workspace = true
 serde_json.workspace = true
 

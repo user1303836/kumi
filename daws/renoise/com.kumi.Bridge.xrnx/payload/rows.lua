@@ -636,30 +636,64 @@ local function line_row(line, number, note_columns, effect_columns, scan_hidden)
   return row
 end
 
--- M4 (n-song): the automation of a pattern's track, as the automation-write kind takes it: per automated parameter its ref,
--- names, play mode and points (time in lines from 0, value 0 to 1 of the parameter's range).
-local PLAYMODE_NAMES = { "points", "linear", "curves" }
-function M.envelopes(song, epoch, p, t)
-  local track, pattern_track, out = song:track(t), song:pattern(p):track(t), {}
+-- Every solo taken away (Renoise turns every track Active); false when one stays. The setter toggles a track's own solo, so `false`
+-- on a track soloed only along with another (a group's member) solos it on its own first (measured, 3.5.4): hence the rounds, of
+-- which a solo takes two at most.
+M.SOLO_ROUNDS = 64
+function M.unsolo_all(song)
+  for _ = 1, M.SOLO_ROUNDS do
+    local first
+    for t = 1, M.track_count(song) do
+      local track = song:track(t)
+      if track.type ~= renoise.Track.TRACK_TYPE_MASTER and track.solo_state then
+        first = track
+        break
+      end
+    end
+    if not first then return true end
+    first.solo_state = false
+  end
+  return false
+end
+
+-- Each of a pattern track's automations with the device and parameter it automates, in the track's order:
+-- fn(d, k, device, parameter, automation). A track's parameters run to hundreds and its automations are few, so none reads no
+-- parameter, and the walk ends at the last. (An alias is walked whole: whether its list counts what `find_automation` finds in
+-- the track it shows hasn't been measured.)
+function M.each_automation(track, pattern_track, fn)
+  local left = pattern_track.is_alias and math.huge or #pattern_track.automation
   for d = 1, #track.devices do
+    if left == 0 then return end
     local device = track:device(d)
     for k = 1, #device.parameters do
       local parameter = device:parameter(k)
       if parameter.is_automated then
         local automation = pattern_track:find_automation(parameter)
         if automation then
-          local points = {}
-          for i, point in ipairs(automation.points) do points[i] = { time = point.time - 1, value = point.value, scaling = point.scaling } end
-          table.sort(points, function(a, b) return a.time < b.time end)
-          out[#out + 1] = {
-            ref = refs.make(epoch, "param", t, d, k), device = device.display_name ~= "" and device.display_name or device.name,
-            parameter = parameter.name, playmode = PLAYMODE_NAMES[automation.playmode] or "linear", points = array(points),
-            valueMin = parameter.value_min, valueMax = parameter.value_max,
-          }
+          fn(d, k, device, parameter, automation)
+          left = left - 1
+          if left == 0 then return end
         end
       end
     end
   end
+end
+
+-- M4 (n-song): the automation of a pattern's track, as the automation-write kind takes it: per automated parameter its ref,
+-- names, play mode and points (time in lines from 0, value 0 to 1 of the parameter's range).
+local PLAYMODE_NAMES = { "points", "linear", "curves" }
+function M.envelopes(song, epoch, p, t)
+  local track, pattern_track, out = song:track(t), song:pattern(p):track(t), {}
+  M.each_automation(track, pattern_track, function(d, k, device, parameter, automation)
+    local points = {}
+    for i, point in ipairs(automation.points) do points[i] = { time = point.time - 1, value = point.value, scaling = point.scaling } end
+    table.sort(points, function(a, b) return a.time < b.time end)
+    out[#out + 1] = {
+      ref = refs.make(epoch, "param", t, d, k), device = device.display_name ~= "" and device.display_name or device.name,
+      parameter = parameter.name, playmode = PLAYMODE_NAMES[automation.playmode] or "linear", points = array(points),
+      valueMin = parameter.value_min, valueMax = parameter.value_max,
+    }
+  end)
   return out
 end
 

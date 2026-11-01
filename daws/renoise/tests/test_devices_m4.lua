@@ -1091,6 +1091,27 @@ test("devices m4: Renoise's undo of Kumi's change inside an instrument is still 
   end)
 end)
 
+test("devices m4: a macro map's undo says so when its instrument was deleted or can't be followed, as for a record of an older tool", function()
+  local _, peer = mapped_song()
+  local epoch = place(peer)
+  local record = change(peer, "instrument-macro-map", { ref = epoch .. ":instrument:1", macro = 1, set = { { mapping = 2, min = 0.25, max = 0.5 } } })
+  local kept = record.material.at
+  eq(kept.label, "Lead")
+  -- What an older tool kept: its own shape, which this one doesn't follow.
+  record.material.at = { n = 1, mark = kept.at[1].mark, label = "Lead" }
+  failure(restore(peer, "instrument-macro-map", record), "stale", "couldn't follow")
+  -- A mark from before what the tool remembers.
+  record.material.at = { of = kept.of, label = kept.label, at = { { n = 1, mark = "from another run" } } }
+  failure(restore(peer, "instrument-macro-map", record), "stale", "couldn't follow")
+  -- The instrument deleted since: named by what it was called.
+  record.material.at = kept
+  mock.song:insert_instrument_at(2)
+  mock.song:delete_instrument_at(1)
+  local before = steps()
+  failure(restore(peer, "instrument-macro-map", record), "gone", "\226\128\156Lead\226\128\157 isn't in the song any more")
+  eq(steps(), before, "nothing written")
+end)
+
 test("devices m4: a macro's mappings get their ranges and scaling in one step, and Kumi's undo writes back what they were", function()
   local _, peer = mapped_song()
   local epoch = place(peer)
@@ -1269,15 +1290,20 @@ test("devices m4: a native device's settings are saved as a preset in the user l
   end
   local done, err = pcall(function()
     local epoch, layout = place(peer)
-    local function save(d, name, replace)
-      return call(peer, "preset_save", { ref = epoch .. ":device:1." .. d, name = name, replace = replace, epoch = epoch, layout = layout })
+    local function save(d, name, replace, library)
+      return call(peer, "preset_save", { ref = epoch .. ":device:1." .. d, name = name, replace = replace, epoch = epoch, layout = layout, library = library })
     end
+    local moved = home .. "/OneDrive/Documents/Renoise/User Library"
     failure(save(2, "Bright"), "failed", "user library")
+    -- Neither there: it's the host's folder that's named.
+    failure(save(2, "Bright", nil, moved), "failed", "OneDrive")
     os.execute("mkdir -p '" .. home .. "/Documents/Renoise/User Library'")
     local saved = save(2, "Bright")
     ok(saved.result, json.encode(saved.error or {}))
     eq(saved.result.file, home .. "/Documents/Renoise/User Library/Effect Presets/EQ 5/Bright.xrdp")
-    ok(saved.result.note:find("Effect Presets/EQ 5", 1, true) and saved.result.note:find("preferences", 1, true), "where it went, said (#361 N-N8)")
+    ok(saved.result.note:find("Effect Presets/EQ 5", 1, true), "where it went, said (#361 N-N8)")
+    -- The host's folder isn't there (a Renoise that didn't follow Documents): the home folder's.
+    eq(save(2, "Fallback", nil, moved).result.file, home .. "/Documents/Renoise/User Library/Effect Presets/EQ 5/Fallback.xrdp")
     local f = assert(io.open(saved.result.file, "rb"))
     eq(f:read("*a"), mock.song:track(1):device(2).active_preset_data, "its preset data")
     f:close()
@@ -1289,6 +1315,11 @@ test("devices m4: a native device's settings are saved as a preset in the user l
     failure(save(4, "Long"), "bad-params", "plug%-in")
     failure(save(2, "../x"), "bad-params", "name")
     failure(save(2, "a:b"), "bad-params", "name")
+    -- The host's folder is there: it wins over the home folder's.
+    os.execute("mkdir -p '" .. moved .. "'")
+    eq(save(2, "Bright", nil, moved).result.file, moved .. "/Effect Presets/EQ 5/Bright.xrdp")
+    -- And a tool under an older host, which says nothing, still takes the home folder's.
+    eq(save(2, "Older").result.file, home .. "/Documents/Renoise/User Library/Effect Presets/EQ 5/Older.xrdp")
     eq(steps(), 0)
   end)
   os.getenv = real_getenv

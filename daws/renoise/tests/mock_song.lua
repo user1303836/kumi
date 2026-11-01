@@ -239,9 +239,10 @@ local function line(data, ctx)
     end
     return true
   end
-  return object("renoise.PatternLine", {
+  local proxy = object("renoise.PatternLine", {
     note_column = function(_, c)
       if type(c) ~= "number" or c < 1 or c > 12 then out_of_range("note column", c) end
+      M.column_reads = (M.column_reads or 0) + 1
       local w = ctx and {
         peek = function() return ((ctx.current() or {}).notes or {})[c] or empty_note() end,
         cell = function()
@@ -256,6 +257,7 @@ local function line(data, ctx)
     end,
     effect_column = function(_, c)
       if type(c) ~= "number" or c < 1 or c > 8 then out_of_range("effect column", c) end
+      M.column_reads = (M.column_reads or 0) + 1
       local w = ctx and {
         peek = function() return ((ctx.current() or {}).effects or {})[c] or { number = 0, amount = 0 } end,
         cell = function()
@@ -269,6 +271,21 @@ local function line(data, ctx)
       return effect_column((now().effects or {})[c] or { number = 0, amount = 0 }, w)
     end,
   }, { is_empty = empty })
+  -- As Renoise 3.5.4 writes one (lab 2026-11-01): all 12 note columns and all 8 effect columns, hidden ones too, between " | ".
+  getmetatable(proxy).__tostring = function()
+    local d, cells = now(), {}
+    for c = 1, 12 do
+      local n = note_column((d.notes or {})[c] or empty_note())
+      cells[c] = n.note_string .. n.instrument_string .. n.volume_string .. n.panning_string .. n.delay_string
+        .. n.effect_number_string .. n.effect_amount_string
+    end
+    for c = 1, 8 do
+      local e = effect_column((d.effects or {})[c] or { number = 0, amount = 0 })
+      cells[12 + c] = e.number_string .. e.amount_string
+    end
+    return table.concat(cells, " | ")
+  end
+  return proxy
 end
 
 -- Devices

@@ -2,3 +2,4 @@
 
 mod provider;
 mod renoise_device_actions;
+mod songs;

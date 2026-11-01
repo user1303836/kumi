@@ -5,10 +5,10 @@ use super::{
     features::MeasureOptions,
     learn::{PresetEntry, SetEntry, SoundEntry},
     search::{
-        describe_track, search_presets, search_sets, LikeSound, PresetHit, PresetQuery, SearchResult, SetQuery, SoundHit, SoundIndex,
-        SoundQuery,
+        describe_device, describe_track, search_presets, search_sets, LikeSound, PresetHit, PresetQuery, SearchResult, SetQuery, SoundHit,
+        SoundIndex, SoundQuery,
     },
-    sets::{Clips, SetSummary, SetTrack},
+    sets::{Clips, SetSummary, SetTrack, TrackKind},
     sources::basename,
     store::unpack_vector,
 };
@@ -123,6 +123,7 @@ pub(crate) const LIBRARY_PHRASES: &[AssetPhrase] = &[
         count: 1,
         said: |p| format!("or give set (a path from a result, or a {0}'s name) for that {0}:", p.words.place),
     },
+    AssetPhrase { live: "every track with its devices in order, colour, clips and the samples it plays", count: 1, said: |p| p.vocab.project_parts.into() },
     AssetPhrase { live: "the bass from my Night Drive Set", count: 1, said: |p| format!("the bass from my Night Drive {}", p.words.place) },
     AssetPhrase { live: "Every word must be in the Set: its name", count: 1, said: |p| format!("Every word must be in the {}: its name", p.words.place) },
     AssetPhrase { live: "A Set's path (from a result) or name", count: 1, said: |p| format!("A {}'s path (from a result) or name", p.words.place) },
@@ -518,6 +519,9 @@ impl LibraryTool {
             if let Some(made_in) = set.live.as_ref().or(set.made_in.as_ref()).filter(|s| !s.is_empty()) {
                 response["madeIn"] = json!(made_in);
             }
+            if let Some(instruments) = set.instruments.as_ref().filter(|i| !i.is_empty()) {
+                response["instruments"] = json!(instruments.iter().map(describe_device).collect::<Vec<_>>());
+            }
             if let Some(main) = set.main.as_ref().filter(|m| !m.devices.is_empty()) {
                 response["main"] = describe_track(main)["devices"].clone();
             }
@@ -541,11 +545,18 @@ impl LibraryTool {
     }
 }
 /// A track of a project: another DAW's says nothing of clips it has none of (a Renoise track never has; "no clips" would
-/// read as an empty track).
+/// read as an empty track), nor that it's a MIDI track or a return, which are Live's words for what it may not be (Renoise
+/// has no MIDI tracks; `returns` says what a send is).
 fn describe_in(set: &SetSummary, track: &SetTrack) -> Value {
     let mut row = describe_track(track);
-    if set.daw.is_some() && track.clips == Clips::default() {
-        row.as_object_mut().unwrap().remove("clips");
+    if set.daw.is_some() {
+        let row = row.as_object_mut().unwrap();
+        if track.clips == Clips::default() {
+            row.remove("clips");
+        }
+        if matches!(track.kind, TrackKind::Midi | TrackKind::Return) {
+            row.remove("kind");
+        }
     }
     row
 }

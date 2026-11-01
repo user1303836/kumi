@@ -112,7 +112,7 @@ prop {
 -- `with`, the other tracks to hear alone with it, are turned Active with what each plays through (Renoise's own solo of each
 -- says what that is). Neither mute nor solo is an undo step.
 
-local SOLO_ROUNDS = 64 -- (un-solo rounds: a solo takes two at most, the first making a track soloed along with another the soloed one)
+local SOLO_ROUNDS = rows.SOLO_ROUNDS
 
 local function solo_snapshot(song)
   local out = {}
@@ -127,16 +127,12 @@ end
 
 -- What the fence keeps of a snapshot: a fingerprint of every track's place, name, mute and solo.
 local function solo_print(list)
-  local a, b = 5381, 0
+  local parts = {}
   for _, e in ipairs(list) do
     local text = string.format("%d:%s:%d:%s|", e.t, e.id, e.mute, e.solo and "1" or "0")
-    for i = 1, #text do
-      local byte = text:byte(i)
-      a = (a * 33 + byte) % 4294967296
-      b = (b * 65599 + byte) % 4294967296
-    end
+    parts[#parts + 1] = text
   end
-  return string.format("%08x%08x", a, b)
+  return base.hash(table.concat(parts))
 end
 
 -- The tracks that read soloed now, as a set and as a key ("2,6").
@@ -152,22 +148,7 @@ local function soloed_now(song)
   return set, table.concat(key, ",")
 end
 
--- Every solo taken away (Renoise turns every track Active); false when one stays.
-local function unsolo_all(song)
-  for _ = 1, SOLO_ROUNDS do
-    local first
-    for t = 1, rows.track_count(song) do
-      local track = song:track(t)
-      if not is_master(track) and track.solo_state then
-        first = track
-        break
-      end
-    end
-    if not first then return true end
-    first.solo_state = false
-  end
-  return false
-end
+local unsolo_all = rows.unsolo_all
 
 -- Whether track `t` has the mute and solo of `state` ({mute, solo}).
 local function solo_holds(song, t, state)

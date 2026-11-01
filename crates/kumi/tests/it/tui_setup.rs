@@ -12,7 +12,10 @@ use kumi::tui::{
     style::ColorDepth,
 };
 use kumi_common::abort::Signal;
-use kumi_daw::{provider::Installed as LiveInstalled, setup::DawSetup as LiveSetup};
+use kumi_daw::{
+    provider::Installed as LiveInstalled,
+    setup::{DawSetup as LiveSetup, Reopens},
+};
 use models::FakeModels;
 use serde_json::json;
 use std::{
@@ -50,6 +53,8 @@ struct FakeLive {
     looked: Cell<usize>,
     /// The saved Set open in Live, as the session read it.
     set: RefCell<Option<String>>,
+    /// What Live opens by itself as it starts.
+    reopens: Cell<Reopens>,
     /// Live runs on this computer (not Linux).
     here: Cell<bool>,
     /// The terminal macOS names when it asks whether Kumi may control Live.
@@ -74,6 +79,7 @@ impl FakeLive {
             found: RefCell::new(vec![LiveInstalled::Ready]),
             looked: Cell::new(0),
             set: RefCell::default(),
+            reopens: Cell::new(Reopens::Unknown),
             here: Cell::new(true),
             permission: RefCell::default(),
             menu: RefCell::default(),
@@ -169,6 +175,9 @@ impl LiveSetup for FakeLive {
     }
     fn open_set(&self) -> Option<String> {
         self.set.borrow().clone()
+    }
+    fn reopens(&self) -> Reopens {
+        self.reopens.get()
     }
     fn here(&self) -> bool {
         self.here.get()
@@ -882,6 +891,57 @@ case!(a_restart_opens_the_set_again_or_says_where_it_is, async {
     h.wait_for("waiting for Live").await;
     assert!(!said(&h).contains("Open Recent"));
     h.close().await;
+});
+
+case!(what_the_restart_says_goes_by_what_the_daw_opens_by_itself, async {
+    const FRONT: &str = "Live opens the Set you had in front, if you saved it; it lists any others with its recent Sets.";
+    // The DAW brings it all back: nothing to find, on the step or once setup ends.
+    let live = FakeLive::new(true);
+    live.reopens.set(Reopens::Everything);
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.wait_for("Restart Live now").await;
+    h.type_text("\r").await;
+    h.wait_for("waiting for Live").await;
+    h.connect();
+    h.wait_for("You're set.").await;
+    h.type_text("\r").await;
+    h.wait_until_hidden("You're set.").await;
+    assert!(!said(&h).contains("Open Recent"), "{}", said(&h));
+    assert!(!said(&h).contains("in front"), "{}", said(&h));
+    h.close().await;
+    // It brings back the project in front alone: where the others are, and it doesn't say the rest comes back.
+    let live = FakeLive::new(true);
+    live.reopens.set(Reopens::Front);
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.wait_for("Restart Live now").await;
+    h.type_text("\r").await;
+    h.wait_for("waiting for Live").await;
+    wait_for_said(&h, FRONT).await;
+    assert!(!said(&h).contains("Open Recent"), "{}", said(&h));
+    h.close().await;
+    // The same when the step is put off after the install failed, for each answer.
+    for (reopens, words) in [
+        (Reopens::Everything, "Live is opening again."),
+        (Reopens::Front, &*format!("Live is opening again. {FRONT}")),
+        (Reopens::Unknown, "Live is opening again. If you saved your Set, it's in Live's File › Open Recent Set."),
+    ] {
+        let live = FakeLive::new(true);
+        live.reopens.set(reopens);
+        live.installs.borrow_mut().push(Err("disk full".into()));
+        let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+        h.start().await;
+        h.wait_for("Restart Live now").await;
+        h.type_text("\r").await;
+        h.wait_for("Try again").await;
+        h.type_text("\x1b[B\r").await;
+        wait_for_said(&h, words).await;
+        if reopens == Reopens::Everything {
+            assert!(!said(&h).contains("Open Recent"), "{}", said(&h));
+        }
+        h.close().await;
+    }
 });
 
 case!(a_live_12_that_isnt_here_or_never_opened_is_said_before_anything_is_installed, async {

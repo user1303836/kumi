@@ -827,6 +827,7 @@ fn set_entry() -> SetEntry {
             live: Some("12.2".into()),
             daw: None,
             made_in: None,
+            instruments: None,
         }),
         error: None,
     }

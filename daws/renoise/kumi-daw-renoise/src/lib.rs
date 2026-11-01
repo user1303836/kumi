@@ -12,6 +12,7 @@ mod lines;
 mod listening;
 mod mapping;
 mod provider;
+pub mod songs;
 mod variations;
 
 use kumi_agent::core::{
