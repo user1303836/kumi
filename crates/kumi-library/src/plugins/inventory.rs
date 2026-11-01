@@ -677,7 +677,7 @@ pub fn is_limiter_name(name: &str) -> bool {
         // loudness/limiter products qualify without reading their internal signal path.
         matches!(
             p.info.plugin.as_str(),
-            "softube-weiss-mm-1-mastering-maximizer" | "zynaptiq-loud-1" | "fabfilter-pro-l" | "fabfilter-pro-l-1" | "fabfilter-pro-l-2"
+            "softube-weiss-mm-1-mastering-maximizer" | "zynaptiq-loud-1" | "fabfilter-pro-l-1" | "fabfilter-pro-l-2"
         )
     }) || matches!(name_key.as_str(), "fabfilterprol2" | "prol2")
 }
@@ -807,7 +807,7 @@ mod tests {
     fn fabfilter_limiter_classification_excludes_compressors_and_other_processors() {
         let mut limiters = 0;
         for format in builtins().iter().filter(|p| p.info.family == "fabfilter") {
-            let is_limiter = matches!(format.info.plugin.as_str(), "fabfilter-pro-l" | "fabfilter-pro-l-1" | "fabfilter-pro-l-2");
+            let is_limiter = matches!(format.info.plugin.as_str(), "fabfilter-pro-l-1" | "fabfilter-pro-l-2");
             limiters += usize::from(is_limiter);
             for class in &format.info.ids.vst3 {
                 assert_eq!(is_limiter_name(&class.name), is_limiter, "{}", class.name);

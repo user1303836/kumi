@@ -51,7 +51,10 @@ synthetic fixtures; they never require an installed plug-in, a running DAW or a 
   grant writes to unverified versions.
 - Native `.ffp` files use a separate conversion check. Their signatures, schema versions and parameter
   counts must match captured layouts. Native values can use a different scale from VST3 state, notably
-  One's normalized parameter array. Unverified conversions are rejected rather than guessed.
+  One's normalized parameter array. Copied controls are checked against their measured ranges and options;
+  captured initialization-only sentinels remain read-only. Unverified conversions are rejected rather than guessed.
+  Import uses the source filename as its display name unless a name is supplied explicitly. Verified native
+  author/description fields are retained; an imported preset never inherits the template's factory credits.
 - No FabFilter binary, installer, license or factory preset is bundled. The files under `fixtures/` are
   initialized states and synthetic test inputs. Existing manufacturer independence and trademark notices
   above apply to FabFilter as well.
@@ -124,7 +127,10 @@ plugin-formats/
   each retains its own identity and initialized state. The build compacts and compresses JSON and initialized
   VST3 resources; repository fixtures remain standard `.vstpreset` files. Each bundled resource is decoded
   within the same size limit as its reader. Version-specific templates share one control schema where the
-  measured controls agree.
+  measured controls agree. Identical version captures reuse the primary template only with recorded equivalence.
+  `field_defaults` shares field units and file kinds; `options_ref` names a format's `option_tables` entry.
+  These tables share memory after loading, while the public catalog still exposes complete field metadata.
+  Range evidence can share mapping tables without dropping any field's endpoint or reload observations.
 - **No vendor content.** Factory presets, wavetables and samples stay on the machine they were installed on.
   The survey below reads them where they lie and keeps only counts, types, ranges and option-like values.
 - **Evidence stays explicit.** Learn from files, behaviour and normal host APIs by default. Disassembling or
@@ -154,6 +160,11 @@ New presets receive a fresh random UUID; edits retain the source identity.
 The additional initialized VST3 captures were made on 2026-10-27. Ozone's `fixtures/defaults/` holds one
 state per class; each other verified product has its own initialized state. Blank SD3 state contains no
 sample library. Runtime evidence and editable-field checks are recorded beside each product's structure.
+
+FabFilter's native `.ffp` test fixtures are constructed from the initialized VST3 controls, with a deliberately
+changed measured control and synthetic author/description metadata where supported. They are distinct test
+patches, not copies of installed default preset files. Each product records construction steps and exact
+changes in `verified.json`; native signatures and layouts were learned from external `.ffp` files.
 
 The Serum 2 controller states name the preset's full path (`selectedPresetPath`), which held the machine's
 user folder. That one string was replaced by one of the same length and the controller's body recompressed,

@@ -233,7 +233,7 @@ impl PluginTool {
                 if edits.len() > 512 {
                     return Err("At most 512 edits per preset".into());
                 }
-                let options = preset::WriteOptions {
+                let mut options = preset::WriteOptions {
                     version: version.into(),
                     class_id: matches[0].class_id.clone(),
                     name: string("name").map(str::to_string),
@@ -241,7 +241,19 @@ impl PluginTool {
                 let result = if action == "create" {
                     preset::create(plugin, &options, &edits)
                 } else {
-                    preset::edit(plugin, &read_file(Path::new(required("input")?), plugin)?, &options, &edits)
+                    let source = Path::new(required("input")?);
+                    let bytes = read_file(source, plugin)?;
+                    if options.name.is_none()
+                        && !bytes.starts_with(b"VST3")
+                        && structure::builtin(plugin).is_some_and(|format| format.info.family == "fabfilter")
+                    {
+                        let name =
+                            source.file_stem().and_then(|stem| stem.to_str()).ok_or("Supply a display name for this native preset")?;
+                        kumi_library::plugins::formats::write_value::validate_display_name(name)
+                            .map_err(|error| format!("Native preset filename: {error}; supply an explicit name"))?;
+                        options.name = Some(name.into());
+                    }
+                    preset::edit(plugin, &bytes, &options, &edits)
                 }
                 .map_err(|e| e.to_string())?;
                 let bytes = result.write();
@@ -362,6 +374,60 @@ impl KernelTool for PluginTool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fabfilter_native_import_uses_a_validated_filename_stem_unless_named_explicitly() {
+        use kumi_library::plugins::formats::{vstpreset::VstPreset, xml};
+
+        let temp = tempfile::tempdir().unwrap();
+        let plugin = "fabfilter-pro-q-4";
+        let format = structure::builtin(plugin).unwrap();
+        let resources = temp.path().join("Pro-Q 4.vst3/Contents/Resources");
+        std::fs::create_dir_all(&resources).unwrap();
+        std::fs::write(
+            resources.join("moduleinfo.json"),
+            serde_json::to_vec(&json!({"Classes":[{
+                "Name":"Pro-Q 4", "CID":format.info.ids.vst3[0].id,
+                "Category":"Audio Module Class", "Version":format.verified.writes[0].version
+            }]}))
+            .unwrap(),
+        )
+        .unwrap();
+        let source = temp.path().join("Warm Bus.ffp");
+        let native = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/fabfilter-pro-q-4/format-1/fixtures/init.ffp"));
+        std::fs::write(&source, native).unwrap();
+        let tool = tool(temp.path());
+        let request = json!({"action":"edit","plugin":plugin,"input":source,"output":"Converted.vstpreset"});
+        let check_name = |path: &Path, expected: &str| {
+            let container = VstPreset::read(&std::fs::read(path).unwrap()).unwrap();
+            let controller = container.controller().unwrap();
+            let length = u32::from_le_bytes(controller[8..12].try_into().unwrap()) as usize;
+            assert_eq!(std::str::from_utf8(&controller[12..12 + length]).unwrap(), expected);
+            let metadata = xml::parse(std::str::from_utf8(container.chunk("Info").unwrap()).unwrap()).unwrap();
+            let name = metadata.root.children.iter().find(|child| child.attribute("id") == Some("Name")).unwrap();
+            assert_eq!(name.attribute("value"), Some(expected));
+        };
+        tool.run(&input(request.clone())).unwrap();
+        check_name(&tool.output.join("Converted.vstpreset"), "Warm Bus");
+        let mut explicit = request.clone();
+        explicit["name"] = json!("My Δ Bus");
+        explicit["output"] = json!("Explicit.vstpreset");
+        tool.run(&input(explicit)).unwrap();
+        check_name(&tool.output.join("Explicit.vstpreset"), "My Δ Bus");
+        let mut existing = request.clone();
+        existing["input"] = json!(tool.output.join("Converted.vstpreset"));
+        existing["output"] = json!("Edited.vstpreset");
+        tool.run(&input(existing)).unwrap();
+        check_name(&tool.output.join("Edited.vstpreset"), "Warm Bus");
+        let invalid = temp.path().join("Bad..Name.ffp");
+        std::fs::write(&invalid, native).unwrap();
+        let mut bad = request;
+        bad["input"] = json!(invalid);
+        bad["output"] = json!("Bad.vstpreset");
+        assert!(tool.run(&input(bad)).unwrap_err().contains("supply an explicit name"));
+        assert!(!tool.output.join("Bad.vstpreset").exists());
+    }
+
     #[test]
     fn installed_search_finds_fabfilter_by_vendor_when_host_names_omit_it() {
         let temp = tempfile::tempdir().unwrap();

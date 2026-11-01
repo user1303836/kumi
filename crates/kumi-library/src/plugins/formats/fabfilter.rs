@@ -45,6 +45,7 @@ struct TextDocument {
     schema: u32,
     parameters: BTreeMap<String, Range<usize>>,
     edits: BTreeMap<String, f32>,
+    metadata: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -156,7 +157,13 @@ impl FabFilterPreset {
                     return Err(error("invalid native conversion interval"));
                 }
                 let scale = NativeScale { minimum, maximum, steps };
-                scale.plain(source.value(index).ok_or_else(|| error("missing native slot"))?)?;
+                let name = indices
+                    .iter()
+                    .find_map(|(name, position)| (*position == index).then_some(name))
+                    .ok_or_else(|| error(&format!("native parameter {index} has no verified field")))?;
+                scale
+                    .plain(source.value(index).ok_or_else(|| error("missing native slot"))?)
+                    .map_err(|why| error(&format!("parameters/{name}: {why}")))?;
                 native_scales.insert(index, scale);
             }
         }
@@ -265,18 +272,24 @@ impl FabFilterPreset {
         let Document::Floats(target) = &mut template.document else { unreachable!() };
         match &self.document {
             Document::Floats(source) => {
+                let names: BTreeMap<_, _> = self.indices.iter().map(|(name, index)| (*index, name.as_str())).collect();
                 for index in 0..source.count {
+                    let name = names.get(&index).ok_or_else(|| error(&format!("native parameter {index} has no verified field")))?;
                     let value = source.value(index).ok_or_else(|| error("missing native parameter"))?;
                     let value = match self.native_scales.get(&index) {
                         Some(scale) => scale.plain(value)?,
                         None => value,
                     };
+                    self.validate_native_value(name, value, target.value(index))?;
                     target.set(index, value)?;
                 }
             }
             Document::Text(source) => {
                 for name in source.parameters.keys() {
-                    target.set(self.indices[name], source.value(name).ok_or_else(|| error("missing native parameter"))?)?;
+                    let index = self.indices[name];
+                    let value = source.value(name).ok_or_else(|| error("missing native parameter"))?;
+                    self.validate_native_value(name, value, target.value(index))?;
+                    target.set(index, value)?;
                 }
             }
         }
@@ -284,6 +297,27 @@ impl FabFilterPreset {
             template.rename(name)?;
         }
         template.write()
+    }
+
+    fn validate_native_value(&self, name: &str, value: f32, initialized: Option<f32>) -> Result<(), FormatError> {
+        let validation = write_value::validate_scalar(&self.plugin, &format!("parameters/{name}"), &Value::from(f64::from(value)));
+        if validation.is_ok() {
+            return Ok(());
+        }
+        // Two measured Twin 3 MIDI inputs use initialized sentinels outside the
+        // editable host range. Only explicitly cataloged values that are also
+        // byte-identical to this version's initialization may pass unchanged.
+        let preserved_default = initialized.is_some_and(|initial| initial.to_bits() == value.to_bits())
+            && constants(format(&self.plugin)?, "state")?
+                .get("native_read_only_defaults")
+                .and_then(|values| values.get(name))
+                .and_then(Value::as_array)
+                .is_some_and(|values| values.iter().any(|entry| entry.as_f64().is_some_and(|n| (n as f32).to_bits() == value.to_bits())));
+        if preserved_default {
+            Ok(())
+        } else {
+            validation
+        }
     }
 
     /// Native presets may use an older parameter scale even when their array has
@@ -305,7 +339,14 @@ impl FabFilterPreset {
     /// the float array. Those belong in the controller, not in FFBS's private
     /// suffix. Preserve the entire native extension block and the template UI.
     pub fn to_controller(&self, template: &[u8]) -> Result<Vec<u8>, FormatError> {
-        let Document::Floats(source) = &self.document else { return Ok(template.into()) };
+        let source = match &self.document {
+            Document::Floats(source) => source,
+            Document::Text(source) => {
+                self.check_native_conversion()?;
+                check_controller(&self.plugin, template, template)?;
+                return source.to_controller(template);
+            }
+        };
         if is_component(&source.bytes) {
             return Ok(template.into());
         }
@@ -428,6 +469,7 @@ impl TextDocument {
         let mut signature = None;
         let mut schema = None;
         let mut parameters = BTreeMap::new();
+        let mut metadata = BTreeMap::new();
         let mut offset = 0;
         for (number, line) in text.split_inclusive('\n').enumerate() {
             if number >= MAX_DECODED_ITEMS {
@@ -453,6 +495,9 @@ impl TextDocument {
                     ("Preset", "Version") => {
                         schema = Some(value.parse().map_err(|_| error("invalid native schema"))?);
                     }
+                    ("Preset", "Author" | "Description") => {
+                        metadata.insert(key.to_ascii_uppercase(), value.into());
+                    }
                     ("Parameters", _) => {
                         float(value.parse::<f64>().map_err(|_| error("native parameter is not numeric"))?)?;
                         let equals = line.find('=').ok_or_else(|| error("missing native value separator"))?;
@@ -473,6 +518,7 @@ impl TextDocument {
             schema: schema.ok_or_else(|| error("missing native schema"))?,
             parameters,
             edits: BTreeMap::new(),
+            metadata,
         })
     }
 
@@ -498,6 +544,41 @@ impl TextDocument {
             return Err(error("edited native text exceeds the size limit"));
         }
         Ok(bytes)
+    }
+
+    fn to_controller(&self, template: &[u8]) -> Result<Vec<u8>, FormatError> {
+        let range = controller_extensions(template)?;
+        let end = custom_values_end(template, range.start, true)?;
+        let mut entries = Vec::new();
+        let mut position = range.start + 12;
+        for _ in 0..le(template, range.start + 8)? {
+            let key = custom_string(template, &mut position)?;
+            let value = custom_string(template, &mut position)?;
+            if !matches!(key, "AUTHOR" | "DESCRIPTION") {
+                entries.push((key, value));
+            }
+        }
+        entries.extend(self.metadata.iter().map(|(key, value)| (key.as_str(), value.as_str())));
+        if entries.len() > MAX_DECODED_ITEMS {
+            return Err(error("converted metadata exceeds the item limit"));
+        }
+        let mut output = template[..range.start].to_vec();
+        output.extend_from_slice(b"CuSV\x01\0\0\0");
+        output.extend_from_slice(&(entries.len() as u32).to_le_bytes());
+        for (key, value) in entries {
+            for text in [key, value] {
+                output.extend_from_slice(&(text.len() as u32).to_le_bytes());
+                output.extend_from_slice(text.as_bytes());
+            }
+        }
+        // Missing source metadata stays missing; it must not acquire the
+        // initialized factory author's identity or description. Other private
+        // controller values, tuning, and editor state remain byte-exact.
+        output.extend_from_slice(&template[end..]);
+        if output.len() > MAX_DECODED_BYTES {
+            return Err(error("converted controller exceeds the size limit"));
+        }
+        Ok(output)
     }
 }
 
@@ -589,25 +670,26 @@ fn custom_values_end(bytes: &[u8], at: usize, check_resources: bool) -> Result<u
     let mut position = at + 12;
     let mut keys = BTreeSet::new();
     for _ in 0..count {
-        let mut key = "";
-        for field in 0..2 {
-            let length = le(bytes, position)? as usize;
-            position += 4;
-            let end = position.checked_add(length).ok_or_else(|| error("native extension length overflow"))?;
-            let value = bytes.get(position..end).ok_or_else(|| error("truncated native extension string"))?;
-            let value = std::str::from_utf8(value).map_err(|_| error("native extension string is not UTF-8"))?;
-            if field == 0 {
-                if !keys.insert(value) {
-                    return Err(error("duplicate native extension key"));
-                }
-                key = value;
-            } else if check_resources {
-                check_resource_path(key, value)?;
-            }
-            position = end;
+        let key = custom_string(bytes, &mut position)?;
+        let value = custom_string(bytes, &mut position)?;
+        if !keys.insert(key) {
+            return Err(error("duplicate native extension key"));
+        }
+        if check_resources {
+            check_resource_path(key, value)?;
         }
     }
     Ok(position)
+}
+
+fn custom_string<'a>(bytes: &'a [u8], position: &mut usize) -> Result<&'a str, FormatError> {
+    let length = le(bytes, *position)? as usize;
+    *position += 4;
+    let end = position.checked_add(length).ok_or_else(|| error("native extension length overflow"))?;
+    let value = bytes.get(*position..end).ok_or_else(|| error("truncated native extension string"))?;
+    let value = std::str::from_utf8(value).map_err(|_| error("native extension string is not UTF-8"))?;
+    *position = end;
+    Ok(value)
 }
 
 fn check_resource_path(key: &str, value: &str) -> Result<(), FormatError> {
@@ -743,6 +825,45 @@ mod tests {
         let expected = String::from_utf8(text.to_vec()).unwrap().replace("-3.25", "2.5");
         assert_eq!(document.write().unwrap(), expected.as_bytes());
         assert_eq!(TextDocument::read(expected.as_bytes()).unwrap().value("Band 1 Gain"), Some(2.5));
+    }
+
+    #[test]
+    fn native_text_metadata_replacement_preserves_private_controller_values_and_extensions() {
+        use crate::plugins::{formats::vstpreset::VstPreset, templates};
+
+        let plugin = "fabfilter-pro-q-4";
+        let container = VstPreset::read(templates::initial(plugin).unwrap()).unwrap();
+        let controller = container.controller().unwrap();
+        let range = controller_extensions(controller).unwrap();
+        let mut template = controller[..range.start].to_vec();
+        template.extend_from_slice(b"CuSV\x01\0\0\0\x03\0\0\0");
+        for (key, value) in [("AUTHOR", "Template author"), ("DESCRIPTION", "Template description"), ("Private", "opaque\0value")] {
+            for text in [key, value] {
+                template.extend_from_slice(&(text.len() as u32).to_le_bytes());
+                template.extend_from_slice(text.as_bytes());
+            }
+        }
+        let opaque = b"unrecognized extension\0\xff";
+        template.extend_from_slice(opaque);
+        template.extend_from_slice(&controller[range.end..]);
+        let native = FabFilterPreset::read(
+            plugin,
+            b"[Preset]\nSignature=FQ4p\nVersion=4\nAuthor=Source author\nDescription=Source description\n[Parameters]\nBand 1 Gain=0\n",
+        )
+        .unwrap();
+        let converted = native.to_controller(&template).unwrap();
+        let end = custom_values_end(&converted, range.start, true).unwrap();
+        let original_end = custom_values_end(&template, range.start, true).unwrap();
+        assert_eq!(&converted[..range.start], &template[..range.start]);
+        assert_eq!(&converted[end..], &template[original_end..]);
+        let mut position = range.start + 12;
+        let mut values = BTreeMap::new();
+        for _ in 0..le(&converted, range.start + 8).unwrap() {
+            values.insert(custom_string(&converted, &mut position).unwrap(), custom_string(&converted, &mut position).unwrap());
+        }
+        assert_eq!(values.get("AUTHOR"), Some(&"Source author"));
+        assert_eq!(values.get("DESCRIPTION"), Some(&"Source description"));
+        assert_eq!(values.get("Private"), Some(&"opaque\0value"));
     }
 
     #[test]

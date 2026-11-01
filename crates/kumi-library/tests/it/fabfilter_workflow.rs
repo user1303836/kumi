@@ -1,5 +1,5 @@
 use kumi_library::plugins::{
-    formats::{structure, vstpreset::VstPreset},
+    formats::{structure, vstpreset::VstPreset, xml},
     preset::{self, Edit, WriteOptions},
     templates,
 };
@@ -9,6 +9,41 @@ fn record(format: &structure::PluginFormat) -> Value {
     let path =
         std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(format.info.format_directory()).join("verified.json");
     serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
+}
+
+fn word(bytes: &[u8], at: usize) -> usize {
+    u32::from_le_bytes(bytes[at..at + 4].try_into().unwrap()) as usize
+}
+
+fn assert_name(preset: &VstPreset, expected: &str) {
+    let info = xml::parse(std::str::from_utf8(preset.chunk("Info").expect("VST3 display metadata")).unwrap()).unwrap();
+    let name = info.root.children.iter().find(|child| child.name == "Attribute" && child.attribute("id") == Some("Name")).unwrap();
+    assert_eq!(name.attribute("value"), Some(expected), "VST3 Info name");
+    let component = preset.component().unwrap();
+    let state = if component.starts_with(b"FabF") { component } else { preset.controller().expect("FFBS controller display name") };
+    assert_eq!(std::str::from_utf8(&state[12..12 + word(state, 8)]).unwrap(), expected, "plug-in's internal preset name");
+}
+
+fn controller_metadata(controller: &[u8]) -> std::collections::BTreeMap<String, String> {
+    let mut position = 20 + word(controller, 8);
+    for _ in 0..2 {
+        position += 4 + word(controller, position);
+    }
+    assert_eq!(&controller[position..position + 8], b"CuSV\x01\0\0\0");
+    let count = word(controller, position + 8);
+    position += 12;
+    let mut entries = std::collections::BTreeMap::new();
+    for _ in 0..count {
+        let mut read = || {
+            let length = word(controller, position);
+            position += 4;
+            let text = std::str::from_utf8(&controller[position..position + length]).unwrap().to_owned();
+            position += length;
+            text
+        };
+        entries.insert(read(), read());
+    }
+    entries
 }
 
 #[test]
@@ -25,19 +60,29 @@ fn fabfilter_products_create_edit_inspect_and_preserve_host_state() {
             let initial = templates::initial_for_version(plugin, &options.version).or_else(|| templates::initial(plugin)).unwrap();
             assert_eq!(preset::edit(plugin, initial, &options, &[]).unwrap().write(), initial, "{plugin} {} no-op", options.version);
             options.name = Some("Kumi FabFilter 测试".into());
-            let mut generated = preset::create(plugin, &options, std::slice::from_ref(&edit)).unwrap();
+            let generated = preset::create(plugin, &options, std::slice::from_ref(&edit)).unwrap();
             assert!(format.has_id(&generated.class_id));
+            assert_name(&generated, options.name.as_deref().unwrap());
             let inspected = preset::inspect(plugin, &generated.write(), None).unwrap();
             let name = path.strip_prefix("parameters/").unwrap();
             let value = inspected["data"]["parameters"][name].as_f64().unwrap();
             let expected = edit.value.as_f64().unwrap();
             assert!((value - expected).abs() <= 1e-5 * expected.abs().max(1.0), "{plugin} {} readback", options.version);
-            generated.chunks.push(("Priv".into(), b"host-private data".to_vec()));
+            let mut existing = VstPreset::read(initial).unwrap();
+            existing.chunks.push(("Priv".into(), b"host-private data".to_vec()));
             options.name = None;
-            let controller = generated.controller().map(Vec::from);
-            let updated = preset::edit(plugin, &generated.write(), &options, std::slice::from_ref(&edit)).unwrap();
+            let component = existing.component().unwrap();
+            let offset = if component.starts_with(b"FabF") { 20 + word(component, 8) } else { 12 };
+            let at = offset + 4 * check["stored_index"].as_u64().unwrap() as usize;
+            let mut expected_component = component.to_vec();
+            expected_component[at..at + 4].copy_from_slice(&(expected as f32).to_le_bytes());
+            assert_ne!(component, expected_component, "{plugin} {} must exercise a real edit", options.version);
+            let updated = preset::edit(plugin, &existing.write(), &options, std::slice::from_ref(&edit)).unwrap();
+            assert_eq!(updated.component(), Some(expected_component.as_slice()), "{plugin}: more than the intended float slot changed");
             assert_eq!(updated.chunk("Priv"), Some(b"host-private data".as_slice()));
-            assert_eq!(updated.controller(), controller.as_deref(), "an unrelated edit changed controller metadata: {plugin}");
+            for (id, bytes) in existing.chunks.iter().filter(|(id, _)| id != "Comp") {
+                assert_eq!(updated.chunk(id), Some(bytes.as_slice()), "{plugin}: an unrelated edit changed {id}");
+            }
             assert!(preset::edit(plugin, generated.component().unwrap(), &options, &[]).is_err(), "bare component accepted: {plugin}");
             assert!(preset::inspect(plugin, generated.component().unwrap(), None).is_err());
             let invalid = [edit.clone(), Edit { path: "parameters/Invented setting".into(), value: json!(0.5) }];
@@ -48,6 +93,51 @@ fn fabfilter_products_create_edit_inspect_and_preserve_host_state() {
         products += 1;
     }
     assert_eq!(products, 25, "the current and legacy VST3 product families must all be covered");
+}
+
+#[test]
+fn native_imports_use_the_requested_name_and_source_author_through_the_public_workflow() {
+    for format in structure::builtins().iter().filter(|format| format.info.family == "fabfilter") {
+        let plugin = &format.info.plugin;
+        let path = std::path::Path::new(env!("KUMI_WORKSPACE"))
+            .join("plugin-formats")
+            .join(format.info.format_directory())
+            .join("fixtures/init.ffp");
+        let bytes = std::fs::read(path).unwrap();
+        let options = WriteOptions {
+            version: format.verified.writes[0].version.clone(),
+            name: Some("Imported Kumi 音".into()),
+            ..Default::default()
+        };
+        let imported = preset::edit(plugin, &bytes, &options, &[]).unwrap();
+        assert_name(&imported, options.name.as_deref().unwrap());
+        if imported.component().unwrap().starts_with(b"FFBS") {
+            let template = VstPreset::read(templates::initial(plugin).unwrap()).unwrap();
+            let before = controller_metadata(template.controller().unwrap());
+            let after = controller_metadata(imported.controller().unwrap());
+            assert_eq!(after.get("AUTHOR").map(String::as_str), Some("Kumi fixture author"), "{plugin}: source author lost");
+            assert_eq!(
+                after.get("DESCRIPTION").map(String::as_str),
+                Some("Synthetic test controls generated by Kumi."),
+                "{plugin}: source description lost"
+            );
+            assert_ne!(before.get("AUTHOR"), after.get("AUTHOR"), "{plugin}: fixture must exercise metadata replacement");
+        }
+    }
+}
+
+#[test]
+fn missing_native_text_metadata_does_not_inherit_the_template_author_or_description() {
+    let plugin = "fabfilter-pro-q-4";
+    let format = structure::builtin(plugin).unwrap();
+    let bytes = b"[Preset]\nSignature=FQ4p\nVersion=4\n[Parameters]\nBand 1 Gain=0\n";
+    let options =
+        WriteOptions { version: format.verified.writes[0].version.clone(), name: Some("Private preset".into()), ..Default::default() };
+    let imported = preset::edit(plugin, bytes, &options, &[]).unwrap();
+    let metadata = controller_metadata(imported.controller().unwrap());
+    assert!(!metadata.contains_key("AUTHOR"));
+    assert!(!metadata.contains_key("DESCRIPTION"));
+    assert_name(&imported, "Private preset");
 }
 
 #[test]

@@ -1,6 +1,26 @@
 use kumi_library::plugins::formats::{fabfilter, structure, vstpreset::VstPreset};
 use kumi_library::plugins::templates;
-use serde_json::json;
+use serde_json::{json, Value};
+
+fn fixture_component(format: &structure::PluginFormat, fixture: &str, component: &[u8]) -> Vec<u8> {
+    let path =
+        std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(format.info.format_directory()).join("verified.json");
+    let evidence: Value = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    let offset = if component.starts_with(b"FabF") { 20 + u32::from_le_bytes(component[8..12].try_into().unwrap()) as usize } else { 12 };
+    let mut expected = component.to_vec();
+    let mut changes = 0;
+    for edit in evidence["native"]["fixture_edits"].as_array().unwrap().iter().filter(|edit| edit["fixture"] == fixture) {
+        let from = edit["from"].as_f64().unwrap() as f32;
+        let value = edit["value"].as_f64().unwrap() as f32;
+        let at = offset + 4 * edit["stored_index"].as_u64().unwrap() as usize;
+        assert_eq!(f32::from_le_bytes(component[at..at + 4].try_into().unwrap()), from, "{} fixture source", format.info.plugin);
+        assert_ne!(from, value, "synthetic fixtures must deliberately differ from initialized controls");
+        expected[at..at + 4].copy_from_slice(&value.to_le_bytes());
+        changes += 1;
+    }
+    assert_eq!(changes, 1, "{} {fixture}: one measured synthetic control", format.info.plugin);
+    expected
+}
 
 #[test]
 fn every_fabfilter_initialized_state_and_controller_has_a_verified_layout() {
@@ -44,7 +64,7 @@ fn every_fabfilter_component_rejects_corrupt_headers_before_writing() {
 }
 
 #[test]
-fn initialized_native_presets_convert_without_losing_controls_or_controller_extensions() {
+fn synthetic_native_presets_convert_the_measured_changes_and_preserve_other_controls() {
     let mut checked = 0;
     for format in structure::builtins().iter().filter(|format| format.info.family == "fabfilter") {
         let plugin = &format.info.plugin;
@@ -57,9 +77,14 @@ fn initialized_native_presets_convert_without_losing_controls_or_controller_exte
         assert_eq!(native.write().unwrap(), bytes, "{plugin}: native no-op changed bytes");
         let container = VstPreset::read(templates::initial(plugin).unwrap()).unwrap();
         let component = container.component().unwrap();
-        assert_eq!(native.to_state(component).unwrap(), component, "{plugin}: native conversion changed initialized controls");
+        let expected = fixture_component(format, "init.ffp", component);
+        assert_eq!(native.to_state(component).unwrap(), expected, "{plugin}: native conversion changed an unrelated control");
         if let Some(controller) = container.controller() {
-            assert_eq!(native.to_controller(controller).unwrap(), controller, "{plugin}: native conversion lost controller metadata");
+            let converted = native.to_controller(controller).unwrap();
+            fabfilter::check_controller(plugin, &converted, controller).unwrap();
+            if controller.starts_with(b"FFed") {
+                assert_eq!(converted, controller, "{plugin}: legacy controller state changed");
+            }
         }
         let before = native.to_node();
         let parameters = before.get("parameters").unwrap();
@@ -115,7 +140,8 @@ fn one_native_normalized_controls_keep_the_same_physical_meaning_in_vst3() {
     let template = VstPreset::read(templates::initial(plugin).unwrap()).unwrap();
     let component = template.component().unwrap();
     let mut preset = fabfilter::FabFilterPreset::read(plugin, bytes).unwrap();
-    assert_eq!(preset.to_state(component).unwrap(), component, "the six controls absent from schema zero keep initialized defaults");
+    let expected = fixture_component(structure::builtin(plugin).unwrap(), "init-v0.ffp", component);
+    assert_eq!(preset.to_state(component).unwrap(), expected, "the six controls absent from schema zero keep initialized defaults");
     preset.set("parameters/Wave Form", &json!(2)).unwrap();
     preset.set("parameters/Pitch", &json!(-6)).unwrap();
     let native = preset.write().unwrap();
@@ -125,4 +151,62 @@ fn one_native_normalized_controls_keep_the_same_physical_meaning_in_vst3() {
     let parameters = converted.get("parameters").unwrap();
     assert_eq!(parameters.get("Wave Form").unwrap().as_f64(), Some(2.0));
     assert_eq!(parameters.get("Pitch").unwrap().as_f64(), Some(-6.0));
+}
+
+#[test]
+fn native_imports_validate_every_copied_value_even_without_requested_edits() {
+    use kumi_library::plugins::preset::{self, WriteOptions};
+
+    let plugin = "fabfilter-pro-q-4";
+    let format = structure::builtin(plugin).unwrap();
+    let options = WriteOptions { version: format.verified.writes[0].version.clone(), ..Default::default() };
+    let text = |value: &str| format!("[Preset]\nSignature=FQ4p\nVersion=4\n[Parameters]\nBand 1 Gain={value}\n");
+    let rejected = preset::edit(plugin, text("1e30").as_bytes(), &options, &[]).unwrap_err();
+    assert!(rejected.to_string().contains("parameters/Band 1 Gain"), "{rejected}");
+    let valid = preset::edit(plugin, text("3.5").as_bytes(), &options, &[]).unwrap();
+    let readback = preset::inspect(plugin, &valid.write(), None).unwrap();
+    assert_eq!(readback["data"]["parameters"]["Band 1 Gain"], json!(3.5));
+
+    let plugin = "fabfilter-pro-q-3";
+    let format = structure::builtin(plugin).unwrap();
+    let options = WriteOptions { version: format.verified.writes[0].version.clone(), ..Default::default() };
+    let source = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/fabfilter-pro-q-3/format-1/fixtures/init.ffp"));
+    for (name, value) in [("Band 1 Gain", 1e30_f32), ("Band 1 Used", 0.5)] {
+        let index = format.structure.files["state"].constants["parameter_indices"][name].as_u64().unwrap() as usize;
+        let mut bytes = source.to_vec();
+        bytes[12 + index * 4..16 + index * 4].copy_from_slice(&value.to_le_bytes());
+        let rejected = preset::edit(plugin, &bytes, &options, &[]).unwrap_err();
+        assert!(rejected.to_string().contains(&format!("parameters/{name}")), "{rejected}");
+    }
+    let mut native = fabfilter::FabFilterPreset::read(plugin, source).unwrap();
+    native.set("parameters/Band 1 Gain", &json!(-3.5)).unwrap();
+    native.set("parameters/Band 1 Used", &json!(1)).unwrap();
+    let valid = preset::edit(plugin, &native.write().unwrap(), &options, &[]).unwrap();
+    let readback = preset::inspect(plugin, &valid.write(), None).unwrap();
+    assert_eq!(readback["data"]["parameters"]["Band 1 Gain"], json!(-3.5));
+    assert_eq!(readback["data"]["parameters"]["Band 1 Used"], json!(1.0));
+}
+
+#[test]
+fn native_initialized_sentinels_require_the_explicit_field_and_exact_version_default() {
+    let plugin = "fabfilter-twin-3";
+    let format = structure::builtin(plugin).unwrap();
+    let source = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/fabfilter-twin-3/format-1/fixtures/init.ffp"));
+    let current = VstPreset::read(templates::initial(plugin).unwrap()).unwrap();
+    let native = fabfilter::FabFilterPreset::read(plugin, source).unwrap();
+    native.to_state(current.component().unwrap()).unwrap();
+    for (name, sentinel) in [("MIDI Source 6 Input", 6.0), ("MIDI Source 7 Input", 7.0)] {
+        let index = format.structure.files["state"].constants["parameter_indices"][name].as_u64().unwrap() as usize;
+        let mut bytes = source.to_vec();
+        assert_eq!(f32::from_le_bytes(bytes[12 + index * 4..16 + index * 4].try_into().unwrap()), sentinel);
+        bytes[12 + index * 4..16 + index * 4].copy_from_slice(&8_f32.to_le_bytes());
+        let invalid = fabfilter::FabFilterPreset::read(plugin, &bytes).unwrap();
+        let rejected = invalid.to_state(current.component().unwrap()).unwrap_err();
+        assert!(rejected.to_string().contains(name), "{rejected}");
+        let mut edit = native.clone();
+        assert!(edit.set(&format!("parameters/{name}"), &json!(sentinel)).is_err(), "an import sentinel became a writable option");
+    }
+    let older = VstPreset::read(templates::initial_for_version(plugin, "3.0.5.0").unwrap()).unwrap();
+    let rejected = native.to_state(older.component().unwrap()).unwrap_err();
+    assert!(rejected.to_string().contains("MIDI Source 6 Input"), "the selected version must initialize the same sentinel: {rejected}");
 }
