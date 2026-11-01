@@ -1411,6 +1411,10 @@ and your provider's own retention are separate.
   checks that each address is public before it connects, and a proxy would look
   the name up again where Kumi can't check it. On a network that lets only a
   proxy out, they can't read pages.
+- **ChatGPT** answers over one WebSocket connection to chatgpt.com that Kumi
+  keeps open while you work, so each step of an answer sends only what's new.
+  With a proxy, or on a network that won't open one, Kumi asks over HTTPS as
+  before.
 
 ## Files and settings
 

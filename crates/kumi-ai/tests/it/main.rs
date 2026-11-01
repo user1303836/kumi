@@ -11,4 +11,5 @@ mod ollama;
 mod pin_providers;
 mod quirks;
 mod rows;
+mod socket;
 mod table;
