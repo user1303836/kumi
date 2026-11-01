@@ -3,6 +3,8 @@
 //! outlet is for, its messages, its attributes and what to see also). A page is read from this machine's Max when
 //! it's asked for; none is carried in Kumi.
 
+use std::path::{Component, Path, PathBuf};
+
 use super::catalog::catalog;
 use super::reference::{atoms, Object, Reference};
 
@@ -64,8 +66,13 @@ impl Element {
     }
 }
 
+/// How deep a page's elements are read inside one another. Max's pages nest a few deep: one deeper isn't Max's, and
+/// what's done with a page (its text, a copy, letting it go) goes as deep as it does.
+const NESTING: usize = 64;
+
 /// A page's top element (its c74object), read as the pages are written: comments and declarations are passed over,
-/// a closing tag nothing opened is too, and what's left open at the end is closed. None for text with no element.
+/// a closing tag nothing opened is too, and what's left open at the end is closed. None for text with no element, or
+/// with elements nested deeper than [`NESTING`].
 pub fn read(text: &str) -> Option<Element> {
     let mut open: Vec<Element> = vec![Element::default()];
     let mut rest = text;
@@ -101,6 +108,8 @@ pub fn read(text: &str) -> Option<Element> {
             let element = element(inside);
             if empty {
                 open.last_mut()?.children.push(Node::Element(element));
+            } else if open.len() > NESTING {
+                return None;
             } else {
                 open.push(element);
             }
@@ -272,6 +281,20 @@ pub const LOOKS: [&str; 10] = ["Appearance", "Color", "Description", "Font", "Im
 pub const NO_MAX: &str = "Max wasn't found on this machine, so Kumi can't read its reference pages: \
 docs.cycling74.com/reference/<object>/ has them on the web.";
 
+/// What to say when KUMI_MAX is set and holds no Max: it's used alone, so it's the thing to fix. None when it isn't set.
+pub fn wrong_kumi_max() -> Option<String> {
+    let named = std::env::var_os("KUMI_MAX").filter(|named| !named.is_empty())?;
+    Some(format!(
+        "KUMI_MAX names no Max ({}): point it at Max's C74 folder or a Max that holds one, or unset it.",
+        Path::new(&named).display()
+    ))
+}
+
+/// What to say when there's no Max to read: why, if KUMI_MAX is why.
+pub fn no_max() -> String {
+    wrong_kumi_max().unwrap_or_else(|| NO_MAX.to_string())
+}
+
 /// A description cut to `most` characters at a word.
 fn brief(text: &str, most: usize) -> String {
     if text.chars().count() <= most {
@@ -283,6 +306,20 @@ fn brief(text: &str, most: usize) -> String {
 
 fn count(n: usize, what: &str) -> String {
     format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+}
+
+/// A page's text: its bytes as UTF-8, with any that aren't replaced (a page saved in Latin-1, say), so it's read
+/// rather than passed over. None when it can't be read.
+pub(crate) fn text_of(file: &Path) -> Option<String> {
+    std::fs::read(file).ok().map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
+/// Where a page kept with the reference is, in its C74 folder: folders and a file within it, never the folder itself or
+/// a way out of it (a reference.json changed since Kumi wrote it, say). None for no page.
+fn within(root: &Path, page: &str) -> Option<PathBuf> {
+    let page = Path::new(page);
+    let inside = page.components().all(|part| matches!(part, Component::Normal(_)));
+    (inside && !page.as_os_str().is_empty()).then(|| root.join(page))
 }
 
 /// What this machine's Max says of the objects boxes' texts name, a page for each.
@@ -301,12 +338,7 @@ pub fn describe(reference: &Reference, text: &str) -> String {
         let names = near.iter().map(|name| format!("[{name}]")).collect::<Vec<_>>().join(", ");
         return if near.is_empty() { format!("No [{class}] in this Max.") } else { format!("No [{class}] in this Max. Nearest: {names}.") };
     };
-    let read_page = |object: &Object| {
-        Some(&object.page)
-            .filter(|path| !path.is_empty())
-            .and_then(|path| std::fs::read_to_string(reference.root.join(path)).ok())
-            .and_then(|text| read(&text))
-    };
+    let read_page = |object: &Object| within(&reference.root, &object.page).and_then(|path| text_of(&path)).and_then(|text| read(&text));
     let own = read_page(object);
     // An object with modes ([zl lookup]) has a page for each that this Max writes as its own name (zl.lookup): one whose
     // page takes a mode message, or lists no argument. Where the first argument is a name ([dict view]), the word is
@@ -619,6 +651,11 @@ mod tests {
         assert_eq!(read("no element"), None);
         let cdata = read("<a>x <![CDATA[1 < 2 > 0 & y]]> z</a>").unwrap();
         assert_eq!(cdata.text(), "x 1 < 2 > 0 & y z", "a CDATA section is its text as written");
+        // Nested as deep as Kumi reads, and one deeper; and as deep as a page could make it, which isn't read at all.
+        let nested = |depth: usize| format!("{}x{}", "<a>".repeat(depth), "</a>".repeat(depth));
+        assert_eq!(read(&nested(NESTING)).map(|page| page.text()).as_deref(), Some("x"));
+        assert_eq!(read(&nested(NESTING + 1)), None);
+        assert_eq!(read(&"<a>".repeat(100_000)), None);
     }
 
     /// A page written for these tests (not Max's): an object that holds numbers back, its attributes' own attributes
@@ -684,6 +721,26 @@ mod tests {
             "boxes": [instance("pipe 100", 2, 1), instance("pipe 0 100", 2, 1), instance("pipe 0 0 100", 3, 2)] } });
         std::fs::write(c74.path().join("help").join("pipe.maxhelp"), help.to_string()).unwrap();
         c74
+    }
+
+    #[test]
+    fn a_kept_page_is_read_from_inside_maxs_folder_alone() {
+        let base = tempfile::tempdir().unwrap();
+        let c74 = base.path().join("C74");
+        let pages = c74.join("docs").join("refpages").join("max-ref");
+        std::fs::create_dir_all(&pages).unwrap();
+        std::fs::write(pages.join("pipe.maxref.xml"), PAGE).unwrap();
+        let outside = base.path().join("outside.maxref.xml");
+        std::fs::write(&outside, PAGE.replace("Hold numbers back", "Read from outside")).unwrap();
+        let mut reference = learn(&c74);
+        assert!(describe(&reference, "pipe").contains("Hold numbers back"), "its own page, as learned");
+        for kept in ["../outside.maxref.xml".to_string(), outside.display().to_string()] {
+            reference.objects.get_mut("pipe").unwrap().page = kept.clone();
+            let told = describe(&reference, "pipe");
+            assert!(!told.contains("Read from outside"), "{kept}: {told}");
+        }
+        assert_eq!(within(&c74, ""), None, "no page");
+        assert_eq!(within(&c74, "docs/x.maxref.xml"), Some(c74.join("docs/x.maxref.xml")));
     }
 
     #[test]

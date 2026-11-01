@@ -1488,6 +1488,7 @@ Environment variables (paths must be absolute):
 | `KUMI_RENOISE_PREFS_DIR` | Renoise's preferences: a `V<x.y.z>` folder, or the folder that holds them |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Live's Remote Scripts folder, when Kumi doesn't find it |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Where `kumi bridge` puts Kumi's extension and `kumi doctor` looks for it, when Kumi doesn't find Live's Extensions folder |
+| `KUMI_MAX` | The Max whose objects Kumi reads when it makes a Max for Live device: its `C74` folder (`resources` on Windows), or a Max that holds one (`Max.app`, or the folder `Max.exe` is in). It's used alone: if it names no Max, Kumi says so and reads no other. Otherwise it's the Max of the Live that's open, then the newest Live's |
 | `KUMI_BRIDGE_WAIT_SECONDS` | How long `kumi bridge` waits for Live to connect; `0` doesn't wait |
 | `KUMI_NO_UPDATE_CHECK` | Any value turns off the check for a newer version at start |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` | The proxy Kumi goes through, and the addresses it doesn't ([proxies](#proxies-and-school-or-office-networks)) |

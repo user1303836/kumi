@@ -227,7 +227,7 @@ fn needs_reference(input: &JsonObject, asked: &[String]) -> bool {
 fn pages(texts: &[String], reference: Option<&reference::Reference>) -> String {
     let mut pages = match (texts.is_empty(), reference) {
         (true, _) => "objects: give one or more of Max's objects, each as it's typed in a box (\"makenote 60 100 250\").".to_string(),
-        (false, None) => page::NO_MAX.to_string(),
+        (false, None) => page::no_max(),
         (false, Some(reference)) => page::describe_all(reference, &texts[..texts.len().min(MOST_OBJECTS)]),
     };
     if texts.len() > MOST_OBJECTS {
@@ -321,6 +321,9 @@ impl KernelTool for DeviceTool {
         }
         // The device is always made: what doesn't fit is made the nearest way it can be, and said beside it.
         let (mut spec, mut found) = check_spec(&input);
+        if reference.is_none() && needs_reference(&input, &asked) {
+            found.notes.extend(page::wrong_kumi_max());
+        }
         // Code Kumi's check found never stops would hold Max (and Live) up: it's kept in the device without running.
         let mut runaway = false;
         let checked = match &spec {
