@@ -441,10 +441,10 @@ local function add_apply(song, env, input, fence, desc)
     if type(err) ~= "table" then err = { code = "failed", message = "Renoise wouldn't set up the device: " .. tostring(err) } end
     error(err, 0)
   end
-  local state = material_.device_state(device)
+  local state = material_.state_at(song, index, at)
   return {
     -- (a Doofer's or a Splitter's devices inside, a Notepad's text, a plug-in's state: what its parameters don't show)
-    applied = { index = at, path = info.path, state = state, content = material_.content_fence(device) },
+    applied = { index = at, path = info.path, state = state, content = material_.content_at(song, index, at) },
     created = { ref = refs.make(env.epoch(), "device", index, at), kind = "device" },
     target = { ref = refs.make(env.epoch(), "device", index, at), kind = "device" },
     -- (where its undo finds it: its place, followed through the devices made, deleted and moved since)
@@ -473,12 +473,12 @@ local function add_restore(song, env, restore, desc)
   end
   local applied = restore.applied
   if type(applied) ~= "table" then bad("applied: what the change wrote") end
-  local now = material_.device_state(device)
+  local now = material_.state_at(song, index, at)
   local title = (device.display_name ~= "" and device.display_name or device.name) .. " on " .. base.named(index, track)
   if not restore.discard and (now.path ~= applied.path or now.state ~= (applied.state or {}).state or now.active ~= (applied.state or {}).active) then
     fail("changed", title .. " changed in Renoise since Kumi made it")
   end
-  if not restore.discard and applied.content ~= nil and material_.content_fence(device) ~= applied.content then
+  if not restore.discard and applied.content ~= nil and material_.content_at(song, index, at) ~= applied.content then
     fail("changed", title .. " changed in Renoise since Kumi made it (what's inside it, its text or its state)")
   end
   local device_name, track_name = M.label(device), base.named(index, track)
@@ -498,8 +498,8 @@ base.register({
 })
 
 -- Deleting a device keeps its path, name, bypass, preset data and automation to make it again.
-local function delete_signature(track, at, device)
-  local state = material_.device_state(device)
+local function delete_signature(song, index, track, at)
+  local state = material_.state_at(song, index, at)
   state.index = at
   state.track = base.track_id(track) -- (the device on another track at that place is not this one)
   return state
@@ -507,7 +507,7 @@ end
 
 local function delete_preview(song, env, input)
   local index, at, track, device, name = device_of(song, env, input.ref, "device-delete", 2)
-  local state = delete_signature(track, at, device)
+  local state = delete_signature(song, index, track, at)
   local display = {
     title = string.format("Deleted %s from %s", q(M.label(device)), q(base.named(index, track))),
     before = { devices = #track.devices }, after = { devices = #track.devices - 1 },
@@ -519,7 +519,7 @@ end
 local function delete_apply(song, env, input, fence, desc)
   local ok, index, at, track, device, name = pcall(device_of, song, env, input.ref, "device-delete", 2)
   if not ok then base.gone_is_changed(index) end
-  local state = delete_signature(track, at, device)
+  local state = delete_signature(song, index, track, at)
   if not base.same_table(state, fence) then fail("changed", name .. " changed since the preview") end
   local automation = material_.read_automation(song, index, track, at)
   local patterns = {}
@@ -606,7 +606,7 @@ local function delete_restore(song, env, restore, desc)
   -- It is back already (the producer's undo, or an earlier restore): nothing to write.
   local present = at <= #track.devices and track:device(at) or nil
   if present and present.device_path == saved.path then
-    local state = material_.device_state(present)
+    local state = material_.state_at(song, index, at)
     if state.state == (material.state or {}).state and state.display == (material.state or {}).display then
       return { restored = { deleted = false }, display = { title = string.format("%s is back on %s already", q(label), q(track_name)) }, undo = { desc = desc, entry = false }, unwritten = true }
     end
@@ -653,7 +653,7 @@ end
 local function move_preview(song, env, input)
   local index, at, track, device, name = device_of(song, env, input.ref, "device-move", 2)
   local to = move_wanted(track, input, at)
-  local state = delete_signature(track, at, device)
+  local state = delete_signature(song, index, track, at)
   local display = {
     title = string.format("Moved %s on %s to place %d", q(M.label(device)), q(base.named(index, track)), to),
     before = { index = at }, after = { index = to },
@@ -665,7 +665,7 @@ end
 local function move_apply(song, env, input, fence, desc)
   local ok, index, at, track, device, name = pcall(device_of, song, env, input.ref, "device-move", 2)
   if not ok then base.gone_is_changed(index) end
-  local state = delete_signature(track, at, device)
+  local state = delete_signature(song, index, track, at)
   if not base.same_table(state, fence) then fail("changed", name .. " changed since the preview") end
   local to = move_wanted(track, input, at)
   local display = {
@@ -690,12 +690,12 @@ local function move_apply(song, env, input, fence, desc)
   song:describe_undo(desc)
   local step = to > at and 1 or -1
   for i = at, to - step, step do track:swap_devices_at(i, i + step) end
-  local after = material_.device_state(track:device(to))
+  local after = material_.state_at(song, index, to)
   if after.state ~= state.state or after.path ~= state.path then fail("failed", "Renoise didn't move " .. name) end
   local material = device_kept(env, index, to, track:device(to))
   material.was, material.now = neighbour(to > at and at - 1 or at), neighbour(to - 1)
   return {
-    applied = { index = to, state = delete_signature(track, to, track:device(to)) }, material = material, display = display,
+    applied = { index = to, state = delete_signature(song, index, track, to) }, material = material, display = display,
     target = device_target(env, index, to),
     undo = { desc = desc, entry = true },
     prior = { index = at }, place = { track = index, device = to }, follows = "device",
