@@ -12,9 +12,12 @@
 #   Arrangement audio clips are made aside at their length (one Live can't make that long refuses here); then the
 #   remnants (the pieces Live left) go, and each clip is made again whole. Leaving: clips the change's own undo takes
 #   away first, so not in a clip's way. With check, only the checks. What Live won't set back exactly is named in
-#   partial. A failure once something changed is answered with how far it got ("error", "removed", "made").
+#   partial. Each clip made comes with its new identity and the hash of what it is now, which a later undo checks
+#   in place of the one it had before. A failure once something changed is answered with how far it got ("error",
+#   "removed", "made").
 # - "notes": {"track", "trackName", "trackId", "clip", "notes", "notesHash"}: more of a restored clip's notes (a big
-#   clip's take several calls); with notesHash, the last, which checks the clip holds every note it had.
+#   clip's take several calls); with notesHash, the last, which checks the clip holds every note it had and says its
+#   hash now.
 # - "state": {"track", "trackName", "trackId", "from", "scenes"}: what the track holds from a time on and in some
 #   scenes' slots, to tell whether Live's undo put things back as they were.
 import hashlib, os
@@ -461,6 +464,7 @@ def restore(args):
             gaps = missing(clip, kept, item.get("notesToCome", False), put_back(clip, track, kept))
             if gaps:
                 done["partial"].append({"name": kept["name"], "missing": gaps})
+            done["made"][-1]["hash"] = digest(leaf(clip))
     except Exception as error:
         for stand in stands.values():
             attempt(lambda stand=stand: track.delete_clip(stand))
@@ -475,6 +479,7 @@ def more_notes(args):
             out = {"added": len(args["notes"])}
             if args.get("notesHash"):
                 out["exact"] = digest(sorted(note_row(note) for note in clip.get_all_notes_extended())) == args["notesHash"]
+                out["hash"] = digest(leaf(clip))
             return out
     raise ValueError("the clip Kumi made again isn't there any more")
 

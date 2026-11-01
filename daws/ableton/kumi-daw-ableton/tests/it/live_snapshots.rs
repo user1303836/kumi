@@ -386,6 +386,130 @@ async fn a_cleared_range_puts_back_what_it_cut_after_the_pieces_live_left() {
         .await;
 }
 
+/// The track's Arrangement clips as Live holds them, each by its identity and the hash of what it is: a check refuses
+/// as Kumi's script does in Live when a piece isn't there as the change left it, and a restore takes the pieces away
+/// and makes each clip again with an identity of its own, as Live gives one.
+struct Track {
+    clips: RefCell<Vec<(String, String)>>,
+    next: Cell<u32>,
+}
+impl Track {
+    fn edit(&self, identity: &str) {
+        self.clips.borrow_mut().iter_mut().filter(|(clip, _)| clip == identity).for_each(|(_, hash)| *hash = "edited".into());
+    }
+}
+/// The first piece Live left of "Verse" when the middle of it was cleared, as Kumi reads it before deleting it.
+fn left() -> Value {
+    json!({"identity":"live:501","track":"live:100","trackName":"Keys","trackId":"01J9KEYS","where":{"start":8.0,"end":10.0},
+        "hash":"left-hash","notesHash":"left-notes",
+        "leaf":{"kind":"midi","name":"Verse","color":0,"muted":false,"looping":true,"loop":[0.0,2.0],"markers":[0.0,2.0],
+            "signature":[4,4],"span":[8.0,10.0],"notes":[[60,0.0,1.0,100.0,false,1.0,0.0,64.0]]}})
+}
+/// A clear of the middle of "Verse" (beats 10 to 12), then the first piece it left deleted, on `track`.
+async fn clear_then_delete(track: &Rc<Track>) -> Live {
+    let python: Python = {
+        let track = track.clone();
+        Rc::new(move |args| match args["op"].as_str() {
+            Some("capture") if args.get("clips").is_some() => Some(json!({"clips":[left()]})),
+            Some("restore") => {
+                let remnants = args["remnants"].as_array().unwrap();
+                for remnant in remnants {
+                    let kept = (remnant["identity"].as_str().unwrap().to_owned(), remnant["hash"].as_str().unwrap().to_owned());
+                    if !track.clips.borrow().contains(&kept) {
+                        return Some(
+                            json!({"raise":format!("\u{201c}{}\u{201d} changed in Live since", remnant["name"].as_str().unwrap())}),
+                        );
+                    }
+                }
+                if args["check"] == true {
+                    return Some(json!({"checked":true}));
+                }
+                track.clips.borrow_mut().retain(|(clip, _)| !remnants.iter().any(|remnant| remnant["identity"] == clip.as_str()));
+                let made: Vec<Value> = args["clips"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|clip| {
+                        let identity = format!("live:{}", track.next.replace(track.next.get() + 1));
+                        let hash = format!("{identity} as made again");
+                        track.clips.borrow_mut().push((identity.clone(), hash.clone()));
+                        json!({"identity":identity,"where":clip["where"],"name":clip["leaf"]["name"],"hash":hash})
+                    })
+                    .collect();
+                let removed: Vec<&Value> = remnants.iter().map(|remnant| &remnant["name"]).collect();
+                Some(json!({"removed":removed,"made":made,"partial":[]}))
+            }
+            _ => None,
+        })
+    };
+    let inner = bridge_reply(python);
+    let reply: Reply = {
+        let track = track.clone();
+        Rc::new(move |name, args| {
+            match name {
+                // Live leaves two pieces of "Verse"; the delete takes the first.
+                "live_clip_clear_range_apply" => {
+                    *track.clips.borrow_mut() = vec![("live:501".into(), "left-hash".into()), ("live:502".into(), "right-hash".into())]
+                }
+                "live_clip_delete_apply" => track.clips.borrow_mut().retain(|(clip, _)| clip != "live:501"),
+                _ => {}
+            }
+            inner(name, args)
+        })
+    };
+    let live = live(TOOLS, reply, None).await;
+    let (text, is_error) = live.change("clear_range", json!({"trackRef":TRACK,"fromBeat":10,"toBeat":12})).await;
+    assert!(!is_error, "{text}");
+    let (text, is_error) = live.change("delete_clip", json!({"clipRef":VERSE})).await;
+    assert!(!is_error, "{text}");
+    live
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_piece_a_clear_left_that_kumis_undo_made_again_is_found_by_the_clear_s_undo() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let track = Rc::new(Track { clips: RefCell::new(vec![("live:501".into(), "verse-hash".into())]), next: Cell::new(700) });
+            let live = clear_then_delete(&track).await;
+            // The deletion's undo makes the piece again: Live gives it an identity of its own.
+            let (text, is_error) = live.undo().await;
+            assert!(!is_error, "{text}");
+            assert_eq!(*track.clips.borrow(), [("live:502".into(), "right-hash".into()), ("live:700".into(), "live:700 as made again".into())]);
+            // The clear's undo finds that piece as the one Kumi made again, as Kumi made it, and puts "Verse" back whole.
+            let (text, is_error) = live.undo().await;
+            assert!(!is_error, "{text}");
+            assert!(text.contains("\"broughtBack\":\"\u{201c}Verse\u{201d}\""), "{text}");
+            let restore = live.python("restore").last().unwrap().clone();
+            assert_eq!(
+                restore["remnants"],
+                json!([{"identity":"live:700","hash":"live:700 as made again","name":"Verse"},{"identity":"live:502","hash":"right-hash","name":"Verse"}])
+            );
+            assert!(same(&restore["clips"][0]["where"], &json!({"start":8,"end":16})), "{restore}");
+            assert_eq!(*track.clips.borrow(), [("live:701".into(), "live:701 as made again".into())]);
+            assert!(live.integration.history.entries.borrow().values().all(|entry| entry.borrow().record.state == ChangeState::Undone));
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_piece_kumis_undo_made_again_and_the_producer_edited_since_stays() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let track = Rc::new(Track { clips: RefCell::new(vec![("live:501".into(), "verse-hash".into())]), next: Cell::new(700) });
+            let live = clear_then_delete(&track).await;
+            live.undo().await;
+            // The producer edits the piece Kumi made again: the clear's undo leaves it, and the change, as they are.
+            track.edit("live:700");
+            let (text, is_error) = live.undo().await;
+            assert!(is_error);
+            assert!(text.contains("\u{201c}Verse\u{201d} changed in Live since"), "{text}");
+            assert_eq!(*track.clips.borrow(), [("live:502".into(), "right-hash".into()), ("live:700".into(), "edited".into())]);
+            let clear = live.integration.history.entries.borrow().values().next().unwrap().borrow().record.clone();
+            assert_eq!(clear.state, ChangeState::Kept, "{text}");
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn without_python_in_live_a_deletion_stays_lives_to_take_back() {
     tokio::task::LocalSet::new()

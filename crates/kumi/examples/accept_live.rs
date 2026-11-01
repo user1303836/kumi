@@ -248,7 +248,8 @@ struct Accept {
     observation: RefCell<Option<Observation>>,
     rows: RefCell<Vec<bool>>,
     records: Rc<RefCell<Vec<ChangeRecord>>>,
-    /// Changes the run itself took away afterwards (a clip it cleared and deleted): their own undo finds nothing, as it should.
+    /// Changes the run itself took away afterwards (a clip it wrote, cleared and deleted): their own undo looks for the clip
+    /// they made, which Kumi's undo of the deletion and the clear makes again as a new one, so they stay.
     expected_kept: RefCell<HashSet<String>>,
     stopping: Rc<Cell<bool>>,
     looked: Rc<Cell<f64>>,

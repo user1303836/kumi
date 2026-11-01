@@ -61,10 +61,11 @@ pub enum FastResult {
     Error { error: String, sent: bool },
 }
 
-/// What HISTORY asks of Live: its connection, and Kumi's memory of the Set.
+/// What HISTORY asks of Live: its connection, Kumi's memory of the Set, and the clips Kumi's undo made again.
 pub struct LiveChanges {
     pub connection: Rc<LiveConnection>,
     pub remember: Rc<Remember>,
+    pub remade: snapshots::Remade,
 }
 #[async_trait(?Send)]
 impl ChangeHost for LiveChanges {
@@ -219,7 +220,7 @@ impl LiveHistory for History {
         timeout_ms: Option<u64>,
         on_change: Option<Rc<dyn Fn(ChangeRecord)>>,
     ) -> Self {
-        Self::over(LiveChanges { connection, remember }, timeout_ms, on_change)
+        Self::over(LiveChanges { connection, remember, remade: Default::default() }, timeout_ms, on_change)
     }
     fn observed(&self) -> Vec<ObservedChange> {
         self.entries
@@ -371,6 +372,8 @@ impl LiveHistory for History {
         _signal: Signal,
     ) -> Result<UndoResult, RuntimeError> {
         let names = material.names();
+        // A piece Live left that a later change deleted, and Kumi's undo of that one made again, is that clip now.
+        let material = material.followed(&self.remade);
         let remember = &self.remember;
         let mut leaves = vec![];
         for clip in &material.clips {
@@ -410,6 +413,7 @@ impl LiveHistory for History {
             // The change's own undo didn't happen, and nothing else did: its record says why.
             Err(stopped) => stopped,
             Ok(Ok(restored)) => {
+                self.remade.note(&material.clips, &restored.made);
                 let record = self.update(entry, ChangeState::Undone, None);
                 let mut text = json!({"undone":record.title,"change":record.id,"broughtBack":names});
                 if let Some(short) = restored.short_of() {
