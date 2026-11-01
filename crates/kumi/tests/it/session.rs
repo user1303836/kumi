@@ -2246,6 +2246,7 @@ struct SearchRig {
     ms: u64,
     values_score: bool,
     settled: RefCell<Vec<f64>>,
+    kept_only: Option<String>,
 }
 impl SearchRig {
     fn new(scores: Vec<f64>) -> Self {
@@ -2259,6 +2260,7 @@ impl SearchRig {
             ms: 1,
             values_score: false,
             settled: RefCell::new(vec![]),
+            kept_only: None,
         }
     }
     fn knob() -> Knob {
@@ -2312,6 +2314,9 @@ impl GoalRig for SearchRig {
         assert!(!signal.is_cancelled());
         self.cleanup.borrow_mut().push(format!("keep:{slot}"));
         Ok("Kumi · Goal best".into())
+    }
+    fn kept_only(&self) -> Option<String> {
+        self.kept_only.clone()
     }
     async fn settle(&self, _: &str, _: &[Knob], values: &[f64], signal: Signal) -> Result<Option<String>, RuntimeError> {
         assert!(!signal.is_cancelled());
@@ -2384,6 +2389,22 @@ local_test!(goal_reaches_target_cleans_in_order_keeps_best_and_lesson, {
     assert_eq!(h.session.lessons().await.unwrap().len(), 1);
     h.session.close().await.unwrap();
     assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Done);
+});
+local_test!(a_goals_end_says_when_its_best_holds_only_a_part_of_its_track, {
+    let mut raw = SearchRig::new(vec![96.]);
+    raw.kept_only = Some("“Kumi · Goal best” holds only the patterns of beats 0 to 4.".into());
+    let h = goal_harness(Rc::new(raw), true, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+    assert_eq!(h.session.goal_status().unwrap().state, GoalPhase::Done);
+    assert!(h.notice("Kumi · Goal best” holds only the patterns of beats 0 to 4."));
+    h.session.close().await.unwrap();
+    // A best kept whole has nothing to add.
+    let h = goal_harness(Rc::new(SearchRig::new(vec![96.])), true, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+    assert!(!h.notice("holds only"));
+    h.session.close().await.unwrap();
 });
 local_test!(a_sound_match_loop_without_a_reference_is_a_regular_request_and_other_loops_run_judged_rounds, {
     let rig = Rc::new(SearchRig::new(vec![]));

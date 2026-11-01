@@ -283,14 +283,19 @@ local function players_of(song, env, players, range)
 end
 
 -- What one copy costs, about, in ms (measured: 8 copies of 5 devices and 4 dense 64-line patterns took 200 ms; a track insert
--- grows faster than the tracks, 11 ms at 90 and 385 ms at 566; a pattern's copy with its lines, about 4 ms a 64 lines).
+-- grows faster than the tracks, 11 ms at 90 and 385 ms at 566; a pattern's copy with its lines, about 4 ms a 64 lines: 3.1 with
+-- every column of every line full, and 1 with a note and an effect on each, in 3.5.4, lab 2026-11-01).
 local function cost_of(song, source, patterns)
   local tracks, lines = rows.track_count(song), 0
   for _, p in ipairs(patterns) do lines = lines + song:pattern(p).number_of_lines end
   return 2 + 0.05 * tracks + 11 * (tracks / 90) ^ 2 + 3 * (#song:track(source).devices - 1) + 4 * lines / 64
 end
--- One copy is one callback: one that would hold Renoise longer than this is refused (Renoise's watchdog speaks after ~10 s).
-M.MOST_COPY_MS = 3000
+-- One copy is one callback: one that would hold Renoise longer than this is refused (Renoise's watchdog speaks after ~10 s; by the
+-- model above, and at worst about 4.6 s of Renoise's own, lab 2026-11-01).
+M.MOST_COPY_MS = 6000
+-- And a make of several: under the host's wait for it (SCRATCH_TIMEOUT, 30 s), past which it would answer a timeout while the
+-- copies go on being made, with nobody left to take them back.
+M.MOST_MAKE_MS = 25000
 
 -- The song, if Renoise isn't busy (set and drop name no refs of an epoch of their own: a copy's ref is checked by its name).
 local function ready(env)
@@ -345,8 +350,12 @@ local function make(params, env)
   local source_name = players and players.name or base.named(source, track)
   local per_copy = players and (2 + 0.05 * rows.track_count(song) + 11 * (rows.track_count(song) / 90) ^ 2) or cost_of(song, source, patterns)
   if per_copy > M.MOST_COPY_MS then
-    bad(string.format("one copy of %s would hold Renoise about %.1f s (its lines in %d patterns, in a song of %d tracks): give a range, a few bars of it",
+    fail("too-big", string.format("one copy of %s would hold Renoise about %.1f s (its lines in %d patterns, in a song of %d tracks): give a range, a few bars of it",
       q(source_name), per_copy / 1000, #patterns, rows.track_count(song)))
+  end
+  if per_copy * count > M.MOST_MAKE_MS then
+    fail("too-big", string.format("%d copies of %s would hold Renoise about %.0f s in all, longer than Kumi waits: give a range, a few bars of it",
+      count, q(source_name), per_copy * count / 1000))
   end
   local names = {}
   for n = 1, count do names[n] = M.PREFIX .. tag .. " " .. n end
