@@ -380,7 +380,7 @@ fn my_sets_is_offered_only_where_kumi_reads_the_daws_projects() {
             .any(|tool| tool.name() == "my_sets")
     };
     assert!(offered(&DawProfile::ABLETON));
-    assert!(!offered(&DawProfile::REAPER));
+    assert!(offered(&DawProfile::REAPER));
     assert!(offered(&DawProfile::RENOISE));
 }
 

@@ -6,6 +6,7 @@ mod delivery;
 pub mod ears;
 pub mod library;
 mod listening;
+pub mod projects;
 mod provider;
 mod routing;
 mod variations;

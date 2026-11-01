@@ -29,4 +29,5 @@ kumi-agent = { workspace = true, features = ["test-support"] }
 daw-mcp-server = { path = "../../own/daw-mcp-server" }
 futures.workspace = true
 kumi-testkit.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
