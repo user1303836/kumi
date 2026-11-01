@@ -149,6 +149,44 @@ fn effects(stamp: u128) -> Vec<(String, Value)> {
                 "\"Drive\" -> [prepend drive] -> fx\n",
             )}),
         ),
+        // Gen's multichannel forms, at -12 dB by a Param's message: silent if their code doesn't run, about dry if the
+        // message doesn't reach every channel.
+        effect(
+            "patch mc.gen",
+            json!({"controls": [knob("Gain", -24.0, 24.0, -12.0)], "patch": concat!(
+                "fx = [mc.gen~ @chans 2] {\n",
+                "  Param gain(0);\n",
+                "  out1 = in1 * dbtoa(gain);\n",
+                "}\n",
+                "both = [mc.pack~ 2]\n",
+                "parts = [mc.unpack~ 2]\n",
+                "in.0 -> both\n",
+                "in.1 -> both.1\n",
+                "both -> fx -> parts\n",
+                "parts -> out.0\n",
+                "parts.1 -> out.1\n",
+                "\"Gain\" -> [prepend gain] -> fx\n",
+            )}),
+        ),
+        effect(
+            "patch mcs.gen",
+            json!({"controls": [knob("Gain", -24.0, 24.0, -12.0)], "patch": concat!(
+                "fx = [mcs.gen~] {\n",
+                "  Param gain(0);\n",
+                "  g = dbtoa(gain);\n",
+                "  out1 = in1 * g;\n",
+                "  out2 = in2 * g;\n",
+                "}\n",
+                "both = [mc.pack~ 2]\n",
+                "parts = [mc.unpack~ 2]\n",
+                "in.0 -> both\n",
+                "in.1 -> both.1\n",
+                "both -> fx -> parts\n",
+                "parts -> out.0\n",
+                "parts.1 -> out.1\n",
+                "\"Gain\" -> [prepend gain] -> fx\n",
+            )}),
+        ),
     ]
 }
 

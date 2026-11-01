@@ -160,7 +160,7 @@ enum Language {
 /// What a block after a box of `class` holds.
 fn language(class: &str) -> Language {
     match class {
-        "gen~" | "gen" => Language::GenExpr,
+        "gen~" | "gen" | "mc.gen~" | "mcs.gen~" => Language::GenExpr,
         "p" | "patcher" => Language::Notation,
         _ => Language::JavaScript,
     }
@@ -501,11 +501,11 @@ fn tokens(text: &str, first_line: usize) -> (Vec<(Token, usize)>, Vec<String>) {
     (out, unread)
 }
 
-/// The objects that hold what a block gives them: GenExpr for gen~ and gen, JavaScript for v8 and v8ui, a patch for a
-/// subpatcher.
+/// The objects that hold what a block gives them: GenExpr for gen~, its multichannel forms and gen, JavaScript for v8 and
+/// v8ui, a patch for a subpatcher.
 fn holds(class: &str) -> Option<&'static str> {
     match class {
-        "gen~" | "gen" => Some("GenExpr"),
+        "gen~" | "gen" | "mc.gen~" | "mcs.gen~" => Some("GenExpr"),
         "v8" | "v8ui" => Some("JavaScript"),
         "p" | "patcher" => Some("a patch"),
         _ => None,
@@ -603,7 +603,7 @@ impl Reader<'_> {
                     }
                     (Some(_), None) => {
                         self.found.wrong.push(format!(
-                            "line {line}: only [gen~], [gen], [v8], [v8ui] and [p] hold a {{ … }} block, so [{class}] was made without what it was given: put that in one of them."
+                            "line {line}: only [gen~], [mc.gen~], [mcs.gen~], [gen], [v8], [v8ui] and [p] hold a {{ … }} block, so [{class}] was made without what it was given: put that in one of them."
                         ));
                         What::Object(text)
                     }
@@ -978,9 +978,24 @@ fn expand_within(notation: &Notation, outside: &Outside, top: bool) -> Expanded 
             What::Message(text) => json!({ "maxclass": "message", "text": text, "numinlets": 2, "numoutlets": 1, "outlettype": [""] }),
             What::Gen { text, code } => {
                 let (ins, outs) = (inputs_read(code), outputs_written(code).max(1));
-                let kind = if class == "gen~" { "signal" } else { "" };
-                json!({ "maxclass": "newobj", "text": text, "numinlets": ins.max(1), "numoutlets": outs, "outlettype": vec![kind; outs],
-                    "patcher": gen_patcher(code, ins, outs) })
+                let patcher = gen_patcher(code, ins, outs);
+                // As Max saves each. mc.gen~ runs a gen~ per channel, a port for each in and out, the patcher they share in
+                // the wrapper's data. mcs.gen~ has one multichannel signal in and one out, its channels the in and out inside.
+                match class.as_str() {
+                    "mc.gen~" => {
+                        json!({ "maxclass": "newobj", "text": text, "numinlets": ins.max(1), "numoutlets": outs,
+                            "outlettype": vec!["multichannelsignal"; outs], "data": { "patcher": patcher } })
+                    }
+                    "mcs.gen~" => {
+                        json!({ "maxclass": "newobj", "text": text, "numinlets": 1, "numoutlets": 1, "outlettype": ["multichannelsignal"],
+                            "patcher": patcher })
+                    }
+                    _ => {
+                        let kind = if class == "gen~" { "signal" } else { "" };
+                        json!({ "maxclass": "newobj", "text": text, "numinlets": ins.max(1), "numoutlets": outs,
+                            "outlettype": vec![kind; outs], "patcher": patcher })
+                    }
+                }
             }
             What::Js { text, code } => {
                 if class == "v8ui" && !top {
@@ -1240,7 +1255,7 @@ mod tests {
                 "line 3: a box in the middle of a chain is entered at inlet 0 and left by outlet 0, so Kumi left the line out: write a cord to or from another of its ports on a line of its own.",
                 "line 5: [gen~] holds GenExpr, and it was given none, so it's empty: write it in a { … } block after the box.",
                 "line 6: out is the device's own (what it receives and sends), so the box was made without that name: name it something else.",
-                "line 7: only [gen~], [gen], [v8], [v8ui] and [p] hold a { … } block, so [print] was made without what it was given: put that in one of them.",
+                "line 7: only [gen~], [mc.gen~], [mcs.gen~], [gen], [v8], [v8ui] and [p] hold a { … } block, so [print] was made without what it was given: put that in one of them.",
                 "line 8: \"?\" isn't part of the notation (a box is [object] or (message), a cord is ->), so Kumi left the line out.",
             ]
         );
@@ -1374,6 +1389,64 @@ mod tests {
         // Subpatchers nest 16 deep at most.
         let deep = format!("{}{}", "[p x] {\n".repeat(20), "}\n".repeat(20));
         assert!(parse(&deep).1.wrong.iter().any(|said| said.contains("is inside 16 subpatchers, so Kumi made it empty")));
+    }
+
+    /// #310: mc.gen~ and mcs.gen~ hold GenExpr, each as Max saves it (Max's gen~.maxhelp has both).
+    #[test]
+    fn gens_multichannel_forms_hold_genexpr_as_max_saves_them() {
+        let (notation, found) = parse(concat!(
+            "each = [mc.gen~ @chans 4] {\n",
+            "  // JavaScript would read a / after the word new as a pattern's start, and the } after it as inside that.\n",
+            "  Param new(1);\n",
+            "  if (in1 > 0) { out1 = in1 * new / 2; } out2 = in2 / 2;\n",
+            "}\n",
+            "whole = [mcs.gen~] {\n",
+            "  Param new(1);\n",
+            "  if (in1 > 0) { out1 = in1 * new / 2; } out2 = in1 - in2 / 2;\n",
+            "}\n",
+            "each -> whole\n",
+            "each.1 -> whole.1\n",
+            "whole -> out\n",
+            "whole.1 -> out\n",
+        ));
+        assert!(found.is_empty(), "{found:?}");
+        let outside = Outside { boxes: HashMap::from([("out".to_string(), "obj-out".to_string())]), ..Outside::default() };
+        let Expanded { boxes, found, lines } = expand(&notation, &outside);
+        let code = |patcher: &Value| patcher["boxes"][0]["box"]["code"].as_str().unwrap().to_string();
+        // A gen~ for each channel: a port for each in and out, the patcher in the wrapper's data.
+        let each = &boxes[0]["box"];
+        assert_eq!(each["text"], "mc.gen~ @chans 4");
+        assert_eq!((each["numinlets"].clone(), each["numoutlets"].clone()), (json!(2), json!(2)));
+        assert_eq!(each["outlettype"], json!(["multichannelsignal", "multichannelsignal"]));
+        assert_eq!(each["patcher"], Value::Null, "not where a gen~ has it");
+        assert_eq!(each["data"]["patcher"]["classnamespace"], "dsp.gen");
+        assert!(code(&each["data"]["patcher"]).contains("} out2 = in2 / 2;"), "{each}");
+        // One multichannel signal in and one out, whatever its code reads and writes.
+        let whole = &boxes[1]["box"];
+        assert_eq!((whole["numinlets"].clone(), whole["numoutlets"].clone()), (json!(1), json!(1)));
+        assert_eq!(whole["outlettype"], json!(["multichannelsignal"]));
+        assert_eq!(whole["patcher"]["classnamespace"], "dsp.gen");
+        assert!(code(&whole["patcher"]).contains("} out2 = in1 - in2 / 2;"), "{whole}");
+        // Its in and outs are inside: cords past its one inlet and outlet are left out, as Max would.
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(
+            found.wrong,
+            [
+                "line 11: a cord enters inlet 1 of [mcs.gen~], which has only inlet 0, so Kumi left it out, as Max would.",
+                "line 13: a cord leaves outlet 1 of [mcs.gen~], which has only outlet 0, so Kumi left it out, as Max would.",
+            ]
+        );
+        // Given no code, they're made empty and said, as gen~ is.
+        let (empty, found) = parse("[mc.gen~]\n[mcs.gen~]\n");
+        assert_eq!(
+            found.wrong[0],
+            "line 1: [mc.gen~] holds GenExpr, and it was given none, so it's empty: write it in a { … } block after the box."
+        );
+        assert_eq!(
+            found.wrong[1],
+            "line 2: [mcs.gen~] holds GenExpr, and it was given none, so it's empty: write it in a { … } block after the box."
+        );
+        assert!(matches!(&empty.boxes[0].what, What::Gen { .. }));
     }
 
     #[test]
