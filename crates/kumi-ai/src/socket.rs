@@ -34,9 +34,14 @@ const LIFETIME: Duration = Duration::from_secs(50 * 60);
 /// As HTTP's: opening gives up after 10 s, and an answer that goes quiet for 300 s has stopped.
 const CONNECT: Duration = Duration::from_secs(10);
 const QUIET: Duration = Duration::from_secs(300);
-/// The server says it has the request at once (`response.created`): a connection used before that doesn't within this
-/// went quiet while it waited (a sleeping laptop, a NAT that forgot it), and the request goes on a new one.
-const FIRST: Duration = Duration::from_secs(15);
+/// A connection unused this long is asked whether it's still there (a ping) before a request goes on it: one that went
+/// quiet while it waited (a sleeping laptop, a NAT that forgot it) doesn't answer within `PONG`, and a new one is opened.
+const IDLE: Duration = Duration::from_secs(30);
+const PONG: Duration = Duration::from_secs(5);
+/// The plan's usage comes with a connection's opening only. When it was high, the connection is opened again this often,
+/// so the meter is read again before it warns too late.
+const REREAD: Duration = Duration::from_secs(10 * 60);
+const HIGH: f64 = 60.0;
 /// A request bigger than this (pictures, say) goes over HTTP: a message goes as one frame.
 const MOST_BYTES: usize = 8 * 1024 * 1024;
 /// Connections that failed in a row before HTTP takes over for a while, and how long.
@@ -57,6 +62,10 @@ struct Line {
     /// The opening's answer (the plan's usage, as HTTP's answers carry it), for the first answer on the connection
     /// only: given to every answer, a meter read at the opening would stand in for newer ones.
     usage: Option<Headers>,
+    /// The plan was at least `HIGH` percent used at the opening.
+    high: bool,
+    /// When its last answer ended.
+    used: Instant,
 }
 
 /// The response a later request may carry on from.
@@ -98,11 +107,25 @@ impl Shared {
 pub struct SocketFetch {
     http: Rc<dyn Fetch>,
     shared: Rc<Shared>,
+    idle: Duration,
+    pong: Duration,
+    reread: Duration,
 }
 
 impl SocketFetch {
     pub fn new(http: Rc<dyn Fetch>) -> Self {
-        Self { http, shared: Rc::default() }
+        Self { http, shared: Rc::default(), idle: IDLE, pong: PONG, reread: REREAD }
+    }
+
+    /// For tests: how long a connection may wait unused before it's pinged, how long its pong may take, and how often
+    /// one opened with a high plan reading is opened again.
+    pub fn with_timing(self, idle: Duration, pong: Duration, reread: Duration) -> Self {
+        Self { idle, pong, reread, ..self }
+    }
+
+    /// Whether `line` can take a request from `identity`: not past its time, nor anyone else's, nor read high too long ago.
+    fn fits(&self, line: &Line, identity: &Headers) -> bool {
+        line.opened.elapsed() < LIFETIME && line.identity == *identity && !(line.high && line.opened.elapsed() >= self.reread)
     }
 }
 
@@ -187,14 +210,33 @@ async fn open(url: &str, identity: &Headers) -> Result<Line, tungstenite::Error>
     let opening = tokio_tungstenite::connect_async_tls_with_config(request, None, true, Some(connector));
     let (socket, answer) =
         tokio::time::timeout(CONNECT, opening).await.map_err(|_| tungstenite::Error::Io(std::io::ErrorKind::TimedOut.into()))??;
-    let usage = answer.headers().iter().filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string()))).collect();
-    Ok(Line { socket, opened: Instant::now(), identity: identity.clone(), usage: Some(usage) })
+    let usage: Headers =
+        answer.headers().iter().filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string()))).collect();
+    let high = crate::providers::usage::plan_windows(&usage).iter().any(|window| window.used_percent >= HIGH);
+    Ok(Line { socket, opened: Instant::now(), identity: identity.clone(), usage: Some(usage), high, used: Instant::now() })
+}
+
+/// Whether the connection answers a ping within `wait`.
+async fn alive(socket: &mut Socket, wait: Duration) -> bool {
+    let asked = async {
+        socket.send(Message::Ping(Default::default())).await.ok()?;
+        loop {
+            match socket.next().await? {
+                Ok(Message::Pong(_)) => return Some(()),
+                Ok(_) => continue,
+                Err(_) => return None,
+            }
+        }
+    };
+    matches!(tokio::time::timeout(wait, asked).await, Ok(Some(())))
 }
 
 enum Next {
     Event(String, Value),
-    /// The connection ended, broke or went quiet: why.
+    /// The connection ended or broke: why.
     Gone(String),
+    /// Nothing came for `QUIET`.
+    Quiet,
     Aborted,
 }
 
@@ -212,7 +254,7 @@ async fn next_event(socket: &mut Socket, signal: &Signal, wait: Duration) -> Nex
     loop {
         let Some(message) = unless_aborted(signal, tokio::time::timeout(wait, socket.next())).await else { return Next::Aborted };
         match message {
-            Err(_) => return Next::Gone("The answer went quiet".into()),
+            Err(_) => return Next::Quiet,
             Ok(None | Some(Ok(Message::Close(_)))) => return Next::Gone("The connection closed".into()),
             Ok(Some(Ok(Message::Text(text)))) => {
                 let event = serde_json::from_str(text.as_str()).unwrap_or(Value::Null);
@@ -249,8 +291,18 @@ struct Holding {
 }
 
 impl Holding {
+    /// The answer is over: the connection goes back for the next request.
     fn release(&mut self) {
+        if let Some(line) = &mut self.line {
+            line.used = Instant::now();
+        }
         *self.shared.line.borrow_mut() = self.line.take();
+        self.shared.busy.set(false);
+        self.released = true;
+    }
+    /// The answer is over and the connection goes with it.
+    fn let_go(&mut self) {
+        self.line = None;
         self.shared.busy.set(false);
         self.released = true;
     }
@@ -288,6 +340,7 @@ impl Answer {
                     Next::Event(text, event) => Ok((text, event)),
                     Next::Aborted => Err(aborted()),
                     Next::Gone(why) => Err(broke_off(why, &self.url)),
+                    Next::Quiet => Err(broke_off("The answer went quiet".into(), &self.url)),
                 };
                 match next {
                     Ok(next) => next,
@@ -305,7 +358,7 @@ impl Answer {
             let shared = self.holding.shared.clone();
             shared.failures.set(0);
             if event["type"] == "error" {
-                self.holding.line = None;
+                self.holding.let_go();
             } else {
                 let response = &event["response"];
                 *shared.last.borrow_mut() = response["id"].as_str().filter(|_| event["type"] == "response.completed").map(|id| Last {
@@ -350,7 +403,12 @@ impl Fetch for SocketFetch {
         let full = init.body.as_deref().map_or(0, str::len);
         let mut openings = 0;
         let (first, usage) = loop {
-            let reused = holding.line.as_ref().is_some_and(|line| line.opened.elapsed() < LIFETIME && line.identity == identity);
+            let mut reused = holding.line.as_ref().is_some_and(|line| self.fits(line, &identity));
+            // Unused for a while: still there?
+            if let Some(line) = holding.line.as_mut().filter(|line| reused && line.used.elapsed() >= self.idle) {
+                let Some(answered) = unless_aborted(&signal, alive(&mut line.socket, self.pong)).await else { return Err(aborted()) };
+                reused = answered;
+            }
             if !reused {
                 // A new connection keeps no earlier response.
                 holding.line = None;
@@ -391,22 +449,29 @@ impl Fetch for SocketFetch {
             let sending = tokio::time::timeout(QUIET, line.socket.send(Message::text(text)));
             let Some(sent) = unless_aborted(&signal, sending).await else { return Err(aborted()) };
             let next = match sent {
-                Ok(Ok(())) => next_event(&mut line.socket, &signal, if reused { FIRST } else { QUIET }).await,
+                Ok(Ok(())) => next_event(&mut line.socket, &signal, QUIET).await,
                 Ok(Err(error)) => Next::Gone(error.to_string()),
-                Err(_) => Next::Gone("The request couldn't be sent".into()),
+                Err(_) => Next::Quiet,
             };
             match next {
                 Next::Event(text, event) => {
                     let code = event["error"]["code"].as_str().unwrap_or("");
-                    // The connection no longer has that response: the whole request again.
+                    // The connection no longer has that response: the whole request again, on a new connection in case
+                    // this one says more.
                     if event["type"] == "error" && code == "previous_response_not_found" && carry.is_some() {
-                        carry = None;
-                        continue;
-                    }
-                    // The connection had its hour: the whole request on a new one.
-                    if event["type"] == "error" && code == "websocket_connection_limit_reached" {
                         holding.line = None;
                         continue;
+                    }
+                    // A connection that had its hour: the whole request on a new one. On one just opened the limit is
+                    // something else (other connections of the account's, say): this request over HTTP.
+                    if event["type"] == "error" && code == "websocket_connection_limit_reached" {
+                        holding.line = None;
+                        if reused {
+                            continue;
+                        }
+                        shared.failed();
+                        drop(holding);
+                        return self.http.fetch(url, init).await;
                     }
                     crate::timing::sent_instead(full, size);
                     let usage = holding.line.as_mut().and_then(|line| line.usage.take()).unwrap_or_default();
@@ -427,7 +492,14 @@ impl Fetch for SocketFetch {
                     break ((text, event), usage);
                 }
                 Next::Aborted => return Err(aborted()),
-                // A connection used before ended or went quiet while it waited: the whole request on a new one.
+                // Nothing came for as long as HTTP waits: retryable, as HTTP's quiet answer is.
+                Next::Quiet => {
+                    shared.failed();
+                    let mut error = ApiCallError::new("Cannot connect to API: the answer went quiet", url, None, None);
+                    error.is_retryable = true;
+                    return Err(error.into());
+                }
+                // A connection used before that ended or broke: the whole request on a new one.
                 Next::Gone(_) if reused => {
                     holding.line = None;
                     continue;

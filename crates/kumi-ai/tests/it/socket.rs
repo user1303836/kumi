@@ -15,6 +15,7 @@ use std::{
     cell::RefCell,
     rc::Rc,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -58,7 +59,9 @@ async fn server(script: Script) -> Server {
                     Ok(answer)
                 });
                 let mut socket = socket.await.unwrap();
-                while let Some(Ok(Message::Text(text))) = socket.next().await {
+                while let Some(Ok(message)) = socket.next().await {
+                    // A ping is answered as it's read.
+                    let Message::Text(text) = message else { continue };
                     let _ = sent.send(serde_json::from_str::<Value>(text.as_str()).unwrap());
                     let answer = script.lock().unwrap().next().unwrap_or_default();
                     for event in answer {
@@ -279,6 +282,122 @@ fn a_response_the_connection_no_longer_has_is_asked_for_again_with_the_whole_req
         assert_eq!(server.messages.recv().await.unwrap()["previous_response_id"], "r1");
         let again = server.messages.recv().await.unwrap();
         assert_eq!((again.get("previous_response_id"), &again["input"]), (None, &next["input"]));
+        assert_eq!(server.openings.lock().unwrap().len(), 2, "on a new connection, in case the old one says more");
+    });
+}
+
+#[test]
+fn reasoning_or_words_sent_back_otherwise_send_the_whole_request() {
+    let reasoning = |sealed: &str| json!({"type": "reasoning", "encrypted_content": sealed, "summary": []});
+    let said = json!({"type": "message", "role": "assistant", "content": [{"type": "output_text", "text": "Done."}]});
+    for (made, sent_back) in [(reasoning("sealed"), reasoning("resealed")), (said, json!({"role": "assistant", "content": "Done!"}))] {
+        local(async {
+            let mut server = server(vec![completed("r1", json!([made])), completed("r2", json!([]))]).await;
+            let fetch = SocketFetch::new(Rc::new(Http::default()));
+            events(fetch.fetch(&server.url, post(request(json!([user("go")])))).await.unwrap()).await;
+            let whole = json!([user("go"), sent_back, user("and then")]);
+            events(fetch.fetch(&server.url, post(request(whole.clone()))).await.unwrap()).await;
+            server.messages.recv().await.unwrap();
+            let again = server.messages.recv().await.unwrap();
+            assert_eq!((again.get("previous_response_id"), &again["input"]), (None, &whole));
+        });
+    }
+}
+
+#[test]
+fn a_connection_unused_for_a_while_is_pinged_first_and_one_that_doesnt_answer_gives_way() {
+    let quick = |http| SocketFetch::new(http).with_timing(Duration::ZERO, Duration::from_millis(300), Duration::from_secs(600));
+    // It answers: the request carries on, on the same connection.
+    local(async {
+        let mut server = server(vec![completed("r1", json!([call("c1")])), completed("r2", json!([]))]).await;
+        let fetch = quick(Rc::new(Http::default()));
+        let (first, next) = a_call_then_its_result();
+        events(fetch.fetch(&server.url, post(first)).await.unwrap()).await;
+        events(fetch.fetch(&server.url, post(next)).await.unwrap()).await;
+        server.messages.recv().await.unwrap();
+        assert_eq!(server.messages.recv().await.unwrap()["previous_response_id"], "r1");
+        assert_eq!(server.openings.lock().unwrap().len(), 1);
+    });
+    // It went deaf after its answer (a sleeping laptop, a NAT that forgot it): the whole request on a new one.
+    local(async {
+        let mut deaf = completed("r1", json!([call("c1")]));
+        deaf.push(json!("hold"));
+        let mut server = server(vec![deaf, completed("r2", json!([]))]).await;
+        let fetch = quick(Rc::new(Http::default()));
+        let (first, next) = a_call_then_its_result();
+        events(fetch.fetch(&server.url, post(first)).await.unwrap()).await;
+        assert_eq!(events(fetch.fetch(&server.url, post(next.clone())).await.unwrap()).await, completed("r2", json!([])));
+        server.messages.recv().await.unwrap();
+        let again = server.messages.recv().await.unwrap();
+        assert_eq!((again.get("previous_response_id"), &again["input"]), (None, &next["input"]));
+        assert_eq!(server.openings.lock().unwrap().len(), 2);
+    });
+}
+
+#[test]
+fn a_connection_opened_with_the_plan_read_high_is_opened_again_to_read_it_anew() {
+    local(async {
+        // The server's opening says 60% used: past 60%, read again (here at once).
+        let server = server(vec![completed("r1", json!([])), completed("r2", json!([]))]).await;
+        let fetch = SocketFetch::new(Rc::new(Http::default())).with_timing(Duration::from_secs(30), Duration::from_secs(5), Duration::ZERO);
+        events(fetch.fetch(&server.url, post(request(json!([user("one")])))).await.unwrap()).await;
+        let again = fetch.fetch(&server.url, post(request(json!([user("two")])))).await.unwrap();
+        assert_eq!(again.headers.get("x-codex-primary-used-percent").map(String::as_str), Some("60"));
+        events(again).await;
+        assert_eq!(server.openings.lock().unwrap().len(), 2);
+    });
+}
+
+#[test]
+fn a_cancelled_request_opens_or_sends_nothing_and_leaves_the_connection_to_the_next() {
+    local(async {
+        let server = server(vec![completed("r1", json!([])), completed("r2", json!([]))]).await;
+        let fetch = SocketFetch::new(Rc::new(Http::default()));
+        let cancelled = || {
+            let signal = Signal::new();
+            signal.cancel();
+            let mut init = post(request(json!([user("hi")])));
+            init.signal = Some(signal);
+            init
+        };
+        // Before the opening.
+        assert!(fetch.fetch(&server.url, cancelled()).await.err().unwrap().to_string().contains("aborted"));
+        assert!(server.openings.lock().unwrap().is_empty());
+        events(fetch.fetch(&server.url, post(request(json!([user("hi")])))).await.unwrap()).await;
+        // Before the sending, on the connection that's open: it goes, in case it was half sent.
+        assert!(fetch.fetch(&server.url, cancelled()).await.err().unwrap().to_string().contains("aborted"));
+        assert_eq!(events(fetch.fetch(&server.url, post(request(json!([user("hi")])))).await.unwrap()).await, completed("r2", json!([])));
+        assert_eq!(server.openings.lock().unwrap().len(), 2);
+    });
+}
+
+#[test]
+fn the_hour_s_limit_on_a_connection_just_opened_leaves_the_request_to_http() {
+    local(async {
+        let limit = json!({"type": "error", "status": 400, "error": {"code": "websocket_connection_limit_reached", "message": "limit"}});
+        let server = server(vec![completed("r1", json!([call("c1")])), vec![limit.clone()], vec![limit]]).await;
+        let http = Rc::new(Http::default());
+        let fetch = SocketFetch::new(http.clone());
+        let (first, next) = a_call_then_its_result();
+        events(fetch.fetch(&server.url, post(first)).await.unwrap()).await;
+        // The used connection's limit opens one more; the limit again on that one isn't its hour: HTTP, after two.
+        let response = fetch.fetch(&server.url, post(next)).await.unwrap();
+        assert_eq!(response.headers["x-over"], "http");
+        assert_eq!(server.openings.lock().unwrap().len(), 2);
+        assert_eq!(http.0.borrow().len(), 1);
+    });
+}
+
+#[test]
+fn a_refused_sign_in_is_answered_as_http_answers_it_and_the_connection_goes() {
+    local(async {
+        let refused = json!({"type": "error", "status": 401, "error": {"code": "invalid_token", "message": "Sign in again"}});
+        let server = server(vec![vec![refused], completed("r1", json!([]))]).await;
+        let fetch = SocketFetch::new(Rc::new(Http::default()));
+        let answer = fetch.fetch(&server.url, post(request(json!([user("hi")])))).await.unwrap();
+        assert_eq!(answer.status, 401);
+        assert_eq!(events(fetch.fetch(&server.url, post(request(json!([user("hi")])))).await.unwrap()).await, completed("r1", json!([])));
+        assert_eq!(server.openings.lock().unwrap().len(), 2);
     });
 }
 
