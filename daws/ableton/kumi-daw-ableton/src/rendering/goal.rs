@@ -69,6 +69,12 @@ fn gain(read: &Knobs) -> Option<&Knob> {
     })
 }
 
+/// The tempo a render is heard at: the Set's as it is now, which Live plays and records it at (REAPER's and Renoise's offline
+/// renders keep the tempo a goal opened with); the goal's own when a look can't say what it is.
+fn heard_tempo(now: Option<f64>, opened: f64) -> f64 {
+    now.filter(|tempo| *tempo > 0.).unwrap_or(opened)
+}
+
 fn is_final_limiter(device: &JsonObject) -> bool {
     if device.get("enabled") == Some(&Value::Bool(false)) {
         return false;
@@ -462,8 +468,7 @@ impl GoalRig for Goal {
         drop(rendering);
         let files = result?;
         let heard_from = now_ms();
-        // (Live plays a render at the Set's tempo as it is now; the goal's own is for when a look can't say)
-        let tempo = r.observer.tempo.get().filter(|tempo| *tempo > 0.).unwrap_or(self.tempo);
+        let tempo = heard_tempo(r.observer.tempo.get(), self.tempo);
         let against = if screened { &self.screen.as_ref().unwrap().reference } else { &self.reference };
         let beats = if screened { self.screen.as_ref().unwrap().beats } else { rig.beats };
         drop(rig);
@@ -647,6 +652,14 @@ fn parse_float(text: &str) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_render_is_heard_at_the_sets_tempo_now_and_the_goals_when_a_look_cant_say() {
+        assert_eq!(heard_tempo(Some(90.), 120.), 90., "a tempo that moved wins");
+        for lost in [None, Some(0.), Some(f64::NAN)] {
+            assert_eq!(heard_tempo(lost, 120.), 120., "{lost:?}");
+        }
+    }
 
     #[test]
     fn a_renamed_device_cannot_impersonate_an_enabled_plugin_limiter() {

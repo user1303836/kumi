@@ -443,19 +443,22 @@ fn a_best_kept_beside_an_older_one_is_told_by_the_name_it_was_given() {
         reply["structuredContent"]["items"].as_array_mut().unwrap().push(json!({"ref":"7:track:9","parentRef":"7:set:song","name":BEST}));
         reply["content"][0]["text"] = json!(stringify(&reply["structuredContent"]));
         let bench = Bench::new(&case, "goal-nam", folder.path()).await;
-        *bench.endpoint.on_call.borrow_mut() = Some(Box::new(|actual, expected| {
+        // (the name the rename is sent, which a uuid makes its own)
+        let renamed = Rc::new(RefCell::new(String::new()));
+        let kept = renamed.clone();
+        *bench.endpoint.on_call.borrow_mut() = Some(Box::new(move |actual, expected| {
             let given = actual["args"]["name"].as_str().unwrap_or_default();
             if expected["args"]["name"] == BEST && given.starts_with(&format!("{BEST} ")) {
                 expected["args"]["name"] = given.into();
+                *kept.borrow_mut() = given.to_owned();
             }
         }));
         let mut goal = None;
         for op in case["operations"].as_array().unwrap() {
             let value = bench.run(&mut goal, op, Signal::new()).await.unwrap();
             if op["type"] == "keep" {
-                let told = value.as_str().unwrap();
-                assert_eq!(told.len(), BEST.len() + 4, "{told}");
-                assert!(told.starts_with(&format!("{BEST} ")), "{told}");
+                assert!(!renamed.borrow().is_empty(), "the copy got a name of its own");
+                assert_eq!(value.as_str().unwrap(), *renamed.borrow());
                 return;
             }
         }
