@@ -146,7 +146,7 @@ impl Within {
 /// `line`'s comments, strings, numbers and keywords in `language`, read from `within`: each run's bytes and what it is,
 /// in order, and where the next line begins. Anything else (names, operators, spaces) is plain code.
 pub fn line(language: Language, line: &str, within: Within) -> (Vec<(Range<usize>, Token)>, Within) {
-    let mut lexer = Lexer { language, text: line.as_bytes(), runs: vec![] };
+    let mut lexer = Lexer { language, text: line.as_bytes(), runs: vec![], no_regex: false };
     let within = lexer.read(within);
     (lexer.runs, within)
 }
@@ -155,6 +155,9 @@ struct Lexer<'a> {
     language: Language,
     text: &'a [u8],
     runs: Vec<(Range<usize>, Token)>,
+    /// A regular expression's scan ran to the line's end and consumed nothing: the rest of the line's `/` divide, so a
+    /// line costs its length however its slashes fall (a scan that closes consumes what it read).
+    no_regex: bool,
 }
 
 impl Lexer<'_> {
@@ -197,10 +200,13 @@ impl Lexer<'_> {
         }
         // JavaScript's regular expression: a `/` where a value begins, to its closing `/` and its flags. Any other `/`
         // divides, and so does one whose line ends first.
-        if language == Language::JavaScript && byte == b'/' && self.value_begins(at) {
-            if let Some(end) = self.regex_end(at) {
-                self.runs.push((at..end, Token::String));
-                return Ok(end);
+        if language == Language::JavaScript && byte == b'/' && !self.no_regex && self.value_begins(at) {
+            match self.regex_end(at) {
+                Some(end) => {
+                    self.runs.push((at..end, Token::String));
+                    return Ok(end);
+                }
+                None => self.no_regex = true,
             }
         }
         if language == Language::Lua && rest.starts_with(b"--") {
@@ -351,7 +357,10 @@ impl Lexer<'_> {
         }
         let start = before.iter().rposition(|byte| !self.language.names(*byte)).map_or(0, |at| at + 1);
         let word = std::str::from_utf8(&before[start..]).unwrap_or("");
-        self.language.keywords().contains(&word) && !["this", "super", "true", "false", "null", "undefined"].contains(&word)
+        // (`obj.default` is a property, a value.)
+        before[..start].last() != Some(&b'.')
+            && self.language.keywords().contains(&word)
+            && !["this", "super", "true", "false", "null", "undefined"].contains(&word)
     }
 
     /// Where the regular expression from `at` (its opening `/`) ends: past its closing `/` and its flags. A `/` escaped
@@ -496,8 +505,14 @@ mod tests {
         );
         // After a keyword that takes a value it's one too; after a value that's a keyword, or a `}`, it divides or closes.
         assert_eq!(
-            runs(Language::JavaScript, "return /\"/.test(s)\nthis / a / b\n<A b={c} /><D e={f} />"),
-            [("return".into(), Keyword), ("/\"/".into(), Quoted), ("this".into(), Keyword)]
+            runs(Language::JavaScript, "return /\"/.test(s)\nthis / a / b\n<A b={c} /><D e={f} />\nobj.default / 2 / y"),
+            [
+                ("return".into(), Keyword),
+                ("/\"/".into(), Quoted),
+                ("this".into(), Keyword),
+                ("default".into(), Keyword),
+                ("2".into(), Number)
+            ]
         );
     }
 
@@ -588,6 +603,16 @@ mod tests {
                 ("this".into(), Keyword),
             ]
         );
+    }
+
+    #[test]
+    fn a_long_line_costs_its_length_however_its_slashes_fall() {
+        // Each `/` here begins a regular expression whose `[` never closes: an open fence's unfinished line is read again
+        // every frame, on the screen's thread.
+        let text = "(/[".repeat(200_000);
+        let started = std::time::Instant::now();
+        line(Language::JavaScript, &text, Within::Code);
+        assert!(started.elapsed().as_secs() < 5, "{:?}", started.elapsed());
     }
 
     #[test]
