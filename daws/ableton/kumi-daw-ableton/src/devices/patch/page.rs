@@ -431,11 +431,14 @@ fn tell(page: &Element, named: &str, ports: Option<(usize, usize)>, lines: &mut 
         }
     }
     let (mut full, mut rest, mut looks) = (Vec::new(), Vec::new(), Vec::new());
+    // A page can list an attribute twice (Max's own live.scope~ does, with active): it's said once, as first listed.
+    let mut said: Vec<&str> = Vec::new();
     for attribute in page.child("attributelist").into_iter().flat_map(|list| list.children("attribute")) {
         let Some(name) = real(attribute.attribute("name")) else { continue };
-        if meta(attribute, "invisible") == Some("1") || meta(attribute, "obsolete") == Some("1") {
+        if meta(attribute, "invisible") == Some("1") || meta(attribute, "obsolete") == Some("1") || said.contains(&name) {
             continue;
         }
+        said.push(name);
         if meta(attribute, "category").is_some_and(|category| LOOKS.contains(&category)) {
             looks.push(format!("@{name}"));
         } else if full.len() >= IN_FULL {
@@ -764,6 +767,36 @@ mod tests {
             bare.contains("values 1 = s1, 2 = s2,") && bare.contains("20 = s20 and 4 more"),
             "an empty value counted, not said: {bare}"
         );
+    }
+
+    #[test]
+    fn an_attribute_a_page_lists_twice_is_said_once() {
+        let c74 = tempfile::tempdir().unwrap();
+        let pages = c74.path().join("docs").join("refpages").join("max-ref");
+        std::fs::create_dir_all(&pages).unwrap();
+        let attribute = |name: &str, digest: &str, more: &str| {
+            format!(r#"<attribute name="{name}" get="1" set="1" type="int" size="1"><digest>{digest}</digest>{more}</attribute>"#)
+        };
+        let hidden = r#"<attributelist><attribute name="invisible" get="1" set="1" type="int" size="1" value="1" /></attributelist>"#;
+        let look = r#"<attributelist><attribute name="category" get="1" set="1" type="symbol" size="1" value="Color" /></attributelist>"#;
+        let list = [
+            attribute("active", "Active mode enable", ""),
+            attribute("shown", "Shown once it's not hidden", hidden),
+            attribute("colour", "Its colour", look),
+            attribute("active", "The active state", ""),
+            attribute("shown", "Shown as listed second", ""),
+            attribute("colour", "Its colour again", look),
+        ]
+        .concat();
+        let page = format!(
+            r#"<c74object name="scope" module="max"><digest>Show a signal</digest><attributelist>{list}</attributelist></c74object>"#
+        );
+        std::fs::write(pages.join("scope.maxref.xml"), page).unwrap();
+        let told = describe(&learn(c74.path()), "scope");
+        assert!(told.contains("- @active") && told.contains("Active mode enable"), "as first listed: {told}");
+        assert!(!told.contains("The active state"), "{told}");
+        assert!(told.contains("Shown as listed second") && !told.contains("Shown once"), "a hidden listing says nothing: {told}");
+        assert!(told.contains("Looks: @colour."), "its Looks too: {told}");
     }
 
     #[test]
