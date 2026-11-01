@@ -303,15 +303,23 @@ test("scratch: drop after the producer's own undo took the copies: nothing to re
   H.no_dialogs()
 end)
 
-test("scratch: a copy's cost counts its patterns' lines, and one copy too big for a callback is refused before anything is made (#361 N-S18)", function()
-  local sequence = {}
-  for p = 1, 100 do sequence[p] = p end
-  local env, peer = setup({}, { patterns = 100, sequence_length = 100, sequence = sequence, pattern_lines = 512 })
-  for p = 1, 100 do mock.ops.set_note(p, 3, 1, 1, { note = 36, instrument = 0 }) end -- a long song's bass: 100 patterns of 512 lines
-  mock.data.undo.stack = {}
+test("scratch: a copy's cost counts its patterns' lines, and one copy too big for a callback is refused by its own code before anything is made (#361 N-S18)", function()
+  -- A long song's bass, in patterns of 512 lines.
+  local function song_of(patterns)
+    local sequence = {}
+    for p = 1, patterns do sequence[p] = p end
+    local _, peer = setup({}, { patterns = patterns, sequence_length = patterns, sequence = sequence, pattern_lines = 512 })
+    for p = 1, patterns do mock.ops.set_note(p, 3, 1, 1, { note = 36, instrument = 0 }) end
+    mock.data.undo.stack = {}
+    return peer
+  end
+  -- About 3.2 s by the model: made (Renoise took 2.6 s for this many lines, every column full; lab 2026-11-01).
+  result(make(song_of(100), "s8", 1), "make")
+  -- About 6.4 s: refused.
+  local peer = song_of(200)
   local tracks = #mock.data.tracks
-  local refused = make(peer, "s8", 1)
-  ok(refused.error and refused.error.code == "bad-params", json.encode(refused.result or refused.error))
+  local refused = make(peer, "s9", 1)
+  ok(refused.error and refused.error.code == "too-big", json.encode(refused.result or refused.error))
   ok(refused.error.message:find("give a range", 1, true), refused.error.message)
   eq(#mock.data.tracks, tracks, "no copy made")
   eq(steps(), 0)

@@ -688,11 +688,20 @@ async fn a_goal_searches_scratch_copies_of_its_candidates_and_settles_the_winner
 /// A goal over Track 2 and Track 3, each with a ReaEQ, toward four seconds of noise: the integration, the rig and its
 /// slots. Track 3 renders silence, so what each slot is told shows which render it was heard from.
 async fn two_slot_goal(home: &Path, script: &ReaperScript) -> (Rc<dyn Integration>, Rc<dyn GoalRig>, Vec<GoalSlotInfo>) {
+    let (reaper, rig, slots, _) = two_slot_goal_told(home, script).await;
+    (reaper, rig, slots)
+}
+
+/// `two_slot_goal`, with what the app is told.
+async fn two_slot_goal_told(
+    home: &Path,
+    script: &ReaperScript,
+) -> (Rc<dyn Integration>, Rc<dyn GoalRig>, Vec<GoalSlotInfo>, Rc<RefCell<Vec<String>>>) {
     script.add_fx("r:track:{T0002}", "ReaEQ");
     script.add_fx("r:track:{T0003}", "ReaEQ");
     script.listening().set_level("r:track:{T0002}", 0.4);
     script.listening().set_level("r:track:{T0003}", 0.);
-    let (reaper, _) = integration(Daw::Reaper, home, create_reaper_integration);
+    let (reaper, told) = integration(Daw::Reaper, home, create_reaper_integration);
     reaper.start(Signal::new()).await.unwrap();
     reaper.observe(Signal::new(), None).await.unwrap();
     let reference = home.join("reference.wav");
@@ -709,13 +718,63 @@ async fn two_slot_goal(home: &Path, script: &ReaperScript) -> (Rc<dyn Integratio
     };
     let rig = reaper.goal(&request, Signal::new()).await.unwrap().unwrap();
     let slots = rig.slots();
-    (reaper, rig, slots)
+    (reaper, rig, slots, told)
 }
 
 /// A slot's trial at `value` on its ReaEQ's band 2 gain.
 fn gain_trial(slot: &GoalSlotInfo, value: f64, fresh: bool) -> GenerationTrial {
     let knobs: Vec<Knob> = slot.knobs.iter().filter(|knob| knob.name == "Gain-Band 2").cloned().collect();
     GenerationTrial { slot: slot.name.clone(), knobs, values: vec![value], fresh: fresh.then_some(true) }
+}
+
+/// The best of a goal is kept whole; when the whole track is too much to copy at once, from what the goal listened to, and said.
+#[tokio::test(flavor = "current_thread")]
+async fn a_goals_best_too_big_to_copy_whole_is_kept_from_what_it_listened_to() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for too_big in [false, true] {
+                let home = tempfile::tempdir().unwrap();
+                let script = ReaperScript::new(3, 0);
+                let asked: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+                let simulator = reaper_lab(&script, home.path(), |config| {
+                    let inner = config.respond.take().unwrap();
+                    let into = asked.clone();
+                    config.respond = Some(Arc::new(move |method: &str, params: &Value| {
+                        if method == "scratch" && params["action"] == "make" && params["label"] == "Kumi: goal best" {
+                            into.lock().unwrap().push(params.clone());
+                            if too_big && params.get("range").is_none() {
+                                let why = "one copy of Track 2 would hold Renoise about 3.6 s: give a range, a few bars of it";
+                                return Some(Err(("too-big".to_string(), why.to_string())));
+                            }
+                        }
+                        inner(method, params)
+                    }));
+                })
+                .await;
+                let (reaper, rig, slots, told) = two_slot_goal_told(home.path(), &script).await;
+                let knobs: Vec<Knob> = slots[0].knobs.iter().filter(|knob| knob.name == "Gain-Band 2").cloned().collect();
+                assert_eq!(
+                    rig.keep_best(&slots[0].name, &knobs, &[0.7], Signal::new()).await.unwrap(),
+                    "Kumi · Goal best",
+                    "too big: {too_big}"
+                );
+                let asked = asked.lock().unwrap();
+                let said: Vec<String> = told.borrow().iter().filter(|title| title.contains("holds beats")).cloned().collect();
+                if too_big {
+                    assert_eq!(asked.len(), 2, "{asked:?}");
+                    assert!(asked[0].get("range").is_none() && asked[1]["range"] == json!({"fromBeat": 0.0, "beats": 4.0}), "{asked:?}");
+                    assert_eq!(said.len(), 1, "{said:?}");
+                    assert!(said[0].contains("beats 0 to 4 of") && said[0].contains("the rest stays on"), "{said:?}");
+                } else {
+                    assert_eq!(asked.len(), 1, "the whole copy, once: {asked:?}");
+                    assert!(asked[0].get("range").is_none(), "{asked:?}");
+                    assert!(said.is_empty(), "{said:?}");
+                }
+                reaper.close().await.unwrap();
+                simulator.stop();
+            }
+        })
+        .await;
 }
 
 /// #399 (K29, D4): a generation's trials are heard together, as Live's goal hears them, and each slot is told from its
