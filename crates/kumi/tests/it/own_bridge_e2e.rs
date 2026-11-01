@@ -978,6 +978,64 @@ async fn run_tool(tool: &Rc<dyn KernelTool>, value: Value) -> Value {
 const ARP: &str = r#"[{"line": 0, "notes": [{"col": 1, "note": "C-4"}]}, {"line": 4, "notes": [{"col": 1, "note": "E-4"}]},
     {"line": 8, "notes": [{"col": 1, "note": "G-4"}]}, {"line": 12, "notes": [{"col": 1, "note": "B-4", "volume": "40"}]}]"#;
 
+/// A MIDI item's takes through the host as REAPER's rows say it (`source: "mid"`): operators that only a MIDI take has, and
+/// written notes, are taken, its notes are the takes' own, and a change and a drop find each take as Kumi kept it. The tool once
+/// looked for another word, and took every MIDI item in real REAPER for audio.
+#[tokio::test(flavor = "current_thread")]
+async fn a_reaper_midi_items_takes_move_their_notes_through_the_host() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let paths = BridgePaths::new(home.path(), Daw::Reaper);
+            let secret = ensure_secret(&paths.secret()).unwrap();
+            let script = ReaperScript::new(3, 0);
+            let played: Vec<(i64, f64, f64, i64)> = (0..8).map(|k| (48 + k, k as f64 * 0.5, 0.25, 100)).collect();
+            let (item, _) = script.add_midi_item("r:track:{T0002}", "Riff", 0., 8., &played);
+            let mut config = script.config(secret, "/lab/REAPER");
+            config.discovery_dir = Some(paths.discovery());
+            let _simulator = Simulator::start(config).await.unwrap();
+            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Reaper, home.path())), id: Cell::new(0) });
+            let connect: Connect = Rc::new(move |_| {
+                let endpoint = endpoint.clone();
+                async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+            });
+            let context = IntegrationContext::new(Rc::new(|_, _| {}));
+            let reaper = create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            reaper.start(Signal::new()).await.unwrap();
+            let observed = reaper.observe(Signal::new(), None).await.unwrap();
+            let variations = tool(&observed, "variations");
+            let looser = json!({"direction": "looser", "ops": [{"op": "timing", "amount": 1}, {"op": "velocity", "amount": 0.5}]});
+            let written = json!({"direction": "written", "lines": [{"pitch": 60, "start": 0.5, "length": 0.25}, {"pitch": 64, "start": 1.5, "length": 0.5}]});
+            let made = run_tool(
+                &variations,
+                json!({"action": "make", "source": {"itemRef": item}, "takes": [looser, written], "seed": 7, "listen": false}),
+            )
+            .await;
+            assert_eq!(made["skipped"], json!([]), "{made}");
+            assert_eq!(made["takes"].as_array().unwrap().len(), 2, "{made}");
+            // (their notes in REAPER are the takes' own: moved, and as written; the source's stay)
+            let notes_of = |n: usize| script.midi_notes(&format!("r:item:{{M{n:04}}}"));
+            assert_eq!(script.midi_notes(&item), played);
+            let moved = notes_of(2);
+            assert_eq!(moved.len(), played.len());
+            assert!(moved.iter().zip(&played).any(|(a, b)| a.1 != b.1), "{moved:?}");
+            assert_eq!(notes_of(3).iter().map(|note| (note.0, note.1)).collect::<Vec<_>>(), [(60, 0.5), (64, 1.5)]);
+            let changed = run_tool(&variations, json!({"action": "change", "names": ["rest"], "listen": false})).await;
+            assert_eq!((changed["changed"].as_array().unwrap().len(), &changed["skipped"]), (2, &json!([])), "{changed}");
+            let dropped = run_tool(&variations, json!({"action": "drop"})).await;
+            assert_eq!((dropped["dropped"].clone(), dropped["skipped"].clone()), (json!(["V1", "V2"]), json!([])), "{dropped}");
+            assert!(notes_of(2).is_empty() && notes_of(3).is_empty());
+            // (a take has all of a long source's notes: reads once stopped at 4000, and the take lost the rest)
+            let long: Vec<(i64, f64, f64, i64)> = (0..4200).map(|k| (40 + k % 40, k as f64 / 500., 0.001, 100)).collect();
+            let (item, _) = script.add_midi_item("r:track:{T0003}", "Long", 0., 16., &long);
+            let softer = json!({"direction": "softer", "ops": [{"op": "velocity", "amount": 1}]});
+            let made = run_tool(&variations, json!({"action": "make", "source": {"itemRef": item}, "takes": [softer], "seed": 7, "listen": false})).await;
+            assert_eq!(made["skipped"], json!([]), "{made}");
+            assert_eq!(notes_of(3).len(), 4200);
+        })
+        .await;
+}
+
 /// The user's loop (M7): "make me 9 phrases for this instrument" — then "I like these 5, change these 4 in different ways" —
 /// then the rest dropped. Each take is its own change; the kept takes are marked and never touched; phrase takes are heard.
 #[tokio::test(flavor = "current_thread")]

@@ -78,6 +78,11 @@ impl SimMidi {
             "positionBeats": self.position, "lengthBeats": self.length, "name": self.name, "takeRef": format!("r:take:{}", self.take),
             "takes": 1, "source": "mid", "muted": false})
     }
+    /// Its take's row, as the extension reads one take.
+    fn take_row(&self) -> Value {
+        json!({"ref": format!("r:take:{}", self.take), "name": self.name, "source": "mid", "fxCount": 0, "noteCount": self.notes.len(), "ccCount": 0,
+            "volumeDb": 0.0, "pan": 0.0, "pitch": 0.0, "playrate": 1.0, "preservePitch": false, "startOffset": 0.0})
+    }
     fn note_rows(&self) -> Vec<Value> {
         self.notes
             .iter()
@@ -538,6 +543,9 @@ impl ReaperScript {
         if kind == "notes-change" {
             return Self::notes_change(state, epoch, method, params);
         }
+        if matches!(kind, "item-variation" | "item-variation-set" | "items-delete") {
+            return Self::variation_change(state, epoch, method, kind, params);
+        }
         if matches!(kind, "fx-add" | "fx-param" | "fx-params" | "fx-delete") {
             return Self::fx_change(state, epoch, method, params);
         }
@@ -813,6 +821,69 @@ impl ReaperScript {
                 Ok(json!({"epoch": epoch, "restored": {"notes": state.midi[at].json()}, "display": {"title": "Notes put back"}}))
             }
         }
+    }
+
+    /// `item-variation {ref, position, length, name, notes}` (a copy of a MIDI item with its own notes), `item-variation-set
+    /// {ref, length, notes}` and `items-delete {refs}`: the variations tool's takes, as the extension makes them. Not undone here.
+    fn variation_change(state: &mut State, epoch: &str, method: &str, kind: &str, params: &Value) -> Result<Value, (String, String)> {
+        let input = &params["input"];
+        let gone = || ("gone".to_string(), "that item isn't there".to_string());
+        let beats = |key: &str| input[key].as_f64().map(|seconds| seconds * 2.);
+        let notes = || -> Vec<(i64, f64, f64, i64)> {
+            input["notes"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(|note| {
+                    Some((
+                        note["pitch"].as_i64()?,
+                        note["start"].as_f64()?,
+                        note["length"].as_f64()?,
+                        note["velocity"].as_i64().unwrap_or(100),
+                    ))
+                })
+                .collect()
+        };
+        let title = format!("Kumi's {kind}");
+        if method == "change_preview" {
+            return Ok(
+                json!({"epoch": epoch, "target": {"ref": input["ref"], "kind": "item"}, "prior": {}, "fence": {}, "display": {"title": title}}),
+            );
+        }
+        if method != "change_apply" {
+            return Err(("failed".into(), "the simulator doesn't undo a variation".into()));
+        }
+        let desc = params["desc"].as_str().unwrap_or_default().to_string();
+        let mut answer = json!({"epoch": epoch, "applied": {}, "display": {"title": title}, "undo": {"desc": desc, "entry": true}});
+        match kind {
+            "item-variation" => {
+                let from = Self::find_midi(state, input["ref"].as_str().unwrap_or_default()).ok_or_else(gone)?;
+                let n = state.midi.len() + 1;
+                let mut made = SimMidi { guid: format!("{{M{n:04}}}"), take: format!("{{K{n:04}}}"), ..state.midi[from].clone() };
+                made.position = beats("position").unwrap_or(made.position);
+                made.length = beats("length").unwrap_or(made.length);
+                made.name = input["name"].as_str().unwrap_or_default().to_string();
+                made.notes = notes();
+                made.notes.sort_by(|a, b| a.1.total_cmp(&b.1));
+                answer["created"] = json!({"ref": format!("r:item:{}", made.guid), "kind": "item"});
+                state.midi.push(made);
+            }
+            "item-variation-set" => {
+                let at = Self::find_midi(state, input["ref"].as_str().unwrap_or_default()).ok_or_else(gone)?;
+                state.midi[at].notes = notes();
+                state.midi[at].notes.sort_by(|a, b| a.1.total_cmp(&b.1));
+                state.midi[at].length = beats("length").unwrap_or(state.midi[at].length);
+            }
+            _ => {
+                for reference in input["refs"].as_array().into_iter().flatten().filter_map(Value::as_str) {
+                    let at = Self::find_midi(state, reference).ok_or_else(gone)?;
+                    state.midi.remove(at);
+                }
+            }
+        }
+        state.changed += 1;
+        Self::step(state, &desc);
+        Ok(answer)
     }
 
     /// The track an FX ref's chain is on, and the FX's place in it.
@@ -1398,8 +1469,9 @@ impl ReaperScript {
                 }
                 return Ok(json!({"items": [row], "epoch": epoch}));
             }
-            if let Some(at) = Self::find_midi(state, reference).filter(|_| reference.starts_with("r:item:")) {
-                return Ok(json!({"items": [state.midi[at].row()], "epoch": epoch}));
+            if let Some(at) = Self::find_midi(state, reference) {
+                let row = if reference.starts_with("r:item:") { state.midi[at].row() } else { state.midi[at].take_row() };
+                return Ok(json!({"items": [row], "epoch": epoch}));
             }
             return match state.tracks.iter().find(|row| row["ref"] == reference) {
                 Some(row) => Ok(json!({"items": [row], "epoch": epoch})),

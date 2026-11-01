@@ -30,7 +30,7 @@ pub static WORDS: Words = Words {
     app: "REAPER",
     sources: "an item (itemRef): an audio item (a footstep, an impact, a whoosh) or a MIDI item",
     anchors: "a MIDI take's notes every take keeps as they are (their index, from 0, as read); an audio take keeps its attack whatever the anchors",
-    ops: "pitch (semitones, up or down; a MIDI take's notes move), rate (its playrate: faster or slower, the whole sound still heard), offset (a later start in its source, a few milliseconds), length (shorter), fades, volume; a MIDI take's velocity, timing and thin (fewer notes); amount 0 to 1",
+    ops: "pitch (semitones, up or down; a MIDI take's notes move), rate (an audio take's playrate: faster or slower, the whole sound still heard), offset (a later start in its source, a few milliseconds), length (shorter), fades, volume; a MIDI take's velocity, timing and thin (fewer notes); amount 0 to 1",
     lines: "a MIDI take's notes as notes_add takes them ({pitch, start, length, velocity, channel}: quarter notes from the item's start; its anchor notes stay as they are: no need to write them)",
     places: "items (each take a copy of the source item after it on its track, gap seconds apart)",
     place_names: &["items"],
@@ -52,6 +52,10 @@ pub static WORDS: Words = Words {
 const GAP: f64 = 0.5;
 /// Pages of rows read (200 a page).
 const PAGES: usize = 20;
+/// Pages of a MIDI take's notes read: as many as one change writes (10 000), so a take never loses the rest.
+const NOTE_PAGES: usize = 50;
+/// What an item's row says of a MIDI take's source (reaper-kumi's `rows::source_word`).
+const MIDI_SOURCE: &str = "mid";
 /// How far an audio take's start moves at most (seconds): past that its attack isn't the sound's any more.
 const ATTACK: f64 = 0.03;
 
@@ -123,20 +127,24 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
         answer.pointer("/items/0").cloned().ok_or_else(|| format!("{} isn't in the project any more", self.short(reference)))
     }
 
-    /// What an item holds now: its row, its take's, and a MIDI take's notes.
-    async fn material_now(&self, item: &Value, anchors: &[Note], signal: &Signal) -> Result<ItemTake, String> {
+    /// What an item holds now: its row, its take's, and a MIDI take's notes that play, with each one's index as REAPER reads it.
+    async fn material_now(&self, item: &Value, anchors: &[Note], signal: &Signal) -> Result<(ItemTake, Vec<usize>), String> {
         let take_ref = item.get("takeRef").and_then(Value::as_str).ok_or("the item has no take")?;
         let take = self.one(take_ref, signal).await?;
-        let midi = item.get("source").and_then(Value::as_str) == Some("MIDI");
-        let notes = if midi {
-            let rows = self.plan.rows_through(json!({"kind": "note", "parent": take_ref, "limit": 200}), PAGES, signal).await?;
-            rows.iter().filter(|row| row.get("muted") != Some(&Value::Bool(true))).filter_map(Note::of).collect()
+        let midi = item.get("source").and_then(Value::as_str) == Some(MIDI_SOURCE);
+        let (indexes, notes) = if midi {
+            let rows = self.plan.rows_through(json!({"kind": "note", "parent": take_ref, "limit": 200}), NOTE_PAGES, signal).await?;
+            let count = take.get("noteCount").and_then(Value::as_u64).unwrap_or(0);
+            if count > rows.len() as u64 {
+                return Err(format!("that take has {count} notes, and Kumi varies a MIDI take of at most {}", rows.len()));
+            }
+            played(&rows).into_iter().unzip()
         } else {
-            Vec::new()
+            Default::default()
         };
         let number = |row: &Value, key: &str, default: f64| row.get(key).and_then(Value::as_f64).unwrap_or(default);
         let fade = |side: &str| item.pointer(&format!("/{side}/length")).and_then(Value::as_f64).unwrap_or(0.);
-        Ok(ItemTake {
+        let material = ItemTake {
             midi,
             length: number(item, "length", 0.),
             offset: number(&take, "startOffset", 0.),
@@ -147,7 +155,8 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
             fade_out: fade("fadeOut"),
             notes,
             anchors: anchors.to_vec(),
-        })
+        };
+        Ok((material, indexes))
     }
 
     async fn change(&self, tool: &str, input: Value, signal: &Signal) -> Result<(String, Value), (String, bool)> {
@@ -181,6 +190,26 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
             Err(error) => Err(error.to_string()),
         }
     }
+}
+
+/// A MIDI take's notes that play, of its note rows, each with its index as read: not its muted ones, nor those a trimmed start
+/// hides (written, one would sound at the item's start); one held across the start plays from it.
+fn played(rows: &[Value]) -> Vec<(usize, Note)> {
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| row.get("muted") != Some(&Value::Bool(true)))
+        .filter_map(|(at, row)| {
+            let mut note = Note::of(row)?;
+            let start = row.get("start").and_then(Value::as_f64).unwrap_or(0.);
+            if start < 0. {
+                note.length = round(start + note.length);
+                if note.length <= 0. {
+                    return None;
+                }
+            }
+            Some((row.get("index").and_then(Value::as_u64).map_or(at, |index| index as usize), note))
+        })
+        .collect()
 }
 
 /// A take as REAPER holds it once written: its settings as `settings` writes them and REAPER's reads give them back (times,
@@ -314,7 +343,8 @@ fn apply_one(op: &Value, factor: f64, take: &mut ItemTake, source: &ItemTake, rn
 }
 
 const AUDIO_OPS: [&str; 6] = ["pitch", "rate", "offset", "length", "fades", "volume"];
-const MIDI_OPS: [&str; 7] = ["pitch", "rate", "length", "volume", "velocity", "timing", "thin"];
+// (no rate: REAPER writes notes at the project's beats whatever the playrate, so a MIDI take's rate moves nothing and shortens it)
+const MIDI_OPS: [&str; 6] = ["pitch", "length", "volume", "velocity", "timing", "thin"];
 
 #[async_trait(?Send)]
 impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
@@ -346,17 +376,21 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
             .ok()
             .and_then(|row| row.get("name").and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_default();
-        let mut material = self.material_now(&item, &[], signal).await?;
-        // (the anchors: a MIDI take's notes by their index as read)
+        let (mut material, indexes) = self.material_now(&item, &[], signal).await?;
+        // (the anchors: a MIDI take's notes by their index as read, which counts the ones that don't play)
         let anchors: Vec<usize> =
             input.get("anchors").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).map(|n| n as usize).collect();
         if !anchors.is_empty() && !material.midi {
             return Err("anchors are a MIDI take's notes: an audio take keeps its attack anyway".into());
         }
-        if let Some(missing) = anchors.iter().find(|n| **n >= material.notes.len()) {
-            return Err(format!("anchor {missing}: the take has {} notes (from 0)", material.notes.len()));
+        let mut kept = Vec::with_capacity(anchors.len());
+        for n in &anchors {
+            let at = indexes.iter().position(|index| index == n);
+            kept.push(at.map(|at| material.notes[at].clone()).ok_or_else(|| {
+                format!("anchor {n}: no note that plays has that index (the take plays {} notes; read their indexes)", indexes.len())
+            })?);
         }
-        material.anchors = anchors.iter().map(|n| material.notes[*n].clone()).collect();
+        material.anchors = kept;
         let name = item.get("name").and_then(Value::as_str).unwrap_or("").to_string();
         let short = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem).trim().to_string();
         let short = if short.is_empty() { track_name.clone() } else { short };
@@ -524,7 +558,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
 
     async fn current(&self, set: &ReaperSet, row: &Value, signal: &Signal) -> Result<ItemTake, String> {
         let anchors = set.source.material.as_ref().map(|material| material.anchors.clone()).unwrap_or_default();
-        self.material_now(row, &anchors, signal).await
+        Ok(self.material_now(row, &anchors, signal).await?.0)
     }
 
     async fn rewrite(
@@ -763,6 +797,34 @@ mod tests {
                 assert_eq!(ItemTake { volume_db: take.volume_db, ..quieter.clone() }, take, "{name}: only its volume moves");
                 assert_eq!(digest_of(&read_back(&quieter)), digest_of(&quieter), "{name}: {quieter:?}");
             }
+        }
+    }
+
+    /// The word this backend takes a MIDI item by is the one REAPER's extension writes: a row saying "mid" where it looked for
+    /// "MIDI" made every MIDI item an audio one in real REAPER. (A shared word comes with the extension's next change.)
+    #[test]
+    fn a_midi_items_word_is_the_one_reapers_rows_write() {
+        let rows = include_str!("../../reaper-kumi/src/rows.rs");
+        assert!(rows.contains(&format!("\"midi\" => \"{MIDI_SOURCE}\".into()")), "rows::source_word writes another word for MIDI");
+    }
+
+    /// A take's notes that play, by REAPER's own indexes: not a muted one, nor one a trimmed start hides, which written would
+    /// sound at the item's start (lab, 7.82); one held across the start plays from it.
+    #[test]
+    fn the_notes_of_a_take_are_those_that_play_with_their_indexes_as_read() {
+        let row = |index: u64, start: f64, length: f64, muted: bool| json!({"index": index, "pitch": 60, "start": start, "length": length, "velocity": 90, "channel": 1, "selected": false, "muted": muted});
+        let rows = [row(0, -0.5, 0.25, false), row(1, -0.25, 0.75, false), row(2, 0.5, 0.25, true), row(3, 1., 0.25, false)];
+        let notes: Vec<(usize, f64, f64)> = played(&rows).into_iter().map(|(at, note)| (at, note.start, note.length)).collect();
+        assert_eq!(notes, [(1, 0., 0.5), (3, 1., 0.25)]);
+    }
+
+    /// A MIDI take's operators are those that move something: REAPER writes notes at the project's beats whatever its playrate
+    /// (lab, 7.82), so a rate moves no note and only cuts the end off.
+    #[test]
+    fn a_midi_take_has_no_rate_and_an_audio_take_has() {
+        assert!(!MIDI_OPS.contains(&"rate") && AUDIO_OPS.contains(&"rate"));
+        for direction in NOTE_DIRECTIONS {
+            assert!(note_direction_ops(direction).iter().all(|op| op["op"] != "rate"), "{direction}");
         }
     }
 
