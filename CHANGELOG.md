@@ -3,6 +3,16 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.34 — 2026-11-01
+
+Ships with bridge 1.0.101, as 1.24.33 did.
+
+- Renoise on Windows: a change Kumi previewed before you quit and reopened Renoise isn't made in the
+  reopened one; Kumi asks to preview it again.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.33 — 2026-10-31
 
 Ships with bridge 1.0.101, as 1.24.32 did.
