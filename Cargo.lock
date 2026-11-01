@@ -1601,6 +1601,7 @@ dependencies = [
  "async-trait",
  "daw-bridge",
  "daw-mcp-server",
+ "flate2",
  "futures",
  "kumi-agent",
  "kumi-common",

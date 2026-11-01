@@ -59,7 +59,7 @@ does the job there.
 | **Library and tutorials** | | | |
 | Watches video tutorials | ✓ | ✓ | ✓ |
 | Finds and loads the DAW's presets | ✓ | ✓ | ✓ |
-| Lists your own projects (`my_sets`) | ✓ | not yet: `.rpp` files aren't read | not yet: `.xrns` files aren't read |
+| Lists your own projects (`my_sets`) | ✓ | not yet: `.rpp` files aren't read | ✓ |
 | Searches the DAW's manual | ✓ | not yet: REAPER's manual isn't searched | not yet: Renoise's manual isn't searched |
 | Loads Browser items by id | ✓ | Live only | Live only |
 | Plug-in parameters shown once configured | ✓ | not needed: every parameter is there | not needed: every parameter is there |

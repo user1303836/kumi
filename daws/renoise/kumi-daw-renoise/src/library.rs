@@ -8,7 +8,7 @@ use std::path::PathBuf;
 use daw_bridge::detect::{detect_renoise, Env, Os};
 use daw_bridge::install::RENOISE_TOOL_FOLDER;
 use kumi_daw_own::library::{os_of, source};
-use kumi_library::daws::{Layout, LibrarySources};
+use kumi_library::daws::{Layout, LibrarySources, ProjectFormat};
 use kumi_library::sources::{env_of, home_of, is_folder, join, Source, SourceKind, SourceOptions};
 use kumi_types::daw::{DawId, DawProfile};
 
@@ -68,5 +68,9 @@ impl LibrarySources for RenoiseLibrary {
 
     fn layout(&self) -> &'static Layout {
         &LAYOUT
+    }
+
+    fn projects(&self) -> Option<&'static ProjectFormat> {
+        Some(&crate::songs::FORMAT)
     }
 }
