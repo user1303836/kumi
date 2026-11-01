@@ -83,3 +83,18 @@ test("mock: a closed server closes its clients with it", function()
   ok(not peer.open)
   eq(#mock.crashes, 0, "which is not a client being closed")
 end)
+
+test("mock: a line's text is every column of it, the hidden ones too", function()
+  mock.reset({})
+  mock.song = mock.make_song()
+  local line = mock.song:pattern(1):track(1):line(1)
+  local note, effect = line:note_column(1), line:effect_column(1)
+  note.note_value, note.instrument_value, note.volume_value, note.panning_value = 48, 1, 0x40, 0x20
+  note.delay_value, note.effect_number_value, note.effect_amount_value = 0x10, 0x0A, 5
+  effect.number_value, effect.amount_value = 0x0D, 9
+  local cells = { "C-4014020100A05" }
+  for c = 2, 12 do cells[c] = "---........0000" end
+  cells[13] = "0D09"
+  for c = 14, 20 do cells[c] = "0000" end
+  eq(tostring(line), table.concat(cells, " | "))
+end)

@@ -356,3 +356,33 @@ test("patterns: read with prints, each track's lines summed up as the catch-up d
   local moved = K.call(peer, "read", { kind = "pattern", prints = true, epoch = E }).result.items[1]
   ok(moved.prints["1"] ~= first.prints["1"], "another print")
 end)
+
+test("patterns: a length's region is read as its lines' text, every column of them, none of them one by one", function()
+  local _, peer = K.setup()
+  local E = K.place(peer)
+  pattern(3).lines = 12
+  local input = { ref = K.ref(E, "pattern", 3), lines = 32 }
+  mock.ops.set_note(3, 1, 20, 1, { note = 50 })
+  mock.column_reads = 0
+  local previewed, epoch, layout = K.preview(peer, "pattern-length", input)
+  eq(mock.column_reads, 0, "no column is read one by one")
+  -- A note column Renoise hides, on a line that holds a note already: the region changed.
+  mock.ops.set_note(3, 1, 20, 12, { note = 60 })
+  K.failure(K.apply(peer, "pattern-length", input, "Kumi: l (kl10)", previewed.fence, epoch, layout), "changed")
+  -- The last effect column of that line: so did it.
+  previewed, epoch, layout = K.preview(peer, "pattern-length", input)
+  mock.song:pattern(3):track(1):line(20):effect_column(8).amount_value = 9
+  K.failure(K.apply(peer, "pattern-length", input, "Kumi: l (kl11)", previewed.fence, epoch, layout), "changed")
+  -- The same note in the next column: the column counts, not only what's in the line.
+  mock.song:pattern(3):track(1):line(20):effect_column(8).amount_value = 0
+  mock.song:pattern(3):track(1):line(20):note_column(12).note_value = 121
+  previewed, epoch, layout = K.preview(peer, "pattern-length", input)
+  mock.song:pattern(3):track(1):line(20):note_column(1).note_value = 121
+  mock.song:pattern(3):track(1):line(20):note_column(1).instrument_value = 255
+  mock.ops.set_note(3, 1, 20, 2, { note = 50 })
+  K.failure(K.apply(peer, "pattern-length", input, "Kumi: l (kl13)", previewed.fence, epoch, layout), "changed")
+  -- Nothing changed since: it applies.
+  previewed, epoch, layout = K.preview(peer, "pattern-length", input)
+  ok(K.apply(peer, "pattern-length", input, "Kumi: l (kl12)", previewed.fence, epoch, layout).result)
+  H.no_dialogs()
+end)
