@@ -308,7 +308,6 @@ fn count(n: usize, what: &str) -> String {
     format!("{n} {what}{}", if n == 1 { "" } else { "s" })
 }
 
-/// What this machine's Max says of the objects boxes' texts name, a page for each.
 /// A page's text: its bytes as UTF-8, with any that aren't replaced (a page saved in Latin-1, say), so it's read
 /// rather than passed over. None when it can't be read.
 pub(crate) fn text_of(file: &Path) -> Option<String> {
@@ -323,6 +322,7 @@ fn within(root: &Path, page: &str) -> Option<PathBuf> {
     (inside && !page.as_os_str().is_empty()).then(|| root.join(page))
 }
 
+/// What this machine's Max says of the objects boxes' texts name, a page for each.
 pub fn describe_all(reference: &Reference, texts: &[String]) -> String {
     texts.iter().map(|text| describe(reference, text)).collect::<Vec<_>>().join("\n\n")
 }
