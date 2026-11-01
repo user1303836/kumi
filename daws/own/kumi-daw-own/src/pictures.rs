@@ -248,7 +248,7 @@ pub fn route(answers: &Answers) -> Option<ChangePicture> {
         change,
         values: list(drawn, "values").iter().filter_map(drawn_value).collect(),
     };
-    Some(ChangePicture::Routes { routes: vec![route] })
+    Some(ChangePicture::Routes { routes: vec![route], more: 0 })
 }
 
 // ----- a keyzone -----
@@ -647,7 +647,7 @@ mod tests {
             json!({}),
             json!({"display": {"route": {"from": "Bass", "to": "Reverb", "change": "made", "values": [{"name": "Volume", "to": 0.0, "toText": "0 dB"}]}}}),
         );
-        let Some(ChangePicture::Routes { routes }) = route(&Answers { preview: &preview, applied: &applied }) else { panic!() };
+        let Some(ChangePicture::Routes { routes, .. }) = route(&Answers { preview: &preview, applied: &applied }) else { panic!() };
         assert_eq!((routes[0].from.as_str(), routes[0].to.as_str(), routes[0].change), ("Bass", "Reverb", RouteChange::Made));
         let item = |start: f64, at: &str| json!({"name": "Vox", "start": start, "length": 4.0, "fadeIn": 0.0, "fadeOut": 0.5, "at": at});
         let (preview, applied) =

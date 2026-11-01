@@ -462,6 +462,45 @@ pub async fn read_stereo(path: impl AsRef<Path>, signal: &Signal, from: f64, mos
     Ok(([left, right], rate))
 }
 
+/// The most channels a file's peaks are read across: more than any sound file Kumi meets.
+const MAX_CHANNELS: usize = 64;
+
+/// A file at a glance: how long it is in seconds, and its level along it as `columns` peaks, each the loudest sample
+/// (of any channel) in its stretch, scaled so the file's loudest is 1. Read a block at a time, so a song isn't held
+/// in memory.
+pub async fn peaks(path: impl AsRef<Path>, columns: usize, signal: &Signal) -> Result<(f64, Vec<f32>), AudioError> {
+    let mut source = open_audio(path, Some(signal.clone())).await?;
+    // (a header claiming thousands of channels would make each block as big as the file)
+    if source.channels > MAX_CHANNELS {
+        let _ = source.close().await;
+        return Err(AudioError(format!("That file says it has {} channels.", source.channels)));
+    }
+    let frames = source.frames.max(1);
+    let columns = columns.clamp(1, frames);
+    let mut peaks = vec![0f32; columns];
+    let mut at = 0;
+    while let Some(block) = source.read(65_536).await? {
+        if signal.is_cancelled() {
+            let _ = source.close().await;
+            return Err(AudioError("Stopped.".into()));
+        }
+        let got = block.first().map_or(0, Vec::len);
+        for frame in 0..got {
+            let column = ((at + frame) * columns / frames).min(columns - 1);
+            let level = block.iter().filter_map(|channel| channel.get(frame)).fold(0f32, |most, sample| most.max(sample.abs()));
+            peaks[column] = peaks[column].max(level);
+        }
+        at += got;
+    }
+    let seconds = frames as f64 / source.sample_rate;
+    let _ = source.close().await;
+    let loudest = peaks.iter().copied().fold(0f32, f32::max);
+    if loudest > 0. {
+        peaks.iter_mut().for_each(|peak| *peak = (*peak / loudest).min(1.));
+    }
+    Ok((seconds, peaks))
+}
+
 /// A 16-bit mono WAV of `mono` at `rate`: the tests' sound files.
 #[cfg(any(test, feature = "test-support"))]
 pub fn write_test_wav(path: &Path, mono: &[f32], rate: u32) {
@@ -767,6 +806,33 @@ mod tests {
         assert_eq!(plan(false, None, None), [("ffmpeg".to_string(), None, None)]);
         assert!(AudioError::no_room("Only 5 MB is free.").is_no_room());
         assert!(!AudioError("That file is too short to be audio.".into()).is_no_room());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_files_peaks_follow_its_level_along_it() {
+        let folder = std::env::temp_dir().join(format!("kumi-peaks-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir(&folder).unwrap();
+        let path = folder.join("hit.wav");
+        // A second at 1 kHz: quiet, then loud for a quarter, then silent.
+        let level = |n: usize| {
+            if n < 500 {
+                0.1
+            } else if n < 750 {
+                0.5
+            } else {
+                0.
+            }
+        };
+        let mono: Vec<f32> = (0..1000).map(|n| if n % 2 == 0 { level(n) } else { -level(n) }).collect();
+        write_test_wav(&path, &mono, 1000);
+        let (seconds, peaks) = peaks(&path, 4, &Signal::new()).await.unwrap();
+        assert_eq!(seconds, 1.);
+        assert_eq!(peaks.len(), 4);
+        assert!((peaks[0] - 0.2).abs() < 0.01 && (peaks[1] - 0.2).abs() < 0.01, "{peaks:?}");
+        assert_eq!((peaks[2], peaks[3]), (1., 0.), "the loudest is 1, silence 0");
+        // More columns than samples: one a sample.
+        assert_eq!(super::peaks(&path, 5000, &Signal::new()).await.unwrap().1.len(), 1000);
+        std::fs::remove_dir_all(&folder).unwrap();
     }
 
     #[tokio::test(flavor = "current_thread")]

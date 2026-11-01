@@ -227,6 +227,9 @@ pub struct History<H: ChangeHost> {
     /// values it moved, and when the last came (`parameters::curve_later`).
     pub curve_runs: RefCell<HashMap<String, CurveRun>>,
     pub changes_this_turn: Cell<usize>,
+    /// The run of one kind of change the plan running now makes, which each change it records is marked with
+    /// (`ChangeRecord::batch`).
+    pub batch: RefCell<Option<String>>,
     quiet: RefCell<Option<Vec<String>>>,
     pub timeout_ms: u64,
     on_change: Option<Rc<dyn Fn(ChangeRecord)>>,
@@ -263,6 +266,7 @@ impl<H: ChangeHost> History<H> {
             entries: RefCell::new(IndexMap::new()),
             curve_runs: RefCell::default(),
             changes_this_turn: Cell::new(0),
+            batch: RefCell::new(None),
             quiet: RefCell::new(None),
             on_shift: RefCell::new(None),
             outside: RefCell::new(vec![]),
@@ -332,7 +336,10 @@ impl<H: ChangeHost> History<H> {
             entries.drain(..over);
         }
     }
-    pub fn remember(&self, record: ChangeRecord, transaction_id: String, restore: Option<Restore>) {
+    pub fn remember(&self, mut record: ChangeRecord, transaction_id: String, restore: Option<Restore>) {
+        if record.batch.is_none() {
+            record.batch = self.batch.borrow().clone();
+        }
         self.entries.borrow_mut().insert(record.id.clone(), Rc::new(RefCell::new(Applied::new(record.clone(), transaction_id, restore))));
         self.keep_within(MAX_ENTRIES);
         // Only the newest changes keep their pictures here (each up to 4 KB, and the history keeps thousands).

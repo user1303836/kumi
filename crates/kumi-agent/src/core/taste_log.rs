@@ -397,6 +397,7 @@ mod tests {
             note: None,
             at,
             picture: None,
+            batch: None,
         }
     }
     struct Fixture {

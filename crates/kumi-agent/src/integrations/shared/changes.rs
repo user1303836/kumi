@@ -48,5 +48,6 @@ pub fn new_record(family: ChangeFamily, summary: ChangeSummary, state: ChangeSta
         note: None,
         at,
         picture: summary.picture.and_then(ChangePicture::bounded),
+        batch: None,
     }
 }

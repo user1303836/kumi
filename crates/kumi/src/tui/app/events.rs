@@ -298,6 +298,7 @@ impl TuiApp {
                 let change = kept(change);
                 let (new, refresh) = {
                     let mut state = self.0.state.borrow_mut();
+                    state.images.forget_runs();
                     if let Some(index) = state.records.changes().iter().position(|c| c.id == change.id) {
                         // A picture that came after the change (its curve) is drawn again.
                         if state.records.changes()[index].picture != change.picture {
