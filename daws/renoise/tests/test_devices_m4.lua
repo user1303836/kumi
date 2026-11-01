@@ -183,6 +183,18 @@ test("devices m4: a preset is named by number, name or the last part of a name; 
   failure(response, "bad-params", "mixer")
 end)
 
+test("devices m4: a preset Renoise doesn't take changes nothing, so no step stays (#361 N-N2)", function()
+  local _, peer = setup()
+  local epoch, layout = place(peer)
+  local input = { ref = epoch .. ":device:2.2", preset = "Bright" }
+  local previewed = preview(peer, "device-preset", input)
+  mock.presets_refused = true
+  local done = apply(peer, "device-preset", input, previewed, "Kumi: x (k1)", epoch, layout)
+  mock.presets_refused = nil
+  failure(done, "failed")
+  eq(steps(), 0, "nothing written back, so no step")
+end)
+
 test("devices m4: a preset choice refuses a device whose settings moved since the preview (its fence), writing nothing", function()
   local _, peer = setup()
   local epoch, layout = place(peer)

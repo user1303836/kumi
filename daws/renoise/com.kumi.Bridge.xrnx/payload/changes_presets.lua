@@ -263,7 +263,8 @@ local function preset_apply(song, env, input, fence, desc)
   watch_all(env, t, d, device)
   device.active_preset = n
   if device.active_preset ~= n then
-    pcall(function() device.active_preset_data = xml end)
+    -- (what it left is written back only if it changed anything: a write would leave a step of its own)
+    if device.active_preset_data ~= xml then pcall(function() device.active_preset_data = xml end) end
     fail("failed", "Renoise didn't take the preset " .. q(name))
   end
   local back = device.active_preset_data

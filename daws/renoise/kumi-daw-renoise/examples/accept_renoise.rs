@@ -252,13 +252,19 @@ struct Case {
     /// A known limit of Renoise's: failures of the steps after the second apply (Renoise's undo and redo, and Kumi's undo
     /// after them) make the case a limit, with this reason.
     limit: &'static str,
+    /// Lua the producer's Renoise runs between Kumi's change and its undo.
+    between: &'static str,
 }
 
 const fn case(tool: &'static str, setup: &'static str, input: &'static str, probe: &'static str) -> Case {
-    Case { tool, label: "", setup, host: &[], input, probe, note: "", limit: "" }
+    Case { tool, label: "", setup, host: &[], input, probe, note: "", limit: "", between: "" }
 }
 
 impl Case {
+    const fn between(mut self, between: &'static str) -> Self {
+        self.between = between;
+        self
+    }
     const fn label(mut self, label: &'static str) -> Self {
         self.label = label;
         self
@@ -293,6 +299,13 @@ const PHRASE: &str = "local i = new_instrument('K phrase', 1) song:instrument(i)
 const CHAIN: &str =
     "local i = new_instrument('K chain', 1) local c = song:instrument(i):insert_sample_device_chain_at(1) c.name = 'K ch' return {i = i}";
 const CHAIN_DEVICES: &str = "local i = new_instrument('K chain', 1) local c = song:instrument(i):insert_sample_device_chain_at(1) c:insert_device_at('Audio/Effects/Native/Gainer', 2) c:insert_device_at('Audio/Effects/Native/Delay', 3) return {i = i}";
+/// A chain's Gainer and an *LFO aimed at its first parameter, and what reads them: Renoise gives a device made from its
+/// settings no aim, and clears one as its target goes (#399 N-S22).
+const AIMED_CHAIN: &str = "local i = new_instrument('K aim', 1) local c = song:instrument(i):insert_sample_device_chain_at(1) c:insert_device_at('Audio/Effects/Native/Gainer', 2) local l = c:insert_device_at('Audio/Effects/Native/*LFO', 3) for _, p in ipairs(l.parameters) do if p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end return {i = i}";
+const CHAIN_AIMS: &str = "local out = {} local chains = song:instrument($i).sample_device_chains if #chains == 0 then return out end for k, d in ipairs(chains[1].devices) do local row = d.device_path for _, p in ipairs(d.parameters) do if p.name:find('^Dest') then row = row .. ' ' .. p.name .. '=' .. p.value end end out[k] = row end return out";
+/// An empty instrument with settings of its own, which clear() resets, and a file to load into it (#399 N-S12).
+const KEPT_SLOT: &str = "local f = new_instrument('K xrni', 1) song.selected_instrument_index = f renoise.app():save_instrument('$dir/k.xrni') local i = new_instrument('K slot', 0) local s = song:instrument(i) s.volume = 0.5 s.transpose = 3 s.midi_output_properties.channel = 5 s:macro(1).name = 'Cut' return {i = i}";
+const SLOT_SETTINGS: &str = "local s = song:instrument($i) return {s.name, s.volume, s.transpose, s.midi_output_properties.channel, s:macro(1).name, #s.samples, #song.instruments}";
 const PLUGIN: &str = "local i = new_instrument('K plugin', 0) song:instrument(i).plugin_properties:load_plugin('Audio/Generators/AU/aumu:dls :appl') local pp = song:instrument(i).plugin_properties return {i = i, s = not pp.auto_suspend}";
 const SLOT: &str = "local q, p = new_slot() return {q = q, p = p}";
 /// What a Doofer holds: its devices' types and their gains, as its preset data says.
@@ -389,6 +402,14 @@ static CASES: &[Case] = &[
     case("moddevice_param", "local i = new_instrument('K mod', 1) moddev(song:instrument(i).sample_modulation_sets[1], 'AHDSR') return {i = i}", r#"{"ref":"$E:moddevice:$i.1.1","param":"Attack","value":0.3}"#, "return values(song:instrument($i).sample_modulation_sets[1].devices[1])"),
     case("chain_add", INSTRUMENT, r#"{"ref":"$E:instrument:$i","name":"K chain"}"#, "return chainnames($i)"),
     case("chain_delete", CHAIN, r#"{"ref":"$E:chain:$i.1"}"#, "return chainnames($i)"),
+    case("chain_delete", AIMED_CHAIN, r#"{"ref":"$E:chain:$i.1"}"#, CHAIN_AIMS).label("chain_delete aimed"),
+    case("chaindevice_delete", AIMED_CHAIN, r#"{"ref":"$E:chaindevice:$i.1.3"}"#, CHAIN_AIMS).label("chaindevice_delete the meta"),
+    case("chaindevice_delete", AIMED_CHAIN, r#"{"ref":"$E:chaindevice:$i.1.2"}"#, CHAIN_AIMS).label("chaindevice_delete its target"),
+    case("notes_write", TRACK, r#"{"patternRef":"$E:pattern:1","trackRef":"$E:track:$t","lines":[{"line":0,"notes":[{"col":1,"note":"C-4","instrument":0}]},{"line":4,"notes":[{"col":1,"note":"E-4","instrument":0}]}]}"#, "return notes(1, $t, 8)")
+        .label("notes_write undone after an instrument renumbers them")
+        .between("song:insert_instrument_at(1)")
+        .note(LINES_REDO),
+    case("instrument_load", KEPT_SLOT, r#"{"path":"$dir/k.xrni","ref":"$E:instrument:$i"}"#, SLOT_SETTINGS).label("instrument_load into a slot with settings").limit("Renoise's own undo of a load into a slot doesn't reach HISTORY (#805)."),
     case("chain_set", CHAIN, r#"{"ref":"$E:chain:$i.1","name":"K air"}"#, "return chainnames($i)"),
     case("chaindevice_add", CHAIN, r#"{"ref":"$E:chain:$i.1","path":"Gainer"}"#, "return chainpaths($i, 1)"),
     case("chaindevice_delete", CHAIN_DEVICES, r#"{"ref":"$E:chaindevice:$i.1.2"}"#, "return chainpaths($i, 1)"),
@@ -723,6 +744,12 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
     if outside_undo {
         let note = row.note.clone().unwrap_or_default();
         out.step("note", note.contains("Renoise") && note.contains("Kumi"), format!("“{}”", short(&note, 90)));
+    }
+    if !case.between.is_empty() {
+        if let Err(why) = lab.lua(&fill_lua(case.between, &vars)).await {
+            return out.fail("between", why);
+        }
+        lab.pause().await;
     }
     // 2. Kumi's undo, read back
     let undo = lab.undo(&row.id).await;

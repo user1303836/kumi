@@ -306,6 +306,29 @@ local function with_selected(song, i, fn)
 end
 M.with_selected = with_selected
 
+-- An empty instrument Kumi fills has settings of its own (volume, transpose, MIDI output fields, macros, comments, scale), which
+-- clear() resets: it's kept as a file first (15 ms, no step), to empty it by loading that back, under its own name as Renoise names
+-- what it loads after the file (lab 2026-11-01). Nil when Renoise wouldn't save it.
+function M.keep_slot(song, i)
+  local file = places_.temp_file(".xrni")
+  local ok, saved = pcall(with_selected, song, i, function() return renoise.app():save_instrument(file) end)
+  return ok and saved and io.exists(file) and file or nil
+end
+
+-- The instrument at `i` empty again: as `keep_slot` kept it, or cleared without that file (Renoise empties its temporary folder as
+-- it quits). A note when its own settings are lost.
+function M.empty_slot(song, env, i, file, name)
+  local loaded = false
+  if type(file) == "string" and io.exists(file) then
+    local function load() loaded = with_selected(song, i, function() return places_.load_xrni(song, i, file) end) end
+    if env.replacing_instrument then env.replacing_instrument(i, load) else load() end
+  end
+  local instrument = song:instrument(i)
+  if not loaded then instrument:clear() end
+  if type(name) == "string" and instrument.name ~= name then instrument.name = name end
+  if not loaded then return "Kumi no longer has its settings from before (volume, transpose, MIDI output, macros): they're reset." end
+end
+
 -- The selection after an instrument was made at `i`: the producer's moved up one with the others.
 local function keep_selection(song, i, before)
   local wanted = before >= i and before + 1 or before
@@ -699,6 +722,8 @@ local function delete_restore(song, env, restore, desc)
     pcall(function() song:delete_instrument_at(at) end)
     fail("failed", string.format("Renoise wouldn't load the copy of %s back: nothing was put back", q(label)))
   end
+  -- (Renoise names what it loads after the file: lab 2026-11-01)
+  if type(material.name) == "string" then song:instrument(at).name = material.name end
   -- The notes, where Renoise cleared them and nothing came since (a cell the producer filled is theirs).
   local moved = function(t)
     if type(restore.layout) ~= "number" or not env.shifted then return t end
@@ -873,6 +898,7 @@ local function load_apply(song, env, input, fence, desc)
   local i = plan.into or plan.index
   -- (the empty slot's own name, which its undo gives back: Renoise names the instrument after the file)
   local slot_name = plan.into and song:instrument(plan.into).name or nil
+  local slot = plan.into and M.keep_slot(song, plan.into) or nil
   song:describe_undo(desc)
   if not plan.into then song:insert_instrument_at(i) end
   local loaded_ok, loaded = pcall(load_into, song, i, plan.path, plan.extension)
@@ -881,7 +907,7 @@ local function load_apply(song, env, input, fence, desc)
   if not loaded_ok or not loaded or places_.is_empty(instrument) then
     -- (nothing half-done stays: the new instrument goes, an empty one is emptied)
     pcall(function()
-      if plan.into then instrument:clear() else song:delete_instrument_at(i) end
+      if plan.into then M.empty_slot(song, env, i, slot, slot_name) else song:delete_instrument_at(i) end
     end)
     local why = loaded_ok and "" or (": " .. tostring(type(loaded) == "table" and loaded.message or loaded):gsub("^[^%s:]*%.lua:%d+: ", ""))
     fail("failed", string.format("Renoise wouldn't load %s%s", plan.path, why))
@@ -895,7 +921,7 @@ local function load_apply(song, env, input, fence, desc)
     undo = { desc = desc, entry = true }, prior = { instruments = plan.count }, place = places_.journal_place("instrument", n),
   }
   if plan.into then
-    done.material = { into = places_.place_of(env, "instrument", n), name = slot_name }
+    done.material = { into = places_.place_of(env, "instrument", n), name = slot_name, slot = slot }
   else
     done.material = { made = places_.place_of(env, "instrument", n) }
     done.created = { ref = places_.ref_of(env, "instrument", n), kind = "instrument" }
@@ -920,10 +946,10 @@ local function load_restore(song, env, restore, desc)
     fail("changed", string.format("%s changed in Renoise since Kumi loaded it", q(label)))
   end
   song:describe_undo(desc)
-  instrument:clear()
-  if type(material.name) == "string" and instrument.name ~= material.name then instrument.name = material.name end
+  local note = M.empty_slot(song, env, n[1], material.slot, material.name)
+  label = places_.instrument_label(n[1], song:instrument(n[1]))
   base.note_restored_at(env.journal, "instrument-load", places_.journal_place("instrument", n))
-  return { restored = { emptied = true }, display = { title = string.format("Emptied %s again (put back)", q(label)) }, undo = { desc = desc, entry = true } }
+  return { restored = { emptied = true }, display = { title = string.format("Emptied %s again (put back)", q(label)), note = note }, undo = { desc = desc, entry = true } }
 end
 
 base.register({

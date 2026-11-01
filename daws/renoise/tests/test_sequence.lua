@@ -314,3 +314,18 @@ test("sequence: Renoise's undo and redo of a clone of two slots (two patterns ma
   eq(K.told(peer), "undo:Kumi: clone two (ks61)")
   H.no_dialogs()
 end)
+
+test("sequence: the pool keeps a pattern another pattern's track aliases, even the last and empty, as Renoise does (lab 2026-11-01)", function()
+  setup()
+  local song = mock.song
+  local sequencer = song.sequencer
+  sequencer:insert_new_pattern_at(#sequencer.pattern_sequence + 1)
+  local a = sequencer.pattern_sequence[#sequencer.pattern_sequence]
+  sequencer:insert_new_pattern_at(#sequencer.pattern_sequence + 1)
+  local b = sequencer.pattern_sequence[#sequencer.pattern_sequence]
+  song:pattern(a):track(1).alias_pattern_index = b
+  local patterns = #song.patterns
+  sequencer:delete_sequence_at(#sequencer.pattern_sequence)
+  eq(#song.patterns, patterns, "kept")
+  eq(song:pattern(a):track(1).alias_pattern_index, b)
+end)

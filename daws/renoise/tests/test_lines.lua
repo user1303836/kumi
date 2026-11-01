@@ -277,6 +277,34 @@ test("lines: Kumi's undo of written, transposed or copied lines puts notes back 
   H.no_dialogs()
 end)
 
+test("lines: instruments renumbering isn't an edit, as Renoise makes it or undoes it; a real edit still stops Kumi's undo", function()
+  local _, peer = K.setup(nil, { instruments = 2 })
+  mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 1 })
+  mock.ops.set_note(1, 3, 3, 1, { note = 52, instrument = 1 })
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  local E = K.place(peer)
+  local function write() return K.change(peer, "notes-write", { pattern = K.ref(K.place(peer), "pattern", 1), track = K.ref(K.place(peer), "track", 3), lines = {
+    { line = 0, notes = { { col = 1, note = "OFF" } } },
+  } }) end
+  local written = write()
+  -- Renoise's own undo tells the renumbered lines before the list.
+  mock.song:insert_instrument_at(1)
+  H.tick(2)
+  mock.song:undo()
+  H.tick(2)
+  local undone = K.restore(peer, written)
+  ok(undone.result, T.load_payload_module("json").encode(undone.error or {}))
+  eq(column(1, 3, 1, 1).note_string, "C-4")
+  -- An edit in that pattern a tick after a renumbering does count.
+  written = write()
+  mock.song:insert_instrument_at(1)
+  H.tick(2)
+  mock.song:pattern(1):track(3):line(9):note_column(1).note_string = "C-5"
+  H.tick(2)
+  local refused = K.restore(peer, written)
+  eq(refused.error and refused.error.code, "changed", "an edit may have moved rows")
+end)
+
 test("lines: Kumi's undo refuses to put notes back when the instrument they played was deleted, and writes nothing", function()
   local _, peer = K.setup(nil, { instruments = 2 })
   mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 1 })

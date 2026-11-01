@@ -246,6 +246,7 @@ local function apply(song, env, input, fence, desc)
   local before = song.selected_instrument_index
   local i = kit.into or kit.index
   local was = kit.into and song:instrument(i).name or nil
+  local slot = kit.into and instruments_.keep_slot(song, i) or nil
   song:describe_undo(desc)
   if not kit.into then song:insert_instrument_at(i) end
   local instrument = song:instrument(i)
@@ -260,7 +261,7 @@ local function apply(song, env, input, fence, desc)
   end
   if not filled then
     -- (nothing half-made stays: the new instrument goes, the empty one is emptied again)
-    pcall(function() if kit.into then instrument:clear() else song:delete_instrument_at(i) end end)
+    pcall(function() if kit.into then instruments_.empty_slot(song, env, i, slot, was) else song:delete_instrument_at(i) end end)
     local message = type(why) == "table" and why.message or tostring(why or "it went wrong"):gsub("^[^%s:]*%.lua:%d+: ", "")
     fail("failed", message)
   end
@@ -273,8 +274,7 @@ local function apply(song, env, input, fence, desc)
     undo = { desc = desc, entry = true }, prior = { instruments = kit.count }, place = places_.journal_place("instrument", n),
   }
   if kit.into then
-    -- (emptying it again would leave it unnamed, as Renoise's clear does: its name is kept to give back)
-    done.material = { into = places_.place_of(env, "instrument", n), name = was }
+    done.material = { into = places_.place_of(env, "instrument", n), name = was, slot = slot }
   else
     done.material = { made = places_.place_of(env, "instrument", n) }
     done.created = { ref = places_.ref_of(env, "instrument", n), kind = "instrument" }
@@ -318,12 +318,10 @@ local function restore(song, env, restore, desc)
       base.note_restored_at(env.journal, "instrument-kit", places_.journal_place("instrument", { i }))
       return { restored = { deleted = true }, display = { title = string.format("Removed the kit %s (put back)", q(label)) }, undo = { desc = desc, entry = true } }
     end
-    local instrument = live:instrument(i)
-    instrument:clear()
-    if type(material.name) == "string" and instrument.name ~= material.name then instrument.name = material.name end
+    local note = instruments_.empty_slot(live, env, i, material.slot, material.name)
     base.note_restored_at(env.journal, "instrument-kit", places_.journal_place("instrument", { i }))
-    label = places_.instrument_label(i, instrument)
-    return { restored = { emptied = true }, display = { title = string.format("Emptied %s again (put back)", q(label)) }, undo = { desc = desc, entry = true } }
+    label = places_.instrument_label(i, live:instrument(i))
+    return { restored = { emptied = true }, display = { title = string.format("Emptied %s again (put back)", q(label)), note = note }, undo = { desc = desc, entry = true } }
   end, material.into ~= nil)
 end
 
