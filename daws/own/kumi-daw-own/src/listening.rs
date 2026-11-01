@@ -50,6 +50,10 @@ const TRACK_PAGES: usize = 50;
 const GRID: u64 = 49;
 /// The longest a job is waited for before Kumi stops it (a whole song with heavy plug-ins).
 const JOB_LIMIT: Duration = Duration::from_secs(30 * 60);
+/// How long a render the DAW answers busy is asked again, and how often: Renoise's tool answers busy while it reads a dense
+/// song's tempo commands, a slice each time it's asked and more between, so a moment later it goes on from there.
+const BUSY_WAIT: Duration = Duration::from_secs(20);
+const BUSY_PACE: Duration = Duration::from_secs(1);
 
 /// What Kumi knows of one DAW's listening: what its sources hold, the master's devices that don't make masking unfair,
 /// its gain stage, its equaliser, and the change kinds the listening tools use.
@@ -751,7 +755,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
         let pre_roll = self.beats_per_bar.get().min(window.from).max(0.);
         let args = json!({"sources": sources, "range": {"fromBeat": window.from, "beats": window.beats}, "preRollBeats": pre_roll});
         let own_playing = self.own_playing();
-        let started = match self.ask("render", args, signal.clone()).await? {
+        let started = match while_busy(signal, || self.ask("render", args.clone(), signal.clone())).await? {
             Ok(started) => started,
             Err(refused) => return Ok(Err(refused.why)),
         };
@@ -1950,7 +1954,7 @@ impl<S: RefScheme + 'static> Renderer for OwnRenderer<S> {
         let source = json!({"id": "items", "what": "track", "ref": reference, "stage": "items"});
         let args = json!({"sources": [source], "range": {"fromBeat": from, "beats": beats}, "preRollBeats": 0});
         let own_playing = self.own_playing();
-        let started = match self.ask("render", args, signal.clone()).await? {
+        let started = match while_busy(&signal, || self.ask("render", args.clone(), signal.clone())).await? {
             Ok(started) => started,
             Err(refused) => return Ok(Err(refused.why)),
         };
@@ -2522,6 +2526,27 @@ impl<S: RefScheme + 'static> KernelTool for ListeningTool<S> {
     }
 }
 
+/// `ask`'s answer, asked again while the DAW answers busy, up to `BUSY_WAIT`: still busy then, that's the answer. Any other
+/// answer comes at once, and a stop ends the wait.
+async fn while_busy<F>(signal: &Signal, mut ask: impl FnMut() -> F) -> Result<Result<Value, Refused>, RuntimeError>
+where
+    F: std::future::Future<Output = Result<Result<Value, Refused>, RuntimeError>>,
+{
+    let began = tokio::time::Instant::now();
+    loop {
+        match ask().await? {
+            Err(refused) if refused.there && refused.busy && began.elapsed() < BUSY_WAIT => {
+                tokio::select! {
+                    biased;
+                    _ = signal.cancelled() => return Err(RuntimeError::Aborted),
+                    _ = tokio::time::sleep(BUSY_PACE) => {}
+                }
+            }
+            answer => return Ok(answer),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -2554,6 +2579,76 @@ mod tests {
         assert!(!super::verified_plugin_limiter(&device));
     }
     use super::*;
+
+    fn refused(busy: bool, there: bool) -> Refused {
+        Refused { why: "Renoise is still reading".into(), there, busy, code: busy.then(|| "busy".to_string()), answered: true }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_render_answered_busy_is_asked_again_until_it_starts() {
+        let asked = Cell::new(0);
+        let began = tokio::time::Instant::now();
+        let answer = while_busy(&Signal::new(), || {
+            asked.set(asked.get() + 1);
+            let busy = asked.get() <= 2;
+            async move { Ok(if busy { Err(refused(true, true)) } else { Ok(json!({"jobId": "1"})) }) }
+        })
+        .await
+        .unwrap();
+        assert_eq!(answer.ok(), Some(json!({"jobId": "1"})));
+        assert_eq!(asked.get(), 3);
+        assert_eq!(began.elapsed(), BUSY_PACE * 2);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_daw_still_busy_is_said_once_the_wait_is_over() {
+        let asked = Cell::new(0);
+        let began = tokio::time::Instant::now();
+        let answer = while_busy(&Signal::new(), || {
+            asked.set(asked.get() + 1);
+            async { Ok(Err(refused(true, true))) }
+        })
+        .await
+        .unwrap();
+        assert_eq!(answer.err().map(|refused| refused.why).as_deref(), Some("Renoise is still reading"));
+        assert_eq!(began.elapsed(), BUSY_WAIT);
+        assert_eq!(asked.get(), 21, "once at the start and once a second");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn any_other_refusal_is_said_at_once() {
+        for (busy, there) in [(false, true), (true, false)] {
+            let asked = Cell::new(0);
+            let answer = while_busy(&Signal::new(), || {
+                asked.set(asked.get() + 1);
+                async move { Ok(Err(refused(busy, there))) }
+            })
+            .await
+            .unwrap();
+            assert!(answer.is_err());
+            assert_eq!(asked.get(), 1, "busy {busy}, there {there}");
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stop_ends_the_wait_for_a_busy_daw_at_once() {
+        let signal = Signal::new();
+        let asked = Cell::new(0);
+        let began = tokio::time::Instant::now();
+        let stopping = signal.clone();
+        let wait = while_busy(&signal, || {
+            asked.set(asked.get() + 1);
+            async { Ok(Err(refused(true, true))) }
+        });
+        let stop = async {
+            tokio::time::sleep(BUSY_PACE + BUSY_PACE / 2).await;
+            stopping.cancel();
+        };
+        let (answer, ()) = tokio::join!(wait, stop);
+        assert!(matches!(answer, Err(RuntimeError::Aborted)));
+        assert_eq!(began.elapsed(), BUSY_PACE + BUSY_PACE / 2, "at once, not at the next ask");
+        assert_eq!(asked.get(), 2);
+    }
 
     fn knob(name: &str, raw: f64) -> DeviceKnob {
         DeviceKnob { reference: format!("p:{name}"), name: name.into(), raw, min: 0., max: 1., items: vec![], scale: None }
