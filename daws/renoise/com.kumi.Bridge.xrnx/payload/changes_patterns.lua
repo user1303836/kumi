@@ -135,48 +135,33 @@ base.register({
 -- automation points) are as the change left them: the producer's lines written into a pattern Kumi made longer would go out of
 -- sight.
 
--- The lines from `from` to `to` of every track of the pattern, and the automation points in them, as a short fingerprint; "none"
--- when they hold nothing. (An empty pattern track's lines aren't read: only its automation.)
+-- The lines from `from` to `to` of every track of the pattern, and the automation points in them, as a short fingerprint ("none"
+-- when they hold nothing). (An empty pattern track's lines aren't read: only its automation.) A line is read as its text, every
+-- column of it and the hidden ones too, and hashed with its empty note columns packed to a mark that keeps their places: 28,672
+-- dense lines took 549 ms, where reading each field took 2,086 and hashing the text whole 958 (Renoise 3.5.4, lab 2026-11-01).
+-- Marked, so a record from before this form (16 hex digits, read field by field) can be told from lines that changed.
+local EMPTY_NOTE_COLUMN = "%-%-%-%.%.%.%.%.%.%.%.0000 | "
+local REGION_MARK = "t"
 local function region_print(song, p, from, to)
   if from > to then return "none" end
   local pattern = song:pattern(p)
-  local a, b, any = 5381, 0, false
-  local function add(text)
-    any = true
-    for i = 1, #text do
-      local byte = text:byte(i)
-      a = (a * 33 + byte) % 4294967296
-      b = (b * 65599 + byte) % 4294967296
-    end
-  end
+  local parts = {}
   for t = 1, rows.track_count(song) do
     local pattern_track = pattern:track(t)
     if not pattern_track.is_alias then
       for l = from, pattern_track.is_empty and from - 1 or to do
         local line = pattern_track:line(l)
-        if not line.is_empty then
-          add(t .. ":" .. l .. "=")
-          for c = 1, 12 do
-            local column = line:note_column(c)
-            if not column.is_empty then
-              add(string.format("n%d %d %d %d %d %d %d %d;", c, column.note_value, column.instrument_value, column.volume_value,
-                column.panning_value, column.delay_value, column.effect_number_value, column.effect_amount_value))
-            end
-          end
-          for c = 1, 8 do
-            local column = line:effect_column(c)
-            if not column.is_empty then add(string.format("e%d %d %d;", c, column.number_value, column.amount_value)) end
-          end
-        end
+        if not line.is_empty then parts[#parts + 1] = t .. ":" .. l .. "=" .. tostring(line) .. ";" end
       end
       for k, automation in ipairs(pattern_track.automation) do
         for _, point in ipairs(automation.points) do
-          if point.time >= from and point.time < to + 1 then add(string.format("a%d:%d %.9g %.9g %.9g;", t, k, point.time, point.value, point.scaling)) end
+          if point.time >= from and point.time < to + 1 then parts[#parts + 1] = string.format("a%d:%d %.9g %.9g %.9g;", t, k, point.time, point.value, point.scaling) end
         end
       end
     end
   end
-  return any and string.format("%08x%08x", a, b) or "none"
+  if #parts == 0 then return "none" end
+  return REGION_MARK .. base.hash((table.concat(parts):gsub(EMPTY_NOTE_COLUMN, "_")))
 end
 M.region_print = region_print
 
@@ -266,6 +251,10 @@ local function length_restore(song, env, restore, desc)
     return { restored = { lines = now }, display = { title = title }, undo = { desc = desc, entry = false }, unwritten = true }
   end
   if now ~= applied.lines then fail("changed", label .. "'s length changed in Renoise since Kumi set it") end
+  if not restore.discard and type(applied.from) == "number" and applied.region ~= "none" and tostring(applied.region):sub(1, 1) ~= REGION_MARK then
+    fail("changed", string.format("an older version of Kumi's tool set %s's length, and this one can't tell whether lines %02d to %02d changed since: putting it back could hide them",
+      label, applied.from - 1, applied.to - 1))
+  end
   if not restore.discard and type(applied.from) == "number" and region_print(song, p, applied.from, applied.to) ~= applied.region then
     fail("changed", string.format("lines %02d to %02d of %s changed in Renoise since Kumi set its length: putting it back would hide them",
       applied.from - 1, applied.to - 1, label))
