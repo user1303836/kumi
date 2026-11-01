@@ -495,16 +495,20 @@ what to draw as data, so another front end could draw the same things.
 one accent, mint `#86e3b5`, and Live's own track colours (very dark ones are
 lightened for display). Warning `#e7b45f`, error `#ee8479`, the beat light
 `#ffe14d`. What Kumi keeps has a colour per kind: notes `#8cc8ff`, techniques
-`#c7a6ff`, recipes `#f2a6c4`, lessons `#e7c88f`. Three themes draw it
+`#c7a6ff`, recipes `#f2a6c4`, lessons `#e7c88f`. Code in answers is coloured
+by the language its fence names (JavaScript and TypeScript, gen~, Lua, Python
+and REAPER's EEL): keywords `#7aa2f7`, strings `#b8d47e`, numbers `#e48ee0`,
+comments faint, the rest bright on the code's band. Three themes draw it
 (`theme`): dark, as above; light, made for a light terminal (dark words on a
 warm white `#f7f7f4`, the accent a deeper mint `#14764e`, the warning amber
-`#925b0d`, and track colours too pale to read deepened); and colorblind, the
+`#925b0d`, track colours too pale to read deepened, and code's colours deeper:
+keywords `#3a4fb8`, strings `#4a6a10`, numbers `#9c2f9a`); and colorblind, the
 dark one with colours that stay apart for red-green colour blindness (the accent
 sky blue `#56b4e9`, the warning orange `#e69f00`, the error vermilion
-`#d7650b`). Each theme keeps what its colours mean, and its words read at 4.5:1
-or more. With `system`, Kumi takes light or dark from the background the
-terminal reports as Kumi starts, and asks it to say when its colours turn dark or
-light, which some terminals do (mode 2031).
+`#d7650b`, code's numbers pink `#f0a8d8`). Each theme keeps what its colours
+mean, and its words read at 4.5:1 or more. With `system`, Kumi takes light or
+dark from the background the terminal reports as Kumi starts, and asks it to say
+when its colours turn dark or light, which some terminals do (mode 2031).
 
 **Foundations**, built from terminal primitives with no UI framework:
 
