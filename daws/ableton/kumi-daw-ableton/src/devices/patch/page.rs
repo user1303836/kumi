@@ -295,6 +295,12 @@ fn count(n: usize, what: &str) -> String {
 }
 
 /// What this machine's Max says of the objects boxes' texts name, a page for each.
+/// A page's text: its bytes as UTF-8, with any that aren't replaced (a page saved in Latin-1, say), so it's read
+/// rather than passed over. None when it can't be read.
+pub(crate) fn text_of(file: &Path) -> Option<String> {
+    std::fs::read(file).ok().map(|bytes| String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// Where a page kept with the reference is, in its C74 folder: folders and a file within it, never the folder itself or
 /// a way out of it (a reference.json changed since Kumi wrote it, say). None for no page.
 fn within(root: &Path, page: &str) -> Option<PathBuf> {
@@ -318,9 +324,7 @@ pub fn describe(reference: &Reference, text: &str) -> String {
         let names = near.iter().map(|name| format!("[{name}]")).collect::<Vec<_>>().join(", ");
         return if near.is_empty() { format!("No [{class}] in this Max.") } else { format!("No [{class}] in this Max. Nearest: {names}.") };
     };
-    let read_page = |object: &Object| {
-        within(&reference.root, &object.page).and_then(|path| std::fs::read_to_string(path).ok()).and_then(|text| read(&text))
-    };
+    let read_page = |object: &Object| within(&reference.root, &object.page).and_then(|path| text_of(&path)).and_then(|text| read(&text));
     let own = read_page(object);
     // An object with modes ([zl lookup]) has a page for each that this Max writes as its own name (zl.lookup): one whose
     // page takes a mode message, or lists no argument. Where the first argument is a name ([dict view]), the word is

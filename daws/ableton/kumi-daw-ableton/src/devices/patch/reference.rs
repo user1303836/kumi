@@ -579,7 +579,7 @@ pub fn learn(c74: &Path) -> Reference {
     // when Max's help shows it and no page names it. (An operator's page is named for its sign: bitand's is [&].)
     let mut misnamed: Vec<(String, Object)> = Vec::new();
     for file in &found.pages {
-        if let Some((name, mut object)) = std::fs::read_to_string(file).ok().as_deref().and_then(read_page) {
+        if let Some((name, mut object)) = page::text_of(file).as_deref().and_then(read_page) {
             object.page = file.strip_prefix(c74).unwrap_or(file).to_string_lossy().into_owned();
             let stem = page_stem(file);
             // Of two pages that name an object, the one whose file is named for it.
@@ -1120,6 +1120,19 @@ mod tests {
         let started = std::time::Instant::now();
         assert_eq!(bounded("/bin/sleep", &["10"], within), None);
         assert!(started.elapsed() < std::time::Duration::from_secs(5), "ended at its bound");
+    }
+
+    #[test]
+    fn a_page_that_isnt_utf_8_is_learned_and_told_its_stray_bytes_replaced() {
+        let c74 = tempfile::tempdir().unwrap();
+        let pages = c74.path().join("docs").join("refpages").join("max-ref");
+        std::fs::create_dir_all(&pages).unwrap();
+        // Saved in Latin-1: its é is the one byte 0xE9.
+        let latin = [&br#"<c74object name="thing" module="max"><digest>Caf"#[..], &[0xE9], &br#" sound</digest></c74object>"#[..]].concat();
+        std::fs::write(pages.join("thing.maxref.xml"), latin).unwrap();
+        let reference = learn(c74.path());
+        assert_eq!(reference.objects.get("thing").map(|thing| thing.digest.as_str()), Some("Caf\u{fffd} sound"));
+        assert!(page::describe(&reference, "thing").starts_with("[thing] Caf\u{fffd} sound"), "and its page told");
     }
 
     #[test]
