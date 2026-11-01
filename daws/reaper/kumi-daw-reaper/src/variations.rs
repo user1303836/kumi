@@ -54,6 +54,9 @@ const GAP: f64 = 0.5;
 const PAGES: usize = 20;
 /// How far an audio take's start moves at most (seconds): past that its attack isn't the sound's any more.
 const ATTACK: f64 = 0.03;
+/// A MIDI take's ticks to a quarter note of its source: REAPER's default for new MIDI items (Preferences > MIDI), and what its
+/// copies keep.
+const TICKS: f64 = 960.;
 
 /// A take: its item's length and fades, its take's start offset, pitch, rate and volume, a MIDI take's notes, and the notes
 /// every take keeps (the anchors).
@@ -222,11 +225,25 @@ fn material_value(material: &ItemTake) -> Value {
     })
 }
 
+/// A take's digest, its MIDI notes as REAPER holds them once written (`on_ticks`): a take whose timing was loosened reads back
+/// from REAPER as Kumi kept it (#606).
 fn digest_of(material: &ItemTake) -> String {
     use std::hash::{Hash, Hasher};
+    let held = ItemTake { notes: material.notes.iter().map(|note| on_ticks(note, material.playrate)).collect(), ..material.clone() };
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    material_value(material).to_string().hash(&mut hasher);
+    material_value(&held).to_string().hash(&mut hasher);
     format!("{:016x}", hasher.finish())
+}
+
+/// A note as REAPER holds it once written: its start and end, as `settings` writes them (to the 10 000th of a beat), on the
+/// take's whole ticks (`TICKS` to a quarter note of its source, so `TICKS` × its playrate to one of the project's), as
+/// REAPER's notes are written and read back (#606: a take whose timing was loosened moved its notes off the ticks, and read back
+/// as edited since Kumi wrote it). A note REAPER read is on them already: to its 10 000th, within a tenth of a tick.
+fn on_ticks(note: &Note, playrate: f64) -> Note {
+    let per_beat = TICKS * playrate.max(0.01);
+    let start = (round(note.start) * per_beat).round();
+    let end = ((round(note.start) + round(note.length)) * per_beat).round();
+    Note { start: start / per_beat, length: (end - start) / per_beat, ..note.clone() }
 }
 
 /// The settings a change writes for a take.
@@ -764,6 +781,63 @@ mod tests {
                 assert_eq!(digest_of(&read_back(&quieter)), digest_of(&quieter), "{name}: {quieter:?}");
             }
         }
+    }
+
+    /// (#606) What REAPER's reads give back of a MIDI take Kumi wrote with its timing loosened (reaper-kumi's notes: each start
+    /// and end on the take's whole ticks, 960 to a quarter note, read back to the 10 000th from where the item starts) is the
+    /// take Kumi kept: it stays Kumi's for a change or a drop. Before, a loosened take's notes sat between ticks, and it read
+    /// back as edited.
+    #[test]
+    fn a_midi_take_loosened_in_time_reads_back_from_reaper_as_kumi_kept_it() {
+        // (as reaper-kumi writes notes (`ticks`: the item's start in the project's beats, then whole ticks) and reads them back
+        // (`note_row`): an item well into the project, so its start's beats don't cancel out exactly)
+        let item_qn = 37.0 + 1.0 / 3.0;
+        let read_back = |take: &ItemTake| {
+            let written = settings(take, None);
+            let per_beat = 960. * written["playrate"].as_f64().unwrap();
+            let notes = written["notes"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|line| {
+                    let (start, length) = (line["start"].as_f64().unwrap(), line["length"].as_f64().unwrap());
+                    let (start_ppq, end_ppq) =
+                        (((item_qn + start - item_qn) * per_beat).round(), ((item_qn + start + length - item_qn) * per_beat).round());
+                    let (start_qn, end_qn) = (item_qn + start_ppq / per_beat, item_qn + end_ppq / per_beat);
+                    Note::of(&json!({"pitch": line["pitch"], "start": round(start_qn - item_qn), "length": round(end_qn - start_qn),
+                        "velocity": line["velocity"], "channel": line["channel"]}))
+                    .unwrap()
+                })
+                .collect();
+            ItemTake { notes, ..take.clone() }
+        };
+        let note = |pitch: i64, start: f64| Note { pitch, start, length: 0.25, velocity: 100, channel: 10 };
+        let source = ItemTake {
+            midi: true,
+            notes: vec![note(36, 0.), note(42, 0.5), note(38, 1.), note(42, 1.5), note(36, 2.), note(42, 2.5), note(38, 3.), note(42, 3.5)],
+            anchors: vec![note(36, 0.)],
+            ..audio()
+        };
+        let mut loosened = 0;
+        for seed in 1..=40 {
+            for direction in ["looser", "softer", "higher", "sparser"] {
+                let mut take = source.clone();
+                let mut rng = Rng::new(seed);
+                applied(&note_direction_ops(direction), 1.35, &mut take, &source, &mut rng).unwrap();
+                loosened += usize::from(direction == "looser" && take.notes.iter().zip(&source.notes).any(|(a, b)| a.start != b.start));
+                assert_eq!(digest_of(&read_back(&take)), digest_of(&take), "{direction}, seed {seed}: {take:?}");
+                // (and read again: a take as REAPER holds it reads the same)
+                assert_eq!(digest_of(&read_back(&read_back(&take))), digest_of(&take), "{direction}, seed {seed}");
+            }
+        }
+        assert!(loosened > 30, "the timing moved notes off the ticks: {loosened}");
+        // (a source REAPER read is on its ticks already: its digest is as it was, notes rounded to the 10 000th)
+        let read = read_back(&source);
+        assert_eq!(digest_of(&read), digest_of(&source));
+        // (a note moved by a tick or more is another note)
+        let mut moved = read.clone();
+        moved.notes[3].start += 1. / 960.;
+        assert_ne!(digest_of(&moved), digest_of(&read));
     }
 
     #[test]
