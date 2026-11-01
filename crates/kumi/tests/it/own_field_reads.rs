@@ -302,48 +302,93 @@ static SELF_CALL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bself\.([a-z_
 static PATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b([a-z_][a-z0-9_]*)::([a-z_][a-z0-9_]*)\b").unwrap());
 static NAMED_CONSTANT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(?:([a-z_][a-z0-9_]*)::)?([A-Z][A-Z0-9_]+)\b").unwrap());
 static STRING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""([A-Za-z][A-Za-z0-9_]*)""#).unwrap());
-static RECEIVER: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*(?:\.\s*get(?:_mut)?\(\s*|\[\s*)$").unwrap());
-static WRITING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\.\s*(?:insert|entry|remove)\(\s*$").unwrap());
-static CALL_SO_FAR: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\(([^()]*),\s*$").unwrap());
-static WORD: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"[A-Za-z_][A-Za-z0-9_]*").unwrap());
+static OFF_THE_REQUEST: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\b(?:input|params|args|request)\s*(?:\.\s*get(?:_mut)?\(\s*|\[\s*)$").unwrap());
+static THE_REQUEST: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\b(?:input|params|args|request)\b").unwrap());
+static A_KEY: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"\bkey\s*:\s*$").unwrap());
+static NAME_AT_THE_END: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"([A-Za-z_][A-Za-z0-9_]*)\s*$").unwrap());
 static DISPATCH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""([a-z]+(?:-[a-z]+)*)" => Some\(([^\n]*)\),"#).unwrap());
 static ARM: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?:Kind|Which|Mode|Marks)::([A-Z][A-Za-z]*)\b(?:\([^)]*\))?\s*=>\s*(?:Ok\()?(?:([a-z_]+)::)?([a-z_]+)\(").unwrap()
 });
 static VARIANT: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?:([a-z_]+)::)?[A-Z][A-Za-z]*::([A-Z][A-Za-z]*)").unwrap());
 
-/// What a change answers with, or finds and compares against, never its request.
-const NOT_THE_REQUEST: [&str; 26] = [
-    "to", "from", "state", "now", "prior", "fence", "before", "after", "display", "applied", "answer", "restored", "a", "b", "made", "out",
-    "preview", "target", "result", "old", "current", "live", "kept", "saved", "seen", "row",
-];
+/// Whether the string at `at` stands where a field of the request is read, `after` being what follows it: off the request
+/// (`input.get("f")`), beside it in a plain call (`moment(ctx, input, "f")`), as a table's `key: "f"`, an item of a literal list
+/// or a tuple row, the one argument to a local closure (`id("f")`), or a match arm. A label (`noun: "f"`), a comparison, an API's
+/// name (`fx_set_config(at.fx, "f", …)`) or a read off anything else isn't one.
+fn rust_off_the_request(text: &str, at: usize, after: &str) -> bool {
+    let mut from = at.saturating_sub(200);
+    while !text.is_char_boundary(from) {
+        from -= 1;
+    }
+    let before = &text[from..at];
+    let close = before.trim_end();
+    let a_value = close.strip_suffix(':').is_some_and(|key| key.trim_end().ends_with('"'));
+    if a_value || close.ends_with("==") || close.ends_with("!=") || after.starts_with("==") || after.starts_with("!=") {
+        return false;
+    }
+    if OFF_THE_REQUEST.is_match(before)
+        || A_KEY.is_match(before)
+        || after.starts_with("=>")
+        || after.starts_with('|')
+        || close.ends_with('|')
+    {
+        return true;
+    }
+    let mut depth = 0;
+    for (open, byte) in before.bytes().enumerate().rev() {
+        match byte {
+            b')' | b']' | b'}' => depth += 1,
+            b'(' | b'[' | b'{' if depth > 0 => depth -= 1,
+            b'{' => return false,
+            // (a list, not an index off some other name)
+            b'[' => {
+                let head = before[..open].trim_end();
+                return head.ends_with(" in") || !head.ends_with(|c: char| c.is_alphanumeric() || matches!(c, '_' | ']' | ')'));
+            }
+            b'(' => {
+                let (head, args) = (&before[..open], &before[open + 1..]);
+                let name = NAME_AT_THE_END.captures(head).map(|found| found[1].to_string());
+                let a_method = name
+                    .as_ref()
+                    .is_some_and(|name| head.trim_end().strip_suffix(name.as_str()).is_some_and(|rest| rest.trim_end().ends_with('.')));
+                if a_method {
+                    return false;
+                }
+                if args.trim().is_empty() {
+                    return match name {
+                        Some(name) => !["Some", "Ok", "Err", "bad", "failed", "observation"].contains(&name.as_str()),
+                        // (a tuple row, not a macro's argument)
+                        None => !head.trim_end().ends_with('!'),
+                    };
+                }
+                return THE_REQUEST.is_match(args) && !args.contains('[') && !args.contains(".get(");
+            }
+            _ => {}
+        }
+    }
+    false
+}
 
-/// Rust's reads: a string, but a key of what's answered (`json!({"f": …})`, `map.insert("f".into(), …)`, `state["f"] = …`), or
-/// one read off what isn't the request (`to["f"]`, `number(to, "f")`).
+/// Rust's reads, of a string that isn't a key of what's answered (`json!({"f": …})`, `map.insert("f".into(), …)`,
+/// `state["f"] = …`): inside a field, any such string, as what holds it goes by any name; at the top of the input, only what
+/// stands off the request.
 fn rust_reads(text: &str) -> Reads {
-    let not_the_request = |word: &str| NOT_THE_REQUEST.iter().any(|not| *not == word);
     let mut reads = Reads::default();
     for found in STRING.captures_iter(text) {
         let whole = found.get(0).unwrap();
         let after = text[whole.end()..].trim_start();
         let a_key = after.starts_with(':') && !after.starts_with("::");
-        let kept = [".into()", ".to_string()", ".to_owned()"].iter().any(|made| after.starts_with(made));
+        let made = [".into()", ".to_string()", ".to_owned()"].iter().any(|made| after.starts_with(made));
         let written =
             after.strip_prefix(']').is_some_and(|rest| rest.trim_start().starts_with('=') && !rest.trim_start().starts_with("=="));
-        if a_key || kept || written {
+        if a_key || made || written {
             continue;
         }
-        let mut from = whole.start().saturating_sub(80);
-        while !text.is_char_boundary(from) {
-            from -= 1;
-        }
-        let before = &text[from..whole.start()];
-        let off_an_answer = RECEIVER.captures(before).is_some_and(|by| not_the_request(&by[1]));
-        let with_an_answer =
-            CALL_SO_FAR.captures(before).is_some_and(|so_far| WORD.find_iter(&so_far[1]).any(|word| not_the_request(word.as_str())));
-        if !off_an_answer && !with_an_answer && !WRITING.is_match(before) {
+        reads.anywhere.insert(found[1].to_string());
+        if rust_off_the_request(text, whole.start(), after) {
             reads.of_input.insert(found[1].to_string());
-            reads.anywhere.insert(found[1].to_string());
         }
     }
     reads
@@ -778,11 +823,11 @@ impl Bridges {
                         TAKEN_BY_THE_HOST.iter().find(|(daw, taken, name, _, _)| *daw == app && *taken == kind.kind && *name == field.path);
                     let from_a_file = app == "Renoise" && field.path == "path" && file_kinds.contains(&kind.kind);
                     let read = if let Some((_, _, _, function, _)) = taken {
-                        self.host_reads(&host_memo, &[*function]).holds(&field.name, false)
+                        self.host_reads(&host_memo, &[*function]).holds(&field.name, field.top)
                     } else if from_a_file {
-                        self.host_reads(&host_memo, &[("library_files", "with_file")]).holds(&field.name, false)
+                        self.host_reads(&host_memo, &[("library_files", "with_file")]).holds(&field.name, field.top)
                     } else if let (Some((_, _, tool_too)), Some(by_host)) = (made, &by_host) {
-                        by_host.holds(&field.name, false) || (*tool_too && reads.holds(&field.name, field.top))
+                        by_host.holds(&field.name, field.top) || (*tool_too && reads.holds(&field.name, field.top))
                     } else {
                         reads.holds(&field.name, field.top)
                     };
@@ -831,42 +876,66 @@ fn what_the_host_is_said_to_make_or_take_it_does() {
     }
 }
 
-/// The case this test is for: a bridge drops a kind's read, while other kinds and what it answers still name the field.
+/// The case this test is for: a bridge drops a kind's read, while other kinds, what it answers and its own words still name the
+/// field. (`track-pan`'s `noun: "pan"` is a label, not a read.)
 #[test]
-fn dropping_track_volumes_read_of_volume_db_fails() {
-    let renamed = |files: &mut Vec<(String, String)>, file: &str, read: &str, to: &str| {
+fn dropping_a_kinds_read_of_a_field_fails() {
+    let renamed = |mut files: Vec<(String, String)>, file: &str, read: &str, to: &str| {
         let (_, text) = files.iter_mut().find(|(name, _)| name == file).unwrap();
-        assert!(text.contains(read), "track-volume reads volumeDb another way now: drop that here");
+        assert!(text.contains(read), "{read} isn't how that field is read now: drop that here");
         *text = text.replace(read, to);
+        files
     };
-    let mut reaper = reaper_files();
-    renamed(&mut reaper, "tracks", ".get(\"volumeDb\")", ".get(\"db\")");
-    let unread = Bridges::new(reaper, renoise_files()).unread_fields(Some("track-volume"));
-    assert!(unread.iter().any(|line| line.starts_with("REAPER: track-volume's volumeDb is offered")), "{unread:?}");
-    let mut renoise = renoise_files();
-    renamed(&mut renoise, "changes_tracks", "input.volumeDb", "input.db");
-    let unread = Bridges::new(reaper_files(), renoise).unread_fields(Some("track-volume"));
-    assert!(unread.iter().any(|line| line.starts_with("Renoise: track-volume's volumeDb is offered")), "{unread:?}");
+    for (kind, field, read, to) in
+        [("track-volume", "volumeDb", ".get(\"volumeDb\")", ".get(\"db\")"), ("track-pan", "pan", ".get(\"pan\")", ".get(\"panning\")")]
+    {
+        let unread = Bridges::new(renamed(reaper_files(), "tracks", read, to), renoise_files()).unread_fields(Some(kind));
+        assert!(unread.iter().any(|line| line.starts_with(&format!("REAPER: {kind}'s {field} is offered"))), "{unread:?}");
+    }
+    for (kind, field, read, to) in
+        [("track-volume", "volumeDb", "input.volumeDb", "input.db"), ("track-pan", "pan", "input.pan", "input.panning")]
+    {
+        let unread = Bridges::new(reaper_files(), renamed(renoise_files(), "changes_tracks", read, to)).unread_fields(Some(kind));
+        assert!(unread.iter().any(|line| line.starts_with(&format!("Renoise: {kind}'s {field} is offered"))), "{unread:?}");
+    }
 }
 
 /// A read isn't a key of what's answered, nor one off what a change answered or found.
 #[test]
 fn what_a_change_answers_isnt_a_read() {
     let read = |text: &str| rust_reads(text).holds("level", true);
-    for text in
-        [r#"input.get("level")"#, r#"input["level"]"#, r#"moment(ctx, input, "level", "other")"#, r#"Field { key: "level", parse: flag }"#]
-    {
+    for text in [
+        r#"input.get("level")"#,
+        r#"input["level"]"#,
+        r#"params.get("level")"#,
+        r#"moment(ctx, input, "level", "other")"#,
+        r#"Field { key: "level", parse: flag }"#,
+        r#"["other", "level"].iter()"#,
+        r#"for field in ["other", "level"] {}"#,
+        r#"[("level", 1, "words")]"#,
+        r#"id("level")"#,
+        r#"match name { "level" => 1, _ => 0 }"#,
+    ] {
         assert!(read(text), "{text}");
     }
     for text in [
         r#"json!({"level": 1})"#,
+        r#"json!({"kind": "level"})"#,
         r#"state["level"] = 1.into()"#,
         r#"to["level"]"#,
+        r#"to.get("level")"#,
         r#"number(to, "level")"#,
         r#"map.insert("level".into(), 1)"#,
+        r#"fields.remove("level")"#,
+        r#"Prop { kind: "x", noun: "level" }"#,
+        r#"name == "level""#,
+        r#"fx_set_config(at.fx, "level", 1)"#,
+        r#"Some("level")"#,
     ] {
         assert!(!read(text), "{text}");
     }
+    assert!(rust_reads(r#"note.get("level")"#).holds("level", false), "inside a field, what holds it goes by any name");
+    assert!(!rust_reads(r#"json!({"level": 1})"#).holds("level", false));
     let lua = |text: &str| lua_reads(text).holds("level", true);
     for text in [
         "local a = input.level",
@@ -901,6 +970,9 @@ fn each_action_reads_every_field_it_offers() {
     {
         let code: &dyn Code = if app == "REAPER" { &bridges.reaper } else { &bridges.renoise };
         let memo = Memo::default();
+        for (method, _, _) in table {
+            assert!(set.actions.iter().any(|action| action.method == *method), "{app}: no action calls {method} now: take its row out");
+        }
         for action in set.actions {
             let Some((_, (module, function), forwarded_by)) = table.iter().find(|(method, _, _)| *method == action.method) else {
                 unread.push(format!("{app}: which function answers {}? Add it to the test's list", action.method));

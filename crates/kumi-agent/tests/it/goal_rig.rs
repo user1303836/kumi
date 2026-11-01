@@ -2,10 +2,12 @@
 use async_trait::async_trait;
 use indexmap::IndexMap;
 use kumi_agent::core::{
-    contracts::GenerationTrial,
+    contracts::{Generation, GenerationTrial},
     evolve::Knob,
-    goal_rig::{check_slots, device_label, knob_key, moved, tidy, GoalDaw},
+    goal_rig::{check_slots, device_label, knob_key, moved, tell_generation, tidy, GoalDaw},
 };
+use kumi_listening::goal::Told;
+use kumi_types::contracts::StructuralMove;
 use std::cell::RefCell;
 
 /// A project holding `tracks` (None: it can't be read), noting the slots as they're tidied.
@@ -104,7 +106,23 @@ fn a_value_a_trial_doesnt_give_isnt_a_number() {
     assert!(sent[1].1.is_nan());
 }
 
-/// A project of `tracks`: `made` were added by the model, those in `kept` can't be taken back; notes what's done.
+#[test]
+fn a_generation_is_told_what_was_heard_and_counts_what_it_had_heard_before() {
+    let told = |structural| Told { score: 70., gaps: vec!["too dark".into()], structural };
+    let mut generation = Generation::default();
+    tell_generation(&mut generation, "Bass", told(None), false);
+    assert_eq!(generation.cached, 0);
+    assert_eq!(generation.scores["Bass"], 70.);
+    assert_eq!(generation.gaps["Bass"], ["too dark"]);
+    assert!(generation.structural.is_empty());
+    let structural = StructuralMove { gap: "length".into(), r#move: "change the family".into() };
+    tell_generation(&mut generation, "Lead", told(Some(structural.clone())), true);
+    assert_eq!(generation.cached, 1, "it had been heard");
+    assert_eq!(generation.structural["Lead"], structural);
+}
+
+/// A project that can't be read: `made` were added by the model, those in `kept` can't be taken back, those in `gone` aren't
+/// there any more. Notes what's done.
 struct Tidying {
     made: Vec<&'static str>,
     kept: Vec<&'static str>,
