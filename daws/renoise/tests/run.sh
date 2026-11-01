@@ -4,11 +4,12 @@
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/kumi-renoise-tests.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
-luajit "$here/run.lua" "$tmp" "$@"
+. "$here/children.sh"
+trap 'stop_child; rm -rf "$tmp"' EXIT
+run luajit "$here/run.lua" "$tmp" "$@"
 if [ "${KUMI_SKIP_LUALS:-}" != 1 ]; then
   if command -v lua-language-server >/dev/null 2>&1; then
-    "$here/check.sh"
+    run "$here/check.sh"
   elif [ "${KUMI_REQUIRE_LUALS:-}" = 1 ]; then
     echo "run.sh: KUMI_REQUIRE_LUALS=1 and lua-language-server isn't installed" >&2
     exit 1

@@ -8,9 +8,11 @@ import io
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -546,6 +548,86 @@ class RebaseMoves(unittest.TestCase):
         self.assertIn("1 file in conflict:\n  README.md", out)
         with self.assertRaises(dev.Refused):
             self.bring()
+
+
+@unittest.skipIf(os.name == "nt", "the Renoise tool's test scripts are POSIX sh")
+class RenoiseTestScripts(unittest.TestCase):
+    """daws/renoise/tests/run.sh takes what it started with it when it's killed: a time limit on it once left a 2.9 GB
+    luajit running. Programs stand in for luajit and lua-language-server."""
+
+    STOPPING = "#!/bin/sh\necho $$ > \"$STARTED\"\nexec sleep 60\n"
+
+    def run_sh(self, directory: str, programs: dict[str, str], skip_check: bool) -> subprocess.Popen:
+        folder = Path(directory, "bin")
+        folder.mkdir()
+        for name, script in programs.items():
+            (folder / name).write_text(script)
+            (folder / name).chmod(0o755)
+        env = {
+            **os.environ,
+            "PATH": f"{folder}{os.pathsep}{os.environ['PATH']}",
+            "STARTED": str(Path(directory, "started")),
+            "RENOISE_DEFINITIONS": directory,
+            "TMPDIR": directory,
+            "KUMI_SKIP_LUALS": "1" if skip_check else "",
+        }
+        # What the stand-ins and the script say isn't this test's output.
+        return subprocess.Popen(
+            ["sh", str(ROOT / "daws/renoise/tests/run.sh")], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+        )
+
+    def assert_stops(self, sig: signal.Signals, programs: dict[str, str], skip_check: bool):
+        with tempfile.TemporaryDirectory() as directory:
+            script = self.run_sh(directory, programs, skip_check)
+            started = Path(directory, "started")
+            pid = None
+            try:
+                deadline = time.monotonic() + 20
+                while not (started.exists() and started.read_text().strip()):
+                    self.assertLess(time.monotonic(), deadline, "the stand-in didn't start")
+                    time.sleep(0.02)
+                pid = int(started.read_text())
+                script.send_signal(sig)
+                deadline = time.monotonic() + 5
+                while alive(pid):
+                    self.assertLess(time.monotonic(), deadline, f"{sig.name} left the program running")
+                    time.sleep(0.02)
+                self.assertEqual(script.wait(timeout=20), 128 + sig, "the script says which signal stopped it")
+                self.assertEqual([p.name for p in Path(directory).glob("kumi-renoise-*")], [], "its temporary folders are gone")
+            finally:
+                if pid is not None and alive(pid):
+                    os.kill(pid, signal.SIGKILL)
+                if script.poll() is None:
+                    script.kill()
+                    script.wait()
+
+    def test_luajit_goes_with_the_script(self):
+        for sig in (signal.SIGTERM, signal.SIGALRM, signal.SIGINT, signal.SIGHUP):
+            with self.subTest(sig.name):
+                self.assert_stops(sig, {"luajit": self.STOPPING}, skip_check=True)
+
+    def test_the_type_check_goes_with_the_script(self):
+        programs = {"luajit": "#!/bin/sh\nexit 0\n", "lua-language-server": self.STOPPING}
+        self.assert_stops(signal.SIGTERM, programs, skip_check=False)
+
+    def test_what_the_programs_answer_is_still_the_answer(self):
+        passes = {"luajit": "#!/bin/sh\nexit 0\n", "lua-language-server": "#!/bin/sh\necho 'no problems found'\n"}
+        for programs, skip_check, answer in (
+            ({"luajit": "#!/bin/sh\nexit 3\n"}, True, 3),
+            ({"luajit": "#!/bin/sh\nexit 0\n"}, True, 0),
+            (passes, False, 0),
+            ({**passes, "lua-language-server": "#!/bin/sh\necho 'found 1 problem'\nexit 0\n"}, False, 1),
+        ):
+            with self.subTest(answer=answer, skip_check=skip_check), tempfile.TemporaryDirectory() as directory:
+                self.assertEqual(self.run_sh(directory, programs, skip_check).wait(timeout=20), answer)
+
+
+def alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    return True
 
 
 if __name__ == "__main__":
