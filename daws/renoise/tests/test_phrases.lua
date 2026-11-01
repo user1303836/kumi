@@ -323,6 +323,21 @@ test("phrases: lines back already, the columns Kumi showed still shown: Kumi's u
   eq(newest(), "Kumi: undo arp (k602)")
 end)
 
+test("phrases: after Renoise's undo and redo of Kumi's lines, with nothing left to redo, Kumi's undo puts the cells back (#393)", function()
+  local env, peer = setup()
+  local record = change(peer, "phrase-write", { ref = pref(place(peer), 2, 1), lines = { { line = 1, notes = { { col = 1, note = "D-4" } } } } })
+  H.tick(2)
+  mock.song:undo()
+  H.tick(3)
+  eq(cell(2, 1, 2).note_string, "---", "Renoise's undo")
+  mock.song:redo()
+  H.tick(3)
+  eq(cell(2, 1, 2).note_string, "D-4", "Renoise's redo")
+  local undone = restore(peer, "phrase-write", record)
+  ok(undone.result, json.encode(undone.error or {}))
+  eq(cell(2, 1, 2).note_string, "---")
+end)
+
 test("phrases: an older sample-offset spelling is written as Renoise's 0Sxx, and the change says so", function()
   local env, peer = setup()
   local input = { ref = pref(place(peer), 2, 1), lines = { { line = 2, effects = { { col = 1, number = "09", amount = "40" } } } } }
