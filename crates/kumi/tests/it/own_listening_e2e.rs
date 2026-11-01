@@ -534,13 +534,13 @@ async fn a_goal_searches_scratch_copies_of_its_candidates_and_settles_the_winner
         .await;
 }
 
-/// A goal over Track 2 and Track 3, each with a ReaEQ, toward four seconds of noise; the rig, its slots and the reference's
-/// level (Track 2 is as loud as the reference, Track 3 far quieter).
+/// A goal over Track 2 and Track 3, each with a ReaEQ, toward four seconds of noise: the integration, the rig and its
+/// slots. Track 3 renders silence, so what each slot is told shows which render it was heard from.
 async fn two_slot_goal(home: &Path, script: &ReaperScript) -> (Rc<dyn Integration>, Rc<dyn GoalRig>, Vec<GoalSlotInfo>) {
     script.add_fx("r:track:{T0002}", "ReaEQ");
     script.add_fx("r:track:{T0003}", "ReaEQ");
     script.listening().set_level("r:track:{T0002}", 0.4);
-    script.listening().set_level("r:track:{T0003}", 0.02);
+    script.listening().set_level("r:track:{T0003}", 0.);
     let (reaper, _) = integration(Daw::Reaper, home, create_reaper_integration);
     reaper.start(Signal::new()).await.unwrap();
     reaper.observe(Signal::new(), None).await.unwrap();
@@ -567,10 +567,10 @@ fn gain_trial(slot: &GoalSlotInfo, value: f64, fresh: bool) -> GenerationTrial {
     GenerationTrial { slot: slot.name.clone(), knobs, values: vec![value], fresh: fresh.then_some(true) }
 }
 
-/// #399 (K29, D4): a generation's trials are heard together, as Live's goal hears them, and each slot is scored from its
-/// own copy's render: the one as loud as the reference scores closer, together as when each is heard alone.
+/// #399 (K29, D4): a generation's trials are heard together, as Live's goal hears them, and each slot is told from its
+/// own copy's render, whichever order the trials come in: Track 3's copy is silent, Track 2's is scored.
 #[tokio::test(flavor = "current_thread")]
-async fn a_generations_trials_are_heard_together_and_each_slot_is_scored_from_its_own_copy() {
+async fn a_generations_trials_are_heard_together_and_each_slot_is_told_from_its_own_copy() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let home = tempfile::tempdir().unwrap();
@@ -578,24 +578,21 @@ async fn a_generations_trials_are_heard_together_and_each_slot_is_scored_from_it
             let simulator = reaper_lab(&script, home.path(), |_| {}).await;
             let (reaper, rig, slots) = two_slot_goal(home.path(), &script).await;
             assert_eq!(slots.len(), 2, "{slots:?}");
-            let (loud, quiet) = (&slots[0], &slots[1]);
+            let (sounding, silent) = (&slots[0], &slots[1]);
+            for (n, trials) in [
+                vec![gain_trial(silent, 0.5, true), gain_trial(sounding, 0.5, true)],
+                vec![gain_trial(sounding, 0.6, true), gain_trial(silent, 0.6, true)],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let generation = rig.generation(&trials, Signal::new(), None).await.unwrap();
+                assert_eq!(generation.silent, [silent.name.clone()], "{n}: {generation:?}");
+                assert_eq!(generation.scores.keys().collect::<Vec<_>>(), [&sounding.name], "{n}: {generation:?}");
+            }
             let together =
-                rig.generation(&[gain_trial(loud, 0.5, false), gain_trial(quiet, 0.5, false)], Signal::new(), None).await.unwrap();
-            assert_eq!(
-                script.listening().renders().iter().filter(|render| render["sources"].as_array().is_some_and(|s| s.len() == 2)).count(),
-                1
-            );
-            let (loud_together, quiet_together) = (together.scores[&loud.name], together.scores[&quiet.name]);
-            assert!(loud_together > quiet_together, "Track 2 is the reference's level: {together:?}");
-            let alone = |slot: &GoalSlotInfo| {
-                let trial = gain_trial(slot, 0.5, true);
-                let rig = rig.clone();
-                async move { rig.generation(&[trial], Signal::new(), None).await.unwrap().scores[&slot.name] }
-            };
-            let (loud_alone, quiet_alone) = (alone(loud).await, alone(quiet).await);
-            assert!(loud_alone > quiet_alone, "{loud_alone} {quiet_alone}");
-            assert!((loud_together - loud_alone).abs() < (loud_together - quiet_together).abs() / 2., "{loud_together} {loud_alone}");
-            assert!((quiet_together - quiet_alone).abs() < (loud_together - quiet_together).abs() / 2., "{quiet_together} {quiet_alone}");
+                script.listening().renders().iter().filter(|render| render["sources"].as_array().is_some_and(|s| s.len() == 2)).count();
+            assert_eq!(together, 2, "both copies in each generation's one render");
             rig.close().await.unwrap();
             reaper.close().await.unwrap();
             simulator.stop();
