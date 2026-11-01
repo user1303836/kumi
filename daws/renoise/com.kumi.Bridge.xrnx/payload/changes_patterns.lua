@@ -139,7 +139,9 @@ base.register({
 -- when they hold nothing). (An empty pattern track's lines aren't read: only its automation.) A line is read as its text, every
 -- column of it and the hidden ones too, and hashed with its empty note columns packed to a mark that keeps their places: 28,672
 -- dense lines took 549 ms, where reading each field took 2,086 and hashing the text whole 958 (Renoise 3.5.4, lab 2026-11-01).
+-- Marked, so a record from before this form (16 hex digits, read field by field) can be told from lines that changed.
 local EMPTY_NOTE_COLUMN = "%-%-%-%.%.%.%.%.%.%.%.0000 | "
+local REGION_MARK = "t"
 local function region_print(song, p, from, to)
   if from > to then return "none" end
   local pattern = song:pattern(p)
@@ -159,7 +161,7 @@ local function region_print(song, p, from, to)
     end
   end
   if #parts == 0 then return "none" end
-  return base.hash((table.concat(parts):gsub(EMPTY_NOTE_COLUMN, "_")))
+  return REGION_MARK .. base.hash((table.concat(parts):gsub(EMPTY_NOTE_COLUMN, "_")))
 end
 M.region_print = region_print
 
@@ -249,6 +251,10 @@ local function length_restore(song, env, restore, desc)
     return { restored = { lines = now }, display = { title = title }, undo = { desc = desc, entry = false }, unwritten = true }
   end
   if now ~= applied.lines then fail("changed", label .. "'s length changed in Renoise since Kumi set it") end
+  if not restore.discard and type(applied.from) == "number" and applied.region ~= "none" and tostring(applied.region):sub(1, 1) ~= REGION_MARK then
+    fail("changed", string.format("an older version of Kumi's tool set %s's length, and this one can't tell whether lines %02d to %02d changed since: putting it back could hide them",
+      label, applied.from - 1, applied.to - 1))
+  end
   if not restore.discard and type(applied.from) == "number" and region_print(song, p, applied.from, applied.to) ~= applied.region then
     fail("changed", string.format("lines %02d to %02d of %s changed in Renoise since Kumi set its length: putting it back would hide them",
       applied.from - 1, applied.to - 1, label))

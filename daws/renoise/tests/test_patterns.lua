@@ -386,3 +386,35 @@ test("patterns: a length's region is read as its lines' text, every column of th
   ok(K.apply(peer, "pattern-length", input, "Kumi: l (kl12)", previewed.fence, epoch, layout).result)
   H.no_dialogs()
 end)
+
+test("patterns: a length's undo from an older tool says it can't tell whether its lines changed, and one over nothing still goes", function()
+  local _, peer = K.setup()
+  local E = K.place(peer)
+  pattern(3).lines = 12
+  mock.ops.set_note(3, 1, 20, 1, { note = 50 })
+  local record = K.change(peer, "pattern-length", { ref = K.ref(E, "pattern", 3), lines = 32 })
+  local steps = K.steps()
+  -- Lines that changed under this tool's own record say so, not that it's older.
+  mock.ops.set_note(3, 1, 20, 1, { note = 51 })
+  local changed = K.failure(K.restore(peer, record), "changed")
+  ok(changed:find("changed in Renoise since", 1, true) and not changed:find("older version", 1, true), changed)
+  mock.ops.set_note(3, 1, 20, 1, { note = 50 })
+  -- The fingerprint as an older tool kept it.
+  local mine = record.applied.region
+  record.applied.region = "7e61980ad040e005"
+  local older = K.failure(K.restore(peer, record), "changed")
+  ok(older:find("older version of Kumi's tool", 1, true) and older:find("lines 12 to 31", 1, true), older)
+  eq(pattern(3).lines, 32, "nothing written")
+  eq(K.steps(), steps, "no step")
+  -- Taking it back without keeping what's there doesn't ask.
+  ok(K.restore(peer, record, nil, { discard = true }).result)
+  eq(pattern(3).lines, 12)
+  ok(mine:sub(1, 1) == "t", mine)
+  -- Over nothing, an older tool's record and this one's read the same.
+  pattern(2).lines = 12
+  local empty = K.change(peer, "pattern-length", { ref = K.ref(E, "pattern", 2), lines = 16 })
+  eq(empty.applied.region, "none")
+  ok(K.restore(peer, empty).result)
+  eq(pattern(2).lines, 12)
+  H.no_dialogs()
+end)
