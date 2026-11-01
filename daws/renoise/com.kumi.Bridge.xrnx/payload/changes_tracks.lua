@@ -112,7 +112,7 @@ prop {
 -- `with`, the other tracks to hear alone with it, are turned Active with what each plays through (Renoise's own solo of each
 -- says what that is). Neither mute nor solo is an undo step.
 
-local SOLO_ROUNDS = rows.SOLO_ROUNDS -- (un-solo rounds: a solo takes two at most, the first making a track soloed along with another the soloed one)
+local SOLO_ROUNDS = rows.SOLO_ROUNDS
 
 local function solo_snapshot(song)
   local out = {}

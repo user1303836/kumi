@@ -1865,4 +1865,10 @@ test("reads: a pattern track's automations come in the track's order, with none 
   reads = 0
   walk(track, pattern_track({}), function() error("no automation to give") end)
   eq(reads, 0, "with none, no parameter is read")
+  -- An alias is walked whole, whatever its own list says.
+  seen = {}
+  local alias = pattern_track({})
+  alias.is_alias = true
+  walk(track, alias, function(_, _, _, _, automation) seen[#seen + 1] = automation end)
+  eq(table.concat(seen, " "), "a b")
 end)

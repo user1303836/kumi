@@ -572,8 +572,6 @@ local function same_state(a, b)
 end
 
 
--- Every solo taken away (Renoise turns every track Active); false when one stays. The setter toggles a track's own solo, so `false`
--- on a track soloed only along with another (a group's member) solos it on its own first (measured, 3.5.4).
 local unsolo_all = rows.unsolo_all
 
 -- The tracks that read soloed now, as a key ("2,6"), and how close they are to `set` (each wanted one counts, each other against).

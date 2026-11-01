@@ -636,7 +636,9 @@ local function line_row(line, number, note_columns, effect_columns, scan_hidden)
   return row
 end
 
--- Every solo taken away (Renoise turns every track Active); false when one stays.
+-- Every solo taken away (Renoise turns every track Active); false when one stays. The setter toggles a track's own solo, so `false`
+-- on a track soloed only along with another (a group's member) solos it on its own first (measured, 3.5.4): hence the rounds, of
+-- which a solo takes two at most.
 M.SOLO_ROUNDS = 64
 function M.unsolo_all(song)
   for _ = 1, M.SOLO_ROUNDS do
@@ -656,9 +658,10 @@ end
 
 -- Each of a pattern track's automations with the device and parameter it automates, in the track's order:
 -- fn(d, k, device, parameter, automation). A track's parameters run to hundreds and its automations are few, so none reads no
--- parameter, and the walk ends at the last.
+-- parameter, and the walk ends at the last. (An alias is walked whole: whether its list counts what `find_automation` finds in
+-- the track it shows hasn't been measured.)
 function M.each_automation(track, pattern_track, fn)
-  local left = #pattern_track.automation
+  local left = pattern_track.is_alias and math.huge or #pattern_track.automation
   for d = 1, #track.devices do
     if left == 0 then return end
     local device = track:device(d)

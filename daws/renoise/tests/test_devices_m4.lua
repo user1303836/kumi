@@ -1091,6 +1091,27 @@ test("devices m4: Renoise's undo of Kumi's change inside an instrument is still 
   end)
 end)
 
+test("devices m4: a macro map's undo says so when its instrument was deleted or can't be followed, as for a record of an older tool", function()
+  local _, peer = mapped_song()
+  local epoch = place(peer)
+  local record = change(peer, "instrument-macro-map", { ref = epoch .. ":instrument:1", macro = 1, set = { { mapping = 2, min = 0.25, max = 0.5 } } })
+  local kept = record.material.at
+  eq(kept.label, "Lead")
+  -- What an older tool kept: its own shape, which this one doesn't follow.
+  record.material.at = { n = 1, mark = kept.at[1].mark, label = "Lead" }
+  failure(restore(peer, "instrument-macro-map", record), "stale", "couldn't follow")
+  -- A mark from before what the tool remembers.
+  record.material.at = { of = kept.of, label = kept.label, at = { { n = 1, mark = "from another run" } } }
+  failure(restore(peer, "instrument-macro-map", record), "stale", "couldn't follow")
+  -- The instrument deleted since: named by what it was called.
+  record.material.at = kept
+  mock.song:insert_instrument_at(2)
+  mock.song:delete_instrument_at(1)
+  local before = steps()
+  failure(restore(peer, "instrument-macro-map", record), "gone", "\226\128\156Lead\226\128\157 isn't in the song any more")
+  eq(steps(), before, "nothing written")
+end)
+
 test("devices m4: a macro's mappings get their ranges and scaling in one step, and Kumi's undo writes back what they were", function()
   local _, peer = mapped_song()
   local epoch = place(peer)
