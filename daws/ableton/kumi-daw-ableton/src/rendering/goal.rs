@@ -210,7 +210,7 @@ impl LiveRenderer {
         let slice = parse_float(&goal.reference.over_time.every)
             .filter(|v| *v != 0. && !v.is_nan())
             .unwrap_or(goal.reference.seconds / goal.reference.over_time.lufs.len().max(1) as f64);
-        if let Some(pick) = screen_pick(&goal.reference, tempo, rig.beats, slice) {
+        if let Some(pick) = screen_pick(&goal.reference.over_time.lufs, tempo, rig.beats, slice) {
             // A stop or a failed read here leaves the rig as much as one before: it's taken down, as above.
             let reference = match listening.heard_reference(named, &pick.request(request, tempo), signal).await {
                 Ok(reference) => reference,
