@@ -2,10 +2,16 @@ use super::super::{bridge_version::GOAL_BRIDGE, concurrent::eager_all, connectio
 use super::rig::{Held, Rig, Source, Window};
 use super::*;
 use async_trait::async_trait;
-use kumi_agent::core::evolve::Knob;
-use kumi_common::js::number::{parse, round};
-use kumi_listening::engine::{heard_options, silent_render, Listening};
-use kumi_media::audio::{analyze::Analysis, matching::closeness};
+use kumi_agent::core::{
+    evolve::Knob,
+    goal_rig::{device_label, knob_key as key, moved as moved_knobs, tell_generation, GoalDaw},
+};
+use kumi_common::js::number::parse;
+use kumi_listening::{
+    engine::Listening,
+    goal::{hear, screen_pick, tell, trial_key, HeardCache, Told},
+};
+use kumi_media::audio::analyze::Analysis;
 use std::collections::{HashMap, HashSet};
 #[derive(Clone)]
 struct Knobs {
@@ -19,12 +25,6 @@ struct Screen {
     beats: f64,
     reference: Analysis,
 }
-#[derive(Clone)]
-struct Cached {
-    score: f64,
-    gaps: Vec<String>,
-    structural: Option<StructuralMove>,
-}
 struct Goal {
     render: Rc<LiveRenderer>,
     rig: tokio::sync::Mutex<Rig>,
@@ -34,10 +34,7 @@ struct Goal {
     reference: Analysis,
     focus: Option<Focus>,
     screen: Option<Screen>,
-    heard: RefCell<IndexMap<String, Cached>>,
-}
-fn key(knob: &Knob) -> String {
-    format!("{}|{}", knob.device, knob.name)
+    heard: RefCell<HeardCache<Told>>,
 }
 fn device_name(device: &JsonObject) -> String {
     device
@@ -55,7 +52,7 @@ fn identities(read: &Knobs) -> std::collections::BTreeMap<String, String> {
         .filter_map(|(index, device)| {
             let text = |key: &str| device.get(key).and_then(Value::as_str).unwrap_or("");
             Some((
-                format!("{index}:{}", device_name(device)),
+                device_label(index, &device_name(device)),
                 super::probe::identity_of(text("className"), text("classDisplayName"), text("name"))?,
             ))
         })
@@ -131,7 +128,7 @@ impl LiveRenderer {
                 };
                 knobs.push(Knob {
                     r#ref: reference.into(),
-                    device: format!("{index}:{}", device_name(device)),
+                    device: device_label(index, &device_name(device)),
                     name: name.into(),
                     value,
                     min,
@@ -191,7 +188,7 @@ impl LiveRenderer {
             reference,
             focus: request.focus,
             screen: None,
-            heard: RefCell::new(IndexMap::new()),
+            heard: RefCell::new(HeardCache::default()),
         };
         for (name, label) in sources {
             if let Err(error) = goal.adopt(&name, &label, signal.clone()).await {
@@ -201,40 +198,20 @@ impl LiveRenderer {
         }
         let rig = goal.rig.get_mut();
         let tempo = self.observer.tempo.get().unwrap();
-        if rig.beats * 60. / tempo >= 6. {
-            let beats = round(3. * tempo / 60.).max(2.);
-            let lufs = &goal.reference.over_time.lufs;
-            let slice = parse_float(&goal.reference.over_time.every)
-                .filter(|v| *v != 0. && !v.is_nan())
-                .unwrap_or(goal.reference.seconds / lufs.len().max(1) as f64);
-            let across = round(beats * 60. / tempo / slice).max(1.);
-            let mut best_at = 0;
-            let mut best_score = f64::NEG_INFINITY;
-            if across.is_finite() && across <= lufs.len() as f64 {
-                let across = across as usize;
-                for at in 0..=lufs.len() - across {
-                    let part: Vec<_> = lufs[at..at + across].iter().map(|v| v.unwrap_or(-70.)).collect();
-                    let mean = part.iter().sum::<f64>() / part.len() as f64;
-                    let change = part.windows(2).map(|v| (v[1] - v[0]).abs()).sum::<f64>();
-                    if mean + change > best_score {
-                        best_score = mean + change;
-                        best_at = at;
-                    }
-                }
-            }
-            let offset = round(best_at as f64 * slice * tempo / 60.).min(rig.beats - beats).max(0.);
-            let mut snippet = request.clone();
-            snippet.reference_from = Some(request.reference_from.unwrap_or(0.) + offset * 60. / tempo);
-            snippet.reference_seconds = Some(beats * 60. / tempo);
+        // (Live's slices are as long as the analysis says, to the tenth of a second)
+        let slice = parse_float(&goal.reference.over_time.every)
+            .filter(|v| *v != 0. && !v.is_nan())
+            .unwrap_or(goal.reference.seconds / goal.reference.over_time.lufs.len().max(1) as f64);
+        if let Some(pick) = screen_pick(&goal.reference, tempo, rig.beats, slice) {
             // A stop or a failed read here leaves the rig as much as one before: it's taken down, as above.
-            let reference = match listening.heard_reference(named, &snippet, signal).await {
+            let reference = match listening.heard_reference(named, &pick.request(request, tempo), signal).await {
                 Ok(reference) => reference,
                 Err(error) => {
                     self.close_rig(rig).await;
                     return Err(error);
                 }
             };
-            goal.screen = Some(Screen { from: rig.from + offset, beats, reference });
+            goal.screen = Some(Screen { from: rig.from + pick.offset, beats: pick.beats, reference });
         }
         Ok(Ok(Rc::new(goal)))
     }
@@ -402,14 +379,7 @@ impl GoalRig for Goal {
         let signal = self.signal(given);
         let r = &self.render;
         let screened = options.and_then(|v| v.screen) == Some(true) && self.screen.is_some();
-        let cache_key = |trial: &GenerationTrial| {
-            format!(
-                "{}|{}|{}",
-                trial.slot,
-                if screened { "screen" } else { "full" },
-                trial.values.iter().map(|value| to_fixed(*value, 4)).collect::<Vec<_>>().join(",")
-            )
-        };
+        let cache_key = |trial: &GenerationTrial| trial_key(&trial.slot, screened, &trial.values);
         if r.is_rendering() {
             return Err(observation("Another render is running."));
         }
@@ -426,13 +396,8 @@ impl GoalRig for Goal {
                     let last = current
                         .get(&trial.slot)
                         .ok_or_else(|| RuntimeError::plain("Cannot read properties of undefined (reading 'get')"))?;
-                    trial
-                        .knobs
-                        .iter()
-                        .enumerate()
-                        .map(|(i, k)| (k.clone(), trial.values.get(i).copied().unwrap_or(f64::NAN)))
-                        .filter(|(knob, value)| last.get(&key(knob)).is_none_or(|last| (last - value).abs() > 1e-6))
-                        .collect::<Vec<_>>()
+                    // (a value a trial doesn't give is sent as it is, as Live's goal has always sent it)
+                    moved_knobs(trial, Some(last), false)
                 };
                 if moved.is_empty() {
                     continue;
@@ -484,8 +449,7 @@ impl GoalRig for Goal {
                 }
             }
             render_from = now_ms();
-            if !trials.is_empty()
-                && trials.iter().all(|trial| trial.fresh != Some(true) && self.heard.borrow().contains_key(&cache_key(trial)))
+            if !trials.is_empty() && trials.iter().all(|trial| trial.fresh != Some(true) && self.heard.borrow().contains(&cache_key(trial)))
             {
                 Ok(IndexMap::new())
             } else {
@@ -510,40 +474,24 @@ impl GoalRig for Goal {
             let cache_key = &cache_key;
             async move {
                 let cache_key = cache_key(trial);
-                let known = if trial.fresh != Some(true) { self.heard.borrow().get(&cache_key).cloned() } else { None };
+                let known = if trial.fresh != Some(true) { self.heard.borrow().get(&cache_key) } else { None };
                 if let Some(known) = known {
-                    let mut out = generation.borrow_mut();
-                    out.cached += 1;
-                    out.scores.insert(trial.slot.clone(), known.score);
-                    out.gaps.insert(trial.slot.clone(), known.gaps);
-                    if let Some(structural) = known.structural {
-                        out.structural.insert(trial.slot.clone(), structural);
-                    }
+                    tell_generation(&mut generation.borrow_mut(), &trial.slot, known, true);
                     return Ok::<_, RuntimeError>(());
                 }
                 let Some(rendered) = files.get(&trial.slot) else {
                     generation.borrow_mut().silent.push(trial.slot.clone());
                     return Ok(());
                 };
-                let heard = audio::hear(&rendered.file, heard_options(rendered.start, beats * 60. / tempo, self.focus, signal))
-                    .await
-                    .map_err(|e| RuntimeError::plain(e.to_string()))?;
-                if silent_render(&heard) {
-                    generation.borrow_mut().silent.push(trial.slot.clone());
-                    return Ok(());
-                }
-                let close = closeness(&heard, against, self.focus);
-                let structural = close.structural.map(|s| StructuralMove { gap: s.gap, r#move: s.r#move });
-                let mut out = generation.borrow_mut();
-                out.scores.insert(trial.slot.clone(), close.score);
-                out.gaps.insert(trial.slot.clone(), close.gaps.clone());
-                if let Some(structural) = &structural {
-                    out.structural.insert(trial.slot.clone(), structural.clone());
-                }
-                let mut cache = self.heard.borrow_mut();
-                cache.insert(cache_key, Cached { score: close.score, gaps: close.gaps, structural });
-                if cache.len() > 2000 {
-                    cache.shift_remove_index(0);
+                let heard =
+                    hear(rendered, beats * 60. / tempo, self.focus, signal).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
+                // (each slot is told as its hearing ends, as Live's goal has always told them)
+                match tell(&heard, against, self.focus) {
+                    None => generation.borrow_mut().silent.push(trial.slot.clone()),
+                    Some(told) => {
+                        tell_generation(&mut generation.borrow_mut(), &trial.slot, told.clone(), false);
+                        self.heard.borrow_mut().insert(cache_key, told);
+                    }
                 }
                 Ok(())
             }
@@ -641,51 +589,63 @@ impl GoalRig for Goal {
         }
     }
     async fn tidy(&self, top: &[String], given: Signal) -> Result<Vec<String>, RuntimeError> {
-        let signal = self.signal(given);
-        let r = &self.render;
-        let mut said = vec![];
-        let tracks = r.rows("track", json!({"fields":["name"]}), signal.clone()).await.unwrap_or_default();
-        let mut order = self.slots.borrow().clone();
-        let index = |name: &str| {
-            tracks.iter().position(|row| row.get("name").and_then(Value::as_str) == Some(name)).map(|i| i as i64).unwrap_or(-1)
-        };
-        order.sort_by_key(|slot| std::cmp::Reverse(index(&slot.name)));
-        for slot in order {
-            let fresh = r.rows("track", json!({"fields":["name"]}), signal.clone()).await.unwrap_or_else(|_| tracks.clone());
-            let Some(reference) = fresh
-                .iter()
-                .find(|row| row.get("name").and_then(Value::as_str) == Some(&slot.name))
-                .and_then(|row| row.get("ref"))
-                .and_then(Value::as_str)
-            else {
-                continue;
-            };
-            if top.contains(&slot.name) {
-                let _ = r.step("set_mixer", json!({"trackRef":reference,"mute":true}), signal.clone()).await;
-                continue;
-            }
-            let made = r.history.entries.borrow().values().rev().find_map(|entry| {
-                let record = &entry.borrow().record;
-                (record.family == ChangeFamily::Structure
-                    && record.state == ChangeState::Applied
-                    && record.title.contains(&format!("“{}”", slot.name)))
-                .then(|| record.id.clone())
-            });
-            let undone = match made {
-                Some(id) => r.history.undo(&id, signal.clone(), true).await.ok(),
-                None => None,
-            };
-            if undone.is_none_or(|undone| undone.is_error) {
-                let _ = r.step("set_mixer", json!({"trackRef":reference,"mute":true}), signal.clone()).await;
-                said.push(format!("“{}” stays, muted.", slot.name));
-            }
-        }
-        Ok(said)
+        let tidy = LiveTidy { render: &self.render, signal: self.signal(given), tracks: RefCell::new(vec![]) };
+        let slots = self.slots.borrow().iter().map(|slot| slot.name.clone()).collect();
+        Ok(kumi_agent::core::goal_rig::tidy(&tidy, slots, top).await)
     }
     async fn close(&self) -> Result<Vec<String>, RuntimeError> {
         let mut rig = self.rig.lock().await;
         self.render.close_rig(&mut rig).await;
         Ok(rig.notes.clone())
+    }
+}
+
+/// A finished goal's candidates tidied in Live: each found again by its name in the Set's tracks as they are now, a
+/// candidate the model made (its Structure change) taken back.
+struct LiveTidy<'a> {
+    render: &'a LiveRenderer,
+    signal: Signal,
+    /// The Set's tracks as tidying began: where a slot is found when a later read fails.
+    tracks: RefCell<Vec<JsonObject>>,
+}
+
+#[async_trait(?Send)]
+impl GoalDaw for LiveTidy<'_> {
+    async fn tidy_order(&self, mut slots: Vec<String>) -> Vec<String> {
+        let tracks = self.render.rows("track", json!({"fields":["name"]}), self.signal.clone()).await.unwrap_or_default();
+        let index = |name: &str| {
+            tracks.iter().position(|row| row.get("name").and_then(Value::as_str) == Some(name)).map(|i| i as i64).unwrap_or(-1)
+        };
+        slots.sort_by_key(|slot| std::cmp::Reverse(index(slot)));
+        *self.tracks.borrow_mut() = tracks;
+        slots
+    }
+    async fn track_of(&self, slot: &str) -> Option<String> {
+        let fresh = match self.render.rows("track", json!({"fields":["name"]}), self.signal.clone()).await {
+            Ok(fresh) => fresh,
+            Err(_) => self.tracks.borrow().clone(),
+        };
+        fresh
+            .iter()
+            .find(|row| row.get("name").and_then(Value::as_str) == Some(slot))
+            .and_then(|row| row.get("ref"))
+            .and_then(Value::as_str)
+            .map(str::to_owned)
+    }
+    async fn mute(&self, track: &str) {
+        let _ = self.render.step("set_mixer", json!({"trackRef":track,"mute":true}), self.signal.clone()).await;
+    }
+    fn made_by_kumi(&self, slot: &str) -> Option<String> {
+        self.render.history.entries.borrow().values().rev().find_map(|entry| {
+            let record = &entry.borrow().record;
+            (record.family == ChangeFamily::Structure
+                && record.state == ChangeState::Applied
+                && record.title.contains(&format!("“{slot}”")))
+            .then(|| record.id.clone())
+        })
+    }
+    async fn take_back(&self, id: &str) -> bool {
+        self.render.history.undo(id, self.signal.clone(), true).await.is_ok_and(|undone| !undone.is_error)
     }
 }
 
