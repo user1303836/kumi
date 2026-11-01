@@ -497,9 +497,12 @@ HISTORY stays honest in each case: Kumi refuses, or says what it can't do.
   AU plug-in instruments were loaded and unloaded (the cause isn't known); then
   Renoise's undo can't take back `plugin_load`, `plugin_param` or `plugin_set`.
   `plugin_preset` is untested with plug-ins that have more than one program.
-- **REAPER:** a project whose tracks are all replaced at once (an action that
-  removes every track and inserts others) reads as another project, so Kumi's
-  references to it go stale and the model reads again.
+- **REAPER:** a project whose tracks are all replaced at once stays the same
+  project when the change made an undo point (an action that removes every
+  track and inserts others). It reads as another project when nothing shows it
+  was an edit: a script that makes no undo point, REAPER's undo or redo of such
+  a change, REAPER before 7.79, or an undo history at its limit. Kumi's
+  references to it then go stale and the model reads again.
 - **REAPER:** Kumi's undo of parameter modulation turns its switches off but
   leaves the modulation settings, which REAPER keeps once made; the row says so.
 - **REAPER:** `track_midi_out` needs a MIDI output device in REAPER's
