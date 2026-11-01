@@ -11,7 +11,7 @@ use daw_mcp_server::{
     simulator::{Simulator, SimulatorConfig},
 };
 use futures::FutureExt;
-use kumi_agent::core::{context::IntegrationContext, contracts::*};
+use kumi_agent::core::{context::IntegrationContext, contracts::*, evolve::Knob};
 use kumi_agent::mcp::client::McpEndpoint;
 use kumi_common::abort::Signal;
 use kumi_daw_own::bridge::{Connect, OwnOptions};
@@ -528,6 +528,136 @@ async fn a_goal_searches_scratch_copies_of_its_candidates_and_settles_the_winner
             assert_eq!(script.listening().scratch_copies(), 0, "the copies are gone");
             assert_eq!(script.listening().kept().len(), 2, "the bests stay tracks of the project's");
             assert_ours(&told.borrow());
+            reaper.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
+/// A goal over Track 2 and Track 3, each with a ReaEQ, toward four seconds of noise: the integration, the rig and its
+/// slots. Track 3 renders silence, so what each slot is told shows which render it was heard from.
+async fn two_slot_goal(home: &Path, script: &ReaperScript) -> (Rc<dyn Integration>, Rc<dyn GoalRig>, Vec<GoalSlotInfo>) {
+    script.add_fx("r:track:{T0002}", "ReaEQ");
+    script.add_fx("r:track:{T0003}", "ReaEQ");
+    script.listening().set_level("r:track:{T0002}", 0.4);
+    script.listening().set_level("r:track:{T0003}", 0.);
+    let (reaper, _) = integration(Daw::Reaper, home, create_reaper_integration);
+    reaper.start(Signal::new()).await.unwrap();
+    reaper.observe(Signal::new(), None).await.unwrap();
+    let reference = home.join("reference.wav");
+    daw_mcp_server::simulator::listening::write_noise(&reference, 4., 0.4, 9).unwrap();
+    let candidate = |track: &str| AuditionCandidate { track: track.into(), clip: None, label: None, mix: None };
+    let request = AuditionRequest {
+        candidates: vec![candidate("Track 2"), candidate("Track 3")],
+        from_beat: Some(0.),
+        beats: Some(4.),
+        reference: Some(reference.to_string_lossy().into_owned()),
+        reference_from: None,
+        reference_seconds: None,
+        focus: None,
+    };
+    let rig = reaper.goal(&request, Signal::new()).await.unwrap().unwrap();
+    let slots = rig.slots();
+    (reaper, rig, slots)
+}
+
+/// A slot's trial at `value` on its ReaEQ's band 2 gain.
+fn gain_trial(slot: &GoalSlotInfo, value: f64, fresh: bool) -> GenerationTrial {
+    let knobs: Vec<Knob> = slot.knobs.iter().filter(|knob| knob.name == "Gain-Band 2").cloned().collect();
+    GenerationTrial { slot: slot.name.clone(), knobs, values: vec![value], fresh: fresh.then_some(true) }
+}
+
+/// #399 (K29, D4): a generation's trials are heard together, as Live's goal hears them, and each slot is told from its
+/// own copy's render, whichever order the trials come in: Track 3's copy is silent, Track 2's is scored.
+#[tokio::test(flavor = "current_thread")]
+async fn a_generations_trials_are_heard_together_and_each_slot_is_told_from_its_own_copy() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            let (reaper, rig, slots) = two_slot_goal(home.path(), &script).await;
+            assert_eq!(slots.len(), 2, "{slots:?}");
+            let (sounding, silent) = (&slots[0], &slots[1]);
+            for (n, trials) in [
+                vec![gain_trial(silent, 0.5, true), gain_trial(sounding, 0.5, true)],
+                vec![gain_trial(sounding, 0.6, true), gain_trial(silent, 0.6, true)],
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let generation = rig.generation(&trials, Signal::new(), None).await.unwrap();
+                assert_eq!(generation.silent, [silent.name.clone()], "{n}: {generation:?}");
+                assert_eq!(generation.scores.keys().collect::<Vec<_>>(), [&sounding.name], "{n}: {generation:?}");
+            }
+            let together =
+                script.listening().renders().iter().filter(|render| render["sources"].as_array().is_some_and(|s| s.len() == 2)).count();
+            assert_eq!(together, 2, "both copies in each generation's one render");
+            rig.close().await.unwrap();
+            reaper.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
+/// #399 (K29, D3): a knob the DAW won't set on a copy is the only one the search leaves be; the trial's other knobs are
+/// set (a value at a time once the batch is refused, as Live's goal sets them) and kept as the copy's, so they aren't sent
+/// again.
+#[tokio::test(flavor = "current_thread")]
+async fn a_goal_leaves_only_the_knob_the_daw_refuses_and_sets_the_rest_once() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            let (reaper, rig, slots) = two_slot_goal(home.path(), &script).await;
+            let slot = &slots[0];
+            let named = |name: &str| slot.knobs.iter().find(|knob| knob.name == name).cloned().unwrap();
+            let (gain, freq) = (named("Gain-Band 2"), named("Freq-Band 2"));
+            let index = |knob: &Knob| -> u64 { knob.r#ref.rsplit(':').next().unwrap().parse().unwrap() };
+            script.listening().refuse_param(0, index(&gain), "that parameter can't be set on the copy");
+            let trial =
+                GenerationTrial { slot: slot.name.clone(), knobs: vec![gain.clone(), freq.clone()], values: vec![0.7, 0.3], fresh: None };
+            let generation = rig.generation(&[trial.clone()], Signal::new(), None).await.unwrap();
+            let gain_key = format!("{}|{}", gain.device, gain.name);
+            assert_eq!(
+                generation.frozen.get(&slot.name).map(|keys| keys.iter().cloned().collect::<Vec<_>>()),
+                Some(vec![gain_key.clone()])
+            );
+            assert!(generation.scores.contains_key(&slot.name), "still heard: {generation:?}");
+            let copy = script.listening().renders().last().unwrap()["sources"][0]["ref"].as_str().unwrap().to_owned();
+            let set = || script.listening().copy_values(&copy);
+            assert_eq!(set().len(), 1, "{:?}", set());
+            assert_eq!((set()[0]["param"].as_u64(), set()[0]["normalized"].as_f64()), (Some(index(&freq)), Some(0.3)));
+            // Again at the same values: the band's frequency is the copy's already, and isn't sent again.
+            let again = rig.generation(&[GenerationTrial { fresh: Some(true), ..trial }], Signal::new(), None).await.unwrap();
+            assert_eq!(set().len(), 1, "{:?}", set());
+            assert_eq!(again.frozen.get(&slot.name).map(|keys| keys.contains(&gain_key)), Some(true));
+            rig.close().await.unwrap();
+            reaper.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
+/// #399 (K29, D5): a render whose file doesn't say how long it is is heard over its window at the tempo the goal opened
+/// with, not at whatever a look read since (a render's tempo commands, the producer's change): the window is two seconds
+/// at 120, an eighth of that at 960, too short to hear.
+#[tokio::test(flavor = "current_thread")]
+async fn a_goals_renders_are_heard_at_the_tempo_it_opened_with() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            script.listening().leave_out_render_seconds();
+            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            let (reaper, rig, slots) = two_slot_goal(home.path(), &script).await;
+            script.set_tempo(960.);
+            reaper.observe(Signal::new(), None).await.unwrap();
+            let generation = rig.generation(&[gain_trial(&slots[0], 0.5, false)], Signal::new(), None).await.unwrap();
+            assert!(generation.silent.is_empty(), "{generation:?}");
+            assert!(generation.scores.contains_key(&slots[0].name), "{generation:?}");
+            rig.close().await.unwrap();
             reaper.close().await.unwrap();
             simulator.stop();
         })

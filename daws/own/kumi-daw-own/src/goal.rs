@@ -90,6 +90,10 @@ pub struct OwnGoalRig<S: RefScheme + 'static> {
     window: Window,
     /// The request's from_beat: where a candidate added later is heard when it names no part.
     from_given: Option<f64>,
+    /// The tempo the windows were measured in, read as the goal opened: a render whose file doesn't say how long it is
+    /// is heard over its window at this tempo. (A look meanwhile may read another: Renoise's render leaves the transport
+    /// where the song's tempo commands took it, until the goal puts it back.)
+    tempo: f64,
     reference: Analysis,
     focus: Option<Focus>,
     screen: Option<Screen>,
@@ -147,6 +151,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             current: RefCell::new(IndexMap::new()),
             window,
             from_given: request.from_beat,
+            tempo,
             reference,
             focus: request.focus,
             screen: None,
@@ -351,8 +356,10 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         Ok(Ok((knobs, places)))
     }
 
-    /// Sets a slot's trial values on its copy; the knobs the DAW refused, by key.
-    async fn set_copy(&self, slot: &str, moved: &[(Knob, f64)], signal: &Signal) -> Result<Result<(), String>, RuntimeError> {
+    /// Sets a slot's trial values on its copy: the knobs the DAW refused, by key. A batch it refuses is set again a value
+    /// at a time, so a knob it won't take doesn't keep the others from moving (as Live's goal sets them). Err: the slot or
+    /// its copy is gone.
+    async fn set_copy(&self, slot: &str, moved: &[(Knob, f64)], signal: &Signal) -> Result<Result<HashSet<String>, String>, RuntimeError> {
         let r = &self.renderer;
         let (scratch, copy, places) = {
             let slots = self.slots.borrow();
@@ -362,30 +369,43 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             let Some(copy) = r.copy_ref(&found.copy_name) else { return Ok(Err(format!("“{slot}”'s copy is gone"))) };
             (found.scratch.clone(), copy, found.places.clone())
         };
-        let values: Vec<Value> = moved
+        let values: Vec<(String, Value)> = moved
             .iter()
             .filter_map(|(knob, value)| {
                 let (device, param) = places.get(&key(knob))?;
                 let mut set = json!({"ref": copy, "device": device, "param": param});
                 set[r.table.scratch_field] = json!(value);
-                Some(set)
+                Some((key(knob), set))
             })
             .collect();
-        if values.is_empty() {
-            return Ok(Ok(()));
-        }
+        let mut refused = HashSet::new();
         for chunk in values.chunks(256) {
-            match r.ask("scratch", json!({"action": "set", "scratchId": scratch, "values": chunk}), signal.clone()).await? {
-                Ok(done) => {
-                    let steps = done.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0);
-                    if let Some(found) = self.slots.borrow_mut().iter_mut().find(|found| found.info.name == slot) {
-                        found.steps += steps;
-                    }
+            if self.set_on_copy(slot, &scratch, chunk.iter().map(|(_, set)| set.clone()).collect(), signal).await? {
+                continue;
+            }
+            // (refused because the search was stopped: nothing is asked again)
+            signal.check()?;
+            for (key, set) in chunk {
+                if !self.set_on_copy(slot, &scratch, vec![set.clone()], signal).await? {
+                    refused.insert(key.clone());
                 }
-                Err(refused) => return Ok(Err(refused.why)),
             }
         }
-        Ok(Ok(()))
+        Ok(Ok(refused))
+    }
+
+    /// One scratch `set` of these values on a slot's copy, the steps it left in the DAW's undo counted: whether it took them.
+    async fn set_on_copy(&self, slot: &str, scratch: &str, values: Vec<Value>, signal: &Signal) -> Result<bool, RuntimeError> {
+        match self.renderer.ask("scratch", json!({"action": "set", "scratchId": scratch, "values": values}), signal.clone()).await? {
+            Ok(done) => {
+                let steps = done.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0);
+                if let Some(found) = self.slots.borrow_mut().iter_mut().find(|found| found.info.name == slot) {
+                    found.steps += steps;
+                }
+                Ok(true)
+            }
+            Err(_) => Ok(false),
+        }
     }
 
     /// A goal that never opened: its copies go, and the safety limiters it put on candidates are taken off again, each
@@ -673,14 +693,18 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 continue;
             }
             match self.set_copy(&trial.slot, &moved, &signal).await? {
-                Ok(()) => {
+                // (what the DAW took is the copy's now; the knobs it refused, the search leaves be)
+                Ok(refused) => {
                     let mut current = self.current.borrow_mut();
                     let last = current.entry(trial.slot.clone()).or_default();
-                    for (knob, value) in &moved {
+                    for (knob, value) in moved.iter().filter(|(knob, _)| !refused.contains(&key(knob))) {
                         last.insert(key(knob), *value);
                     }
+                    if !refused.is_empty() {
+                        generation.frozen.insert(trial.slot.clone(), refused);
+                    }
                 }
-                // (the DAW refused them: the search leaves them be)
+                // (the slot or its copy is gone: none of its knobs can move)
                 Err(_) => {
                     generation.frozen.insert(trial.slot.clone(), moved.iter().map(|(knob, _)| key(knob)).collect::<HashSet<_>>());
                 }
@@ -728,11 +752,23 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 }
             }
         }
-        let tempo = r.tempo().unwrap_or(120.);
         let against = if screened { &self.screen.as_ref().unwrap().reference } else { &self.reference };
-        for trial in trials {
-            let cache_key = cache_key(trial);
-            let known = if trial.fresh != Some(true) { self.heard.borrow().get(&cache_key).cloned() } else { None };
+        // Each trial heard before is told from what was heard; the rest are heard together, as Live's goal hears them.
+        let told: Vec<(&GenerationTrial, String, Option<Cached>)> = trials
+            .iter()
+            .map(|trial| {
+                let cache_key = cache_key(trial);
+                let known = if trial.fresh != Some(true) { self.heard.borrow().get(&cache_key).cloned() } else { None };
+                (trial, cache_key, known)
+            })
+            .collect();
+        let hearing =
+            told.iter().filter(|(_, _, known)| known.is_none()).filter_map(|(trial, _, _)| files.get(&trial.slot)).map(|rendered| {
+                let seconds = rendered.seconds.unwrap_or(beats * 60. / self.tempo);
+                audio::hear(&rendered.file, heard_options(rendered.start, seconds, self.focus, signal.clone()))
+            });
+        let mut heard = futures::future::try_join_all(hearing).await.map_err(|error| RuntimeError::plain(error.to_string()))?.into_iter();
+        for (trial, cache_key, known) in told {
             if let Some(known) = known {
                 generation.cached += 1;
                 generation.scores.insert(trial.slot.clone(), known.score);
@@ -746,10 +782,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 generation.silent.push(trial.slot.clone());
                 continue;
             };
-            let seconds = rendered.seconds.unwrap_or(beats * 60. / tempo);
-            let heard = audio::hear(&rendered.file, heard_options(rendered.start, seconds, self.focus, signal.clone()))
-                .await
-                .map_err(|error| RuntimeError::plain(error.to_string()))?;
+            let Some(heard) = heard.next() else { break };
             if silent_render(&heard) {
                 generation.silent.push(trial.slot.clone());
                 continue;
