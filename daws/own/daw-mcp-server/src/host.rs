@@ -20,6 +20,8 @@ struct Current {
     pid: u32,
     resource: String,
     port: u16,
+    /// When its bridge started (its discovery file's `startedMs`).
+    started_ms: u64,
     client: BridgeClient,
 }
 
@@ -82,6 +84,9 @@ pub struct Host {
 pub struct Pick {
     pub pid: Option<u32>,
     pub resource: Option<String>,
+    /// When the instance's bridge started: what tells one run of a DAW that can't say its pid (Renoise on Windows, pid 0)
+    /// from the next one in the same folder. Only a change pins it ([`Host::pin`]).
+    pub started: Option<u64>,
 }
 
 impl Pick {
@@ -95,11 +100,13 @@ impl Pick {
             Some(Value::String(resource)) => Some(resource.clone()),
             Some(_) => return Err("resource must be a folder path".into()),
         };
-        Ok(Self { pid, resource })
+        Ok(Self { pid, resource, started: None })
     }
 
     fn matches(&self, discovery: &Discovery) -> bool {
-        self.pid.is_none_or(|pid| pid == discovery.pid) && self.resource.as_ref().is_none_or(|resource| *resource == discovery.resource)
+        self.pid.is_none_or(|pid| pid == discovery.pid)
+            && self.resource.as_ref().is_none_or(|resource| *resource == discovery.resource)
+            && self.started.is_none_or(|started| started == discovery.started_ms)
     }
 }
 
@@ -134,8 +141,10 @@ fn no_listener(error: &std::io::Error) -> bool {
 }
 
 impl Host {
+    /// The host for `daw`'s bridges in Kumi's folder. Renoise's: the instrument files left in Kumi's work folder an hour
+    /// or more ago are removed first.
     pub fn new(daw: Daw, kumi_home: &Path) -> Self {
-        Self {
+        let host = Self {
             daw,
             paths: BridgePaths::new(kumi_home, daw),
             current: std::sync::Arc::new(tokio::sync::Mutex::new(None)),
@@ -143,7 +152,11 @@ impl Host {
             journal: std::sync::Arc::new(crate::changes::Journal::for_daw(daw)),
             catchup: crate::catchup::Catchup::new(BridgePaths::new(kumi_home, daw).snapshots()),
             jobs: crate::listening::Jobs::default(),
+        };
+        if daw == Daw::Renoise {
+            crate::renoise::instruments::sweep_work(&host.paths.root.join("work"), std::time::SystemTime::now());
         }
+        host
     }
 
     pub(crate) fn catchup(&self) -> &crate::catchup::Catchup {
@@ -302,6 +315,7 @@ impl Host {
             !open.client.is_closed()
                 && pick.pid.is_none_or(|pid| pid == open.pid)
                 && pick.resource.as_ref().is_none_or(|r| *r == open.resource)
+                && pick.started.is_none_or(|started| started == open.started_ms)
         });
         let (alive, _, _) = self.instances();
         if !reusable {
@@ -320,7 +334,13 @@ impl Host {
             match self.connect(discovery, &secret).await {
                 Some(Ok(client)) => {
                     self.forward_events(&client);
-                    *current = Some(Current { pid: discovery.pid, resource: discovery.resource.clone(), port: discovery.port, client });
+                    *current = Some(Current {
+                        pid: discovery.pid,
+                        resource: discovery.resource.clone(),
+                        port: discovery.port,
+                        started_ms: discovery.started_ms,
+                        client,
+                    });
                 }
                 Some(Err(why)) => return Err(why),
                 None => return Err(format!("no {} with Kumi's bridge is running", self.daw)),
@@ -356,7 +376,13 @@ impl Host {
                     old.client.close().await;
                 }
                 self.forward_events(&client);
-                *current = Some(Current { pid, resource: resource.to_string(), port: discovery.port, client: client.clone() });
+                *current = Some(Current {
+                    pid,
+                    resource: resource.to_string(),
+                    port: discovery.port,
+                    started_ms: discovery.started_ms,
+                    client: client.clone(),
+                });
                 Some(client)
             }
         }
@@ -404,12 +430,13 @@ impl Host {
     }
 
     /// The instance a pick means now (connected to, if it wasn't), as a pick of that one alone: what a change is previewed
-    /// in, so its apply and undo go there and never to another one.
+    /// in, so its apply and undo go there and never to another one. One that can't say its pid (0) is pinned by when its
+    /// bridge started too, so the DAW opened again in the same folder isn't taken for it (#399, N-S10).
     pub(crate) async fn pin(&self, pick: &Pick) -> Result<Pick, CallError> {
         let mut current = self.current.lock().await;
         self.ensure_connected(&mut current, pick).await.map_err(CallError::NotConnected)?;
         let open = current.as_ref().expect("connected above");
-        Ok(Pick { pid: Some(open.pid), resource: Some(open.resource.clone()) })
+        Ok(Pick { pid: Some(open.pid), resource: Some(open.resource.clone()), started: (open.pid == 0).then_some(open.started_ms) })
     }
 
     /// The refusal for a change whose instance isn't running any more (another one may be: the change isn't made there).
@@ -418,11 +445,16 @@ impl Host {
         if self.instances().0.iter().any(|discovery| instance.matches(discovery)) {
             return None;
         }
-        let folder = instance.resource.as_deref().map(|resource| format!(", {resource}")).unwrap_or_default();
-        Some(json!({
-            "error": format!("this change was made in another {} (pid {pid}{folder}), which isn't running now: preview it again", self.daw),
-            "code": "stale",
-        }))
+        let error = match (pid, instance.resource.as_deref()) {
+            // (no pid to name: the DAW was opened again since, in the same folder or another)
+            (0, Some(folder)) => format!("this change was made in {} before it was opened again ({folder}): preview it again", self.daw),
+            (0, None) => format!("this change was made in {} before it was opened again: preview it again", self.daw),
+            (pid, folder) => {
+                let folder = folder.map(|resource| format!(", {resource}")).unwrap_or_default();
+                format!("this change was made in another {} (pid {pid}{folder}), which isn't running now: preview it again", self.daw)
+            }
+        };
+        Some(json!({"error": error, "code": "stale"}))
     }
 
     /// Asks the chosen instance's bridge for one of its answers (`read`, `snapshot`, `focus`, `focus_body`). The
