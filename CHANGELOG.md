@@ -3,6 +3,36 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.50 — 2026-11-02
+
+Ships with bridge 1.0.102, as 1.24.49 did. Ships with REAPER extension 0.1.10 and Renoise tool 1.0.13,
+which REAPER and Renoise load when they restart; `kumi update` puts them in.
+
+- REAPER: a MIDI variation stays Kumi's once written, whether its timing was loosened, it's a chord,
+  or its item is imported MIDI, trimmed or ignores the project tempo, so "change the rest" and "drop
+  the rest" include it.
+- REAPER: a variation of a looped MIDI item keeps looping, and a pooled MIDI item can be varied. A
+  change to a pooled take says it reached the whole pool, and how many items.
+- Loosening a MIDI take's timing keeps its notes inside it and no longer overlaps notes of one pitch,
+  which could cut the later one short.
+- REAPER: a tempo-synced LFO keeps the speed asked for, and Kumi's undo puts it back.
+- REAPER: an undone parameter modulation says what's really left: none of it is saved with the
+  project.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### REAPER extension 0.1.10
+
+- Catch-up now sees edits to a pooled MIDI item's notes; a project from before this update reports its
+  pooled items as changed once.
+- A MIDI take's row says its ticks (`ticksPerQuarter`, `tickAtStart`) and its source's end, pooled
+  MIDI takes read as MIDI and say `pooled`, and a variation of a looped MIDI item keeps looping.
+
+### Renoise tool 1.0.13
+
+- Undoing a sample's polarity flip in Renoise now shows in HISTORY.
+
 ## 1.24.49 — 2026-11-02
 
 Ships with bridge 1.0.102, as 1.24.48 did. Ships with Renoise tool 1.0.12, which Renoise loads when it
