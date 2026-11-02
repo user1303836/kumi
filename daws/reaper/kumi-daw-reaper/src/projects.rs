@@ -18,7 +18,7 @@ use regex::Regex;
 
 /// The most of a project read. A REAPER project is a few megabytes, a MIDI-heavy one tens; a plug-in that keeps its samples
 /// in its state can make it gigabytes, and those lines aren't held.
-pub const MOST_BYTES: u64 = 4 * 1024 * 1024 * 1024;
+const MOST_BYTES: u64 = 4 * 1024 * 1024 * 1024;
 /// The most of one line held: REAPER wraps a plug-in's state well below this; what's past it is passed over.
 const MOST_LINE: usize = 1024 * 1024;
 /// The most of one word kept (a name, a preset, a path).
@@ -36,25 +36,24 @@ const MOST_INSIDE: usize = 16;
 const CHECK_EVERY: usize = 4096;
 
 /// REAPER's projects, as the library learns them.
-pub static FORMAT: ProjectFormat = ProjectFormat { extension: ".rpp", skip, read: read_project };
+pub(crate) static FORMAT: ProjectFormat = ProjectFormat { extension: ".rpp", skip, read: read_project };
 
 /// Whether a `.rpp` at `path` isn't one of the producer's projects: one of Kumi's copies of a project, a hidden file
 /// (macOS's `._` files on other disks), or one REAPER keeps as a backup or an auto-save, in its `Backups` or `AutoSaves`
 /// folder or with its time in the name.
-pub fn skip(path: &Path) -> bool {
+fn skip(path: &Path) -> bool {
     static STAMPED: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)-\d{4}-\d{2}-\d{2}_\d{4}(\d{2})?\.rpp$").unwrap());
     let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-    let kept = path.parent().is_some_and(|folder| {
-        folder.components().any(|part| {
-            let part = part.as_os_str().to_string_lossy();
-            part.eq_ignore_ascii_case("Backups") || part.eq_ignore_ascii_case("AutoSaves")
-        })
+    // (a folder named so further up, a disk called Backups, isn't REAPER's)
+    let kept = path.parent().and_then(Path::file_name).is_some_and(|folder| {
+        let folder = folder.to_string_lossy();
+        folder.eq_ignore_ascii_case("Backups") || folder.eq_ignore_ascii_case("AutoSaves")
     });
     name.starts_with('.') || is_kumi_copy(&name) || kept || STAMPED.is_match(&name)
 }
 
 /// The project at `path`, read as far as `MOST_BYTES`.
-pub fn read_project(path: &Path, signal: &Signal) -> Result<SetSummary, RuntimeError> {
+fn read_project(path: &Path, signal: &Signal) -> Result<SetSummary, RuntimeError> {
     read_at_most(path, signal, MOST_BYTES)
 }
 
@@ -72,19 +71,19 @@ fn read_at_most(path: &Path, signal: &Signal, most: u64) -> Result<SetSummary, R
         .and_then(|set| set.ok_or_else(|| RuntimeError::plain(format!("{shown} isn't a REAPER project"))))
 }
 
-/// A line's words as REAPER writes them: apart by spaces, one with a space in it quoted with whichever of `"`, `'` and
-/// `` ` `` it doesn't hold. Each at most `MOST_VALUE` long.
+/// A line's words as REAPER writes them: apart by ASCII spaces (a full-width space is part of a name, unquoted), one with an
+/// ASCII space in it quoted with whichever of `"`, `'` and `` ` `` it doesn't hold. Each at most `MOST_VALUE` long.
 fn words(line: &str) -> Vec<&str> {
     let short = |word: &'_ str| -> usize { word.floor_char_boundary(MOST_VALUE) };
     let mut said = vec![];
-    let mut rest = line.trim_start();
+    let mut rest = line.trim_ascii_start();
     while let Some(first) = rest.chars().next() {
         if matches!(first, '"' | '\'' | '`') {
             match rest[1..].find(first) {
                 Some(end) => {
                     let word = &rest[1..1 + end];
                     said.push(&word[..short(word)]);
-                    rest = rest[2 + end..].trim_start();
+                    rest = rest[2 + end..].trim_ascii_start();
                 }
                 None => {
                     let word = &rest[1..];
@@ -93,10 +92,10 @@ fn words(line: &str) -> Vec<&str> {
                 }
             }
         } else {
-            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            let end = rest.find(|c: char| c.is_ascii_whitespace()).unwrap_or(rest.len());
             let word = &rest[..end];
             said.push(&word[..short(word)]);
-            rest = rest[end..].trim_start();
+            rest = rest[end..].trim_ascii_start();
         }
     }
     said
@@ -120,8 +119,9 @@ enum Block {
     Other,
 }
 
-/// An FX as it's named in its block's line (`<VST "VSTi: ReaSynth (Cockos)" reasynth.vst.dylib 0 "Lead" …`, `<JS
-/// Utility/volume ""`, `<CONTAINER Container 0 "" 0`), and whether it's one of REAPER's own (Cockos's, a JSFX, a
+/// An FX as it's named in its block's line, as REAPER 7.82 saves them (`<VST "VSTi: ReaSynth (Cockos)" reasynth.vst.dylib 0
+/// "Lead" …`, `<AU "AUi: DLSMusicDevice (Apple)" "Apple: DLSMusicDevice" "" …`, `<JS utility/volume ""`, `<CONTAINER Container
+/// Space`), and whether it's one of REAPER's own (Cockos's, a JSFX, a
 /// container), which name no plug-in.
 fn device_of(tag: &str, words: &[&str]) -> (SetDevice, bool) {
     let named = words.get(1).copied().unwrap_or_default();
@@ -131,7 +131,7 @@ fn device_of(tag: &str, words: &[&str]) -> (SetDevice, bool) {
             (SetDevice { name: named.into(), role: if midi { DeviceRole::Midi } else { DeviceRole::Audio }, ..Default::default() }, true)
         }
         "CONTAINER" => {
-            let renamed = words.get(3).copied().filter(|renamed| !renamed.is_empty());
+            let renamed = words.get(2).copied().filter(|renamed| !renamed.is_empty());
             (SetDevice { name: "Container".into(), role: DeviceRole::Rack, preset: renamed.map(Into::into), ..Default::default() }, true)
         }
         _ => {
@@ -146,8 +146,13 @@ fn device_of(tag: &str, words: &[&str]) -> (SetDevice, bool) {
             };
             let role = if kind.ends_with('i') { DeviceRole::Instrument } else { DeviceRole::Audio };
             let own = maker == "Cockos";
-            // A VST's own name for this one, given in REAPER (its line's fifth word).
-            let renamed = (tag == "VST").then(|| words.get(4).copied()).flatten().filter(|renamed| !renamed.is_empty());
+            // Its name for this one, given in REAPER: a VST's fifth word, an AU's fourth.
+            let renamed = match tag {
+                "VST" => words.get(4),
+                "AU" => words.get(3),
+                _ => None,
+            };
+            let renamed = renamed.copied().filter(|renamed| !renamed.is_empty());
             let device = SetDevice {
                 name: name.into(),
                 role,
@@ -294,6 +299,10 @@ impl Read {
             Some(Block::Track) => {
                 let Some(mut read) = self.track.take() else { return };
                 self.kept += 1;
+                // An unnamed track, by its place, as REAPER calls it.
+                if read.track.name.is_empty() {
+                    read.track.name = format!("Track {}", self.set.tracks.len() + 1);
+                }
                 // REAPER's tracks have no kind: one with audio in it is said to, and one without says nothing (`my_sets`
                 // leaves out another DAW's "midi").
                 read.track.kind = if read.folder {
@@ -306,9 +315,7 @@ impl Read {
                 if read.folder {
                     self.folders.push(read.track.name.clone());
                 }
-                for _ in 0..read.closes {
-                    self.folders.pop();
-                }
+                self.folders.truncate(self.folders.len().saturating_sub(read.closes));
                 self.set.tracks.push(read.track);
             }
             _ => {}
@@ -450,7 +457,7 @@ fn read_lines(mut lines: impl BufRead, name: &str, folder: &str, signal: &Signal
                     continue;
                 }
                 let line = String::from_utf8_lossy(&bytes[start..]);
-                read.line(line.trim_end());
+                read.line(line.trim_ascii_end());
             }
             None => {}
         }
@@ -526,7 +533,7 @@ mod tests {
         AAAA
         BBBB
       >
-      <CONTAINER Container 0 "Space" 0
+      <CONTAINER Container Space
         <JS "Utility/volume" ""
           0 - -
         >
@@ -732,6 +739,58 @@ mod tests {
     }
 
     #[test]
+    fn a_track_closing_more_folders_than_are_open_ends_at_once() {
+        let closes = "<REAPER_PROJECT 0.1 \"7.82\" 1 0\n  <TRACK {A}\n    NAME Bus\n    ISBUS 1 1\n  >\n  <TRACK {B}\n    ISBUS 2 -9000000000000000000\n  >\n  <TRACK {C}\n  >\n>\n";
+        let set = read_text(closes.as_bytes()).unwrap();
+        assert_eq!(set.tracks[1].group.as_deref(), Some("Bus"));
+        assert_eq!(set.tracks[2].group, None);
+    }
+
+    #[test]
+    fn a_full_width_space_is_part_of_a_name_and_an_unnamed_track_is_named_by_its_place() {
+        let text = "<REAPER_PROJECT 0.1 \"7.82\" 1 0\n  <TRACK {A}\n    NAME ドラム\u{3000}キック\n  >\n  <TRACK {B}\n    NAME \"\"\n  >\n  <TRACK {C}\n  >\n>\n";
+        let set = read_text(text.as_bytes()).unwrap();
+        let names: Vec<_> = set.tracks.iter().map(|track| track.name.as_str()).collect();
+        assert_eq!(names, ["ドラム\u{3000}キック", "Track 2", "Track 3"]);
+    }
+
+    /// A project REAPER 7.82 saved itself, built through its API: stock FX, an Apple AU, a JSFX, a renamed container and FX, a
+    /// chosen preset, a WAV on an item, a named folder, a full-width space in a name and an unnamed track.
+    #[test]
+    fn a_project_reaper_itself_saved_reads_as_it_was_made() {
+        let set = read_text(include_bytes!("../tests/fixtures/stock.rpp")).unwrap();
+        assert_eq!(set.made_in.as_deref(), Some("REAPER 7.82"));
+        assert_eq!((set.tempo, set.signature.as_deref()), (Some(98.), Some("7/8")));
+        let master = set.main.as_ref().unwrap();
+        assert_eq!(master.devices.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["ReaLimit"]);
+        let rows: Vec<_> = set.tracks.iter().map(|t| (t.name.as_str(), t.kind, t.group.as_deref())).collect();
+        assert_eq!(
+            rows,
+            [
+                ("Drum Bus", TrackKind::Group, None),
+                ("ドラム\u{3000}キック", TrackKind::Audio, Some("Drum Bus")),
+                ("Keys", TrackKind::Midi, None),
+                ("Track 4", TrackKind::Midi, None),
+            ]
+        );
+        let comp = &set.tracks[0].devices[0];
+        assert_eq!((comp.name.as_str(), comp.preset.as_deref()), ("ReaComp", Some("stock - Rock Snare - aim for 4dB GR")));
+        assert_eq!(set.tracks[1].samples, ["/Projects/Song/Media/tone.wav"]);
+        assert_eq!(set.tracks[1].clips.arrangement, 1);
+        let keys = &set.tracks[2].devices;
+        assert_eq!(keys.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["ReaSynth", "DLSMusicDevice", "utility/volume", "Container"]);
+        assert_eq!(
+            (keys[0].role, keys[0].preset.as_deref(), keys[0].plugin.as_deref()),
+            (DeviceRole::Instrument, Some("Lead synth"), None)
+        );
+        assert_eq!((keys[1].role, keys[1].plugin.as_deref()), (DeviceRole::Instrument, Some("AUi: DLSMusicDevice (Apple)")));
+        assert_eq!(keys[2].role, DeviceRole::Audio);
+        assert_eq!((keys[3].role, keys[3].preset.as_deref()), (DeviceRole::Rack, Some("Space")));
+        assert_eq!(keys[3].inside.as_deref(), Some(&["ReaEQ".to_string(), "utility/volume".to_string()][..]));
+        assert_eq!(set.tracks[2].plugins.as_deref(), Some(&["DLSMusicDevice".to_string()][..]));
+    }
+
+    #[test]
     fn a_read_stopped_ends_with_aborted() {
         let mut text = PROJECT.as_bytes().to_vec();
         text.splice(PROJECT.find("  <TRACK").unwrap()..PROJECT.find("  <TRACK").unwrap(), b"  X\n".repeat(CHECK_EVERY * 2));
@@ -748,6 +807,7 @@ mod tests {
             ("/Music/Song/Song (Kumi copy 2026-10-20 14.05.31 +0900).rpp", true),
             ("/Music/Song/._Song.rpp", true),
             ("/Music/Song/Backups/Song.rpp", true),
+            ("/Volumes/Backups/Music/Song.rpp", false),
             ("/Music/Song/autosaves/Song.rpp", true),
             ("/Music/Song/Song-2026-10-19_183654.RPP", true),
             ("/Music/Song/Song-2026-10-19_1836.rpp", true),
