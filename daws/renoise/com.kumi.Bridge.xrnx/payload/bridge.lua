@@ -1090,7 +1090,6 @@ local function retouched_at(mark, p)
   if not (token and token.pid) then return end
   b.retouch = b.retouch or {}
   b.retouch[mark] = token.pid .. "=" .. token.touches
-  token.recent = 0
 end
 
 -- The journal's: a change Renoise's redo put back holds what Kumi wrote again; its counts (`touch`, and a copy's source's) now
@@ -1109,7 +1108,7 @@ local function retouched(applied)
       end
       if token then break end
     end
-    if token then b.retouch[mark], token.recent = pid .. "=" .. token.touches, 0 end
+    if token then b.retouch[mark] = pid .. "=" .. token.touches end
   end
 end
 
@@ -1682,7 +1681,7 @@ function M.start(h, reloading)
   observers = sync.new(guard, b, {
     structural = on_structural,
     tracks = on_tracks,
-    -- (every changed line counts for its pattern: the producer's edits, Renoise's undo and redo, Kumi's own writes. A notes
+    -- (every changed line but a renumbering's, `renumbering()`, counts for its pattern: the producer's edits, Renoise's undo and redo, Kumi's own writes. A notes
     -- change's undo goes through only if none came since its step; see changes_notes.lua)
     lines = function(pos, owner)
       -- (n-instruments: a phrase's lines count for the phrase)
