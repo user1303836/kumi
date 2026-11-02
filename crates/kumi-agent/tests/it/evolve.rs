@@ -13,6 +13,7 @@ fn knobs(device: &str, values: &[f64]) -> Vec<Knob> {
             max: 1.0,
             step: None,
             value,
+            device_id: None,
         })
         .collect()
 }
@@ -62,6 +63,16 @@ fn crossover_only_mixes_one_chain_and_stuck_slots_are_reseeded() {
     assert_eq!(e.slots.iter().find(|s| s.name == "B").unwrap().score, None);
     assert_eq!(e.propose().iter().find(|t| t.slot == "B").unwrap().how, TrialHow::Start);
 }
+/// Gain a plug-in adds after its sound isn't its sound: it only drives what's after it harder.
+#[test]
+fn a_search_leaves_a_plugins_output_and_makeup_gain_alone() {
+    let mut all = knobs("Compressor", &[0.5; 6]);
+    for (k, name) in all.iter_mut().zip(["Output Gain", "Global Gain", "Adjustment (dB)", "Auto Makeup Gain", "Makeup", "Gain Reduction"]) {
+        k.name = name.into();
+    }
+    assert_eq!(searchable(&all, MOST_KNOBS).iter().map(|k| k.name.as_str()).collect::<Vec<_>>(), vec!["Gain Reduction"]);
+}
+
 #[test]
 fn search_leaves_silencing_switches_levels_and_safety_limiter_alone_and_snaps_steps() {
     let mut all = knobs("Operator", &[1.0, 0.8, 0.5, 0.5, 3.0, 1.0]);
@@ -166,4 +177,19 @@ fn a_suggested_setting_is_tried_once_the_slots_start_is_heard_and_kept_only_if_b
     e.suggest("B", vec![0.0; 5]);
     assert_eq!(heard(&mut e)[0].how, TrialHow::Remembered);
     assert_eq!(e.slots[0].elite, best);
+}
+
+/// (#399) A knob's device id reaches a goal's saved state. A goal saved without it still loads, and a knob with none saves as it
+/// always has, so a saved goal reads the same both ways across an update and a rollback.
+#[test]
+fn a_knob_saved_without_a_device_id_loads_and_one_with_none_saves_as_before() {
+    let saved = serde_json::json!({"ref":"r","device":"0:EQ","name":"Tone","min":0.0,"max":1.0,"value":0.5});
+    let knob: Knob = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(knob.device_id, None);
+    assert_eq!(serde_json::to_value(&knob).unwrap(), saved);
+
+    let known = Knob { device_id: Some("live:7".into()), ..knob };
+    let saved = serde_json::to_value(&known).unwrap();
+    assert_eq!(saved["device_id"], "live:7");
+    assert_eq!(serde_json::from_value::<Knob>(saved).unwrap(), known);
 }

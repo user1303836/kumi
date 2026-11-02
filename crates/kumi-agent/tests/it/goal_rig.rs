@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use kumi_agent::core::{
     contracts::{Generation, GenerationTrial},
     evolve::Knob,
-    goal_rig::{check_slots, device_label, knob_key, moved, tell_generation, tidy, GoalDaw},
+    goal_rig::{check_slots, device_label, given_values, knob_key, moved, moved_or_went, tell_generation, tidy, GoalDaw},
 };
 use kumi_listening::goal::Told;
 use kumi_types::contracts::StructuralMove;
@@ -68,7 +68,16 @@ fn a_trial_for_a_slot_the_goal_doesnt_hold_is_refused_in_plain_words() {
 }
 
 fn knob(device: &str, name: &str) -> Knob {
-    Knob { r#ref: format!("{device}/{name}"), device: device.into(), name: name.into(), value: 0.5, min: 0., max: 1., step: None }
+    Knob {
+        r#ref: format!("{device}/{name}"),
+        device: device.into(),
+        name: name.into(),
+        value: 0.5,
+        min: 0.,
+        max: 1.,
+        step: None,
+        device_id: None,
+    }
 }
 
 #[test]
@@ -89,21 +98,21 @@ fn a_trials_knobs_move_when_they_differ_from_what_was_last_set() {
     let last: IndexMap<String, f64> = [(knob_key(&tone), 0.5 + 1e-7), (knob_key(&drive), 0.2)].into_iter().collect();
     let moved_names = |found: Vec<(Knob, f64)>| found.into_iter().map(|(knob, value)| (knob.name, value)).collect::<Vec<_>>();
     assert_eq!(
-        moved_names(moved(&trial, Some(&last), true)),
+        moved_names(moved(&trial, Some(&last))),
         [("Drive".to_string(), 0.9), ("Level".to_string(), 0.3)],
         "as it was stays; no value set yet moves"
     );
-    assert_eq!(moved(&trial, None, true).len(), 3, "nothing set yet: all of them");
+    assert_eq!(moved(&trial, None).len(), 3, "nothing set yet: all of them");
 }
 
 #[test]
-fn a_value_a_trial_doesnt_give_isnt_a_number() {
-    let (tone, drive) = (knob("0:Synth", "Tone"), knob("0:Synth", "Drive"));
-    let trial = GenerationTrial { slot: "Bass".into(), knobs: vec![tone, drive], values: vec![0.5], fresh: None };
-    assert_eq!(moved(&trial, None, true).len(), 1, "with finite_only, it never moves");
-    let sent = moved(&trial, None, false);
-    assert_eq!(sent.len(), 2);
-    assert!(sent[1].1.is_nan());
+fn a_value_not_given_or_not_a_number_is_never_sent() {
+    let (tone, drive, level) = (knob("0:Synth", "Tone"), knob("0:Synth", "Drive"), knob("0:Synth", "Level"));
+    let knobs = vec![tone, drive, level];
+    let given = given_values(&knobs, &[f64::NAN, 0.5]);
+    assert_eq!(given.iter().map(|(knob, _)| knob.name.as_str()).collect::<Vec<_>>(), ["Drive"]);
+    let trial = GenerationTrial { slot: "Bass".into(), knobs, values: vec![f64::NAN, 0.5], fresh: None };
+    assert_eq!(moved(&trial, None).len(), 1);
 }
 
 #[test]
@@ -181,4 +190,17 @@ async fn a_candidate_that_went_is_left_out() {
     let said = tidy(&daw, names(&["Gone"]), &[]).await;
     assert!(daw.done.borrow().is_empty());
     assert!(said.is_empty());
+}
+
+#[test]
+fn what_moved_or_went_names_each_device_once_first_seen_first() {
+    let on = |device: &str, name: &str| Knob { device: device.into(), name: name.into(), ..knob_for_words() };
+    // (a slot's knobs come shaping knobs first, so they interleave by device)
+    let knobs = [on("0:Synth", "Tone"), on("1:EQ", "Gain"), on("0:Synth", "Drive"), on("1:EQ", "Q")];
+    let said = moved_or_went("Pad", &knobs);
+    assert!(said.starts_with("“Synth”, “EQ” moved or went on “Pad” since the search began"), "{said}");
+}
+
+fn knob_for_words() -> Knob {
+    Knob { r#ref: "1".into(), device: String::new(), name: String::new(), value: 0., min: 0., max: 1., step: None, device_id: None }
 }
