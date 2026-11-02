@@ -376,8 +376,10 @@ saves the song, instruments and device presets.
   `loop_pattern`), the metronome switch (`metronome_switch`), editing settings
   (`edit_settings`) and a plug-in's auto-suspend (`plugin_suspend`).
 - After Renoise's own undo and redo of line edits (`notes_write`, `lines_copy`,
-  `phrase_write` and the like), Kumi's undo of them is refused: it can't tell
-  Renoise's redo from your own identical lines. Renoise's undo still can.
+  `phrase_write` and the like), Kumi's undo of them works for the newest change
+  only: nothing edited after it, and nothing left to redo. In any other case
+  it's refused: Kumi can't tell Renoise's redo from your own identical lines.
+  Renoise's undo still can.
 - In long sessions Renoise's undo history has sometimes emptied after AU
   instruments were loaded and unloaded (cause unknown).
 - FOCUS's Mixer has no meters: Renoise's API has none.

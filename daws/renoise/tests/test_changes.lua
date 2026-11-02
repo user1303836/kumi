@@ -1558,12 +1558,13 @@ test("changes: a big restore is numbered steps, and the producer's undo of lines
   H.tick(3)
   drain(peer)
   told = H.events(peer, "undone_in_daw")
-  -- (lines back as Kumi wrote them may be Renoise's redo, or its undo of something older: Kumi can't tell)
-  eq(told[#told].data.how, "unsure")
-  -- and Kumi's undo refuses: Renoise's undo and redo changed the pattern since Kumi's step
-  local refused = restore(peer, "notes-write", { target = previewed.target, prior = previewed.prior, applied = done.result.applied }, "Kumi: undo many (kn72)", epoch, layout)
-  eq(refused.error and refused.error.code, "changed", json.encode(refused))
-  eq(cell(1, 2, 12, 1):sub(1, 3), "C-3")
+  -- (Kumi's step is the newest and nothing is left to redo, so the lines back are Renoise's redo of it, #393)
+  eq(told[#told].data.how, "redo")
+  -- and Kumi's undo takes them away again
+  local redone = restore(peer, "notes-write", { target = previewed.target, prior = previewed.prior, applied = done.result.applied }, "Kumi: undo many (kn72)", epoch, layout)
+  ok(redone.result, json.encode(redone.error or {}))
+  eq(cell(1, 2, 12, 1), "--- .. .. .. .. 0000")
+  eq(cell(1, 2, 1, 1), "--- .. .. .. .. 0000")
   -- restored in numbered steps (84 writes in slices of 30), in a pattern nothing changed since
   input.pattern = pattern_ref(epoch, 2)
   previewed = preview(peer, "notes-write", input)

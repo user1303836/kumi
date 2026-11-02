@@ -275,7 +275,7 @@ HISTORY の行がないもの：`play`、`stop`、`audition_note`（ノートを
 
 どの場合も HISTORY は正直なままです。Kumi は断るか、できないことを伝えます。
 
-- **Renoise：** 行の編集（`notes_write`、`notes_clear`、`notes_transpose`、`notes_humanize`、`lines_copy`、`phrase_write`、`phrase_clear`）を Renoise 自身の取り消しとやり直しにかけたあとは、Kumi の取り消しは断られます。Renoise のやり直しと、あなた自身が書いた同じ行を区別できないためです。行には "Renoise may have redone it" と表示され、Renoise の取り消しで戻せます。
+- **Renoise：** 行の編集（`notes_write`、`notes_clear`、`notes_transpose`、`notes_humanize`、`lines_copy`、`phrase_write`、`phrase_clear`）を Renoise で取り消してやり直したあと、Kumi の取り消しが使えるのは最新の変更だけです（そのあとに編集がなく、やり直せるものも残っていないとき）。それ以外は、Renoise のやり直しとあなた自身が書いた同じ行を区別できないため、Kumi の取り消しは断られます。行には "Renoise may have redone it" と表示され、Renoise の取り消しで戻せます。
 - **Renoise：** 長いセッションで、AU のプラグインインストゥルメントを読み込んだり外したりしたあと、取り消し履歴が空になることがありました（原因はわかっていません）。そのときは Renoise の取り消しで `plugin_load`、`plugin_param`、`plugin_set` を戻せません。`plugin_preset` は、プログラムが複数あるプラグインではまだ試していません。
 - **REAPER：** トラックがすべて一度に入れ替わっても、その変更が取り消しポイントを作ったなら（すべてのトラックを消してほかを挿入するアクションなど）、同じプロジェクトのままです。編集だったと示すものがないときは別のプロジェクトとして読まれます：取り消しポイントを作らないスクリプト、そうした変更の REAPER による取り消しややり直し、7.79 より前の REAPER、上限に達した取り消し履歴。そのとき Kumi の参照は古くなり、モデルが読み直します。
 - **REAPER：** パラメーターモジュレーションを Kumi の取り消しで戻すと、スイッチはオフになりますが、REAPER が一度作ると残すモジュレーションの設定はそのままです。行にそう書かれます。
