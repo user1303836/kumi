@@ -637,3 +637,52 @@ test("scratch: players of phrases are empty tracks, each playing the instrument'
   failure(call(peer, "scratch", { action = "make", scratchId = "s9p1b", count = 1, label = "v", epoch = epoch, layout = layout,
     range = { fromBeat = 2, beats = 4 }, phrases = { instrument = epoch .. ":instrument:1", phrases = { 1 } } }), "bad-params")
 end)
+
+-- A meta device on Bass aimed at its Compressor (the devices count from the mixer as 0), which has a second knob and preset data.
+local function aimed_bass(dest_track)
+  local bass = track(3)
+  bass.devices[3].params[2] = { name = "Ratio", value = 1, min = 0, max = 10 }
+  bass.devices[3].preset_data = "<c><Value>0.5</Value></c>"
+  bass.devices[#bass.devices + 1] = { name = "*LFO", path = "Audio/Effects/Native/*LFO", params = {
+    { name = "Dest. Track", value = dest_track, min = -1, max = 255 }, { name = "Dest. Effect", value = 2, min = -1, max = 255 },
+    { name = "Dest. Parameter", value = 1, min = -1, max = 255 }, { name = "Amplitude", value = 0.5, min = 0, max = 1 },
+  } }
+  mock.device_catalog["Audio/Effects/Native/*LFO"] = {
+    { name = "Dest. Track", value = -1, min = -1, max = 255 }, { name = "Dest. Effect", value = -1, min = -1, max = 255 },
+    { name = "Dest. Parameter", value = -1, min = -1, max = 255 }, { name = "Amplitude", value = 0.5, min = 0, max = 1 },
+  }
+  mock.device_catalog["Audio/Effects/Native/Compressor"][2] = { name = "Ratio", value = 1, min = 0, max = 10 }
+end
+
+test("scratch: a meta device moving its own track moves the copy's, aimed by the track's number or by -1", function()
+  for _, dest_track in ipairs({ 2, -1 }) do
+    local _, peer = setup()
+    aimed_bass(dest_track)
+    result(make(peer, "s1a2b", 1), "make")
+    local aimed = track(6).devices[4].params
+    eq(aimed[1].value, 5, "the copy's track")
+    eq(aimed[2].value, 2, "its Compressor")
+    eq(aimed[3].value, 1, "its first parameter")
+  end
+end)
+
+test("scratch-keep: what a kept copy's meta device moves doesn't stop Kumi's undo; a knob beside it does", function()
+  for _, knob in ipairs({ false, true }) do
+    local _, peer = setup()
+    aimed_bass(-1)
+    local made = result(make(peer, "s16", 1))
+    local done = keep(peer, { ref = made.copies[1].ref, name = "Best" })
+    ok(type(done.material.print) == "string" and done.material.print ~= "unread", "printed")
+    local compressor = track(6).devices[3]
+    -- (as Renoise moves it: the parameter, and its value in the preset data)
+    compressor.params[1].value = 3.25
+    compressor.preset_data = "<c><Value>0.7</Value></c>"
+    if knob then
+      compressor.params[2].value = 4
+      failure(undo(peer, done), "changed", "changed in Renoise")
+    else
+      local undone = undo(peer, done)
+      ok(undone.result, "Kumi's undo: " .. tostring((undone.error or {}).message))
+    end
+  end
+end)

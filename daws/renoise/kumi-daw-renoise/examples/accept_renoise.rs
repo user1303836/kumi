@@ -313,6 +313,17 @@ const CHAIN_DEVICES: &str = "local i = new_instrument('K chain', 1) local c = so
 /// settings no aim, and clears one as its target goes (#399 N-S22).
 const AIMED_CHAIN: &str = "local i = new_instrument('K aim', 1) local c = song:instrument(i):insert_sample_device_chain_at(1) c:insert_device_at('Audio/Effects/Native/Gainer', 2) local l = c:insert_device_at('Audio/Effects/Native/*LFO', 3) for _, p in ipairs(l.parameters) do if p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end return {i = i}";
 const CHAIN_AIMS: &str = "local out = {} local chains = song:instrument($i).sample_device_chains if #chains == 0 then return out end for k, d in ipairs(chains[1].devices) do local row = d.device_path for _, p in ipairs(d.parameters) do if p.name:find('^Dest') then row = row .. ' ' .. p.name .. '=' .. p.value end end out[k] = row end return out";
+/// A track's device and a meta device moving its first parameter, as Renoise moves it whatever the transport does (#804).
+const AIMED_TRACK: &str = "local t = new_track('K aimed', {'Audio/Effects/Native/Gainer', 'Audio/Effects/Native/*LFO'}) for _, p in ipairs(song:track(t):device(3).parameters) do if p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end return {t = t}";
+const AIMED_ACROSS: &str = "local t = new_track('K aimed', {'Audio/Effects/Native/Gainer'}) local o = new_track('K lfo', {'Audio/Effects/Native/*LFO'}) for _, p in ipairs(song:track(o):device(2).parameters) do if p.name == 'Dest. Track' then p.value = t - 1 elseif p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end return {t = t, o = o}";
+const AIMED_DOOFER: &str = "local t = new_track('K aimed', {'Audio/Effects/Native/Doofer', 'Audio/Effects/Native/*LFO'}) local d = song:track(t):device(2) for _, p in ipairs(song:track(t):device(3).parameters) do if p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end d:parameter(2).value = 75 local x = d.active_preset_data d:parameter(2).value = 50 return {t = t, x = x}";
+const AIMED_EQ: &str = "local t = new_track('K aimed', {'Audio/Effects/Native/EQ 5', 'Audio/Effects/Native/*LFO'}) for _, p in ipairs(song:track(t):device(3).parameters) do if p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end return {t = t}";
+/// A Doofer with an *LFO inside aimed at the Gainer inside, written as its data says it (a device's own data keeps no aim), and data
+/// for it with its second macro changed.
+const AIMED_INSIDE: &str = "local t = new_track('K inside', {'Audio/Effects/Native/Gainer', 'Audio/Effects/Native/*LFO', 'Audio/Effects/Native/Doofer'}) local tr = song:track(t) local function body(d, slot) return d.active_preset_data:match('<DeviceSlot type=\\\"' .. slot .. '\\\">(.-)</DeviceSlot>') end local inner = '<Devices><GainerDevice type=\\\"GainerDevice\\\">' .. body(tr:device(2), 'GainerDevice') .. '</GainerDevice><LfoDevice type=\\\"LfoDevice\\\">' .. body(tr:device(3), 'LfoDevice') .. '</LfoDevice></Devices>' local d = tr:device(4) d.active_preset_data = d.active_preset_data:gsub('<DeviceChain>', '<DeviceChain>' .. inner:gsub('%%', '%%%%'), 1) local aimed = d.active_preset_data:gsub('(<DestEffect>%s*<Value>)[^<]*', '%10', 1):gsub('(<DestParameter>%s*<Value>)[^<]*', '%11', 1) d.active_preset_data = aimed tr:delete_device_at(3) tr:delete_device_at(2) local now = tr:device(2) now:parameter(2).value = 75 local x = now.active_preset_data now:parameter(2).value = 50 return {t = t, x = x}";
+/// A Gainer whose Gain automation Renoise plays: the transport runs through the case.
+const AUTOMATED: &str = "song:pattern(1).number_of_lines = 16 local t = new_track('K automated', {'Audio/Effects/Native/Gainer'}) local a = song:pattern(1):track(t):create_automation(song:track(t):device(2):parameter(1)) a:add_point_at(1, 0.1) a:add_point_at(9, 0.9) song.transport:start_at(1) return {t = t}";
+const AIMS_ON: &str = "local out = {} for k, d in ipairs(song:track($t).devices) do local row = d.device_path for _, p in ipairs(d.parameters) do if p.name:find('^Dest') then row = row .. ' ' .. p.name .. '=' .. p.value end end out[k] = row end return out";
 /// An empty instrument with settings of its own, which clear() resets, and a file to load into it (#399 N-S12).
 const KEPT_SLOT: &str = "local f = new_instrument('K xrni', 1) song.selected_instrument_index = f renoise.app():save_instrument('$dir/k.xrni') local i = new_instrument('K slot', 0) local s = song:instrument(i) s.volume = 0.5 s.transpose = 3 s.midi_output_properties.channel = 5 s:macro(1).name = 'Cut' return {i = i}";
 const SLOT_SETTINGS: &str = "local s = song:instrument($i) return {s.name, s.volume, s.transpose, s.midi_output_properties.channel, s:macro(1).name, #s.samples, #song.instruments}";
@@ -366,6 +377,13 @@ static CASES: &[Case] = &[
     case("device_add", TRACK, r#"{"ref":"$E:track:$t","path":"Audio/Effects/Native/Delay"}"#, "return paths($t)"),
     case("device_delete", "return {t = new_track('K device', {'Audio/Effects/Native/Delay'})}", r#"{"ref":"$E:device:$t.2"}"#, "return paths($t)"),
     case("device_move", "return {t = new_track('K device', {'Audio/Effects/Native/Delay', 'Audio/Effects/Native/Gainer'})}", r#"{"ref":"$E:device:$t.2","index":3}"#, "return paths($t)"),
+    case("device_delete", AIMED_TRACK, r#"{"ref":"$E:device:$t.2"}"#, AIMS_ON).label("device_delete a meta device moves, on its track"),
+    case("device_delete", AIMED_ACROSS, r#"{"ref":"$E:device:$t.2"}"#, "return paths($t)").label("device_delete a meta device moves, from another track"),
+    case("device_delete", AUTOMATED, r#"{"ref":"$E:device:$t.2"}"#, "return paths($t)").label("device_delete a device automation moves, playing"),
+    case("device_move", AIMED_TRACK, r#"{"ref":"$E:device:$t.2","index":3}"#, "return paths($t)").label("device_move a device a meta device moves"),
+    case("device_preset", AIMED_EQ, r#"{"ref":"$E:device:$t.2","preset":2}"#, "local d = song:track($t):device(2) return {d.active_preset, d:parameter(2).value, d:parameter(3).value}").label("device_preset on a device a meta device moves"),
+    case("device_preset_data", AIMED_DOOFER, r#"{"ref":"$E:device:$t.2","presetData":"$x"}"#, "return song:track($t):device(2):parameter(2).value").label("device_preset_data on a Doofer whose macro a meta device moves"),
+    case("device_preset_data", AIMED_INSIDE, r#"{"ref":"$E:device:$t.2","presetData":"$x"}"#, "return song:track($t):device(2):parameter(2).value").label("device_preset_data on a Doofer with a meta device aimed inside"),
     case("device_bypass", "return {t = new_track('K device', {'Audio/Effects/Native/Delay'})}", r#"{"ref":"$E:device:$t.2","bypass":true}"#, "return song:track($t):device(2).is_active"),
     case("device_param", GAINER, r#"{"ref":"$E:device:$t.2","param":1,"value":0.5}"#, "return values(song:track($t):device(2))"),
     case("notes_write", TRACK, r#"{"patternRef":"$E:pattern:1","trackRef":"$E:track:$t","lines":[{"line":0,"notes":[{"col":1,"note":"C-4","instrument":0}]},{"line":4,"notes":[{"col":1,"note":"E-4","instrument":0}]}]}"#, "return notes(1, $t, 8)").note(LINES_REDO),
@@ -728,6 +746,10 @@ impl Outcome {
 
 async fn setup(lab: &Lab, case: &Case) -> Result<BTreeMap<String, Value>, String> {
     let mut vars = lab.vars.clone();
+    // (a case before may have left the transport running, or a meta device moving what it aimed at)
+    lab.lua("song.transport:stop() for t = 1, #song.tracks do for d = 2, #song:track(t).devices do local device = song:track(t):device(d) if device.is_active and device.device_path:find('/*LFO', 1, true) then device.is_active = false end end end return true")
+        .await
+        .map_err(|why| format!("setup: {why}"))?;
     let made = lab.lua(&fill_lua(case.setup, &vars)).await.map_err(|why| format!("setup: {why}"))?;
     if let Value::Object(fields) = made {
         vars.extend(fields);

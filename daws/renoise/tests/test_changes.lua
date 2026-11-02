@@ -1124,7 +1124,8 @@ test("changes: a device changed since the preview is not deleted", function()
   local epoch, layout = place(peer)
   local ref = epoch .. ":device:3.2"
   local previewed = preview(peer, "device-delete", { ref = ref })
-  devices_of(3)[2].params[1].value = 0.1
+  -- (not its one parameter, which has automation, which moves it anyway: #804)
+  devices_of(3)[2].active = true
   failure(apply(peer, "device-delete", { ref = ref }, "Kumi: delete device (kf21)", previewed.fence, epoch, layout), "changed")
   eq(paths_of(3), "Mixer,EQ 5,#Send")
   eq(steps(), 0)

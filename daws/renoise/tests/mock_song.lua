@@ -746,6 +746,7 @@ function M.make_song(options)
         if type(a) ~= "number" or type(b) ~= "number" or not t.devices[a] or not t.devices[b] then out_of_range("device", a) end
         if d.options.mixer_device and (a == 1 or b == 1) then error("the mixer device must stay first", 2) end
         local function swap()
+          M.swap_device_routes(t, a, b)
           t.devices[a], t.devices[b] = t.devices[b], t.devices[a]
           M.fire(t.devices_observable, { type = "swap", index1 = a, index2 = b })
         end
@@ -1944,7 +1945,8 @@ local function follow_routes(removed, index)
   end
 end
 
--- The same for a destination's Effect (the device's number less one), aimed at a device of `track`.
+-- The same for a destination's Effect (the device's number less one), aimed at a device of `track`: by its number, or by -1 from
+-- that track itself (lab 2026-11-01).
 function M.follow_device_routes(track, device_index, removed)
   local at
   for i, t in ipairs(M.data.tracks) do
@@ -1954,7 +1956,7 @@ function M.follow_device_routes(track, device_index, removed)
     for _, device in ipairs(other.devices or {}) do
       for _, destination in ipairs(destinations_of(device)) do
         local dtrack, deffect, dparameter = destination.track, destination.effect, destination.parameter
-        if dtrack.value == at - 1 then
+        if dtrack.value == at - 1 or (dtrack.value == -1 and other == track) then
           if removed then
             if deffect.value == device_index - 1 then
               deffect.value = -1
@@ -1965,6 +1967,24 @@ function M.follow_device_routes(track, device_index, removed)
           elseif deffect.value >= device_index - 1 then
             deffect.value = deffect.value + 1
           end
+        end
+      end
+    end
+  end
+end
+
+-- And a destination's Effect follows its device as two of `track`'s swap.
+function M.swap_device_routes(track, a, b)
+  local at
+  for i, t in ipairs(M.data.tracks) do
+    if t == track then at = i end
+  end
+  for _, other in ipairs(M.data.tracks) do
+    for _, device in ipairs(other.devices or {}) do
+      for _, destination in ipairs(destinations_of(device)) do
+        if destination.track.value == at - 1 or (destination.track.value == -1 and other == track) then
+          if destination.effect.value == a - 1 then destination.effect.value = b - 1
+          elseif destination.effect.value == b - 1 then destination.effect.value = a - 1 end
         end
       end
     end
