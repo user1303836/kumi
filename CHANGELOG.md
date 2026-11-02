@@ -3,6 +3,25 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.47 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.46 did. Ships with Renoise tool 1.0.11, which Renoise loads when it
+restarts; `kumi update` puts it in.
+
+- In REAPER, Kumi can find your own projects by what's in them: their tracks, FX, media and tempo.
+- In Live, a goal's search no longer moves a plug-in's output or makeup gain.
+- In Live, a goal's search finds a device's knobs after you add a device or a track above it, and
+  leaves alone a device you deleted.
+- A goal says why when it couldn't keep its best.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Renoise tool 1.0.11
+
+- Undoing a plug-in's program or auto-suspend in Renoise now shows in HISTORY, and Kumi's undo of them
+  still works afterwards.
+
 ## 1.24.46 — 2026-11-01
 
 Ships with bridge 1.0.102, as 1.24.45 did. Ships with Renoise tool 1.0.10, which Renoise loads when it
