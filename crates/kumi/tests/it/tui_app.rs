@@ -898,10 +898,14 @@ case!(heard_spectrum_comparison_above_answer, async {
     h.emit(json!({"type":"heard","file":"mix.wav","summary":"−12.1 LUFS","bands":[-8,-5,-7,-6,-10,-12,-15,-17,-19,-22],"compared":{"reference":"ref.wav","summary":"−8.4 LUFS","differences":[0.2,0.4,-0.3,2.8,0,-1.1,-2,-1.5,-0.8,0.5],"headlines":["low mids +2.8 dB"]}}));
     let lines = h.screen();
     h.has("Heard ref.wav · −8.4 LUFS · 128 BPM · F minor");
-    assert!(lines.iter().any(|s| s.contains("████") && s.contains("▄▄▄▄")));
+    // One file draws as an octave analyzer: what it measures, its dB, its Hz scale and its tilt.
+    h.has("energy per octave, dB under the loudest band");
+    assert!(lines.iter().any(|s| s.trim_start().starts_with("−10 ") && s.contains('█')), "{lines:#?}");
+    assert!(lines.iter().any(|s| s.contains("50") && s.contains("1k") && s.contains("10k Hz")), "{lines:#?}");
+    h.has("tilt −1.4 dB per octave · pink noise is 0, darker is below");
     h.has("Heard mix.wav against ref.wav, loudness matched");
     assert!(lines.iter().any(|s| s.contains("+2.8") && s.contains("−2.0")));
-    assert_eq!(lines.iter().filter(|s| s.contains("l.mid") && s.contains("air")).count(), 2);
+    assert_eq!(lines.iter().filter(|s| s.contains("l.mid") && s.contains("air")).count(), 1);
     h.close().await;
     let h = Harness::new(120, 36);
     h.start().await;
@@ -1370,10 +1374,15 @@ case!(whole_screens_match_source, async {
             h.emit(event.clone());
         }
         let actual = h.screen();
+        // One file heard draws as an octave analyzer, where the source drew a strip a row high: those screens changed
+        // on purpose too, and are goldens of their own.
+        let analyzer = case["events"].as_array().unwrap().iter().any(|event| event["type"] == "heard" && event["compared"].is_null());
         // W6-2 changed these on purpose: below 100 columns with 24 rows or more, the pane is the drawer under the
         // conversation, where the source drew a two-line strip. The same events' screens are goldens of their own.
         if width < 100 && height >= 24 {
             drawer_golden(&format!("{}.{width}x{height}.txt", case["name"].as_str().unwrap()), &actual);
+        } else if analyzer {
+            source_golden("analyzer-source", &format!("{}.{width}x{height}.txt", case["name"].as_str().unwrap()), &actual);
         } else {
             let expected: Vec<String> = serde_json::from_value(case["expected"].clone()).unwrap();
             assert_eq!(actual, expected, "{} {}×{}", case["name"], case["width"], case["height"]);
@@ -1382,10 +1391,15 @@ case!(whole_screens_match_source, async {
     }
 });
 
-/// A source screen the drawer draws in place of the strip, kept in tests/goldens/tui/drawer-source (trailing spaces
-/// trimmed; `KUMI_BLESS=1` writes it again).
+/// A source screen the drawer draws in place of the strip, kept in tests/goldens/tui/drawer-source.
 fn drawer_golden(name: &str, lines: &[String]) {
-    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/tui/drawer-source").join(name);
+    source_golden("drawer-source", name, lines);
+}
+
+/// A source screen drawn differently on purpose, kept in tests/goldens/tui/`folder` (trailing spaces trimmed;
+/// `KUMI_BLESS=1` writes it again).
+fn source_golden(folder: &str, name: &str, lines: &[String]) {
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/tui").join(folder).join(name);
     let actual = lines.iter().map(|line| line.trim_end()).collect::<Vec<_>>().join("\n") + "\n";
     if std::env::var_os("KUMI_BLESS").is_some() {
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
