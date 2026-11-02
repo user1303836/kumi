@@ -449,11 +449,21 @@ end
 -- shows or monitors, where a plug-in's editor sits): what the journal compares to tell Renoise's undo and redo of a Doofer's,
 -- a Splitter's or a Notepad's contents, and what a change's fence of them holds.
 M.VIEW_STATE = { "IsMaximized", "ShowDevices", "CurrentlyVisibleChain", "MonitorVisibleChain", "PluginEditorWindowPosition" }
+-- Whether preset data holds a meta device aimed at something: only what's inside a container says that (a device's own data keeps no
+-- aim, lab 3.5.4). What it aims at moves on its own, and that device's value in the data with it, stopped or playing (lab 2026-11-01).
+function M.aims_inside(xml)
+  for value in xml:gmatch("DestEffect>%s*<Value>(-?[%d%.]+)</Value>") do
+    if tonumber(value) >= 0 then return true end
+  end
+  return false
+end
+
 function M.content_of(xml)
   local kept = M.prints_of(xml)
   local printed = kept.content
   if printed == nil then
-    local content = xml:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
+    local source = M.aims_inside(xml) and xml:gsub("<Value>[^<]*</Value>", "<Value/>") or xml
+    local content = source:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
     content = content:gsub("<IsSelected>[^<]*</IsSelected>", "<IsSelected/>")
     for _, tag in ipairs(M.VIEW_STATE) do
       content = content:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
@@ -476,11 +486,16 @@ end
 -- plug-in's state, lab 2026-11-01), so with one the fence is of what's there, not of its values.
 function M.content_fence(device, data, moving)
   if not M.is_deep(device) then return nil end
+  return M.content_of(M.settled_data(device, data, moving))
+end
+
+-- A device's preset data, without what moves on its own when something does.
+function M.settled_data(device, data, moving)
   local text = data or device.active_preset_data
   if M.moves_on_its_own(device, moving) then
     text = text:gsub("<Value>[^<]*</Value>", "<Value/>"):gsub("<ParameterChunk>.-</ParameterChunk>", "<ParameterChunk/>")
   end
-  return M.content_of(text)
+  return text
 end
 
 -- Whether anything but the producer moves one of the device's parameters: what a meta device aims at (`moving`), or automation.

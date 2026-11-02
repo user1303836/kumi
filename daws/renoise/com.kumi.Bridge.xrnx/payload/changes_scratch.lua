@@ -10,6 +10,7 @@ local rows = import("rows")
 local base = import("changes_base")
 local scratch = import("scratch")
 local fnv = import("fnv")
+local material_ = import("changes_material")
 
 local format = string.format
 
@@ -51,13 +52,18 @@ local function content_print(song, index, track)
   value(track.prefx_width)
   value(track.postfx_volume)
   value(track.postfx_panning)
+  -- (what a meta device moves moves as the automation does, and the preset data with it, #804)
+  local moving = material_.moving_on(song, index)
   for d = 1, #track.devices do
     local device = track:device(d)
+    local moved = moving[d]
     feed(device.device_path or "")
     feed(device.is_active and "on" or "off")
-    for _, parameter in ipairs(device.parameters) do value(parameter) end
+    for k, parameter in ipairs(device.parameters) do
+      if moved and moved[k] then feed("a") else value(parameter) end
+    end
     -- (a plug-in keeps settings no parameter shows)
-    if d > 1 then feed(device.active_preset_data or "") end
+    if d > 1 then feed(material_.settled_data(device, nil, moved) or "") end
   end
   local sequencer = song.sequencer
   for s = 1, #sequencer.pattern_sequence do

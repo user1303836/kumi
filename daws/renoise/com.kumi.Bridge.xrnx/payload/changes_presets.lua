@@ -342,11 +342,12 @@ local function settings_reread(song, place)
 end
 local function settings_read(found)
   local moving = material_.moving_on(found.song, found.t)
-  local now = { print = M.print_of(found.device.active_preset_data) }
-  if material_.moves_on_its_own(found.device, moving[found.d]) then
+  local xml = found.device.active_preset_data
+  local now = { print = M.print_of(xml) }
+  if material_.moves_on_its_own(found.device, moving[found.d]) or material_.aims_inside(xml) then
     now.moves = true
     now.state = material_.state_at(found.song, found.t, found.d, moving).state
-    now.content = content_at(found.song, found.t, found.d, nil, moving)
+    now.content = content_at(found.song, found.t, found.d, xml, moving)
   end
   return now
 end

@@ -210,9 +210,11 @@ local function make_copy(song, source, at, name, patterns)
       local made = copy:insert_device_at(device.device_path, d)
       if device.active_preset_data ~= "" then pcall(function() made.active_preset_data = device.active_preset_data end) end
       made.is_active = device.is_active
-      -- (a meta device made from its preset data aims nowhere (measured); one that modulated its own track does the copy's)
+      -- (a meta device made from its preset data aims nowhere (measured); one that modulated its own track, by its number or by -1,
+      -- does the copy's)
       local dest = device.device_path:find("/Native/*", 1, true) and parameter_named(device, "Dest. Track")
-      if dest and dest.value == source - 1 then
+      local effect = dest and parameter_named(device, "Dest. Effect")
+      if dest and (dest.value == source - 1 or (dest.value == -1 and effect and effect.value >= 0)) then
         local made_dest = parameter_named(made, "Dest. Track")
         if made_dest then
           made_dest.value = at - 1

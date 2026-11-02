@@ -2399,3 +2399,70 @@ test("devices m4: a device chain load is fenced without what a meta device moves
   local done = apply(peer, "device-chain-load", input, previewed, "Kumi: chain", epoch, layout)
   ok(done.result, json.encode(done.error or {}))
 end)
+
+-- What a meta device inside a Doofer moves, as Renoise moves it: the inner device's value in the data.
+local INNER_LFO = "<LfoDevice type=\"LfoDevice\">\n          <DestEffect>\n            <Value>0.0</Value>\n          </DestEffect>\n        </LfoDevice>\n      </Devices>"
+local function inner_moves(data, to)
+  local replaced = function(text) return (text:gsub("(<Volume>%s*<Value>)[^<]*", "%1" .. to, 1)) end
+  if data.preset_data then data.preset_data = replaced(data.preset_data) else data.xml_body = replaced(data.xml_body) end
+end
+
+test("devices m4: what's inside a Doofer whose own meta device moves it is fenced by what's there, and Renoise's undo is told (#804)", function()
+  local inside = doofer()
+  inside.xml_body = inside.xml_body:gsub("</Devices>", INNER_LFO, 1)
+  local _, peer = setup({ { name = "Kick", devices = { inside } } })
+  local data = device_data(1, 2)
+  local epoch, layout = place(peer)
+  local current = mock.song:track(1):device(2).active_preset_data
+  local input = { ref = epoch .. ":device:1.2", presetData = (current:gsub("(<Macro1>%s*<Value>)[^<]*", "%175", 1)) }
+  local previewed = preview(peer, "device-preset-data", input)
+  inner_moves(data, 0.3)
+  local done = apply(peer, "device-preset-data", input, previewed, "Kumi: a macro", epoch, layout)
+  ok(done.result, json.encode(done.error or {}))
+  local record = done.result
+  record.prior = previewed.prior
+  inner_moves(data, 0.6)
+  H.tick(3)
+  drain(peer)
+  mock.song:undo()
+  inner_moves(data, 0.2)
+  H.tick(3)
+  drain(peer)
+  local told = H.events(peer, "undone_in_daw")
+  eq(#told, 1, "Renoise's undo told")
+  eq(told[1].data.how, "undo")
+  mock.song:redo()
+  inner_moves(data, 0.9)
+  H.tick(3)
+  drain(peer)
+  told = H.events(peer, "undone_in_daw")
+  eq(#told, 1, "Renoise's redo told")
+  eq(told[1].data.how, "redo")
+  -- A device put inside is a change, whatever the LFO does.
+  local holds = data.preset_data
+  local inner = "<GainerDevice type=\"GainerDevice\"/>\n      </Devices>"
+  data.preset_data = holds:gsub("</Devices>", inner, 1)
+  failure(restore(peer, "device-preset-data", record), "changed", "inside")
+  data.preset_data = holds
+  inner_moves(data, 0.4)
+  local undone = restore(peer, "device-preset-data", record)
+  ok(undone.result, json.encode(undone.error or {}))
+  eq(value(1, 2, 2), 50)
+end)
+
+test("devices m4: Kumi's undo of a Doofer it made with a meta device aimed inside isn't stopped by what that moves (#804)", function()
+  -- (*Hydra's and *XY Pad's outputs say OutNDestEffect, by Renoise's song schema)
+  for _, tag in ipairs({ "DestEffect", "Out1DestEffect" }) do
+    local _, peer = make_song()
+    local epoch = place(peer)
+    local xml = DOOFER_XML:gsub("<GainerDevice type=\"GainerDevice\"/>", "<GainerDevice type=\"GainerDevice\">\n          <Volume>\n            <Value>1.0</Value>\n          </Volume>\n        </GainerDevice>", 1)
+      :gsub("</Devices>", (INNER_LFO:gsub("DestEffect", tag)), 1)
+    local done = make(peer, { epoch .. ":device:2.2", epoch .. ":device:2.3" }, { presetData = xml })
+    ok(done.result, json.encode(done.error or {}))
+    inner_moves(device_data(2, 2), 0.3)
+    local back = restore(peer, "doofer-make", done.result)
+    ok(back.result, tag .. ": " .. json.encode(back.error or {}))
+    eq(paths(2), "EQ 5, Gainer, *LFO")
+  end
+  mock.device_slots = nil
+end)
