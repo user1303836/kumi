@@ -3,6 +3,24 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.49 — 2026-11-02
+
+Ships with bridge 1.0.102, as 1.24.48 did. Ships with Renoise tool 1.0.12, which Renoise loads when it
+restarts; `kumi update` puts it in.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Renoise tool 1.0.12
+
+- Kumi's undo of a kit or a load into an empty instrument gives back its own volume, transpose, MIDI
+  settings and macros.
+- Kumi's undo of deleting an instrument gives back its name, where it left the name of a temporary
+  file.
+- Deleting a sample FX chain or a device in one puts back what its meta devices aim at, and a chain
+  with a running meta device can be changed.
+- Kumi can undo its lines after an instrument or phrase is made, moved or deleted, where it refused.
+
 ## 1.24.48 — 2026-11-01
 
 Ships with bridge 1.0.102, as 1.24.47 did.
