@@ -72,7 +72,12 @@ pub fn last_best_stays(best: &str, why: &str, after: &str) -> String {
     format!("The last “{best}” stays where it is ({why}){after}; the new best goes on a track of its own")
 }
 
-/// A safety limiter that couldn't come off a candidate that never joined.
+/// A last best left where it is, with why, and where the new one is: why there are two.
+pub fn last_best_beside(last: &str, why: &str, new: &str) -> String {
+    format!("The last “{last}” stays where it is ({why}), so the new best is beside it on “{new}”.")
+}
+
+/// A safety limiter that couldn't come off a candidate.
 pub fn limiter_stays(limiter: &str, track: &str) -> String {
     format!("Kumi's safety {limiter} stays last on “{track}”: delete it if you don't want it there.")
 }

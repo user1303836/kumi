@@ -33,7 +33,8 @@ use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
 /// The tools a goal can reach, as the oracle's bridge lists them.
-const TOOLS: [&str; 37] = [
+const TOOLS: [&str; 38] = [
+    "live_run_python",
     "server_status",
     "live_status",
     "live_discover",
@@ -117,6 +118,9 @@ struct Track {
     armed: bool,
     muted: bool,
     devices: Vec<Device>,
+    /// Its clips, by what's in them.
+    clips: Vec<String>,
+    volume: f64,
 }
 impl Track {
     fn new(name: &str, devices: &[&str]) -> Self {
@@ -126,6 +130,8 @@ impl Track {
             armed: false,
             muted: false,
             devices: devices.iter().map(|name| Device::new(name)).collect(),
+            clips: vec!["notes".into()],
+            volume: 0.85,
         }
     }
 }
@@ -146,6 +152,14 @@ struct Set {
     next: Cell<u32>,
     previews: RefCell<HashMap<String, (String, JsonObject)>>,
     undos: RefCell<HashMap<String, Undo>>,
+    /// How many looks Live takes to have stopped playing, after it's asked: till then it shows no take.
+    lag: Cell<u32>,
+    stopping: Cell<u32>,
+    /// Knobs Live won't set, by their device's name and theirs.
+    refused: RefCell<Vec<(String, String)>>,
+    /// Live copies a track a moment behind what was just set on it, as a real Live was seen to: what the last set changed, by
+    /// track, device, knob and its value before.
+    last_set: RefCell<Vec<(usize, usize, usize, f64)>>,
     /// Every call, as `{name, args}`.
     asked: RefCell<Vec<Value>>,
     /// A test's look at each call as it comes, which can make it fail.
@@ -170,6 +184,10 @@ impl Set {
             next: Cell::new(0),
             previews: RefCell::default(),
             undos: RefCell::default(),
+            lag: Cell::new(0),
+            stopping: Cell::new(0),
+            refused: RefCell::default(),
+            last_set: RefCell::default(),
             asked: RefCell::default(),
             on_call: RefCell::new(None),
         })
@@ -180,6 +198,32 @@ impl Set {
         let track = tracks.iter().find(|found| found.name == track).unwrap();
         let device = track.devices.iter().find(|found| found.name == device).unwrap();
         device.knobs.iter().find(|(name, _)| name == knob).unwrap().1
+    }
+    /// The producer edits a track's clip.
+    fn edit_clip(&self, track: &str) {
+        self.tracks.borrow_mut().iter_mut().find(|found| found.name == track).unwrap().clips[0] = "edited notes".into();
+    }
+    /// The producer rides a track's fader.
+    fn ride_fader(&self, track: &str) {
+        self.tracks.borrow_mut().iter_mut().find(|found| found.name == track).unwrap().volume = 0.5;
+    }
+    /// What Kumi's read of a track whole comes to, here: its devices, clips and mixer as they are (`assets/best-print.py` in Live).
+    fn python(&self, args: &JsonObject) -> Value {
+        let code = text(&args["code"]);
+        let line = code.lines().find_map(|line| line.strip_prefix("ARGS = json.loads(")).unwrap();
+        let given: Value = serde_json::from_str(&serde_json::from_str::<String>(line.strip_suffix(')').unwrap()).unwrap()).unwrap();
+        let tracks = self.tracks.borrow();
+        let named: Vec<&Track> = tracks.iter().filter(|track| track.name == text(&given["track"])).collect();
+        let result = match named.as_slice() {
+            [] => Value::Null,
+            [track] => json!({
+                "devices": track.devices.iter().map(|device| json!([device.name, device.knobs])).collect::<Vec<_>>(),
+                "clips": track.clips,
+                "mixer": track.volume,
+            }),
+            _ => return json!({"ok":false,"result":null,"stdout":"","error":{"message":"Two tracks are named that"}}),
+        };
+        json!({"ok":true,"result":result,"stdout":"","error":null})
     }
     /// The names of a track's devices, in order.
     fn chain(&self, track: &str) -> Vec<String> {
@@ -252,6 +296,12 @@ impl Set {
         let at = places(parent);
         let items: Vec<Value> = match kind {
             "set" => {
+                if self.stopping.get() > 0 {
+                    self.stopping.set(self.stopping.get() - 1);
+                    if self.stopping.get() == 0 {
+                        self.playing.set(false);
+                    }
+                }
                 vec![json!({"ref":"7:set:song","objectIdentity":"song","name":"Fixture Set","tempo":120,"position":if self.playing.get() {100} else {0},"playing":self.playing.get()})]
             }
             "track" => tracks
@@ -277,7 +327,7 @@ impl Set {
                     json!({"ref":format!("7:parameter:{}:{}:{index}",at[0],at[1]),"parentRef":parent,"name":name,"value":value,"min":0,"max":1})
                 })
                 .collect(),
-            "arrangement-clip" if tracks[at[0]].name.starts_with("Kumi · render") => {
+            "arrangement-clip" if tracks[at[0]].name.starts_with("Kumi · render") && !self.playing.get() => {
                 vec![json!({"ref":format!("7:arrangement_clip:{}:0",at[0]),"parentRef":parent,"name":"Take","isAudio":true,"start":0,"length":16,"filePath":self.take})]
             }
             "session-playback" => {
@@ -293,8 +343,14 @@ impl Set {
             let tracks = self.tracks.borrow();
             for value in args["values"].as_array().unwrap() {
                 let at = places(text(&value["parameterRef"]));
-                if tracks.get(at[0]).and_then(|track| track.devices.get(at[1])).and_then(|device| device.knobs.get(at[2])).is_none() {
+                let Some(device) = tracks.get(at[0]).and_then(|track| track.devices.get(at[1])) else {
                     return Err(RuntimeError::plain("No such parameter."));
+                };
+                let Some((knob, _)) = device.knobs.get(at[2]) else {
+                    return Err(RuntimeError::plain("No such parameter."));
+                };
+                if self.refused.borrow().contains(&(device.name.clone(), knob.clone())) {
+                    return Err(RuntimeError::plain("That parameter can't be changed now."));
                 }
             }
         }
@@ -338,6 +394,11 @@ impl Set {
             "live_track_structure" => {
                 let at = places(text(&asked["ref"]))[0];
                 let mut copy = tracks[at].clone();
+                for (track, device, knob, before) in self.last_set.borrow().iter() {
+                    if *track == at {
+                        copy.devices[*device].knobs[*knob].1 = *before;
+                    }
+                }
                 copy.id = next_identity();
                 copy.name = format!("{} copy", copy.name);
                 for device in &mut copy.devices {
@@ -373,15 +434,23 @@ impl Set {
                 answer["deviceRef"] = json!(format!("7:device:{at}:d{}", tracks[at].devices.len() - 1));
             }
             "live_device_parameter" => {
+                let mut last_set = self.last_set.borrow_mut();
+                last_set.clear();
                 for value in asked["values"].as_array().unwrap() {
                     let at = places(text(&value["parameterRef"]));
-                    tracks[at[0]].devices[at[1]].knobs[at[2]].1 = value["value"].as_f64().unwrap();
+                    let knob = &mut tracks[at[0]].devices[at[1]].knobs[at[2]];
+                    last_set.push((at[0], at[1], at[2], knob.1));
+                    knob.1 = value["value"].as_f64().unwrap();
                 }
             }
             "live_recording" => self.playing.set(asked.get("action").map(text) == Some("start")),
             "live_transport_action" => {
                 if asked.get("action").map(text) == Some("stop") {
-                    self.playing.set(false);
+                    if self.playing.get() && self.lag.get() > 0 {
+                        self.stopping.set(self.lag.get());
+                    } else {
+                        self.playing.set(false);
+                    }
                 }
             }
             _ => {}
@@ -429,6 +498,7 @@ impl McpEndpoint for Set {
         Ok(reply(match name {
             "live_discover" => self.discover(&args),
             "live_undo" => self.undo(&args),
+            "live_run_python" => self.python(&args),
             "live_status" => json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":7}),
             "live_transaction_release" => json!({}),
             _ => match (name.strip_suffix("_preview"), name.strip_suffix("_apply")) {
@@ -568,6 +638,17 @@ impl Live {
     /// A change the model asked for.
     async fn change(&self, tool: &str, args: Value) {
         self.mutations.step(tool, args.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+    }
+    /// Reads of this kind fail, the next this many times.
+    fn fail_reads(&self, kind: &'static str, times: u32) {
+        let left = Cell::new(times);
+        *self.set.on_call.borrow_mut() = Some(Box::new(move |name, args| {
+            if name == "live_discover" && args.get("kind").map(text) == Some(kind) && left.get() > 0 {
+                left.set(left.get() - 1);
+                return Err(RuntimeError::plain("Live didn't answer."));
+            }
+            Ok(())
+        }));
     }
     fn was_told(&self, text: &str) -> bool {
         self.told.borrow().iter().any(|line| line.contains(text))
@@ -961,6 +1042,24 @@ fn tidying_takes_back_only_the_track_the_model_added() {
     });
 }
 
+/// (#399) Live copies a track a moment behind what was just set on it: a real Live's copy held the last trial's value, though the
+/// track read as the winner's. The best holds what it was kept at.
+#[test]
+fn a_best_holds_what_it_was_kept_at_though_live_copies_a_moment_behind() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.3)])], Signal::new(), None).await.unwrap();
+        goal.close().await.unwrap();
+
+        let best = keep(&goal, &slot, &[("Synth", "Tone", 0.7)]).await;
+
+        assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.7);
+        assert_eq!(live.set.knob(&best, "Synth", "Tone"), 0.7, "and not the trial's 0.3");
+    });
+}
+
 /// (#399) A paused goal's candidates weren't tidied and still play: its best waits muted beside them, and that's said.
 #[test]
 fn a_paused_goals_best_waits_muted() {
@@ -1035,23 +1134,29 @@ fn a_best_as_kumi_kept_it_is_replaced() {
         assert_eq!(best, BEST);
         assert_eq!(live.set.knob(BEST, "Synth", "Tone"), 0.8);
         assert_eq!(live.set.tracks.borrow().iter().filter(|track| track.name.starts_with(BEST)).count(), 1);
-        assert!(!live.was_told("stays where it is"));
+        assert_eq!(goal.kept_only(), None);
     });
 }
 
-/// (#399) A best the producer worked on is theirs: it stays, the new one goes beside it under a name of its own, and that's said.
+/// (#399) A best the producer worked on is theirs: it stays, the new one goes beside it under a name of its own, and the notice
+/// names both and says why.
 #[test]
 fn a_best_the_producer_worked_on_stays() {
     type Work = fn(&Set);
-    let works: [(&str, Work); 2] =
-        [("turned a knob", |set| set.turn(BEST, "Synth", "Tone", 0.95)), ("put a device in", |set| set.put_device_in(BEST, 0, "New"))];
-    for (what, work) in works {
+    let works: [(&str, Work, &str); 4] = [
+        ("turned a knob", |set| set.turn(BEST, "Synth", "Tone", 0.95), "its devices changed"),
+        ("put a device in", |set| set.put_device_in(BEST, 0, "New"), "its devices changed"),
+        ("edited its notes", |set| set.edit_clip(BEST), "its clips changed"),
+        ("rode its fader", |set| set.ride_fader(BEST), "its mixer changed"),
+    ];
+    for (what, work, why) in works {
         on_a_paused_clock(async {
             let live = Live::new(&[("Candidate", &["Synth"])]).await;
             let goal = live.goal(&["Candidate"]).await;
             let slot = slot_named(&goal, "Candidate");
             goal.close().await.unwrap();
             keep(&goal, &slot, &[("Synth", "Tone", 0.7)]).await;
+            assert_eq!(goal.kept_only(), None, "{what}: one best, nothing to explain");
             work(&live.set);
             let theirs = live.set.chain(BEST);
 
@@ -1061,14 +1166,50 @@ fn a_best_the_producer_worked_on_stays() {
             assert!(new.starts_with(BEST), "{what}: {new}");
             assert_eq!(live.set.knob(&new, "Synth", "Tone"), 0.8, "{what}");
             assert_eq!(live.set.chain(BEST), theirs, "{what}");
-            assert!(live.was_told("The last “Kumi · Goal best” stays where it is (it changed since Kumi kept it)"), "{what}");
+            let said = goal.kept_only().unwrap();
+            assert_eq!(
+                said,
+                format!("The last “{BEST}” stays where it is ({why} since Kumi kept it), so the new best is beside it on “{new}”."),
+                "{what}"
+            );
 
-            // What's Kumi's now is the new one: it's the one the next keep replaces.
+            // What's Kumi's now is the new one: it's the one the next keep replaces, and the one they worked on still stays.
             let next = keep(&goal, &slot, &[("Synth", "Tone", 0.85)]).await;
             assert!(!live.set.has_track(&new) || next == new, "{what}");
             assert!(live.set.has_track(BEST), "{what}");
+            assert_eq!(goal.kept_only(), None, "{what}: the last one was replaced this time");
         });
     }
+}
+
+/// (#399) A best Kumi can't show is unchanged stays: a failed proof can only add a track, never lose one.
+#[test]
+fn a_best_kumi_cant_read_stays() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.close().await.unwrap();
+        keep(&goal, &slot, &[("Synth", "Tone", 0.7)]).await;
+        *live.set.on_call.borrow_mut() = Some(Box::new(|name, _| {
+            if name == "live_run_python" {
+                return Err(RuntimeError::plain("Live didn't answer."));
+            }
+            Ok(())
+        }));
+
+        let new = keep(&goal, &slot, &[("Synth", "Tone", 0.8)]).await;
+
+        assert_ne!(new, BEST);
+        assert_eq!(live.set.knob(BEST, "Synth", "Tone"), 0.7);
+        assert!(goal.kept_only().unwrap().contains("Kumi couldn't read it"), "{:?}", goal.kept_only());
+
+        // As it was kept it couldn't be read either: the next can't show it's unchanged.
+        *live.set.on_call.borrow_mut() = None;
+        let next = keep(&goal, &slot, &[("Synth", "Tone", 0.9)]).await;
+        assert!(live.set.has_track(&new), "{next}");
+        assert!(goal.kept_only().unwrap().contains("Kumi couldn't read it when it kept it"), "{:?}", goal.kept_only());
+    });
 }
 
 /// (#399) A best no longer there under its name was renamed, and so is theirs, or deleted: it's left, without a word.
@@ -1087,7 +1228,7 @@ fn a_best_renamed_or_deleted_is_left_without_a_word() {
         assert_eq!(best, BEST, "the plain name is free");
         assert!(live.set.has_track("Mine"));
         assert_eq!(live.set.knob("Mine", "Synth", "Tone"), 0.7);
-        assert!(!live.was_told("stays where it is"));
+        assert_eq!(goal.kept_only(), None);
     });
 }
 
@@ -1222,8 +1363,8 @@ fn a_limiter_that_cant_come_off_is_said() {
     });
 }
 
-/// (#399) Live's search moves the candidates' own tracks. When the goal ends each goes back as the goal found it, with its
-/// limiter at unity, and the best keeps the values it was kept at.
+/// (#399) Live's search moves the candidates' own tracks. When the goal ends each goes back as the goal found it, without Kumi's
+/// limiter, and the best keeps the values it was kept at.
 #[test]
 fn a_goals_candidates_go_back_as_it_found_them() {
     on_a_paused_clock(async {
@@ -1246,8 +1387,9 @@ fn a_goals_candidates_go_back_as_it_found_them() {
         for track in ["A", "B"] {
             assert_eq!(live.set.knob(track, "Synth", "Tone"), 0.5, "{track}");
             assert_eq!(live.set.knob(track, "Synth", "Drive"), 0.2, "{track}");
-            assert_eq!(live.set.knob(track, "Limiter", "Gain"), 0.5, "{track}");
+            assert_eq!(live.set.chain(track), ["Synth"], "{track}: its limiter came off");
         }
+        assert_eq!(live.set.knob(&best, "Limiter", "Gain"), 0.5, "the best's stays, at unity");
         assert_eq!(live.set.knob(&best, "Synth", "Tone"), 0.65);
         assert_eq!(live.set.knob(&best, "Synth", "Drive"), 0.35);
     });
@@ -1322,7 +1464,7 @@ fn candidates_go_back_to_where_the_goal_first_found_them_across_a_leap() {
         assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.5);
         assert_eq!(live.set.knob("Candidate", "Synth", "Drive"), 0.35);
         assert_eq!(live.set.knob("Candidate", "New", "Tone"), 0.5, "the new device isn't touched");
-        assert_eq!(live.set.knob("Candidate", "Limiter", "Gain"), 0.5);
+        assert_eq!(live.set.chain("Candidate"), ["New", "Synth"]);
     });
 }
 
@@ -1346,17 +1488,74 @@ fn a_track_thats_gone_is_skipped_without_a_word() {
     });
 }
 
-/// (#399) What can't be put back is said, so the producer knows to look.
+/// (#399) One knob Live won't take back doesn't stop the rest, or the limiter: it's named, and a later goal can still finish it.
 #[test]
-fn what_cant_be_put_back_is_said() {
+fn a_knob_live_wont_take_back_is_said_and_the_rest_go_back() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth", "EQ"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6), ("Synth", "Drive", 0.3), ("EQ", "Tone", 0.7)])], Signal::new(), None)
+            .await
+            .unwrap();
+        goal.close().await.unwrap();
+        live.set.refused.borrow_mut().push(("Synth".into(), "Tone".into()));
+
+        let said = goal.put_back(Signal::new()).await;
+
+        assert_eq!(said, ["Live wouldn't take Synth Tone on “Candidate” back to where the goal found it: check it."]);
+        assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.6);
+        assert_eq!(live.set.knob("Candidate", "Synth", "Drive"), 0.2, "the rest of its device's");
+        assert_eq!(live.set.knob("Candidate", "EQ", "Tone"), 0.5, "the next device's");
+        assert_eq!(live.set.chain("Candidate"), ["Synth", "EQ"], "and its limiter came off");
+
+        live.set.refused.borrow_mut().clear();
+        assert!(goal.put_back(Signal::new()).await.is_empty());
+        assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.5, "what was left, the next time");
+    });
+}
+
+/// (#399) A goal paused because Live went, say, can't read anything back. What it knows stays, so the goal that picks it up still
+/// takes the candidate back to where it first was, not to where this search left it.
+#[test]
+fn a_put_back_that_cant_read_keeps_what_it_knows_for_the_next_goal() {
+    for kind in ["track", "device"] {
+        on_a_paused_clock(async {
+            let live = Live::new(&[("Candidate", &["Synth"])]).await;
+            let goal = live.goal(&["Candidate"]).await;
+            let slot = slot_named(&goal, "Candidate");
+            goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+            goal.close().await.unwrap();
+            live.fail_reads(kind, 1);
+
+            let said = goal.put_back(Signal::new()).await;
+
+            assert_eq!(said.len(), 1, "{kind}: {said:?}");
+            assert!(said[0].starts_with("Kumi couldn't put “Candidate” back as the goal found it"), "{kind}: {said:?}");
+            assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.6, "{kind}");
+
+            *live.set.on_call.borrow_mut() = None;
+            let goal = live.goal(&["Candidate"]).await;
+            let slot = slot_named(&goal, "Candidate");
+            goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.7)])], Signal::new(), None).await.unwrap();
+            goal.close().await.unwrap();
+
+            assert!(goal.put_back(Signal::new()).await.is_empty(), "{kind}");
+            assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.5, "{kind}: where the first goal found it");
+            assert_eq!(live.set.chain("Candidate"), ["Synth"], "{kind}");
+        });
+    }
+}
+
+/// (#399) A limiter that won't come off a candidate going back doesn't stay turned down, and it's said.
+#[test]
+fn a_limiter_that_wont_come_off_a_candidate_goes_to_unity_and_is_said() {
     on_a_paused_clock(async {
         let live = Live::new(&[("Candidate", &["Synth"])]).await;
         let goal = live.goal(&["Candidate"]).await;
-        let slot = slot_named(&goal, "Candidate");
-        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
         goal.close().await.unwrap();
         *live.set.on_call.borrow_mut() = Some(Box::new(|name, _| {
-            if name == "live_device_parameter_preview" {
+            if name == "live_device_delete_preview" {
                 return Err(RuntimeError::plain("Live didn't answer."));
             }
             Ok(())
@@ -1364,8 +1563,132 @@ fn what_cant_be_put_back_is_said() {
 
         let said = goal.put_back(Signal::new()).await;
 
-        assert_eq!(said.len(), 1, "{said:?}");
-        assert!(said[0].starts_with("Kumi couldn't put “Candidate” back as the goal found it"), "{said:?}");
+        assert_eq!(said, ["Kumi's safety Limiter stays last on “Candidate”: delete it if you don't want it there."]);
+        assert_eq!(live.set.knob("Candidate", "Limiter", "Gain"), 0.5);
+    });
+}
+
+/// (#399) A resumed goal puts a fresh limiter on and turns it down, so it hears as it did before the pause, whether or not Kumi
+/// was restarted meanwhile. Nothing of Kumi's is left when it ends again.
+#[test]
+fn a_resumed_goal_hears_through_a_limiter_turned_down() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        goal.close().await.unwrap();
+        goal.put_back(Signal::new()).await;
+        assert_eq!(live.set.chain("Candidate"), ["Synth"]);
+
+        let goal = live.goal(&["Candidate"]).await;
+
+        assert_eq!(live.set.knob("Candidate", "Limiter", "Gain"), 0.25);
+        goal.close().await.unwrap();
+        goal.put_back(Signal::new()).await;
+        assert_eq!(live.set.chain("Candidate"), ["Synth"]);
+    });
+}
+
+/// (#399) A device put in after Kumi's limiter, as `load_device` does in a leap: a second limiter goes on for the new end of the
+/// chain, and every one of Kumi's is seen to, on the best and on the candidate.
+#[test]
+fn every_limiter_kumi_added_is_seen_to_when_a_device_went_in_after_one() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        goal.close().await.unwrap();
+        live.set.put_device_in("Candidate", 2, "Saturator");
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        assert_eq!(live.set.chain("Candidate"), ["Synth", "Limiter", "Saturator", "Limiter"]);
+        goal.close().await.unwrap();
+
+        let best = keep(&goal, &slot, &[("Synth", "Tone", 0.7)]).await;
+        assert_eq!(live.set.knob_at(&best, 1, "Gain"), 0.5, "the best's first");
+        assert_eq!(live.set.knob_at(&best, 3, "Gain"), 0.5, "the best's second");
+
+        let said = goal.put_back(Signal::new()).await;
+        assert!(said.is_empty(), "{said:?}");
+        assert_eq!(live.set.chain("Candidate"), ["Synth", "Saturator"]);
+    });
+}
+
+/// (#399) A Limiter the producer put last stays on when the candidate goes back, at its own gain.
+#[test]
+fn a_producers_own_limiter_stays_when_a_candidate_goes_back() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth", "Limiter"])]).await;
+        live.set.turn("Candidate", "Limiter", "Gain", 0.6);
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+        goal.close().await.unwrap();
+
+        goal.put_back(Signal::new()).await;
+
+        assert_eq!(live.set.chain("Candidate"), ["Synth", "Limiter"]);
+        assert_eq!(live.set.knob("Candidate", "Limiter", "Gain"), 0.6);
+        assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.5);
+    });
+}
+
+/// (#399) Across a leap the search's words for a knob can be another device's in the new rig. A knob first moved then still goes
+/// back to its own value, as it read.
+#[test]
+fn a_knob_first_moved_after_a_leap_goes_back_to_its_own_value() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["EQ", "EQ"])]).await;
+        live.set.tracks.borrow_mut()[0].devices[0].knobs[1].1 = 0.9;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.close().await.unwrap();
+        live.set.put_device_in("Candidate", 0, "Saturator");
+
+        let goal = live.goal(&["Candidate"]).await;
+        goal.generation(&[trial(&slot, &[("1:EQ", "Drive", 0.5)])], Signal::new(), None).await.unwrap();
+        assert_eq!(live.set.knob_at("Candidate", 2, "Drive"), 0.5, "the second EQ");
+        goal.close().await.unwrap();
+
+        assert!(goal.put_back(Signal::new()).await.is_empty());
+        assert_eq!(live.set.knob_at("Candidate", 2, "Drive"), 0.2, "its own, not the first EQ's");
+        assert_eq!(live.set.knob_at("Candidate", 1, "Drive"), 0.9);
+    });
+}
+
+/// (#399) A candidate renamed during the search is still there at the search's values: its knobs are found at its old place by
+/// who their devices are, and it goes back. Nothing else at that place would answer to them.
+#[test]
+fn a_candidate_renamed_during_the_search_still_goes_back() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+        goal.close().await.unwrap();
+        live.set.rename_track("Candidate", "Renamed");
+
+        let said = goal.put_back(Signal::new()).await;
+
+        assert!(said.is_empty(), "{said:?}");
+        assert_eq!(live.set.knob("Renamed", "Synth", "Tone"), 0.5);
+        assert_eq!(live.set.chain("Renamed"), ["Synth"]);
+    });
+}
+
+/// A goal without Kumi Ears holds its recording between passes, so nothing waits on stopping it: Live shows a take only once it
+/// has stopped playing, a moment after it's asked. A pass waits for that, and hears its take.
+#[test]
+fn a_held_pass_waits_for_live_to_show_its_take() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth"])]).await;
+        live.set.lag.set(3);
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+
+        let generation = goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+
+        assert!(generation.silent.is_empty(), "{:?}", generation.silent);
+        assert!(generation.scores.contains_key("Candidate"), "{:?}", generation.scores);
+        goal.close().await.unwrap();
     });
 }
 

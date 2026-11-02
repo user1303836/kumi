@@ -74,7 +74,13 @@ impl McpEndpoint for Fixture {
         )
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        Ok(serde_json::from_value(json!({"tools":self.case["tools"]})).unwrap())
+        let mut tools = self.case["tools"].clone();
+        // (see `call`: what a keep reads the best with, which this case's recording didn't need)
+        if self.case["label"] == KEEPS_BEFORE_TIDYING {
+            let python = json!({"name":"live_run_python","description":"Run Python","inputSchema":{"type":"object","properties":{},"additionalProperties":true}});
+            tools.as_array_mut().unwrap().push(python);
+        }
+        Ok(serde_json::from_value(json!({ "tools": tools })).unwrap())
     }
     async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
         signal.check()?;
@@ -108,21 +114,26 @@ impl McpEndpoint for Fixture {
             if name == "live_mixer_preview" && expected["args"]["mute"] == false {
                 expected["args"]["mute"] = json!(true);
             }
-            // (#399) A keep reads the last best before taking it back, because Live's undo of a duplicated track deletes it
-            // whatever the producer did to it since; the TypeScript Kumi never looked. The read is answered as the case last
-            // answered that very read, the best as it was kept, and uses up no recorded call.
-            if name == "live_discover" && expected["name"] == "live_undo" {
-                let read = (0..index).rev().find(|at| {
-                    let mut call = self.case["calls"][*at].clone();
-                    if call["args"]["kind"] == "device" {
-                        call["args"]["fields"] = current_fields.clone();
-                    }
-                    canonical(&call) == canonical(&actual)
-                });
-                if let Some(at) = read {
-                    return self.answer(at);
-                }
+            // (#399) Kumi reads a best whole as it keeps it, and again before taking it back, because Live's undo of a duplicated
+            // track deletes it whatever the producer did to it since; the TypeScript Kumi never looked. The case's bridge says the
+            // same each time, so the best is as it was kept, and this uses up no recorded call.
+            if name == "live_run_python" {
+                let body = json!({"ok":true,"result":{"devices":"d","clips":"c","mixer":"m"},"stdout":"","error":null});
+                return Ok(
+                    serde_json::from_value(json!({"content":[{"type":"text","text":stringify(&body)}],"structuredContent":body})).unwrap()
+                );
             }
+        }
+        // (#399) A held pass waits for Live to have stopped playing, which shows its take: the TypeScript Kumi read for it at once.
+        // The fake Live behind these cases has stopped by then, and this uses up no recorded call.
+        if name == "live_discover"
+            && actual["args"]["kind"] == "set"
+            && actual["args"]["fields"] == json!(["ref", "objectIdentity", "playing"])
+        {
+            let body = json!({"epoch":7,"kind":"set","items":[{"ref":"7:set:song","objectIdentity":"song","playing":false}],"revision":"r1","truncated":false});
+            return Ok(
+                serde_json::from_value(json!({"content":[{"type":"text","text":stringify(&body)}],"structuredContent":body})).unwrap()
+            );
         }
         // (#399) A goal that never opens takes off the safety limiter it added; the TypeScript Kumi left it on. In this case the
         // reference goes away before its screen is heard, so the calls past its recording are that: the chain, read as the case

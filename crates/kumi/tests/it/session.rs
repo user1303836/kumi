@@ -2248,6 +2248,10 @@ struct SearchRig {
     settled: RefCell<Vec<f64>>,
     /// What keeping the best answers: the best's name, unless the test says why not.
     keep_says: &'static str,
+    /// What putting the candidates back says.
+    put_back_says: Option<&'static str>,
+    /// A generation fails.
+    fails: bool,
     kept_only: Option<String>,
 }
 impl SearchRig {
@@ -2263,6 +2267,8 @@ impl SearchRig {
             values_score: false,
             settled: RefCell::new(vec![]),
             keep_says: "Kumi · Goal best",
+            put_back_says: None,
+            fails: false,
             kept_only: None,
         }
     }
@@ -2302,6 +2308,9 @@ impl GoalRig for SearchRig {
         signal: Signal,
         options: Option<GenerationOptions>,
     ) -> Result<Generation, RuntimeError> {
+        if self.fails {
+            return Err(RuntimeError::plain("Live went"));
+        }
         let at = self.calls.borrow().len();
         self.calls.borrow_mut().push((trials.to_vec(), options));
         tokio::select! {_=signal.cancelled()=>return Err(RuntimeError::Aborted),_=delay(self.ms)=>{}}
@@ -2348,7 +2357,7 @@ impl GoalRig for SearchRig {
     async fn put_back(&self, signal: Signal) -> Vec<String> {
         assert!(!signal.is_cancelled());
         self.cleanup.borrow_mut().push("put back".into());
-        vec![]
+        self.put_back_says.iter().map(|said| said.to_string()).collect()
     }
 }
 fn goal_harness(rig: Rc<SearchRig>, reference: bool, config: impl FnOnce(&mut SessionOptions)) -> Harness {
@@ -2406,6 +2415,22 @@ local_test!(goal_reaches_target_cleans_in_order_keeps_best_and_lesson, {
     assert_eq!(h.session.lessons().await.unwrap().len(), 1);
     h.session.close().await.unwrap();
     assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Done);
+});
+local_test!(the_end_of_a_goal_is_told_to_the_next_turn_too, {
+    let mut raw = SearchRig::new(vec![96.]);
+    raw.put_back_says = Some("“Candidate” is back as it was, except that you turned Tone.");
+    let h = goal_harness(Rc::new(raw), true, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+    assert!(h.notice("“Candidate” is back as it was, except that you turned Tone."));
+    let asked = h.record.calls.borrow().len();
+    h.session.submit("why are there two?", None).await.unwrap();
+    let next = h.record.calls.borrow()[asked].clone();
+    assert!(next.contains("[Kumi] As the last goal ended: “Candidate” is back as it was, except that you turned Tone."), "{next}");
+    h.session.submit("and now?", None).await.unwrap();
+    let after = h.record.calls.borrow().last().unwrap().clone();
+    assert!(!after.contains("As the last goal"), "once: {after}");
+    h.session.close().await.unwrap();
 });
 local_test!(a_goal_says_why_its_best_wasnt_kept, {
     let mut raw = SearchRig::new(vec![96.]);
@@ -3653,6 +3678,21 @@ local_test!(loop_stop_stops_the_running_loop_before_a_paused_search_on_the_set, 
     h.record.observe_holds.set(false);
     h.session.close().await.unwrap();
     assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Paused, "the search is still there to pick up");
+});
+local_test!(a_match_whose_search_failed_still_says_what_putting_back_said, {
+    let mut raw = SearchRig::new(vec![50.]);
+    raw.fails = true;
+    raw.put_back_says = Some("Kumi couldn't put “Drift” back as the goal found it.");
+    let rig = Rc::new(raw);
+    let h = match_harness(vec![Some(("Drift", 50.)), None], |o| {
+        o.match_budget = Some(MatchBudget { rounds: 0, polish_ms: Some(50), ..MATCH_BUDGET });
+    });
+    *h.record.goal_rig.borrow_mut() = Some(rig.clone());
+    h.session.start().await.unwrap();
+    let _ = h.session.submit("match this reference", None).await;
+    assert_eq!(rig.cleanup.borrow().as_slice(), ["close", "settle", "put back"]);
+    assert!(h.notice("Kumi couldn't put “Drift” back as the goal found it."));
+    h.session.close().await.unwrap();
 });
 local_test!(match_polish_confirms_improvement_at_full_length_and_restores_if_not_better, {
     // Exercise the full search budget independently of the host timer resolution.

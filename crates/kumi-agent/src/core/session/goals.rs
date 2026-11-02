@@ -513,6 +513,13 @@ impl Session {
             }
         }
         notes.extend(rig.put_back(cleanup).await);
+        // (what the end of a goal has to say, the model's told too: the producer may well ask)
+        if !notes.is_empty() {
+            let how = if state.status == GoalRun::Paused { "paused" } else { "ended" };
+            let said = format!("\n\n[Kumi] As the last goal {how}: {}", notes.join(" "));
+            let mut s = self.0.state.borrow_mut();
+            s.next_note = Some(s.next_note.take().unwrap_or_default() + &said);
+        }
         sync(&mut state, &evolution, started);
         self.persist_goal(&place, &state);
         self.goal_event(state.status.into(), Some(&state), None, started, Some(&evolution), &full, screening);

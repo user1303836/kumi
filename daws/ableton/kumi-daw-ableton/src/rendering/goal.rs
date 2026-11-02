@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use kumi_agent::core::{
     evolve::Knob,
     goal_rig::{
-        best_plays_beside, best_waits_muted, check_slots, device_label, device_of, given_values, knob_key as key, last_best_stays,
+        best_plays_beside, best_waits_muted, check_slots, device_label, device_of, given_values, knob_key as key, last_best_beside,
         limiter_stays, moved as moved_knobs, moved_or_went, near, not_in_the_search, tell_generation, you_turned, GoalDaw,
     },
 };
@@ -20,11 +20,12 @@ use std::collections::{HashMap, HashSet};
 /// another, which reads the search's values and Kumi's limiter as if they'd always been there.
 #[derive(Default)]
 pub(super) struct Candidate {
-    /// Kumi put the safety limiter last on its chain, turned down for the search.
-    limited: bool,
+    /// Each safety limiter Kumi put on its chain, turned down for the search: Live's identity for it, empty where Live gives
+    /// none (it's then the last device).
+    limiters: Vec<String>,
     /// A match's winner, left at its values.
     settled: bool,
-    /// Each knob the search moved, by its key.
+    /// Each knob the search moved, by the words the search has for it.
     moved: IndexMap<String, Moved>,
 }
 struct Moved {
@@ -34,31 +35,46 @@ struct Moved {
     /// Where the search last left it.
     to: f64,
 }
-/// The last best as it was kept. Live's undo of a duplicated track deletes it whatever happened to it since, so Kumi reads it
-/// before taking it back: one the producer worked on stays theirs.
+/// The last best as it was kept. Live's undo of a duplicated track deletes it whatever happened to it since, so Kumi reads the
+/// whole track before taking it back, and only one it can show is unchanged goes.
 #[derive(Clone)]
 pub(super) struct KeptBest {
     name: String,
-    limited: bool,
-    print: Print,
+    /// What `BEST_PRINT` read of it as it was kept, the last thing Kumi did to it; None when that couldn't be read.
+    print: Option<Value>,
 }
-/// A chain and its knobs' values, as read. A limiter Kumi added leaves its input out: Kumi puts that at unity itself.
-#[derive(Clone)]
-struct Print {
-    chain: String,
-    knobs: Vec<(String, f64)>,
+/// Reads a track whole, in one go on Live's thread: its devices (inside racks too), clips, notes, a Session clip's automation and
+/// its mixer, each as a digest. None when no track has the name.
+const BEST_PRINT: &str = include_str!("../assets/best-print.py");
+/// What's to be done with the last best.
+enum LastBest {
+    /// It's as Kumi kept it, or there isn't one.
+    Free,
+    /// No track has its name now: deleted, or renamed and so the producer's. It's left without a word.
+    Gone,
+    /// Kumi can't show it's unchanged: it stays, and why.
+    Stays(String, String),
 }
-impl Print {
-    fn of(read: &Knobs, limited: bool) -> Self {
-        let input = gain(read).filter(|_| limited).map(|knob| knob.r#ref.as_str());
-        let knobs = read.knobs.iter().filter(|knob| Some(knob.r#ref.as_str()) != input).map(|knob| (key(knob), knob.value)).collect();
-        Print { chain: read.chain.clone(), knobs }
+/// What the print's parts are, as said of a best that changed.
+fn what_changed(kept: &Value, now: &Value) -> String {
+    let parts: Vec<&str> = [("devices", "its devices"), ("clips", "its clips"), ("mixer", "its mixer")]
+        .into_iter()
+        .filter(|(part, _)| kept[part] != now[part])
+        .map(|(_, said)| said)
+        .collect();
+    if parts.is_empty() {
+        "it changed since Kumi kept it".into()
+    } else {
+        format!("{} changed since Kumi kept it", parts.join(" and "))
     }
-    fn same(&self, now: &Print) -> bool {
-        self.chain == now.chain
-            && self.knobs.len() == now.knobs.len()
-            && self.knobs.iter().zip(&now.knobs).all(|((a, x), (b, y))| a == b && (x - y).abs() <= 1e-6)
-    }
+}
+/// What came of putting one candidate back.
+#[derive(Default)]
+struct Back {
+    /// The knobs the producer turned since the search left them, which stay.
+    turned: Vec<String>,
+    /// The knobs Live wouldn't take back.
+    refused: Vec<String>,
 }
 #[derive(Clone)]
 struct Knobs {
@@ -86,10 +102,12 @@ struct Goal {
     focus: Option<Focus>,
     screen: Option<Screen>,
     heard: RefCell<HeardCache<Told>>,
-    /// The candidates this rig put a safety limiter on: it comes off them if the goal never opens.
-    limiters_added: RefCell<Vec<String>>,
+    /// The safety limiters this rig added, each with its candidate: they come off if the goal never opens.
+    limiters_added: RefCell<Vec<(String, String)>>,
     /// The finished goal's candidates were tidied (the top ones muted for an A/B): its best plays on its own.
     tidied: Cell<bool>,
+    /// Why the best just kept is beside the last one, when it is.
+    beside: RefCell<Option<String>>,
 }
 fn device_name(device: &JsonObject) -> String {
     device
@@ -113,13 +131,33 @@ fn identities(read: &Knobs) -> std::collections::BTreeMap<String, String> {
         })
         .collect()
 }
-fn gain(read: &Knobs) -> Option<&Knob> {
-    let limiter = read.devices.last()?;
-    let name = limiter.get("name").filter(|v| !v.is_null()).map(js_string).unwrap_or_else(|| "Limiter".into());
-    read.knobs.iter().find(|knob| {
-        knob.device == format!("{}:{name}", read.devices.len() - 1)
-            && matches!(knob.name.to_ascii_lowercase().as_str(), "gain" | "input" | "input gain")
-    })
+/// A limiter's input, on the device at this place.
+fn gain_at(read: &Knobs, at: usize) -> Option<&Knob> {
+    let device = read.devices.get(at)?;
+    let label = device_label(at, &device_name(device));
+    read.knobs
+        .iter()
+        .find(|knob| knob.device == label && matches!(knob.name.to_ascii_lowercase().as_str(), "gain" | "input" | "input gain"))
+}
+fn is_stock_limiter(device: &JsonObject) -> bool {
+    device.get("className").and_then(Value::as_str) == Some("Limiter")
+}
+/// Where Kumi's limiters are on a chain as read: by Live's identity for each, wherever it is now, or the last device where Live
+/// gave none. In chain order.
+fn limiter_places(devices: &[JsonObject], limiters: &[String]) -> Vec<usize> {
+    let mut places: Vec<usize> = limiters
+        .iter()
+        .filter_map(|identity| {
+            if identity.is_empty() {
+                devices.len().checked_sub(1).filter(|last| is_stock_limiter(&devices[*last]))
+            } else {
+                devices.iter().position(|device| object_identity(device) == *identity)
+            }
+        })
+        .collect();
+    places.sort_unstable();
+    places.dedup();
+    places
 }
 
 /// Where a slot's track is now, by #700's rule for a ref held across changes: at its ref if that still has its name, else the
@@ -298,6 +336,7 @@ impl LiveRenderer {
             heard: RefCell::new(HeardCache::default()),
             limiters_added: RefCell::new(vec![]),
             tidied: Cell::new(false),
+            beside: RefCell::new(None),
         };
         for (name, label) in sources {
             if let Err(error) = goal.adopt(&name, &label, signal.clone()).await {
@@ -356,12 +395,13 @@ impl Goal {
                 Ok(read) => read,
                 // (a candidate that never joined keeps no safety limiter of the rig's)
                 Err(error) => {
-                    self.take_off(&[name.to_owned()]).await;
+                    self.take_off(&[(name.to_owned(), String::new())]).await;
                     return Err(error);
                 }
             };
-            r.goal_candidates.borrow_mut().entry(name.into()).or_default().limited = true;
-            self.limiters_added.borrow_mut().push(name.into());
+            let identity = read.devices.last().map(object_identity).unwrap_or_default();
+            r.goal_candidates.borrow_mut().entry(name.into()).or_default().limiters.push(identity.clone());
+            self.limiters_added.borrow_mut().push((name.into(), identity));
         }
         self.current.borrow_mut().insert(name.into(), read.knobs.iter().map(|knob| (key(knob), knob.value)).collect());
         self.places.borrow_mut().insert(name.into(), read.reference.clone());
@@ -376,7 +416,9 @@ impl Goal {
     async fn limiter_down(&self, name: &str, signal: Signal) -> Result<Knobs, RuntimeError> {
         let r = &self.render;
         let read = r.read_knobs(name, signal.clone()).await?;
-        let (Some(input), Some(reference)) = (gain(&read), read.devices.last().and_then(|d| d.get("ref")).and_then(Value::as_str)) else {
+        let last = read.devices.len().saturating_sub(1);
+        let (Some(input), Some(reference)) = (gain_at(&read, last), read.devices.last().and_then(|d| d.get("ref")).and_then(Value::as_str))
+        else {
             return Ok(read);
         };
         let down = if input.min < 0. {
@@ -404,19 +446,26 @@ impl Goal {
         let added = self.limiters_added.take();
         self.take_off(&added).await;
     }
-    /// Takes these candidates' safety limiters off again, each last on its track's chain as it is now; what stays is said.
-    async fn take_off(&self, names: &[String]) {
+    /// One safety limiter off the track at this ref, found on its chain as it is now (a device's going retires the refs on its
+    /// track). Whether it went.
+    async fn limiter_off(&self, reference: &str, identity: &str, signal: Signal) -> Result<bool, RuntimeError> {
+        let r = &self.render;
+        let devices = r.device_rows(reference, signal.clone()).await?;
+        let Some(at) = limiter_places(&devices, &[identity.to_owned()]).pop() else { return Ok(false) };
+        let Some(device) = devices[at].get("ref").and_then(Value::as_str) else { return Ok(false) };
+        r.history.quietly(None, r.step("delete_device", json!({"ref":device}), signal)).await?;
+        Ok(true)
+    }
+    /// Takes these safety limiters off again; what stays is said.
+    async fn take_off(&self, limiters: &[(String, String)]) {
         let r = &self.render;
         let signal = r.cleanup();
-        for name in names {
+        for (name, identity) in limiters.iter().rev() {
             let off: Result<bool, RuntimeError> = async {
-                let read = r.read_knobs(name, signal.clone()).await?;
-                let last = read.devices.last().filter(|device| device.get("className").and_then(Value::as_str) == Some("Limiter"));
-                let Some(reference) = last.and_then(|device| device.get("ref")).and_then(Value::as_str) else {
-                    return Ok(false);
-                };
-                r.history.quietly(None, r.step("delete_device", json!({"ref":reference}), signal.clone())).await?;
-                Ok(true)
+                let tracks = r.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
+                let held = self.places.borrow().get(name).cloned();
+                let Some(reference) = track_now(&tracks, name, held.as_deref())? else { return Ok(false) };
+                self.limiter_off(&reference, identity, signal.clone()).await
             }
             .await;
             if !matches!(off, Ok(true)) {
@@ -424,33 +473,41 @@ impl Goal {
             }
             let mut candidates = r.goal_candidates.borrow_mut();
             if let Some(candidate) = candidates.get_mut(name) {
-                candidate.limited = false;
-                if candidate.moved.is_empty() {
+                candidate.limiters.retain(|kept| kept != identity);
+                if candidate.moved.is_empty() && candidate.limiters.is_empty() {
                     candidates.shift_remove(name);
                 }
             }
         }
     }
     /// A candidate an earlier rig of this goal searched, as its chain is now. A knob the search moved that's gone, or that reads
-    /// other than the search left it, was the model's idea or the producer's hand: it's theirs now, and doesn't go back. (The
-    /// rest keep their words, which a search's knobs keep too however the chain moved.)
+    /// other than the search left it, was the model's idea or the producer's hand: it's theirs now, and doesn't go back. The rest
+    /// keep their words, which a search's knobs keep too however the chain moved, so a trial moves them from where they are.
     fn carry_over(&self, name: &str, read: &Knobs) {
         let mut candidates = self.render.goal_candidates.borrow_mut();
         let Some(candidate) = candidates.get_mut(name) else { return };
         candidate.moved.retain(|_, moved| knob_now(read, &moved.knob).is_some_and(|(_, now)| near(now, now.value, moved.to)));
+        candidate.limiters.retain(|identity| identity.is_empty() || read.devices.iter().any(|device| object_identity(device) == *identity));
+        if let Some(current) = self.current.borrow_mut().get_mut(name) {
+            current.extend(candidate.moved.iter().map(|(word, moved)| (word.clone(), moved.to)));
+        }
     }
-    /// A knob the search just set on a slot: where the next trial moves it from, and what goes back when the goal ends.
-    fn remember(&self, slot: &str, knob: &Knob, value: f64) {
-        let Some(from) = self.current.borrow_mut().get_mut(slot).map(|last| last.insert(key(knob), value)) else { return };
+    /// A knob the search just set on a slot: where the next trial moves it from, and what goes back when the goal ends. `was` is
+    /// where it was as read just before.
+    fn remember(&self, slot: &str, knob: &Knob, value: f64, was: f64) {
+        if let Some(last) = self.current.borrow_mut().get_mut(slot) {
+            last.insert(key(knob), value);
+        }
         let mut candidates = self.render.goal_candidates.borrow_mut();
         candidates.entry(slot.into()).or_default().moved.entry(key(knob)).and_modify(|moved| moved.to = value).or_insert_with(|| Moved {
             knob: knob.clone(),
-            from: from.unwrap_or(knob.value),
+            from: was,
             to: value,
         });
     }
-    fn limited(&self, slot: &str) -> bool {
-        self.render.goal_candidates.borrow().get(slot).is_some_and(|candidate| candidate.limited)
+    /// Kumi's limiters on a slot, as they are on this read of it.
+    fn limiters_on(&self, slot: &str, read: &Knobs) -> Vec<usize> {
+        self.render.goal_candidates.borrow().get(slot).map_or(vec![], |candidate| limiter_places(&read.devices, &candidate.limiters))
     }
     /// Knobs set, device by device, quietly.
     async fn set_on_devices(&self, devices: IndexMap<String, Vec<Value>>, signal: Signal) -> Result<(), RuntimeError> {
@@ -466,7 +523,36 @@ impl Goal {
             })
             .await
     }
-    async fn set_slot(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<(), RuntimeError> {
+    /// Knobs set back: a batch Live refuses (one greyed-out knob refuses its whole device's) is tried a value at a time. The
+    /// parameters Live wouldn't take.
+    async fn set_each(&self, devices: IndexMap<String, Vec<Value>>, signal: Signal) -> Result<Vec<String>, RuntimeError> {
+        let r = &self.render;
+        let mut refused = vec![];
+        r.history
+            .quietly(None, async {
+                for (reference, values) in devices {
+                    for chunk in values.chunks(64) {
+                        if r.step("set_device_parameters", json!({"deviceRef":reference,"values":chunk}), signal.clone()).await.is_ok() {
+                            continue;
+                        }
+                        signal.check()?;
+                        for value in chunk {
+                            if r.step("set_device_parameters", json!({"deviceRef":reference,"values":[value]}), signal.clone())
+                                .await
+                                .is_err()
+                            {
+                                signal.check()?;
+                                refused.push(value["parameterRef"].as_str().unwrap_or_default().to_owned());
+                            }
+                        }
+                    }
+                }
+                Ok::<_, RuntimeError>(())
+            })
+            .await?;
+        Ok(refused)
+    }
+    async fn set_slot(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<Knobs, RuntimeError> {
         if !self.current.borrow().contains_key(slot) {
             return Err(RuntimeError::plain(not_in_the_search(slot)));
         }
@@ -478,85 +564,134 @@ impl Goal {
         }
         self.set_on_devices(devices, signal).await?;
         for (knob, value) in moved {
-            self.remember(slot, &knob, value);
+            let was = knob_now(&fresh, &knob).map_or(knob.value, |(_, now)| now.value);
+            self.remember(slot, &knob, value, was);
         }
-        Ok(())
+        Ok(fresh)
     }
-    /// Kumi's safety limiter, last on the track as read, back at unity: its input was turned down for the search.
-    async fn limiter_at_unity(&self, read: &Knobs, signal: Signal) -> Result<(), RuntimeError> {
+    /// Kumi's safety limiters at these places on the track as read back at unity: their inputs were turned down for the search.
+    async fn limiter_at_unity(&self, read: &Knobs, places: &[usize], signal: Signal) -> Result<(), RuntimeError> {
         let r = &self.render;
-        if read.devices.last().and_then(|d| d.get("className")).and_then(Value::as_str) != Some("Limiter") {
-            return Ok(());
-        }
-        if let (Some(input), Some(reference)) = (gain(read), read.devices.last().and_then(|d| d.get("ref")).and_then(Value::as_str)) {
-            let unity = if input.min < 0. {
-                Some(0.)
-            } else if input.min == 0. && input.max == 1. {
-                Some(0.5)
-            } else {
-                None
+        for at in places {
+            let (Some(input), Some(reference)) = (gain_at(read, *at), read.devices[*at].get("ref").and_then(Value::as_str)) else {
+                continue;
             };
-            if let Some(unity) = unity {
-                r.history
-                    .quietly(
-                        None,
-                        r.step(
-                            "set_device_parameters",
-                            json!({"deviceRef":reference,"values":[{"parameterRef":input.r#ref,"value":unity}]}),
-                            signal,
-                        ),
-                    )
-                    .await?;
-            }
+            let unity = if input.min < 0. {
+                0.
+            } else if input.min == 0. && input.max == 1. {
+                0.5
+            } else {
+                continue;
+            };
+            r.history
+                .quietly(
+                    None,
+                    r.step(
+                        "set_device_parameters",
+                        json!({"deviceRef":reference,"values":[{"parameterRef":input.r#ref,"value":unity}]}),
+                        signal.clone(),
+                    ),
+                )
+                .await?;
         }
         Ok(())
     }
-    /// Whether the last best may go: it's as Kumi kept it. One the producer worked on stays theirs, and that's said; one that's
-    /// no longer there under its name (deleted, or renamed and so theirs) is left without a word.
-    async fn last_best_may_go(&self, signal: Signal) -> Result<bool, RuntimeError> {
-        let r = &self.render;
-        let Some(kept) = r.best_kept.borrow().clone() else { return Ok(true) };
-        let now: Result<Option<Knobs>, RuntimeError> = async {
-            let tracks = r.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
-            let Some(reference) = track_now(&tracks, &kept.name, None)? else { return Ok(None) };
-            let devices = r.device_rows(&reference, signal.clone()).await?;
-            Ok(Some(r.knobs_on(reference, devices, signal.clone()).await?))
+    /// A track read whole (`BEST_PRINT`); None when no track has its name.
+    async fn best_print(&self, name: &str, signal: Signal) -> Result<Option<Value>, RuntimeError> {
+        let connection = self.render.connection();
+        if !connection.has("live_run_python") {
+            return Err(RuntimeError::plain("this bridge can't read a whole track"));
         }
-        .await;
-        let why = match now {
-            Ok(None) => return Ok(false),
-            Ok(Some(now)) if kept.print.same(&Print::of(&now, kept.limited)) => return Ok(true),
-            Ok(Some(_)) => "it changed since Kumi kept it".to_owned(),
-            Err(error) => {
+        let code = crate::fast::with_args("best-print", &json!({"track":name}), BEST_PRINT);
+        let read = connection.call("live_run_python", object(json!({"code":code,"mode":"exec","timeoutMs":20000})), signal).await?;
+        let done = super::super::context::payload(&read)?;
+        if done.get("ok") != Some(&Value::Bool(true)) {
+            let why = done.get("error").and_then(|error| error.get("message")).and_then(Value::as_str).unwrap_or("Live didn't say why");
+            return Err(RuntimeError::plain(why));
+        }
+        Ok(done.get("result").filter(|result| !result.is_null()).cloned())
+    }
+    /// What's to be done with the last best: it goes only if Kumi can show it's as Kumi kept it. A failed proof can only add a
+    /// track, never lose one.
+    async fn last_best(&self, signal: Signal) -> Result<LastBest, RuntimeError> {
+        let Some(kept) = self.render.best_kept.borrow().clone() else { return Ok(LastBest::Free) };
+        let why = match (self.best_print(&kept.name, signal.clone()).await, &kept.print) {
+            (Ok(None), _) => return Ok(LastBest::Gone),
+            (Ok(Some(now)), Some(print)) if now == *print => return Ok(LastBest::Free),
+            (Ok(Some(now)), Some(print)) => what_changed(print, &now),
+            (Ok(Some(_)), None) => "Kumi couldn't read it when it kept it".to_owned(),
+            (Err(error), _) => {
                 signal.check()?;
                 format!("Kumi couldn't read it: {}", error.to_string().trim_end_matches('.'))
             }
         };
-        r.tell(last_best_stays(&kept.name, &why, ""), None);
-        Ok(false)
+        Ok(LastBest::Stays(kept.name, why))
     }
-    /// One candidate back as the goal first found it; what the producer turned since the search left it stays, and is named.
-    async fn put_candidate_back(&self, reference: String, candidate: &Candidate, signal: Signal) -> Result<Vec<String>, RuntimeError> {
+    /// One candidate back as the goal first found it, without Kumi's limiters. What's done leaves `candidate`, so what's left of
+    /// it is what a later goal can still put back. With `only_its_own`, the track was found by its old place, not its name, and
+    /// only what Live says is this candidate's is touched.
+    async fn put_candidate_back(
+        &self,
+        reference: String,
+        candidate: &mut Candidate,
+        only_its_own: bool,
+        signal: Signal,
+    ) -> Result<Back, RuntimeError> {
         let r = &self.render;
         let devices = r.device_rows(&reference, signal.clone()).await?;
         let read = r.knobs_on(reference, devices, signal.clone()).await?;
-        let mut turned = vec![];
+        let mut said = Back::default();
         let mut back = vec![];
-        for moved in candidate.moved.values() {
+        let mut names = HashMap::new();
+        let mut leaving = vec![];
+        for (word, moved) in &candidate.moved {
             // (a knob with no place now can't be put back, and its device going was someone's choice)
-            let Some((_, now)) = knob_now(&read, &moved.knob) else { continue };
+            let found = knob_now(&read, &moved.knob).filter(|_| !only_its_own || moved.knob.device_id.is_some());
+            let Some((_, now)) = found else {
+                leaving.push(word.clone());
+                continue;
+            };
+            let name = format!("{} {}", device_of(&moved.knob), moved.knob.name);
             if !near(now, now.value, moved.to) {
-                turned.push(format!("{} {}", device_of(&moved.knob), moved.knob.name));
+                said.turned.push(name);
             } else if !near(now, moved.from, moved.to) {
+                names.insert(now.r#ref.clone(), (word.clone(), name));
                 back.push((moved.knob.clone(), moved.from));
+                continue;
             }
+            leaving.push(word.clone());
         }
         let (devices, _) = by_device(&read, &back);
-        self.set_on_devices(devices, signal.clone()).await?;
-        if candidate.limited {
-            self.limiter_at_unity(&read, signal).await?;
+        let refused = self.set_each(devices, signal.clone()).await?;
+        for (reference, (word, name)) in names {
+            if refused.contains(&reference) {
+                said.refused.push(name);
+            } else {
+                leaving.push(word);
+            }
         }
-        Ok(turned)
+        said.refused.sort();
+        candidate.moved.retain(|word, _| !leaving.contains(word));
+        // Last, from the end of the chain. One that won't come off doesn't stay turned down, and it's said.
+        let mine: Vec<String> = candidate.limiters.iter().filter(|identity| !only_its_own || !identity.is_empty()).cloned().collect();
+        let mut stuck = vec![];
+        for identity in mine.iter().rev() {
+            match self.limiter_off(&read.reference, identity, signal.clone()).await {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(_) => {
+                    signal.check()?;
+                    stuck.push(identity.clone());
+                }
+            }
+        }
+        candidate.limiters = stuck;
+        if !candidate.limiters.is_empty() {
+            let devices = r.device_rows(&read.reference, signal.clone()).await?;
+            let now = r.knobs_on(read.reference.clone(), devices, signal.clone()).await?;
+            self.limiter_at_unity(&now, &limiter_places(&now.devices, &candidate.limiters), signal).await?;
+        }
+        Ok(said)
     }
 }
 #[async_trait(?Send)]
@@ -566,6 +701,9 @@ impl GoalRig for Goal {
     }
     fn screens(&self) -> bool {
         self.screen.is_some()
+    }
+    fn kept_only(&self) -> Option<String> {
+        self.beside.borrow().clone()
     }
     async fn add(&self, candidate: &AuditionCandidate, given: Signal) -> Result<Result<GoalSlotInfo, String>, RuntimeError> {
         let signal = self.signal(given);
@@ -671,7 +809,8 @@ impl GoalRig for Goal {
                     .await?;
                 for (knob, value) in moved {
                     if !refused.contains(&key(&knob)) {
-                        self.remember(&trial.slot, &knob, value);
+                        let was = knob_now(&fresh, &knob).map_or(knob.value, |(_, now)| now.value);
+                        self.remember(&trial.slot, &knob, value, was);
                     }
                 }
                 if !refused.is_empty() {
@@ -732,10 +871,10 @@ impl GoalRig for Goal {
     async fn settle(&self, slot: &str, knobs: &[Knob], values: &[f64], given: Signal) -> Result<Option<String>, RuntimeError> {
         let signal = self.signal(given);
         let result = async {
-            self.set_slot(slot, knobs, values, signal.clone()).await?;
-            if self.limited(slot) {
+            let fresh = self.set_slot(slot, knobs, values, signal.clone()).await?;
+            if !self.limiters_on(slot, &fresh).is_empty() {
                 let read = self.render.read_knobs(slot, signal.clone()).await?;
-                self.limiter_at_unity(&read, signal.clone()).await?;
+                self.limiter_at_unity(&read, &self.limiters_on(slot, &read), signal.clone()).await?;
             }
             Ok::<_, RuntimeError>(())
         }
@@ -755,12 +894,13 @@ impl GoalRig for Goal {
         let signal = self.signal(given);
         let r = &self.render;
         let result: Result<String, RuntimeError> = async {
-            self.set_slot(slot, knobs, values, signal.clone()).await?;
+            let fresh = self.set_slot(slot, knobs, values, signal.clone()).await?;
             self.known.borrow_mut().clear();
-            let may_go = self.last_best_may_go(signal.clone()).await?;
+            *self.beside.borrow_mut() = None;
+            let last = self.last_best(signal.clone()).await?;
             *r.best_kept.borrow_mut() = None;
             let previous = std::mem::take(&mut *r.best_steps.borrow_mut());
-            if may_go {
+            if matches!(last, LastBest::Free) {
                 r.history
                     .quietly(None, async {
                         for id in previous.iter().rev() {
@@ -812,12 +952,31 @@ impl GoalRig for Goal {
                         .filter(|v| !v.is_null())
                         .map(js_string)
                         .unwrap_or_else(|| name_new.clone());
-                    let limited = self.limited(slot);
+                    // (a copy's devices have identities of their own: its limiters are where the candidate's are)
+                    let places = self.limiters_on(slot, &fresh);
                     if let Ok(read) = r.read_knobs(&name_now, signal.clone()).await {
-                        if limited {
-                            let _ = self.limiter_at_unity(&read, signal.clone()).await;
+                        // Live copies a track a moment behind what was just set on it: a real Live's copy held the last trial's
+                        // value, though the track read as the winner's. So the copy is held to what it's the best at.
+                        let behind: Vec<(Knob, f64)> = given_values(knobs, values)
+                            .into_iter()
+                            .filter_map(|(knob, value)| {
+                                let (_, now) = knob_now(&fresh, &knob)?;
+                                let copied = read.knobs.iter().find(|copied| copied.device == now.device && copied.name == now.name)?;
+                                (!near(copied, copied.value, value)).then(|| (copied.clone(), value))
+                            })
+                            .collect();
+                        if !behind.is_empty() {
+                            self.set_on_devices(by_device(&read, &behind).0, signal.clone()).await?;
                         }
-                        *r.best_kept.borrow_mut() = Some(KeptBest { name: name_now.clone(), limited, print: Print::of(&read, limited) });
+                        if !places.is_empty() {
+                            let _ = self.limiter_at_unity(&read, &places, signal.clone()).await;
+                        }
+                    }
+                    // Read last, with all Kumi does to it done.
+                    let print = self.best_print(&name_now, signal.clone()).await.ok().flatten();
+                    *r.best_kept.borrow_mut() = Some(KeptBest { name: name_now.clone(), print });
+                    if let LastBest::Stays(last, why) = &last {
+                        *self.beside.borrow_mut() = Some(last_best_beside(last, why, &name_new));
                     }
                     if waits {
                         r.tell(if muted { best_waits_muted(&name_new, slot) } else { best_plays_beside(&name_new, slot) }, None);
@@ -849,12 +1008,14 @@ impl GoalRig for Goal {
         self.render.close_rig(&mut rig).await;
         Ok(rig.notes.clone())
     }
-    /// Live's search moves the candidates' own tracks, so each goes back as the goal first found it, with its safety limiter at
-    /// unity; the limiter stays, as it does in REAPER and Renoise. A track that's gone was tidied away.
+    /// Live's search moves the candidates' own tracks, so each goes back as the goal first found it, without Kumi's limiter: a
+    /// resumed goal, or a later one, puts on a fresh one turned down, and hears as it did. (REAPER's and Renoise's limiters are
+    /// never turned down, and stay.) A settled winner keeps its limiter, at unity. What can't be put back now is kept for a later
+    /// goal on the track to finish.
     async fn put_back(&self, given: Signal) -> Vec<String> {
         let signal = self.signal(given);
         let r = &self.render;
-        let candidates: Vec<(String, Candidate)> =
+        let candidates: IndexMap<String, Candidate> =
             std::mem::take(&mut *r.goal_candidates.borrow_mut()).into_iter().filter(|(_, candidate)| !candidate.settled).collect();
         if candidates.is_empty() {
             return vec![];
@@ -862,27 +1023,53 @@ impl GoalRig for Goal {
         let tracks = match r.rows("track", json!({"fields":["name"]}), signal.clone()).await {
             Ok(tracks) => tracks,
             Err(error) => {
-                let names: Vec<String> = candidates.iter().map(|(name, _)| format!("“{name}”")).collect();
+                let names: Vec<String> = candidates.keys().map(|name| format!("“{name}”")).collect();
+                *r.goal_candidates.borrow_mut() = candidates;
                 return vec![couldnt_put_back(&names.join(", "), &error)];
             }
         };
         let mut said = vec![];
-        for (name, candidate) in candidates {
+        let mut left = IndexMap::new();
+        for (name, mut candidate) in candidates {
             let held = self.places.borrow().get(&name).cloned();
-            let reference = match track_now(&tracks, &name, held.as_deref()) {
-                Ok(Some(reference)) => reference,
-                Ok(None) => continue,
+            let (reference, only_its_own) = match track_now(&tracks, &name, held.as_deref()) {
+                Ok(Some(reference)) => (reference, false),
+                // No track has its name: renamed, at its old place if nothing moved it, or tidied away, which leaves nothing of it
+                // there for Live's identities to find.
+                Ok(None) => match held.filter(|held| tracks.iter().any(|track| track.get("ref").and_then(Value::as_str) == Some(held))) {
+                    Some(held) => (held, true),
+                    None => continue,
+                },
                 Err(error) => {
                     said.push(couldnt_put_back(&format!("“{name}”"), &error));
+                    left.insert(name, candidate);
                     continue;
                 }
             };
-            match self.put_candidate_back(reference, &candidate, signal.clone()).await {
-                Ok(turned) if turned.is_empty() => {}
-                Ok(turned) => said.push(format!("“{name}” is back as it was, except that {}.", you_turned(&name, &turned))),
+            match self.put_candidate_back(reference, &mut candidate, only_its_own, signal.clone()).await {
+                Ok(back) => {
+                    if !back.turned.is_empty() {
+                        said.push(format!("“{name}” is back as it was, except that {}.", you_turned(&name, &back.turned)));
+                    }
+                    if !back.refused.is_empty() {
+                        said.push(format!(
+                            "Live wouldn't take {} on “{name}” back to where the goal found {}: check {}.",
+                            back.refused.join(", "),
+                            if back.refused.len() == 1 { "it" } else { "them" },
+                            if back.refused.len() == 1 { "it" } else { "them" }
+                        ));
+                    }
+                    if !candidate.limiters.is_empty() {
+                        said.push(limiter_stays("Limiter", &name));
+                    }
+                }
                 Err(error) => said.push(couldnt_put_back(&format!("“{name}”"), &error)),
             }
+            if !candidate.moved.is_empty() || !candidate.limiters.is_empty() {
+                left.insert(name, candidate);
+            }
         }
+        r.goal_candidates.borrow_mut().extend(left);
         said
     }
 }

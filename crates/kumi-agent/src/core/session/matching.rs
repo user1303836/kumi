@@ -524,7 +524,13 @@ impl Session {
                 notes.push(format!("Its settings couldn't all be put back ({reason}); check {}.", winner.name));
             }
             notes.extend(rig.put_back(cleanup).await);
-            search?;
+            if let Err(error) = search {
+                // (what the rig has to say goes nowhere else then)
+                if !notes.is_empty() {
+                    self.notice(notes.join(" "));
+                }
+                return Err(error);
+            }
             let Some(from) = from else {
                 return Ok(None);
             };
