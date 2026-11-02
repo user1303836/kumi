@@ -165,6 +165,20 @@ fn device_of(tag: &str, words: &[&str]) -> (SetDevice, bool) {
     }
 }
 
+/// Where a project's media is, as this system names it. REAPER finds media named relative to the project's folder there. A
+/// project saved on another system says its paths that system's way: a relative one is the same path here, and a whole one
+/// (a Windows drive or share on a Mac) is kept as it was written, never taken for a name inside the project's folder.
+fn media_path(folder: &str, file: &str) -> String {
+    let bytes = file.as_bytes();
+    let windows_whole = file.starts_with(r"\\")
+        || (bytes.len() > 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'));
+    if is_absolute(file) || windows_whole {
+        file.to_string()
+    } else {
+        join(folder, &file.replace('\\', "/"))
+    }
+}
+
 /// A track while it's read: what it is so far, and its folder's start (the line's first `ISBUS` word is 1) and how many
 /// folders end after it (its second, negative).
 #[derive(Default)]
@@ -356,8 +370,7 @@ impl Read {
                 if !SAMPLE_EXTENSIONS.iter().any(|extension| lower.ends_with(extension)) {
                     return;
                 }
-                // REAPER finds media named relative to the project's folder there.
-                let file = if is_absolute(file) { file.to_string() } else { join(&self.folder, file) };
+                let file = media_path(&self.folder, file);
                 if let Some(track) = self.track.as_mut() {
                     if track.track.samples.len() < MOST_SAMPLES && !track.track.samples.contains(&file) {
                         track.track.samples.push(file);
@@ -571,6 +584,12 @@ mod tests {
 >
 "#;
 
+    /// A whole path under the test's `/Projects/Song`, as this system writes it.
+    fn here(parts: &[&str]) -> String {
+        let separator = if cfg!(windows) { "\\" } else { "/" };
+        format!("{separator}{}", parts.join(separator))
+    }
+
     fn read_text(text: &[u8]) -> Option<SetSummary> {
         read_lines(text, "Song", "/Projects/Song", &Signal::new()).unwrap()
     }
@@ -604,7 +623,7 @@ mod tests {
         assert_eq!(bus.plugins.as_deref(), Some(&["Pro-C 2".to_string()][..]));
         // Media, the project's own found in its folder; a section's inner source too; MIDI's file isn't a sample.
         let kick = &set.tracks[1];
-        assert_eq!(kick.samples, ["/Projects/Song/Media/kick.wav", "/Samples/Kick 2.WAV"]);
+        assert_eq!(kick.samples, [here(&["Projects", "Song", "Media", "kick.wav"]), "/Samples/Kick 2.WAV".to_string()]);
         assert_eq!(kick.clips.arrangement, 2);
         let lead = &set.tracks[2];
         assert!(lead.samples.is_empty());
@@ -775,7 +794,7 @@ mod tests {
         );
         let comp = &set.tracks[0].devices[0];
         assert_eq!((comp.name.as_str(), comp.preset.as_deref()), ("ReaComp", Some("stock - Rock Snare - aim for 4dB GR")));
-        assert_eq!(set.tracks[1].samples, ["/Projects/Song/Media/tone.wav"]);
+        assert_eq!(set.tracks[1].samples, [here(&["Projects", "Song", "Media", "tone.wav"])]);
         assert_eq!(set.tracks[1].clips.arrangement, 1);
         let keys = &set.tracks[2].devices;
         assert_eq!(keys.iter().map(|d| d.name.as_str()).collect::<Vec<_>>(), ["ReaSynth", "DLSMusicDevice", "utility/volume", "Container"]);
@@ -788,6 +807,38 @@ mod tests {
         assert_eq!((keys[3].role, keys[3].preset.as_deref()), (DeviceRole::Rack, Some("Space")));
         assert_eq!(keys[3].inside.as_deref(), Some(&["ReaEQ".to_string(), "utility/volume".to_string()][..]));
         assert_eq!(set.tracks[2].plugins.as_deref(), Some(&["DLSMusicDevice".to_string()][..]));
+    }
+
+    /// A project's media however it was saved: a path written on Windows or on a Mac, read on either.
+    #[test]
+    fn media_paths_read_as_this_system_names_them_whichever_system_saved_the_project() {
+        let folder = if cfg!(windows) { r"C:\Music\Song" } else { "/Music/Song" };
+        let inside = |parts: &[&str]| {
+            format!("{folder}{}{}", if cfg!(windows) { "\\" } else { "/" }, parts.join(if cfg!(windows) { "\\" } else { "/" }))
+        };
+        for (written, read) in [
+            (r"Media\kick.wav", inside(&["Media", "kick.wav"])),
+            ("Media/kick.wav", inside(&["Media", "kick.wav"])),
+            ("kick.wav", inside(&["kick.wav"])),
+            (r"C:\Samples\Kick 2.wav", r"C:\Samples\Kick 2.wav".to_string()),
+            ("C:/Samples/Kick 2.wav", "C:/Samples/Kick 2.wav".to_string()),
+            (r"\\studio\share\kick.wav", r"\\studio\share\kick.wav".to_string()),
+            ("/Samples/kick.wav", "/Samples/kick.wav".to_string()),
+        ] {
+            assert_eq!(media_path(folder, written), read, "{written}");
+        }
+        // Up a folder: where it really is, on either system.
+        let up = if cfg!(windows) { r"C:\Music\Shared\kick.wav" } else { "/Music/Shared/kick.wav" };
+        assert_eq!(media_path(folder, r"..\Shared\kick.wav"), up);
+        assert_eq!(media_path(folder, "../Shared/kick.wav"), up);
+        // Through the reader, a line as REAPER on Windows writes it.
+        let text = format!(
+            "<REAPER_PROJECT 0.1 \"7.82/win64\" 1 0\r\n  <TRACK {{A}}\r\n    NAME Kick\r\n    <ITEM\r\n      <SOURCE WAVE\r\n        FILE {}\r\n      >\r\n    >\r\n  >\r\n>\r\n",
+            r#""C:\Samples\Kick 2.wav" 1"#
+        );
+        let set = read_lines(text.as_bytes(), "Song", folder, &Signal::new()).unwrap().unwrap();
+        assert_eq!(set.made_in.as_deref(), Some("REAPER 7.82"));
+        assert_eq!(set.tracks[0].samples, [r"C:\Samples\Kick 2.wav"]);
     }
 
     #[test]
