@@ -8,6 +8,7 @@ local H = T.harness
 local I = T.instruments
 local setup, place, preview, apply, change, restore, failure, call = I.setup, I.place, I.preview, I.apply, I.change, I.restore, I.failure, I.call
 local steps, newest, instrument, iref, sref = I.steps, I.newest, I.instrument, I.iref, I.sref
+local K = assert(loadfile(T.tests_dir .. "change_kit.lua"))(T)
 
 local function sample(i, s) return mock.data.instruments[i].samples[s] end
 local function sample_names(i)
@@ -618,8 +619,13 @@ test("samples: a sample's polarity flips in one step and Kumi's undo flips it ba
   eq(steps(), 2, "nothing written")
   -- Renoise's own undo of a flip: Kumi's undo finds it back already
   record = change(peer, "sample-invert", { ref = sref(place(peer), 1, 1) })
+  H.tick(2)
+  K.told(peer)
   mock.song:undo()
   eq(value_of(1, 1, 1, 500), before[2])
+  -- (no notifier tells it, lab: the journal's poll does)
+  mock.advance(1100)
+  ok(K.told(peer):find("^undo:"), "told undone")
   again = restore(peer, "sample-invert", record)
   ok(again.result and again.result.display.title:find("back already", 1, true), json.encode(again.result or again.error))
 end)

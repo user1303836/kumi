@@ -527,8 +527,8 @@ local function buffer_object(sample)
       if not buffer.prepared then error("finalize_sample_data_changes before prepare_sample_data_changes", 2) end
       local old, new = buffer.prepared.values, copy(buffer.values or {})
       buffer.prepared = nil
-      M.fire(obs(sample, "buffer"))
-      M.record(function() buffer.values = copy(old); M.fire(obs(sample, "buffer")) end, function() buffer.values = copy(new); M.fire(obs(sample, "buffer")) end)
+      -- (values changed in place fire no notifier, nor does Renoise's undo or redo of them: lab 2026-11-01)
+      M.record(function() buffer.values = copy(old) end, function() buffer.values = copy(new) end)
     end,
     delete_sample_data = function()
       local old = sample.buffer
