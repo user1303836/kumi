@@ -1013,17 +1013,12 @@ fn library_file(root: &Path, folder: &str, extension: &str, prefer: &str) -> Opt
     Some(pick.to_string_lossy().into_owned())
 }
 
-/// The installed tool's bridge-reference.json, which says what Kumi home it reports to (the newest Renoise's).
+/// The installed tool's bridge-reference.json, which says what Kumi home it reports to (the Renoise Kumi's tool goes in).
 fn tool_reference() -> Option<PathBuf> {
-    let prefs = dirs_home().join("Library/Preferences/Renoise");
-    let mut found: Vec<PathBuf> = std::fs::read_dir(prefs)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path().join("Scripts/Tools/com.kumi.Bridge.xrnx/bridge-reference.json"))
-        .filter(|path| path.is_file())
-        .collect();
-    found.sort();
-    found.pop()
+    let var = |name: &str| std::env::var(name).ok();
+    let env = daw_bridge::detect::Env { os: daw_bridge::detect::Os::current(), home: dirs_home(), var: &var, root: None };
+    let target = daw_bridge::detect::detect_renoise(&env).target?;
+    Some(target.tools().join(daw_bridge::install::RENOISE_TOOL_FOLDER).join("bridge-reference.json")).filter(|path| path.is_file())
 }
 
 fn saved_reference(home: &Path) -> PathBuf {
@@ -1044,7 +1039,9 @@ fn point_reference(home: &Path) -> Result<(), String> {
     for (key, name) in [("secretFile", "bridge.secret"), ("discoveryDir", "discovery"), ("logDir", "logs")] {
         reference[key] = json!(ours.join(name).to_string_lossy());
     }
-    std::fs::write(&path, serde_json::to_string_pretty(&reference).expect("JSON")).map_err(|why| why.to_string())
+    std::fs::write(&path, serde_json::to_string_pretty(&reference).expect("JSON")).map_err(|why| why.to_string())?;
+    println!("{} reports to {}; put it back with --restore-reference", path.display(), home.display());
+    Ok(())
 }
 
 fn restore_reference(home: &Path) -> Result<(), String> {
@@ -1093,7 +1090,8 @@ fn main() {
     let only: Option<Vec<String>> = flag("--only").map(|list| list.split(',').map(str::to_owned).collect());
     let big = argv.iter().any(|a| a == "--big");
     let out_path = flag("--out");
-    let home = PathBuf::from(home);
+    // (absolute: what's written into the reference is read from Renoise's own folder)
+    let home = std::path::absolute(home).expect("a Kumi home");
     if argv.iter().any(|a| a == "--point-reference" || a == "--restore-reference") {
         let done = if argv.iter().any(|a| a == "--point-reference") { point_reference(&home) } else { restore_reference(&home) };
         if let Err(why) = done {
