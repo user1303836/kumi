@@ -157,6 +157,8 @@ struct Set {
     stopping: Cell<u32>,
     /// Knobs Live won't set, by their device's name and theirs.
     refused: RefCell<Vec<(String, String)>>,
+    /// Whether Live says who each device is (`objectIdentity`), as a bridge before it did wouldn't.
+    identities: Cell<bool>,
     /// Live copies a track a moment behind what was just set on it, as a real Live was seen to: what the last set changed, by
     /// track, device, knob and its value before.
     last_set: RefCell<Vec<(usize, usize, usize, f64)>>,
@@ -187,6 +189,7 @@ impl Set {
             lag: Cell::new(0),
             stopping: Cell::new(0),
             refused: RefCell::default(),
+            identities: Cell::new(true),
             last_set: RefCell::default(),
             asked: RefCell::default(),
             on_call: RefCell::new(None),
@@ -316,7 +319,11 @@ impl Set {
                 .iter()
                 .enumerate()
                 .map(|(index, device)| {
-                    json!({"ref":format!("7:device:{}:d{index}",at[0]),"parentRef":parent,"name":device.name,"className":device.class,"classDisplayName":device.class,"enabled":true,"objectIdentity":device.identity})
+                    let mut row = json!({"ref":format!("7:device:{}:d{index}",at[0]),"parentRef":parent,"name":device.name,"className":device.class,"classDisplayName":device.class,"enabled":true,"objectIdentity":device.identity});
+                    if !self.identities.get() {
+                        row.as_object_mut().unwrap().remove("objectIdentity");
+                    }
+                    row
                 })
                 .collect(),
             "parameter" => tracks[at[0]].devices[at[1]]
@@ -1468,24 +1475,30 @@ fn candidates_go_back_to_where_the_goal_first_found_them_across_a_leap() {
     });
 }
 
-/// (#399) A candidate tidied away or deleted has nothing to go back to, and that needs no word.
+/// (#399) A candidate tidied away or deleted has nothing to go back to, and that needs no word. Nothing goes to the track now at
+/// its old place either, though that track's devices have the same names, and though Live says nothing of who they are.
 #[test]
 fn a_track_thats_gone_is_skipped_without_a_word() {
-    on_a_paused_clock(async {
-        let live = Live::new(&[("Gone", &["Synth"]), ("Stays", &["Synth"])]).await;
-        let goal = live.goal(&["Gone", "Stays"]).await;
-        let (gone, stays) = (slot_named(&goal, "Gone"), slot_named(&goal, "Stays"));
-        goal.generation(&[trial(&gone, &[("Synth", "Tone", 0.6)]), trial(&stays, &[("Synth", "Tone", 0.7)])], Signal::new(), None)
-            .await
-            .unwrap();
-        goal.close().await.unwrap();
-        live.set.delete_track("Gone");
+    for (gone_first, identities) in [(false, true), (true, true), (true, false)] {
+        on_a_paused_clock(async {
+            let case = format!("gone first {gone_first}, identities {identities}");
+            let (gone, other): ((&str, &[&str]), (&str, &[&str])) = (("Gone", &["Synth"]), ("Other", &["Synth", "Limiter"]));
+            let live = Live::new(&if gone_first { [gone, other] } else { [other, gone] }).await;
+            live.set.identities.set(identities);
+            live.set.turn("Other", "Synth", "Tone", 0.3);
+            let goal = live.goal(&["Gone"]).await;
+            let slot = slot_named(&goal, "Gone");
+            goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+            goal.close().await.unwrap();
+            live.set.delete_track("Gone");
 
-        let said = goal.put_back(Signal::new()).await;
+            let said = goal.put_back(Signal::new()).await;
 
-        assert!(said.is_empty(), "{said:?}");
-        assert_eq!(live.set.knob("Stays", "Synth", "Tone"), 0.5);
-    });
+            assert!(said.is_empty(), "{case}: {said:?}");
+            assert_eq!(live.set.knob("Other", "Synth", "Tone"), 0.3, "{case}: the track now at its place");
+            assert_eq!(live.set.chain("Other"), ["Synth", "Limiter"], "{case}: and its own Limiter");
+        });
+    }
 }
 
 /// (#399) One knob Live won't take back doesn't stop the rest, or the limiter: it's named, and a later goal can still finish it.
