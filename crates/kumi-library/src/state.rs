@@ -122,18 +122,20 @@ impl Holding {
         write_compact_json(&self.file, &json!({"pid": std::process::id(), "at": now_ms()})).await
     }
 }
+/// Who a lock's file names, if anyone.
+async fn holder_of(file: &Path) -> Option<f64> {
+    read_json::<Value>(file).await.and_then(|holder| holder["pid"].as_f64())
+}
 /// Whether a lock's file names this process.
 async fn held_here(file: &Path) -> bool {
-    held_by(file, std::process::id()).await
-}
-async fn held_by(file: &Path, pid: u32) -> bool {
-    read_json::<Value>(file).await.and_then(|holder| holder["pid"].as_f64()) == Some(pid as f64)
+    holder_of(file).await == Some(std::process::id() as f64)
 }
 /// The lock of a learner that was ended rather than stopped (`pid`'s, in `dir`), let go of for it: it can't itself. Only
-/// while it's still that learner's: one another process took over meanwhile is theirs.
+/// while it's still that learner's: one another process took over meanwhile is theirs. One that names nobody is the learner's
+/// too, ended between making the file and writing to it (as `acquire_lock` reads it: a lock with no holder is left).
 pub async fn release_ended(dir: &str, pid: u32) -> io::Result<()> {
     let file = Path::new(dir).join("learning.lock");
-    if !held_by(&file, pid).await {
+    if holder_of(&file).await.is_some_and(|holder| holder != pid as f64) {
         return Ok(());
     }
     match tokio::fs::remove_file(&file).await {
