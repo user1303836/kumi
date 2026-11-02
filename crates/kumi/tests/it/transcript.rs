@@ -299,3 +299,80 @@ fn a_reasonings_headline_is_its_latest_title_or_its_last_line_without_markdown()
     assert_eq!(headline("-3 dB on the low shelf should do it"), "-3 dB on the low shelf should do it");
     assert_eq!(headline("> - *quoted*, listed"), "*quoted*, listed");
 }
+
+fn heard(bands: Vec<f64>) -> Entry {
+    Entry::Heard { file: "mix.wav".into(), summary: "−12.1 LUFS".into(), bands, compared: None }
+}
+fn texts(rows: &[Row]) -> Vec<String> {
+    rows.iter().map(|row| row.spans.iter().map(|span| span.text.as_str()).collect::<String>()).collect()
+}
+/// A darker balance, as the analysis gives it: each band's share of the whole, dB.
+const DARK_MIX: [f64; 10] = [-8., -5., -7., -9., -10., -12., -13., -16., -18., -22.];
+
+#[test]
+fn one_file_heard_is_an_octave_analyzer_where_pink_noise_draws_flat() {
+    // Pink noise has the same energy in every octave: each band's share is its width in octaves over all ten's.
+    let octaves = |band: &kumi_media::audio::analyze::Band| (band.to / band.from).log2();
+    let all: f64 = kumi_media::audio::BANDS.iter().map(octaves).sum();
+    let pink = kumi_media::audio::BANDS.iter().map(|band| 10. * (octaves(band) / all).log10()).collect();
+    let lines = texts(&entry_rows(&heard(pink), 75, 0.));
+    assert_eq!(lines[..2], ["Heard mix.wav · −12.1 LUFS", "energy per octave, dB under the loudest band"]);
+    // Every bar as high, half a row into the top one (0 dB is its middle), and as wide as its band on the log scale:
+    // sub (1.6 octaves) wider than bass (1), bass than bite (0.6).
+    assert!(lines[2].starts_with("   0 "), "{lines:#?}");
+    let tops: Vec<&str> = lines[2][5..].split('─').filter(|run| !run.is_empty()).collect();
+    assert_eq!(tops.len(), 10, "{lines:#?}");
+    assert!(tops.iter().all(|run| run.chars().all(|c| c == '▄')), "{tops:?}");
+    let wide = |run: &str| run.chars().count();
+    assert!(wide(tops[0]) > wide(tops[1]) && wide(tops[1]) > wide(tops[7]), "{tops:?}");
+    assert!(lines[3..7].iter().all(|line| line.contains('█') && !line.contains('▄')), "{lines:#?}");
+    assert!(lines[4].starts_with(" −10 ") && lines[6].starts_with(" −20 "), "{lines:#?}");
+    // The Hz scale, and the tilt: none for pink noise.
+    assert!(lines[7].starts_with("     ─") && lines[7].contains('┬'), "{lines:#?}");
+    assert!(["50", "100", "200", "500", "1k", "2k", "5k", "10k Hz"].iter().all(|hz| lines[8].contains(hz)), "{lines:#?}");
+    assert_eq!(lines[9..], ["tilt 0.0 dB per octave · pink noise is 0, darker is below"]);
+}
+
+#[test]
+fn a_band_under_the_analyzers_scale_keeps_a_stub_and_the_tilt_says_how_dark() {
+    let lines = texts(&entry_rows(&heard(DARK_MIX.to_vec()), 75, 0.));
+    assert_eq!(lines.last().unwrap(), "tilt −1.4 dB per octave · pink noise is 0, darker is below");
+    assert!(!lines[6].contains('▁'), "{lines:#?}");
+    // Air 60 dB under the rest: under the scale, a stub on the bottom row (before the gridline's last cell).
+    let mut quiet = DARK_MIX;
+    quiet[9] = -60.;
+    let lines = texts(&entry_rows(&heard(quiet.to_vec()), 75, 0.));
+    assert!(lines[6].trim_end_matches('─').ends_with('▁'), "{lines:#?}");
+}
+
+#[test]
+fn the_analyzer_needs_the_ten_bands_and_room_for_them() {
+    let title = ["Heard mix.wav · −12.1 LUFS"];
+    assert_eq!(texts(&entry_rows(&heard(DARK_MIX.to_vec()), 34, 0.)), title);
+    assert!(entry_rows(&heard(DARK_MIX.to_vec()), 35, 0.).len() > 9);
+    assert_eq!(texts(&entry_rows(&heard(vec![-15.; 31]), 75, 0.)), title);
+    assert_eq!(texts(&entry_rows(&heard(vec![]), 75, 0.)), title);
+    assert_eq!(texts(&entry_rows(&heard(vec![f64::NEG_INFINITY; 10]), 75, 0.)), title);
+    // However wide the conversation, the analyzer keeps to 78 cells.
+    let wide = texts(&entry_rows(&heard(DARK_MIX.to_vec()), 140, 0.));
+    assert!(wide[2..9].iter().all(|line| line.chars().count() <= 78), "{wide:#?}");
+}
+
+#[test]
+fn the_analyzers_bars_are_mixed_again_in_another_theme() {
+    use kumi::tui::style::{set_theme, DARK, LIGHT};
+    let mut t = Transcript::default();
+    t.add(heard(DARK_MIX.to_vec()));
+    let bar = |t: &mut Transcript| {
+        t.rows(75, 0.).iter().flat_map(|row| row.spans.iter()).find(|span| span.text.contains('█')).and_then(|span| span.style.fg).unwrap()
+    };
+    // The accent half over the ground.
+    assert_eq!(bar(&mut t), [0x4a, 0x79, 0x64]);
+    let laid = t.laid_out;
+    set_theme(&LIGHT);
+    let light = bar(&mut t);
+    set_theme(&DARK);
+    assert_eq!(t.laid_out, laid + 1, "laid out again in the light theme");
+    assert_ne!(light, [0x4a, 0x79, 0x64]);
+    assert_eq!(bar(&mut t), [0x4a, 0x79, 0x64]);
+}

@@ -22,8 +22,11 @@ closes, crashes or is stopped.
   words ("looked at your Set"), each with its timing. A step at work animates by
   kind (searching, reading, building a device, changing, listening, playing);
   the same step done several times folds into one line ("read a page ×3").
-  What Kumi heard shows as a small spectrum, and what it keeps as a line of its
-  own: ✎ a note, ◆ a technique, ↻ a recipe, ✦ a lesson from matching. While the
+  A file Kumi heard shows as a spectrum: its ten bands to scale on a frequency
+  axis, each as high as its energy per octave (dB under the loudest band), and
+  the balance's tilt (0 is pink noise, below it darker); against a reference,
+  each band's difference. What Kumi keeps shows as a line of its own: ✎ a note,
+  ◆ a technique, ↻ a recipe, ✦ a lesson from matching. While the
   model thinks between steps, the headline of its reasoning shows on a row of its
   own, as a step at work. Each finished answer ends with one quiet line: its
   time, its changes, and its tokens on an API key or its share of the plan on a

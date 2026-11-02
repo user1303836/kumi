@@ -1,12 +1,13 @@
 //! Conversation rows and timed repeated-step folding.
 use super::{
-    activity::{activity_of, blend_steps, Activity},
+    activity::{activity_of, blend, blend_steps, Activity},
     markdown::{render_markdown_with, MarkdownCache},
-    style::{palette, Rgb, Style},
+    style::{palette, theme, Rgb, Style},
     width::text_width,
     wrap::{wrap_carried, Carry, Span},
 };
 use kumi_common::js::number;
+use kumi_media::audio::BANDS;
 use serde::{Deserialize, Serialize};
 use std::{
     cell::{Cell, RefCell},
@@ -556,64 +557,204 @@ pub fn entry_rows_with(entry: &Entry, width: i32, now: f64, markdown: &mut Markd
     }
 }
 const BAND_LABELS: [&str; 10] = ["sub", "bass", "u.bas", "l.mid", "mids", "u.mid", "pres", "bite", "brill", "air"];
-const BARS: [&str; 8] = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 fn pad(text: &str, cells: usize) -> String {
     let mut units: Vec<_> = text.encode_utf16().collect();
     units.resize(cells, 32);
     units.truncate(cells);
     String::from_utf16_lossy(&units)
 }
+/// A file heard (its title, then its spectrum: `analyzer_rows`), or one compared with a reference (its title, then
+/// each band's difference over the band's name).
 fn heard_rows(file: &str, summary: &str, bands: &[f64], compared: Option<&Comparison>, width: i32) -> Vec<Row> {
+    let Some(c) = compared else {
+        let mut rows = wrapped(&[span(format!("Heard {file} · {summary}"), palette::DIM)], width);
+        rows.extend(analyzer_rows(bands, width));
+        return rows;
+    };
     let cell = if width >= 60 { 6 } else { 5 };
     let fits = (width / cell).clamp(1, 10) as usize;
-    let title =
-        compared.map_or_else(|| format!("Heard {file} · {summary}"), |c| format!("Heard {file} against {}, loudness matched", c.reference));
-    let mut rows = wrapped(&[span(title, palette::DIM)], width);
-    rows.push(row(if let Some(c) = compared {
-        c.differences
-            .iter()
-            .take(fits)
-            .map(|value| {
-                span(
-                    pad(
-                        &format!(
-                            "{}{}",
-                            if *value > 0. {
-                                "+"
-                            } else if *value < 0. {
-                                "−"
-                            } else {
-                                " "
-                            },
-                            number::to_fixed(value.abs(), 1)
-                        ),
-                        cell as usize,
-                    ),
-                    if value.abs() >= 1.5 {
+    let mut rows = wrapped(&[span(format!("Heard {file} against {}, loudness matched", c.reference), palette::DIM)], width);
+    rows.push(row(c
+        .differences
+        .iter()
+        .take(fits)
+        .map(|value| {
+            span(
+                pad(
+                    &format!(
+                        "{}{}",
                         if *value > 0. {
-                            palette::WARN
+                            "+"
+                        } else if *value < 0. {
+                            "−"
                         } else {
-                            palette::ACCENT
-                        }
+                            " "
+                        },
+                        number::to_fixed(value.abs(), 1)
+                    ),
+                    cell as usize,
+                ),
+                if value.abs() >= 1.5 {
+                    if *value > 0. {
+                        palette::WARN
                     } else {
-                        palette::FAINT
-                    },
-                )
-            })
-            .collect()
-    } else {
-        let loudest = bands.iter().copied().fold(f64::NEG_INFINITY, f64::max);
-        bands
-            .iter()
-            .take(fits)
-            .map(|value| {
-                let level = number::round(7. + (value - loudest) / 4.).clamp(0., 7.) as usize;
-                span(pad(&BARS[level].repeat(cell as usize - 2), cell as usize), palette::ACCENT)
-            })
-            .collect()
-    }));
+                        palette::ACCENT
+                    }
+                } else {
+                    palette::FAINT
+                },
+            )
+        })
+        .collect()));
     rows.push(row(BAND_LABELS.iter().take(fits).map(|label| span(pad(label, cell as usize), palette::FAINT)).collect()));
     rows
+}
+/// The analyzer's rows.
+const ANALYZER_ROWS: usize = 5;
+/// The dB a row spans.
+const ANALYZER_STEP: f64 = 5.;
+/// The dB at the top row's top edge: its centre is 0 dB, the loudest band.
+const ANALYZER_TOP: f64 = ANALYZER_STEP / 2.;
+/// The cells left of the plot, where its dB are written.
+const ANALYZER_GUTTER: i32 = 5;
+/// The widest the analyzer is drawn, gutter and all.
+const ANALYZER_WIDTH: i32 = 78;
+/// The narrowest plot that still shows the narrowest band (4–6 kHz, 0.6 octave) a cell wide.
+const ANALYZER_LEAST: i32 = 30;
+/// Where the Hz scale is marked.
+const ANALYZER_TICKS: [(f64, &str); 8] =
+    [(50., "50"), (100., "100"), (200., "200"), (500., "500"), (1000., "1k"), (2000., "2k"), (5000., "5k"), (10000., "10k")];
+const EIGHTHS: [char; 9] = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+/// One file's spectrum, as an octave analyzer: each of the analysis's bands as wide as it is on a log scale from 20 Hz to
+/// 20 kHz, as high as its energy per octave in dB under the loudest band (its share of the whole less its width in
+/// octaves, so pink noise draws flat and a narrow band doesn't look quiet), on rows of 5 dB; the Hz scale under them,
+/// then the balance's tilt. Nothing where the bands aren't the analysis's, or the width can't show them.
+fn analyzer_rows(bands: &[f64], width: i32) -> Vec<Row> {
+    let plot = width.min(ANALYZER_WIDTH) - ANALYZER_GUTTER;
+    if bands.len() != BANDS.len() || plot < ANALYZER_LEAST {
+        return Vec::new();
+    }
+    let levels: Vec<f64> = bands.iter().zip(&BANDS).map(|(share, band)| share - 10. * (band.to / band.from).log2().log10()).collect();
+    let loudest = levels.iter().copied().filter(|level| level.is_finite()).fold(f64::NEG_INFINITY, f64::max);
+    if !loudest.is_finite() {
+        return Vec::new();
+    }
+    // A frequency's column: the plot spans 20 Hz to 20 kHz, a factor of 1000, on a log scale.
+    let column = |hz: f64| plot as f64 * (hz / 20.).log2() / 1000f64.log2();
+    let plot = plot as usize;
+    let (bar, grid) = (blend(palette::GROUND, palette::ACCENT, 0.5), blend(palette::GROUND, palette::RULE, 0.5));
+    // Every other row is marked with its dB, and a gridline through the cells no band reaches.
+    let marked = |row: usize| row.is_multiple_of(2);
+    let mut cells: Vec<Vec<(char, Rgb)>> = (0..ANALYZER_ROWS).map(|row| vec![(if marked(row) { '─' } else { ' ' }, grid); plot]).collect();
+    let floor = ANALYZER_TOP - ANALYZER_ROWS as f64 * ANALYZER_STEP;
+    for (band, level) in BANDS.iter().zip(&levels) {
+        // The band's columns, its last left empty between it and the next.
+        let from = number::round(column(band.from)) as usize;
+        let columns = from..(number::round(column(band.to)) as usize).saturating_sub(1).min(plot).max(from);
+        let high = if level.is_finite() { ((level - loudest - floor) / ANALYZER_STEP).clamp(0., ANALYZER_ROWS as f64) } else { 0. };
+        let (full, eighths) = (high.floor() as usize, number::round(high.fract() * 8.) as usize);
+        for up in 0..full {
+            cells[ANALYZER_ROWS - 1 - up][columns.clone()].fill(('█', bar));
+        }
+        if eighths > 0 && full < ANALYZER_ROWS {
+            cells[ANALYZER_ROWS - 1 - full][columns.clone()].fill((EIGHTHS[eighths], bar));
+        }
+        // Under the scale: a stub, so the band is still there.
+        if high == 0. {
+            cells[ANALYZER_ROWS - 1][columns].fill(('▁', palette::TRACK));
+        }
+    }
+    let mut rows = wrapped(&[span("energy per octave, dB under the loudest band", palette::FAINT)], width);
+    for (index, cells) in cells.iter().enumerate() {
+        let label = if marked(index) { signed_whole(ANALYZER_TOP - (index as f64 + 0.5) * ANALYZER_STEP) } else { String::new() };
+        rows.push(cells_row(span(format!("{label:>width$} ", width = ANALYZER_GUTTER as usize - 1), palette::FAINT), cells));
+    }
+    // The Hz scale: a tick for each mark, and its words under it where they don't run into the last.
+    let mut axis = vec![('─', palette::RULE); plot];
+    let mut words = vec![(' ', palette::FAINT); plot];
+    let mut write = |at: usize, text: &str| text.chars().enumerate().for_each(|(offset, letter)| words[at + offset].0 = letter);
+    let mut free = 0;
+    for (hz, label) in ANALYZER_TICKS {
+        let at = column(hz).floor() as usize;
+        axis[at] = ('┬', palette::RULE);
+        let start = at.saturating_sub((label.len() - 1) / 2);
+        if start >= free && start + label.len() <= plot {
+            write(start, label);
+            free = start + label.len() + 1;
+        }
+    }
+    if free + 2 <= plot {
+        write(free, "Hz");
+    }
+    let gutter = || span(" ".repeat(ANALYZER_GUTTER as usize), palette::FAINT);
+    rows.push(cells_row(gutter(), &axis));
+    rows.push(cells_row(gutter(), &words));
+    // The balance's slope through the bands' centres, as the analysis measures its tilt: 0 for pink noise.
+    let points: Vec<(f64, f64)> = BANDS
+        .iter()
+        .zip(&levels)
+        .filter(|(_, level)| level.is_finite())
+        .map(|(band, level)| ((band.from * band.to).sqrt().log2(), *level))
+        .collect();
+    rows.extend(wrapped(
+        &[
+            span("tilt ", palette::FAINT),
+            span(format!("{} dB per octave", signed_tenths(slope(&points))), palette::DIM),
+            span(" · pink noise is 0, darker is below", palette::FAINT),
+        ],
+        width,
+    ));
+    rows
+}
+/// `lead`, then the cells up to the last that isn't blank, a span for each run of one colour (blanks join any run).
+fn cells_row(lead: Span, cells: &[(char, Rgb)]) -> Row {
+    let drawn = cells.iter().rposition(|cell| cell.0 != ' ').map_or(0, |last| last + 1);
+    let mut spans = vec![lead];
+    let (mut run, mut color) = (String::new(), None);
+    for &(letter, cell) in &cells[..drawn] {
+        if letter != ' ' {
+            if let Some(before) = color.filter(|before| *before != cell) {
+                spans.push(span(std::mem::take(&mut run), before));
+            }
+            color = Some(cell);
+        }
+        run.push(letter);
+    }
+    if !run.is_empty() {
+        spans.push(span(run, color.unwrap_or(palette::FAINT)));
+    }
+    row(spans)
+}
+/// The least-squares slope through `points`.
+fn slope(points: &[(f64, f64)]) -> f64 {
+    if points.len() < 2 {
+        return 0.;
+    }
+    let count = points.len() as f64;
+    let (mean_x, mean_y) = (points.iter().map(|p| p.0).sum::<f64>() / count, points.iter().map(|p| p.1).sum::<f64>() / count);
+    let spread: f64 = points.iter().map(|p| (p.0 - mean_x).powi(2)).sum();
+    if spread == 0. {
+        return 0.;
+    }
+    points.iter().map(|p| (p.0 - mean_x) * (p.1 - mean_y)).sum::<f64>() / spread
+}
+/// A whole number of dB as the analyzer writes it: "0", "−10".
+fn signed_whole(value: f64) -> String {
+    let whole = number::round(value);
+    if whole < 0. {
+        format!("−{}", number::to_string(-whole))
+    } else {
+        number::to_string(whole.abs())
+    }
+}
+/// Tenths as the conversation writes them: "−2.0", "1.5", "0.0".
+fn signed_tenths(value: f64) -> String {
+    let tenths = number::round(value * 10.) / 10.;
+    if tenths < 0. {
+        format!("−{}", number::to_fixed(-tenths, 1))
+    } else {
+        number::to_fixed(tenths.abs(), 1)
+    }
 }
 fn auditioned_rows(round: f64, best: Option<&Best>, previous: Option<f64>, takes: &[Take], gaps: &[String], width: i32) -> Vec<Row> {
     let mut spans = vec![span(format!("Round {} · ", number::to_string(round)), palette::DIM)];
@@ -802,6 +943,9 @@ fn watched_rows(entry: &Entry, width: i32) -> Vec<Row> {
 struct Cache {
     width: i32,
     revision: u64,
+    /// The theme it was laid out in: colours mixed from a theme's (a spectrum's bars and gridlines) are mixed again in
+    /// another.
+    theme: &'static str,
     /// Shared with each layout made from it: a frame borrows these, it doesn't copy them.
     rows: Rc<[Row]>,
     moving: bool,
@@ -919,16 +1063,16 @@ impl Transcript {
                 }
             }
         }
-        let revision = entry.revision.get();
+        let (revision, drawn_in) = (entry.revision.get(), theme().name);
         let mut cached = entry.cache.borrow_mut();
-        if cached.as_ref().is_none_or(|c| c.width != width || c.revision != revision || moving || c.moving) {
+        if cached.as_ref().is_none_or(|c| c.width != width || c.revision != revision || c.theme != drawn_in || moving || c.moving) {
             self.laid_out += 1;
             let rows = entry_rows_with(&entry.borrow(), width, now, &mut entry.markdown.borrow_mut());
             // The kept lines serve while the answer streams; a settled answer's rows are the cache above.
             if !matches!(&*entry.borrow(), Entry::Assistant { status: AnswerStatus::Running, .. }) {
                 *entry.markdown.borrow_mut() = MarkdownCache::default();
             }
-            *cached = Some(Cache { width, revision, rows: rows.into(), moving });
+            *cached = Some(Cache { width, revision, theme: drawn_in, rows: rows.into(), moving });
         }
         cached.as_ref().unwrap().rows.clone()
     }
