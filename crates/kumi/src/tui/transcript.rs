@@ -943,7 +943,7 @@ fn watched_rows(entry: &Entry, width: i32) -> Vec<Row> {
 struct Cache {
     width: i32,
     revision: u64,
-    /// The theme it was laid out in: colours mixed from a theme's (a spectrum's bars, a fading step) are mixed again in
+    /// The theme it was laid out in: colours mixed from a theme's (a spectrum's bars and gridlines) are mixed again in
     /// another.
     theme: &'static str,
     /// Shared with each layout made from it: a frame borrows these, it doesn't copy them.
