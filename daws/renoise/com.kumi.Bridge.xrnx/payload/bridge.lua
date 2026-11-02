@@ -1797,7 +1797,6 @@ function M.tick()
   -- (the auditions whose time is up end: a note never hangs on)
   local ended, audition_err = pcall(actions.tick, M.now_ms())
   if not ended then M.log_error("auditions", audition_err) end
-  b.ticks = (b.ticks or 0) + 1
   if b.ticks % 20 == 0 then log.flush() end
 end
 
