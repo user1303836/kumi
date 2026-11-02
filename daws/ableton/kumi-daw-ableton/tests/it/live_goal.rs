@@ -157,6 +157,10 @@ impl Set {
     fn put_track_in(&self, at: usize, name: &str, devices: &[&str]) {
         self.tracks.borrow_mut().insert(at, Track::new(name, devices));
     }
+    /// The producer deletes a track.
+    fn delete_track(&self, name: &str) {
+        self.tracks.borrow_mut().retain(|track| track.name != name);
+    }
     /// How many times this kind of thing was read.
     fn reads(&self, kind: &str) -> usize {
         self.asked.borrow().iter().filter(|call| call["name"] == "live_discover" && call["args"]["kind"] == kind).count()
@@ -515,6 +519,24 @@ fn a_trial_goes_to_its_own_track_once_another_was_put_in_above() {
 
         assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.7);
         assert_eq!(live.set.knob("Other", "Synth", "Tone"), 0.5, "the track now at the candidate's old place");
+        goal.close().await.unwrap();
+    });
+}
+
+/// (#399) A candidate's track deleted mid-search: the search stops and says why, rather than tuning the track now at its place.
+#[test]
+fn a_trial_for_a_track_thats_gone_stops_the_search_in_words() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth"]), ("Other", &["Synth"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+        live.set.delete_track("Candidate");
+
+        let said = goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.7)])], Signal::new(), None).await.err().unwrap().to_string();
+
+        assert!(said.contains("The track “Candidate” is gone."), "{said}");
+        assert_eq!(live.set.knob("Other", "Synth", "Tone"), 0.5, "the track now at its place");
         goal.close().await.unwrap();
     });
 }
