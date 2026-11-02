@@ -3,6 +3,25 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.44 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.43 did. Ships with Renoise tool 1.0.9, which Renoise loads when it
+restarts; `kumi update` puts it in.
+
+- A Max patch can run GenExpr once per channel in `[mc.gen~]`, or across a multichannel signal's
+  channels in `[mcs.gen~]`, as it could in `[gen~]`.
+- A gen box whose code is in its text or a file it names, such as `[gen~ @expr …]`, is made as
+  written, not made empty.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Renoise tool 1.0.9
+
+- A goal in a very long, dense song keeps its best from what it listened to, rather than failing at
+  the last step.
+- Changing a pattern's length in a dense song holds Renoise for much less time.
+
 ## 1.24.43 — 2026-11-01
 
 Ships with bridge 1.0.102, as 1.24.42 did. Ships with Renoise tool 1.0.8, which Renoise loads when it
