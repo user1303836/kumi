@@ -9,7 +9,8 @@ use kumi_agent::core::{
     contracts::*,
     evolve::Knob,
     goal_rig::{
-        check_slots, device_label, given_values, knob_key as key, moved, moved_or_went, not_in_the_search, tell_generation, GoalDaw,
+        best_plays_beside, best_waits_muted, check_slots, device_label, device_of, given_values, knob_key as key, last_best_stays,
+        limiter_stays, moved, moved_or_went, near, not_in_the_search, tell_generation, you_turned, GoalDaw,
     },
     refs::RefScheme,
 };
@@ -414,7 +415,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
                 None => false,
             };
             if !gone {
-                let note = format!("Kumi's safety {limiter} stays last on “{name}”: delete it if you don't want it there.");
+                let note = limiter_stays(limiter, &name);
                 r.tell_app(&note);
                 stays.push(note);
             }
@@ -501,7 +502,6 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
     /// devices): only those whose winner differs from where the search began (none when nothing won: the track stays as it
     /// is), and never one the producer turned on the track since (said, and left as they set it).
     async fn set_track(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<(), String> {
-        let near = |knob: &Knob, a: f64, b: f64| (a - b).abs() <= 1e-5 * (knob.max - knob.min).abs().max(1e-9);
         let given = given_values(knobs, values);
         let won: Vec<(&Knob, f64)> =
             given.iter().filter(|(knob, value)| !near(knob, *value, knob.value)).map(|(knob, value)| (knob, *value)).collect();
@@ -515,7 +515,6 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             Err(error) => return Err(error.to_string()),
         };
         let places = self.slots.borrow().iter().find(|found| found.info.name == slot).map(|found| found.places.clone()).unwrap_or_default();
-        let named = |knob: &Knob| knob.device.split_once(':').map_or(knob.device.as_str(), |(_, name)| name).to_owned();
         // (by device as it is now: one change for each, as a device's knobs are set; nothing when one moved or went)
         let mut by_device: IndexMap<String, Vec<(&str, f64)>> = IndexMap::new();
         let mut moved: Vec<Knob> = vec![];
@@ -543,7 +542,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
                 })
                 .and_then(|p| p.get("value").and_then(Value::as_f64));
             if now.is_some_and(|now| !near(knob, now, knob.value)) {
-                turned.push(format!("{} {}", named(knob), knob.name));
+                turned.push(format!("{} {}", device_of(knob), knob.name));
                 continue;
             }
             by_device.entry(row.reference.clone()).or_default().push((knob.r#ref.as_str(), value));
@@ -561,11 +560,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             self.renderer.plan.history.grouped(&format!("“{slot}”: {set} knobs the goal set"), &made, &[]);
         }
         if !turned.is_empty() {
-            let them = if turned.len() == 1 { "it" } else { "them" };
-            return Err(format!(
-                "you turned {} on “{slot}” since the search began, so Kumi left {them} as you set {them}",
-                turned.join(", ")
-            ));
+            return Err(you_turned(slot, &turned));
         }
         Ok(())
     }
@@ -782,7 +777,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                         None => !unmuted,
                     };
                     let after = if muted { "" } else { " and plays now: mute it to hear the new best alone" };
-                    r.tell_app(&format!("The last “{BEST}” stays where it is ({why}){after}; the new best goes on a track of its own"));
+                    r.tell_app(&last_best_stays(BEST, why, after));
                     break;
                 }
                 unmuted |= at > 0;
@@ -857,9 +852,9 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 match r.change("track_mute", json!({"ref": copy, "mute": true}), signal.clone()).await {
                     Ok((id, _)) => {
                         kept.push(id);
-                        r.tell_app(&format!("“{BEST}” waits muted beside “{slot}”, which plays as it was: unmute it to hear the best"));
+                        r.tell_app(&best_waits_muted(BEST, slot));
                     }
-                    Err(_) => r.tell_app(&format!("“{BEST}” plays beside “{slot}”: mute one of them to hear the other alone")),
+                    Err(_) => r.tell_app(&best_plays_beside(BEST, slot)),
                 }
             }
             *r.goal_best.borrow_mut() = kept;

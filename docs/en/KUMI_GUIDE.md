@@ -760,9 +760,20 @@ its own fast knob search and with the model's bigger ideas every few
 generations, until the score reaches 95, you stop it, or four hours pass. The
 GOAL tab shows how it's going. With Max for Live, Kumi holds the candidates back
 while it tries them, so you hear the Set without them; the best goes on
-"Kumi · Goal best" when the search pauses or ends. Esc pauses the search,
-`/loop` alone picks it up again (even after a restart), and `/loop stop` ends
-it.
+"Kumi · Goal best" when the search pauses or ends. A paused goal's best waits
+muted beside its candidates. In Live, each candidate then goes back as the goal
+found it, without Kumi's limiter, apart from a knob you turned during the search.
+Esc pauses the search, `/loop` alone picks it up again (even after a restart),
+and `/loop stop` ends it.
+
+The next best replaces the last one only if Kumi can show it's unchanged.
+Otherwise the last one stays, the new one goes beside it, and Kumi says why there
+are two. In Live, Kumi reads the track's devices, clips, notes, mixer and Session
+clips' automation. It can't see a plug-in's own state that isn't a parameter,
+data inside a Max for Live device, or a change to automation already drawn in the
+Arrangement. An edit only there is replaced with the best. Live's own undo brought
+back a replaced best with its notes and a device setting no parameter shows; we
+expect the same for plug-ins and Max devices, but haven't seen it.
 
 What Kumi learns from each match is kept as a lesson (✦) for the next one;
 `/memory` lists them.

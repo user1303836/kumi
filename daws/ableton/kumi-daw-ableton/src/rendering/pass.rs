@@ -155,6 +155,11 @@ impl LiveRenderer {
                         lap("record stop");
                     } else {
                         rig.hold.as_mut().unwrap().recording = false;
+                        // Nothing here waits on stopping the recording, as the line above does: Live shows the take only once
+                        // it has stopped playing, a moment after it's asked, and till then a clip read here finds none, or the
+                        // pass before's.
+                        self.stopped_playing(signal.clone()).await?;
+                        lap("stopped");
                     }
                     started = false;
                     let late = Cell::new(false);
@@ -276,6 +281,18 @@ impl LiveRenderer {
         });
         result?;
         Ok(files)
+    }
+
+    /// Waits for Live to have stopped playing, at most about two seconds.
+    async fn stopped_playing(&self, signal: Signal) -> Result<(), RuntimeError> {
+        for _ in 0..40 {
+            let set = self.rows("set", json!({"fields":["playing"]}), signal.clone()).await?;
+            if set.first().and_then(|set| set.get("playing")) != Some(&Value::Bool(true)) {
+                break;
+            }
+            delay(50., signal.clone()).await?;
+        }
+        Ok(())
     }
 
     /// Why a pass can't go ahead for lack of disk, when it can't. Kumi's own folder holds every take; a record pass's
