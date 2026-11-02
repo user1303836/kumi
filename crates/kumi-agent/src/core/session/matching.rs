@@ -519,9 +519,11 @@ impl Session {
 
             let (final_knobs, final_values) = kept.as_ref().map(|(k, v)| (k.as_slice(), v.as_slice())).unwrap_or((&knobs, &start));
 
-            if let Some(reason) = rig.settle(&winner.name, final_knobs, final_values, abort::timeout(120_000)).await?.filter(|s| !s.is_empty()) {
+            let cleanup = abort::timeout(120_000);
+            if let Some(reason) = rig.settle(&winner.name, final_knobs, final_values, cleanup.clone()).await?.filter(|s| !s.is_empty()) {
                 notes.push(format!("Its settings couldn't all be put back ({reason}); check {}.", winner.name));
             }
+            notes.extend(rig.put_back(cleanup).await);
             search?;
             let Some(from) = from else {
                 return Ok(None);

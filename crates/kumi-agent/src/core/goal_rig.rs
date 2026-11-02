@@ -40,12 +40,49 @@ pub fn given_values(knobs: &[Knob], values: &[f64]) -> Vec<(Knob, f64)> {
     knobs.iter().zip(values).filter(|(_, value)| value.is_finite()).map(|(knob, value)| (knob.clone(), *value)).collect()
 }
 
+/// A knob's device by its name, without its place in the chain.
+pub fn device_of(knob: &Knob) -> &str {
+    knob.device.split_once(':').map_or(knob.device.as_str(), |(_, name)| name)
+}
+
+/// Whether these are one value of a knob: what a DAW reads back of a value it was given is close, not equal, and a stepped
+/// knob lands on its step.
+pub fn near(knob: &Knob, a: f64, b: f64) -> bool {
+    (a - b).abs() <= (1e-5 * (knob.max - knob.min).abs().max(1e-9)).max(knob.step.unwrap_or(0.) / 2.)
+}
+
+/// What's said of these knobs (each as “device knob”), which the producer turned on a track since the search began.
+pub fn you_turned(slot: &str, turned: &[String]) -> String {
+    let them = if turned.len() == 1 { "it" } else { "them" };
+    format!("you turned {} on “{slot}” since the search began, so Kumi left {them} as you set {them}", turned.join(", "))
+}
+
+/// A paused goal's best, muted beside its candidate, which plays as it was.
+pub fn best_waits_muted(best: &str, slot: &str) -> String {
+    format!("“{best}” waits muted beside “{slot}”, which plays as it was: unmute it to hear the best")
+}
+
+/// A paused goal's best that couldn't be muted.
+pub fn best_plays_beside(best: &str, slot: &str) -> String {
+    format!("“{best}” plays beside “{slot}”: mute one of them to hear the other alone")
+}
+
+/// A last best the producer worked on: it stays theirs, and why; `after` is anything more to say of it.
+pub fn last_best_stays(best: &str, why: &str, after: &str) -> String {
+    format!("The last “{best}” stays where it is ({why}){after}; the new best goes on a track of its own")
+}
+
+/// A safety limiter that couldn't come off a candidate that never joined.
+pub fn limiter_stays(limiter: &str, track: &str) -> String {
+    format!("Kumi's safety {limiter} stays last on “{track}”: delete it if you don't want it there.")
+}
+
 /// Why nothing was set: these knobs of a slot, which the search moved, moved or went meanwhile. Each device is named once,
 /// first seen first.
 pub fn moved_or_went(slot: &str, knobs: &[Knob]) -> String {
     let mut named: Vec<String> = vec![];
     for knob in knobs {
-        let name = format!("“{}”", knob.device.split_once(':').map_or(knob.device.as_str(), |(_, name)| name));
+        let name = format!("“{}”", device_of(knob));
         if !named.contains(&name) {
             named.push(name);
         }

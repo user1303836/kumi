@@ -760,7 +760,10 @@ its own fast knob search and with the model's bigger ideas every few
 generations, until the score reaches 95, you stop it, or four hours pass. The
 GOAL tab shows how it's going. With Max for Live, Kumi holds the candidates back
 while it tries them, so you hear the Set without them; the best goes on
-"Kumi · Goal best" when the search pauses or ends. Esc pauses the search,
+"Kumi · Goal best" when the search pauses or ends. A paused goal's best waits
+muted beside its candidates, and a best you changed since Kumi kept it stays,
+with the next one beside it. In Live, each candidate then goes back as the goal
+found it, apart from a knob you turned during the search. Esc pauses the search,
 `/loop` alone picks it up again (even after a restart), and `/loop stop` ends
 it.
 

@@ -503,7 +503,7 @@ impl Session {
             notes.extend(rig.tidy(&top, cleanup.clone()).await.unwrap_or_default());
         }
         if let Some(leader) = leader.as_ref().filter(|l| l.score.is_some()) {
-            let kept = rig.keep_best(&leader.name, &leader.knobs, &leader.elite, cleanup).await.unwrap_or_default();
+            let kept = rig.keep_best(&leader.name, &leader.knobs, &leader.elite, cleanup.clone()).await.unwrap_or_default();
             if kept.starts_with("Kumi · Goal best") {
                 state.best_track = Some(kept);
                 notes.extend(rig.kept_only());
@@ -512,6 +512,7 @@ impl Session {
                 notes.push(format!("Its best wasn't kept: {}.", kept.trim_end_matches('.')));
             }
         }
+        notes.extend(rig.put_back(cleanup).await);
         sync(&mut state, &evolution, started);
         self.persist_goal(&place, &state);
         self.goal_event(state.status.into(), Some(&state), None, started, Some(&evolution), &full, screening);

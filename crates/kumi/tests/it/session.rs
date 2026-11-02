@@ -2345,6 +2345,11 @@ impl GoalRig for SearchRig {
         self.cleanup.borrow_mut().push("close".into());
         Ok(vec![])
     }
+    async fn put_back(&self, signal: Signal) -> Vec<String> {
+        assert!(!signal.is_cancelled());
+        self.cleanup.borrow_mut().push("put back".into());
+        vec![]
+    }
 }
 fn goal_harness(rig: Rc<SearchRig>, reference: bool, config: impl FnOnce(&mut SessionOptions)) -> Harness {
     let session = Rc::new(RefCell::new(None::<Session>));
@@ -2396,7 +2401,7 @@ local_test!(goal_reaches_target_cleans_in_order_keeps_best_and_lesson, {
     assert_eq!(status.best.as_ref().unwrap().score, 96.);
     assert_eq!(status.generation, 3);
     assert_eq!(status.why.as_deref(), Some("reached 96%"));
-    assert_eq!(*rig.cleanup.borrow(), ["close", "tidy:Candidate", "keep:Candidate"]);
+    assert_eq!(*rig.cleanup.borrow(), ["close", "tidy:Candidate", "keep:Candidate", "put back"]);
     assert_eq!(h.record.calls.borrow().len(), 1);
     assert_eq!(h.session.lessons().await.unwrap().len(), 1);
     h.session.close().await.unwrap();
@@ -3665,7 +3670,7 @@ local_test!(match_polish_confirms_improvement_at_full_length_and_restores_if_not
         h.session.start().await.unwrap();
         h.session.submit("match this reference", None).await.unwrap();
         assert_eq!(h.record.calls.borrow().len(), 2);
-        assert_eq!(rig.cleanup.borrow().as_slice(), ["close", "settle"]);
+        assert_eq!(rig.cleanup.borrow().as_slice(), ["close", "settle", "put back"]);
         if improves {
             assert!(h.record.calls.borrow()[1].contains("kept on the track"), "{}", h.record.calls.borrow()[1]);
             assert!(rig.settled.borrow()[0] > 0.2);

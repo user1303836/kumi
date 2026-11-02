@@ -816,6 +816,11 @@ pub trait GoalRig {
     async fn tidy(&self, top: &[String], signal: Signal) -> Result<Vec<String>, RuntimeError>;
     /// The rig's scratch tracks go and the transport comes back; anything the producer should know.
     async fn close(&self) -> Result<Vec<String>, RuntimeError>;
+    /// The goal's over: what its search left on the candidates' own tracks goes back, where a DAW's search moves them at all
+    /// (REAPER's and Renoise's try copies); anything the producer should know. A settled winner keeps its values.
+    async fn put_back(&self, _signal: Signal) -> Vec<String> {
+        vec![]
+    }
 }
 
 /// What kind of thing was pointed at.

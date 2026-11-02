@@ -4,7 +4,7 @@ use indexmap::IndexMap;
 use kumi_agent::core::{
     contracts::{Generation, GenerationTrial},
     evolve::Knob,
-    goal_rig::{check_slots, device_label, given_values, knob_key, moved, moved_or_went, tell_generation, tidy, GoalDaw},
+    goal_rig::{check_slots, device_label, given_values, knob_key, moved, moved_or_went, near, tell_generation, tidy, GoalDaw},
 };
 use kumi_listening::goal::Told;
 use kumi_types::contracts::StructuralMove;
@@ -203,4 +203,17 @@ fn what_moved_or_went_names_each_device_once_first_seen_first() {
 
 fn knob_for_words() -> Knob {
     Knob { r#ref: "1".into(), device: String::new(), name: String::new(), value: 0., min: 0., max: 1., step: None, device_id: None }
+}
+
+#[test]
+fn one_value_of_a_knob_is_what_a_daw_reads_back_of_it() {
+    let wide = Knob { min: 20., max: 20000., ..knob_for_words() };
+    assert!(near(&wide, 1234.5678, 1234.568), "a float's rounding, on a wide knob");
+    assert!(!near(&wide, 1234., 1300.));
+    let unit = knob_for_words();
+    assert!(near(&unit, 0.7, 0.699_999_988), "a float's rounding");
+    assert!(!near(&unit, 0.7, 0.71));
+    let stepped = Knob { max: 10., step: Some(1.), ..knob_for_words() };
+    assert!(near(&stepped, 2.4, 2.), "a stepped knob lands on its step");
+    assert!(!near(&stepped, 2.6, 2.));
 }
