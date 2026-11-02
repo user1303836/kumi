@@ -1048,7 +1048,6 @@ local function invert_apply(song, env, input, fence, desc)
   local sample = song:instrument(plan.n[1]):sample(plan.n[2])
   song:describe_undo(desc)
   invert_buffer(sample.sample_buffer)
-  if env.watch_undo then env.watch_undo(sample.sample_buffer_observable) end
   return {
     applied = { print = M.buffer_print(sample.sample_buffer) }, material = { at = places_.place_of(env, "sample", plan.n) },
     target = sample_target(env, plan.n), display = { title = "Flipped the polarity of " .. plan.label },
@@ -1085,6 +1084,8 @@ base.register({
   reread = places_.reread("sample"),
   read = function(sample) return { print = M.buffer_print(sample.sample_buffer) } end,
   same = function(a, b) return base.same_table(a.print, b.print) end,
+  -- (Renoise's undo takes it back and no notifier tells, lab 2026-11-01: read again now and then)
+  polled = true,
 })
 
 return M
