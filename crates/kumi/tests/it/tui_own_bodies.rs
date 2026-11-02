@@ -645,6 +645,85 @@ scene!(reaper_mixer, DawId::Reaper, BODY_SHOTS, |h| {
     shows(&h, "FOCUS · Mixer").await;
 });
 
+/// The body of a mixer of a kick and a master, with the DAW's meters or without.
+fn two_strips(daw: &kumi_daw_own::bridge::OwnDaw, levels: bool) -> Option<FocusBody> {
+    let meter = |db: f64| if levels { json!([db, db]) } else { Value::Null };
+    let body = json!({"strips": [
+        {"ref": "r:track:master", "name": "MASTER", "master": true, "volumeDb": 0.0, "pan": 0.0, "peakDb": meter(-150.0)},
+        {"ref": "r:track:{Kick}", "name": "Kick", "volumeDb": -6.02, "pan": 0.0, "selected": true, "peakDb": meter(-150.0)},
+    ], "trackCount": 1, "from": 0, "levels": levels});
+    (daw.to_body)(&BodyRequest::Mixer { track_ref: Some("r:track:{Kick}".into()) }, &body)
+}
+
+const MIXER_FOCUS: fn() -> Value =
+    || json!({"view": "mixer", "selection": {"track": {"name": "Kick", "type": "audio"}, "trackRef": "r:track:{Kick}"}});
+
+case!(reapers_meters_move_in_a_read_of_their_own_as_often_as_they_sound, async {
+    tokio::time::pause();
+    work_with(DawId::Reaper);
+    let c = Rc::new(Control::default());
+    *c.own.borrow_mut() = two_strips(&reaper::DAW, true);
+    let level = |db: f64| TrackLevel { track_ref: "r:track:{Kick}".into(), peak_db: [db, db] };
+    *c.levels.borrow_mut() = Some(vec![level(-150.0)]);
+    let h = Harness::with(120, 40, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    h.emit(focus_of(reaper::DAW.fill_focus, MIXER_FOCUS()));
+    shows(&h, "FOCUS · Mixer").await;
+    let reads = || h.calls().iter().filter(|call| *call == "own:levels").count();
+    // Silence: at most one read a second.
+    let quiet = reads();
+    delay(3050).await;
+    let quietly = reads() - quiet;
+    assert!((1..=4).contains(&quietly), "{quietly} reads in 3 s of silence");
+    // The track sounds: its meter moves without the mixer being read again, and five reads a second at most.
+    let bodies = h.calls().iter().filter(|call| call.starts_with("own:Mixer")).count();
+    let kick = |h: &Harness| h.screen().into_iter().find(|line| line.contains("Kick")).expect("Kick's strip");
+    let silent = kick(&h);
+    *c.levels.borrow_mut() = Some(vec![level(-3.0)]);
+    delay(1100).await;
+    assert_ne!(kick(&h), silent, "the meter moved");
+    let sounding = reads();
+    delay(2000).await;
+    let soundingly = reads() - sounding;
+    assert!((5..=10).contains(&soundingly), "{soundingly} reads in 2 s of sound");
+    assert!(h.calls().iter().filter(|call| call.starts_with("own:Mixer")).count() <= bodies + 1, "the body stays at its own pace");
+    // An extension without this read: asked again only rarely, and the mixer's own read goes on.
+    *c.levels.borrow_mut() = None;
+    delay(300).await;
+    let refused = reads();
+    delay(4500).await;
+    assert_eq!(reads(), refused, "backs off after a refusal");
+    delay(1000).await;
+    assert_eq!(reads(), refused + 1, "asks again");
+    // Leaving the mixer stops the reads.
+    h.emit(json!({"type": "focus", "focus": {"track": {"name": "Kick", "kind": "audio"}, "trackRef": "r:track:{Kick}"}}));
+    *c.own.borrow_mut() = None;
+    delay(10).await;
+    let left = reads();
+    delay(6000).await;
+    assert!(reads() <= left, "{} reads after leaving the mixer", reads() - left);
+    h.close().await;
+});
+
+case!(a_mixer_without_meters_never_reads_them, async {
+    tokio::time::pause();
+    work_with(DawId::Renoise);
+    let c = Rc::new(Control::default());
+    *c.own.borrow_mut() = two_strips(&renoise::DAW, false);
+    let h = Harness::with(120, 40, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    h.emit(focus_of(
+        renoise::DAW.fill_focus,
+        json!({"view": "mixer", "selection": {"track": {"name": "Kick", "type": "sequencer"}, "trackRef": "e1:track:1"}}),
+    ));
+    shows(&h, "FOCUS · Mixer").await;
+    delay(6000).await;
+    assert!(!h.calls().iter().any(|call| call == "own:levels"), "{:?}", h.calls());
+    h.close().await;
+});
+
 scene!(reaper_arrange_window, DawId::Reaper, BODY_SHOTS, |h| {
     // (#399 K35) The arrange view scrolled to bars 9–16 of 64: what it shows, the regions from start to end (the Verse
     // began before it), and a track's fixed lanes, a row each, the lanes that don't play faint.

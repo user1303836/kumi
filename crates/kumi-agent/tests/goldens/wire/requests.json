@@ -531,5 +531,18 @@
     "request": {
       "type": "mixer"
     }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "levels",
+      "trackRef": "track:2"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "levels"
+    }
   }
 ]

@@ -116,6 +116,8 @@ pub struct Control {
     pub own: RefCell<Option<FocusBody>>,
     /// The DAW refuses its own bodies (Renoise while Kumi renders): they read as nothing, though it can show them.
     pub own_refused: Cell<bool>,
+    /// The mixer's meters alone; nothing is what an extension without that read answers.
+    pub levels: RefCell<Option<Vec<TrackLevel>>>,
     /// What /export and /share get as the conversation going on now.
     pub export: RefCell<Option<ConversationToExport>>,
     /// The session's palette (with "palette" set, the session keeps palettes).
@@ -156,6 +158,7 @@ impl Default for Control {
             arrangement: RefCell::default(),
             own: RefCell::default(),
             own_refused: Cell::default(),
+            levels: RefCell::default(),
             export: RefCell::default(),
             palette: RefCell::default(),
             music: RefCell::default(),
@@ -578,6 +581,10 @@ impl Control {
             BodyRequest::Notes { item_ref } => self.clip_view(item_ref).await?.map(FocusBody::Notes),
             BodyRequest::Grid { track_ref, index } => self.session_strip(track_ref, *index).await?.map(FocusBody::Grid),
             BodyRequest::Timeline => self.arrangement_strip().await?.map(FocusBody::Timeline),
+            BodyRequest::Levels { .. } => {
+                self.call("own:levels");
+                self.levels.borrow().clone().map(FocusBody::Levels)
+            }
             other => {
                 self.call(format!("own:{other:?}"));
                 self.own.borrow().clone().filter(|own| own_kind(own) == other.kind() && !self.own_refused.get())

@@ -533,6 +533,8 @@ struct State {
     pasting: bool,
     refreshing: Option<BodyKind>,
     tree_refresh: Option<JoinHandle<()>>,
+    /// Reading the meters of the mixer FOCUS shows.
+    levels_refresh: Option<JoinHandle<()>>,
     wake_timer: Option<JoinHandle<()>>,
     wake_time: Option<f64>,
     beat_timer: Option<JoinHandle<()>>,
@@ -721,6 +723,7 @@ impl State {
             pasting: false,
             refreshing: None,
             tree_refresh: None,
+            levels_refresh: None,
             wake_timer: None,
             wake_time: None,
             beat_timer: None,
@@ -1123,7 +1126,13 @@ impl TuiApp {
             // The producer quitting, not Kumi closing to open again (with another DAW, or updated) or failing to start.
             printing = self.0.options.transcript_on_quit && message.is_none() && !state.reopening;
             let flashes = std::mem::take(&mut state.flash_timers);
-            let timers = [state.tree_refresh.take(), state.wake_timer.take(), state.beat_timer.take(), state.status_timer.take()];
+            let timers = [
+                state.tree_refresh.take(),
+                state.levels_refresh.take(),
+                state.wake_timer.take(),
+                state.beat_timer.take(),
+                state.status_timer.take(),
+            ];
             let alerting = [state.alert_timer.take(), state.answer_countdown.take()];
             for task in timers.into_iter().chain(alerting).flatten().chain(flashes) {
                 task.abort();
@@ -1380,7 +1389,9 @@ impl Drop for Inner {
     fn drop(&mut self) {
         self.scheduler.dispose();
         let state = self.state.get_mut();
-        for timer in [state.tree_refresh.take(), state.wake_timer.take(), state.beat_timer.take()].into_iter().flatten() {
+        for timer in
+            [state.tree_refresh.take(), state.levels_refresh.take(), state.wake_timer.take(), state.beat_timer.take()].into_iter().flatten()
+        {
             timer.abort();
         }
     }

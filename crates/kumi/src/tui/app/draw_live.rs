@@ -9,6 +9,7 @@ use super::super::{
     wrap::wrap,
 };
 use super::drawing::{sp, spans, st};
+use super::live::LEVELS_SILENT_DB;
 use super::records::Shown;
 use super::*;
 /// What FOCUS drew: the DAW's word for its body (" · Device"), why the DAW may be stale (" · Live is busy: …"), and the
@@ -932,12 +933,12 @@ impl TuiApp {
                 let level = (((loudest + 60.) / 60.).clamp(0., 1.) * 7.).round() as usize;
                 let style = if loudest > -1. {
                     st::WARN
-                } else if loudest > -60. {
+                } else if loudest > LEVELS_SILENT_DB {
                     st::ACCENT
                 } else {
                     st::FAINT
                 };
-                screen.put(at - 2, row, if loudest <= -60. { "·" } else { LEVELS[level] }, &style);
+                screen.put(at - 2, row, if loudest <= LEVELS_SILENT_DB { "·" } else { LEVELS[level] }, &style);
             }
             screen.put(at, row, &right, &st::DIM);
             row += 1;
