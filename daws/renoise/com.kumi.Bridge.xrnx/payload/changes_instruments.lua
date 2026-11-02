@@ -315,6 +315,15 @@ function M.keep_slot(song, i)
   return ok and saved and io.exists(file) and file or nil
 end
 
+-- What the journal reads of an instrument a change filled: empty again after Renoise's undo, as `print_of` says the change left it
+-- after its redo. (Renoise's undo of a load into a slot replaces the instrument, and tells only that: the bridge keeps its place.)
+function M.slot_read(print_of)
+  return function(instrument)
+    if places_.is_empty(instrument) then return { empty = true } end
+    return { print = print_of(instrument) }
+  end
+end
+
 -- The instrument at `i` empty again: as `keep_slot` kept it, or cleared without that file (Renoise empties its temporary folder as
 -- it quits). A note when its own settings are lost.
 function M.empty_slot(song, env, i, file, name)
@@ -922,6 +931,7 @@ local function load_apply(song, env, input, fence, desc)
   }
   if plan.into then
     done.material = { into = places_.place_of(env, "instrument", n), name = slot_name, slot = slot }
+    done.prior, done.journal_applied = { empty = true }, { print = done.applied.print }
   else
     done.material = { made = places_.place_of(env, "instrument", n) }
     done.created = { ref = places_.ref_of(env, "instrument", n), kind = "instrument" }
@@ -955,6 +965,7 @@ end
 base.register({
   kind = "instrument-load", custom = true, by_place = true,
   preview = load_preview, apply = load_apply, restore = load_restore,
+  reread = places_.reread("instrument"), read = M.slot_read(places_.instrument_work), same = base.same_table,
 })
 
 -- instrument-duplicate {ref, index?}: a copy of the instrument (samples and all), right after it unless index says.
