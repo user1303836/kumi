@@ -79,10 +79,11 @@ impl McpEndpoint for Fixture {
         let index = self.calls.get();
         let actual = json!({"name":name,"args":args});
         let mut expected = self.case["calls"][index].clone();
-        // Goals now read the immutable product name and enabled state before reusing a limiter.
+        // Goals now read the immutable product name and enabled state before reusing a limiter, and each device's identity, to
+        // find it again however the chain moves (#399).
         // Adapt only that exact read projection; keep the frozen oracle's data, mutations and
         // every other dispatch unchanged. The rename/bypass cases have their own regression test.
-        let current_fields = json!(["ref", "parentRef", "name", "className", "classDisplayName", "enabled"]);
+        let current_fields = json!(["ref", "parentRef", "name", "className", "classDisplayName", "enabled", "objectIdentity"]);
         if name == "live_discover"
             && actual["args"]["kind"] == "device"
             && expected["args"]["fields"] == json!(["ref", "parentRef", "name", "className"])

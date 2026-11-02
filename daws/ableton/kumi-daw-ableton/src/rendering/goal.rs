@@ -1,4 +1,5 @@
 use super::super::{bridge_version::GOAL_BRIDGE, concurrent::eager_all, connection::NO_CURRENT_LIVE};
+use super::ears::object_identity;
 use super::rig::{Held, Rig, Source, Window};
 use super::*;
 use async_trait::async_trait;
@@ -14,7 +15,7 @@ use kumi_listening::{
     goal::{hear, screen_pick, tell, tell_timing, trial_key, HeardCache, Told},
 };
 use kumi_media::audio::analyze::Analysis;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 #[derive(Clone)]
 struct Knobs {
     reference: String,
@@ -33,6 +34,8 @@ struct Goal {
     slots: RefCell<Vec<GoalSlotInfo>>,
     current: RefCell<IndexMap<String, IndexMap<String, f64>>>,
     known: RefCell<IndexMap<String, (u64, Knobs)>>,
+    /// Each slot's track as last read: where it stays while another track shares its name.
+    places: RefCell<HashMap<String, String>>,
     /// The Set's tempo as the goal opened: what a render is heard at when a look since can't say what it is now.
     tempo: f64,
     reference: Analysis,
@@ -71,6 +74,24 @@ fn gain(read: &Knobs) -> Option<&Knob> {
     })
 }
 
+/// Where a slot's track is now, by #700's rule for a ref held across changes: at its ref if that still has its name, else the
+/// only track of its name; several are told, never the first. None when no track has its name.
+fn track_now(tracks: &[JsonObject], name: &str, held: Option<&str>) -> Result<Option<String>, RuntimeError> {
+    let named: Vec<&str> = tracks
+        .iter()
+        .filter(|track| track.get("name").and_then(Value::as_str) == Some(name))
+        .filter_map(|track| track.get("ref").and_then(Value::as_str))
+        .collect();
+    match named.as_slice() {
+        [] => Ok(None),
+        [only] => Ok(Some((*only).to_owned())),
+        several => match held.filter(|held| several.contains(held)) {
+            Some(held) => Ok(Some(held.to_owned())),
+            None => Err(observation(format!("Two tracks are named “{name}”; rename one so Kumi can render it."))),
+        },
+    }
+}
+
 /// The tempo a render is heard at: the Set's as it is now, which Live plays and records it at (REAPER's and Renoise's offline
 /// renders keep the tempo a goal opened with); the goal's own when a look can't say what it is.
 fn heard_tempo(now: Option<f64>, opened: f64) -> f64 {
@@ -89,28 +110,34 @@ fn is_final_limiter(device: &JsonObject) -> bool {
         _ => false,
     }
 }
-/// A knob as the chain has it now, with its device's ref: on its device at its place under the same name, else on the one
-/// device of that name, where the chain moved (Live's refs are places, and a device put in above shifts them). None when it
-/// went, or when several could be it.
-fn knob_now<'a>(read: &'a Knobs, knob: &Knob) -> Option<(&'a str, &'a Knob)> {
-    let (at, name) = knob.device.split_once(':')?;
-    let named = |at: &usize| read.devices.get(*at).is_some_and(|device| device_name(device) == name);
-    let place = at.parse().ok().filter(|at| named(at)).or_else(|| {
-        let mut same = (0..read.devices.len()).filter(|at| named(at));
-        same.next().filter(|_| same.next().is_none())
-    })?;
-    let label = device_label(place, name);
+/// A knob as the chain has it now, with its device's ref. Live's refs are places, and a device put in above shifts them, so a
+/// knob goes by who its device is (`known`, by the knobs' word for a device), wherever that is now, and is None if it went:
+/// a device of the same name is another device. Where Live didn't say who it is, it's on its device at its place under the
+/// same name, else on the one device of that name; None when it went, or when several could be it.
+fn knob_now<'a>(read: &'a Knobs, knob: &Knob, known: &HashMap<String, String>) -> Option<(&'a str, &'a Knob)> {
+    let place = match known.get(&knob.device) {
+        Some(identity) => read.devices.iter().position(|device| object_identity(device) == *identity)?,
+        None => {
+            let (at, name) = knob.device.split_once(':')?;
+            let named = |at: &usize| read.devices.get(*at).is_some_and(|device| device_name(device) == name);
+            at.parse().ok().filter(|at| named(at)).or_else(|| {
+                let mut same = (0..read.devices.len()).filter(|at| named(at));
+                same.next().filter(|_| same.next().is_none())
+            })?
+        }
+    };
+    let label = device_label(place, &device_name(&read.devices[place]));
     let now = read.knobs.iter().find(|now| now.device == label && now.name == knob.name)?;
     Some((read.devices[place].get("ref")?.as_str()?, now))
 }
 /// Knobs at their values, by the device each is on now; and the ones that moved or went, or whose parameter another knob
 /// already took (of two devices of one name with one gone, either could be the one that's left).
-fn by_device(read: &Knobs, moved: &[(Knob, f64)]) -> (IndexMap<String, Vec<Value>>, Vec<Knob>) {
+fn by_device(read: &Knobs, moved: &[(Knob, f64)], known: &HashMap<String, String>) -> (IndexMap<String, Vec<Value>>, Vec<Knob>) {
     let mut devices: IndexMap<String, Vec<Value>> = IndexMap::new();
     let mut lost = vec![];
     let mut taken = HashSet::new();
     for (knob, value) in moved {
-        match knob_now(read, knob).filter(|(_, now)| taken.insert(now.r#ref.clone())) {
+        match knob_now(read, knob, known).filter(|(_, now)| taken.insert(now.r#ref.clone())) {
             Some((reference, now)) => devices.entry(reference.into()).or_default().push(json!({"parameterRef":now.r#ref,"value":value})),
             None => lost.push(knob.clone()),
         }
@@ -119,11 +146,6 @@ fn by_device(read: &Knobs, moved: &[(Knob, f64)]) -> (IndexMap<String, Vec<Value
 }
 impl LiveRenderer {
     async fn read_knobs(&self, name: &str, signal: Signal) -> Result<Knobs, RuntimeError> {
-        let (reference, devices) = self.track_and_devices(name, signal.clone()).await?;
-        self.knobs_on(reference, devices, signal).await
-    }
-    /// Where a track is now, and the devices on it.
-    async fn track_and_devices(&self, name: &str, signal: Signal) -> Result<(String, Vec<JsonObject>), RuntimeError> {
         let tracks = self.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
         let reference = tracks
             .iter()
@@ -132,9 +154,13 @@ impl LiveRenderer {
             .and_then(Value::as_str)
             .ok_or_else(|| observation(format!("The track “{name}” is gone.")))?
             .to_owned();
-        let devices =
-            self.rows("device", json!({"parent":reference,"fields":["name","className","classDisplayName","enabled"]}), signal).await?;
-        Ok((reference, devices))
+        let devices = self.device_rows(&reference, signal.clone()).await?;
+        self.knobs_on(reference, devices, signal).await
+    }
+    /// The devices on a track, and who each is.
+    async fn device_rows(&self, reference: &str, signal: Signal) -> Result<Vec<JsonObject>, RuntimeError> {
+        self.rows("device", json!({"parent":reference,"fields":["name","className","classDisplayName","enabled","objectIdentity"]}), signal)
+            .await
     }
     /// The knobs of these devices, as a track at `reference` has them now.
     async fn knobs_on(&self, reference: String, devices: Vec<JsonObject>, signal: Signal) -> Result<Knobs, RuntimeError> {
@@ -215,6 +241,7 @@ impl LiveRenderer {
             slots: RefCell::new(vec![]),
             current: RefCell::new(IndexMap::new()),
             known: RefCell::new(IndexMap::new()),
+            places: RefCell::default(),
             tempo,
             reference,
             focus: request.focus,
@@ -246,20 +273,28 @@ impl Goal {
     fn signal(&self, given: Signal) -> Signal {
         abort::any([given, self.render.connection().lifetime.clone()])
     }
-    /// A slot's knobs as its track has them now, for a trial to set. Where the track is and its devices are read each time,
-    /// because a device or a track put in above moves Live's refs, which are places, and changes neither the lease nor the
-    /// epoch; the knobs themselves are read again only when those differ from what's known.
-    async fn knobs_now(&self, name: &str, signal: Signal) -> Result<Knobs, RuntimeError> {
-        let (reference, devices) = self.render.track_and_devices(name, signal.clone()).await?;
+    /// A slot's knobs as its track has them now, for a trial to set; None when no track has its name. Where the track is and its
+    /// devices are read each time, because a device or a track put in above moves Live's refs, which are places, and changes
+    /// neither the lease nor the epoch; the knobs themselves are read again only when those differ from what's known.
+    async fn knobs_now(&self, name: &str, signal: Signal) -> Result<Option<Knobs>, RuntimeError> {
+        let tracks = self.render.rows("track", json!({"fields":["name"]}), signal.clone()).await?;
+        let held = self.places.borrow().get(name).cloned();
+        let Some(reference) = track_now(&tracks, name, held.as_deref())? else { return Ok(None) };
+        self.places.borrow_mut().insert(name.into(), reference.clone());
+        let devices = self.render.device_rows(&reference, signal.clone()).await?;
         let lease = self.render.connection().lease.get();
         if let Some((known, read)) = self.known.borrow().get(name) {
             if *known == lease && read.reference == reference && read.devices == devices {
-                return Ok(read.clone());
+                return Ok(Some(read.clone()));
             }
         }
         let read = self.render.knobs_on(reference, devices, signal).await?;
         self.known.borrow_mut().insert(name.into(), (self.render.connection().lease.get(), read.clone()));
-        Ok(read)
+        Ok(Some(read))
+    }
+    /// Who a slot's devices were as the search read them, by the knobs' word for each.
+    fn devices_known(&self, slot: &str) -> HashMap<String, String> {
+        self.render.goal_devices.borrow().get(slot).cloned().unwrap_or_default()
     }
     async fn adopt(&self, name: &str, label: &str, signal: Signal) -> Result<GoalSlotInfo, RuntimeError> {
         let r = &self.render;
@@ -295,6 +330,16 @@ impl Goal {
             }
         }
         self.current.borrow_mut().insert(name.into(), read.knobs.iter().map(|knob| (key(knob), knob.value)).collect());
+        self.places.borrow_mut().insert(name.into(), read.reference.clone());
+        // (what's kept of an earlier rig's words stays: a search's knobs keep the words they began with)
+        let mut known = r.goal_devices.borrow_mut();
+        let known = known.entry(name.into()).or_default();
+        for (at, device) in read.devices.iter().enumerate() {
+            let identity = object_identity(device);
+            if !identity.is_empty() {
+                known.insert(device_label(at, &device_name(device)), identity);
+            }
+        }
         let devices = identities(&read);
         let slot = GoalSlotInfo { name: name.into(), label: label.into(), chain: read.chain, knobs: read.knobs, devices };
         self.slots.borrow_mut().push(slot.clone());
@@ -306,7 +351,7 @@ impl Goal {
         }
         let fresh = self.render.read_knobs(slot, signal.clone()).await?;
         let moved = given_values(knobs, values);
-        let (devices, lost) = by_device(&fresh, &moved);
+        let (devices, lost) = by_device(&fresh, &moved, &self.devices_known(slot));
         if !lost.is_empty() {
             return Err(RuntimeError::plain(moved_or_went(slot, &lost)));
         }
@@ -431,11 +476,16 @@ impl GoalRig for Goal {
                 if moved.is_empty() {
                     continue;
                 }
-                let fresh = self.knobs_now(&trial.slot, signal.clone()).await?;
-                let (devices, lost) = by_device(&fresh, &moved);
-                plans.push((trial, moved, fresh, devices, lost));
+                // (no track has the slot's name now: none of its knobs can move, and the other slots go on)
+                let Some(fresh) = self.knobs_now(&trial.slot, signal.clone()).await? else {
+                    generation.frozen.insert(trial.slot.clone(), moved.iter().map(|(knob, _)| key(knob)).collect());
+                    continue;
+                };
+                let known = self.devices_known(&trial.slot);
+                let (devices, lost) = by_device(&fresh, &moved, &known);
+                plans.push((trial, moved, fresh, known, devices, lost));
             }
-            for (trial, moved, fresh, devices, lost) in plans {
+            for (trial, moved, fresh, known, devices, lost) in plans {
                 // (a knob whose device moved or went can't be set: the search leaves it be)
                 let mut refused: HashSet<String> = lost.iter().map(key).collect();
                 r.history
@@ -453,7 +503,7 @@ impl GoalRig for Goal {
                                 {
                                     signal.check()?;
                                     if let Some((knob, _)) = moved.iter().find(|(knob, _)| {
-                                        knob_now(&fresh, knob)
+                                        knob_now(&fresh, knob, &known)
                                             .is_some_and(|(_, now)| Some(now.r#ref.as_str()) == value["parameterRef"].as_str())
                                     }) {
                                         refused.insert(key(knob));
@@ -698,7 +748,8 @@ mod tests {
     #[test]
     fn a_knob_is_found_at_its_place_or_on_the_one_device_of_its_name_once_the_chain_moved() {
         let tone = chain(&["Synth", "EQ"]).knobs[1].clone();
-        let found = |names: &[&str]| knob_now(&chain(names), &tone).map(|(device, now)| (device.to_owned(), now.r#ref.clone()));
+        let unknown = HashMap::new();
+        let found = |names: &[&str]| knob_now(&chain(names), &tone, &unknown).map(|(device, now)| (device.to_owned(), now.r#ref.clone()));
         let at = |n: usize| Some((format!("7:device:0:d{n}"), format!("7:parameter:0:{n}:0")));
         assert_eq!(found(&["Synth", "EQ"]), at(1));
         assert_eq!(found(&["New", "Synth", "EQ"]), at(2), "a device put in above moved it");
@@ -710,7 +761,7 @@ mod tests {
     #[test]
     fn a_knob_whose_device_went_isnt_sent() {
         let (read, tone) = (chain(&["Synth"]), chain(&["Synth", "EQ"]).knobs.clone());
-        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)]);
+        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)], &HashMap::new());
         assert_eq!(devices.len(), 1);
         assert_eq!(devices["7:device:0:d0"], [json!({"parameterRef": "7:parameter:0:0:0", "value": 0.7})]);
         assert_eq!(lost, [tone[1].clone()]);
@@ -720,9 +771,25 @@ mod tests {
     fn of_two_knobs_that_come_to_one_parameter_the_second_isnt_sent() {
         // Two devices of one name, one of them gone: both knobs find the one that's left.
         let (read, tone) = (chain(&["EQ"]), chain(&["EQ", "EQ"]).knobs.clone());
-        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)]);
+        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)], &HashMap::new());
         assert_eq!(devices["7:device:0:d0"], [json!({"parameterRef": "7:parameter:0:0:0", "value": 0.7})]);
         assert_eq!(lost, [tone[1].clone()]);
+    }
+
+    #[test]
+    fn a_slots_track_is_at_its_ref_or_the_only_one_of_its_name_and_several_are_told() {
+        let tracks: Vec<JsonObject> = ["Pad", "Bass", "Pad"]
+            .iter()
+            .enumerate()
+            .map(|(at, name)| object(json!({"ref": format!("7:track:{at}"), "name": name})))
+            .collect();
+        let now = |name: &str, held: Option<&str>| track_now(&tracks, name, held).map_err(|error| error.to_string());
+        assert_eq!(now("Bass", Some("7:track:9")), Ok(Some("7:track:1".to_owned())), "the only one of its name");
+        assert_eq!(now("Pad", Some("7:track:2")), Ok(Some("7:track:2".to_owned())), "at its ref, with its name");
+        assert_eq!(now("Lead", None), Ok(None), "no track has it");
+        for held in [Some("7:track:1"), None] {
+            assert_eq!(now("Pad", held), Err("Two tracks are named “Pad”; rename one so Kumi can render it.".to_owned()), "{held:?}");
+        }
     }
 
     #[test]

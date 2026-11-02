@@ -81,6 +81,9 @@ pub struct LiveRenderer {
     /// back, closing a render, removing copies), and the next call, or the next answer, waits for it.
     busy: tokio::sync::Mutex<()>,
     best_steps: RefCell<Vec<String>>,
+    /// Who each device of a goal's candidate was as the search read it, by candidate and by the knobs' word for the device: Live's
+    /// identity for it. It's here because a leap opens a new rig, and a search's knobs keep the words they began with.
+    goal_devices: RefCell<std::collections::HashMap<String, std::collections::HashMap<String, String>>>,
 }
 /// The listening tools over Live: the tools and their state are `Listening`'s (a judged run, a tune), Live is what they
 /// listen through. A tool call comes in here and goes to `Listening`; what only Live has is `LiveRenderer`'s.
@@ -163,6 +166,7 @@ impl LiveRenderer {
             rendering: ListenFlag::default(),
             busy: tokio::sync::Mutex::new(()),
             best_steps: RefCell::new(vec![]),
+            goal_devices: RefCell::default(),
         })
     }
     /// A restart of Live may make Max for Live available; bridge-only disconnects leave refusal intact.

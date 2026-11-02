@@ -73,17 +73,35 @@ const TOOLS: [&str; 35] = [
 
 #[derive(Clone)]
 struct Device {
+    /// Live's identity for it, which it keeps wherever it goes.
+    identity: u32,
     name: String,
     class: String,
     knobs: Vec<(String, f64)>,
 }
+thread_local! {
+    static IDENTITIES: Cell<u32> = const { Cell::new(0) };
+}
+fn next_identity() -> u32 {
+    IDENTITIES.with(|next| next.replace(next.get() + 1))
+}
 impl Device {
     /// A device with the two knobs every test's device has.
     fn new(name: &str) -> Self {
-        Device { name: name.into(), class: name.into(), knobs: vec![("Tone".into(), 0.5), ("Drive".into(), 0.2)] }
+        Device {
+            identity: next_identity(),
+            name: name.into(),
+            class: name.into(),
+            knobs: vec![("Tone".into(), 0.5), ("Drive".into(), 0.2)],
+        }
     }
     fn limiter() -> Self {
-        Device { name: "Limiter".into(), class: "Limiter".into(), knobs: vec![("Gain".into(), 0.5), ("Ceiling".into(), 0.97)] }
+        Device {
+            identity: next_identity(),
+            name: "Limiter".into(),
+            class: "Limiter".into(),
+            knobs: vec![("Gain".into(), 0.5), ("Ceiling".into(), 0.97)],
+        }
     }
 }
 #[derive(Clone)]
@@ -143,15 +161,32 @@ impl Set {
         let device = track.devices.iter().find(|found| found.name == device).unwrap();
         device.knobs.iter().find(|(name, _)| name == knob).unwrap().1
     }
+    /// A knob's value now, on the first device of the track at this place.
+    fn knob_on_track(&self, at: usize, knob: &str) -> f64 {
+        self.tracks.borrow()[at].devices[0].knobs.iter().find(|(name, _)| name == knob).unwrap().1
+    }
+    /// A knob's value now, on the device at this place.
+    fn knob_at(&self, track: &str, at: usize, knob: &str) -> f64 {
+        let tracks = self.tracks.borrow();
+        let track = tracks.iter().find(|found| found.name == track).unwrap();
+        track.devices[at].knobs.iter().find(|(name, _)| name == knob).unwrap().1
+    }
+    /// The producer renames the device at this place.
+    fn rename_device(&self, track: &str, at: usize, name: &str) {
+        let mut tracks = self.tracks.borrow_mut();
+        tracks.iter_mut().find(|found| found.name == track).unwrap().devices[at].name = name.into();
+    }
     /// The producer puts a device in at this place on a track.
     fn put_device_in(&self, track: &str, at: usize, name: &str) {
         let mut tracks = self.tracks.borrow_mut();
         tracks.iter_mut().find(|found| found.name == track).unwrap().devices.insert(at, Device::new(name));
     }
-    /// The producer deletes a device from a track.
+    /// The producer deletes the first device of this name from a track.
     fn delete_device(&self, track: &str, name: &str) {
         let mut tracks = self.tracks.borrow_mut();
-        tracks.iter_mut().find(|found| found.name == track).unwrap().devices.retain(|device| device.name != name);
+        let devices = &mut tracks.iter_mut().find(|found| found.name == track).unwrap().devices;
+        let at = devices.iter().position(|device| device.name == name).unwrap();
+        devices.remove(at);
     }
     /// The producer puts a track in at this place.
     fn put_track_in(&self, at: usize, name: &str, devices: &[&str]) {
@@ -189,7 +224,7 @@ impl Set {
                 .iter()
                 .enumerate()
                 .map(|(index, device)| {
-                    json!({"ref":format!("7:device:{}:d{index}",at[0]),"parentRef":parent,"name":device.name,"className":device.class,"classDisplayName":device.class,"enabled":true})
+                    json!({"ref":format!("7:device:{}:d{index}",at[0]),"parentRef":parent,"name":device.name,"className":device.class,"classDisplayName":device.class,"enabled":true,"objectIdentity":device.identity})
                 })
                 .collect(),
             "parameter" => tracks[at[0]].devices[at[1]]
@@ -442,9 +477,10 @@ impl Live {
 fn slot_named(goal: &Rc<dyn GoalRig>, name: &str) -> GoalSlotInfo {
     goal.slots().into_iter().find(|slot| slot.name == name).unwrap()
 }
-/// The slot's knob on this device, by the name it had as the goal opened.
+/// The slot's knob on this device, by the name it had as the goal opened, or by the knobs' word for it where two share a name.
 fn knob_on(slot: &GoalSlotInfo, device: &str, name: &str) -> Knob {
-    slot.knobs.iter().find(|knob| knob.device.ends_with(&format!(":{device}")) && knob.name == name).unwrap().clone()
+    let this = |knob: &&Knob| knob.device == device || knob.device.ends_with(&format!(":{device}"));
+    slot.knobs.iter().filter(this).find(|knob| knob.name == name).unwrap().clone()
 }
 /// A trial of these knobs on a slot.
 fn trial(slot: &GoalSlotInfo, set: &[(&str, &str, f64)]) -> GenerationTrial {
@@ -523,20 +559,104 @@ fn a_trial_goes_to_its_own_track_once_another_was_put_in_above() {
     });
 }
 
-/// (#399) A candidate's track deleted mid-search: the search stops and says why, rather than tuning the track now at its place.
+/// (#399) One candidate's track deleted mid-search: its knobs freeze and the search goes on with the others, as in REAPER and
+/// Renoise, and nothing goes to the track now at its place.
 #[test]
-fn a_trial_for_a_track_thats_gone_stops_the_search_in_words() {
+fn a_trial_for_a_track_thats_gone_freezes_its_knobs_and_the_others_go_on() {
     on_a_paused_clock(async {
-        let live = Live::new(&[("Candidate", &["Synth"]), ("Other", &["Synth"])]).await;
+        let live = Live::new(&[("Gone", &["Synth"]), ("Stays", &["Synth"])]).await;
+        let goal = live.goal(&["Gone", "Stays"]).await;
+        let (gone, stays) = (slot_named(&goal, "Gone"), slot_named(&goal, "Stays"));
+        let trials = |value: f64| [trial(&gone, &[("Synth", "Tone", value)]), trial(&stays, &[("Synth", "Tone", value)])];
+        goal.generation(&trials(0.6), Signal::new(), None).await.unwrap();
+        live.set.delete_track("Gone");
+
+        let generation = goal.generation(&trials(0.7), Signal::new(), None).await.unwrap();
+
+        let frozen: Vec<&String> = generation.frozen["Gone"].iter().collect();
+        assert_eq!(frozen, [&knob_key(&knob_on(&gone, "Synth", "Tone"))]);
+        assert!(!generation.frozen.contains_key("Stays"));
+        assert_eq!(live.set.knob("Stays", "Synth", "Tone"), 0.7, "the other candidate moved, once");
+        goal.close().await.unwrap();
+    });
+}
+
+/// (#399) A device deleted from a chain with another of its name: the knob is lost with it, not moved onto the other.
+#[test]
+fn a_knob_whose_device_went_doesnt_land_on_another_of_its_name() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["EQ", "Synth", "EQ"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        let first = knob_on(&slot, "0:EQ", "Tone");
+        goal.generation(&[trial(&slot, &[("0:EQ", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+        live.set.delete_device("Candidate", "EQ");
+
+        let generation = goal.generation(&[trial(&slot, &[("0:EQ", "Tone", 0.7)])], Signal::new(), None).await.unwrap();
+
+        assert!(generation.frozen["Candidate"].contains(&knob_key(&first)));
+        assert_eq!(live.set.knob("Candidate", "EQ", "Tone"), 0.5, "the EQ that's left was never in this knob's trial");
+        goal.close().await.unwrap();
+    });
+}
+
+/// (#399) Two devices of one name with a device put in above: each knob stays on its own.
+#[test]
+fn each_knob_stays_on_its_own_device_of_two_of_a_name_once_one_was_put_in_above() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["EQ", "EQ"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.generation(&[trial(&slot, &[("0:EQ", "Tone", 0.6), ("1:EQ", "Tone", 0.4)])], Signal::new(), None).await.unwrap();
+        live.set.put_device_in("Candidate", 0, "New");
+
+        let generation =
+            goal.generation(&[trial(&slot, &[("0:EQ", "Tone", 0.7), ("1:EQ", "Tone", 0.3)])], Signal::new(), None).await.unwrap();
+
+        assert!(generation.frozen.is_empty(), "{:?}", generation.frozen);
+        assert_eq!(live.set.knob_at("Candidate", 1, "Tone"), 0.7, "the first EQ");
+        assert_eq!(live.set.knob_at("Candidate", 2, "Tone"), 0.3, "the second EQ");
+        assert_eq!(live.set.knob_at("Candidate", 0, "Tone"), 0.5, "the new device");
+        goal.close().await.unwrap();
+    });
+}
+
+/// A device the producer renamed mid-search is the same device: its knobs still move.
+#[test]
+fn a_device_renamed_mid_search_keeps_its_knobs() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["Synth"])]).await;
         let goal = live.goal(&["Candidate"]).await;
         let slot = slot_named(&goal, "Candidate");
         goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
-        live.set.delete_track("Candidate");
+        live.set.rename_device("Candidate", 0, "My Synth");
 
-        let said = goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.7)])], Signal::new(), None).await.err().unwrap().to_string();
+        let generation = goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.7)])], Signal::new(), None).await.unwrap();
 
-        assert!(said.contains("The track “Candidate” is gone."), "{said}");
-        assert_eq!(live.set.knob("Other", "Synth", "Tone"), 0.5, "the track now at its place");
+        assert!(generation.frozen.is_empty(), "{:?}", generation.frozen);
+        assert_eq!(live.set.knob("Candidate", "My Synth", "Tone"), 0.7);
+        goal.close().await.unwrap();
+    });
+}
+
+/// (#399) A second track of a candidate's name put in above: it's told, rather than tuning whichever comes first. One put in
+/// below leaves the candidate where it is.
+#[test]
+fn a_second_track_of_a_candidates_name_is_told_unless_its_own_place_still_holds() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Other", &["Synth"]), ("Candidate", &["Synth"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+
+        live.set.put_track_in(2, "Candidate", &["Synth"]);
+        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.7)])], Signal::new(), None).await.unwrap();
+        assert_eq!(live.set.knob_on_track(1, "Tone"), 0.7, "one below: the candidate is where it was");
+        assert_eq!(live.set.knob_on_track(2, "Tone"), 0.5);
+
+        live.set.put_track_in(0, "Candidate", &["Synth"]);
+        let said = goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.8)])], Signal::new(), None).await.err().unwrap().to_string();
+        assert!(said.contains("Two tracks are named “Candidate”"), "{said}");
         goal.close().await.unwrap();
     });
 }
