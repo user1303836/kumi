@@ -115,11 +115,13 @@ pub fn note_op(
         "timing" => {
             // (no later than the take's last note ends: past its source's end a DAW may refuse the take)
             let last = notes.iter().map(|note| note.start + note.length).fold(0., f64::max);
+            // (which are anchors is told before any moves: one may land right on an anchor)
+            let stays: Vec<bool> = notes.iter().map(|note| !free(note)).collect();
             for note in notes.iter_mut().filter(|note| free(note)) {
                 let moved = note.start + sign(op, rng) * some_of(0.06 * much, rng);
                 note.start = moved.min((last - note.length).max(note.start)).max(0.);
             }
-            parted(notes, anchors, last);
+            parted(notes, &stays, last);
             "timing loosened".into()
         }
         // (Kumi's own "higher" and "lower": some of the notes, at least one, an octave up or down, the same notes of the scale
@@ -157,11 +159,9 @@ const CLOSEST: f64 = 1. / 96.;
 
 /// Notes of one pitch and channel no longer overlapping: a note ends just before the next of them starts, as a note-off of one pitch
 /// stops the note sounding on it whichever it was meant for, and it'd cut the later one short. An anchor stays as it is: a note that
-/// would land on it, or too close before it, goes past it. None is dropped, and none ends past `last` while there's room after the last
+/// would land on it, or too close before it, goes to its nearer side with room. None is dropped, and none ends past `last` while there's room after the last
 /// anchor for them to start `CLOSEST` apart: a roll denser than that can.
-fn parted(notes: &mut [Note], anchors: &[Note], last: f64) {
-    // (an anchor is untouched, so exactly itself: `same` would take a note that landed just beside one for it)
-    let stays: Vec<bool> = notes.iter().map(|note| anchors.contains(note)).collect();
+fn parted(notes: &mut [Note], stays: &[bool], last: f64) {
     let mut runs: BTreeMap<(i64, i64), Vec<usize>> = BTreeMap::new();
     for (at, note) in notes.iter().enumerate() {
         runs.entry((note.pitch, note.channel)).or_default().push(at);
@@ -178,11 +178,15 @@ fn parted(notes: &mut [Note], anchors: &[Note], last: f64) {
         let mut floor = 0_f64;
         for at in run.iter().copied().filter(|at| !stays[*at]) {
             let (start, end) = (notes[at].start, notes[at].start + notes[at].length);
-            let mut from = start.max(floor);
+            let (mut from, mut before) = (start.max(floor), 0_f64);
             for (anchor, anchor_end) in &fixed {
                 if from + CLOSEST > *anchor && from < *anchor_end {
-                    from = *anchor_end;
+                    // (to the nearer side that has room: past a long anchor is a long way from where it was)
+                    let back = *anchor - CLOSEST;
+                    let fits = back >= floor && back >= before && back >= 0.;
+                    from = if fits && from - back <= *anchor_end - from { back } else { *anchor_end };
                 }
+                before = *anchor_end;
             }
             if from != start {
                 notes[at].start = from;
@@ -190,16 +194,21 @@ fn parted(notes: &mut [Note], anchors: &[Note], last: f64) {
             }
             floor = from + CLOSEST;
         }
-        // (the tail back inside the take, if that pushed it past the end and it fits after the last anchor)
-        let after = fixed.last().map_or(0., |(_, end)| *end);
-        let mut ceiling = last;
-        for at in run.iter().rev().copied().take_while(|at| !stays[*at]) {
+        // (the tail back inside the take, if that pushed it past the end: up to the last anchor, or if that ends the take, up to it and
+        // before it)
+        let (mut ceiling, after) = match fixed.as_slice() {
+            [.., before, (anchor, end)] if end + CLOSEST > last => (*anchor, before.1),
+            [(anchor, end)] if end + CLOSEST > last => (*anchor, 0.),
+            [.., (_, end)] => (last, *end),
+            [] => (last, 0.),
+        };
+        for at in run.iter().rev().copied().filter(|at| !stays[*at]) {
             let from = ceiling - CLOSEST;
             if notes[at].start <= from || from < after {
                 break;
             }
             notes[at].start = from;
-            notes[at].length = CLOSEST;
+            notes[at].length = notes[at].length.min(ceiling - from);
             ceiling = from;
         }
         // (then each ends in time, as written, each to the 10 000th, and a 10 000th short of the next: Live refuses a note that ends
@@ -340,6 +349,32 @@ mod timing_tests {
                 let end = sorted.iter().map(|note| note.start + note.length).fold(0., f64::max);
                 // (a roll denser than notes may start apart has no room for that)
                 assert!(step < CLOSEST || end <= 48. * step + 1e-9, "{name}, seed {seed}: ends at {end}");
+            }
+        }
+        // Around anchors, a note stays near where it was and inside the take: a run to an anchored last note, a flam, and a pickup before a
+        // long note, where going past the anchor would move it a long way or out of the take.
+        let run: Vec<Note> = (0..32).map(|k| note(38, k as f64 * 0.03125, 0.03125)).collect();
+        let flam: Vec<Note> = (1..5).flat_map(|k| [note(38, k as f64 - 0.03, 0.03), note(38, k as f64, 0.25)]).collect();
+        let pickup = vec![note(38, 0., 0.25), note(38, 0.9375, 0.0625), note(38, 1., 2.)];
+        for (name, played, anchors, furthest) in [
+            ("to an anchored last note", run.clone(), vec![run[31].clone()], 0.125),
+            ("flams", flam.clone(), flam.iter().skip(1).step_by(2).cloned().collect(), 0.0601),
+            ("a pickup", pickup.clone(), vec![pickup[2].clone()], 0.0601),
+        ] {
+            let end = played.iter().map(|note| note.start + note.length).fold(0., f64::max);
+            for seed in 0..512 {
+                let moved = loosened(played.clone(), &anchors, seed);
+                assert!(anchors.iter().all(|anchor| moved.contains(anchor)), "{name}, seed {seed}: {moved:?}");
+                for (now, was) in moved.iter().zip(&played) {
+                    assert!((now.start - was.start).abs() <= furthest, "{name}, seed {seed}: {was:?} moved to {now:?}");
+                    assert!(now.start + now.length <= end + 1e-9, "{name}, seed {seed}: {now:?} ends past {end}");
+                }
+                let mut sorted = moved.clone();
+                sorted.sort_by(|a, b| a.start.total_cmp(&b.start));
+                for pair in sorted.windows(2) {
+                    assert!(round(pair[0].start) + round(pair[0].length) <= round(pair[1].start) + 1e-9, "{name}, seed {seed}: {pair:?}");
+                    assert!(pair[0].length > 0., "{name}, seed {seed}: {pair:?}");
+                }
             }
         }
         // Other pitches and channels may overlap as they like.
