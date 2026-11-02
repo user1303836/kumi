@@ -1218,6 +1218,12 @@ fn take_row(reaper: &Reaper, proj: Project, take: Take, place: Option<(usize, bo
         }
         item_rows::midi_ticks(reaper, proj, take, &mut row);
     }
+    // (read alone: the tick its source ends on, past which a looped item plays it again)
+    if place.is_none() && reaper.take_is_midi(take) {
+        if let Some(end) = reaper.midi_events(take).and_then(|events| crate::changes::source_end(&events)) {
+            row["sourceEndTick"] = end.into();
+        }
+    }
     item_rows::take_details(reaper, take, &mut row, place.is_none());
     row
 }
@@ -1862,6 +1868,12 @@ mod tests {
             (row.get("ticksPerQuarter").cloned(), row.get("tickAtStart").cloned())
         };
         assert_eq!(ticks("r:take:{TAKE-S1}"), (Some(json!(960.0)), Some(json!(0.0))));
+        // (read alone, it says the tick its source ends on; listed, it spares the read of its MIDI)
+        fake::with(|s| {
+            s.tracks[2].items[0].takes[0].more.raw = Some(vec![crate::midi::Event { pos: 7680, flag: 0, msg: vec![0xB0, 0x7B, 0] }]);
+        });
+        assert_eq!(lab.rows(json!({"ref": "r:take:{TAKE-S1}"}))[0]["sourceEndTick"], 7680);
+        assert_eq!(lab.rows(json!({"kind": "take", "parent": "r:item:{ITEM-S1}"}))[0].get("sourceEndTick"), None);
         fake::with(|s| {
             let take = &mut s.tracks[2].items[0].takes[0];
             take.extra.insert("D_STARTOFFS".into(), 0.0123);

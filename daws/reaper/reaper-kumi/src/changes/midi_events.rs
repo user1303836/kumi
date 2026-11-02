@@ -63,7 +63,7 @@ fn is_bezier_data(msg: &[u8]) -> bool {
 }
 
 /// Where the take's source ends: the end marker's tick, when the last event is one.
-pub(super) fn source_end(events: &[Event]) -> Option<i64> {
+pub(crate) fn source_end(events: &[Event]) -> Option<i64> {
     events.last().filter(|e| e.msg == END_MARKER).map(|e| e.pos)
 }
 

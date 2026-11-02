@@ -171,9 +171,10 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
             if (rows.len() as u64) < count {
                 return Err(format!("Kumi read {} of that take's {count} notes: try again", rows.len()));
             }
-            hidden = rows.iter().any(|row| {
-                row.get("muted") != Some(&Value::Bool(true)) && row.get("start").and_then(Value::as_f64).is_some_and(|start| start < 0.)
-            });
+            hidden = plays_again(item, &take)
+                && rows.iter().any(|row| {
+                    row.get("muted") != Some(&Value::Bool(true)) && row.get("start").and_then(Value::as_f64).is_some_and(|start| start < 0.)
+                });
             played(&rows).into_iter().unzip()
         } else {
             Default::default()
@@ -262,14 +263,31 @@ fn anchors_of(indexes: &[usize], notes: &[Note], wanted: &[usize]) -> Result<Vec
         .collect()
 }
 
-/// Why an item can't be a source, in words: one that loops, with notes its trimmed start hides. Those play from its second pass on,
+/// Whether an item plays past its source's end, so its source again from its start: it loops, and from the tick at its start, at its
+/// playrate, its length runs past the tick its source ends on (ticks that bend can't say: taken to). An extension that doesn't say
+/// its source's end: no.
+fn plays_again(item: &Value, take: &Value) -> bool {
+    if item.get("loop") != Some(&Value::Bool(true)) {
+        return false;
+    }
+    let number = |key: &str| take.get(key).and_then(Value::as_f64);
+    match (Ticks::of(take), number("sourceEndTick"), item.get("lengthBeats").and_then(Value::as_f64)) {
+        (Ticks::Bent, ..) => true,
+        (Ticks::Even { per_quarter, at_start }, Some(end), Some(beats)) => {
+            at_start + beats * per_quarter * number("playrate").unwrap_or(1.) > end
+        }
+        _ => false,
+    }
+}
+
+/// Why an item can't be a source, in words: one that plays its source again, with notes its trimmed start hides. Those play from its second pass on,
 /// and a take can only write notes from its start, so it'd lose them there. Or a pooled one, by an extension that still says
 /// "midipool": it can't read that item's notes.
 fn refused_source(item: &Value, hidden: bool) -> Option<String> {
     if item.get("source").and_then(Value::as_str) == Some("midipool") {
         return Some("that MIDI item is pooled, and the extension REAPER has loaded can't read a pooled item's notes: restart REAPER to load the new one".into());
     }
-    (hidden && item.get("loop") == Some(&Value::Bool(true))).then(|| {
+    hidden.then(|| {
         "that item loops, and its trimmed start hides notes that play from its second pass on, which a take can't hold yet: drag its start back over them, or vary it without the loop".to_string()
     })
 }
@@ -942,7 +960,18 @@ mod tests {
         let looped = json!({"source": "mid", "loop": true});
         assert!(refused_source(&looped, true).unwrap().contains("second pass"));
         assert_eq!(refused_source(&looped, false), None);
-        assert_eq!(refused_source(&json!({"source": "mid", "loop": false}), true), None);
+        // Loop is on by default for a new MIDI item, so only an item that runs past its source's end plays it again.
+        let item = |beats: f64, on: bool| json!({"loop": on, "lengthBeats": beats});
+        let take = json!({"ticksPerQuarter": 960.0, "tickAtStart": 960.0, "sourceEndTick": 7680, "playrate": 1.0});
+        assert!(plays_again(&item(8., true), &take), "from tick 960 for 8 beats: past 7680");
+        assert!(!plays_again(&item(6., true), &take), "from tick 960 for 6 beats: inside it");
+        assert!(!plays_again(&item(8., false), &take), "it doesn't loop");
+        assert!(
+            plays_again(&item(6., true), &json!({"ticksPerQuarter": 960.0, "tickAtStart": 960.0, "sourceEndTick": 7680, "playrate": 1.5})),
+            "faster"
+        );
+        assert!(plays_again(&item(1., true), &json!({"ticksPerQuarter": null})), "bent ticks can't say");
+        assert!(!plays_again(&item(8., true), &json!({"ticksPerQuarter": 960.0, "tickAtStart": 960.0})), "an extension that doesn't say");
         // (an extension not reloaded yet still says "midipool", and can't read its notes)
         assert!(refused_source(&json!({"source": "midipool"}), false).unwrap().contains("restart REAPER"));
     }
