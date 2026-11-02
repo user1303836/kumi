@@ -13,7 +13,7 @@ use std::collections::{HashMap, VecDeque};
 use serde_json::{json, Map, Value};
 
 use super::items::{changed, gone};
-use super::{Applied, Ctx, Done, Preview, Restore, Restored};
+use super::{pool, Applied, Ctx, Done, Preview, Restore, Restored};
 use crate::midi::Event;
 use crate::read::{bad, failed, take_start_qn};
 use crate::reaper::Take;
@@ -63,7 +63,7 @@ fn is_bezier_data(msg: &[u8]) -> bool {
 }
 
 /// Where the take's source ends: the end marker's tick, when the last event is one.
-pub(super) fn source_end(events: &[Event]) -> Option<i64> {
+pub(crate) fn source_end(events: &[Event]) -> Option<i64> {
     events.last().filter(|e| e.msg == END_MARKER).map(|e| e.pos)
 }
 
@@ -729,6 +729,7 @@ pub fn preview(ctx: &Ctx, input: &Value, which: Which) -> Done<Preview> {
     if which != Which::Delete {
         display["after"] = rows_of(ctx, plan.take, plan.item_qn, plan.add.iter().cloned().enumerate()).into();
     }
+    let display = pool::said(ctx, plan.take, pool::WILL_APPLY, display);
     Ok(Preview {
         target: json!({"ref": refs::take_ref(&plan.guid), "kind": "take"}),
         prior: json!({"events": plan.before.len(), "fence": fence.clone()}),
@@ -778,7 +779,12 @@ pub fn apply(ctx: &Ctx, input: &Value, fence: &Value, which: Which) -> Done<Appl
     let count = plan.add.len().max(plan.remove.len());
     Ok(Applied {
         applied: json!({"added": added_now.iter().map(ev_json).collect::<Vec<_>>(), "removed": gone_now.iter().map(ev_json).collect::<Vec<_>>(), "events": after.len()}),
-        display: json!({"title": title(which, count, &label(ctx, plan.take)), "events": after.len(), "written": rows_of(ctx, plan.take, plan.item_qn, added_now.iter().cloned().enumerate())}),
+        display: pool::said(
+            ctx,
+            plan.take,
+            pool::APPLIED,
+            json!({"title": title(which, count, &label(ctx, plan.take)), "events": after.len(), "written": rows_of(ctx, plan.take, plan.item_qn, added_now.iter().cloned().enumerate())}),
+        ),
         unwritten: gone_now.is_empty() && added_now.is_empty(),
         ..Default::default()
     })
@@ -832,7 +838,12 @@ pub fn restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
     }
     Ok(Restored {
         restored: json!({"events": after.len()}),
-        display: json!({"title": format!("MIDI events in {} put back ({} removed, {} written again)", label(ctx, take), present.len(), to_bring_back.len())}),
+        display: pool::said(
+            ctx,
+            take,
+            pool::PUT_BACK,
+            json!({"title": format!("MIDI events in {} put back ({} removed, {} written again)", label(ctx, take), present.len(), to_bring_back.len())}),
+        ),
         unwritten: present.is_empty() && to_bring_back.is_empty(),
     })
 }

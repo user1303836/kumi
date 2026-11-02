@@ -78,11 +78,11 @@ impl SimMidi {
     fn row(&self) -> Value {
         json!({"ref": format!("r:item:{}", self.guid), "trackRef": self.track, "position": self.position / 2., "length": self.length / 2.,
             "positionBeats": self.position, "lengthBeats": self.length, "name": self.name, "takeRef": format!("r:take:{}", self.take),
-            "takes": 1, "source": "mid", "muted": false})
+            "takes": 1, "source": daw_bridge::contract::MIDI_SOURCE, "muted": false})
     }
     /// Its take's row, as the extension reads one take.
     fn take_row(&self) -> Value {
-        json!({"ref": format!("r:take:{}", self.take), "name": self.name, "source": "mid", "fxCount": 0, "noteCount": self.notes.len(), "ccCount": 0,
+        json!({"ref": format!("r:take:{}", self.take), "name": self.name, "source": daw_bridge::contract::MIDI_SOURCE, "fxCount": 0, "noteCount": self.notes.len(), "ccCount": 0, "ticksPerQuarter": 960.0, "tickAtStart": 0.0,
             "volumeDb": 0.0, "pan": 0.0, "pitch": 0.0, "playrate": 1.0, "preservePitch": false, "startOffset": 0.0})
     }
     fn note_rows(&self) -> Vec<Value> {
