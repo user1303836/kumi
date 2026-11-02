@@ -1721,7 +1721,7 @@ function M.start(h, reloading)
         return
       end
       local token = type(pos) == "table" and type(pos.pattern) == "number" and b.groups and b.groups.patterns[pos.pattern]
-      if token and token.touches and b.renumbering and not reads_renumbered(b.renumbering, pos) then b.renumbering = false end
+      if token and token.touches and b.renumbering and not reads_renumbered(b.renumbering, pos) then b.renumbering = nil end
       if token and token.touches and not b.renumbering then
         token.touches = token.touches + 1
         token.recent = (token.recent_tick == b.ticks and token.recent or 0) + 1
@@ -1800,7 +1800,7 @@ local function tick_listening()
 end
 
 function M.tick()
-  b.ticks, b.renumbering = (b.ticks or 0) + 1, false
+  b.ticks, b.renumbering = (b.ticks or 0) + 1, nil
   b.alive_ms = M.now_ms()
   unix_ms()
   if not b.cfg then

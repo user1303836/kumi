@@ -466,3 +466,18 @@ test("lines: a renumbering a phrase op makes isn't an edit, and an edit right af
   H.tick(2)
   eq(K.restore(peer, second).error.code, "changed", "the edit counted")
 end)
+
+test("lines: a renumbered note in a later column isn't an edit", function()
+  local _, peer = K.setup(nil, { instruments = 3 })
+  mock.ops.set_note(1, 3, 5, 12, { note = 50, instrument = 2 })
+  mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 0 })
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  local written = K.change(peer, "notes-write", { pattern = K.ref(K.place(peer), "pattern", 1), track = K.ref(K.place(peer), "track", 3), lines = {
+    { line = 0, notes = { { col = 1, note = "OFF" } } },
+  } })
+  H.tick(2)
+  mock.song:insert_instrument_at(1)
+  H.tick(2)
+  local undone = K.restore(peer, written)
+  ok(undone.result, "not an edit: " .. tostring((undone.error or {}).message))
+end)
