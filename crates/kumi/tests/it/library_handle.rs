@@ -35,14 +35,19 @@ async fn result(tools: &[Rc<dyn KernelTool>], name: &str, input: Value) -> Value
     assert!(!result.is_error, "{}", result.text);
     serde_json::from_str(&result.text).unwrap()
 }
-async fn wait(check: impl Fn() -> bool) {
-    tokio::time::timeout(Duration::from_secs(20), async {
-        while !check() {
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-    })
-    .await
-    .unwrap();
+/// Until `check` holds, or a failure that names the wait that ran out.
+#[track_caller]
+fn wait(check: impl Fn() -> bool) -> impl std::future::Future<Output = ()> {
+    let from = std::panic::Location::caller();
+    async move {
+        let waited = tokio::time::timeout(Duration::from_secs(20), async {
+            while !check() {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+        })
+        .await;
+        assert!(waited.is_ok(), "the wait at line {} ran out after 20 s", from.line());
+    }
 }
 #[tokio::test]
 async fn full_library_learns_searches_compares_files_describes_sets_and_remembers_taste() {
