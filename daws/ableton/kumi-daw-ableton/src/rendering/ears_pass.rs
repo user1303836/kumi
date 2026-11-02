@@ -79,8 +79,9 @@ impl LiveRenderer {
                     if listening.is_empty() && index > 0 {
                         break;
                     }
-                    let heard =
-                        self.ears_piece(rig, &link, &listening, &folder, *piece, index == 0, last, &mut started, signal.clone()).await?;
+                    let heard = self
+                        .ears_piece(rig, &link, &listening, &folder, *piece, tempo, index == 0, last, &mut started, signal.clone())
+                        .await?;
                     for (name, outcome) in heard {
                         let named = if taps.len() > 1 { format!("{name}: ") } else { String::new() };
                         match outcome {
@@ -156,12 +157,12 @@ impl LiveRenderer {
         taps: &[(String, Tap)],
         folder: &Path,
         piece: Window,
+        tempo: f64,
         first: bool,
         last: bool,
         started: &mut bool,
         signal: Signal,
     ) -> Result<IndexMap<String, Result<Part, Missed>>, RuntimeError> {
-        let tempo = self.pass_tempo(rig)?;
         let meter = self.observer.beats_per_bar.get();
         let beat_ms = 60. / tempo * 1000.;
         let mut heard: IndexMap<String, Result<Part, Missed>> = IndexMap::new();
