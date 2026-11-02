@@ -63,7 +63,9 @@ pub(super) fn said(ctx: &Ctx, take: Take, done: &str, mut display: Value) -> Val
     if !pooled(ctx, take) {
         return display;
     }
-    let words = match items_in(ctx, take).filter(|items| *items > 1) {
+    let words = match items_in(ctx, take) {
+        // (the only one left in its pool: it reaches nothing else)
+        Some(0 | 1) => return display,
         Some(items) => format!("{done} all {items} items in this take's MIDI pool."),
         None => format!("{done} every item in this take's MIDI pool."),
     };

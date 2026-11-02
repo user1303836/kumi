@@ -274,7 +274,8 @@ fn plays_again(item: &Value, take: &Value) -> bool {
     match (Ticks::of(take), number("sourceEndTick"), item.get("lengthBeats").and_then(Value::as_f64)) {
         (Ticks::Bent, ..) => true,
         (Ticks::Even { per_quarter, at_start }, Some(end), Some(beats)) => {
-            at_start + beats * per_quarter * number("playrate").unwrap_or(1.) > end
+            // (past it by more than a tick: a left edge dragged leaves the item ending right on it, its row's numbers rounded)
+            at_start + beats * per_quarter * number("playrate").unwrap_or(1.) > end + 1.
         }
         _ => false,
     }
@@ -966,6 +967,9 @@ mod tests {
         assert!(plays_again(&item(8., true), &take), "from tick 960 for 8 beats: past 7680");
         assert!(!plays_again(&item(6., true), &take), "from tick 960 for 6 beats: inside it");
         assert!(!plays_again(&item(8., false), &take), "it doesn't loop");
+        // A left edge dragged: the item ends on its source's end, and the row's numbers are rounded either way (124 BPM, 0.3722 s).
+        let dragged = json!({"ticksPerQuarter": 960.0, "tickAtStart": 738.4768, "sourceEndTick": 7680, "playrate": 1.0});
+        assert!(!plays_again(&item(7.2308, true), &dragged), "it reaches its source's end, and no further");
         assert!(
             plays_again(&item(6., true), &json!({"ticksPerQuarter": 960.0, "tickAtStart": 960.0, "sourceEndTick": 7680, "playrate": 1.5})),
             "faster"

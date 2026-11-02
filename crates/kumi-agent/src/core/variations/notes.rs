@@ -178,16 +178,17 @@ fn parted(notes: &mut [Note], anchors: &[Note]) {
             // (the earlier one starts early enough)
             notes[first].start = notes[first].start.min((notes[second].start - CLOSEST).max(0.));
         }
-        let end = notes[first].start + notes[first].length;
-        let from = if first_stays { end } else { notes[first].start + CLOSEST };
+        let from = if first_stays { round(notes[first].start) + round(notes[first].length) } else { notes[first].start + CLOSEST };
         if !second_stays && notes[second].start < from {
             // (the later one starts late enough, its end where it was)
             let last = notes[second].start + notes[second].length;
             notes[second].start = from;
             notes[second].length = (last - from).max(CLOSEST);
         }
-        if notes[first].start + notes[first].length > notes[second].start {
-            notes[first].length = notes[second].start - notes[first].start;
+        // (as written, each to the 10 000th, and a 10 000th short of the next: Live refuses a note that ends past it by any amount)
+        let room = round(round(notes[second].start) - round(notes[first].start)) - 1e-4;
+        if !first_stays && round(notes[first].length) > room {
+            notes[first].length = room;
         }
     }
 }
@@ -292,8 +293,9 @@ mod timing_tests {
             assert!(anchors.iter().all(|anchor| moved.contains(anchor)), "seed {seed}: {moved:?}");
             let mut sorted = moved.clone();
             sorted.sort_by(|a, b| a.start.total_cmp(&b.start));
+            // (as a DAW is sent them, each to the 10 000th: real Live refused a take whose note ended past the next by that rounding)
             for pair in sorted.windows(2) {
-                assert!(pair[0].start + pair[0].length <= pair[1].start + 1e-9, "seed {seed}: {pair:?}");
+                assert!(round(pair[0].start) + round(pair[0].length) <= round(pair[1].start), "seed {seed}: {pair:?}");
                 assert!(pair[0].length > 0., "seed {seed}: {pair:?}");
             }
         }
