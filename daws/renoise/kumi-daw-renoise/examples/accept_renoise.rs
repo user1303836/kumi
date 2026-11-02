@@ -410,6 +410,10 @@ static CASES: &[Case] = &[
         .label("notes_write undone after an instrument renumbers them")
         .between("song:insert_instrument_at(1)")
         .note(LINES_REDO),
+    case("notes_write", TRACK, r#"{"patternRef":"$E:pattern:1","trackRef":"$E:track:$t","lines":[{"line":0,"notes":[{"col":1,"note":"C-4","instrument":0}]},{"line":4,"notes":[{"col":1,"note":"E-4","instrument":0}]}]}"#, "return notes(1, $t, 8)")
+        .label("notes_write refused after an edit in the same callback as an instrument op")
+        .between("song:insert_instrument_at(1) song:pattern(1):track($t):line(7):note_column(1).note_string = 'C-5'")
+        .limit("Kumi's undo is meant to refuse: the edit is the producer's, and these steps can't be run past it."),
     case("instrument_load", KEPT_SLOT, r#"{"path":"$dir/k.xrni","ref":"$E:instrument:$i"}"#, SLOT_SETTINGS).label("instrument_load into a slot with settings").limit("Renoise's own undo of a load into a slot doesn't reach HISTORY (#805)."),
     case("chain_set", CHAIN, r#"{"ref":"$E:chain:$i.1","name":"K air"}"#, "return chainnames($i)"),
     case("chaindevice_add", CHAIN, r#"{"ref":"$E:chain:$i.1","path":"Gainer"}"#, "return chainpaths($i, 1)"),

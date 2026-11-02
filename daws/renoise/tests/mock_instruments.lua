@@ -272,8 +272,11 @@ local function renumber(type_, a, b)
     if v == 255 or v == nil then return end
     if type_ == "insert" then
       if v >= a - 1 then note.instrument = v + 1 tell_lines(p, t, k) end
+    elseif type_ == "cleared" then
+      -- (a note of the deleted instrument is cleared before the list tells: lab 2026-11-01)
+      if v == a - 1 then l.notes[c] = note_data({}) tell_lines(p, t, k) end
     elseif type_ == "remove" then
-      if v == a - 1 then l.notes[c] = note_data({}) tell_lines(p, t, k) elseif v > a - 1 then note.instrument = v - 1 tell_lines(p, t, k) end
+      if v > a - 1 then note.instrument = v - 1 tell_lines(p, t, k) end
     elseif type_ == "swap" then
       if v == a - 1 then note.instrument = b - 1 tell_lines(p, t, k) elseif v == b - 1 then note.instrument = a - 1 tell_lines(p, t, k) end
     end
@@ -328,6 +331,7 @@ function M.instrument_list_op(type_, a, b, spec, record)
   elseif type_ == "remove" then
     if not instruments[a] then out_of_range("instrument", a) end
     if #instruments == 1 then error("Renoise needs at least one instrument", 3) end
+    renumber("cleared", a)
     made = table.remove(instruments, a)
     M.fire(d.song_fields.instruments_observable, { type = "remove", index = a })
     renumber("remove", a)
@@ -342,11 +346,28 @@ function M.instrument_list_op(type_, a, b, spec, record)
   if selected > #instruments then d.song_fields.selected_instrument_index = #instruments end
   if record then
     local after = notes_snapshot()
-    local function tell_notes() each_note(function(_, _, _, p, t, k) tell_lines(p, t, k) end) end
-    -- (Renoise's undo tells the lines first and then the list, its redo as the first time: lab 2026-11-01)
+    -- (the lines that differ between two snapshots; `cleared`, those a delete emptied)
+    local function lines_of(snapshot)
+      local out = {}
+      for _, entry in ipairs(snapshot) do out[entry[1] .. "." .. entry[2] .. "." .. entry[3] .. "." .. entry[4]] = entry end
+      return out
+    end
+    local was, now = lines_of(before), lines_of(after)
+    local renumbered, cleared = {}, {}
+    for key, entry in pairs(was) do
+      local other = now[key]
+      local played = entry[5].instrument
+      if played ~= 255 and played ~= nil and not (other and other[5].instrument == played) then
+        local list = (type_ == "remove" and played == a - 1) and cleared or renumbered
+        list[#list + 1] = entry
+      end
+    end
+    local function tell(list) for _, entry in ipairs(list) do tell_lines(entry[1], entry[2], entry[3]) end end
+    -- (Renoise's undo tells the renumbered lines first and then the list, and last what a delete emptied; its redo as the first time:
+    -- lab 2026-11-01)
     M.record(function()
       notes_restore(before)
-      tell_notes()
+      tell(renumbered)
       if type_ == "insert" then
         table.remove(instruments, a)
         M.fire(d.song_fields.instruments_observable, { type = "remove", index = a })
@@ -357,7 +378,10 @@ function M.instrument_list_op(type_, a, b, spec, record)
         instruments[a], instruments[b] = instruments[b], instruments[a]
         M.fire(d.song_fields.instruments_observable, { type = "swap", index1 = a, index2 = b })
       end
+      tell(cleared)
     end, function()
+      notes_restore(after)
+      tell(cleared)
       if type_ == "insert" then
         table.insert(instruments, a, made)
         M.fire(d.song_fields.instruments_observable, { type = "insert", index = a })
@@ -368,8 +392,7 @@ function M.instrument_list_op(type_, a, b, spec, record)
         instruments[a], instruments[b] = instruments[b], instruments[a]
         M.fire(d.song_fields.instruments_observable, { type = "swap", index1 = a, index2 = b })
       end
-      notes_restore(after)
-      tell_notes()
+      tell(renumbered)
     end)
   end
   return made
@@ -1485,9 +1508,10 @@ function M.instrument_proxy(i)
     if #instrument.phrases >= 126 then error("can't have more than 126 phrases", 2) end
     if ph < 1 or ph > #instrument.phrases + 1 then out_of_range("phrase", ph) end
     -- (Renoise's new phrase: lab)
-    renumber_phrases(instrument, "insert", ph)
     list_op(instrument.phrases, instrument.phrases_observable, "insert", ph, nil, phrase_data({ name = string.format("Phrase %02d", #instrument.phrases + 1),
       lpb = M.data.transport_fields.lpb, lines = 32, loop_end = 32, key_tracking = 2, autoseek = true, note_columns = 4, instrument_column_visible = false }))
+    -- (the list tells first, then the lines: lab 2026-11-01)
+    renumber_phrases(instrument, "insert", ph)
     return M.phrase_proxy(instrument, ph)
   end
   fields.delete_phrase_at = function(_, ph)
@@ -1496,8 +1520,8 @@ function M.instrument_proxy(i)
     for m, mapping in ipairs(instrument.mappings) do
       if mapping.phrase == phrase then list_op(instrument.mappings, instrument.mappings_observable, "remove", m) break end
     end
-    renumber_phrases(instrument, "remove", ph)
     list_op(instrument.phrases, instrument.phrases_observable, "remove", ph)
+    renumber_phrases(instrument, "remove", ph)
     -- (measured, 3.5.4: the program moves off a phrase deleted, 2 to 1, and down with the phrases after it; an insert leaves
     -- it where it is: M7 lab 2026-10-21)
     local program = instrument.phrase_program
