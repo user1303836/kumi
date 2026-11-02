@@ -703,7 +703,54 @@ end
 -- before is refused), and what was made gets its watchers. What was deleted loses its group, and a swap moves the groups
 -- with their objects (Renoise keeps an object's notifiers through a swap: measured). Only an operation the lists can't follow
 -- asks for the whole song to be watched anew.
+-- Instruments or phrases made, moved or deleted: Renoise renumbers the notes and 0Z commands that name them, which tells the
+-- patterns' line notifiers (lab 2026-11-01). That isn't an edit: it moves no rows. The list tells first and its lines follow in
+-- the same call, each read already renumbered: as long as they read so, they don't count, until the next tick. A line that doesn't
+-- is an edit (a script's, in the same callback), and ends that. An edit naming a later instrument still reads as one: nothing tells
+-- them apart. (A note deleted with its instrument is told before the list, and counts: it did change.) Only Renoise's undo tells the
+-- lines first: what this tick counted since the last mark handed out goes back (never past a mark: an edit after it would look like
+-- none; an edit just before it would be what the undo takes back).
+local function renumbering(kind, op)
+  local song = renoise.song()
+  local undoing = song and song:is_undo_redoing()
+  local window = b.renumbering or {}
+  b.renumbering = window
+  if kind == "phrases" then
+    window.phrases = true
+  else
+    local first, second = op and (op.index or op.index1), op and op.index2
+    -- (instruments count from 0 in a note. A new one's own number is no renumbering: a note written to play it is an edit. Renoise's
+    -- undo of a delete brings back what played the one it brings back)
+    local from = (first or 1) - 1
+    if second and second - 1 < from then from = second - 1 end
+    if op and op.type == "insert" and not undoing then from = first end
+    window.from = math.min(window.from or from, from)
+  end
+  if not undoing then return end
+  for _, token in pairs(b.groups and b.groups.patterns or {}) do
+    if token.recent_tick == b.ticks and token.recent then
+      token.touches, token.recent = token.touches - token.recent, 0
+    end
+  end
+end
+
+-- Whether a line told while something renumbers reads as what that writes: an instrument from the first it moved, or a 0Z. A line
+-- as `tostring` gives it (9.5 us, lab 2026-11-01): 12 note columns of 15 characters, the instrument the 4th and 5th, " | " between.
+local function reads_renumbered(window, pos)
+  local ok, text = pcall(function() return tostring(renoise.song():pattern(pos.pattern):track(pos.track):line(pos.line)) end)
+  if not ok then return false end
+  if window.phrases and text:find("0Z", 1, true) then return true end
+  if window.from then
+    for c = 0, 11 do
+      local value = tonumber(text:sub(18 * c + 4, 18 * c + 5), 16)
+      if value and value >= window.from then return true end
+    end
+  end
+  return false
+end
+
 local function on_structural(reason, kind, op, owner, token)
+  if kind == "instruments" or kind == "phrases" then renumbering(kind, op) end
   -- (n-instruments: a modulation set's devices notifier names each place one higher than the list has it, and tells of a
   -- device at 1 that the list doesn't show as a set is copied: lab 2026-10-19. That one is no change to the list.)
   if kind == "moddevices" and op then
@@ -1131,6 +1178,7 @@ local place_env = {
   -- mark is of another pattern or watch)
   pattern_touch_mark = function(p)
     local token = b.groups and b.groups.patterns[p]
+    if token then token.recent = 0 end
     return token and token.pid and (token.pid .. "=" .. token.touches) or nil
   end,
   pattern_touched_since = function(p, mark)
@@ -1673,7 +1721,7 @@ function M.start(h, reloading)
   observers = sync.new(guard, b, {
     structural = on_structural,
     tracks = on_tracks,
-    -- (every changed line counts for its pattern: the producer's edits, Renoise's undo and redo, Kumi's own writes. A notes
+    -- (every changed line but a renumbering's, `renumbering()`, counts for its pattern: the producer's edits, Renoise's undo and redo, Kumi's own writes. A notes
     -- change's undo goes through only if none came since its step; see changes_notes.lua)
     lines = function(pos, owner)
       -- (n-instruments: a phrase's lines count for the phrase)
@@ -1682,7 +1730,12 @@ function M.start(h, reloading)
         return
       end
       local token = type(pos) == "table" and type(pos.pattern) == "number" and b.groups and b.groups.patterns[pos.pattern]
-      if token and token.touches then token.touches = token.touches + 1 end
+      if token and token.touches and b.renumbering and not reads_renumbered(b.renumbering, pos) then b.renumbering = nil end
+      if token and token.touches and not b.renumbering then
+        token.touches = token.touches + 1
+        token.recent = (token.recent_tick == b.ticks and token.recent or 0) + 1
+        token.recent_tick = b.ticks
+      end
     end,
     -- (a track of the pattern made an alias or not: what its lines are changed)
     alias = function(token)
@@ -1756,6 +1809,7 @@ local function tick_listening()
 end
 
 function M.tick()
+  b.ticks, b.renumbering = (b.ticks or 0) + 1, nil
   b.alive_ms = M.now_ms()
   unix_ms()
   if not b.cfg then
@@ -1784,7 +1838,6 @@ function M.tick()
   -- (the auditions whose time is up end: a note never hangs on)
   local ended, audition_err = pcall(actions.tick, M.now_ms())
   if not ended then M.log_error("auditions", audition_err) end
-  b.ticks = (b.ticks or 0) + 1
   if b.ticks % 20 == 0 then log.flush() end
 end
 

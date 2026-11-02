@@ -324,6 +324,34 @@ test("lines: Kumi's undo of written, transposed or copied lines puts notes back 
   H.no_dialogs()
 end)
 
+test("lines: instruments renumbering isn't an edit, as Renoise makes it or undoes it; a real edit still stops Kumi's undo", function()
+  local _, peer = K.setup(nil, { instruments = 2 })
+  mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 1 })
+  mock.ops.set_note(1, 3, 3, 1, { note = 52, instrument = 1 })
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  local E = K.place(peer)
+  local function write() return K.change(peer, "notes-write", { pattern = K.ref(K.place(peer), "pattern", 1), track = K.ref(K.place(peer), "track", 3), lines = {
+    { line = 0, notes = { { col = 1, note = "OFF" } } },
+  } }) end
+  local written = write()
+  -- Renoise's own undo tells the renumbered lines before the list.
+  mock.song:insert_instrument_at(1)
+  H.tick(2)
+  mock.song:undo()
+  H.tick(2)
+  local undone = K.restore(peer, written)
+  ok(undone.result, T.load_payload_module("json").encode(undone.error or {}))
+  eq(column(1, 3, 1, 1).note_string, "C-4")
+  -- An edit in that pattern a tick after a renumbering does count.
+  written = write()
+  mock.song:insert_instrument_at(1)
+  H.tick(2)
+  mock.song:pattern(1):track(3):line(9):note_column(1).note_string = "C-5"
+  H.tick(2)
+  local refused = K.restore(peer, written)
+  eq(refused.error and refused.error.code, "changed", "an edit may have moved rows")
+end)
+
 test("lines: Kumi's undo refuses to put notes back when the instrument they played was deleted, and writes nothing", function()
   local _, peer = K.setup(nil, { instruments = 2 })
   mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 1 })
@@ -340,4 +368,116 @@ test("lines: Kumi's undo refuses to put notes back when the instrument they play
   eq(column(1, 3, 1, 1).note_string, "OFF", "nothing written")
   eq(K.steps(), before)
   H.no_dialogs()
+end)
+
+test("lines: a renumbering told by Renoise's undo gives back nothing from before a mark", function()
+  local _, peer = K.setup(nil, { instruments = 2 })
+  mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 1 })
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  mock.song:insert_instrument_at(1)
+  H.tick(2)
+  -- In one tick: Kumi's write (its lines counted, then its mark), and Renoise's undo of the insert, which tells lines first.
+  local written = K.change(peer, "notes-write", { pattern = K.ref(K.place(peer), "pattern", 1), track = K.ref(K.place(peer), "track", 3), lines = {
+    { line = 0, notes = { { col = 1, note = "OFF" } } },
+  } })
+  local stack = mock.data.undo.stack
+  stack[#stack], stack[#stack - 1] = stack[#stack - 1], stack[#stack]
+  mock.song:undo()
+  H.tick(2)
+  -- An edit after the mark still counts.
+  mock.song:pattern(1):track(3):line(9):note_column(1).note_string = "C-5"
+  H.tick(2)
+  eq(K.restore(peer, written).error.code, "changed", "an edit since the mark")
+end)
+
+test("lines: an edit just before an instrument is made still counts", function()
+  local _, peer = K.setup(nil, { instruments = 2 })
+  mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 1 })
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  local written = K.change(peer, "notes-write", { pattern = K.ref(K.place(peer), "pattern", 1), track = K.ref(K.place(peer), "track", 3), lines = {
+    { line = 0, notes = { { col = 1, note = "OFF" } } },
+  } })
+  H.tick(2)
+  mock.song:pattern(1):track(3):line(9):note_column(1).note_string = "C-5"
+  mock.song:insert_instrument_at(1)
+  H.tick(2)
+  eq(K.restore(peer, written).error.code, "changed", "the edit counted")
+end)
+
+test("lines: an edit in the same callback as an instrument op stops Kumi's undo, however many lines it renumbered first", function()
+  local function window(op)
+    local _, peer = K.setup(nil, { instruments = 3 })
+    mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 2 })
+    mock.ops.set_note(1, 3, 5, 1, { note = 50, instrument = 2 })
+    mock.data.undo.stack, mock.data.undo.redo = {}, {}
+    local written = K.change(peer, "notes-write", { pattern = K.ref(K.place(peer), "pattern", 1), track = K.ref(K.place(peer), "track", 3), lines = {
+      { line = 0, notes = { { col = 1, note = "OFF" } } },
+    } })
+    H.tick(2)
+    op()
+    mock.song:pattern(1):track(3):line(9):note_column(1).note_string = "C-5"
+    H.tick(2)
+    eq(K.restore(peer, written).error.code, "changed", "the edit counted")
+  end
+  window(function() mock.song:delete_instrument_at(3) end)
+  window(function() mock.song:insert_instrument_at(1) end)
+  window(function() mock.song:swap_instruments_at(2, 3) end)
+end)
+
+test("lines: a note written to play the instrument just made is an edit, not a renumbering", function()
+  local _, peer = K.setup(nil, { instruments = 2 })
+  mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 1 })
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  local written = K.change(peer, "notes-write", { pattern = K.ref(K.place(peer), "pattern", 1), track = K.ref(K.place(peer), "track", 3), lines = {
+    { line = 0, notes = { { col = 1, note = "OFF" } } },
+  } })
+  H.tick(2)
+  mock.song:insert_instrument_at(2)
+  local column = mock.song:pattern(1):track(3):line(9):note_column(1)
+  column.note_string, column.instrument_value = "C-5", 1
+  H.tick(2)
+  eq(K.restore(peer, written).error.code, "changed", "the note counted")
+end)
+
+test("lines: a renumbering a phrase op makes isn't an edit, and an edit right after it is", function()
+  local _, peer = K.setup(nil, { instruments = 2 })
+  local instrument = mock.song:instrument(1)
+  instrument:insert_phrase_at(1)
+  instrument:insert_phrase_at(2)
+  mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 0 })
+  local effect = mock.song:pattern(1):track(3):line(1):effect_column(1)
+  effect.number_string, effect.amount_value = "0Z", 2
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  local function written()
+    return K.change(peer, "notes-write", { pattern = K.ref(K.place(peer), "pattern", 1), track = K.ref(K.place(peer), "track", 3), lines = {
+      { line = 4, notes = { { col = 1, note = "OFF" } } },
+    } })
+  end
+  local first = written()
+  H.tick(2)
+  instrument:insert_phrase_at(1)
+  H.tick(2)
+  local undone = K.restore(peer, first)
+  ok(undone.result, "a phrase's renumbering isn't an edit: " .. tostring((undone.error or {}).message))
+  local second = written()
+  H.tick(2)
+  instrument:insert_phrase_at(1)
+  mock.song:pattern(1):track(3):line(9):note_column(1).note_string = "C-5"
+  H.tick(2)
+  eq(K.restore(peer, second).error.code, "changed", "the edit counted")
+end)
+
+test("lines: a renumbered note in a later column isn't an edit", function()
+  local _, peer = K.setup(nil, { instruments = 3 })
+  mock.ops.set_note(1, 3, 5, 12, { note = 50, instrument = 2 })
+  mock.ops.set_note(1, 3, 1, 1, { note = 48, instrument = 0 })
+  mock.data.undo.stack, mock.data.undo.redo = {}, {}
+  local written = K.change(peer, "notes-write", { pattern = K.ref(K.place(peer), "pattern", 1), track = K.ref(K.place(peer), "track", 3), lines = {
+    { line = 0, notes = { { col = 1, note = "OFF" } } },
+  } })
+  H.tick(2)
+  mock.song:insert_instrument_at(1)
+  H.tick(2)
+  local undone = K.restore(peer, written)
+  ok(undone.result, "not an edit: " .. tostring((undone.error or {}).message))
 end)
