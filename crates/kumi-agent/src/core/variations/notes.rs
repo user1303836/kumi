@@ -113,9 +113,13 @@ pub fn note_op(
             "velocities moved".into()
         }
         "timing" => {
+            // (no later than the take's last note ends: past its source's end a DAW may refuse the take)
+            let last = notes.iter().map(|note| note.start + note.length).fold(0., f64::max);
             for note in notes.iter_mut().filter(|note| free(note)) {
-                note.start = (note.start + sign(op, rng) * some_of(0.06 * much, rng)).max(0.);
+                let moved = note.start + sign(op, rng) * some_of(0.06 * much, rng);
+                note.start = moved.min((last - note.length).max(note.start)).max(0.);
             }
+            parted(notes, anchors);
             "timing loosened".into()
         }
         // (Kumi's own "higher" and "lower": some of the notes, at least one, an octave up or down, the same notes of the scale
@@ -146,6 +150,46 @@ pub fn note_op(
         }
         _ => return None,
     }))
+}
+
+/// How close two notes of one pitch and channel may start: a sixty-fourth of a triplet, a whole tick on any common grid.
+const CLOSEST: f64 = 1. / 96.;
+
+/// Notes of one pitch and channel no longer overlapping: a note ends where the next of them starts, as a note-off of one pitch stops
+/// the note sounding on it whichever it was meant for, and it'd cut the later one short. An anchor stays as it is: the note beside
+/// it gives way. Neither is dropped.
+fn parted(notes: &mut [Note], anchors: &[Note]) {
+    let mut order: Vec<usize> = (0..notes.len()).collect();
+    order.sort_by(|a, b| {
+        let (a, b) = (&notes[*a], &notes[*b]);
+        (a.pitch, a.channel).cmp(&(b.pitch, b.channel)).then(a.start.total_cmp(&b.start))
+    });
+    let anchored = |note: &Note| anchors.iter().any(|anchor| anchor.same(note));
+    for pair in order.windows(2) {
+        let (first, second) = (pair[0], pair[1]);
+        if (notes[first].pitch, notes[first].channel) != (notes[second].pitch, notes[second].channel) {
+            continue;
+        }
+        let (first_stays, second_stays) = (anchored(&notes[first]), anchored(&notes[second]));
+        if first_stays && second_stays {
+            continue;
+        }
+        if second_stays {
+            // (the earlier one starts early enough)
+            notes[first].start = notes[first].start.min((notes[second].start - CLOSEST).max(0.));
+        }
+        let end = notes[first].start + notes[first].length;
+        let from = if first_stays { end } else { notes[first].start + CLOSEST };
+        if !second_stays && notes[second].start < from {
+            // (the later one starts late enough, its end where it was)
+            let last = notes[second].start + notes[second].length;
+            notes[second].start = from;
+            notes[second].length = (last - from).max(CLOSEST);
+        }
+        if notes[first].start + notes[first].length > notes[second].start {
+            notes[first].length = notes[second].start - notes[first].start;
+        }
+    }
 }
 
 /// Notes the model wrote with the take's anchor notes in, as they are (#400 review notes: written notes never have to repeat
@@ -208,6 +252,55 @@ pub fn anchors_in(anchors: &[Note], notes: &[Note]) -> Result<(), String> {
     match anchors.iter().find(|anchor| !notes.iter().any(|note| note == *anchor)) {
         Some(anchor) => Err(format!("the anchor note {} at {:.2} isn't as it was", anchor.pitch, anchor.start)),
         None => Ok(()),
+    }
+}
+
+#[cfg(test)]
+mod timing_tests {
+    use super::*;
+
+    fn note(pitch: i64, start: f64, length: f64) -> Note {
+        Note { pitch, start, length, velocity: 90, channel: 1 }
+    }
+
+    fn loosened(mut notes: Vec<Note>, anchors: &[Note], seed: u64) -> Vec<Note> {
+        note_op("timing", &json!({"op": "timing", "amount": 1}), 1., &mut notes, anchors, &mut Rng::new(seed)).unwrap().unwrap();
+        notes
+    }
+
+    /// Loosened, no note ends past where the take's last did: a legato line to its item's end fills its source, and a DAW may refuse a
+    /// note past it (REAPER does, and the whole take with it).
+    #[test]
+    fn loosened_notes_stay_inside_what_the_take_held() {
+        let legato: Vec<Note> = (0..8).map(|k| note(48 + k, k as f64 * 0.5, 0.5)).collect();
+        for seed in 0..64 {
+            for moved in loosened(legato.clone(), &[], seed) {
+                assert!(moved.start + moved.length <= 4. + 1e-9 && moved.start >= 0., "seed {seed}: {moved:?}");
+            }
+        }
+    }
+
+    /// Loosened, notes of one pitch and channel don't overlap: a note-off of that pitch would stop the later one too. None goes, and an
+    /// anchor stays as it is.
+    #[test]
+    fn loosened_notes_of_one_pitch_never_overlap_and_anchors_stay() {
+        let hats: Vec<Note> = (0..16).map(|k| note(42, k as f64 * 0.25, 0.25)).collect();
+        let anchors = [hats[4].clone(), hats[9].clone()];
+        for seed in 0..64 {
+            let moved = loosened(hats.clone(), &anchors, seed);
+            assert_eq!(moved.len(), 16);
+            assert!(anchors.iter().all(|anchor| moved.contains(anchor)), "seed {seed}: {moved:?}");
+            let mut sorted = moved.clone();
+            sorted.sort_by(|a, b| a.start.total_cmp(&b.start));
+            for pair in sorted.windows(2) {
+                assert!(pair[0].start + pair[0].length <= pair[1].start + 1e-9, "seed {seed}: {pair:?}");
+                assert!(pair[0].length > 0., "seed {seed}: {pair:?}");
+            }
+        }
+        // Other pitches and channels may overlap as they like.
+        let chord = vec![note(60, 0., 1.), note(64, 0., 1.), Note { channel: 2, ..note(60, 0.5, 1.) }];
+        let moved = loosened(chord.clone(), &[], 3);
+        assert!(moved.iter().zip(&chord).all(|(a, b)| a.length == b.length), "{moved:?}");
     }
 }
 

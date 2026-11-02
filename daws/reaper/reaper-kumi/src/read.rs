@@ -1212,6 +1212,10 @@ fn take_row(reaper: &Reaper, proj: Project, take: Take, place: Option<(usize, bo
     if let Some((notes, ccs, _)) = reaper.midi_counts(take).filter(|_| reaper.take_is_midi(take)) {
         row["noteCount"] = notes.into();
         row["ccCount"] = ccs.into();
+        // (a change to a pooled take lands on every item in its pool: lab, 7.82)
+        if reaper.take_source_type(take).is_some_and(|kind| kind.eq_ignore_ascii_case("MIDIPOOL")) {
+            row["pooled"] = true.into();
+        }
         item_rows::midi_ticks(reaper, proj, take, &mut row);
     }
     item_rows::take_details(reaper, take, &mut row, place.is_none());
@@ -1878,7 +1882,8 @@ mod tests {
         let row = &lab.rows(json!({"ref": "r:take:{TAKE-S1}"}))[0];
         assert_eq!((&row["source"], &row["noteCount"], &row["ticksPerQuarter"]), (&json!("mid"), &json!(2), &json!(960.0)));
         assert_eq!(lab.rows(json!({"kind": "note", "parent": "r:take:{TAKE-S1}"})).len(), 2);
-        assert_eq!(lab.rows(json!({"kind": "item", "parent": "r:track:{CCCC}"}))[0]["source"], "mid");
+        let item = &lab.rows(json!({"kind": "item", "parent": "r:track:{CCCC}"}))[0];
+        assert_eq!((&item["source"], &item["pooled"], &row["pooled"]), (&json!("mid"), &json!(true), &json!(true)));
     }
 
     /// (#606, lab 7.82) Ticks that bend across an item have no straight line: an item that ignores the project tempo bent by

@@ -1025,6 +1025,14 @@ async fn a_reaper_midi_items_takes_move_their_notes_through_the_host() {
             let dropped = run_tool(&variations, json!({"action": "drop"})).await;
             assert_eq!((dropped["dropped"].clone(), dropped["skipped"].clone()), (json!(["V1", "V2"]), json!([])), "{dropped}");
             assert!(notes_of(2).is_empty() && notes_of(3).is_empty());
+            // (a take is compared with the anchors it was made with: a later make that asks for none doesn't make it edited)
+            let up = |semitones: i64| json!({"direction": "up", "ops": [{"op": "pitch", "semitones": semitones}]});
+            run_tool(&variations, json!({"action": "make", "source": {"itemRef": item}, "takes": [up(2)], "anchors": [0, 3], "seed": 7, "listen": false})).await;
+            run_tool(&variations, json!({"action": "make", "source": {"itemRef": item}, "takes": [up(-3)], "seed": 8, "listen": false})).await;
+            let changed = run_tool(&variations, json!({"action": "change", "names": ["rest"], "listen": false})).await;
+            assert_eq!(changed["skipped"], json!([]), "{changed}");
+            let dropped = run_tool(&variations, json!({"action": "drop"})).await;
+            assert_eq!(dropped["skipped"], json!([]), "{dropped}");
             // (a take has all of a long source's notes: reads once stopped at 4000, and the take lost the rest)
             let long: Vec<(i64, f64, f64, i64)> = (0..4200).map(|k| (40 + k % 40, k as f64 / 500., 0.001, 100)).collect();
             let (item, _) = script.add_midi_item("r:track:{T0003}", "Long", 0., 16., &long);

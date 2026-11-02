@@ -15,7 +15,7 @@ use kumi_agent::core::{
             NOTE_DIRECTIONS,
         },
         tool::{names, names_to_find},
-        Material, Rng, TakeSet,
+        Material, Rng, TakeSet, TakeState,
     },
 };
 use kumi_common::abort::Signal;
@@ -155,10 +155,11 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
     }
 
     /// What an item holds now: its row, its take's, and a MIDI take's notes that play, with each one's index as REAPER reads it.
-    async fn material_now(&self, item: &Value, anchors: &[Note], signal: &Signal) -> Result<(ItemTake, Vec<usize>), String> {
+    async fn material_now(&self, item: &Value, anchors: &[Note], signal: &Signal) -> Result<(ItemTake, Vec<usize>, bool), String> {
         let take_ref = item.get("takeRef").and_then(Value::as_str).ok_or("the item has no take")?;
         let take = self.one(take_ref, signal).await?;
         let midi = item.get("source").and_then(Value::as_str) == Some(daw_bridge::contract::MIDI_SOURCE);
+        let mut hidden = false;
         let (indexes, notes) = if midi {
             let count = take.get("noteCount").and_then(Value::as_u64).unwrap_or(0);
             if count > MOST_NOTES {
@@ -170,6 +171,9 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
             if (rows.len() as u64) < count {
                 return Err(format!("Kumi read {} of that take's {count} notes: try again", rows.len()));
             }
+            hidden = rows.iter().any(|row| {
+                row.get("muted") != Some(&Value::Bool(true)) && row.get("start").and_then(Value::as_f64).is_some_and(|start| start < 0.)
+            });
             played(&rows).into_iter().unzip()
         } else {
             Default::default()
@@ -189,7 +193,7 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
             anchors: anchors.to_vec(),
             ticks: if midi { Ticks::of(&take) } else { Ticks::Unsaid },
         };
-        Ok((material, indexes))
+        Ok((material, indexes, hidden))
     }
 
     async fn change(&self, tool: &str, input: Value, signal: &Signal) -> Result<(String, Value), (String, bool)> {
@@ -256,6 +260,18 @@ fn anchors_of(indexes: &[usize], notes: &[Note], wanted: &[usize]) -> Result<Vec
             })
         })
         .collect()
+}
+
+/// Why an item can't be a source, in words: one that loops, with notes its trimmed start hides. Those play from its second pass on,
+/// and a take can only write notes from its start, so it'd lose them there. Or a pooled one, by an extension that still says
+/// "midipool": it can't read that item's notes.
+fn refused_source(item: &Value, hidden: bool) -> Option<String> {
+    if item.get("source").and_then(Value::as_str) == Some("midipool") {
+        return Some("that MIDI item is pooled, and the extension REAPER has loaded can't read a pooled item's notes: restart REAPER to load the new one".into());
+    }
+    (hidden && item.get("loop") == Some(&Value::Bool(true))).then(|| {
+        "that item loops, and its trimmed start hides notes that play from its second pass on, which a take can't hold yet: drag its start back over them, or vary it without the loop".to_string()
+    })
 }
 
 /// A take as REAPER holds it once written: its settings as `settings` writes them and REAPER's reads give them back (times,
@@ -458,7 +474,10 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
             .ok()
             .and_then(|row| row.get("name").and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_default();
-        let (mut material, indexes) = self.material_now(&item, &[], signal).await?;
+        let (mut material, indexes, hidden) = self.material_now(&item, &[], signal).await?;
+        if let Some(why) = refused_source(&item, hidden) {
+            return Err(why);
+        }
         // (the anchors: a MIDI take's notes by their index as read, which counts the ones that don't play)
         let anchors: Vec<usize> =
             input.get("anchors").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).map(|n| n as usize).collect();
@@ -636,10 +655,17 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
     }
 
     async fn current(&self, set: &ReaperSet, row: &Value, signal: &Signal) -> Result<ItemTake, String> {
-        let anchors = set.source.material.as_ref().map(|material| material.anchors.clone()).unwrap_or_default();
-        let (now, _) = self.material_now(row, &anchors, signal).await?;
-        // (the take Kumi kept there: `find` gave it the row's ref)
-        let kept = set.takes.iter().find(|take| take.place.get("ref").is_some_and(|reference| Some(reference) == row.get("ref")));
+        // (the take Kumi kept there: `find` gave it the row's ref. Its own anchors: a later make may ask for others)
+        let kept = set
+            .takes
+            .iter()
+            .filter(|take| take.state != TakeState::Dropped)
+            .find(|take| take.place.get("ref").is_some_and(|reference| Some(reference) == row.get("ref")));
+        let anchors = match kept {
+            Some(take) => take.material.anchors.clone(),
+            None => set.source.material.as_ref().map(|material| material.anchors.clone()).unwrap_or_default(),
+        };
+        let (now, ..) = self.material_now(row, &anchors, signal).await?;
         Ok(match kept {
             Some(take) => as_kept(now, &take.material),
             None => now,
@@ -909,6 +935,18 @@ mod tests {
         assert!(pitches(&[9]).unwrap_err().contains("anchor 9"));
     }
 
+    /// A looped item with notes behind its trim says why it can't be varied (they play from its second pass); hidden notes of an item
+    /// that doesn't loop never play, and a looped item with none hidden loses nothing.
+    #[test]
+    fn a_looped_item_with_hidden_notes_is_refused_in_words() {
+        let looped = json!({"source": "mid", "loop": true});
+        assert!(refused_source(&looped, true).unwrap().contains("second pass"));
+        assert_eq!(refused_source(&looped, false), None);
+        assert_eq!(refused_source(&json!({"source": "mid", "loop": false}), true), None);
+        // (an extension not reloaded yet still says "midipool", and can't read its notes)
+        assert!(refused_source(&json!({"source": "midipool"}), false).unwrap().contains("restart REAPER"));
+    }
+
     /// A MIDI take's operators are those that move something: REAPER writes notes at the project's beats whatever its playrate
     /// (lab, 7.82), so a rate moves no note and only cuts the end off.
     #[test]
@@ -1013,10 +1051,9 @@ mod tests {
         reads_back_as_kept(a_riff(), note_direction_ops("looser"), 1066.666667, 0.);
     }
 
-    /// A hat on every sixteenth, each as long as its step: loosened, neighbours of one pitch overlap, and REAPER keeps them as
-    /// written, a save and a reopen too (lab).
+    /// A hat on every sixteenth, each as long as its step: loosened, its notes don't overlap (core parts them), and read back as kept.
     #[test]
-    fn overlapping_notes_of_one_pitch_read_back_as_kept() {
+    fn repeated_notes_of_one_pitch_read_back_as_kept() {
         let hats = (0..16).map(|k| a_note(42, k as f64 * 0.25, 0.25)).collect();
         reads_back_as_kept(hats, note_direction_ops("looser"), 960., 0.);
     }

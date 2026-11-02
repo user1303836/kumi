@@ -4213,3 +4213,42 @@ fn an_fxs_pins_are_mapped_whole_put_back_and_refused_when_the_producer_remapped_
     assert!(refused(json!({"ref": "r:fx:{FX-VERB}", "pins": [{"pin": 5, "channels": [1]}]})).contains("from 1 to 4"));
     assert!(refused(json!({"ref": "r:fx:{FX-VERB}", "pins": [{"pin": 1, "channels": [1]}, {"pin": 1, "channels": [2]}]})).contains("twice"));
 }
+
+/// A change to a pooled take lands on every item in its pool, so its answer and its HISTORY row (both `display.note`) say so, how
+/// many included, and so does its undo; the take's row says it's pooled, and a take that isn't says nothing of pools.
+#[test]
+fn a_change_to_a_pooled_take_says_it_lands_on_the_whole_pool() {
+    let lab = Lab::new();
+    let note_of = |value: &Value| value["display"]["note"].as_str().map(str::to_owned);
+    let add = json!({"ref": SNARE_TAKE, "notes": [{"pitch": 60, "start": 2.5, "length": 0.5}]});
+    let (preview, applied) = lab.make("notes-add", add.clone(), "Kumi: Wrote 1 note (kpo00)");
+    assert_eq!((note_of(&preview), note_of(&applied)), (None, None), "not pooled");
+    lab.undo("notes-add", &preview, &applied, "Kumi: undo (kpo01)").unwrap();
+    fake::with(|s| {
+        let snare = &mut s.tracks[2];
+        snare.items[0].takes[0].source = Some("MIDIPOOL".into());
+        snare.items[0].takes[0].more.pool = Some("{THE-POOL}".into());
+        let mut copy = snare.items[0].clone();
+        copy.guid = "{ITEM-S2}".into();
+        copy.takes[0].guid = "{TAKE-S2}".into();
+        copy.position = 20.0;
+        snare.items.push(copy);
+    });
+    assert_eq!(lab.call("read", json!({"ref": SNARE_TAKE})).unwrap()["items"][0]["pooled"], true);
+    let (preview, applied) = lab.make("notes-add", add, "Kumi: Wrote 1 note (kpo02)");
+    assert_eq!(note_of(&preview).as_deref(), Some("REAPER will apply this to all 2 items in this take's MIDI pool."));
+    assert_eq!(note_of(&applied).as_deref(), Some("REAPER applied this to all 2 items in this take's MIDI pool."));
+    let undone = lab.undo("notes-add", &preview, &applied, "Kumi: undo (kpo03)").unwrap();
+    assert_eq!(note_of(&undone).as_deref(), Some("REAPER put this back in all 2 items in this take's MIDI pool."));
+    // Every kind that writes a take's MIDI says it.
+    for (kind, input) in [
+        ("notes-quantize", json!({"ref": SNARE_TAKE, "grid": 0.25})),
+        ("midi-events-add", json!({"ref": SNARE_TAKE, "events": [{"type": "cc", "start": 0.5, "controller": 1, "value": 64}]})),
+    ] {
+        let (preview, applied) = lab.make(kind, input, "Kumi: A change (kpo04)");
+        assert!(note_of(&preview).unwrap().contains("in this take's MIDI pool"), "{kind}: {preview}");
+        assert!(note_of(&applied).unwrap().contains("in this take's MIDI pool"), "{kind}: {applied}");
+        let undone = lab.undo(kind, &preview, &applied, "Kumi: undo (kpo05)").unwrap();
+        assert!(note_of(&undone).is_none_or(|note| note.contains("in this take's MIDI pool")), "{kind}: {undone}");
+    }
+}

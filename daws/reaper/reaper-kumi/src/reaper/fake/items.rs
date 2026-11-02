@@ -13,6 +13,8 @@ pub struct TakeMore {
     pub stretch: Vec<(f64, f64, f64)>,
     /// Take markers: source position, name, colour; in source order.
     pub markers: Vec<(f64, String, i32)>,
+    /// The MIDI pool it's in, when it's pooled (its chunk's `POOLEDEVTS`).
+    pub pool: Option<String>,
     /// The media file a take plays, and its length (seconds, or quarter notes for MIDI).
     pub file: Option<String>,
     pub length: f64,
@@ -392,10 +394,12 @@ pub(super) unsafe extern "C" fn get_item_state_chunk(item: *mut MediaItem, buf: 
                 text += if k == i.active { "TAKE SEL\n" } else { "TAKE\n" };
             }
             text += &format!("NAME \"{}\"\nGUID {}\n", take.name, take.guid);
-            if take.source.as_deref() == Some("MIDI") {
+            if matches!(take.source.as_deref(), Some("MIDI" | "MIDIPOOL")) {
+                let own = format!("{{POOL-{}}}", take.guid.trim_matches(|c| c == '{' || c == '}'));
                 text += &format!(
-                    "<SOURCE MIDI\nPOOLEDEVTS {{POOL-{}}}\nCFGEDITVIEW 0 0\n>\n",
-                    take.guid.trim_matches(|c| c == '{' || c == '}')
+                    "<SOURCE {}\nPOOLEDEVTS {}\nCFGEDITVIEW 0 0\n>\n",
+                    take.source.as_deref().unwrap_or_default(),
+                    take.more.pool.as_deref().unwrap_or(&own)
                 );
             }
             // The take's FX as m4-r-fxenv writes their entries (its take FX kinds read them back): one FXID line per FX,

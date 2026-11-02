@@ -610,6 +610,10 @@ pub fn item_row(reaper: &Reaper, proj: Project, item: Item) -> Value {
         "selected": reaper.item_value(item, "B_UISEL") != 0.0,
     });
     crate::read::item_rows::item_details(reaper, item, &mut row);
+    // (a change to a pooled take lands on every item in its pool: lab, 7.82)
+    if take.and_then(|take| reaper.take_source_type(take)).is_some_and(|kind| kind.eq_ignore_ascii_case("MIDIPOOL")) {
+        row["pooled"] = true.into();
+    }
     row
 }
 

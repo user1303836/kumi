@@ -509,6 +509,11 @@ HISTORY stays honest in each case: Kumi refuses, or says what it can't do.
   project; REAPER still lists them until it next loads the track. An undone MIDI
   learn leaves an empty entry on the FX, saved with it, that listens to nothing.
   The row says so.
+- **REAPER:** a change to a pooled MIDI take lands on every item in its pool, as
+  REAPER's own editor does: the answer and the row say so, with how many, and
+  Kumi's undo puts them all back. A variation of a pooled item leaves the pool.
+  A looped MIDI item with notes hidden by its trimmed start can't be varied yet:
+  those notes play from its second pass, and a take can't hold them.
 - **REAPER:** a MIDI take that reads other than Kumi kept it counts as edited,
   and a change or "drop the rest" leaves it (naming it drops it). Kumi can't
   tell an edit from REAPER's placing where a take ignores the project tempo and

@@ -44,6 +44,7 @@ mod fx_params;
 mod fxchain;
 mod fxkinds;
 mod modulation;
+mod pool;
 // (r-tracks) M4: track properties, routing, project items, actions; NIT-7.
 mod actions;
 mod groups;

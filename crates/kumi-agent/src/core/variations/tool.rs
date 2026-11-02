@@ -994,8 +994,6 @@ fn bounds_of(input: &JsonObject) -> Bounds {
     }
 }
 
-/// A rewrite's change, what the take holds now and its line: what was drawn, or (when only part of it went in) what the backend
-/// says it holds, the line saying why.
 /// A found take that holds other than Kumi kept it: edited since, or, where the DAW put what Kumi wrote where Kumi can't follow
 /// it, maybe (and why).
 fn edited_line<B: VariationsBackend>(backend: &B, number: usize, current: &B::Material) -> String {
@@ -1006,6 +1004,8 @@ fn edited_line<B: VariationsBackend>(backend: &B, number: usize, current: &B::Ma
     }
 }
 
+/// A rewrite's change, what the take holds now and its line: what was drawn, or (when only part of it went in) what the backend
+/// says it holds, the line saying why.
 fn holding<M: Clone>(drawn: &Drawn<M>, done: Rewritten<M>) -> (String, M, String) {
     let (change, instead) = done;
     let mut line = take_line(drawn, &change);
