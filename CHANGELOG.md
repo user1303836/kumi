@@ -3,6 +3,16 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.48 — 2026-11-01
+
+Ships with bridge 1.0.102, as 1.24.47 did.
+
+- What Kumi heard now shows as a spectrum you can read: each band to scale on a frequency axis, in dB
+  per octave with a marked scale, and the mix's tilt.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.47 — 2026-11-01
 
 Ships with bridge 1.0.102, as 1.24.46 did. Ships with Renoise tool 1.0.11, which Renoise loads when it
