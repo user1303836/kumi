@@ -2267,7 +2267,16 @@ impl SearchRig {
         }
     }
     fn knob() -> Knob {
-        Knob { r#ref: "knob:1".into(), device: "1:Operator".into(), name: "Filter Freq".into(), min: 0., max: 1., step: None, value: 0.2 }
+        Knob {
+            r#ref: "knob:1".into(),
+            device: "1:Operator".into(),
+            name: "Filter Freq".into(),
+            min: 0.,
+            max: 1.,
+            step: None,
+            value: 0.2,
+            device_id: None,
+        }
     }
 }
 #[async_trait(?Send)]

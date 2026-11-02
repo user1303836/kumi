@@ -621,6 +621,54 @@ fn each_knob_stays_on_its_own_device_of_two_of_a_name_once_one_was_put_in_above(
     });
 }
 
+/// (#399) A leap opens a new rig, and a search's knobs keep the words they began with: with a device put in above during it, each
+/// still lands on the device it was read from.
+#[test]
+fn a_leap_keeps_each_knob_on_the_device_it_was_read_from() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["EQ", "EQ"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.generation(&[trial(&slot, &[("0:EQ", "Tone", 0.6), ("1:EQ", "Tone", 0.4)])], Signal::new(), None).await.unwrap();
+        goal.close().await.unwrap();
+        live.set.put_device_in("Candidate", 0, "Saturator");
+
+        let goal = live.goal(&["Candidate"]).await;
+        let generation =
+            goal.generation(&[trial(&slot, &[("0:EQ", "Tone", 0.7), ("1:EQ", "Tone", 0.3)])], Signal::new(), None).await.unwrap();
+
+        assert!(generation.frozen.is_empty(), "{:?}", generation.frozen);
+        assert_eq!(live.set.knob_at("Candidate", 1, "Tone"), 0.7, "the first EQ");
+        assert_eq!(live.set.knob_at("Candidate", 2, "Tone"), 0.3, "the second EQ");
+        assert_eq!(live.set.knob_at("Candidate", 0, "Tone"), 0.5, "the Saturator");
+        goal.close().await.unwrap();
+    });
+}
+
+/// (#399) A later goal on a chain that moved reads its own knobs: nothing of the last goal's words is left to send them elsewhere.
+#[test]
+fn a_later_goal_on_a_moved_chain_goes_by_the_knobs_it_read() {
+    on_a_paused_clock(async {
+        let live = Live::new(&[("Candidate", &["EQ", "EQ"])]).await;
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        goal.generation(&[trial(&slot, &[("0:EQ", "Tone", 0.6), ("1:EQ", "Tone", 0.4)])], Signal::new(), None).await.unwrap();
+        goal.close().await.unwrap();
+        drop(goal);
+        live.set.put_device_in("Candidate", 0, "Saturator");
+
+        let goal = live.goal(&["Candidate"]).await;
+        let slot = slot_named(&goal, "Candidate");
+        let generation =
+            goal.generation(&[trial(&slot, &[("1:EQ", "Tone", 0.7), ("2:EQ", "Tone", 0.3)])], Signal::new(), None).await.unwrap();
+
+        assert!(generation.frozen.is_empty(), "{:?}", generation.frozen);
+        assert_eq!(live.set.knob_at("Candidate", 1, "Tone"), 0.7, "the first EQ");
+        assert_eq!(live.set.knob_at("Candidate", 2, "Tone"), 0.3, "the second EQ");
+        goal.close().await.unwrap();
+    });
+}
+
 /// A device the producer renamed mid-search is the same device: its knobs still move.
 #[test]
 fn a_device_renamed_mid_search_keeps_its_knobs() {

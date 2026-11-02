@@ -317,6 +317,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
                     max,
                     step: crate::listening::steps_of(row).map(|steps| (max - min) / (steps - 1) as f64),
                     value: number("value").unwrap_or(min),
+                    device_id: None,
                 };
                 places.insert(key(&knob), (device.index, index));
                 knobs.push(knob);

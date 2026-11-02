@@ -464,6 +464,7 @@ fn goal_state() -> GoalState {
         max: 1.0,
         step: None,
         value,
+        device_id: None,
     };
     GoalState {
         version: 1,

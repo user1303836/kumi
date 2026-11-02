@@ -13,6 +13,7 @@ fn knobs(device: &str, values: &[f64]) -> Vec<Knob> {
             max: 1.0,
             step: None,
             value,
+            device_id: None,
         })
         .collect()
 }
@@ -176,4 +177,19 @@ fn a_suggested_setting_is_tried_once_the_slots_start_is_heard_and_kept_only_if_b
     e.suggest("B", vec![0.0; 5]);
     assert_eq!(heard(&mut e)[0].how, TrialHow::Remembered);
     assert_eq!(e.slots[0].elite, best);
+}
+
+/// (#399) A knob's device id reaches a goal's saved state. A goal saved without it still loads, and a knob with none saves as it
+/// always has, so a saved goal reads the same both ways across an update and a rollback.
+#[test]
+fn a_knob_saved_without_a_device_id_loads_and_one_with_none_saves_as_before() {
+    let saved = serde_json::json!({"ref":"r","device":"0:EQ","name":"Tone","min":0.0,"max":1.0,"value":0.5});
+    let knob: Knob = serde_json::from_value(saved.clone()).unwrap();
+    assert_eq!(knob.device_id, None);
+    assert_eq!(serde_json::to_value(&knob).unwrap(), saved);
+
+    let known = Knob { device_id: Some("live:7".into()), ..knob };
+    let saved = serde_json::to_value(&known).unwrap();
+    assert_eq!(saved["device_id"], "live:7");
+    assert_eq!(serde_json::from_value::<Knob>(saved).unwrap(), known);
 }

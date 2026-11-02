@@ -68,7 +68,16 @@ fn a_trial_for_a_slot_the_goal_doesnt_hold_is_refused_in_plain_words() {
 }
 
 fn knob(device: &str, name: &str) -> Knob {
-    Knob { r#ref: format!("{device}/{name}"), device: device.into(), name: name.into(), value: 0.5, min: 0., max: 1., step: None }
+    Knob {
+        r#ref: format!("{device}/{name}"),
+        device: device.into(),
+        name: name.into(),
+        value: 0.5,
+        min: 0.,
+        max: 1.,
+        step: None,
+        device_id: None,
+    }
 }
 
 #[test]
@@ -193,5 +202,5 @@ fn what_moved_or_went_names_each_device_once_first_seen_first() {
 }
 
 fn knob_for_words() -> Knob {
-    Knob { r#ref: "1".into(), device: String::new(), name: String::new(), value: 0., min: 0., max: 1., step: None }
+    Knob { r#ref: "1".into(), device: String::new(), name: String::new(), value: 0., min: 0., max: 1., step: None, device_id: None }
 }

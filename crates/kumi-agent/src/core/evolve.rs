@@ -20,6 +20,10 @@ pub struct Knob {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<f64>,
     pub value: f64,
+    /// Who its device is, where a DAW's refs are places and it can say (Live's identity for the device): the knob finds it by
+    /// this however the chain moves, and a search's knobs keep it across a leap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

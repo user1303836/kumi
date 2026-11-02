@@ -111,11 +111,11 @@ fn is_final_limiter(device: &JsonObject) -> bool {
     }
 }
 /// A knob as the chain has it now, with its device's ref. Live's refs are places, and a device put in above shifts them, so a
-/// knob goes by who its device is (`known`, by the knobs' word for a device), wherever that is now, and is None if it went:
-/// a device of the same name is another device. Where Live didn't say who it is, it's on its device at its place under the
-/// same name, else on the one device of that name; None when it went, or when several could be it.
-fn knob_now<'a>(read: &'a Knobs, knob: &Knob, known: &HashMap<String, String>) -> Option<(&'a str, &'a Knob)> {
-    let place = match known.get(&knob.device) {
+/// knob goes by who its device is, wherever that is now, and is None if it went: a device of the same name is another device.
+/// Where Live didn't say who it is, it's on its device at its place under the same name, else on the one device of that name;
+/// None when it went, or when several could be it.
+fn knob_now<'a>(read: &'a Knobs, knob: &Knob) -> Option<(&'a str, &'a Knob)> {
+    let place = match &knob.device_id {
         Some(identity) => read.devices.iter().position(|device| object_identity(device) == *identity)?,
         None => {
             let (at, name) = knob.device.split_once(':')?;
@@ -132,12 +132,12 @@ fn knob_now<'a>(read: &'a Knobs, knob: &Knob, known: &HashMap<String, String>) -
 }
 /// Knobs at their values, by the device each is on now; and the ones that moved or went, or whose parameter another knob
 /// already took (of two devices of one name with one gone, either could be the one that's left).
-fn by_device(read: &Knobs, moved: &[(Knob, f64)], known: &HashMap<String, String>) -> (IndexMap<String, Vec<Value>>, Vec<Knob>) {
+fn by_device(read: &Knobs, moved: &[(Knob, f64)]) -> (IndexMap<String, Vec<Value>>, Vec<Knob>) {
     let mut devices: IndexMap<String, Vec<Value>> = IndexMap::new();
     let mut lost = vec![];
     let mut taken = HashSet::new();
     for (knob, value) in moved {
-        match knob_now(read, knob, known).filter(|(_, now)| taken.insert(now.r#ref.clone())) {
+        match knob_now(read, knob).filter(|(_, now)| taken.insert(now.r#ref.clone())) {
             Some((reference, now)) => devices.entry(reference.into()).or_default().push(json!({"parameterRef":now.r#ref,"value":value})),
             None => lost.push(knob.clone()),
         }
@@ -188,6 +188,7 @@ impl LiveRenderer {
                     min,
                     max,
                     step: parameter.get("quantization").and_then(Value::as_f64).filter(|v| *v > 0.),
+                    device_id: Some(object_identity(device)).filter(|identity| !identity.is_empty()),
                 });
             }
         }
@@ -292,10 +293,6 @@ impl Goal {
         self.known.borrow_mut().insert(name.into(), (self.render.connection().lease.get(), read.clone()));
         Ok(Some(read))
     }
-    /// Who a slot's devices were as the search read them, by the knobs' word for each.
-    fn devices_known(&self, slot: &str) -> HashMap<String, String> {
-        self.render.goal_devices.borrow().get(slot).cloned().unwrap_or_default()
-    }
     async fn adopt(&self, name: &str, label: &str, signal: Signal) -> Result<GoalSlotInfo, RuntimeError> {
         let r = &self.render;
         let mut read = r.read_knobs(name, signal.clone()).await?;
@@ -331,15 +328,6 @@ impl Goal {
         }
         self.current.borrow_mut().insert(name.into(), read.knobs.iter().map(|knob| (key(knob), knob.value)).collect());
         self.places.borrow_mut().insert(name.into(), read.reference.clone());
-        // (what's kept of an earlier rig's words stays: a search's knobs keep the words they began with)
-        let mut known = r.goal_devices.borrow_mut();
-        let known = known.entry(name.into()).or_default();
-        for (at, device) in read.devices.iter().enumerate() {
-            let identity = object_identity(device);
-            if !identity.is_empty() {
-                known.insert(device_label(at, &device_name(device)), identity);
-            }
-        }
         let devices = identities(&read);
         let slot = GoalSlotInfo { name: name.into(), label: label.into(), chain: read.chain, knobs: read.knobs, devices };
         self.slots.borrow_mut().push(slot.clone());
@@ -351,7 +339,7 @@ impl Goal {
         }
         let fresh = self.render.read_knobs(slot, signal.clone()).await?;
         let moved = given_values(knobs, values);
-        let (devices, lost) = by_device(&fresh, &moved, &self.devices_known(slot));
+        let (devices, lost) = by_device(&fresh, &moved);
         if !lost.is_empty() {
             return Err(RuntimeError::plain(moved_or_went(slot, &lost)));
         }
@@ -481,11 +469,10 @@ impl GoalRig for Goal {
                     generation.frozen.insert(trial.slot.clone(), moved.iter().map(|(knob, _)| key(knob)).collect());
                     continue;
                 };
-                let known = self.devices_known(&trial.slot);
-                let (devices, lost) = by_device(&fresh, &moved, &known);
-                plans.push((trial, moved, fresh, known, devices, lost));
+                let (devices, lost) = by_device(&fresh, &moved);
+                plans.push((trial, moved, fresh, devices, lost));
             }
-            for (trial, moved, fresh, known, devices, lost) in plans {
+            for (trial, moved, fresh, devices, lost) in plans {
                 // (a knob whose device moved or went can't be set: the search leaves it be)
                 let mut refused: HashSet<String> = lost.iter().map(key).collect();
                 r.history
@@ -503,7 +490,7 @@ impl GoalRig for Goal {
                                 {
                                     signal.check()?;
                                     if let Some((knob, _)) = moved.iter().find(|(knob, _)| {
-                                        knob_now(&fresh, knob, &known)
+                                        knob_now(&fresh, knob)
                                             .is_some_and(|(_, now)| Some(now.r#ref.as_str()) == value["parameterRef"].as_str())
                                     }) {
                                         refused.insert(key(knob));
@@ -736,6 +723,7 @@ mod tests {
             min: 0.,
             max: 1.,
             step: None,
+            device_id: None,
         };
         Knobs {
             reference: "7:track:0".into(),
@@ -748,8 +736,7 @@ mod tests {
     #[test]
     fn a_knob_is_found_at_its_place_or_on_the_one_device_of_its_name_once_the_chain_moved() {
         let tone = chain(&["Synth", "EQ"]).knobs[1].clone();
-        let unknown = HashMap::new();
-        let found = |names: &[&str]| knob_now(&chain(names), &tone, &unknown).map(|(device, now)| (device.to_owned(), now.r#ref.clone()));
+        let found = |names: &[&str]| knob_now(&chain(names), &tone).map(|(device, now)| (device.to_owned(), now.r#ref.clone()));
         let at = |n: usize| Some((format!("7:device:0:d{n}"), format!("7:parameter:0:{n}:0")));
         assert_eq!(found(&["Synth", "EQ"]), at(1));
         assert_eq!(found(&["New", "Synth", "EQ"]), at(2), "a device put in above moved it");
@@ -761,7 +748,7 @@ mod tests {
     #[test]
     fn a_knob_whose_device_went_isnt_sent() {
         let (read, tone) = (chain(&["Synth"]), chain(&["Synth", "EQ"]).knobs.clone());
-        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)], &HashMap::new());
+        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)]);
         assert_eq!(devices.len(), 1);
         assert_eq!(devices["7:device:0:d0"], [json!({"parameterRef": "7:parameter:0:0:0", "value": 0.7})]);
         assert_eq!(lost, [tone[1].clone()]);
@@ -771,7 +758,7 @@ mod tests {
     fn of_two_knobs_that_come_to_one_parameter_the_second_isnt_sent() {
         // Two devices of one name, one of them gone: both knobs find the one that's left.
         let (read, tone) = (chain(&["EQ"]), chain(&["EQ", "EQ"]).knobs.clone());
-        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)], &HashMap::new());
+        let (devices, lost) = by_device(&read, &[(tone[0].clone(), 0.7), (tone[1].clone(), 0.9)]);
         assert_eq!(devices["7:device:0:d0"], [json!({"parameterRef": "7:parameter:0:0:0", "value": 0.7})]);
         assert_eq!(lost, [tone[1].clone()]);
     }
