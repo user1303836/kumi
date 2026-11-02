@@ -556,6 +556,9 @@ class RenoiseTestScripts(unittest.TestCase):
     luajit running. Programs stand in for luajit and lua-language-server."""
 
     STOPPING = "#!/bin/sh\necho $$ > \"$STARTED\"\nexec sleep 60\n"
+    # (as lua-language-server: its check runs in a process of its own)
+    WITH_A_WORKER = "#!/bin/sh\nsleep 60 &\necho $$ $! > \"$STARTED\"\nwait\n"
+    KILLS = (signal.SIGTERM, signal.SIGALRM, signal.SIGINT, signal.SIGQUIT, signal.SIGHUP)
 
     def run_sh(self, directory: str, programs: dict[str, str], skip_check: bool) -> subprocess.Popen:
         folder = Path(directory, "bin")
@@ -573,41 +576,47 @@ class RenoiseTestScripts(unittest.TestCase):
         }
         # What the stand-ins and the script say isn't this test's output.
         return subprocess.Popen(
-            ["sh", str(ROOT / "daws/renoise/tests/run.sh")], env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+            ["sh", str(ROOT / "daws/renoise/tests/run.sh")],
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            # (a signal ignored when a shell starts can't be trapped: under nohup or as a background job, these tests' would be)
+            preexec_fn=lambda: [signal.signal(sig, signal.SIG_DFL) for sig in self.KILLS],
         )
 
     def assert_stops(self, sig: signal.Signals, programs: dict[str, str], skip_check: bool):
         with tempfile.TemporaryDirectory() as directory:
             script = self.run_sh(directory, programs, skip_check)
             started = Path(directory, "started")
-            pid = None
+            pids = []
             try:
                 deadline = time.monotonic() + 20
-                while not (started.exists() and started.read_text().strip()):
+                while not (started.exists() and started.read_text().endswith("\n")):
                     self.assertLess(time.monotonic(), deadline, "the stand-in didn't start")
                     time.sleep(0.02)
-                pid = int(started.read_text())
+                pids = [int(pid) for pid in started.read_text().split()]
                 script.send_signal(sig)
                 deadline = time.monotonic() + 5
-                while alive(pid):
+                while any(alive(pid) for pid in pids):
                     self.assertLess(time.monotonic(), deadline, f"{sig.name} left the program running")
                     time.sleep(0.02)
                 self.assertEqual(script.wait(timeout=20), 128 + sig, "the script says which signal stopped it")
                 self.assertEqual([p.name for p in Path(directory).glob("kumi-renoise-*")], [], "its temporary folders are gone")
             finally:
-                if pid is not None and alive(pid):
-                    os.kill(pid, signal.SIGKILL)
+                for pid in pids:
+                    if alive(pid):
+                        os.kill(pid, signal.SIGKILL)
                 if script.poll() is None:
                     script.kill()
                     script.wait()
 
     def test_luajit_goes_with_the_script(self):
-        for sig in (signal.SIGTERM, signal.SIGALRM, signal.SIGINT, signal.SIGHUP):
+        for sig in self.KILLS:
             with self.subTest(sig.name):
                 self.assert_stops(sig, {"luajit": self.STOPPING}, skip_check=True)
 
     def test_the_type_check_goes_with_the_script(self):
-        programs = {"luajit": "#!/bin/sh\nexit 0\n", "lua-language-server": self.STOPPING}
+        programs = {"luajit": "#!/bin/sh\nexit 0\n", "lua-language-server": self.WITH_A_WORKER}
         self.assert_stops(signal.SIGTERM, programs, skip_check=False)
 
     def test_what_the_programs_answer_is_still_the_answer(self):
