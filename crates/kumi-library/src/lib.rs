@@ -59,7 +59,6 @@ use taste::Taste;
 pub use taste::TasteLine;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::Command,
     sync::{mpsc, watch, Mutex, MutexGuard},
     task::JoinHandle,
 };

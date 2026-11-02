@@ -28,34 +28,42 @@ fn slices(count: usize, loud: std::ops::Range<usize>) -> Vec<Option<f64>> {
 
 #[test]
 fn a_part_under_six_seconds_isnt_screened() {
-    assert_eq!(screen_pick(&slices(24, 0..0), 120., 11.9, 0.5), None);
-    assert!(screen_pick(&slices(24, 0..0), 120., 12., 0.5).is_some(), "six seconds is long enough");
+    assert_eq!(screen_pick(&slices(24, 0..0), 12., 120., 11.9), None);
+    assert!(screen_pick(&slices(24, 0..0), 12., 120., 12.).is_some(), "six seconds is long enough");
 }
 
 #[test]
 fn a_long_part_is_screened_on_the_three_seconds_that_are_loudest_and_move_most() {
-    let pick = screen_pick(&slices(24, 12..18), 120., 24., 0.5).unwrap();
+    let pick = screen_pick(&slices(24, 12..18), 12., 120., 24.).unwrap();
     assert_eq!(pick, ScreenPick { offset: 11., beats: 6. }, "from slice 11, as the step up into the loud part counts as moving too");
+}
+
+/// Each slice is as long as the reference over its slices, not as the analysis shows it: to the tenth of a second, here 0.5 s
+/// for 0.45 s, a screen would start 4 beats late.
+#[test]
+fn a_screen_is_cut_at_the_references_exact_slices() {
+    let pick = screen_pick(&slices(70, 40..46), 31.5, 120., 80.).unwrap();
+    assert_eq!(pick.offset, 35.);
 }
 
 #[test]
 fn a_slice_nothing_was_measured_in_counts_as_silence() {
     let mut lufs = slices(24, 0..0);
     lufs[..6].fill(None);
-    let pick = screen_pick(&lufs, 120., 24., 0.5).unwrap();
+    let pick = screen_pick(&lufs, 12., 120., 24.).unwrap();
     assert_eq!(pick.offset, 5., "the last stretch to hold a step up from silence");
 }
 
 #[test]
 fn a_screen_stays_inside_the_part() {
     // The loud stretch is 15 seconds into a reference longer than the 8 second part.
-    let pick = screen_pick(&slices(40, 30..36), 120., 16., 0.5).unwrap();
+    let pick = screen_pick(&slices(40, 30..36), 20., 120., 16.).unwrap();
     assert_eq!(pick, ScreenPick { offset: 10., beats: 6. }, "as late as a stretch fits: 16 beats less 6");
 }
 
 #[test]
 fn a_reference_shorter_than_the_stretch_is_screened_from_its_start() {
-    assert_eq!(screen_pick(&slices(3, 1..3), 120., 24., 0.5), Some(ScreenPick { offset: 0., beats: 6. }));
+    assert_eq!(screen_pick(&slices(3, 1..3), 1.5, 120., 24.), Some(ScreenPick { offset: 0., beats: 6. }));
 }
 
 #[test]

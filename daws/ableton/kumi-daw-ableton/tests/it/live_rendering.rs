@@ -79,10 +79,11 @@ impl McpEndpoint for Fixture {
         let index = self.calls.get();
         let actual = json!({"name":name,"args":args});
         let mut expected = self.case["calls"][index].clone();
-        // Goals now read the immutable product name and enabled state before reusing a limiter.
+        // Goals now read the immutable product name and enabled state before reusing a limiter, and each device's identity, to
+        // find it again however the chain moves (#399).
         // Adapt only that exact read projection; keep the frozen oracle's data, mutations and
         // every other dispatch unchanged. The rename/bypass cases have their own regression test.
-        let current_fields = json!(["ref", "parentRef", "name", "className", "classDisplayName", "enabled"]);
+        let current_fields = json!(["ref", "parentRef", "name", "className", "classDisplayName", "enabled", "objectIdentity"]);
         if name == "live_discover"
             && actual["args"]["kind"] == "device"
             && expected["args"]["fields"] == json!(["ref", "parentRef", "name", "className"])
@@ -504,6 +505,64 @@ fn a_render_is_heard_for_its_part_when_a_look_loses_the_tempo() {
         let value = bench.run(&mut goal, &case["operations"][1], Signal::new()).await.unwrap();
         assert_eq!(bench.observer.tempo.get(), None, "the look lost it");
         eq(&value, &case["results"][1]["value"], "heard for its part");
+    });
+}
+
+/// (#789) A look before the pass can't say the Set's tempo: the pass records at the tempo its rig opened with, as the case did.
+#[test]
+fn a_pass_records_at_the_tempo_its_rig_opened_with_when_a_look_lost_it() {
+    on_a_paused_clock(async {
+        let folder = tempfile::tempdir().unwrap();
+        let case = goal_case(folder.path(), "held-goal-cache-settle-best", "goal-pas");
+        let bench = Bench::new(&case, "goal-pas", folder.path()).await;
+        let mut goal = None;
+        bench.run(&mut goal, &case["operations"][0], Signal::new()).await.unwrap();
+        bench.observer.tempo.set(None);
+        let value = bench.run(&mut goal, &case["operations"][1], Signal::new()).await.unwrap();
+        eq(&value, &case["results"][1]["value"], "recorded and heard as the case did");
+    });
+}
+
+/// (#789) The same in a pass Kumi Ears hears.
+#[test]
+fn an_ears_pass_goes_by_the_tempo_its_rig_opened_with_when_a_look_lost_it() {
+    on_a_paused_clock(async {
+        let folder = tempfile::tempdir().unwrap();
+        let case = goal_case(folder.path(), "goal-ears-held", "goal-ear");
+        let bench = Bench::new(&case, "goal-ear", folder.path()).await;
+        let mut goal = None;
+        bench.run(&mut goal, &case["operations"][0], Signal::new()).await.unwrap();
+        bench.observer.tempo.set(None);
+        let value = bench.run(&mut goal, &case["operations"][1], Signal::new()).await.unwrap();
+        eq(&value, &case["results"][1]["value"], "heard as the case did");
+        assert!(bench.ears.at.get() > 0, "Kumi Ears heard it");
+    });
+}
+
+/// (#789) A winner's knob on a device that went since the search began: said, and nothing is set.
+#[test]
+fn a_winner_whose_device_went_is_refused_in_words_and_nothing_is_set() {
+    on_a_paused_clock(async {
+        let folder = tempfile::tempdir().unwrap();
+        let case = goal_case(folder.path(), "held-goal-cache-settle-best", "goal-wen");
+        let bench = Bench::new(&case, "goal-wen", folder.path()).await;
+        let operations = case["operations"].as_array().unwrap();
+        let settling = operations.iter().position(|op| op["type"] == "settle").unwrap();
+        let mut goal = None;
+        for op in &operations[..settling] {
+            bench.run(&mut goal, op, Signal::new()).await.unwrap();
+        }
+        let knob: kumi_agent::core::evolve::Knob = serde_json::from_value(
+            json!({"ref": "7:parameter:2:9:0", "device": "9:Gone", "name": "Tone", "min": 0, "max": 1, "value": 0.5}),
+        )
+        .unwrap();
+        let said = goal.unwrap().settle("Candidate", &[knob], &[0.7], Signal::new()).await.unwrap().unwrap();
+        assert!(said.starts_with("“Gone” moved or went on “Candidate”"), "{said}");
+        let asked = bench.endpoint.calls.get();
+        assert!(
+            case["calls"].as_array().unwrap()[..asked].iter().skip(asked - 4).all(|call| call["name"] == "live_discover"),
+            "it only read the chain"
+        );
     });
 }
 

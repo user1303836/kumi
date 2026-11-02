@@ -72,7 +72,6 @@ pub fn kinds(daw: Daw) -> Kinds {
                 // M4 (n-song): the metronome switch and the editing settings (measured in 3.5.4)
                 "metronome-switch",
                 "edit-settings",
-                "plugin-suspend",
             ],
         },
     }

@@ -2246,6 +2246,8 @@ struct SearchRig {
     ms: u64,
     values_score: bool,
     settled: RefCell<Vec<f64>>,
+    /// What keeping the best answers: the best's name, unless the test says why not.
+    keep_says: &'static str,
     kept_only: Option<String>,
 }
 impl SearchRig {
@@ -2260,11 +2262,21 @@ impl SearchRig {
             ms: 1,
             values_score: false,
             settled: RefCell::new(vec![]),
+            keep_says: "Kumi · Goal best",
             kept_only: None,
         }
     }
     fn knob() -> Knob {
-        Knob { r#ref: "knob:1".into(), device: "1:Operator".into(), name: "Filter Freq".into(), min: 0., max: 1., step: None, value: 0.2 }
+        Knob {
+            r#ref: "knob:1".into(),
+            device: "1:Operator".into(),
+            name: "Filter Freq".into(),
+            min: 0.,
+            max: 1.,
+            step: None,
+            value: 0.2,
+            device_id: None,
+        }
     }
 }
 #[async_trait(?Send)]
@@ -2313,7 +2325,7 @@ impl GoalRig for SearchRig {
     async fn keep_best(&self, slot: &str, _: &[Knob], _: &[f64], signal: Signal) -> Result<String, RuntimeError> {
         assert!(!signal.is_cancelled());
         self.cleanup.borrow_mut().push(format!("keep:{slot}"));
-        Ok("Kumi · Goal best".into())
+        Ok(self.keep_says.into())
     }
     fn kept_only(&self) -> Option<String> {
         self.kept_only.clone()
@@ -2389,6 +2401,17 @@ local_test!(goal_reaches_target_cleans_in_order_keeps_best_and_lesson, {
     assert_eq!(h.session.lessons().await.unwrap().len(), 1);
     h.session.close().await.unwrap();
     assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Done);
+});
+local_test!(a_goal_says_why_its_best_wasnt_kept, {
+    let mut raw = SearchRig::new(vec![96.]);
+    raw.keep_says = "“EQ” moved or went on “Candidate” since the search began.";
+    let rig = Rc::new(raw);
+    let h = goal_harness(rig.clone(), true, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+    assert!(h.notice("Its best wasn't kept: “EQ” moved or went on “Candidate” since the search began."));
+    assert!(!h.notice("the best is on"), "no best is named");
+    h.session.close().await.unwrap();
 });
 local_test!(a_goals_end_says_when_its_best_holds_only_a_part_of_its_track, {
     let mut raw = SearchRig::new(vec![96.]);
