@@ -3,6 +3,22 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.52 — 2026-11-02
+
+Ships with bridge 1.0.102, as 1.24.51 did.
+
+- In Live, when a goal pauses or ends, each candidate goes back as the goal found it, without Kumi's
+  limiter, apart from a knob you turned during the search.
+- In Live, a goal replaces its last best only when it can tell you haven't changed it; otherwise the
+  new best goes beside it, and Kumi says why there are two.
+- In Live, a goal without Max for Live hears its candidates, rather than silence.
+- In Live, a goal no longer changes the gain of a Limiter you put last on a track.
+- In Live, a paused goal's best waits muted, so the part isn't heard twice.
+- In Live, a goal that can't start takes its safety Limiters off again.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.51 — 2026-11-02
 
 Ships with bridge 1.0.102, as 1.24.50 did. Ships with Renoise tool 1.0.14, which Renoise loads when it
