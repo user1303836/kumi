@@ -4228,6 +4228,14 @@ fn a_change_to_a_pooled_take_says_it_lands_on_the_whole_pool() {
         let snare = &mut s.tracks[2];
         snare.items[0].takes[0].source = Some("MIDIPOOL".into());
         snare.items[0].takes[0].more.pool = Some("{THE-POOL}".into());
+    });
+    // (the only item left in its pool: it reaches nothing else, so it says nothing)
+    let (preview, applied) = lab.make("notes-add", add.clone(), "Kumi: Wrote 1 note (kpo06)");
+    assert_eq!((note_of(&preview), note_of(&applied)), (None, None), "a pool of one");
+    let undone = lab.undo("notes-add", &preview, &applied, "Kumi: undo (kpo07)").unwrap();
+    assert_eq!(note_of(&undone), None, "a pool of one");
+    fake::with(|s| {
+        let snare = &mut s.tracks[2];
         let mut copy = snare.items[0].clone();
         copy.guid = "{ITEM-S2}".into();
         copy.takes[0].guid = "{TAKE-S2}".into();
