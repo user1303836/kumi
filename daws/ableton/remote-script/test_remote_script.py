@@ -494,11 +494,19 @@ class RemoteScriptTests(unittest.TestCase):
         with patch.dict(sys.modules, {"Live": None}): surface._start_timer()
         self.assertEqual((surface._timer, surface._bridge.between_ticks), (None, False))
 
+    def no_files_check(self, package):
+        """No check of the bridge's files off Live's thread, as everywhere but Windows: there the real one (PowerShell)
+        would still be running at the first tick, and a test not about it would see no bridge start."""
+        unchecked = patch.object(package, "_files_check", return_value=None)
+        unchecked.start()
+        self.addCleanup(unchecked.stop)
+
     def test_each_display_tick_serves_the_bridge_once_and_nothing_is_scheduled(self):
         """Live's _Framework delivers schedule_message's tasks from its own update_display, which this surface
         overrides: a drain it scheduled never ran in Live (a lab Live: 0 drains in 111 display ticks), and with the
         base's update_display called too it ran on every tick, serving the bridge twice. The tick serves it once."""
         package = __import__("AbletonMcpBridge"); scheduled = []
+        self.no_files_check(package)
 
         class Bridge:
             def __init__(self, *args, **kwargs): self.served = 0
@@ -516,6 +524,7 @@ class RemoteScriptTests(unittest.TestCase):
         surface): the producer sees the reason in Live's status bar (show_message, never a dialog), Live's log has it
         with its traceback, and Kumi reads it beside the script with this Live's process."""
         package = __import__("AbletonMcpBridge")
+        self.no_files_check(package)
         record = Path(package.__file__).with_name("start-failure.json")
         said, logged = [], []
 
@@ -619,6 +628,7 @@ class RemoteScriptTests(unittest.TestCase):
 
     def test_a_failed_start_stops_the_timer_and_a_good_one_counts_its_rate_from_the_start(self):
         package = __import__("AbletonMcpBridge"); made = []
+        self.no_files_check(package)
 
         class Timer:
             def __init__(self, callback, interval, repeat): self.callback, self.running = callback, False; made.append(self)
