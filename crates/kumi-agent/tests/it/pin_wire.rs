@@ -1771,6 +1771,7 @@ pub(crate) fn requests() -> Vec<Op> {
         op::SignInChatgpt { id: 4, by_code: false }.into(),
         op::StopSignIn { id: 4 }.into(),
         op::MissingModel {}.into(),
+        op::Warm {}.into(),
     ];
     requests.extend([SetChoice::Open, SetChoice::Copy, SetChoice::Cancel].map(|choice| op::AnswerSet { choice }.into()));
     requests.extend(

@@ -447,6 +447,9 @@
     "type": "missing-model"
   },
   {
+    "type": "warm"
+  },
+  {
     "type": "answer-set",
     "choice": "open"
   },

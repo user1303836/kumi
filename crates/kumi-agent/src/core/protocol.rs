@@ -393,6 +393,9 @@ requests! {
     /// The saved model, when its provider's own list no longer shows it: what to say ("ChatGPT no longer offers
     /// gpt-5.5 to your sign-in"), or None.
     MissingModel {} -> Option<String>;
+    /// The producer began a message: the chosen model's sign-in and connection are made ready while they type
+    /// ([`ModelController::warm`]). Nothing comes of it that anyone sees.
+    Warm {} -> ();
     /// A body for FOCUS (while connected).
     FocusBody { request: BodyRequest } -> Option<FocusBody>;
 }
@@ -643,6 +646,7 @@ pub async fn models_answer(op: &Op, models: Option<Rc<dyn ModelController>>, sid
         Op::MissingModel(request) => {
             answered(request.clone(), |op::MissingModel {}| async move { Ok(kumi_ai::control::missing_model(&*controls()?).await) }).await
         }
+        Op::Warm(request) => answered(request.clone(), |op::Warm {}| async move { Ok(controls()?.warm().await) }).await,
         _ => return None,
     })
 }
@@ -840,7 +844,8 @@ impl Session {
             | Op::SaveKey(_)
             | Op::SignOut(_)
             | Op::SignInChatgpt(_)
-            | Op::MissingModel(_)) => {
+            | Op::MissingModel(_)
+            | Op::Warm(_)) => {
                 // If this list and models_answer's ever part ways, a request the controls don't answer is "Not available", not a
                 // panic.
                 models_answer(&op, session.model_controls(), side).await.unwrap_or_else(|| Err(RuntimeError::plain("Not available")))

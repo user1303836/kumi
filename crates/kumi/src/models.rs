@@ -9,7 +9,7 @@ use kumi_ai::{
         store::{Credential, CredentialStore},
     },
     binding::ModelBinding,
-    http::Fetch,
+    http::{Fetch, FetchInit},
     providers::{
         api_key_from, chat_only,
         local::{self, LocalBinding, LocalKind, LocalModelOptions, LocalServer},
@@ -98,6 +98,8 @@ struct CachedBinding {
     tier: Option<String>,
     binding: Bound,
 }
+/// How soon after one warm-up another may start: typing more of the same message needs none.
+const WARM_AGAIN: std::time::Duration = std::time::Duration::from_secs(20);
 type Defaulting = Shared<LocalBoxFuture<'static, Result<Option<DefaultModel>, RuntimeError>>>;
 struct State {
     model: Option<String>,
@@ -110,7 +112,13 @@ struct State {
     named: Option<Vec<LocalServer>>,
     heard: HashSet<String>,
     defaulting: Option<Defaulting>,
+    /// When the producer last began a message (`warm`).
+    warmed: Option<std::time::Instant>,
+    /// A binding being made, for the model, effort and tier it's for: another ask for the same joins it (a warm-up and the
+    /// message after it), so a sign-in being refreshed is waited on once, not raced for its lock.
+    binding: Option<((String, Option<Effort>, Option<String>), Binding)>,
 }
+type Binding = Shared<LocalBoxFuture<'static, Result<Bound, RuntimeError>>>;
 struct Inner {
     options: ModelControlOptions,
     /// The cloud providers' HTTP: their lists, sign-ins, key checks and model calls go through one client. For an API-key
@@ -155,6 +163,8 @@ pub fn create_model_control(options: ModelControlOptions) -> ModelControl {
                 named: None,
                 heard: HashSet::new(),
                 defaulting: None,
+                warmed: None,
+                binding: None,
             }),
             learned: Default::default(),
             closed: Signal::new(),
@@ -592,19 +602,39 @@ impl ModelControl {
         let binding = if let Some(cached) = cached.filter(|b| b.model == model && b.effort == effort && b.tier == tier) {
             cached.binding
         } else {
-            let binding = self.bind(&model, effort, tier.clone()).await?;
-            self.inner.state.borrow_mut().bound = Some(CachedBinding { model, effort, tier, binding: binding.clone() });
-            if let Some(asked) = binding.asked() {
+            let key = (model.clone(), effort, tier.clone());
+            let joined =
+                self.inner.state.borrow().binding.as_ref().filter(|(making, _)| *making == key).map(|(_, binding)| binding.clone());
+            let making = joined.unwrap_or_else(|| {
                 let control = self.clone();
-                let saying = binding.clone();
-                tokio::task::spawn_local(async move {
-                    asked.await;
-                    if let Some(note) = saying.note() {
-                        control.say(note);
+                let made = key.clone();
+                let binding: Binding = async move {
+                    let (model, effort, tier) = made.clone();
+                    let bound = control.bind(&model, effort, tier.clone()).await;
+                    let mut state = control.inner.state.borrow_mut();
+                    if state.binding.as_ref().is_some_and(|(making, _)| *making == made) {
+                        state.binding = None;
                     }
-                });
-            }
-            binding
+                    let binding = bound?;
+                    state.bound = Some(CachedBinding { model, effort, tier, binding: binding.clone() });
+                    drop(state);
+                    if let Some(asked) = binding.asked() {
+                        let saying = binding.clone();
+                        tokio::task::spawn_local(async move {
+                            asked.await;
+                            if let Some(note) = saying.note() {
+                                control.say(note);
+                            }
+                        });
+                    }
+                    Ok(binding)
+                }
+                .boxed_local()
+                .shared();
+                self.inner.state.borrow_mut().binding = Some((key, binding.clone()));
+                binding
+            });
+            making.await?
         };
         Ok(BindingInfo { binding: binding.binding(), asked: binding.asked(), backing: binding })
     }
@@ -626,6 +656,34 @@ impl ModelControl {
         let Some(fallback) = fallback.filter(|fallback| Some(fallback) != model.as_ref()) else { return Ok(None) };
         Ok(Some(self.bind(&fallback, None, None).await?.binding()))
     }
+    /// The producer began a message: the chosen cloud model is bound (its sign-in read, refreshed when due, and its
+    /// faster tier's list when `/fast` is on) and an API-key provider's connection opened, so the message waits on
+    /// neither: a message sent meanwhile joins the binding being made. At
+    /// most once every `WARM_AGAIN`; it says nothing and changes nothing the producer sees, whatever comes of it: no model
+    /// chosen, a model server's, not signed in, offline.
+    pub async fn warm(&self) {
+        let model = self.inner.state.borrow().model.clone().filter(|model| !model.is_empty());
+        let Some(Parsed { provider, server: None, .. }) = self.parse(model.as_deref()) else { return };
+        let Some(provider) = ProviderId::parse(&provider) else { return };
+        {
+            let mut state = self.inner.state.borrow_mut();
+            if state.warmed.is_some_and(|at| at.elapsed() < WARM_AGAIN) {
+                return;
+            }
+            state.warmed = Some(std::time::Instant::now());
+        }
+        if self.binding_with_info().await.is_err() {
+            return;
+        }
+        // ChatGPT's answers go over a WebSocket of their own, which the first request opens.
+        if provider.row().sign_in == SignIn::Chatgpt {
+            return;
+        }
+        // Any answer will do: the connection it went on stays open for the message (a HEAD, so nothing is read).
+        let signal = abort::any([abort::timeout(5_000), self.inner.closed.clone()]);
+        let init = FetchInit { method: "HEAD".into(), signal: Some(signal), ..Default::default() };
+        let _ = self.inner.cloud.fetch(provider.row().base_url, init).await;
+    }
     /// Another model the producer chose for some work (background workers), at its provider's default effort.
     pub async fn binding_for(&self, model: &str) -> Result<ModelBinding, RuntimeError> {
         let tier = self.tier_for(model).await;
@@ -640,6 +698,9 @@ impl ModelController for ModelControl {
     }
     async fn providers(&self) -> Result<Vec<ProviderStatus>, RuntimeError> {
         ModelControl::providers(self).await
+    }
+    async fn warm(&self) {
+        ModelControl::warm(self).await
     }
     async fn local(&self) -> Vec<LocalStatus> {
         ModelControl::local(self).await
