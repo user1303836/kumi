@@ -616,15 +616,18 @@ async fn renoises_bodies_are_its_pattern_matrix_and_keyzones_in_its_own_notation
                 ]}),
                 false,
             ));
-            let Some(FocusBody::Tracker(grid)) = renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()) }, Signal::new()).await.unwrap() else {
+            let Some(FocusBody::Tracker(grid)) = renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()), tracks: None }, Signal::new()).await.unwrap() else {
                 panic!("a pattern")
             };
-            assert_eq!(host.asked.borrow().last().unwrap().1, json!({"kind": "pattern", "ref": "3:pattern:2"}));
+            // (A4-2) The tracks FOCUS can draw, not a big song's every one; a tool that takes no limit answers them all, and
+            // they draw as before.
+            assert_eq!(host.asked.borrow().last().unwrap().1, json!({"kind": "pattern", "ref": "3:pattern:2", "limit": 24}));
             assert_eq!((grid.from, grid.cursor, grid.playing), (0, Some(1), Some(0)), "lines from 1 in Renoise, from 0 in FOCUS");
             assert_eq!(grid.tracks[0].cells, ["C-4 01 .. .. .. 0A10", "OFF .. .. .. .. ...."], "each column kept in its place");
 
-            renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:phrase:1.2".into()) }, Signal::new()).await.unwrap();
+            renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:phrase:1.2".into()), tracks: None }, Signal::new()).await.unwrap();
             assert_eq!(host.asked.borrow().last().unwrap().1["kind"], "phrase", "a phrase is asked for as one");
+            assert_eq!(host.asked.borrow().last().unwrap().1.get("limit"), None, "a phrase is one track's");
 
             host.answers.borrow_mut().push((
                 "focus_body",
@@ -647,6 +650,105 @@ async fn renoises_bodies_are_its_pattern_matrix_and_keyzones_in_its_own_notation
             };
             assert_eq!((map.zones[0].notes, map.macros.len(), map.phrases.len()), ((60, 60), 1, 1));
             assert!(renoise.focus_body(&BodyRequest::Timeline, Signal::new()).await.unwrap().is_none(), "Renoise has no timeline strip");
+            renoise.close().await.unwrap();
+        })
+        .await;
+}
+
+/// A host that also tells its events to whoever listens (the bridge's `tracks` shifts here).
+struct Telling {
+    inner: Rc<Host>,
+    listeners: RefCell<Vec<Rc<dyn Fn(JsonObject)>>>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for Telling {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        None
+    }
+    async fn list(&self, cursor: Option<&str>, signal: Signal) -> Result<ListToolsResult, RuntimeError> {
+        self.inner.list(cursor, signal).await
+    }
+    async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
+        self.inner.call(name, args, signal).await
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_live_event(&self, listener: Rc<dyn Fn(JsonObject)>) -> Box<dyn Fn()> {
+        self.listeners.borrow_mut().push(listener);
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// (A4-2) Renoise's pattern is read for the track the producer is on as well as the first ones: FOCUS draws that one first.
+/// That track's ref is a place, so after a track shift the focus hasn't caught up with yet, every track is read, as before.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn renoises_pattern_is_read_for_the_producers_track_and_the_first_ones() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use kumi_agent::core::view::BodyRequest;
+            // (a layout the book takes from the focus: a pattern's read names it only for refs of its own, which it has none of)
+            let focus = json!({"epoch": "3", "layout": 5, "view": "pattern", "selection": {"trackRef": "3:track:40"}, "transport": {"playing": false}});
+            let body = json!({"ref": "3:pattern:2", "name": "Drop", "lines": 64, "from": 1, "lpb": 4, "tracks": []});
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![
+                    ("status", json!({"connected": true}), false),
+                    ("focus", focus, false),
+                    ("focus_body", body, false),
+                ]),
+                asked: RefCell::default(),
+            });
+            let telling = Rc::new(Telling { inner: host.clone(), listeners: RefCell::default() });
+            let mut options = options(host.clone(), Rc::default());
+            let endpoint = telling.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint = endpoint.clone();
+                async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+            }));
+            options.context.on_focus = Some(Rc::new(|_| {}));
+            let renoise = create_renoise_integration(options);
+            renoise.start(Signal::new()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            // The pattern's read, and what the host was asked for it.
+            async fn read(renoise: &dyn Integration, host: &Host) -> Value {
+                renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()), tracks: None }, Signal::new()).await.unwrap();
+                host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap()
+            }
+            let asked = read(&*renoise, &host).await;
+            assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
+            // FOCUS says how many it can draw where it shows: that many.
+            renoise
+                .focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()), tracks: Some(9) }, Signal::new())
+                .await
+                .unwrap();
+            let narrow = host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap();
+            assert_eq!(narrow["limit"], json!(9), "{narrow}");
+            // A layout makes the bridge carry (or refuse as stale) the refs on tracks a read names: the track named only to
+            // read around it brings none, so the read is never refused for it.
+            assert_eq!(asked.get("layout"), None, "{asked}");
+            // A track is inserted above it: until the focus says where the producer is now, every track is read.
+            let shift = json!({"name": "tracks", "data": {"layout": 6, "made": [10], "gone": []}});
+            for listener in telling.listeners.borrow().iter() {
+                listener(shift.as_object().unwrap().clone());
+            }
+            let asked = read(&*renoise, &host).await;
+            assert_eq!((asked.get("limit"), asked.get("around")), (None, None), "{asked}");
+            // The focus's next read says it again, at the layout now.
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let asked = read(&*renoise, &host).await;
+            assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
             renoise.close().await.unwrap();
         })
         .await;

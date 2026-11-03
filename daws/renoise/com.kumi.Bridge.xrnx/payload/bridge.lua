@@ -1766,6 +1766,7 @@ function M.start(h, reloading)
       conns:finish_job(job.record, job.request, ok, value)
     end,
     on_active = function(active) if host.set_fast then host.set_fast(active) end end,
+    background = function(request) return request ~= nil and server.BACKGROUND[request.method] == true end,
     playing = function()
       local ok, playing = pcall(function() return renoise.song().transport.playing end)
       if ok then return playing end

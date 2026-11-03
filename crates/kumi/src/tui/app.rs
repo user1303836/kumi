@@ -364,6 +364,8 @@ struct Strip {
 struct OwnBody {
     body: Option<FocusBody>,
     key: Option<String>,
+    /// The most tracks the body was read for (a tracker's), None for all: a wider FOCUS reads it again for more.
+    tracks: Option<usize>,
     reading: bool,
     again: bool,
 }
@@ -931,6 +933,8 @@ impl TuiApp {
                     if let Some(a) = resize.upgrade() {
                         a.renderer.borrow_mut().invalidate();
                         a.scheduler.request();
+                        // (FOCUS wider: a tracker's body is read again for the tracks it can draw now)
+                        TuiApp(a).read_own(false);
                     }
                 }),
             });
