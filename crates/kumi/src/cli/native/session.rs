@@ -207,7 +207,9 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
     let mut seen_open = open.then(std::time::Instant::now);
     let quick_since =
         |seen: Option<std::time::Instant>| seen.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(pace.quick_for_ms));
-    let (mut looks, mut was_answering) = (0, false);
+    // (None until the first look: a port answering then is no Live starting, and a failure that persists there, a
+    // restart told or a stale secret, gets no quick tries)
+    let (mut looks, mut was_answering) = (0, None::<bool>);
     while looks < pace.looks {
         if !quick_since(seen_open) {
             looks += 1;
@@ -234,10 +236,10 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
         }
         let answering = answers().await;
         // Its port answering now and not before: Live is starting its Remote Script (opened after Kumi, say).
-        if answering && !was_answering {
+        if answering && was_answering == Some(false) {
             seen_open = Some(std::time::Instant::now());
         }
-        was_answering = answering;
+        was_answering = Some(answering);
         let quick = quick_since(seen_open);
         if answering {
             if (quick || tries < pace.tries) && next.is_some_and(|at| std::time::Instant::now() >= at) {
@@ -1764,6 +1766,13 @@ mod watch_tests {
         assert_eq!(reconnects, 4, "connected at the fourth, within the quick looks");
         // No quick looks: as before, one try and then the retry's pace.
         let (_, reconnects) = watched(pace(300, 20, 0, 1), true, 0, 4, &[2_500]).await;
+        assert_eq!(reconnects, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_port_answering_from_the_first_look_with_live_not_seen_open_gets_no_quick_tries() {
+        // A failure that persists there (a restart told, a stale secret): the retry's pace and the tries, as before.
+        let (_, reconnects) = watched(pace(300, 20, 5_000, 1), false, 0, 4, &[2_500]).await;
         assert_eq!(reconnects, 1);
     }
 
