@@ -928,6 +928,7 @@ mod tests {
                 fetch,
                 say: None,
                 installed: None,
+                lists: None,
             })
         };
         assert!(made(None).inner.cloud.is_kumis_own());
