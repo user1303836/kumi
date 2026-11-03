@@ -1890,23 +1890,28 @@ async fn an_asked_for_update_takes_the_release_githubs_api_names_and_the_usual_w
     let cache = dir.path().join("update-check.json");
     assert_eq!(newer_release(cache.to_str().unwrap(), &env, Some(1000.), Some(daily.clone())).await.as_deref(), Some("98.0.0"));
     assert_eq!(*daily.calls.borrow(), ["https://github.com/user1303836/kumi/releases/latest/download/kumi-release.json"]);
-    // kumi update downloads from the release the API named, checked against that release's own checksum.
-    let home = dir.path().join("home");
-    put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
-    put(home.join("app").join(executable_name("kumi")), "earlier");
+    // kumi update downloads from the release the API named, checked against that release's own checksum: with
+    // releases/latest answering first, and with the API and that release's own description answering before it.
     let bundle = fake_release(dir.path(), "99.0.0");
-    let hub = Rc::new(Hub { sha256: hex::encode(Sha256::digest(&bundle)), bundle, ..Hub::with(200, true) });
-    let installed: Env = [
-        ("KUMI_HOME".into(), home.display().to_string()),
-        ("HOME".into(), dir.path().join("user").display().to_string()),
-        ("KUMI_REMOTE_SCRIPTS_DIR".into(), dir.path().join("Remote Scripts").display().to_string()),
-    ]
-    .into();
-    let (mut updating, out) = io(&installed);
-    updating.fetcher = Some(hub.clone());
-    assert_eq!(update_installed(updating).await.unwrap(), 0, "{}", out.0.borrow());
-    assert!(out.0.borrow().contains(&format!("Kumi {KUMI_VERSION} → 99.0.0.")), "{}", out.0.borrow());
-    assert_eq!(hub.calls.borrow().last().unwrap(), "https://github.com/user1303836/kumi/releases/download/v99.0.0/kumi.tar.gz");
+    let from_the_newest = "https://github.com/user1303836/kumi/releases/download/v99.0.0/kumi.tar.gz";
+    for (n, waits) in [[0; 3], [0, 50, 0]].into_iter().enumerate() {
+        let home = dir.path().join(format!("home-{n}"));
+        put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+        put(home.join("app").join(executable_name("kumi")), "earlier");
+        let sha256 = hex::encode(Sha256::digest(&bundle));
+        let hub = Rc::new(Hub { sha256, bundle: bundle.clone(), waits, ..Hub::with(200, true) });
+        let installed: Env = [
+            ("KUMI_HOME".into(), home.display().to_string()),
+            ("HOME".into(), dir.path().join(format!("user-{n}")).display().to_string()),
+            ("KUMI_REMOTE_SCRIPTS_DIR".into(), dir.path().join(format!("Remote Scripts {n}")).display().to_string()),
+        ]
+        .into();
+        let (mut updating, out) = io(&installed);
+        updating.fetcher = Some(hub.clone());
+        assert_eq!(update_installed(updating).await.unwrap(), 0, "{waits:?}: {}", out.0.borrow());
+        assert!(out.0.borrow().contains(&format!("Kumi {KUMI_VERSION} → 99.0.0.")), "{waits:?}: {}", out.0.borrow());
+        assert_eq!(*hub.calls.borrow(), [LATEST, API, NEWEST, from_the_newest], "{waits:?}");
+    }
 }
 /// Kumi's PATH line as the installer writes it, or edited to start from $HOME, ${HOME} or ~: each is Kumi's under its
 /// marker, as install.sh counts it. Another Kumi's line, and Kumi's folder named outside a marker, stay.
