@@ -66,6 +66,8 @@ struct FakeLive {
     live_version: RefCell<Option<String>>,
     /// A Set given to open with Live can't be opened (moved, or on a drive that's gone): Live stays closed.
     set_fails: Cell<bool>,
+    /// Why Live couldn't start Kumi's bridge, as its log says.
+    failure: RefCell<Option<String>>,
 }
 impl FakeLive {
     fn new(open: bool) -> Rc<Self> {
@@ -86,6 +88,7 @@ impl FakeLive {
             surface_ms: Cell::new(45_000),
             live_version: RefCell::new(Some("12.4".into())),
             set_fails: Cell::new(false),
+            failure: RefCell::default(),
         })
     }
     fn calls(&self) -> Vec<String> {
@@ -193,6 +196,9 @@ impl LiveSetup for FakeLive {
     }
     fn surface_wait(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.surface_ms.get())
+    }
+    async fn start_failure(&self) -> Option<String> {
+        self.failure.borrow().clone()
     }
 }
 
@@ -596,6 +602,19 @@ case!(esc_at_the_control_surface_says_how_kumi_connects, async {
     h.wait_for("waiting for Live").await;
     h.type_text("\x1b").await;
     wait_for_said(&h, "Kumi connects to Live by itself once Live answers: in Live, open Settings › Link, Tempo & MIDI and set a Control Surface to AbletonMcpBridge.").await;
+    h.close().await;
+});
+
+case!(esc_while_the_bridge_couldnt_start_doesnt_ask_for_the_control_surface, async {
+    let live = FakeLive::new(false);
+    *live.failure.borrow_mut() =
+        Some("Live has AbletonMcpBridge as a Control Surface but couldn't start it: Loopback holds port 9765.".into());
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.wait_for("didn't start").await;
+    h.type_text("\x1b").await;
+    wait_for_said(&h, "Kumi connects to Live by itself once Live answers.").await;
+    assert!(!said(&h).contains("set a Control Surface"), "{}", rows(&h));
     h.close().await;
 });
 
@@ -1030,6 +1049,34 @@ case!(the_control_surface_step_says_where_settings_are_after_a_while, async {
     println!("--- control surface, a while later ---\n{more}");
     // Still the one instruction, now with where to find it.
     assert!(said(&h).contains("set a Control Surface to AbletonMcpBridge. Kumi notices by itself."));
+    h.close().await;
+});
+
+case!(a_control_surface_live_couldnt_start_says_why_in_place_of_asking_for_it, async {
+    let live = FakeLive::new(false);
+    *live.menu.borrow_mut() = Some("Settings is in Live's Live menu (⌘,).".into());
+    live.surface_ms.set(300);
+    let why = "Live has AbletonMcpBridge as a Control Surface but couldn't start it: Loopback holds port 9765, which the bridge needs. Quit Loopback, then restart Live. Kumi connects by itself once Live answers.";
+    *live.failure.borrow_mut() = Some(why.into());
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    wait_for_said(&h, why).await;
+    let failing = rows(&h);
+    println!("--- control surface, the bridge couldn't start ---\n{failing}");
+    assert!(failing.lines().any(|l| l == "  Control Surface     didn't start"), "{failing}");
+    assert!(!said(&h).contains("set a Control Surface to AbletonMcpBridge"), "it's chosen: not asked for");
+    // Past the wait for where Live's Settings are: not said, since it's chosen already.
+    delay(700).await;
+    assert!(!said(&h).contains("Settings is in"), "{}", rows(&h));
+    // Fixed, and Live not answering yet: the instruction again, and where the Settings are, its wait over.
+    *live.failure.borrow_mut() = None;
+    wait_for_said(&h, "set a Control Surface to AbletonMcpBridge. Kumi notices by itself.").await;
+    h.has("Control Surface     waiting for Live");
+    wait_for_said(&h, "Settings is in Live's Live menu (⌘,). If Live shows a dialog, answer it first.").await;
+    assert!(!said(&h).contains("Loopback"));
+    h.emit(json!({"type":"connection","state":"connected"}));
+    h.wait_for("You're set.").await;
+    h.has("Control Surface     Live 12.4 · connected");
     h.close().await;
 });
 

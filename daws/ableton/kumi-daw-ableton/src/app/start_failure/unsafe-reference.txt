@@ -1,0 +1,128 @@
+2026-11-02T23:24:48.299186: info: #######################################
+2026-11-02T23:24:48.299348: info: Started: Live 12.4.25b1 Build: 2026-10-28_e04f372900
+2026-11-02T23:24:48.299354: info: #######################################
+2026-11-02T23:24:50.011890: info: AMidiIO: Midi Remote Scripts: 
+  MidiRemoteScript 1 [Control Surface="AbletonMcpBridge" Input="None" Output="None"]
+  MidiRemoteScript 2 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 3 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 4 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 5 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 6 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 7 [Control Surface="None" Input="None" Output="None"]
+2026-11-02T23:24:50.011910: info: AMidiIO: Takeover Mode: None
+2026-11-02T23:24:50.186447: info: AMidiIO: Midi Remote Scripts: 
+  MidiRemoteScript 1 [Control Surface="AbletonMcpBridge" Input="None" Output="None"]
+  MidiRemoteScript 2 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 3 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 4 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 5 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 6 [Control Surface="None" Input="None" Output="None"]
+  MidiRemoteScript 7 [Control Surface="None" Input="None" Output="None"]
+2026-11-02T23:24:50.186463: info: AMidiIO: Takeover Mode: None
+2026-11-02T23:24:50.186696: info: Python: INFO:_Framework.ControlSurface:186 - LOG: (AbletonMcpBridge) Initializing...
+2026-11-02T23:24:50.186712: info: RemoteScriptMessage: (AbletonMcpBridge) Initializing...
+2026-11-02T23:24:50.188317: error: RemoteScriptError: 
+2026-11-02T23:24:50.188325: error: RemoteScriptError: Traceback (most recent call last):
+
+2026-11-02T23:24:50.188330: error: RemoteScriptError: 
+2026-11-02T23:24:50.188335: error: RemoteScriptError:   File "/Users/producer/Music/Ableton/User Library/Remote Scripts/AbletonMcpBridge/__init__.py", line 720, in create_instance
+
+2026-11-02T23:24:50.188434: error: RemoteScriptError: 
+2026-11-02T23:24:50.188443: error: RemoteScriptError:     
+2026-11-02T23:24:50.188449: error: RemoteScriptError: return AbletonMcpBridge(c_instance)
+2026-11-02T23:24:50.188456: error: RemoteScriptError: 
+
+2026-11-02T23:24:50.188468: error: RemoteScriptError: 
+2026-11-02T23:24:50.188473: error: RemoteScriptError:  
+2026-11-02T23:24:50.188483: error: RemoteScriptError:  
+2026-11-02T23:24:50.188489: error: RemoteScriptError:  
+2026-11-02T23:24:50.188496: error: Last message repeated 8 time(s): RemoteScriptError:  
+2026-11-02T23:24:50.188496: error: RemoteScriptError: ^
+2026-11-02T23:24:50.188501: error: RemoteScriptError: ^
+2026-11-02T23:24:50.188504: error: RemoteScriptError: ^
+2026-11-02T23:24:50.188517: error: Last message repeated 25 time(s): RemoteScriptError: ^
+2026-11-02T23:24:50.188517: error: RemoteScriptError: 
+
+2026-11-02T23:24:50.188520: error: RemoteScriptError: 
+2026-11-02T23:24:50.188525: error: RemoteScriptError:   File "/Users/producer/Music/Ableton/User Library/Remote Scripts/AbletonMcpBridge/__init__.py", line 624, in __init__
+
+2026-11-02T23:24:50.188611: error: RemoteScriptError: 
+2026-11-02T23:24:50.188616: error: RemoteScriptError:     
+2026-11-02T23:24:50.188621: error: RemoteScriptError: self._bridge = _Bridge(c_instance, _read_config(), song=accessor() if callable(accessor) else None, provenance="real-live", diagnostics_validator=_diagnostics_path_safe)
+2026-11-02T23:24:50.188625: error: RemoteScriptError: 
+
+2026-11-02T23:24:50.188634: error: RemoteScriptError: 
+2026-11-02T23:24:50.188638: error: RemoteScriptError:  
+2026-11-02T23:24:50.188641: error: RemoteScriptError:  
+2026-11-02T23:24:50.188644: error: RemoteScriptError:  
+2026-11-02T23:24:50.188660: error: Last message repeated 36 time(s): RemoteScriptError:  
+2026-11-02T23:24:50.188660: error: RemoteScriptError: ^
+2026-11-02T23:24:50.188664: error: RemoteScriptError: ^
+2026-11-02T23:24:50.188667: error: RemoteScriptError: ^
+2026-11-02T23:24:50.188674: error: Last message repeated 11 time(s): RemoteScriptError: ^
+2026-11-02T23:24:50.188674: error: RemoteScriptError: 
+
+2026-11-02T23:24:50.188677: error: RemoteScriptError: 
+2026-11-02T23:24:50.188682: error: RemoteScriptError:   File "/Users/producer/Music/Ableton/User Library/Remote Scripts/AbletonMcpBridge/__init__.py", line 130, in _read_config
+
+2026-11-02T23:24:50.188724: error: RemoteScriptError: 
+2026-11-02T23:24:50.188730: error: RemoteScriptError:     
+2026-11-02T23:24:50.188734: error: RemoteScriptError: raise ValueError("bridge configuration reference is missing or unsafe")
+2026-11-02T23:24:50.188738: error: RemoteScriptError: 
+
+2026-11-02T23:24:50.188749: error: RemoteScriptError: 
+2026-11-02T23:24:50.188753: error: RemoteScriptError: ValueError
+2026-11-02T23:24:50.188757: error: RemoteScriptError: : 
+2026-11-02T23:24:50.188761: error: RemoteScriptError: bridge configuration reference is missing or unsafe
+2026-11-02T23:24:50.188764: error: RemoteScriptError: 
+
+2026-11-02T23:24:50.188773: info: Exception: Script could not be loaded.
+2026-11-02T23:24:50.188778: info: Exception: Stack trace format version: 1 (Mac)
+VMAddr Slide: 0x00000000027b4000
+ Exception: === Begin stack trace (pc:fn) ===
+ Exception: 0x0000000103a0816c:000000000000000000
+ Exception: 0x0000000103aa2208:000000000000000000
+ Exception: 0x0000000103aa1e64:000000000000000000
+ Exception: 0x0000000103aa23bc:000000000000000000
+ Exception: 0x0000000104dfc818:000000000000000000
+ Exception: 0x0000000104dff8e8:000000000000000000
+ Exception: 0x0000000104e05090:000000000000000000
+ Exception: 0x0000000104e04cc0:000000000000000000
+ Exception: 0x0000000104e0419c:000000000000000000
+ Exception: 0x0000000104e0203c:000000000000000000
+ Exception: 0x0000000104f03da0:000000000000000000
+ Exception: 0x0000000102bd19e0:000000000000000000
+ Exception: 0x00000001040b335c:000000000000000000
+ Exception: 0x0000000102bd3a30:000000000000000000
+ Exception: 0x00000001040b2494:000000000000000000
+ Exception: 0x00000001040b21f8:000000000000000000
+ Exception: 0x00000001040b2898:000000000000000000
+ Exception: 0x00000001040af57c:000000000000000000
+ Exception: 0x0000000104f038b4:000000000000000000
+ Exception: 0x0000000102bb9820:000000000000000000
+ Exception: 0x0000000102bb6750:000000000000000000
+ Exception: 0x0000000103f2ae4c:000000000000000000
+ Exception: 0x0000000103f1b25c:000000000000000000
+ Exception: 0x000000019fa931a0:000000000000000000
+ Exception: 0x000000019fb22394:000000000000000000
+ Exception: 0x000000019fb222d8:000000000000000000
+ Exception: 0x000000019fa5f3d0:000000000000000000
+ Exception: 0x00000001a115038c:000000000000000000
+ Exception: 0x00000001a405ca14:000000000000000000
+ Exception: 0x00000001a405c7a8:000000000000000000
+ Exception: 0x00000001a405ae80:000000000000000000
+ Exception: 0x00000001a405aa94:000000000000000000
+ Exception: 0x00000001a117920c:000000000000000000
+ Exception: 0x00000001a1179004:000000000000000000
+ Exception: 0x00000001a823453c:000000000000000000
+ Exception: 0x00000001a8233f9c:000000000000000000
+ Exception: 0x00000001a822da0c:000000000000000000
+ Exception: 0x00000001ace2b454:000000000000000000
+ Exception: 0x00000001a40547c0:000000000000000000
+ Exception: 0x00000001a48cc748:000000000000000000
+ Exception: 0x00000001a48cc26c:000000000000000000
+ Exception: 0x00000001a404790c:000000000000000000
+ Exception: 0x0000000103f2a4bc:000000000000000000
+ Exception: 0x000000019f607e80:000000000000000000
+ Exception: === End stack trace ===
+

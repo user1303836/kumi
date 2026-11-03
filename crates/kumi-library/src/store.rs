@@ -4,8 +4,10 @@
 //! saying so; now and then the log is written afresh with only what stands. A reader keeps its place
 //! and reads only what was added since.
 
+use std::borrow::Borrow;
 use std::collections::HashMap;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::io::{self, SeekFrom};
 use std::marker::PhantomData;
 use std::path::{Path, PathBuf};
@@ -14,7 +16,7 @@ use std::time::Duration;
 use base64::engine::general_purpose::{GeneralPurpose, GeneralPurposeConfig};
 use base64::engine::DecodePaddingMode;
 use base64::Engine;
-use indexmap::IndexMap;
+use indexmap::IndexSet;
 use kumi_common::js::json::{stringify, stringify_pretty};
 use serde::de::{DeserializeOwned, DeserializeSeed, Deserializer, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
@@ -119,6 +121,89 @@ impl LogEntry for Entry {
     }
 }
 
+/// A log's entries as its lines leave them: in order, each found by its path. An entry is found by its own path, not by
+/// a copy of it (a map's keys would hold a big library's paths a second time).
+#[derive(Debug)]
+pub struct Entries<T>(IndexSet<ByPath<T>>);
+
+/// An entry known by its path: two are the same entry when their paths are.
+#[derive(Debug)]
+struct ByPath<T>(T);
+
+impl<T: LogEntry> PartialEq for ByPath<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.0.path() == other.0.path()
+    }
+}
+
+impl<T: LogEntry> Eq for ByPath<T> {}
+
+/// As its path's text hashes, so a path finds it.
+impl<T: LogEntry> Hash for ByPath<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.0.path().hash(state)
+    }
+}
+
+impl<T: LogEntry> Borrow<str> for ByPath<T> {
+    fn borrow(&self) -> &str {
+        self.0.path()
+    }
+}
+
+impl<T> Default for Entries<T> {
+    fn default() -> Self {
+        Entries(IndexSet::default())
+    }
+}
+
+impl<T: LogEntry> Entries<T> {
+    pub fn new() -> Self {
+        Self::default()
+    }
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+    pub fn clear(&mut self) {
+        self.0.clear()
+    }
+    pub fn get(&self, path: &str) -> Option<&T> {
+        self.0.get(path).map(|entry| &entry.0)
+    }
+    pub fn contains_key(&self, path: &str) -> bool {
+        self.0.contains(path)
+    }
+    pub fn keys(&self) -> impl DoubleEndedIterator<Item = &str> + ExactSizeIterator {
+        self.0.iter().map(|entry| entry.0.path())
+    }
+    pub fn values(&self) -> impl DoubleEndedIterator<Item = &T> + ExactSizeIterator {
+        self.0.iter().map(|entry| &entry.0)
+    }
+    pub fn into_values(self) -> impl DoubleEndedIterator<Item = T> + ExactSizeIterator {
+        self.0.into_iter().map(|entry| entry.0)
+    }
+    /// The entry in its path's place: where the entry with that path was, or at the end.
+    pub fn insert(&mut self, entry: T) {
+        self.0.replace(ByPath(entry));
+    }
+    pub fn retain(&mut self, mut keep: impl FnMut(&T) -> bool) {
+        self.0.retain(|entry| keep(&entry.0))
+    }
+    fn reserve(&mut self, more: usize) {
+        self.0.reserve(more)
+    }
+}
+
+impl<T: LogEntry> std::ops::Index<&str> for Entries<T> {
+    type Output = T;
+    fn index(&self, path: &str) -> &T {
+        self.get(path).expect("no entry with that path")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Header {
@@ -212,13 +297,13 @@ impl<T: LogEntry> Log<T> {
     }
 
     /// What stands in the log now, by path.
-    pub async fn load(&self) -> IndexMap<String, T> {
+    pub async fn load(&self) -> Entries<T> {
         let header = read_header(&self.file).await;
         if !self.is_mine(&header) {
-            return IndexMap::new();
+            return Entries::new();
         }
         let text = tokio::fs::read(&self.file).await.map(text_of).unwrap_or_default();
-        let mut entries = IndexMap::new();
+        let mut entries = Entries::new();
         let body = match text.find('\n') {
             Some(at) => &text[at + 1..],
             None => &text,
@@ -405,9 +490,9 @@ impl<'de> Visitor<'de> for Through {
 }
 
 /// Apply a log's lines to `entries`; a line cut off by a crash is left out. A path's last line decides: gone, it
-/// leaves; learned, it goes to the end, so the entries come out as applying the lines one by one leaves them. The map
-/// is gone through once for all the lines (removing one entry at a time moves every entry after it).
-fn apply_lines<T: LogEntry>(text: &str, entries: &mut IndexMap<String, T>) {
+/// leaves; learned, it goes to the end, so the entries come out as applying the lines one by one leaves them. The
+/// entries are gone through once for all the lines (removing one entry at a time moves every entry after it).
+fn apply_lines<T: LogEntry>(text: &str, entries: &mut Entries<T>) {
     // Each path's last line, numbered; None is gone.
     let mut last: HashMap<String, (usize, Option<T>)> = HashMap::new();
     for (number, line) in text.split('\n').enumerate() {
@@ -427,14 +512,14 @@ fn apply_lines<T: LogEntry>(text: &str, entries: &mut IndexMap<String, T>) {
         last.insert(path, (number, entry));
     }
     if last.keys().any(|path| entries.contains_key(path)) {
-        entries.retain(|path, _| !last.contains_key(path));
+        entries.retain(|entry| !last.contains_key(entry.path()));
     }
-    let mut learned: Vec<(usize, String, T)> =
-        last.into_iter().filter_map(|(path, (number, entry))| entry.map(|entry| (number, path, entry))).collect();
-    learned.sort_unstable_by_key(|(number, _, _)| *number);
+    // A line's entry has the line's path (both read its last "path"), so it's found by it.
+    let mut learned: Vec<(usize, T)> = last.into_values().filter_map(|(number, entry)| entry.map(|entry| (number, entry))).collect();
+    learned.sort_unstable_by_key(|(number, _)| *number);
     entries.reserve(learned.len());
-    for (_, path, entry) in learned {
-        entries.insert(path, entry);
+    for (_, entry) in learned {
+        entries.insert(entry);
     }
 }
 
@@ -454,12 +539,12 @@ pub struct LogReader<T> {
     pub version: u32,
     generation: Option<String>,
     offset: u64,
-    pub entries: IndexMap<String, T>,
+    pub entries: Entries<T>,
 }
 
 impl<T: LogEntry> LogReader<T> {
     pub fn new(file: impl Into<PathBuf>, kind: &str, version: u32) -> Self {
-        LogReader { file: file.into(), kind: kind.to_string(), version, generation: None, offset: 0, entries: IndexMap::new() }
+        LogReader { file: file.into(), kind: kind.to_string(), version, generation: None, offset: 0, entries: Entries::new() }
     }
 
     pub async fn refresh(&mut self) -> io::Result<Refreshed> {
@@ -507,7 +592,7 @@ impl<T: LogEntry> LogReader<T> {
 }
 
 /// Big logs are read a few thousand lines at a time, so the screen keeps drawing meanwhile.
-async fn apply_chunked<T: LogEntry>(text: &str, entries: &mut IndexMap<String, T>) {
+async fn apply_chunked<T: LogEntry>(text: &str, entries: &mut Entries<T>) {
     const CHUNK: usize = 1 << 20;
     let bytes = text.as_bytes();
     let mut at = 0;
@@ -598,6 +683,7 @@ pub fn unpack_vector(text: &str) -> Vec<f32> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use indexmap::IndexMap;
 
     #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
     struct Sound {
@@ -679,6 +765,30 @@ mod tests {
         }
     }
 
+    /// Entries as a map by path kept them: one learned again takes the place of the one before, a new one goes at the
+    /// end, and each is found by its path.
+    #[test]
+    fn an_entry_learned_again_takes_its_paths_place() {
+        let mut entries = Entries::new();
+        for sound in [sound("/a.wav", "kick"), sound("/b.wav", "hat"), sound("/c.wav", "clap")] {
+            entries.insert(sound);
+        }
+        entries.insert(sound("/b.wav", "snare"));
+        entries.insert(sound("/d.wav", "tom"));
+        assert_eq!(entries.keys().collect::<Vec<_>>(), ["/a.wav", "/b.wav", "/c.wav", "/d.wav"]);
+        assert_eq!(entries.get("/b.wav").and_then(|sound| sound.class.as_deref()), Some("snare"));
+        assert_eq!(entries["/d.wav"].class.as_deref(), Some("tom"));
+        assert!(entries.get("/e.wav").is_none() && !entries.contains_key("/e.wav"));
+        entries.retain(|sound| sound.path != "/a.wav");
+        let classes: Vec<_> = entries.into_values().map(|sound| sound.class.unwrap()).collect();
+        assert_eq!(classes, ["snare", "clap", "tom"]);
+    }
+
+    /// Each entry with the path it's found by.
+    fn found(entries: &Entries<Sound>) -> Vec<(&str, &Sound)> {
+        entries.values().map(|sound| (sound.path(), sound)).collect()
+    }
+
     #[tokio::test]
     async fn lines_applied_together_leave_what_applying_them_one_by_one_does() {
         use rand::{Rng, SeedableRng};
@@ -716,17 +826,22 @@ mod tests {
                 text.push_str(&line);
                 text.push('\n');
             }
-            let mut before = IndexMap::new();
-            for index in 0..random.random_range(0..20) {
-                before.insert(format!("/s/{index}.wav"), sound(&format!("/s/{index}.wav"), "old"));
-            }
-            let mut expected = before.clone();
+            let before: Vec<_> = (0..random.random_range(0..20)).map(|index| sound(&format!("/s/{index}.wav"), "old")).collect();
+            let entries = |sounds: &[Sound]| {
+                let mut entries = Entries::new();
+                sounds.iter().cloned().for_each(|sound| entries.insert(sound));
+                entries
+            };
+            let mut expected: IndexMap<_, _> = before.iter().map(|sound| (sound.path.clone(), sound.clone())).collect();
             apply_one_by_one(&text, &mut expected);
-            let mut whole = before.clone();
+            // Each entry is found by the path the line was applied by: the one the entry itself has.
+            let expected: Vec<_> = expected.iter().map(|(path, sound)| (path.as_str(), sound)).collect();
+            let mut whole = entries(&before);
             apply_lines(&text, &mut whole);
-            assert_eq!(whole.iter().collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>(), "round {round}");
+            assert_eq!(found(&whole), expected, "round {round}");
+            assert!(expected.iter().all(|(path, sound)| whole.get(path) == Some(sound)), "round {round}");
             // A reader's chunks, split anywhere between lines, leave the same.
-            let mut chunked = before.clone();
+            let mut chunked = entries(&before);
             let mut at = 0;
             while at < text.len() {
                 let from = (at + random.random_range(1..400)).min(text.len() - 1);
@@ -734,7 +849,7 @@ mod tests {
                 apply_lines(&text[at..=end], &mut chunked);
                 at = end + 1;
             }
-            assert_eq!(chunked.iter().collect::<Vec<_>>(), expected.iter().collect::<Vec<_>>(), "round {round}, chunked");
+            assert_eq!(found(&chunked), expected, "round {round}, chunked");
         }
     }
 
@@ -770,7 +885,7 @@ mod tests {
         let mut reader: LogReader<Sound> = LogReader::new(&file, "sounds", 1);
         reader.refresh().await.unwrap();
         assert_eq!(reader.entries.keys().collect::<Vec<_>>(), ["/a.wav", "/b\u{fffd}.wav", "/c.wav"]);
-        assert_eq!(log.load().await.keys().cloned().collect::<Vec<_>>(), ["/a.wav", "/b\u{fffd}.wav", "/c.wav"]);
+        assert_eq!(log.load().await.keys().collect::<Vec<_>>(), ["/a.wav", "/b\u{fffd}.wav", "/c.wav"]);
     }
 
     #[tokio::test]

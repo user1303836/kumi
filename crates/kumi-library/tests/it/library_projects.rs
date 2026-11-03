@@ -111,9 +111,9 @@ async fn a_daws_project_files_are_learned_as_its_projects_beside_lives_sets_leav
             assert_eq!((tracker.daw, tracker.tempo, tracker.made_in.as_deref()), (Some(DawId::Renoise), Some(128.), Some("Songs 1.0")));
             assert_eq!(named("Recent Song.song").set.as_ref().unwrap().daw, Some(DawId::Renoise));
             assert_eq!(named("Broken.song").error.as_deref(), Some("no tempo"));
-            assert!(!sets.keys().any(|path| path.contains(" copy")), "a copy is left out: {:?}", sets.keys());
-            assert!(!sets.keys().any(|path| path.ends_with("Song.backup-1.als")), "{:?}", sets.keys());
-            assert!(sets.keys().any(|path| path.ends_with("Song.als")), "{:?}", sets.keys());
+            assert!(!sets.keys().any(|path| path.contains(" copy")), "a copy is left out: {:?}", sets.keys().collect::<Vec<_>>());
+            assert!(!sets.keys().any(|path| path.ends_with("Song.backup-1.als")), "{:?}", sets.keys().collect::<Vec<_>>());
+            assert!(sets.keys().any(|path| path.ends_with("Song.als")), "{:?}", sets.keys().collect::<Vec<_>>());
             // The producer's habits are Live's alone: its Sets' two folders, not the songs.
             let taste: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("taste.json")).unwrap()).unwrap();
             assert_eq!(taste["sets"], 2);
@@ -128,7 +128,7 @@ async fn a_daws_project_files_are_learned_as_its_projects_beside_lives_sets_leav
             };
             learn(LearnOptions::new(plan, Signal::new())).await.unwrap();
             let sets = library_logs(&dir.to_string_lossy()).sets.load().await;
-            assert!(sets.keys().all(|path| !path.ends_with("Tracker Song.song")), "{:?}", sets.keys());
+            assert!(sets.keys().all(|path| !path.ends_with("Tracker Song.song")), "{:?}", sets.keys().collect::<Vec<_>>());
         })
         .await;
 }

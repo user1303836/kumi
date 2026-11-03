@@ -7,7 +7,8 @@
 //! it counts (it merges and drops some), so only it can say no.
 //!
 //! Live's bridge keeps a copy of this for its own owner-only files (ableton-mcp-server's
-//! `lifecycle/delivery/native_acl.rs`; a bridge uses nothing of Kumi's but kumi-common): keep them in step.
+//! `lifecycle/delivery/native_acl.rs`; a bridge uses nothing of Kumi's but kumi-common), and so does the lifecycle of
+//! Kumi's own bridges, with a folder's shape too (daw-bridge's `lifecycle/native_acl.rs`): keep the three in step.
 use std::{ffi::c_void, os::windows::ffi::OsStrExt, path::Path, ptr::null_mut};
 
 type Handle = *mut c_void;
