@@ -30,22 +30,20 @@ pub async fn is_live_running_on(run: Run, platform: &str, env: &Env) -> bool {
     }
     false
 }
-/// The running Lives' process ids: pgrep's on macOS, PowerShell's Get-Process on Windows; none where it can't be told.
+/// The running Lives' process ids: pgrep's on macOS; on Windows, Toolhelp's snapshot, matched as `is_live_running_on`
+/// matches it (as `Get-Process -Name 'Ableton Live*'` did), with nothing run; none where it can't be told.
 pub async fn live_pids_on(run: Run, platform: &str, env: &Env) -> Vec<u32> {
-    let ran = match platform {
-        "darwin" => run("pgrep".into(), vec!["-x".into(), "Live".into()], None).await,
-        "win32" => {
-            let script = "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }";
-            run(
-                system::system_program(SystemProgram::Powershell, env, platform),
-                ["-NoProfile", "-NonInteractive", "-Command", script].map(str::to_string).into(),
-                None,
-            )
-            .await
+    match platform {
+        "darwin" => {
+            let ran = run("pgrep".into(), vec!["-x".into(), "Live".into()], None).await;
+            ran.stdout.split_whitespace().filter_map(|pid| pid.parse().ok()).collect()
         }
-        _ => return vec![],
-    };
-    ran.stdout.split_whitespace().filter_map(|pid| pid.parse().ok()).collect()
+        "win32" => {
+            let listing = super::live_app::processes(env);
+            listing.into_iter().filter(|(_, listed)| super::live_app::is_windows_live(listed)).map(|(pid, _)| pid).collect()
+        }
+        _ => vec![],
+    }
 }
 use super::{
     bridge_files::{self, Wrong},

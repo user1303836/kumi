@@ -612,6 +612,39 @@ mod tests {
         );
     }
 
+    /// On Windows the record's Live is looked for in Windows' own process list (`KUMI_PROCESSES` stands in for it), by
+    /// name as `Get-Process -Name 'Ableton Live*'` matched, in any case. Nothing runs, PowerShell or other, whether the
+    /// record's process is a Live or not.
+    #[tokio::test(flavor = "current_thread")]
+    async fn on_windows_the_records_live_is_found_in_the_process_list_and_nothing_runs() {
+        let scripts = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(scripts.path().join("AbletonMcpBridge")).unwrap();
+        let asked = Rc::new(RefCell::new(vec![]));
+        let run: Run = {
+            let asked = asked.clone();
+            Rc::new(move |program, _args, _cwd| {
+                asked.borrow_mut().push(program);
+                async { kumi_daw::process::Ran::default() }.boxed_local()
+            })
+        };
+        let nothing = tempfile::tempdir().unwrap();
+        let no_log = nothing.path().to_str().unwrap();
+        for (pid, listing, said) in
+            [(4242, "4 System\n4242 ABLETON LIVE 12 SUITE.EXE\n90 node.exe", true), (42430, "4 System\n42430 Ableton Index.exe", false)]
+        {
+            let record = serde_json::json!({"version": 1, "pid": pid, "at": 1.5, "exception": "ValueError: bridge secret is invalid"});
+            std::fs::write(scripts.path().join("AbletonMcpBridge/start-failure.json"), record.to_string()).unwrap();
+            let env = Env::from([
+                ("KUMI_REMOTE_SCRIPTS_DIR".to_string(), scripts.path().display().to_string()),
+                ("KUMI_PROCESSES".to_string(), listing.to_string()),
+            ]);
+            let words = start_failure_settled(&env, no_log, run.clone(), "win32", Duration::ZERO).await;
+            assert_eq!(words.is_some(), said, "{listing}: {words:?}");
+            assert!(words.is_none_or(|words| words.contains("said “bridge secret is invalid”")));
+        }
+        assert!(asked.borrow().is_empty(), "nothing run: {:?}", asked.borrow());
+    }
+
     #[test]
     fn each_cause_says_what_the_exception_says_and_its_fix() {
         let port = |owner: PortOwner, slots| words(&Failed { exception: PORT_IN_USE.into(), slots }, &[(9765, owner), (9766, None)], false);
