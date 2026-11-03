@@ -1754,20 +1754,46 @@ async fn an_update_in_a_folder_another_account_owns_says_whose_before_anything_m
     assert!(serve.calls.borrow().is_empty());
 }
 /// GitHub right after a release: its API names `newest` (or answers `api` instead), that release has its own
-/// description when `described`, and `releases/latest` still leads to the one before (98.0.0).
+/// description when `described`, and `releases/latest` still leads to the one before (`latest`, 98.0.0), or never
+/// answers when `latest_hangs`. `waits` holds each answer back that many milliseconds: the API's, `releases/latest`'s
+/// and the release's own description's (each from when it's asked).
 struct Hub {
     api: u16,
     newest: &'static str,
+    latest: &'static str,
+    latest_hangs: bool,
     described: bool,
+    waits: [u64; 3],
     bundle: Vec<u8>,
     sha256: String,
     calls: RefCell<Vec<String>>,
 }
 impl Hub {
     fn new(api: u16, described: bool) -> Rc<Self> {
-        Rc::new(Self { api, newest: "99.0.0", described, bundle: vec![], sha256: "a".repeat(64), calls: RefCell::new(vec![]) })
+        Rc::new(Self::with(api, described))
+    }
+    fn with(api: u16, described: bool) -> Self {
+        Self {
+            api,
+            newest: "99.0.0",
+            latest: "98.0.0",
+            latest_hangs: false,
+            described,
+            waits: [0; 3],
+            bundle: vec![],
+            sha256: "a".repeat(64),
+            calls: RefCell::new(vec![]),
+        }
     }
 }
+async fn wait(ms: u64) {
+    if ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
+    }
+}
+const API: &str = "https://api.github.com/repos/user1303836/kumi/releases/latest";
+const LATEST: &str = "https://github.com/user1303836/kumi/releases/latest/download/kumi-release.json";
+const NEWEST: &str = "https://github.com/user1303836/kumi/releases/download/v99.0.0/kumi-release.json";
 #[async_trait(?Send)]
 impl Fetch for Hub {
     async fn fetch(&self, url: &str, init: FetchInit) -> Result<Response, LanguageModelError> {
@@ -1776,9 +1802,11 @@ impl Fetch for Hub {
         let own = format!("https://github.com/user1303836/kumi/releases/download/v{}", self.newest);
         if url == "https://api.github.com/repos/user1303836/kumi/releases/latest" {
             assert!(init.headers.contains_key("user-agent"), "GitHub's API wants a user agent");
+            wait(self.waits[0]).await;
             return Ok(Response::json_response(self.api, json!({"tag_name":format!("v{}", self.newest)})));
         }
         if url == format!("{own}/kumi-release.json") {
+            wait(self.waits[2]).await;
             let mut newest = manifest(self.newest);
             newest["sha256"] = json!(self.sha256);
             return Ok(if self.described { Response::json_response(200, newest) } else { Response::text_response(404, "Not Found") });
@@ -1789,17 +1817,64 @@ impl Fetch for Hub {
                 ..Response::text_response(200, "")
             });
         }
-        assert_eq!(url, "https://github.com/user1303836/kumi/releases/latest/download/kumi-release.json");
-        Ok(Response::json_response(200, manifest("98.0.0")))
+        assert_eq!(url, LATEST);
+        if self.latest_hangs {
+            futures::future::pending::<()>().await;
+        }
+        wait(self.waits[1]).await;
+        Ok(Response::json_response(200, manifest(self.latest)))
+    }
+}
+/// GitHub's API often answers before `releases/latest`, whose description is two redirects away. Whichever of
+/// `releases/latest` and the release's own description answers next, the answer is the one main gave, asking one
+/// after the other, and it's never later than main's (on the paused clock: the API answers at 50 ms).
+#[tokio::test(start_paused = true)]
+async fn when_githubs_api_answers_first_the_answer_is_mains_and_never_later() {
+    let env = Env::new();
+    // (the API's status, releases/latest's version and wait, the release's own description's wait, described)
+    // → (the answer, and when it comes, in ms). Each comment ends with main's answer, and when.
+    let cases = [
+        // releases/latest at the API's version comes next: that's the answer, without waiting on the second read,
+        // which has started. Main: 99.0.0 at 250.
+        ((200, "99.0.0", 100, 200, true), ("99.0.0", 100)),
+        // The release's own description comes next: it decides. Main: 99.0.0 at 150.
+        ((200, "98.0.0", 300, 100, true), ("99.0.0", 150)),
+        // ... a 404: releases/latest's, already on its way. Main: 98.0.0 at 450.
+        ((200, "98.0.0", 300, 100, false), ("98.0.0", 300)),
+        // releases/latest at the release before comes next: the release's own description decides. Main: 99.0.0 at 250.
+        ((200, "98.0.0", 100, 200, true), ("99.0.0", 250)),
+        // ... a 404: releases/latest's. Main: 98.0.0 at 350.
+        ((200, "98.0.0", 100, 200, false), ("98.0.0", 250)),
+        // The API's rate limit: releases/latest's. Main: 98.0.0 at 150.
+        ((403, "98.0.0", 100, 200, true), ("98.0.0", 100)),
+    ];
+    for ((api, latest, latest_ms, own_ms, described), (answer, at)) in cases {
+        let hub = Rc::new(Hub { latest, waits: [50, latest_ms, own_ms], ..Hub::with(api, described) });
+        let started = tokio::time::Instant::now();
+        let asked = check_release(&env, Some(hub.clone())).await.unwrap();
+        let case = format!("{api} {latest} {latest_ms} {own_ms} {described}");
+        assert_eq!(asked.as_deref(), Some(answer), "{case}");
+        assert_eq!(started.elapsed().as_millis(), at, "{case}");
+        let calls: &[&str] = if api == 200 { &[LATEST, API, NEWEST] } else { &[LATEST, API] };
+        assert_eq!(*hub.calls.borrow(), calls, "{case}");
     }
 }
 #[tokio::test]
 async fn an_asked_for_update_takes_the_release_githubs_api_names_and_the_usual_way_without_it() {
     let env = Env::new();
-    // Right after a release: the API names it while releases/latest still leads to the one before.
+    // Right after a release: the API names it while releases/latest still leads to the one before, asked beside it.
     let fresh = Hub::new(200, true);
     assert_eq!(check_release(&env, Some(fresh.clone())).await.unwrap().as_deref(), Some("99.0.0"));
-    assert_eq!(fresh.calls.borrow().len(), 2);
+    assert_eq!(*fresh.calls.borrow(), [LATEST, API, NEWEST]);
+    // Once releases/latest leads to the release the API names, that's its own description: no second read.
+    let settled = Rc::new(Hub { latest: "99.0.0", ..Hub::with(200, true) });
+    assert_eq!(check_release(&env, Some(settled.clone())).await.unwrap().as_deref(), Some("99.0.0"));
+    assert_eq!(*settled.calls.borrow(), [LATEST, API]);
+    // releases/latest not answering doesn't hold up the release the API names, read from its own description.
+    let held = Rc::new(Hub { latest_hangs: true, ..Hub::with(200, true) });
+    let asked = tokio::time::timeout(std::time::Duration::from_secs(10), check_release(&env, Some(held.clone())));
+    assert_eq!(asked.await.expect("not held up by releases/latest").unwrap().as_deref(), Some("99.0.0"));
+    assert_eq!(*held.calls.borrow(), [LATEST, API, NEWEST]);
     // The API's rate limit, or a release without its description yet: the usual way, without a word about it.
     for (api, described) in [(403, true), (429, true), (200, false)] {
         assert_eq!(check_release(&env, Some(Hub::new(api, described))).await.unwrap().as_deref(), Some("98.0.0"), "{api} {described}");
@@ -1815,23 +1890,28 @@ async fn an_asked_for_update_takes_the_release_githubs_api_names_and_the_usual_w
     let cache = dir.path().join("update-check.json");
     assert_eq!(newer_release(cache.to_str().unwrap(), &env, Some(1000.), Some(daily.clone())).await.as_deref(), Some("98.0.0"));
     assert_eq!(*daily.calls.borrow(), ["https://github.com/user1303836/kumi/releases/latest/download/kumi-release.json"]);
-    // kumi update downloads from the release the API named, checked against that release's own checksum.
-    let home = dir.path().join("home");
-    put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
-    put(home.join("app").join(executable_name("kumi")), "earlier");
+    // kumi update downloads from the release the API named, checked against that release's own checksum: with
+    // releases/latest answering first, and with the API and that release's own description answering before it.
     let bundle = fake_release(dir.path(), "99.0.0");
-    let hub = Rc::new(Hub { sha256: hex::encode(Sha256::digest(&bundle)), bundle, ..Rc::try_unwrap(Hub::new(200, true)).ok().unwrap() });
-    let installed: Env = [
-        ("KUMI_HOME".into(), home.display().to_string()),
-        ("HOME".into(), dir.path().join("user").display().to_string()),
-        ("KUMI_REMOTE_SCRIPTS_DIR".into(), dir.path().join("Remote Scripts").display().to_string()),
-    ]
-    .into();
-    let (mut updating, out) = io(&installed);
-    updating.fetcher = Some(hub.clone());
-    assert_eq!(update_installed(updating).await.unwrap(), 0, "{}", out.0.borrow());
-    assert!(out.0.borrow().contains(&format!("Kumi {KUMI_VERSION} → 99.0.0.")), "{}", out.0.borrow());
-    assert_eq!(hub.calls.borrow().last().unwrap(), "https://github.com/user1303836/kumi/releases/download/v99.0.0/kumi.tar.gz");
+    let from_the_newest = "https://github.com/user1303836/kumi/releases/download/v99.0.0/kumi.tar.gz";
+    for (n, waits) in [[0; 3], [0, 50, 0]].into_iter().enumerate() {
+        let home = dir.path().join(format!("home-{n}"));
+        put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+        put(home.join("app").join(executable_name("kumi")), "earlier");
+        let sha256 = hex::encode(Sha256::digest(&bundle));
+        let hub = Rc::new(Hub { sha256, bundle: bundle.clone(), waits, ..Hub::with(200, true) });
+        let installed: Env = [
+            ("KUMI_HOME".into(), home.display().to_string()),
+            ("HOME".into(), dir.path().join(format!("user-{n}")).display().to_string()),
+            ("KUMI_REMOTE_SCRIPTS_DIR".into(), dir.path().join(format!("Remote Scripts {n}")).display().to_string()),
+        ]
+        .into();
+        let (mut updating, out) = io(&installed);
+        updating.fetcher = Some(hub.clone());
+        assert_eq!(update_installed(updating).await.unwrap(), 0, "{waits:?}: {}", out.0.borrow());
+        assert!(out.0.borrow().contains(&format!("Kumi {KUMI_VERSION} → 99.0.0.")), "{waits:?}: {}", out.0.borrow());
+        assert_eq!(*hub.calls.borrow(), [LATEST, API, NEWEST, from_the_newest], "{waits:?}");
+    }
 }
 /// Kumi's PATH line as the installer writes it, or edited to start from $HOME, ${HOME} or ~: each is Kumi's under its
 /// marker, as install.sh counts it. Another Kumi's line, and Kumi's folder named outside a marker, stay.

@@ -164,11 +164,11 @@ pub async fn ask_release_at(base: &str, fetch: Option<Rc<dyn Fetch>>) -> AskedRe
         AskedRelease::Manifest(manifest)
     }
 }
-/// The newest release's own downloads, as GitHub's API names it. For a few minutes after a release,
+/// The newest release's own downloads, as GitHub's API names it, and its version. For a few minutes after a release,
 /// `releases/latest/download` can still lead to the one before, while the API already names the new one. The answer
 /// only chooses which release's own description (and checksum) to read. None when the API doesn't say (its rate
 /// limit, a network that blocks it). It's asked without a token.
-async fn newest_release_base(fetch: &Rc<dyn Fetch>) -> Option<String> {
+async fn newest_release(fetch: Rc<dyn Fetch>) -> Option<(String, String)> {
     let headers =
         Headers::from([("accept".into(), "application/vnd.github+json".into()), ("user-agent".into(), format!("kumi/{KUMI_VERSION}"))]);
     let init = FetchInit { headers, signal: Some(abort::timeout(3_000)), ..Default::default() };
@@ -179,24 +179,61 @@ async fn newest_release_base(fetch: &Rc<dyn Fetch>) -> Option<String> {
     let tag = response.json().await.ok()?.get("tag_name")?.as_str()?.to_string();
     let version = tag.strip_prefix('v')?;
     (crate::config::release_version(version).as_deref() == Some(version))
-        .then(|| format!("https://github.com/user1303836/kumi/releases/download/{tag}"))
+        .then(|| (format!("https://github.com/user1303836/kumi/releases/download/{tag}"), version.to_string()))
 }
 /// The newest release for `kumi update` and its checks: the one GitHub's API names, read from that release's own
 /// description, else the usual way. With KUMI_RELEASES, only there. The daily check doesn't come here, so it
 /// asks no more than once a day.
+///
+/// The usual description is asked beside the API, not after it. When the API answers, the release it names has its own
+/// description read, as before, unless the usual description has come and is that release: then it's that release's
+/// own description, and the answer. It's the answer too when it shows that release before the second read is in; the
+/// second read, already started, isn't waited on. Otherwise the second read decides as before; where the usual way
+/// would be asked, its answer is already on its way, under its own time limit.
 async fn ask_newest(env: &Env, fetch: Rc<dyn Fetch>) -> (String, AskedRelease) {
+    use futures::future::{select, Either};
     let usual = release_base(env);
-    if env.get("KUMI_RELEASES").is_none_or(|s| s.is_empty()) {
-        if let Some(base) = newest_release_base(&fetch).await {
-            match ask_release_at(&base, Some(fetch.clone())).await {
-                // The usual way goes over the same network: no second wait for the same failure.
-                asked @ (AskedRelease::Manifest(_) | AskedRelease::Offline(..)) => return (base, asked),
-                _ => {}
-            }
-        }
+    let asking = |base: &str| {
+        let (base, fetch) = (base.to_string(), fetch.clone());
+        Box::pin(async move { ask_release_at(&base, Some(fetch)).await })
+    };
+    if env.get("KUMI_RELEASES").is_some_and(|s| !s.is_empty()) {
+        return (usual.clone(), asking(&usual).await);
     }
-    let asked = ask_release_at(&usual, Some(fetch)).await;
-    (usual, asked)
+    // (the usual way polled first, so it's asked even where the API answers at once)
+    let (newest, latest) = match select(asking(&usual), Box::pin(newest_release(fetch.clone()))).await {
+        Either::Left((latest, api)) => (api.await, Either::Left(latest)),
+        Either::Right((newest, latest)) => (newest, Either::Right(latest)),
+    };
+    let Some((base, version)) = newest else {
+        let latest = match latest {
+            Either::Left(latest) => latest,
+            Either::Right(latest) => latest.await,
+        };
+        return (usual, latest);
+    };
+    let its = |asked: &AskedRelease| matches!(asked, AskedRelease::Manifest(manifest) if manifest.kumi == version);
+    // The usual way goes over the same network: no second wait for the same failure.
+    let decided = |own: AskedRelease| matches!(own, AskedRelease::Manifest(_) | AskedRelease::Offline(..)).then_some(own);
+    let own = asking(&base);
+    match latest {
+        Either::Left(latest) if its(&latest) => (base, latest),
+        Either::Left(latest) => match decided(own.await) {
+            Some(own) => (base, own),
+            None => (usual, latest),
+        },
+        Either::Right(latest) => match select(own, latest).await {
+            Either::Left((own, latest)) => match decided(own) {
+                Some(own) => (base, own),
+                None => (usual, latest.await),
+            },
+            Either::Right((latest, _)) if its(&latest) => (base, latest),
+            Either::Right((latest, own)) => match decided(own.await) {
+                Some(own) => (base, own),
+                None => (usual, latest),
+            },
+        },
+    }
 }
 pub async fn fetch_manifest(env: &Env, fetch: Option<Rc<dyn Fetch>>) -> Option<ReleaseManifest> {
     match ask_release(env, fetch).await {
