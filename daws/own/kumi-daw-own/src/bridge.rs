@@ -974,7 +974,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         // Where FOCUS is drawn, its first read goes as soon as the first look has answered (at most a period from now):
         // the look's snapshot is still the DAW's first request, and FOCUS fills right after it. Plain mode keeps its pace.
         let (looked_once, mut first) = (self.looked_once.clone(), self.options.context.focus_drawn);
-        let (read, looks) = (self.read.clone(), self.looks.clone());
+        let (project_read, looks) = (self.read.clone(), self.looks.clone());
         tokio::task::spawn_local(async move {
             // The looks asked for because none had read the project yet that the session took, when the last ask was, and
             // how many looks had begun then.
@@ -1050,7 +1050,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 // didn't read it count, LOOKS_AGAIN at most. A DAW that went and came back after a look read it is looked
                 // at by the session itself.
                 let free = focus.get("busy").is_none_or(Value::is_null);
-                if !read.get() && free && asked_at.is_none_or(|at| at.elapsed() >= ASK_AGAIN) {
+                if !project_read.get() && free && asked_at.is_none_or(|at| at.elapsed() >= ASK_AGAIN) {
                     if asked_at.is_some() && looks.get() != looks_then {
                         taken += 1;
                     }
