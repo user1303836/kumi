@@ -582,10 +582,11 @@ impl ModelControl {
                     && before != bound_by(control.info_for(model.as_deref()))
                 {
                     // (and a binding being made from the kept list isn't joined)
-                    let mut state = inner.state.borrow_mut();
-                    state.bound = None;
-                    state.binding = None;
-                    drop(state);
+                    {
+                        let mut state = inner.state.borrow_mut();
+                        state.bound = None;
+                        state.binding = None;
+                    }
                     let _ = (inner.options.changed)().await;
                 }
             }
