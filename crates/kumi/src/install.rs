@@ -605,6 +605,8 @@ struct Unpacking {
     stdin: Option<tokio::process::ChildStdin>,
     /// tar stopped taking what it was given before it had ended well, or was given up on.
     broke: bool,
+    /// How long tar may take to take one piece (UNPACK_PIECE).
+    piece_limit: Duration,
 }
 /// How long tar may take to take one piece of the download before it's given up on, and how long it may take to end.
 const UNPACK_PIECE: Duration = Duration::from_secs(30);
@@ -634,7 +636,7 @@ impl Unpacking {
         #[cfg(windows)]
         command.creation_flags(0x0800_0000);
         let mut child = command.spawn().ok()?;
-        Some(Self { stdin: child.stdin.take(), child, broke: false })
+        Some(Self { stdin: child.stdin.take(), child, broke: false, piece_limit: UNPACK_PIECE })
     }
     /// Hands tar the next piece, within UNPACK_PIECE and until `signal` (the producer's Ctrl-C, the download's own
     /// limit). One it doesn't take ends the handing: a tar that has read the archive's end takes no more (and ends
@@ -643,7 +645,7 @@ impl Unpacking {
         use tokio::io::AsyncWriteExt;
         let Some(stdin) = self.stdin.as_mut() else { return };
         let taken = tokio::select! {
-            taken = tokio::time::timeout(UNPACK_PIECE, stdin.write_all(piece)) => taken.map(|written| written.is_ok()).map_err(|_| ()),
+            taken = tokio::time::timeout(self.piece_limit, stdin.write_all(piece)) => taken.map(|written| written.is_ok()).map_err(|_| ()),
             _ = signal.cancelled() => Err(()),
         };
         match taken {
@@ -885,14 +887,17 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
             &io.env,
             &format!("Unpacking Kumi {}…", manifest.kumi),
             async {
-                // Unpacked as it downloaded, now that the checksum matched; or else from the downloaded file.
-                let streamed = match unpacking.take() {
-                    Some(unpacking) => unpacking.finished().await,
-                    None => false,
+                // Unpacked as it downloaded, now that the checksum matched; or else from the downloaded file. After a stream
+                // that didn't end well, that's over what tar wrote: the same archive rewrites each file it holds, where
+                // removing them could fail on a file a scanner holds.
+                let (streamed, tried) = match unpacking.take() {
+                    Some(unpacking) => (unpacking.finished().await, true),
+                    None => (false, false),
                 };
                 if !streamed {
                     FROM_FILE.with(|count| count.set(count.get() + 1));
-                    if let Err(error) = remove(&fresh).and_then(|()| fs::create_dir_all(&fresh)) {
+                    let made = if tried { fs::create_dir_all(&fresh) } else { remove(&fresh).and_then(|()| fs::create_dir_all(&fresh)) };
+                    if let Err(error) = made {
                         return not_in_place(&home, &error).into();
                     }
                     // tar.exe reads its arguments in Windows' code page, which can't spell every folder name: run in
@@ -2624,5 +2629,29 @@ mod path_line_tests {
         assert_eq!((after.as_str(), left), ("export EDITOR=vim\nalias ll='ls -l'\n", vec![]));
         assert_eq!(by_hand(&removed), format!("lines 1–2: {PATH_MARKER} / {LINE}; lines 6–7: {PATH_MARKER} / {LINE}"));
         assert_eq!(by_hand(&numbered(&[(4, PATH_MARKER)])), format!("line 4: {PATH_MARKER}"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod unpacking_tests {
+    use super::*;
+
+    /// `sleep` never reads its stdin, as a tar stuck on a write or a stalled xz: the piece is given up on at its limit,
+    /// or at once when the download's signal fires, and the stream counts as not finished.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_tar_that_stops_reading_is_given_up_on_at_its_limit_or_at_a_cancel() {
+        for (limit_ms, cancel_ms) in [(200u64, 600_000u64), (600_000, 200)] {
+            let mut child =
+                tokio::process::Command::new("sleep").arg("60").stdin(std::process::Stdio::piped()).kill_on_drop(true).spawn().unwrap();
+            let mut unpacking = Unpacking { stdin: child.stdin.take(), child, broke: false, piece_limit: Duration::from_millis(limit_ms) };
+            let signal = abort::timeout(cancel_ms);
+            // More than any pipe holds.
+            let piece = vec![0u8; 4 * 1024 * 1024];
+            let started = std::time::Instant::now();
+            unpacking.feed(&piece, &signal).await;
+            assert!(started.elapsed() < Duration::from_secs(5), "limit {limit_ms} ms, cancel {cancel_ms} ms");
+            assert!(unpacking.broke && unpacking.stdin.is_none());
+            assert!(!unpacking.finished().await, "given up on, so not finished");
+        }
     }
 }
