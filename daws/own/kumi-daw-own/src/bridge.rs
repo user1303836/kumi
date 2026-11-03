@@ -20,7 +20,7 @@ use kumi_agent::{
         project::{decide_project_with, ProjectRules},
         references::{Candidate, CandidateKind},
         refs::{Book, Moved, RefScheme, Shift},
-        view::{BodyKind, BodyRequest, DawFocus, DeviceNode, FocusBody},
+        view::{BodyKind, BodyRequest, DawFocus, DeviceNode, FocusBody, TRACKER_TRACKS},
     },
     integrations::none::no_access,
     mcp::{
@@ -1796,6 +1796,14 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         // The timeline's tracks around the one the producer works on, not the first of a big project's.
         if let (BodyRequest::Timeline, Some(track)) = (request, self.selected.borrow().clone()) {
             args.insert("around".into(), track.into());
+        }
+        // A pattern's tracks (a tracker's): the first that FOCUS can draw and the producer's, not a big song's every one. A
+        // bridge that takes no `limit` here sends them all, as before.
+        if matches!(request, BodyRequest::Tracker { .. }) && args.get("kind").and_then(Value::as_str) == Some("pattern") {
+            args.insert("limit".into(), TRACKER_TRACKS.into());
+            if let Some(track) = self.selected.borrow().clone() {
+                args.insert("around".into(), track.into());
+            }
         }
         if let Some(layout) = self.layout.get().filter(|_| names_tracks(&self.book.borrow().scheme, &args)) {
             args.insert("layout".into(), layout.into());

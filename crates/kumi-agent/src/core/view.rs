@@ -551,6 +551,11 @@ pub struct TimelineItem {
     pub silent: bool,
 }
 
+/// The most tracks a tracker body is read for: the first this many, and the producer's past them. FOCUS draws the
+/// producer's track, then the others in order while they fit: at its widest (the drawer, 95 columns) 22 more of the
+/// narrowest (3 columns and a gap, after a 4-column line number). A big song's other tracks would never be drawn.
+pub const TRACKER_TRACKS: usize = 24;
+
 /// A tracker pattern (or phrase) around its cursor, as FOCUS draws it: each track's lines in the DAW's own notation.
 /// Names and cells are data.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]

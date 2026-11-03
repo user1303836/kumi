@@ -535,6 +535,41 @@ test("reads: the pattern body is a window of lines around the cursor", function(
   H.no_dialogs()
 end)
 
+-- (A4-2) FOCUS draws the producer's track first, then the song's in order until its pane is full: Kumi asks for that many
+-- with `limit`, and every track it gets is the one the whole body has.
+test("reads: a pattern body with a limit reads the first tracks and the producer's past them, as the whole body has them", function()
+  local env, peer = setup()
+  fill_demo()
+  local E = epoch_of(peer)
+  local whole = call(peer, "focus_body", { kind = "pattern" }).result
+  eq(#whole.tracks, 7)
+  local function same(body, picked, why)
+    eq(#body.tracks, #picked, why)
+    for k, t in ipairs(picked) do eq(json.encode(body.tracks[k]), json.encode(whole.tracks[t]), why .. ": track " .. t) end
+    for _, key in ipairs({ "ref", "name", "lines", "from", "lpb", "cursor", "playing" }) do eq(body[key], whole[key], why .. ": " .. key) end
+    eq(body.window.from, whole.window.from, why)
+    eq(body.window.to, whole.window.to, why)
+    eq(body.truncated, whole.truncated, why)
+  end
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:4" }).result, { 1, 2, 4 }, "the producer's track past the first two")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 3, around = E .. ":track:2" }).result, { 1, 2, 3 }, "the producer's among the first")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 3 }).result, { 1, 2, 3 }, "no track of the producer's: the first")
+  -- A track past the limit named as the producer's comes too: FOCUS draws the first of that name.
+  mock.ops.rename_track(5, "Bass")
+  E = epoch_of(peer)
+  whole = call(peer, "focus_body", { kind = "pattern" }).result
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:4" }).result, { 1, 2, 4, 5 }, "a name past the limit")
+  -- What can't be kept exactly reads every track, as a Kumi that asks for no limit does.
+  local all = { 1, 2, 3, 4, 5, 6, 7 }
+  same(call(peer, "focus_body", { kind = "pattern" }).result, all, "no limit")
+  same(call(peer, "focus_body", { kind = "pattern", around = E .. ":track:4" }).result, all, "no limit, a track named")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 7, around = E .. ":track:4" }).result, all, "a limit of every track")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = "0:track:4" }).result, all, "a track of another epoch")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:40" }).result, all, "no such track")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":pattern:1" }).result, all, "not a track")
+  H.no_dialogs()
+end)
+
 test("reads: the matrix, phrase, instrument and dsp bodies", function()
   local env, peer = setup()
   fill_demo()

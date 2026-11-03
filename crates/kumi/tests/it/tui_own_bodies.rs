@@ -377,6 +377,44 @@ case!(renoises_pattern_fits_the_drawer_around_its_cursor, async {
     h.close().await;
 });
 
+// (A4-2) A tracker body is read for its first TRACKER_TRACKS tracks and the producer's: FOCUS at its widest (the drawer
+// below 100 columns) draws the producer's track, then the first others while they fit, and never one past that many.
+case!(renoises_pattern_at_focus_widest_draws_no_track_past_the_ones_read, async {
+    use kumi_agent::core::view::TRACKER_TRACKS;
+    work_with(DawId::Renoise);
+    let c = Rc::new(Control::default());
+    let tracks: Vec<TrackerTrack> =
+        (1..=64).map(|n| TrackerTrack { name: format!("T{n:02}"), color: None, cells: vec!["...".into(); 33] }).collect();
+    *c.own.borrow_mut() = Some(FocusBody::Tracker(TrackerGrid {
+        item_ref: "3:pattern:2".into(),
+        name: "Wide".into(),
+        lines: 64,
+        from: 0,
+        cursor: Some(1),
+        playing: None,
+        lpb: Some(4.),
+        heading: None,
+        facts: vec![],
+        tracks,
+    }));
+    let h = Harness::with(99, 30, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    let focus = json!({"track":{"name":"T40","kind":"sequencer"},"trackRef":"3:track:40","mainView":{"kind":"pattern-editor","label":"Pattern Editor"},"item":{"kind":"pattern-track","itemRef":"3:pattern:2","name":"Wide"}});
+    h.emit(json!({"type":"focus","focus":focus}));
+    let strip = |lines: &[String]| lines.iter().position(|line| line.starts_with("  NOW   FOCUS")).expect("the drawer");
+    let lines = h.screen();
+    h.type_text(&click(&lines, strip(&lines), "FOCUS")).await;
+    shows(&h, "Wide · 64 lines").await;
+    let lines = h.screen();
+    let names = lines.iter().find(|line| line.contains("T40")).expect("the tracks' names");
+    let drawn: Vec<usize> = names.split_whitespace().filter_map(|word| word.strip_prefix('T')?.parse().ok()).collect();
+    assert_eq!(drawn.first(), Some(&40), "the producer's track first: {names}");
+    assert!(drawn.len() > 20, "the widest FOCUS draws many narrow tracks: {names}");
+    assert!(drawn[1..].iter().all(|n| *n <= TRACKER_TRACKS), "none past the first {TRACKER_TRACKS}: {names}");
+    h.close().await;
+});
+
 // ----- goldens (m4-tui): each new body and each family's picture, drawn from what the bridges send -----
 //
 // Whole screens kept as text in tests/goldens/tui/daw (trailing spaces trimmed): at 120×36 and 160×40, narrow (80×30),
