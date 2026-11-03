@@ -89,7 +89,7 @@ async fn a_request_nobody_waits_for_runs_at_once_as_far_as_it_goes() {
 }
 
 /// The twelve model requests, signing in among them: what `models_answer` answers.
-const MODEL_REQUESTS: [&str; 12] = [
+const MODEL_REQUESTS: [&str; 13] = [
     "Providers",
     "LocalModels",
     "ChooseDefault",
@@ -102,6 +102,7 @@ const MODEL_REQUESTS: [&str; 12] = [
     "SignOut",
     "SignInChatgpt",
     "MissingModel",
+    "Warm",
 ];
 
 #[tokio::test(flavor = "current_thread")]

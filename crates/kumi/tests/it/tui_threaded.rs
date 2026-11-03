@@ -741,3 +741,92 @@ async fn a_message_sent_while_the_session_starts_waits_for_it() {
         })
         .await;
 }
+
+/// A session that counts the warm-ups it's told: one each time the producer begins a message.
+struct Warms {
+    warms: Arc<AtomicUsize>,
+}
+
+/// What the session does, asked through its handle below.
+impl Warms {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        idle()
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Ok(None)
+    }
+    fn warm(&self) {
+        self.warms.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for Warms {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::default()
+    }
+    fn status(&self) -> SessionStatus {
+        Warms::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, { Op::Warm(_) => Reply::Warm(self.warm()), })
+    }
+    alike!();
+}
+
+/// The first character of a message tells the session to ready its model, once: typing on, a `/` command and a search
+/// tell it nothing.
+#[tokio::test(flavor = "current_thread")]
+async fn a_message_begun_tells_the_session_to_ready_its_model_once_and_a_command_or_a_search_doesnt() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let warms = Arc::new(AtomicUsize::new(0));
+            let counted = warms.clone();
+            let build: Build = Box::new(move |_| async move { Ok(Built::new(Rc::new(Warms { warms: counted }))) }.boxed_local());
+            let threaded = Threaded::spawn(build).await.unwrap();
+            let h = Harness::on(120, 36, threaded.clone(), |_| {});
+            h.start().await;
+            h.input.write("m");
+            until("the warm-up", || warms.load(Ordering::SeqCst) == 1).await;
+            h.input.write("ake the bass darker");
+            delay(100).await;
+            assert_eq!(warms.load(Ordering::SeqCst), 1, "typing on tells nothing more");
+            // Sent, the box is empty again: a command begun tells nothing.
+            h.input.write("\r");
+            delay(100).await;
+            h.input.write("/model");
+            delay(100).await;
+            h.input.write(&"\x7f".repeat(6));
+            // Nor does looking back through what was sent.
+            h.input.write("\x12");
+            h.input.write("dark");
+            delay(100).await;
+            assert_eq!(warms.load(Ordering::SeqCst), 1);
+            h.close().await;
+        })
+        .await;
+}

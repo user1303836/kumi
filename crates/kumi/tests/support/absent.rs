@@ -93,7 +93,8 @@ pub fn answer(op: Op) -> Result<Reply, RuntimeError> {
         | Op::SaveKey(_)
         | Op::SignOut(_)
         | Op::SignInChatgpt(_)
-        | Op::MissingModel(_) => return Err(absent()),
+        | Op::MissingModel(_)
+        | Op::Warm(_) => return Err(absent()),
         Op::StopSlots(_) => Reply::StopSlots(()),
         Op::StopSignIn(_) => Reply::StopSignIn(()),
         Op::FocusBody(_) => Reply::FocusBody(None),
