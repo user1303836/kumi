@@ -238,28 +238,92 @@ struct Prepared {
     lower: String,
     /// The letters `lower` has, and those its words start with.
     letters: Letters,
-    where_: String,
-    hay: String,
-    folders: Vec<String>,
+    /// Where it is, as the sounds in its folder share it (held once for them all: a big library has ~30 sounds a folder).
+    folder: Rc<Folder>,
+    /// The lowercased file name: what follows `folder.hay` in the "label/relative path" a word is looked for in.
+    file: String,
     vector: Vec<f32>,
 }
-fn prepared(entry: &SoundEntry, source: &Source, root: usize) -> Prepared {
+/// What the sounds of one folder (of one source) share in the index.
+#[derive(Debug, PartialEq)]
+struct Folder {
+    /// The source's label and the folders down to it, as shown ("Splice / Drums / Kicks").
+    where_: String,
+    /// Those, lowercased, each: a word of the query names one ("kick" in Kicks).
+    folders: Vec<String>,
+    /// The lowercased "label/relative path" up to and with its last separator; a sound's `file` follows it.
+    hay: String,
+}
+impl Prepared {
+    /// Whether the lowercased "label/relative path" holds `word`, exactly as the one string would.
+    fn hay_contains(&self, word: &str) -> bool {
+        let mut seen = InFolder::unseen();
+        seen.look(&self.folder, word);
+        seen.in_place(self, word)
+    }
+}
+/// What a word of a search found in the folder it looked at last: a folder's sounds come together, so a search looks
+/// at each folder once for them.
+struct InFolder {
+    folder: *const Folder,
+    /// The folder's part of a sound's place holds the word.
+    holds: bool,
+    /// One of its folders is named for the word, or for more than one of it ("kick" in Kicks).
+    named: bool,
+    /// The word has no separator, so a file name (which has none) can hold it whole.
+    whole: bool,
+    /// A word found across the folder's part and a file name holds a separator where the folder's part ends (it ends
+    /// with one). For each of the word's separators where the word up to there ends the folder's part: where the rest
+    /// of the word starts, which a file name must start with.
+    goes_on: Vec<usize>,
+}
+impl InFolder {
+    fn unseen() -> Self {
+        InFolder { folder: std::ptr::null(), holds: false, named: false, whole: false, goes_on: vec![] }
+    }
+    fn look(&mut self, folder: &Rc<Folder>, word: &str) {
+        self.folder = Rc::as_ptr(folder);
+        self.holds = folder.hay.contains(word);
+        self.whole = !word.contains(['/', '\\']);
+        self.goes_on.clear();
+        let separators = word.match_indices(['/', '\\']).map(|(at, separator)| at + separator.len());
+        self.goes_on.extend(separators.filter(|rest| folder.hay.ends_with(&word[..*rest])));
+    }
+    /// Whether a sound of the folder holds the word in its place: in the folder's part, in its file's, or across.
+    fn in_place(&self, made: &Prepared, word: &str) -> bool {
+        self.holds || (self.whole && made.file.contains(word)) || self.goes_on.iter().any(|rest| made.file.starts_with(&word[*rest..]))
+    }
+}
+/// The folders an index has made, by their source's label and their path in it: each made once, shared by its sounds.
+type Folders = HashMap<String, Rc<Folder>>;
+fn prepared(entry: &SoundEntry, source: &Source, root: usize, made: &mut Folders) -> Prepared {
     let relative = below(&entry.path, &source.path).unwrap_or(&entry.path);
-    let mut folders: Vec<_> = relative.split(['\\', '/']).map(str::to_owned).collect();
-    folders.pop();
     let name = basename(&entry.path);
     let ext = extension(&entry.path);
     let name = name.strip_suffix(&ext).unwrap_or(&name).to_owned();
-    let all = std::iter::once(source.label.clone()).chain(folders).collect::<Vec<_>>();
     let lower = name.to_lowercase();
+    let hay = format!("{}/{relative}", source.label).to_lowercase();
+    // Split at its last separator: the folder's part (shared) and the file's.
+    let cut = hay.rfind(['/', '\\']).map_or(0, |at| at + 1);
+    let file = hay[cut..].to_owned();
+    let at = relative.rfind(['/', '\\']).map_or(0, |at| at + 1);
+    let key = format!("{}\u{0}{}", source.label, &relative[..at]);
+    let folder = made
+        .entry(key)
+        .or_insert_with(|| {
+            let mut folders: Vec<_> = relative.split(['\\', '/']).map(str::to_owned).collect();
+            folders.pop();
+            let all = std::iter::once(source.label.clone()).chain(folders).collect::<Vec<_>>();
+            Rc::new(Folder { where_: all.join(" / "), folders: all.iter().map(|s| s.to_lowercase()).collect(), hay: hay[..cut].to_owned() })
+        })
+        .clone();
     Prepared {
         root,
         letters: letters_of(&lower),
         lower,
         name,
-        where_: all.join(" / "),
-        hay: format!("{}/{relative}", source.label).to_lowercase(),
-        folders: all.iter().map(|s| s.to_lowercase()).collect(),
+        folder,
+        file,
         vector: entry.vector.as_deref().map(unpack_vector).unwrap_or_default(),
     }
 }
@@ -318,12 +382,13 @@ impl SoundIndex {
     }
     fn rooted(entries: impl IntoIterator<Item = impl Into<Rc<SoundEntry>>>, mut roots: Vec<&Source>) -> Self {
         roots.sort_by_key(|s| std::cmp::Reverse(s.path.encode_utf16().count()));
+        let mut made = Folders::new();
         let rows: Vec<_> = entries
             .into_iter()
             .map(Into::into)
             .filter_map(|entry: Rc<SoundEntry>| {
                 roots.iter().position(|root| below(&entry.path, &root.path).is_some()).map(|at| {
-                    let prepared = prepared(&entry, roots[at], at);
+                    let prepared = prepared(&entry, roots[at], at, &mut made);
                     (entry, prepared)
                 })
             })
@@ -400,6 +465,8 @@ impl SoundIndex {
         let before_rows: HashMap<&str, usize> = before_entries.iter().enumerate().map(|(row, entry)| (entry.path.as_str(), row)).collect();
         let mut rows = vec![];
         let mut count = 0;
+        // Folders made before and kept stay shared with the sounds made now.
+        let mut made_folders = Folders::new();
         for entry in entries.into_iter().map(Into::<Rc<SoundEntry>>::into) {
             if let Some(at) = roots.iter().position(|s| below(&entry.path, &s.path).is_some()) {
                 let kept = before_rows
@@ -411,8 +478,13 @@ impl SoundIndex {
                     })
                     .and_then(|row| before_prepared[row].take());
                 let made = match kept {
-                    Some(made) => Prepared { root: at, ..made },
-                    None => prepared(&entry, &roots[at], at),
+                    Some(made) => {
+                        let relative = below(&entry.path, &roots[at].path).unwrap_or(&entry.path);
+                        let cut = relative.rfind(['/', '\\']).map_or(0, |at| at + 1);
+                        made_folders.entry(format!("{}\u{0}{}", roots[at].label, &relative[..cut])).or_insert_with(|| made.folder.clone());
+                        Prepared { root: at, ..made }
+                    }
+                    None => prepared(&entry, &roots[at], at, &mut made_folders),
                 };
                 rows.push((made, entry));
             }
@@ -438,7 +510,7 @@ impl SoundIndex {
                     Some((entry, made))
                 } else {
                     roots.iter().position(|s| present.contains(s.path.as_str()) && below(&entry.path, &s.path).is_some()).map(|at| {
-                        let made = prepared(&entry, &roots[at], at);
+                        let made = prepared(&entry, &roots[at], at, &mut made_folders);
                         (entry, made)
                     })
                 }
@@ -458,7 +530,7 @@ impl SoundIndex {
     }
     /// Where a sound is, by its row: its source's label and the folders down to it ("Splice / Drums / Kicks").
     pub fn place(&self, row: usize) -> &str {
-        &self.prepared[row].where_
+        &self.prepared[row].folder.where_
     }
     pub fn holds(&self, folder: &str) -> bool {
         self.entries.iter().any(|e| below(&e.path, folder).is_some())
@@ -468,6 +540,38 @@ impl SoundIndex {
     }
     fn normalized(&self, vector: &[f64]) -> [f32; VECTOR_LENGTH] {
         std::array::from_fn(|d| ((vector.get(d).copied().unwrap_or(0.) - self.mean[d] as f64) * self.scale[d] as f64) as f32)
+    }
+    /// A row's score for the query's words, added to `score` word by word: false when a word is found neither in its
+    /// name, its place, nor its class. Kept apart from the search's loop, which a search without words runs tight.
+    #[inline(never)]
+    fn scored_by_words(
+        &self,
+        row: usize,
+        entry: &SoundEntry,
+        (naming, classes, plurals): (&[String], &[Option<SoundClass>], &[String]),
+        in_folder: &mut [InFolder],
+        score: &mut f64,
+    ) -> bool {
+        let made = &self.prepared[row];
+        for (((word, class), plural), seen) in naming.iter().zip(classes).zip(plurals).zip(in_folder.iter_mut()) {
+            if seen.folder != Rc::as_ptr(&made.folder) {
+                seen.look(&made.folder, word);
+                seen.named = made.folder.folders.iter().any(|folder| folder == word || folder == plural);
+            }
+            let in_name = if made.lower.starts_with(word.as_str()) {
+                10.
+            } else if made.lower.contains(word.as_str()) {
+                5.
+            } else {
+                0.
+            };
+            let as_class = class.is_some() && entry.r#class == *class;
+            if in_name == 0. && !as_class && !seen.in_place(made, word) {
+                return false;
+            }
+            *score += in_name + if seen.named { 3. } else { 0. } + if as_class { 8. } else { 0. };
+        }
+        true
     }
     pub fn search(&self, query: &SoundQuery) -> SearchResult<SoundHit> {
         let words = words(&query.words);
@@ -482,6 +586,7 @@ impl SoundIndex {
         let like = query.like.as_ref().map(|like| self.normalized(&like.vector));
         let spread = (2. * self.weights.iter().map(|w| *w as f64 * *w as f64).sum::<f64>()).sqrt();
         let (mut rows, mut scores, mut closeness) = (vec![], vec![], HashMap::new());
+        let mut in_folder: Vec<_> = naming.iter().map(|_| InFolder::unseen()).collect();
         for (row, entry) in self.entries.iter().enumerate() {
             if query.kind.is_some_and(|k| entry.kind != Some(k))
                 || (!query.classes.is_empty() && entry.r#class.is_none_or(|c| !query.classes.contains(&c)))
@@ -516,26 +621,7 @@ impl SoundIndex {
                     continue;
                 }
             }
-            let made = &self.prepared[row];
-            let mut missing = false;
-            for ((word, class), plural) in naming.iter().zip(&classes).zip(&plurals) {
-                let in_name = if made.lower.starts_with(word) {
-                    10.
-                } else if made.lower.contains(word) {
-                    5.
-                } else {
-                    0.
-                };
-                let as_class = class.is_some() && entry.r#class == *class;
-                if in_name == 0. && !as_class && !made.hay.contains(word) {
-                    missing = true;
-                    break;
-                }
-                score += in_name
-                    + if made.folders.iter().any(|folder| folder == word || folder == plural) { 3. } else { 0. }
-                    + if as_class { 8. } else { 0. };
-            }
-            if missing {
+            if !naming.is_empty() && !self.scored_by_words(row, entry, (&naming, &classes, &plurals), &mut in_folder, &mut score) {
                 continue;
             }
             if let Some(like) = like {
@@ -616,7 +702,7 @@ impl SoundIndex {
                     for (word, class) in naming.iter().zip(&classes) {
                         if made.lower.contains(word) {
                             why.push(format!("“{word}” in its name"));
-                        } else if made.hay.contains(word) {
+                        } else if made.hay_contains(word) {
                             why.push(format!("in a “{word}” folder"));
                         } else if class.is_some() && entry.r#class == *class {
                             why.push(format!(
@@ -641,7 +727,7 @@ impl SoundIndex {
                         // A hit's own copy: a search gives few.
                         entry: SoundEntry::clone(entry),
                         name: made.name.clone(),
-                        r#where: made.where_.clone(),
+                        r#where: made.folder.where_.clone(),
                         score: round(scores[at] * 10.) / 10.,
                         why,
                         closeness: close.map(round),
@@ -756,7 +842,7 @@ impl SoundIndex {
     /// The sound in this row as the search names it: its file's name without the extension, that name lowercased as the
     /// search matches it, and where it is ("Splice / Drums / 808").
     pub fn named(&self, row: usize) -> Option<(&str, &str, &str)> {
-        self.prepared.get(row).map(|prepared| (prepared.name.as_str(), prepared.lower.as_str(), prepared.where_.as_str()))
+        self.prepared.get(row).map(|prepared| (prepared.name.as_str(), prepared.lower.as_str(), prepared.folder.where_.as_str()))
     }
     /// The numbers the search compares for the sound in this row: None when it isn't measured.
     pub fn compared_at(&self, row: usize) -> Option<&[f32]> {
@@ -989,8 +1075,8 @@ mod tests {
     fn rows(index: &SoundIndex) -> Vec<String> {
         let row = |row: usize| {
             let made = &index.prepared[row];
-            let (name, lower, place, hay, folders, vector) =
-                (&made.name, &made.lower, &made.where_, &made.hay, &made.folders, &made.vector);
+            let hay = format!("{}{}", made.folder.hay, made.file);
+            let (name, lower, place, folders, vector) = (&made.name, &made.lower, &made.folder.where_, &made.folder.folders, &made.vector);
             let standardized = &index.vectors[row * VECTOR_LENGTH..(row + 1) * VECTOR_LENGTH];
             format!(
                 "{:?} {:?} {name} {lower} {place} {hay} {folders:?} {vector:?} {standardized:?}",
@@ -1029,11 +1115,67 @@ mod tests {
         let renamed = vec![source(&samples, "Samples"), source(&pack, "Pack 2")];
         let again = SoundIndex::build_after(second.clone(), &renamed, Some(again)).await;
         assert_eq!(rows(&again), rows(&SoundIndex::build(second.clone(), &renamed).await));
-        assert!(again.prepared.iter().any(|made| made.where_.starts_with("Pack 2 / ")));
+        assert!(again.prepared.iter().any(|made| made.folder.where_.starts_with("Pack 2 / ")));
         // One gone from the disk: what was under it is under the source around it.
         std::fs::remove_dir_all(&pack).unwrap();
         let again = SoundIndex::build_after(second.clone(), &renamed, Some(again)).await;
         assert_eq!(rows(&again), rows(&SoundIndex::build(second, &renamed).await));
-        assert!(again.prepared.iter().all(|made| made.where_.starts_with("Samples")));
+        assert!(again.prepared.iter().all(|made| made.folder.where_.starts_with("Samples")));
+    }
+
+    /// A sound's place is held as its folder's part, shared by the folder's sounds, and its file's. A word is found in it
+    /// exactly as in the one lowercased "label/relative path" it was: every piece of that string (across the separator
+    /// between the parts too, and at either edge), with case folded as the whole was (a Greek final sigma, a dotted İ),
+    /// separators repeated or mixed, and words it doesn't hold. Its folders and where it is are as they were.
+    #[test]
+    fn a_word_is_found_in_a_sounds_place_as_in_the_one_string_it_was() {
+        let source = Source { path: "/L".into(), label: "Splice Ⅱ".into(), kind: SourceKind::Folder };
+        let paths = [
+            "/L/Drums/Kicks/Kick 1.wav",
+            "/L/Drums/Kicks/Kick 3.wav",
+            "/L/Drums//Kicks/KICK 2.WAV",
+            "/L/Drums\\Snares\\Snare.wav",
+            "/L/Drums/Mixed\\Hat/x.wav",
+            "/L/Top.wav",
+            "/L/ΟΔΟΣ/ΣΑΣ.wav",
+            "/L/İstanbul/Ünal.AIF",
+            "/L/a/b/c/d/e.wav",
+            "/L/Drums/Kicks/",
+            "/L/Drums\\Kicks/Kick 4.wav",
+        ];
+        let absent = ["kicks/kick 9", "snare/", "ΣΑΣ", "zz", "drums/kicks/kick 1.wav!", "splice ⅱ//"];
+        let mut made = Folders::new();
+        let mut kept = vec![];
+        for path in paths {
+            let entry = sound(path, 0.);
+            let ours = prepared(&entry, &source, 0, &mut made);
+            let relative = below(path, &source.path).unwrap_or(path);
+            let one = format!("{}/{relative}", source.label).to_lowercase();
+            assert_eq!(format!("{}{}", ours.folder.hay, ours.file), one, "{path}");
+            assert!(ours.folder.hay.ends_with(['/', '\\']), "{path}");
+            let starts: Vec<usize> = one.char_indices().map(|(at, _)| at).chain([one.len()]).collect();
+            for (i, from) in starts.iter().enumerate() {
+                for to in &starts[i..] {
+                    let word = &one[*from..*to];
+                    assert!(ours.hay_contains(word), "{path}: {word:?}");
+                }
+            }
+            for word in absent {
+                assert_eq!(ours.hay_contains(word), one.contains(word), "{path}: {word:?}");
+            }
+            let mut folders: Vec<_> = relative.split(['\\', '/']).map(str::to_owned).collect();
+            folders.pop();
+            let all = std::iter::once(source.label.clone()).chain(folders).collect::<Vec<_>>();
+            assert_eq!(ours.folder.where_, all.join(" / "), "{path}");
+            assert_eq!(ours.folder.folders, all.iter().map(|s| s.to_lowercase()).collect::<Vec<_>>(), "{path}");
+            kept.push(ours);
+        }
+        // One folder's sounds share it; another folder has its own, even one that only its separators tell apart
+        // (repeated, or of the other kind).
+        assert!(Rc::ptr_eq(&kept[0].folder, &kept[1].folder));
+        assert!(Rc::ptr_eq(&kept[0].folder, &kept[9].folder));
+        assert!(!Rc::ptr_eq(&kept[0].folder, &kept[2].folder));
+        assert!(!Rc::ptr_eq(&kept[0].folder, &kept[3].folder));
+        assert!(!Rc::ptr_eq(&kept[0].folder, &kept[10].folder));
     }
 }
