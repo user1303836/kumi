@@ -692,6 +692,71 @@ test("reads: the fast timer runs only while a read is pending", function()
   H.no_dialogs()
 end)
 
+-- A4-8: Renoise fires the timers once a frame (about every 20 ms): a slice takes STOPPED_BUDGET_MS while the transport
+-- is stopped, PLAYING_BUDGET_MS while it plays; and a frame where the main tick comes too runs the jobs once.
+local BUDGETS = T.load_payload_module("jobs")
+local function one_slice(peer)
+  local before = mock.time
+  KUMI_BRIDGE.payload.tick_jobs()
+  return mock.time - before
+end
+
+test("reads: a slice takes its stopped budget while Renoise is stopped and its playing budget while it plays", function()
+  local env, peer = setup(nil, heavy({ tracks = 60, lines = 32 }))
+  mock.clock_step_ms = 1 -- every look at the clock costs a millisecond
+  H.send(peer, { type = "request", id = 1, method = "read", params = { kind = "track", limit = 60 } })
+  local stopped = one_slice(peer)
+  mock.data.transport_fields.playing = true
+  local playing = one_slice(peer)
+  mock.data.transport_fields.playing = false
+  local again = one_slice(peer)
+  mock.clock_step_ms = 0
+  local STOPPED, PLAYING = BUDGETS.STOPPED_BUDGET_MS, BUDGETS.PLAYING_BUDGET_MS
+  ok(STOPPED ~= PLAYING, "two budgets")
+  -- (a slice ends a few looks at the clock past its budget, each look 1 ms here)
+  local function about(spent, budget) return spent > budget and spent <= budget + 3 end
+  ok(about(stopped, STOPPED), "stopped: " .. stopped .. " ms")
+  ok(about(playing, PLAYING), "playing: " .. playing .. " ms")
+  ok(about(again, STOPPED), "stopped again: " .. again .. " ms")
+  for _ = 1, 400 do
+    mock.advance(10)
+    local got = H.frames(peer)
+    if got[1] then eq(got[#got].id, 1) break end
+  end
+  H.no_dialogs()
+end)
+
+-- (a slice is at least STOPPED_BUDGET_MS here, the song stopped, and a stale run STALE_SLICE_MS: "no slice" is under both)
+local SLICE_MS = T.load_payload_module("jobs").STOPPED_BUDGET_MS
+
+test("reads: the main tick leaves a pending read to the fast timer and still counts as the timers running", function()
+  local env, peer = setup(nil, heavy({ tracks = 60, lines = 32 }))
+  mock.clock_step_ms = 1
+  H.send(peer, { type = "request", id = 1, method = "read", params = { kind = "track", limit = 60 } })
+  local before = mock.time
+  KUMI_BRIDGE.payload.tick()
+  local spent = mock.time - before
+  ok(spent < SLICE_MS, "no slice in the main tick: " .. spent .. " ms")
+  -- (a message more than 100 ms after the last slice but soon after the main tick: the timers run, so the message runs no
+  -- slice; the read, 60 tracks, is still pending)
+  KUMI_BRIDGE.payload.tick_jobs()
+  mock.time = mock.time + 50
+  KUMI_BRIDGE.payload.tick()
+  mock.time = mock.time + 55
+  before = mock.time
+  H.send(peer, { type = "request", id = 2, method = "ping" })
+  spent = mock.time - before
+  mock.clock_step_ms = 0
+  ok(spent < SLICE_MS, "no slice in the message's callback: " .. spent .. " ms")
+  for _ = 1, 400 do
+    mock.advance(10)
+    local done = false
+    for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == 1 then done = true end end
+    if done then break end
+  end
+  H.no_dialogs()
+end)
+
 test("reads: a song switched in the middle of a read ends it with epoch-changed", function()
   local env, peer = setup(nil, heavy({ tracks = 60, lines = 32 }))
   mock.clock_step_ms = 1
@@ -1898,6 +1963,9 @@ test("reads: a lines read that waits between every line looks the pattern up aga
     f:close()
     local patched, n = text:gsub("\nM%.BUDGET_MS = 8\n", "\nM.BUDGET_MS = -1\n")
     assert(n == 1, "BUDGET_MS")
+    -- (and the budget while the transport is stopped, as it is here)
+    patched, n = patched:gsub("\nM%.STOPPED_BUDGET_MS = 14\n", "\nM.STOPPED_BUDGET_MS = -1\n")
+    assert(n == 1, "STOPPED_BUDGET_MS")
     f = assert(io.open(path, "wb"))
     f:write(patched)
     f:close()

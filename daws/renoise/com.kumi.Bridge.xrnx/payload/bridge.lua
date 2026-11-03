@@ -1766,6 +1766,11 @@ function M.start(h, reloading)
       conns:finish_job(job.record, job.request, ok, value)
     end,
     on_active = function(active) if host.set_fast then host.set_fast(active) end end,
+    playing = function()
+      local ok, playing = pcall(function() return renoise.song().transport.playing end)
+      if ok then return playing end
+      return nil
+    end,
   })
   status.cache = b
   if b.cfg and b.cfg.log_dir then configure_log(b.cfg.log_dir) end
@@ -1840,7 +1845,10 @@ function M.tick()
   if not ok then M.log_error("events", err) end
   ok, err = xpcall(tick_listening, debug.traceback)
   if not ok then M.log_error("listening", err) end
-  jobs:run()
+  -- (While a read is pending its slices run on the fast timer, which Renoise fires in the same frames as this one: a run
+  -- here too gave those frames two slices. This tick still says the timers run, which a message's stale check waits for.
+  -- A loader without the fast timer runs them here.)
+  if host.set_fast then jobs:timers_ran() else jobs:run() end
   conns:tick()
   -- (the auditions whose time is up end: a note never hangs on)
   local ended, audition_err = pcall(actions.tick, M.now_ms())
