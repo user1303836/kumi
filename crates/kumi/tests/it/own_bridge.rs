@@ -655,7 +655,45 @@ async fn renoises_bodies_are_its_pattern_matrix_and_keyzones_in_its_own_notation
         .await;
 }
 
+/// A host that also tells its events to whoever listens (the bridge's `tracks` shifts here).
+struct Telling {
+    inner: Rc<Host>,
+    listeners: RefCell<Vec<Rc<dyn Fn(JsonObject)>>>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for Telling {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        None
+    }
+    async fn list(&self, cursor: Option<&str>, signal: Signal) -> Result<ListToolsResult, RuntimeError> {
+        self.inner.list(cursor, signal).await
+    }
+    async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
+        self.inner.call(name, args, signal).await
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_live_event(&self, listener: Rc<dyn Fn(JsonObject)>) -> Box<dyn Fn()> {
+        self.listeners.borrow_mut().push(listener);
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
 /// (A4-2) Renoise's pattern is read for the track the producer is on as well as the first ones: FOCUS draws that one first.
+/// That track's ref is a place, so after a track shift the focus hasn't caught up with yet, every track is read, as before.
 #[tokio::test(flavor = "current_thread", start_paused = true)]
 async fn renoises_pattern_is_read_for_the_producers_track_and_the_first_ones() {
     tokio::task::LocalSet::new()
@@ -672,17 +710,37 @@ async fn renoises_pattern_is_read_for_the_producers_track_and_the_first_ones() {
                 ]),
                 asked: RefCell::default(),
             });
+            let telling = Rc::new(Telling { inner: host.clone(), listeners: RefCell::default() });
             let mut options = options(host.clone(), Rc::default());
+            let endpoint = telling.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint = endpoint.clone();
+                async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+            }));
             options.context.on_focus = Some(Rc::new(|_| {}));
             let renoise = create_renoise_integration(options);
             renoise.start(Signal::new()).await.unwrap();
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()) }, Signal::new()).await.unwrap();
-            let asked = host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap();
+            let read = || async {
+                renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()) }, Signal::new()).await.unwrap();
+                host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap()
+            };
+            let asked = read().await;
             assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
             // A layout makes the bridge carry (or refuse as stale) the refs on tracks a read names: the track named only to
             // read around it brings none, so the read is never refused for it.
             assert_eq!(asked.get("layout"), None, "{asked}");
+            // A track is inserted above it: until the focus says where the producer is now, every track is read.
+            let shift = json!({"name": "tracks", "data": {"layout": 6, "made": [10], "gone": []}});
+            for listener in telling.listeners.borrow().iter() {
+                listener(shift.as_object().unwrap().clone());
+            }
+            let asked = read().await;
+            assert_eq!((asked.get("limit"), asked.get("around")), (None, None), "{asked}");
+            // The focus's next read says it again, at the layout now.
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let asked = read().await;
+            assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
             renoise.close().await.unwrap();
         })
         .await;

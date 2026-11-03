@@ -130,6 +130,9 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     looks: Rc<Cell<u32>>,
     /// The track the producer has selected, as the last focus said: the timeline's page is centred on it.
     selected: Rc<RefCell<Option<String>>>,
+    /// The book's layout when `selected` was read: after a track shift since, a positional ref (Renoise's) may name
+    /// another track.
+    selected_at: Rc<Cell<Option<u64>>>,
     /// What the DAW's own view of the timeline showed at the last read of it (REAPER's arrange view): the next read is
     /// of that stretch.
     timeline_view: Cell<Option<[f64; 2]>>,
@@ -479,6 +482,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         read: Rc::default(),
         looks: Rc::default(),
         selected: Rc::default(),
+        selected_at: Rc::default(),
         timeline_view: Cell::new(None),
         identity: link.project.clone(),
         layout: link.layout.clone(),
@@ -966,6 +970,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
             return;
         }
         let (endpoint, closed, daw, selected) = (self.endpoint.clone(), self.closed.clone(), self.daw, self.selected.clone());
+        let selected_at = self.selected_at.clone();
         let (connected, identity, on_connection) =
             (self.connected.clone(), self.identity.clone(), self.options.context.on_connection.clone());
         let back_at = self.back_at.clone();
@@ -1098,6 +1103,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 }
                 last_epoch = epoch;
                 *selected.borrow_mut() = focus.pointer("/selection/trackRef").and_then(Value::as_str).map(str::to_owned);
+                selected_at.set(layout.get());
                 let seen = json!({"view": focus.get("view"), "selection": focus.get("selection"), "epoch": focus.get("epoch"), "busy": focus.get("busy")});
                 let transport = focus.get("transport").cloned();
                 let playing = transport.as_ref().and_then(|t| t.get("playing")) == Some(&Value::Bool(true));
@@ -1803,10 +1809,19 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         // A pattern's tracks (a tracker's): the first that FOCUS can draw and the producer's, not a big song's every one. A
         // bridge that takes no `limit` here sends them all, as before. (Named after the layout: a track named only to read
         // around it is never a reason for the bridge to refuse the read as stale.)
+        // A track shift since the focus said which track is selected may have moved it: then every track is read, as before.
         if matches!(request, BodyRequest::Tracker { .. }) && args.get("kind").and_then(Value::as_str) == Some("pattern") {
-            args.insert("limit".into(), TRACKER_TRACKS.into());
-            if let Some(track) = self.selected.borrow().clone() {
-                args.insert("around".into(), track.into());
+            let selected = self.selected.borrow().clone();
+            let shifted = self.book.borrow().scheme.positional() && self.selected_at.get() != self.layout.get();
+            match selected {
+                Some(_) if shifted => {}
+                Some(track) => {
+                    args.insert("limit".into(), TRACKER_TRACKS.into());
+                    args.insert("around".into(), track.into());
+                }
+                None => {
+                    args.insert("limit".into(), TRACKER_TRACKS.into());
+                }
             }
         }
         // The stretch of the timeline the DAW's view showed last, as the producer scrolled and zoomed it there: its

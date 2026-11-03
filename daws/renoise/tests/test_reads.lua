@@ -651,6 +651,51 @@ local function fill_cells(tracks, lines)
   end
 end
 
+-- (A4-2) A song too dense for every track's lines to fit a page: the whole body cuts its window short, as it always did; a
+-- body of the tracks FOCUS can draw gets the window FOCUS asks for, each row as the whole body has it; and tracks too many for
+-- a page even then are still cut to it, marked truncated.
+test("reads: a pattern body of the tracks FOCUS draws keeps the page bound and gets a dense song's whole window", function()
+  local env, peer = setup(nil, heavy({ tracks = 12, lines = 128 }))
+  fill_cells(12, 40)
+  local E = epoch_of(peer)
+  local function same(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) ~= "table" then return a == b end
+    for k, v in pairs(a) do if not same(v, b[k]) then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+  end
+  local response, _, longest = call(peer, "focus_body", { kind = "pattern" })
+  local whole = response.result
+  ok(longest <= MAX_LINE, "the whole body is a page: " .. longest)
+  eq(whole.truncated, true, "every track's lines don't fit a page")
+  ok(whole.window.to < 33, "so its window is cut short: " .. whole.window.to)
+  response, _, longest = call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:5" })
+  local drawn = response.result
+  ok(longest <= MAX_LINE, "a page: " .. longest)
+  eq(drawn.truncated, nil, "the drawable tracks' lines fit")
+  eq(drawn.window.from, 1)
+  eq(drawn.window.to, 33, "the window FOCUS asks for")
+  eq(#drawn.tracks, 3)
+  for k, t in ipairs({ 1, 2, 5 }) do
+    local mine, theirs = drawn.tracks[k], whole.tracks[t]
+    eq(mine.ref, theirs.ref)
+    local shared = {}
+    for _, row in ipairs(mine.lines) do
+      if row.line <= whole.window.to then shared[#shared + 1] = row end
+    end
+    ok(same(shared, theirs.lines), "track " .. t .. ": the rows both windows hold are the same")
+    eq(#mine.lines, 40 < 33 and 40 or 33, "track " .. t .. ": a row for each filled line in the window")
+  end
+  -- Every track is one FOCUS might draw (a limit just under them all, the last one the producer's): cut to the page again.
+  response, _, longest = call(peer, "focus_body", { kind = "pattern", limit = 11, around = E .. ":track:12" })
+  ok(longest <= MAX_LINE, "still a page: " .. longest)
+  eq(#response.result.tracks, 12)
+  eq(response.result.truncated, true, "marked truncated")
+  eq(response.result.window.to, whole.window.to, "cut where the whole body is")
+  H.no_dialogs()
+end)
+
 test("reads: a page never goes over 256 KiB, and the pages together are every row", function()
   local env, peer = setup(nil, heavy({ tracks = 1, lines = 300 }))
   fill_cells(1, 300)
