@@ -346,6 +346,97 @@ async fn with_nothing_drawing_the_focus_the_daw_is_asked_about_once_a_second() {
         .await;
 }
 
+/// A host that takes `snapshot_ms` over the project's snapshot (a big project) and answers the rest at once, noting when
+/// each tool was asked.
+struct Slow {
+    inner: Rc<Host>,
+    snapshot_ms: u64,
+    asked: RefCell<Vec<(String, tokio::time::Instant)>>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for Slow {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        None
+    }
+    async fn list(&self, cursor: Option<&str>, signal: Signal) -> Result<ListToolsResult, RuntimeError> {
+        self.inner.list(cursor, signal).await
+    }
+    async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
+        self.asked.borrow_mut().push((name.into(), tokio::time::Instant::now()));
+        if name == "snapshot" {
+            tokio::time::sleep(std::time::Duration::from_millis(self.snapshot_ms)).await;
+        }
+        self.inner.call(name, args, signal).await
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// FOCUS's first read goes as soon as the session's first look has answered, not a whole poll period after the start;
+/// a look slower than a period doesn't hold it back; the look's snapshot is the DAW's first request either way; and plain
+/// mode, which draws no FOCUS, keeps its once a second.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn focus_is_first_read_right_after_the_first_look_and_no_later_than_a_period() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let focus = json!({"epoch": "1", "view": "arrange", "selection": {}, "transport": {"playing": false}});
+            // (how long the snapshot takes, whether FOCUS is drawn, when the first focus read is due after the start)
+            for (snapshot_ms, drawn, due_ms) in [(5u64, true, 5u64), (400, true, 150), (5, false, 1_000)] {
+                let host = Rc::new(Host {
+                    answers: RefCell::new(vec![
+                        ("status", json!({"connected": true}), false),
+                        ("snapshot", reaper_snapshot(), false),
+                        ("focus", focus.clone(), false),
+                    ]),
+                    asked: RefCell::default(),
+                });
+                let slow = Rc::new(Slow { inner: host, snapshot_ms, asked: RefCell::default() });
+                let mut options = options(Rc::new(Host { answers: RefCell::default(), asked: RefCell::default() }), Rc::default());
+                let endpoint = slow.clone();
+                options.connect = Some(Rc::new(move |_| {
+                    let endpoint = endpoint.clone();
+                    async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+                }));
+                options.context.on_focus = Some(Rc::new(|_| {}));
+                options.context.focus_drawn = drawn;
+                let reaper = create_reaper_integration(options);
+                let began = tokio::time::Instant::now();
+                reaper.start(Signal::new()).await.unwrap();
+                // The session looks right after the start, as `reset` does.
+                let (seen, _) =
+                    tokio::join!(reaper.observe(Signal::new(), None), tokio::time::sleep(std::time::Duration::from_millis(1_100)));
+                assert_eq!(seen.unwrap().label, "REAPER — Night Drive");
+                reaper.close().await.unwrap();
+                let asked: Vec<(String, u64)> = slow
+                    .asked
+                    .borrow()
+                    .iter()
+                    .filter(|(tool, _)| matches!(tool.as_str(), "status" | "snapshot" | "focus"))
+                    .map(|(tool, at)| (tool.clone(), (*at - began).as_millis() as u64))
+                    .collect();
+                let case = format!("snapshot {snapshot_ms} ms, drawn {drawn}: {asked:?}");
+                let order: Vec<&str> = asked.iter().take(3).map(|(tool, _)| tool.as_str()).collect();
+                assert_eq!(order, ["status", "snapshot", "focus"], "the look's snapshot is the DAW's first request: {case}");
+                let first_focus = asked.iter().find(|(tool, _)| tool == "focus").map(|(_, at)| *at);
+                assert_eq!(first_focus, Some(due_ms), "{case}");
+            }
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_daw_gone_mid_playback_plays_nothing_any_more() {
     tokio::task::LocalSet::new()

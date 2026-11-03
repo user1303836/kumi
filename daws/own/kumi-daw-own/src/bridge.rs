@@ -121,6 +121,9 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     connected: Rc<Cell<bool>>,
     closed: Rc<Cell<bool>>,
     watching: Cell<bool>,
+    /// Told when a look has answered, whatever it found: FOCUS's first read goes then, right after the project's
+    /// snapshot, rather than a whole poll period after the start.
+    looked_once: Rc<tokio::sync::Notify>,
     /// The track the producer has selected, as the last focus said: the timeline's page is centred on it.
     selected: Rc<RefCell<Option<String>>>,
     /// What the DAW's own view of the timeline showed at the last read of it (REAPER's arrange view): the next read is
@@ -468,6 +471,7 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         connected: link.connected.clone(),
         closed: Rc::new(Cell::new(false)),
         watching: Cell::new(false),
+        looked_once: Rc::default(),
         selected: Rc::default(),
         timeline_view: Cell::new(None),
         identity: link.project.clone(),
@@ -622,6 +626,15 @@ pub fn focus_pause(period: u64, quiet: u32, playing: bool) -> u64 {
 const FOCUS_QUIET_POLLS: u32 = 20;
 const FOCUS_QUIETER_POLLS: u32 = 110;
 const FOCUS_SLOWEST_MS: u64 = 600;
+
+/// Tells whoever waits for a look that it has answered, however it ends (its future dropped included).
+struct Told<'a>(&'a tokio::sync::Notify);
+
+impl Drop for Told<'_> {
+    fn drop(&mut self) {
+        self.0.notify_one();
+    }
+}
 
 /// Why the DAW may answer late, in words: REAPER's `busy` code.
 fn busy_words(code: &str, profile: &DawProfile) -> String {
@@ -950,6 +963,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         let heard = self.heard.clone();
         let drawn = if self.options.context.focus_drawn { FOCUS_MS } else { UNDRAWN_FOCUS_MS };
         let period = self.options.context.focus_interval_ms.unwrap_or(drawn).max(50);
+        // Where FOCUS is drawn, its first read goes as soon as the first look has answered (at most a period from now):
+        // the look's snapshot is still the DAW's first request, and FOCUS fills right after it. Plain mode keeps its pace.
+        let (looked_once, mut first) = (self.looked_once.clone(), self.options.context.focus_drawn);
         tokio::task::spawn_local(async move {
             let (mut last, mut last_transport, mut last_epoch): (Option<Value>, Option<Value>, Option<String>) = (None, None, None);
             // Polls in a row that found nothing moved, and whether the last answer had the DAW playing.
@@ -971,7 +987,15 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 }
             };
             while !closed.get() {
-                tokio::time::sleep(std::time::Duration::from_millis(focus_pause(period, quiet, was_playing))).await;
+                let pause = tokio::time::sleep(std::time::Duration::from_millis(focus_pause(period, quiet, was_playing)));
+                if std::mem::take(&mut first) {
+                    tokio::select! {
+                        _ = looked_once.notified() => {}
+                        _ = pause => {}
+                    }
+                } else {
+                    pause.await;
+                }
                 let Some(host) = endpoint.borrow().clone() else { continue };
                 let read = host.call("focus", JsonObject::new(), abort::timeout(2_000)).await.ok().map(answer_of);
                 if closed.get() {
@@ -1764,6 +1788,8 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         Ok((self.daw.to_body)(request, &body))
     }
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
+        // FOCUS's first read waits for this look, whatever it comes to: an answer, a refusal, an error or a stop.
+        let _told = Told(&self.looked_once);
         let pinned = hints.as_ref().and_then(|hints| hints.pinned.as_ref());
         let references = hints.as_ref().map(|hints| hints.references.as_slice()).unwrap_or_default();
         signal.check()?;
