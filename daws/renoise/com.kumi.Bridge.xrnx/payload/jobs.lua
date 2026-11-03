@@ -1,5 +1,6 @@
--- Long reads as coroutines: each is resumed for a few milliseconds per timer tick, so a big read never holds Renoise's
--- GUI thread for long (its watchdog complains after about 10 s). A job re-looks-up what it reads on every slice
+-- Long reads as coroutines: each is resumed for a few milliseconds per timer tick (and a new read once in the callback of
+-- the message that asked for it: M:run_first), so a big read never holds Renoise's GUI thread for long (its watchdog
+-- complains after about 10 s). A job re-looks-up what it reads on every slice
 -- (it holds indices, never objects) and stops with "epoch-changed" if the song's refs changed meanwhile.
 
 local M = {}
