@@ -25,31 +25,8 @@ pub async fn is_live_running_on(run: Run, platform: &str, env: &Env) -> bool {
         return run("pgrep".into(), vec!["-x".into(), "Live".into()], None).await.code == 0;
     }
     if platform == "win32" {
-        let asked = run(
-            system::system_program(SystemProgram::Powershell, env, platform),
-            [
-                "-NoProfile",
-                "-NonInteractive",
-                "-Command",
-                "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Id",
-            ]
-            .map(str::to_string)
-            .into(),
-            None,
-        )
-        .await;
-        if asked.code == 0 {
-            return asked.stdout.bytes().any(|c| c.is_ascii_digit());
-        }
-        return run(
-            system::system_program(SystemProgram::Tasklist, env, platform),
-            ["/FI", "IMAGENAME eq Ableton Live*", "/NH"].map(str::to_string).into(),
-            None,
-        )
-        .await
-        .stdout
-        .to_ascii_lowercase()
-        .contains("ableton live");
+        // Toolhelp's snapshot, as `Get-Process -Name 'Ableton Live*'` (and tasklist's filter) matched: in any case.
+        return super::live_app::processes(env).iter().any(|(_, listed)| super::live_app::is_windows_live(listed));
     }
     false
 }

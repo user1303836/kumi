@@ -11,9 +11,37 @@ use std::{path::Path, sync::LazyLock, time::Duration};
 
 /// What `ps` is asked to list what's running, each by the program it runs (macOS).
 pub(crate) const RUNNING_PROGRAMS: [&str; 2] = ["-axo", "comm="];
-/// What PowerShell is asked for the program of the Live that's open; nothing when none is (Windows).
-pub(crate) const OPEN_LIVE_PROGRAM: &str =
-    "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Path";
+
+/// This computer's processes, as Kumi's detection lists them: on Windows a Toolhelp snapshot, a moment's work where each
+/// PowerShell took 170–450 ms. `KUMI_PROCESSES` in `env` (else this process's) stands in for them.
+pub(crate) fn processes(env: &Env) -> Vec<(u32, String)> {
+    daw_bridge::detect::list_processes(&|name| env.get(name).cloned())
+}
+
+/// Whether a listed program is a Live on Windows, as `Get-Process -Name 'Ableton Live*'` matches: its name (the file's,
+/// `.exe` left off) starts "Ableton Live", in any case.
+pub(crate) fn is_windows_live(listed: &str) -> bool {
+    let name = listed.rsplit(['/', '\\']).next().unwrap_or(listed).to_lowercase();
+    name.strip_suffix(".exe").unwrap_or(&name).starts_with("ableton live")
+}
+
+/// The Lives running on Windows, by their programs' paths, as `Get-Process -Name 'Ableton Live*'` gives them: by name,
+/// then pid. A listing that names a path (a stand-in) gives it; else the system names the process's own, and one it
+/// won't name is left out.
+pub(crate) fn windows_lives(listing: &[(u32, String)]) -> Vec<String> {
+    let mut lives: Vec<&(u32, String)> = listing.iter().filter(|(_, listed)| is_windows_live(listed)).collect();
+    lives.sort_by_key(|(pid, listed)| (listed.rsplit(['/', '\\']).next().unwrap_or(listed).to_lowercase(), *pid));
+    lives
+        .into_iter()
+        .filter_map(|(pid, listed)| {
+            if listed.contains(['/', '\\']) {
+                Some(listed.clone())
+            } else {
+                daw_bridge::detect::program_of(*pid).map(|path| path.display().to_string())
+            }
+        })
+        .collect()
+}
 
 /// The Live that's open: its app, a `.app` on macOS and an `.exe` on Windows.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,11 +70,7 @@ fn quoted(text: &str) -> String {
 pub async fn open_live(run: &Run, platform: &str, env: &Env) -> Option<OpenLive> {
     match platform {
         "darwin" => run("ps".into(), args(&RUNNING_PROGRAMS), None).await.stdout.lines().find_map(live_app_of),
-        "win32" => {
-            let ran = run(powershell(env, platform), args(&["-NoProfile", "-NonInteractive", "-Command", OPEN_LIVE_PROGRAM]), None).await;
-            let app = ran.stdout.trim();
-            (!app.is_empty()).then(|| OpenLive { app: app.into() })
-        }
+        "win32" => windows_lives(&processes(env)).into_iter().next().map(|app| OpenLive { app }),
         _ => None,
     }
 }
@@ -415,7 +439,10 @@ mod tests {
                 async move { ran }.boxed_local()
             })
         };
-        let env = Env::from([("SystemRoot".to_string(), "C:\\Windows".to_string())]);
+        let env = Env::from([
+            ("SystemRoot".to_string(), "C:\\Windows".to_string()),
+            ("KUMI_PROCESSES".to_string(), "4242 C:\\ProgramData\\Ableton\\Live 12 Suite\\Program\\Ableton Live 12 Suite.exe".to_string()),
+        ]);
         let powershell = "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe";
         let live = open_live(&run, "win32", &env).await.unwrap();
         assert_eq!(live.app, "C:\\ProgramData\\Ableton\\Live 12 Suite\\Program\\Ableton Live 12 Suite.exe");
@@ -431,25 +458,23 @@ mod tests {
             assert_eq!(command, powershell);
             assert_eq!(&args[..3], ["-NoProfile", "-NonInteractive", "-Command"]);
         }
+        // Which Live is open comes from the process list: PowerShell only closes, starts and reads a version.
         let scripts: Vec<&str> = calls.iter().map(|(_, args)| args[3].as_str()).collect();
         assert_eq!(
             scripts[0],
-            "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty Path"
-        );
-        assert_eq!(
-            scripts[1],
             "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | ForEach-Object { [void]$_.CloseMainWindow() }"
         );
         assert_eq!(
-            scripts[2],
+            scripts[1],
             "$app = 'C:\\ProgramData\\Ableton\\Live 12 Suite\\Program\\Ableton Live 12 Suite.exe'; if ($app) { Start-Process -FilePath $app; 'started' }"
         );
-        assert_eq!(scripts[3], "$app = 'C:\\Live''s\\Ableton Live 12.exe'; if ($app) { Start-Process -FilePath $app; 'started' }");
+        assert_eq!(scripts[2], "$app = 'C:\\Live''s\\Ableton Live 12.exe'; if ($app) { Start-Process -FilePath $app; 'started' }");
         assert_eq!(
-            scripts[4],
+            scripts[3],
             "$app = (Get-ChildItem -Path (Join-Path $env:ProgramData 'Ableton\\Live*\\Program\\Ableton Live*.exe') -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1 -ExpandProperty FullName); if ($app) { Start-Process -FilePath $app; 'started' }"
         );
-        assert_eq!(scripts[5], "(Get-Item -LiteralPath 'C:\\ProgramData\\Ableton\\Live 12 Suite\\Program\\Ableton Live 12 Suite.exe').VersionInfo.ProductVersion");
+        assert_eq!(scripts[4], "(Get-Item -LiteralPath 'C:\\ProgramData\\Ableton\\Live 12 Suite\\Program\\Ableton Live 12 Suite.exe').VersionInfo.ProductVersion");
+        assert_eq!(scripts.len(), 5);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -472,25 +497,29 @@ mod tests {
                 async move { Ran { code: 0, stdout, stderr: String::new() } }.boxed_local()
             })
         };
-        let env = Env::from([("SystemRoot".to_string(), "C:\\Windows".to_string())]);
+        let windows = |listing: &str| {
+            Env::from([("SystemRoot".to_string(), "C:\\Windows".to_string()), ("KUMI_PROCESSES".to_string(), listing.to_string())])
+        };
+        let env = windows("77 C:\\ProgramData\\Ableton\\Live 12 Beta\\Program\\Ableton Live 12 Beta.exe");
         assert!(open_set_file(&run, "darwin", &env, "/Music/Song A Project/Song A.als").await);
         assert!(open_set_file(&run, "win32", &env, "C:\\Music\\Bob's Song.als").await);
         {
             let calls = calls.borrow();
             assert_eq!(calls[1], "open -a /Applications/Ableton Live 12 Beta.app /Music/Song A Project/Song A.als");
+            // Windows' Live comes from the process list: the next call is its Start-Process.
             assert!(
-                calls[3].ends_with(
+                calls[2].ends_with(
                     "$app = 'C:\\ProgramData\\Ableton\\Live 12 Beta\\Program\\Ableton Live 12 Beta.exe'; if ($app) { Start-Process -FilePath $app -ArgumentList '\"C:\\Music\\Bob''s Song.als\"'; 'started' }"
                 ),
                 "{}",
-                calls[3]
+                calls[2]
             );
         }
         // No Live running: nothing is opened with whatever app .als files go to.
         *running.borrow_mut() = false;
         calls.borrow_mut().clear();
         assert!(!open_set_file(&run, "darwin", &env, "/Music/Song A Project/Song A.als").await);
-        assert!(!open_set_file(&run, "win32", &env, "C:\\Music\\Song.als").await);
+        assert!(!open_set_file(&run, "win32", &windows("none"), "C:\\Music\\Song.als").await);
         assert!(!open_set_file(&run, "linux", &env, "/x.als").await);
         assert!(calls.borrow().iter().all(|call| !call.starts_with("open ") && !call.contains("Start-Process")), "{:?}", calls.borrow());
     }
@@ -498,10 +527,59 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn on_windows_live_not_found_or_not_started_says_so() {
         let run: Run = Rc::new(|_, _, _| async { Ran { code: 0, stdout: String::new(), stderr: String::new() } }.boxed_local());
-        let env = Env::new();
+        let env = Env::from([("KUMI_PROCESSES".to_string(), "none".to_string())]);
         assert_eq!(open_live(&run, "win32", &env).await, None);
         assert!(!start(&run, "win32", &env, None, None).await, "no Live under ProgramData: nothing started");
         assert_eq!(version(&run, "win32", &env, Some("C:\\x.exe")).await, None);
+    }
+
+    /// Windows' Lives come from the process list, matched as `Get-Process -Name 'Ableton Live*'` matched: the name, `.exe`
+    /// left off, starting "Ableton Live" in any case; first by name, then pid. Asking runs nothing.
+    #[tokio::test(flavor = "current_thread")]
+    async fn on_windows_the_process_list_says_which_live_runs_as_get_process_did() {
+        for (listed, live) in [
+            ("Ableton Live 12 Suite.exe", true),
+            ("ABLETON LIVE 11 LITE.EXE", true),
+            ("ableton live 12 beta", true),
+            ("C:\\ProgramData\\Ableton\\Live 12 Suite\\Program\\Ableton Live 12 Suite.exe", true),
+            ("Ableton Index.exe", false),
+            ("Live.exe", false),
+            ("My Ableton Live 12.exe", false),
+            ("", false),
+        ] {
+            assert_eq!(is_windows_live(listed), live, "{listed:?}");
+        }
+        let listing = [
+            (30, "C:\\Lives\\Ableton Live 12 Suite.exe".to_string()),
+            (20, "C:\\Lives\\Ableton Live 11 Suite.exe".to_string()),
+            (10, "C:\\Lives\\ableton live 12 suite.exe".to_string()),
+            (5, "C:\\Windows\\explorer.exe".to_string()),
+        ];
+        assert_eq!(
+            windows_lives(&listing),
+            ["C:\\Lives\\Ableton Live 11 Suite.exe", "C:\\Lives\\ableton live 12 suite.exe", "C:\\Lives\\Ableton Live 12 Suite.exe"],
+            "by name in any case, then pid"
+        );
+        let asked = Rc::new(RefCell::new(0));
+        let run: Run = {
+            let asked = asked.clone();
+            Rc::new(move |_, _, _| {
+                *asked.borrow_mut() += 1;
+                async { Ran::default() }.boxed_local()
+            })
+        };
+        let listed = |listing: &str| Env::from([("KUMI_PROCESSES".to_string(), listing.to_string())]);
+        assert!(is_live_running_on(run.clone(), "win32", &listed("8 C:\\Live\\Ableton Live 12 Suite.exe")).await);
+        assert!(
+            is_live_running_on(run.clone(), "win32", &listed("8 Ableton Live 12 Beta.exe")).await,
+            "by image name, as Toolhelp gives it"
+        );
+        assert!(!is_live_running_on(run.clone(), "win32", &listed("8 C:\\Windows\\explorer.exe")).await);
+        assert!(!is_live_running_on(run.clone(), "win32", &listed("none")).await);
+        let open = listed("8 C:\\Live\\Ableton Live 12 Suite.exe");
+        assert_eq!(open_live(&run, "win32", &open).await, Some(OpenLive { app: "C:\\Live\\Ableton Live 12 Suite.exe".into() }));
+        assert!(closed(&run, "win32", &listed("none"), &Signal::new()).await);
+        assert_eq!(*asked.borrow(), 0, "no PowerShell, no tasklist");
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -719,13 +719,15 @@ pub fn running_programs(daw: Daw, env: &Env) -> Vec<PathBuf> {
     programs(daw, &processes(env.var))
 }
 
+/// A process's program, by its path, as the system names it (Linux's /proc, Windows' image name); None elsewhere, or for a
+/// process the system won't say.
 #[cfg(target_os = "linux")]
-fn program_of(pid: u32) -> Option<PathBuf> {
+pub fn program_of(pid: u32) -> Option<PathBuf> {
     std::fs::read_link(format!("/proc/{pid}/exe")).ok()
 }
 
 #[cfg(windows)]
-fn program_of(pid: u32) -> Option<PathBuf> {
+pub fn program_of(pid: u32) -> Option<PathBuf> {
     use std::os::windows::ffi::OsStringExt;
     type Handle = *mut std::ffi::c_void;
     #[link(name = "kernel32")]
@@ -752,7 +754,7 @@ fn program_of(pid: u32) -> Option<PathBuf> {
 }
 
 #[cfg(not(any(target_os = "linux", windows)))]
-fn program_of(_pid: u32) -> Option<PathBuf> {
+pub fn program_of(_pid: u32) -> Option<PathBuf> {
     None
 }
 
