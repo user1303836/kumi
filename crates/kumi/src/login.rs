@@ -71,6 +71,7 @@ pub async fn login(config: &AppConfig, io: LoginIo) -> Result<(), RuntimeError> 
             fetch: io.fetch.clone(),
             say: None,
             installed: None,
+            lists: None,
         });
         let verdict = step(
             io.out.clone(),

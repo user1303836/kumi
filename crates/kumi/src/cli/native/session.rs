@@ -408,6 +408,10 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
         }),
         fetch: None,
         installed: None,
+        // The providers' lists, kept beside models.dev's catalog: a start reads them at once.
+        lists: Some(crate::model_lists::KeptLists::new(
+            std::path::Path::new(&crate::config::kumi_dir(&env)).join("cache").join("model-lists.json"),
+        )),
     }));
     // models.dev's catalog of models: the copy Kumi kept, then a newer one at most once a day, never in the way (a slow
     // answer ends with the session, so Kumi's exit doesn't wait on it).

@@ -92,6 +92,7 @@ impl Fixture {
             }),
             say: None,
             installed: Some(Rc::new(|_| false)),
+            lists: None,
         });
         Self { _folder: folder, control, store, settings_file, changes }
     }
@@ -211,6 +212,7 @@ async fn opencode_zen_and_go_share_new_keys_and_invalidate_the_current_binding()
         }),
         say: None,
         installed: None,
+        lists: None,
     });
     assert_eq!(
         control.save_key(ProviderId::parse("opencode").unwrap(), "oc-fixture-key-0001", None).await.unwrap(),
@@ -355,7 +357,7 @@ impl Fetch for NoStudio {
 #[tokio::test(flavor = "current_thread")]
 async fn local_models_need_no_signin_choose_a_loaded_tool_model_and_explain_limitations_once() {
     tokio::task::LocalSet::new().run_until(async{
-let(server,task)=ollama().await;let folder=tempfile::tempdir().unwrap();let file=folder.path().join("settings.json");let servers=json!([{"name":"llama.cpp","baseURL":"http://127.0.0.1:9/v1"}]);std::fs::write(&file,json!({"modelServers":servers}).to_string()).unwrap();let said=Rc::new(RefCell::new(Vec::new()));let make=|file:&std::path::Path,auth:&str|create_model_control(ModelControlOptions{store:Rc::new(open_credential_store(folder.path().join(auth))),settings_file:file.to_string_lossy().into(),env:Env::from([("OLLAMA_HOST".into(),server.clone())]),fetch:Some(Rc::new(NoStudio)),changed:Rc::new(||async{Ok(())}.boxed_local()),say:Some(Rc::new({let said=said.clone();move|message|said.borrow_mut().push(message)})),installed:Some(Rc::new(|_|false))});let control=make(&file,"auth.json");assert_eq!(serde_json::to_value(control.local().await).unwrap(),json!([{"id":"ollama","name":"Ollama","where":"on this computer","running":true},{"id":"llama-cpp","name":"llama.cpp","where":"on this computer","running":false,"start":"Start it, or check its address (http://127.0.0.1:9/v1) in ~/.kumi/settings.json"}]));assert_eq!(control.models("ollama",false).await.unwrap().into_iter().map(|m|(m.id,m.description)).collect::<Vec<_>>(),vec![("ollama/qwen3:8b".into(),Some("8B · Q4_K_M · loaded".into())),("ollama/gemma3:4b".into(),Some("8B · Q4_K_M · can't change the Set".into()))]);let chosen=control.choose_default().await.unwrap().unwrap();assert_eq!(chosen.model.id,"ollama/qwen3:8b");assert_eq!(chosen.note,None);let mut current=serde_json::to_value(control.current()).unwrap();current.as_object_mut().unwrap().remove("efforts");assert_eq!(current,json!({"model":"ollama/qwen3:8b","provider":"ollama","name":"qwen3:8b","pinned":false,"where":"on this computer"}));assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap(),json!({"model":"ollama/qwen3:8b","modelServers":servers}));assert_eq!(control.choose("ollama/gemma3:4b").await.unwrap().as_deref(),Some("gemma3:4b can't use tools, so Kumi can talk with it about your Set but can't change anything. qwen3:8b on Ollama can: /model chooses it."));assert_eq!(control.choose("ollama/gemma3:4b").await.unwrap(),None);assert_eq!(control.binding().await.unwrap().id,"ollama/gemma3:4b");assert!(said.borrow().is_empty());for(id,name)in[("ollama","Ollama"),("llama-cpp","llama.cpp"),("anthropic","Anthropic")]{assert_eq!(control.provider_name(id),name);}let racing=make(&folder.path().join("fresh-settings.json"),"fresh-auth.json");let(announced,bound)=tokio::join!(racing.choose_default(),racing.binding());assert_eq!(announced.unwrap().unwrap().model.id,"ollama/qwen3:8b");assert_eq!(bound.unwrap().id,"ollama/qwen3:8b");let later=make(&file,"auth.json");let binding=later.binding_with_info().await.unwrap();binding.asked.unwrap().await;tokio::task::yield_now().await;assert_eq!(said.borrow().len(),1);assert!(said.borrow()[0].starts_with("gemma3:4b can't use tools"));task.abort();
+let(server,task)=ollama().await;let folder=tempfile::tempdir().unwrap();let file=folder.path().join("settings.json");let servers=json!([{"name":"llama.cpp","baseURL":"http://127.0.0.1:9/v1"}]);std::fs::write(&file,json!({"modelServers":servers}).to_string()).unwrap();let said=Rc::new(RefCell::new(Vec::new()));let make=|file:&std::path::Path,auth:&str|create_model_control(ModelControlOptions{store:Rc::new(open_credential_store(folder.path().join(auth))),settings_file:file.to_string_lossy().into(),env:Env::from([("OLLAMA_HOST".into(),server.clone())]),fetch:Some(Rc::new(NoStudio)),changed:Rc::new(||async{Ok(())}.boxed_local()),say:Some(Rc::new({let said=said.clone();move|message|said.borrow_mut().push(message)})),installed:Some(Rc::new(|_|false)),lists:None});let control=make(&file,"auth.json");assert_eq!(serde_json::to_value(control.local().await).unwrap(),json!([{"id":"ollama","name":"Ollama","where":"on this computer","running":true},{"id":"llama-cpp","name":"llama.cpp","where":"on this computer","running":false,"start":"Start it, or check its address (http://127.0.0.1:9/v1) in ~/.kumi/settings.json"}]));assert_eq!(control.models("ollama",false).await.unwrap().into_iter().map(|m|(m.id,m.description)).collect::<Vec<_>>(),vec![("ollama/qwen3:8b".into(),Some("8B · Q4_K_M · loaded".into())),("ollama/gemma3:4b".into(),Some("8B · Q4_K_M · can't change the Set".into()))]);let chosen=control.choose_default().await.unwrap().unwrap();assert_eq!(chosen.model.id,"ollama/qwen3:8b");assert_eq!(chosen.note,None);let mut current=serde_json::to_value(control.current()).unwrap();current.as_object_mut().unwrap().remove("efforts");assert_eq!(current,json!({"model":"ollama/qwen3:8b","provider":"ollama","name":"qwen3:8b","pinned":false,"where":"on this computer"}));assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap(),json!({"model":"ollama/qwen3:8b","modelServers":servers}));assert_eq!(control.choose("ollama/gemma3:4b").await.unwrap().as_deref(),Some("gemma3:4b can't use tools, so Kumi can talk with it about your Set but can't change anything. qwen3:8b on Ollama can: /model chooses it."));assert_eq!(control.choose("ollama/gemma3:4b").await.unwrap(),None);assert_eq!(control.binding().await.unwrap().id,"ollama/gemma3:4b");assert!(said.borrow().is_empty());for(id,name)in[("ollama","Ollama"),("llama-cpp","llama.cpp"),("anthropic","Anthropic")]{assert_eq!(control.provider_name(id),name);}let racing=make(&folder.path().join("fresh-settings.json"),"fresh-auth.json");let(announced,bound)=tokio::join!(racing.choose_default(),racing.binding());assert_eq!(announced.unwrap().unwrap().model.id,"ollama/qwen3:8b");assert_eq!(bound.unwrap().id,"ollama/qwen3:8b");let later=make(&file,"auth.json");let binding=later.binding_with_info().await.unwrap();binding.asked.unwrap().await;tokio::task::yield_now().await;assert_eq!(said.borrow().len(),1);assert!(said.borrow()[0].starts_with("gemma3:4b can't use tools"));task.abort();
 }).await;
 }
 /// A provider added after the first five, as Venice was: only this test's thread has it.
@@ -379,6 +381,7 @@ fn control_with(folder: &tempfile::TempDir, settings: Value) -> ModelControl {
         changed: Rc::new(|| async { Ok(()) }.boxed_local()),
         say: None,
         installed: Some(Rc::new(|_| false)),
+        lists: None,
     })
 }
 #[tokio::test(flavor = "current_thread")]
@@ -509,6 +512,7 @@ async fn a_custom_server_that_takes_responses_is_sent_responses() {
         changed: Rc::new(|| async { Ok(()) }.boxed_local()),
         say: None,
         installed: Some(Rc::new(|_| false)),
+        lists: None,
     });
     let listed = control.models("box", false).await.unwrap();
     assert_eq!(
@@ -580,5 +584,190 @@ fn options_like(f: &Fixture, fetch: Rc<dyn Fetch>) -> ModelControlOptions {
         }),
         say: None,
         installed: Some(Rc::new(|_| false)),
+        lists: None,
     }
+}
+/// ChatGPT's model list as the test sets it now, with the asks for it counted. While held, an ask waits.
+struct Listing {
+    models: RefCell<Value>,
+    asks: Cell<usize>,
+    held: Cell<bool>,
+}
+impl Listing {
+    fn new(models: Value) -> Rc<Self> {
+        Rc::new(Self { models: RefCell::new(models), asks: Cell::new(0), held: Cell::new(false) })
+    }
+}
+#[async_trait(?Send)]
+impl Fetch for Listing {
+    async fn fetch(&self, url: &str, _: FetchInit) -> Result<Response, LanguageModelError> {
+        if !url.starts_with("https://chatgpt.com/backend-api/codex/models") {
+            return Ok(Response::text_response(404, ""));
+        }
+        self.asks.set(self.asks.get() + 1);
+        while self.held.get() {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+        Ok(Response::json_response(200, json!({"models": self.models.borrow().clone()})))
+    }
+}
+/// A ChatGPT model's row: its slug, whether it lists the faster tier, and whether the list shows it.
+fn row(slug: &str, fast: bool, shown: bool) -> Value {
+    let tiers = if fast { json!([{"id":"priority","name":"Fast","description":"2x speed"}]) } else { json!([]) };
+    json!({"slug": slug, "display_name": slug, "priority": 1, "visibility": if shown { "list" } else { "hide" }, "service_tiers": tiers})
+}
+async fn sign_in_chatgpt_as(store: &Rc<dyn CredentialStore>, account: &str) {
+    sign_in_chatgpt(store).await;
+    let account = account.to_string();
+    store
+        .update(
+            "openai-codex",
+            Box::new(move |saved| {
+                async move {
+                    let Some(Credential::Oauth(mut credential)) = saved else { unreachable!("signed in above") };
+                    credential.account_id = account;
+                    Ok(Some(Credential::Oauth(credential)))
+                }
+                .boxed_local()
+            }),
+        )
+        .await
+        .unwrap();
+}
+/// A run of Kumi in `folder`: its sign-ins, settings and kept lists there.
+fn run_in(folder: &std::path::Path, fetch: Rc<dyn Fetch>) -> (ModelControl, Rc<dyn CredentialStore>) {
+    let store: Rc<dyn CredentialStore> = Rc::new(open_credential_store(folder.join("auth.json")));
+    let control = create_model_control(ModelControlOptions {
+        store: store.clone(),
+        settings_file: folder.join("settings.json").to_string_lossy().into(),
+        env: Env::new(),
+        fetch: Some(fetch),
+        changed: Rc::new(|| async { Ok(()) }.boxed_local()),
+        say: None,
+        installed: Some(Rc::new(|_| false)),
+        lists: Some(kumi::model_lists::KeptLists::new(folder.join("cache").join("model-lists.json"))),
+    });
+    (control, store)
+}
+fn slugs(listed: &[kumi_ai::providers::models::ModelInfo]) -> Vec<String> {
+    listed.iter().map(|info| info.model.clone()).collect()
+}
+async fn until(what: &str, done: impl Fn() -> bool) {
+    let began = std::time::Instant::now();
+    while !done() {
+        assert!(began.elapsed() < std::time::Duration::from_secs(5), "{what} never happened");
+        tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+    }
+}
+/// A list kept by the run before is what the next run reads at once (`/fast`'s tier, `/model`), without waiting for
+/// the provider. The provider is asked again behind it, and its answer, changed since, is what Kumi knows once it lands.
+#[tokio::test(flavor = "current_thread")]
+async fn a_kept_list_answers_at_once_and_the_providers_own_comes_in_behind_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let listing = Listing::new(json!([row("gpt-6-astra", true, true), row("gpt-6-luna", false, true)]));
+            let (first, store) = run_in(folder.path(), listing.clone());
+            sign_in_chatgpt(&store).await;
+            assert_eq!(slugs(&first.models("openai-codex", false).await.unwrap()), ["gpt-6-astra", "gpt-6-luna"]);
+            assert_eq!(listing.asks.get(), 1);
+            // The next run: the provider's answer is held back, and has changed (Astra's faster tier gone, Nova new).
+            listing.held.set(true);
+            *listing.models.borrow_mut() = json!([row("gpt-6-astra", false, true), row("gpt-6-nova", false, true)]);
+            let (next, _) = run_in(folder.path(), listing.clone());
+            assert_eq!(slugs(&next.models("openai-codex", false).await.unwrap()), ["gpt-6-astra", "gpt-6-luna"]);
+            next.choose("openai-codex/gpt-6-astra").await.unwrap();
+            assert_eq!(next.set_fast(true).await.unwrap().map(|tier| tier.id).as_deref(), Some("priority"));
+            until("the provider asked again", || listing.asks.get() == 2).await;
+            listing.held.set(false);
+            until("its answer known", || next.current().fast.is_none()).await;
+            assert_eq!(slugs(&next.models("openai-codex", false).await.unwrap()), ["gpt-6-astra", "gpt-6-nova"]);
+            assert_eq!(listing.asks.get(), 2, "asked once behind the kept list");
+            // And kept for the run after.
+            let (after, _) = run_in(folder.path(), listing.clone());
+            assert_eq!(slugs(&after.models("openai-codex", false).await.unwrap()), ["gpt-6-astra", "gpt-6-nova"]);
+        })
+        .await;
+}
+/// A kept list is read only for the sign-in that listed it, by the Kumi that kept it, within a week: otherwise Kumi
+/// waits for the provider, as when nothing's kept. The file holds neither the account nor any key.
+#[tokio::test(flavor = "current_thread")]
+async fn a_kept_list_is_only_for_the_sign_in_and_the_kumi_that_kept_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let listing = Listing::new(json!([row("gpt-6-astra", true, true)]));
+            let (first, store) = run_in(folder.path(), listing.clone());
+            sign_in_chatgpt_as(&store, "acct-1").await;
+            first.models("openai-codex", false).await.unwrap();
+            let file = folder.path().join("cache").join("model-lists.json");
+            let kept = std::fs::read_to_string(&file).unwrap();
+            assert!(!kept.contains("acct-1") && !kept.contains("refresh-1") && !kept.contains("e30."), "{kept}");
+            *listing.models.borrow_mut() = json!([row("gpt-6-nova", false, true)]);
+            // Another account: listed for it, not read from what acct-1's sign-in kept.
+            let (other, store) = run_in(folder.path(), listing.clone());
+            sign_in_chatgpt_as(&store, "acct-2").await;
+            assert_eq!(slugs(&other.models("openai-codex", false).await.unwrap()), ["gpt-6-nova"]);
+            assert_eq!(listing.asks.get(), 2);
+            // Back on acct-1 with what acct-2 kept: listed again. Then kept by another Kumi, or more than a week ago.
+            sign_in_chatgpt_as(&store, "acct-1").await;
+            *listing.models.borrow_mut() = json!([row("gpt-6-astra", true, true)]);
+            assert_eq!(slugs(&run_in(folder.path(), listing.clone()).0.models("openai-codex", false).await.unwrap()), ["gpt-6-astra"]);
+            assert_eq!(listing.asks.get(), 3);
+            let mut asks = 3;
+            for (field, value) in [("kumi", json!("0.0.1")), ("at", json!(kumi_common::time::now_ms() - 8 * 24 * 3600 * 1000))] {
+                let mut kept: Value = serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+                kept["lists"]["openai-codex"][field] = value;
+                std::fs::write(&file, kept.to_string()).unwrap();
+                run_in(folder.path(), listing.clone()).0.models("openai-codex", false).await.unwrap();
+                asks += 1;
+                assert_eq!(listing.asks.get(), asks, "{field}");
+            }
+            // Kept as it should be: read at once, then asked behind it.
+            let (fresh, _) = run_in(folder.path(), listing.clone());
+            fresh.models("openai-codex", false).await.unwrap();
+            until("asked behind it", || listing.asks.get() == asks + 1).await;
+        })
+        .await;
+}
+/// The saved model is checked against the list the provider gives this run (#328), never against one kept from an
+/// earlier run, which may still show it.
+#[tokio::test(flavor = "current_thread")]
+async fn a_saved_model_is_checked_against_this_runs_list_not_a_kept_one() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let listing = Listing::new(json!([row("gpt-5.5", false, true), row("gpt-6-luna", false, true)]));
+            let (first, store) = run_in(folder.path(), listing.clone());
+            sign_in_chatgpt(&store).await;
+            first.choose("openai-codex/gpt-5.5").await.unwrap();
+            assert_eq!(missing_model(&first).await, None);
+            // ChatGPT hides it now; the next run's kept list still shows it.
+            listing.held.set(true);
+            *listing.models.borrow_mut() = json!([row("gpt-5.5", false, false), row("gpt-6-luna", false, true)]);
+            let (next, _) = run_in(folder.path(), listing.clone());
+            assert_eq!(slugs(&next.models("openai-codex", false).await.unwrap()), ["gpt-5.5", "gpt-6-luna"]);
+            listing.held.set(false);
+            assert_eq!(missing_model(&next).await.as_deref(), Some("ChatGPT no longer offers gpt-5.5 to your sign-in"));
+            assert_eq!(listing.asks.get(), 2, "the check waited for the ask under way, not a second one");
+        })
+        .await;
+}
+/// A sign-in that changes (a key saved, ChatGPT signed out) lets go of what its providers kept.
+#[tokio::test(flavor = "current_thread")]
+async fn a_sign_in_that_changes_lets_go_of_its_kept_lists() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let listing = Listing::new(json!([row("gpt-6-astra", true, true)]));
+            let (control, store) = run_in(folder.path(), listing.clone());
+            sign_in_chatgpt(&store).await;
+            control.models("openai-codex", false).await.unwrap();
+            let file = folder.path().join("cache").join("model-lists.json");
+            let kept = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap()["lists"].clone();
+            assert!(kept()["openai-codex"].is_object());
+            assert!(control.sign_out(ProviderId::parse("openai-codex").unwrap()).await.unwrap());
+            assert!(kept()["openai-codex"].is_null(), "{}", kept());
+        })
+        .await;
 }

@@ -1,4 +1,7 @@
-use crate::config::{read_settings, write_settings};
+use crate::{
+    config::{read_settings, write_settings},
+    model_lists::{self, KeptLists},
+};
 use futures::{
     future::{LocalBoxFuture, Shared},
     FutureExt,
@@ -42,6 +45,9 @@ pub struct ModelControlOptions {
     pub fetch: Option<Rc<dyn Fetch>>,
     pub say: Option<Rc<dyn Fn(String)>>,
     pub installed: Option<Rc<dyn Fn(LocalKind) -> bool>>,
+    /// Where the cloud providers' model lists are kept between runs (None: not kept, each run lists them). Kept lists
+    /// are listed again in the background, which needs a `LocalSet`.
+    pub lists: Option<KeptLists>,
 }
 #[derive(Clone)]
 enum Bound {
@@ -101,6 +107,8 @@ struct CachedBinding {
 /// How soon after one warm-up another may start: typing more of the same message needs none.
 const WARM_AGAIN: std::time::Duration = std::time::Duration::from_secs(20);
 type Defaulting = Shared<LocalBoxFuture<'static, Result<Option<DefaultModel>, RuntimeError>>>;
+/// A cloud provider's list, asked for: under way, or answered.
+type Listing = Shared<LocalBoxFuture<'static, Result<Vec<ModelInfo>, RuntimeError>>>;
 struct State {
     model: Option<String>,
     /// The model that carries on while this one can't (`fallbackModel`).
@@ -108,6 +116,12 @@ struct State {
     effort: Option<Effort>,
     fast: bool,
     catalog: HashMap<String, Vec<ModelInfo>>,
+    /// The cloud providers whose list in `catalog` came from the provider this run (not from what was kept).
+    listed: HashSet<String>,
+    /// Each cloud provider's latest ask for its list this run.
+    listing: HashMap<String, Listing>,
+    /// Counts sign-in changes: a list asked for before one isn't kept after it.
+    signed: u64,
     bound: Option<CachedBinding>,
     named: Option<Vec<LocalServer>>,
     heard: HashSet<String>,
@@ -159,6 +173,9 @@ pub fn create_model_control(options: ModelControlOptions) -> ModelControl {
                 effort: settings.effort,
                 fast: settings.fast == Some(true),
                 catalog: HashMap::new(),
+                listed: HashSet::new(),
+                listing: HashMap::new(),
+                signed: 0,
                 bound: None,
                 named: None,
                 heard: HashSet::new(),
@@ -434,27 +451,122 @@ impl ModelControl {
             if let Some(known) = self.inner.state.borrow().catalog.get(provider) {
                 return Ok(known.clone());
             }
+            // Kept from an earlier run for this sign-in: used now, while the provider lists it again behind it.
+            if let Some(kept) = self.kept(provider).await {
+                self.inner.state.borrow_mut().catalog.insert(provider.into(), kept.clone());
+                self.list_behind(provider);
+                return Ok(kept);
+            }
+        }
+        if server.is_none() {
+            if let Some(cloud) = ProviderId::parse(provider) {
+                return self.list(cloud, refresh).await;
+            }
         }
         let signal = Some(abort::any([abort::timeout(15000), self.inner.closed.clone()]));
         let listed = if let Some(server) = server {
             local::list_local_models_in(&server, Transport { fetch: self.inner.options.fetch.clone(), signal }, crate::daw::profile())
                 .await?
-        } else if let Some(provider) = ProviderId::parse(provider) {
-            list_models(
-                provider,
-                ListOptions {
-                    store: self.inner.options.store.clone(),
-                    env: Some(self.inner.options.env.clone()),
-                    fetch: Some(self.inner.cloud.clone()),
-                    signal,
-                },
-            )
-            .await?
         } else {
             Vec::new()
         };
         self.inner.state.borrow_mut().catalog.insert(provider.into(), listed.clone());
         Ok(listed)
+    }
+    /// `provider`'s list as the provider gives it this run: the list it gave already, the ask under way, or a new ask.
+    /// What the saved model is checked against (#328): never a list kept from an earlier run.
+    pub async fn listed_now(&self, provider: &str) -> Result<Vec<ModelInfo>, RuntimeError> {
+        let Some(cloud) = self.cloud_provider(provider) else { return self.models(provider, false).await };
+        let listed = {
+            let state = self.inner.state.borrow();
+            state.listed.contains(provider).then(|| state.catalog.get(provider).cloned()).flatten()
+        };
+        match listed {
+            Some(listed) => Ok(listed),
+            None => self.list(cloud, false).await,
+        }
+    }
+    /// The list kept for `provider` and the sign-in it would be listed with now.
+    async fn kept(&self, provider: &str) -> Option<Vec<ModelInfo>> {
+        let lists = self.inner.options.lists.as_ref()?;
+        let cloud = self.cloud_provider(provider)?;
+        let who = self.identity(cloud).await?;
+        lists.read(provider, &who, kumi_common::time::now_ms())
+    }
+    async fn identity(&self, provider: ProviderId) -> Option<String> {
+        let saved = self.inner.options.store.get(provider.row().credential).await.ok().flatten();
+        model_lists::identity(provider, saved.as_ref(), &self.inner.options.env)
+    }
+    /// The provider lists `provider` again, in the background, unless it has this run: asked now, so whatever wants its
+    /// list next waits for this ask rather than making another.
+    fn list_behind(&self, provider: &str) {
+        let Some(cloud) = ProviderId::parse(provider) else { return };
+        if !self.inner.state.borrow().listed.contains(provider) {
+            let listing = self.ask(cloud, false);
+            tokio::task::spawn_local(async move {
+                let _ = listing.await;
+            });
+        }
+    }
+    /// The provider's list, asked for now (or the ask under way, unless `refresh` wants a newer one). Once answered it's
+    /// what Kumi knows of the provider's models, and it's kept for the next run, unless a sign-in changed meanwhile.
+    async fn list(&self, provider: ProviderId, refresh: bool) -> Result<Vec<ModelInfo>, RuntimeError> {
+        self.ask(provider, refresh).await
+    }
+    fn ask(&self, provider: ProviderId, refresh: bool) -> Listing {
+        let id = provider.as_str();
+        let under_way = self.inner.state.borrow().listing.get(id).filter(|listing| listing.peek().is_none()).cloned();
+        if let Some(listing) = under_way.filter(|_| !refresh) {
+            return listing;
+        }
+        // What the ask needs, and the control only weakly: it keeps its asks, which mustn't keep it.
+        // (Through the cloud providers' one client, whose connection a first message reuses.)
+        let (signed, store, env, fetch, lists) = (
+            self.inner.state.borrow().signed,
+            self.inner.options.store.clone(),
+            self.inner.options.env.clone(),
+            Some(self.inner.cloud.clone()),
+            self.inner.options.lists.clone(),
+        );
+        let (inner, closed) = (Rc::downgrade(&self.inner), self.inner.closed.clone());
+        let listing: Listing = async move {
+            let saved = store.get(provider.row().credential).await.ok().flatten();
+            let who = model_lists::identity(provider, saved.as_ref(), &env);
+            let signal = Some(abort::any([abort::timeout(15000), closed]));
+            let listed = list_models(provider, ListOptions { store, env: Some(env), fetch, signal }).await?;
+            let Some(inner) = inner.upgrade() else { return Ok(listed) };
+            if inner.state.borrow().signed == signed {
+                let id = provider.as_str();
+                {
+                    let mut state = inner.state.borrow_mut();
+                    state.catalog.insert(id.into(), listed.clone());
+                    state.listed.insert(id.into());
+                }
+                if let (Some(lists), Some(who)) = (lists, who) {
+                    lists.keep(id, &who, kumi_common::time::now_ms(), &listed);
+                }
+            }
+            Ok(listed)
+        }
+        .boxed_local()
+        .shared();
+        self.inner.state.borrow_mut().listing.insert(id.into(), listing.clone());
+        listing
+    }
+    /// A sign-in changed for these providers: what they listed, here and kept, goes; they list afresh.
+    fn signed_anew(&self, providers: &[&str]) {
+        {
+            let mut state = self.inner.state.borrow_mut();
+            state.signed += 1;
+            for provider in providers {
+                state.catalog.remove(*provider);
+                state.listed.remove(*provider);
+                state.listing.remove(*provider);
+            }
+        }
+        if let Some(lists) = &self.inner.options.lists {
+            lists.forget(providers);
+        }
     }
     pub async fn choose(&self, next: &str) -> Result<Option<String>, RuntimeError> {
         if self.parse(Some(next)).is_none() {
@@ -536,13 +648,9 @@ impl ModelControl {
             .store
             .update(info.credential, Box::new(move |_| async move { Ok(Some(Credential::ApiKey { key })) }.boxed_local()))
             .await?;
-        {
-            let mut state = self.inner.state.borrow_mut();
-            // Every provider the key opens lists afresh.
-            for row in table::rows().filter(|row| row.credential == info.credential) {
-                state.catalog.remove(row.id);
-            }
-        }
+        // Every provider the key opens lists afresh.
+        let opened: Vec<&str> = table::rows().filter(|row| row.credential == info.credential).map(|row| row.id).collect();
+        self.signed_anew(&opened);
         if self.current_provider().is_some_and(|p| p.row().credential == info.credential) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
@@ -557,13 +665,9 @@ impl ModelControl {
             ChatGptSignIn::Device { signal, on_code } => login_codex_device(LoginOptions { signal, ..Default::default() }, on_code).await?,
         };
         self.inner.options.store.update(OPENAI_CODEX, Box::new(move |_| async move { Ok(Some(credential.into())) }.boxed_local())).await?;
-        let model = {
-            let mut state = self.inner.state.borrow_mut();
-            for row in table::rows().filter(|row| row.sign_in == SignIn::Chatgpt) {
-                state.catalog.remove(row.id);
-            }
-            state.model.clone()
-        };
+        let chatgpt: Vec<&str> = table::rows().filter(|row| row.sign_in == SignIn::Chatgpt).map(|row| row.id).collect();
+        self.signed_anew(&chatgpt);
+        let model = self.inner.state.borrow().model.clone();
         if model.as_ref().is_none_or(|s| s.is_empty()) {
             self.choose_default().await?;
             return Ok(());
@@ -580,7 +684,7 @@ impl ModelControl {
             return Ok(false);
         }
         self.inner.options.store.update(info.credential, Box::new(|_| async { Ok(None) }.boxed_local())).await?;
-        self.inner.state.borrow_mut().catalog.remove(provider.as_str());
+        self.signed_anew(&[provider.as_str()]);
         if self.current_provider().is_some_and(|p| p.row().credential == info.credential) {
             self.inner.state.borrow_mut().bound = None;
             (self.inner.options.changed)().await?;
@@ -722,6 +826,9 @@ impl ModelController for ModelControl {
     }
     async fn models(&self, provider: &str, refresh: bool) -> Result<Vec<ModelInfo>, RuntimeError> {
         ModelControl::models(self, provider, refresh).await
+    }
+    async fn listed_now(&self, provider: &str) -> Result<Vec<ModelInfo>, RuntimeError> {
+        ModelControl::listed_now(self, provider).await
     }
     async fn choose(&self, next: &str) -> Result<Option<String>, RuntimeError> {
         ModelControl::choose(self, next).await
