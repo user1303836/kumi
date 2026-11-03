@@ -13972,14 +13972,15 @@ PUMP_BUDGET_SECONDS = 0.05
 # change, confirm), within the tick's budget: on loopback it asks within a few milliseconds, and serving
 # it now saves a whole display tick (about 100 ms) a step.
 PUMP_LINGER_SECONDS = 0.012
-# Where Live's timer serves and is measured to call back at least FAST_TIMER_CALLS_PER_SECOND times a second (about
-# every 10 ms on a Mac), a client's next step that doesn't come within this waits for the timer's next call rather than
-# for a display tick, so the tick waits less: each wait holds Live's UI thread, and after the last request of a burst
-# (FOCUS's reads as the producer clicks through tracks) there's nothing to wait for. A change's next step comes within
-# 1 ms nearly always, and within 4 ms for almost all the rest. A timer not measured yet (its first 5 s) or a slower one
-# (Windows' calls about 64 times a second, at its 15.6 ms granularity) keeps PUMP_LINGER_SECONDS.
+# While Live's timer serves and comes back within FAST_TIMER_GAP_SECONDS (the median of its last TIMER_GAPS gaps: about
+# 10 ms on a Mac), a client's next step that doesn't come within this waits for the timer's next call rather than for a
+# display tick, so the tick waits less: each wait holds Live's UI thread, and after the last request of a burst (FOCUS's
+# reads as the producer clicks through tracks) there's nothing to wait for. A change's next step comes within 1 ms nearly
+# always, and within 4 ms for almost all the rest. A timer not measured yet, a slower one (Windows', at its 15.6 ms
+# granularity) and one a busy Live holds back keep PUMP_LINGER_SECONDS.
 PUMP_LINGER_BETWEEN_TICKS_SECONDS = 0.004
-FAST_TIMER_CALLS_PER_SECOND = 90
+FAST_TIMER_GAP_SECONDS = 0.012
+TIMER_GAPS = 8
 # Live's own timer (Live.Base.Timer, about every 10 ms) serves the socket between display ticks, where
 # this Live has one: a request waits for the timer rather than up to a tick. Reads (Kumi's looks at the
 # Set, its background reads, a big Set's catch-up) keep to PUMP_BUDGET_SECONDS of Live's main thread in
@@ -14081,10 +14082,11 @@ class AbletonMcpBridge:
         self._clients: set[socket.socket] = set()
         self._connections: list[_Connection] = []
         self._pump_turn = 0
-        # Set while Live's timer serves the socket between ticks (the Control Surface starts it), and how often it calls
-        # back, once the Control Surface has counted it.
+        # Set while Live's timer serves the socket between ticks (the Control Surface starts it); and the median gap
+        # between its calls lately, from the gaps since the last median.
         self.between_ticks = False
-        self.timer_rate: float | None = None
+        self.timer_gap: float | None = None
+        self._timer_gaps: list[float] = []; self._timer_last: float | None = None
         self._window_started = 0.0; self._window_spent = 0.0; self._change_seconds = 0.0
         self._secret_value = secret
         self._executed_mutations: dict[str, dict[str, Any]] = {}
@@ -14136,9 +14138,18 @@ class AbletonMcpBridge:
         """Live's timer callback, between display ticks: serve what's waiting now, within what's left of
         this tick's budget, then queued Live work."""
         if self._stop.is_set(): return
+        self._timer_called(time.perf_counter())
         left = self._budget_left()
         if left > 0: self._pump(left)
         self.queue.drain()
+
+    def _timer_called(self, now: float) -> None:
+        """Notes the gap since the timer's last call; every TIMER_GAPS gaps, their median becomes `timer_gap`."""
+        last, self._timer_last = self._timer_last, now
+        if last is None: return
+        gaps = self._timer_gaps; gaps.append(now - last)
+        if len(gaps) >= TIMER_GAPS:
+            gaps.sort(); self.timer_gap = gaps[len(gaps) // 2]; gaps.clear()
 
     def _budget_left(self) -> float:
         """What's left of the bridge's share of Live's main thread in this tick's worth of time."""
@@ -14174,7 +14185,7 @@ class AbletonMcpBridge:
                 try:
                     with selectors.DefaultSelector() as selector:
                         for connection in waiting: selector.register(connection.socket, selectors.EVENT_READ, connection)
-                        fast = self.between_ticks and (self.timer_rate or 0.0) >= FAST_TIMER_CALLS_PER_SECOND
+                        fast = self.between_ticks and self.timer_gap is not None and self.timer_gap <= FAST_TIMER_GAP_SECONDS
                         linger = PUMP_LINGER_BETWEEN_TICKS_SECONDS if fast else PUMP_LINGER_SECONDS
                         ready = [key.data for key, _ in selector.select(min(linger, max(0.0, deadline - time.perf_counter())))]
                 except (OSError, ValueError): break
