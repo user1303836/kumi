@@ -3,6 +3,39 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.61 — 2026-11-03
+
+Ships with bridge 1.0.103, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+Ships with Renoise tool 1.0.18, which Renoise loads when it restarts; `kumi update` puts it in.
+
+- With Claude models, Kumi marks where its last request ended for the prompt cache, as Anthropic
+  advises for a step that makes many tool calls at once.
+- With a ChatGPT sign-in, a message you type after a pause reaches the model sooner: Kumi checks or
+  reopens its connection while you type.
+- /map opens again at once: Kumi keeps the map it drew while your library and music stay the same.
+- Starting Kumi without a DAW no longer says it's connecting to Live.
+- A big map opens sooner the first time.
+- `kumi update` is up to most of a second faster: it unpacks the new Kumi while it downloads.
+- When you reopen REAPER or Renoise, Kumi reconnects and fills FOCUS a little sooner.
+- On Windows, Kumi sees whether Live is open, and which program holds its ports, without starting
+  PowerShell: `kumi doctor` and reconnecting after a Set switch are quicker.
+- After installing, the first REAPER or Renoise connect is a little quicker on macOS.
+- A big sound library takes about a quarter less memory while Kumi runs.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.103
+
+- On Windows, Live's bridge starts faster: it checks its own files' permissions without starting
+  PowerShell.
+
+### Renoise tool 1.0.18
+
+- Kumi's catch-up and big reads of a Renoise song finish sooner, about a fifth while stopped, and
+  Renoise's screen stays smoother as Kumi reads.
+
 ## 1.24.60 — 2026-11-03
 
 Ships with bridge 1.0.102, as 1.24.59 did. Ships with Renoise tool 1.0.17, which Renoise loads when it
