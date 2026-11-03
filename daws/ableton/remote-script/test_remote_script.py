@@ -7836,6 +7836,30 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
         client.sendall(self.frame(channel, 5, method="invoke", operation="track.create", args={})); self.answered_between_ticks(client)
         self.assertLess(self.bridge._window_spent, 0.05, "a change made through invoke doesn't")
 
+    def test_while_lives_timer_serves_a_tick_waits_4_ms_for_the_next_step_and_a_display_tick_alone_12(self):
+        # (A9-L1) each wait holds Live's UI thread; the timer comes back within about 10 ms anyway
+        client, channel = self.connect(); waits = []
+        real = remote_module.selectors.DefaultSelector
+        class Recording:
+            def __init__(self): self.inner = real()
+            def __enter__(self): return self
+            def __exit__(self, *rest): self.inner.close()
+            def register(self, *args, **kwargs): return self.inner.register(*args, **kwargs)
+            def select(self, timeout=None): waits.append(timeout); return self.inner.select(timeout)
+        with patch.object(remote_module.selectors, "DefaultSelector", Recording):
+            self.bridge.between_ticks = True
+            client.sendall(self.frame(channel, 1)); time.sleep(0.05)
+            self.bridge.serve_between_ticks()
+            between, waits[:] = list(waits), []
+            self.bridge.between_ticks = False
+            client.sendall(self.frame(channel, 2)); time.sleep(0.05)
+            self.bridge.update_display()
+            alone = list(waits)
+        self.assertEqual(remote_module.PUMP_LINGER_BETWEEN_TICKS_SECONDS, 0.004)
+        self.assertTrue(between and max(between) <= remote_module.PUMP_LINGER_BETWEEN_TICKS_SECONDS, between)
+        self.assertTrue(alone and abs(alone[0] - remote_module.PUMP_LINGER_SECONDS) < 0.001, alone)
+        self.assertEqual([line["id"] for line in self.read_lines(client, 2)], ["status-1", "status-2"])
+
     def test_a_tick_that_answered_no_one_doesnt_wait(self):
         self.connect()
         started = time.perf_counter()

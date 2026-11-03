@@ -13972,6 +13972,11 @@ PUMP_BUDGET_SECONDS = 0.05
 # change, confirm), within the tick's budget: on loopback it asks within a few milliseconds, and serving
 # it now saves a whole display tick (about 100 ms) a step.
 PUMP_LINGER_SECONDS = 0.012
+# While Live's timer serves (about every 10 ms, below), a client's next step that doesn't come within this waits for the
+# timer's next call rather than for a display tick, so the tick waits less: each wait holds Live's UI thread, and after
+# the last request of a burst (FOCUS's reads as the producer clicks through tracks) there's nothing to wait for. A
+# change's next step comes within 1 ms nearly always, and within 4 ms for almost all the rest.
+PUMP_LINGER_BETWEEN_TICKS_SECONDS = 0.004
 # Live's own timer (Live.Base.Timer, about every 10 ms) serves the socket between display ticks, where
 # this Live has one: a request waits for the timer rather than up to a tick. Reads (Kumi's looks at the
 # Set, its background reads, a big Set's catch-up) keep to PUMP_BUDGET_SECONDS of Live's main thread in
@@ -14164,7 +14169,8 @@ class AbletonMcpBridge:
                 try:
                     with selectors.DefaultSelector() as selector:
                         for connection in waiting: selector.register(connection.socket, selectors.EVENT_READ, connection)
-                        ready = [key.data for key, _ in selector.select(min(PUMP_LINGER_SECONDS, max(0.0, deadline - time.perf_counter())))]
+                        linger = PUMP_LINGER_BETWEEN_TICKS_SECONDS if self.between_ticks else PUMP_LINGER_SECONDS
+                        ready = [key.data for key, _ in selector.select(min(linger, max(0.0, deadline - time.perf_counter())))]
                 except (OSError, ValueError): break
                 served = sum(self._service(connection, deadline) for connection in ready)
         finally:
