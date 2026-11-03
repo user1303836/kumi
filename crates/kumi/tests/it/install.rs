@@ -2801,7 +2801,8 @@ impl Fetch for Halves {
 }
 
 /// An update's tar unpacks the bundle while it downloads: half of it is in app.new before the rest has come, and the
-/// update ends as one unpacked from the file did.
+/// update ends as one unpacked from the file did. The bundle carries 2 MB that doesn't compress, as a real one's
+/// programs don't: GNU gzip, which GNU tar unpacks through, reads 256 KB before it writes anything.
 #[tokio::test]
 async fn an_update_unpacks_its_bundle_while_it_downloads() {
     let dir = tempfile::tempdir().unwrap();
@@ -2809,7 +2810,16 @@ async fn an_update_unpacks_its_bundle_while_it_downloads() {
     let home = Path::new(&env["KUMI_HOME"]);
     put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
     put(home.join("app").join(executable_name("kumi")), "earlier");
-    let bytes = fake_release(dir.path(), "99.0.0");
+    let mut state = 0x2545_f491_4f6c_dd1du64;
+    let noise: Vec<u8> = (0..2 * 1024 * 1024)
+        .map(|_| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            (state >> 32) as u8
+        })
+        .collect();
+    let bytes = fake_release_carrying_bytes(dir.path(), "99.0.0", None, &[("noise.bin", noise)]);
     let mut good = manifest("99.0.0");
     good["sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
     let (mut updated, out) = io(&env);
