@@ -2832,7 +2832,9 @@ async fn an_update_unpacks_its_bundle_while_it_downloads() {
     assert_eq!(unpacks_from_file() - from_file, 0, "what tar unpacked as it came is what went in, not an unpacking from the file");
     assert_eq!(version_of(home.join("app")), "99.0.0");
     assert!(!home.join("app.new").exists());
-    assert!(out.0.borrow().contains("Unpacking Kumi 99.0.0…"), "the steps say what they said: {}", out.0.borrow());
+    // The lines it always said (without a terminal, the unpacking step says nothing of itself).
+    let said = out.0.borrow();
+    assert!(said.contains("Downloading Kumi 99.0.0…") && said.contains("→ 99.0.0."), "{said}");
 }
 
 /// A download that doesn't match its checksum changes nothing, though tar unpacked it as it came: app.new goes, with
