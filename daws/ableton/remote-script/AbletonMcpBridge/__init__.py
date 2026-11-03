@@ -706,11 +706,14 @@ class _FilesChecked:
 
 
 # Live's own Python can starve a thread of its own (a hello once took about a second from one), and the check's few
-# steps in Python after its PowerShell need the interpreter: from Live's first call this long after it made the surface,
-# Live's thread waits for the check itself (which lets the interpreter go), so the bridge never starts later than with
-# the check on Live's thread throughout. PowerShell's own run is bounded at 10 s (`_windows_acl_owner_only_all`).
+# steps in Python after its PowerShell need the interpreter. From this long after Live made the surface, its display
+# ticks wait a moment for the check, at most this often, which lets the interpreter go to the check's thread: it gets
+# its turn, Live's thread is held at most a tenth of the time, and Live's window (showing by then) never freezes. The
+# bridge then starts at most about half a second later than with the check on Live's thread throughout, where it held
+# Live's start for the whole of PowerShell's run (bounded at 10 s, `_windows_acl_owner_only_all`).
 _CHECK_ON_ITS_OWN_SECONDS = 0.5
-_CHECK_WAIT_SECONDS = 15.0
+_CHECK_WAIT_SECONDS = 0.01
+_CHECK_WAIT_EVERY_SECONDS = 0.1
 
 
 def _files_check() -> Callable[[], None] | None:
@@ -738,18 +741,24 @@ class AbletonMcpBridge(_ControlSurface):
         self._checked = _FilesChecked(_files_check())
         self._start_timer()
 
-    def _start_when_ready(self) -> bool:
+    def _start_when_ready(self, display_tick: bool = False) -> bool:
         """Whether the bridge runs, starting it here (on Live's thread) once its files are checked. A start that fails is
-        said (_say_start_failure) and isn't tried again."""
+        said (_say_start_failure) and isn't tried again. A display tick past _CHECK_ON_ITS_OWN_SECONDS gives a check
+        still running a moment of the interpreter (_CHECK_WAIT_SECONDS, at most every _CHECK_WAIT_EVERY_SECONDS)."""
         if getattr(self, "_bridge", None) is not None:
             return True
         checked = getattr(self, "_checked", None)
         if checked is None:
             return False
         if not checked.done():
-            if time.monotonic() - getattr(self, "_made_at", 0.0) < _CHECK_ON_ITS_OWN_SECONDS:
+            now = time.monotonic()
+            if not display_tick or now - getattr(self, "_made_at", 0.0) < _CHECK_ON_ITS_OWN_SECONDS:
                 return False
-            checked.wait(_CHECK_WAIT_SECONDS)
+            if now - getattr(self, "_waited_at", 0.0) < _CHECK_WAIT_EVERY_SECONDS:
+                return False
+            self._waited_at = now
+            if not checked.wait(_CHECK_WAIT_SECONDS):
+                return False
         self._checked = None
         try:
             self._bridge = _Bridge(self._instance, _read_config(), song=self._song, provenance="real-live", diagnostics_validator=_diagnostics_path_safe)
@@ -834,7 +843,7 @@ class AbletonMcpBridge(_ControlSurface):
         # Each display tick serves the bridge once (Live's timer serves it between ticks). The base class's own
         # update_display isn't called: _Framework delivers schedule_message's tasks from there, and this surface
         # schedules none.
-        if not self._start_when_ready():
+        if not self._start_when_ready(display_tick=True):
             return
         self._keep_willington()
         self._bridge.update_display()

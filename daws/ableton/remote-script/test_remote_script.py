@@ -590,9 +590,10 @@ class RemoteScriptTests(unittest.TestCase):
         # Elsewhere there's nothing to check off it: the first tick starts it.
         self.assertEqual(package._files_check() is None, os.name != "nt")
 
-    def test_a_check_that_takes_long_is_waited_for_on_lives_thread_after_half_a_second(self):
-        """A thread of its own can be starved by Live's Python: past the bound, Live's thread waits for the check (which
-        lets the interpreter go), so the bridge never starts later than with the check on Live's thread throughout."""
+    def test_a_check_that_takes_long_gets_a_moment_at_display_ticks_and_live_is_never_held_long(self):
+        """A thread of its own can be starved by Live's Python: past the bound, display ticks give the check a moment
+        of the interpreter (at most every 100 ms), never a long wait, so Live's window doesn't freeze; the bridge starts
+        at the first tick after the check is done."""
         package = __import__("AbletonMcpBridge")
 
         class Bridge:
@@ -606,11 +607,15 @@ class RemoteScriptTests(unittest.TestCase):
             surface.update_display()
             self.assertIsNone(surface._bridge, "within the bound: not waited for")
             time.sleep(0.06)
-            began = time.monotonic()
-            surface.update_display()
-            waited = time.monotonic() - began
-        self.assertEqual(surface._bridge.served, 1, "waited for, then started, at that tick")
-        self.assertGreater(waited, 0.1)
+            longest, deadline = 0.0, time.monotonic() + 3
+            while surface._bridge is None and time.monotonic() < deadline:
+                began = time.monotonic()
+                surface.update_display()
+                longest = max(longest, time.monotonic() - began)
+                surface._between_ticks()  # the timer's calls never wait (there's no timer here, so it returns)
+                time.sleep(0.02)
+        self.assertEqual(surface._bridge.served, 1, "started, and served, at the first tick after the check")
+        self.assertLess(longest, 0.08, f"no tick held long: {longest:.3f} s")
 
     def test_a_failed_start_stops_the_timer_and_a_good_one_counts_its_rate_from_the_start(self):
         package = __import__("AbletonMcpBridge"); made = []
