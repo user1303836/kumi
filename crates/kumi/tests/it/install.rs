@@ -1754,10 +1754,13 @@ async fn an_update_in_a_folder_another_account_owns_says_whose_before_anything_m
     assert!(serve.calls.borrow().is_empty());
 }
 /// GitHub right after a release: its API names `newest` (or answers `api` instead), that release has its own
-/// description when `described`, and `releases/latest` still leads to the one before (98.0.0).
+/// description when `described`, and `releases/latest` still leads to the one before (`latest`, 98.0.0), or never
+/// answers when `latest_hangs`.
 struct Hub {
     api: u16,
     newest: &'static str,
+    latest: &'static str,
+    latest_hangs: bool,
     described: bool,
     bundle: Vec<u8>,
     sha256: String,
@@ -1765,9 +1768,24 @@ struct Hub {
 }
 impl Hub {
     fn new(api: u16, described: bool) -> Rc<Self> {
-        Rc::new(Self { api, newest: "99.0.0", described, bundle: vec![], sha256: "a".repeat(64), calls: RefCell::new(vec![]) })
+        Rc::new(Self::with(api, described))
+    }
+    fn with(api: u16, described: bool) -> Self {
+        Self {
+            api,
+            newest: "99.0.0",
+            latest: "98.0.0",
+            latest_hangs: false,
+            described,
+            bundle: vec![],
+            sha256: "a".repeat(64),
+            calls: RefCell::new(vec![]),
+        }
     }
 }
+const API: &str = "https://api.github.com/repos/user1303836/kumi/releases/latest";
+const LATEST: &str = "https://github.com/user1303836/kumi/releases/latest/download/kumi-release.json";
+const NEWEST: &str = "https://github.com/user1303836/kumi/releases/download/v99.0.0/kumi-release.json";
 #[async_trait(?Send)]
 impl Fetch for Hub {
     async fn fetch(&self, url: &str, init: FetchInit) -> Result<Response, LanguageModelError> {
@@ -1789,17 +1807,29 @@ impl Fetch for Hub {
                 ..Response::text_response(200, "")
             });
         }
-        assert_eq!(url, "https://github.com/user1303836/kumi/releases/latest/download/kumi-release.json");
-        Ok(Response::json_response(200, manifest("98.0.0")))
+        assert_eq!(url, LATEST);
+        if self.latest_hangs {
+            futures::future::pending::<()>().await;
+        }
+        Ok(Response::json_response(200, manifest(self.latest)))
     }
 }
 #[tokio::test]
 async fn an_asked_for_update_takes_the_release_githubs_api_names_and_the_usual_way_without_it() {
     let env = Env::new();
-    // Right after a release: the API names it while releases/latest still leads to the one before.
+    // Right after a release: the API names it while releases/latest still leads to the one before, asked beside it.
     let fresh = Hub::new(200, true);
     assert_eq!(check_release(&env, Some(fresh.clone())).await.unwrap().as_deref(), Some("99.0.0"));
-    assert_eq!(fresh.calls.borrow().len(), 2);
+    assert_eq!(*fresh.calls.borrow(), [LATEST, API, NEWEST]);
+    // Once releases/latest leads to the release the API names, that's its own description: no second read.
+    let settled = Rc::new(Hub { latest: "99.0.0", ..Hub::with(200, true) });
+    assert_eq!(check_release(&env, Some(settled.clone())).await.unwrap().as_deref(), Some("99.0.0"));
+    assert_eq!(*settled.calls.borrow(), [LATEST, API]);
+    // releases/latest not answering doesn't hold up the release the API names, read from its own description.
+    let held = Rc::new(Hub { latest_hangs: true, ..Hub::with(200, true) });
+    let asked = tokio::time::timeout(std::time::Duration::from_secs(10), check_release(&env, Some(held.clone())));
+    assert_eq!(asked.await.expect("not held up by releases/latest").unwrap().as_deref(), Some("99.0.0"));
+    assert_eq!(*held.calls.borrow(), [LATEST, API, NEWEST]);
     // The API's rate limit, or a release without its description yet: the usual way, without a word about it.
     for (api, described) in [(403, true), (429, true), (200, false)] {
         assert_eq!(check_release(&env, Some(Hub::new(api, described))).await.unwrap().as_deref(), Some("98.0.0"), "{api} {described}");
@@ -1820,7 +1850,7 @@ async fn an_asked_for_update_takes_the_release_githubs_api_names_and_the_usual_w
     put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
     put(home.join("app").join(executable_name("kumi")), "earlier");
     let bundle = fake_release(dir.path(), "99.0.0");
-    let hub = Rc::new(Hub { sha256: hex::encode(Sha256::digest(&bundle)), bundle, ..Rc::try_unwrap(Hub::new(200, true)).ok().unwrap() });
+    let hub = Rc::new(Hub { sha256: hex::encode(Sha256::digest(&bundle)), bundle, ..Hub::with(200, true) });
     let installed: Env = [
         ("KUMI_HOME".into(), home.display().to_string()),
         ("HOME".into(), dir.path().join("user").display().to_string()),
