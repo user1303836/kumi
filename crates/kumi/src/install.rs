@@ -185,10 +185,11 @@ async fn newest_release(fetch: Rc<dyn Fetch>) -> Option<(String, String)> {
 /// description, else the usual way. With KUMI_RELEASES, only there. The daily check doesn't come here, so it
 /// asks no more than once a day.
 ///
-/// The usual description is asked beside the API, not after it. When it's the release the API names, it's that
-/// release's own description, and the second read is skipped. Otherwise that release's own description is asked as
-/// soon as the API answers, as before, and decides as before; where the usual way would be asked, its answer is
-/// already on its way, under its own time limit.
+/// The usual description is asked beside the API, not after it. When the API answers, the release it names has its own
+/// description read, as before, unless the usual description has come and is that release: then it's that release's
+/// own description, and the answer. It's the answer too when it shows that release before the second read is in; the
+/// second read, already started, isn't waited on. Otherwise the second read decides as before; where the usual way
+/// would be asked, its answer is already on its way, under its own time limit.
 async fn ask_newest(env: &Env, fetch: Rc<dyn Fetch>) -> (String, AskedRelease) {
     use futures::future::{select, Either};
     let usual = release_base(env);

@@ -1755,13 +1755,15 @@ async fn an_update_in_a_folder_another_account_owns_says_whose_before_anything_m
 }
 /// GitHub right after a release: its API names `newest` (or answers `api` instead), that release has its own
 /// description when `described`, and `releases/latest` still leads to the one before (`latest`, 98.0.0), or never
-/// answers when `latest_hangs`.
+/// answers when `latest_hangs`. `waits` holds each answer back that many milliseconds: the API's, `releases/latest`'s
+/// and the release's own description's (each from when it's asked).
 struct Hub {
     api: u16,
     newest: &'static str,
     latest: &'static str,
     latest_hangs: bool,
     described: bool,
+    waits: [u64; 3],
     bundle: Vec<u8>,
     sha256: String,
     calls: RefCell<Vec<String>>,
@@ -1777,10 +1779,16 @@ impl Hub {
             latest: "98.0.0",
             latest_hangs: false,
             described,
+            waits: [0; 3],
             bundle: vec![],
             sha256: "a".repeat(64),
             calls: RefCell::new(vec![]),
         }
+    }
+}
+async fn wait(ms: u64) {
+    if ms > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(ms)).await;
     }
 }
 const API: &str = "https://api.github.com/repos/user1303836/kumi/releases/latest";
@@ -1794,9 +1802,11 @@ impl Fetch for Hub {
         let own = format!("https://github.com/user1303836/kumi/releases/download/v{}", self.newest);
         if url == "https://api.github.com/repos/user1303836/kumi/releases/latest" {
             assert!(init.headers.contains_key("user-agent"), "GitHub's API wants a user agent");
+            wait(self.waits[0]).await;
             return Ok(Response::json_response(self.api, json!({"tag_name":format!("v{}", self.newest)})));
         }
         if url == format!("{own}/kumi-release.json") {
+            wait(self.waits[2]).await;
             let mut newest = manifest(self.newest);
             newest["sha256"] = json!(self.sha256);
             return Ok(if self.described { Response::json_response(200, newest) } else { Response::text_response(404, "Not Found") });
@@ -1811,7 +1821,42 @@ impl Fetch for Hub {
         if self.latest_hangs {
             futures::future::pending::<()>().await;
         }
+        wait(self.waits[1]).await;
         Ok(Response::json_response(200, manifest(self.latest)))
+    }
+}
+/// GitHub's API often answers before `releases/latest`, whose description is two redirects away. Whichever of
+/// `releases/latest` and the release's own description answers next, the answer is the one main gave, asking one
+/// after the other, and it's never later than main's (on the paused clock: the API answers at 50 ms).
+#[tokio::test(start_paused = true)]
+async fn when_githubs_api_answers_first_the_answer_is_mains_and_never_later() {
+    let env = Env::new();
+    // (the API's status, releases/latest's version and wait, the release's own description's wait, described)
+    // → (the answer, and when it comes, in ms). Each comment ends with main's answer, and when.
+    let cases = [
+        // releases/latest at the API's version comes next: that's the answer, without waiting on the second read,
+        // which has started. Main: 99.0.0 at 250.
+        ((200, "99.0.0", 100, 200, true), ("99.0.0", 100)),
+        // The release's own description comes next: it decides. Main: 99.0.0 at 150.
+        ((200, "98.0.0", 300, 100, true), ("99.0.0", 150)),
+        // ... a 404: releases/latest's, already on its way. Main: 98.0.0 at 450.
+        ((200, "98.0.0", 300, 100, false), ("98.0.0", 300)),
+        // releases/latest at the release before comes next: the release's own description decides. Main: 99.0.0 at 250.
+        ((200, "98.0.0", 100, 200, true), ("99.0.0", 250)),
+        // ... a 404: releases/latest's. Main: 98.0.0 at 350.
+        ((200, "98.0.0", 100, 200, false), ("98.0.0", 250)),
+        // The API's rate limit: releases/latest's. Main: 98.0.0 at 150.
+        ((403, "98.0.0", 100, 200, true), ("98.0.0", 100)),
+    ];
+    for ((api, latest, latest_ms, own_ms, described), (answer, at)) in cases {
+        let hub = Rc::new(Hub { latest, waits: [50, latest_ms, own_ms], ..Hub::with(api, described) });
+        let started = tokio::time::Instant::now();
+        let asked = check_release(&env, Some(hub.clone())).await.unwrap();
+        let case = format!("{api} {latest} {latest_ms} {own_ms} {described}");
+        assert_eq!(asked.as_deref(), Some(answer), "{case}");
+        assert_eq!(started.elapsed().as_millis(), at, "{case}");
+        let calls: &[&str] = if api == 200 { &[LATEST, API, NEWEST] } else { &[LATEST, API] };
+        assert_eq!(*hub.calls.borrow(), calls, "{case}");
     }
 }
 #[tokio::test]
