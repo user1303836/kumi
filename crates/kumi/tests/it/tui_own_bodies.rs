@@ -1315,3 +1315,51 @@ case!(a_big_takes_note_count_is_the_takes, async {
     shows(&h, "4 bars · 1200 notes").await;
     h.close().await;
 });
+
+// (A4-2) The producer selects a track past the ones a tracker's body was read for: FOCUS reads it again at once, for that
+// track, and draws it first once it comes; a selection the body holds reads nothing.
+case!(renoises_pattern_is_read_again_for_a_track_selected_past_its_limit, async {
+    work_with(DawId::Renoise);
+    let grid = |names: &[String]| {
+        FocusBody::Tracker(TrackerGrid {
+            item_ref: "3:pattern:2".into(),
+            name: "Wide".into(),
+            lines: 64,
+            from: 0,
+            cursor: Some(1),
+            playing: None,
+            lpb: Some(4.),
+            heading: None,
+            facts: vec![],
+            tracks: names.iter().map(|name| TrackerTrack { name: name.clone(), color: None, cells: vec!["...".into(); 33] }).collect(),
+        })
+    };
+    let first: Vec<String> = (1..=9).map(|n| format!("T{n:02}")).collect();
+    let focus = |track: usize| json!({"type":"focus","focus":{"track":{"name":format!("T{track:02}"),"kind":"sequencer"},"trackRef":format!("3:track:{track}"),"mainView":{"kind":"pattern-editor","label":"Pattern Editor"},"item":{"kind":"pattern-track","itemRef":"3:pattern:2","name":"Wide"}}});
+    let c = Rc::new(Control::default());
+    // (at 120 columns FOCUS is 36 wide: 9 tracks, the first 9 of a 30-track song)
+    *c.own.borrow_mut() = Some(grid(&first));
+    let h = Harness::with(120, 40, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    h.emit(focus(1));
+    shows(&h, "Wide · 64 lines").await;
+    let read = tracker_asks(&h, 1).await.len();
+    assert!(tracker_asks(&h, 0).await.last().unwrap().ends_with("tracks: Some(9) }"));
+    // Another of the tracks read: nothing is read.
+    h.emit(focus(3));
+    delay(50).await;
+    assert_eq!(tracker_asks(&h, 0).await.len(), read, "the body holds track 3");
+    // Track 25: read again at once, and drawn first once it comes.
+    let mut with = first.clone();
+    with.push("T25".into());
+    *c.own.borrow_mut() = Some(grid(&with));
+    h.emit(focus(25));
+    assert_eq!(tracker_asks(&h, read + 1).await.len(), read + 1, "read again for track 25");
+    shows(&h, "T25").await;
+    let lines = h.screen();
+    // (the tracks' names row: T25 and the others drawn after it)
+    let names = lines.iter().find(|line| line.contains("T25") && line.contains("T01")).expect("the tracks' names");
+    assert_eq!(names.split_whitespace().find(|word| word.starts_with('T')), Some("T25"), "the producer's track first: {names}");
+    h.close().await;
+});

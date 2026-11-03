@@ -353,7 +353,16 @@ impl TuiApp {
                 (Some(_), None) => false,
                 (Some(had), Some(wanted)) => had >= wanted,
             };
-            if !again && state.own.key.as_ref() == Some(&key) && covered {
+            // A tracker body cut at its limit that doesn't hold the producer's track (they selected one past it): read again
+            // for it, which FOCUS draws first. (One with fewer tracks than its limit holds them all.)
+            let focused = state.focus.as_ref().and_then(|focus| focus.track.as_ref()).map(|track| track.name.as_str());
+            let misses = match (&state.own.body, state.own.tracks, focused) {
+                (Some(FocusBody::Tracker(grid)), Some(limit), Some(name)) => {
+                    grid.tracks.len() >= limit && !grid.tracks.iter().any(|track| track.name == name)
+                }
+                _ => false,
+            };
+            if !again && state.own.key.as_ref() == Some(&key) && covered && !misses {
                 return;
             }
             if state.own.key.as_ref() != Some(&key) {
