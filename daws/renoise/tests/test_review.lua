@@ -2872,6 +2872,25 @@ test("review MUST 11: another tool's notes in the pattern before a sliced undo's
   end)
 end)
 
+-- A4-8: a read takes its first slice in the callback of the message that asked for it; another connection's job that
+-- writes (a sliced undo waiting for its first step) still waits for the timer, and writes nothing in that callback.
+test("review: a read asked on another connection doesn't run a sliced undo's first step in its callback", function()
+  local env, peer = setup({ patch = constants({ SLICE_WRITES = 30 }) }, { pattern_lines = 128 })
+  local previewed, done = bass_notes(peer, 100, 111, "km11e")
+  local before = steps()
+  local id = send(peer, "change_restore", restore_params("notes-write", record_of(previewed, done), "Kumi: undo n (km11f)", done.epoch, done.layout))
+  eq(steps(), before, "the first step isn't written inside the request")
+  local other = H.connect(env)
+  H.frames(other)
+  H.send(other, { type = "request", id = 77, method = "snapshot", params = json.object() })
+  local answered = false
+  for _, f in ipairs(H.frames(other)) do if f.type == "response" and f.id == 77 then answered = f.result ~= nil end end
+  ok(answered, "the snapshot is answered in its callback")
+  eq(steps(), before, "the undo's first step still waits for the timer")
+  ok(wait(peer, id, 300, 20).result, "and the undo is done on the timers")
+  eq(bass_column(100, 104), "")
+end)
+
 test("review SHOULD 4: a discard of a notes change after a row inserted refuses too: lines have no identity but their place", function()
   local env, peer = setup(nil, { pattern_lines = 128 })
   bass_set({ 104 }, C4)
