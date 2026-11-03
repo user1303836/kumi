@@ -721,11 +721,12 @@ async fn renoises_pattern_is_read_for_the_producers_track_and_the_first_ones() {
             let renoise = create_renoise_integration(options);
             renoise.start(Signal::new()).await.unwrap();
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            let read = || async {
+            // The pattern's read, and what the host was asked for it.
+            async fn read(renoise: &dyn Integration, host: &Host) -> Value {
                 renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()) }, Signal::new()).await.unwrap();
                 host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap()
-            };
-            let asked = read().await;
+            }
+            let asked = read(&*renoise, &host).await;
             assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
             // A layout makes the bridge carry (or refuse as stale) the refs on tracks a read names: the track named only to
             // read around it brings none, so the read is never refused for it.
@@ -735,11 +736,11 @@ async fn renoises_pattern_is_read_for_the_producers_track_and_the_first_ones() {
             for listener in telling.listeners.borrow().iter() {
                 listener(shift.as_object().unwrap().clone());
             }
-            let asked = read().await;
+            let asked = read(&*renoise, &host).await;
             assert_eq!((asked.get("limit"), asked.get("around")), (None, None), "{asked}");
             // The focus's next read says it again, at the layout now.
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            let asked = read().await;
+            let asked = read(&*renoise, &host).await;
             assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
             renoise.close().await.unwrap();
         })
