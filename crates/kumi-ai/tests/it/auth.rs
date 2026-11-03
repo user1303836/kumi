@@ -485,11 +485,21 @@ mod windows_acl_shapes {
             assert!(!is_kumis_shape(Path::new(&shared)), "{shared}");
             assert!(make_kumis_shape(Path::new(&shared)).is_err(), "nothing written by a share's path: {shared}");
         }
-        // The same file by a drive-relative path, from its folder: the drive's working folder is the test's own.
+        // The same file by a drive-relative path, from its folder: the drive's working folder is the test's own, and goes
+        // back to what it was (Windows can't remove a process's working folder, and other tests start from it).
+        struct Back(PathBuf);
+        impl Drop for Back {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+        let back = Back(std::env::current_dir().unwrap());
         std::env::set_current_dir(folder.path()).unwrap();
         let relative = PathBuf::from(format!("{letter}:auth.json"));
-        assert!(relative.is_file(), "the drive-relative path reaches the file");
-        assert!(!is_kumis_shape(&relative) && make_kumis_shape(&relative).is_err(), "a drive-relative path goes to PowerShell");
+        let (reached, fast, written) = (relative.is_file(), is_kumis_shape(&relative), make_kumis_shape(&relative).is_ok());
+        drop(back);
+        assert!(reached, "the drive-relative path reaches the file");
+        assert!(!fast && !written, "a drive-relative path goes to PowerShell");
         // A drive mapped to that share, which Windows calls remote: CI's runners can map one.
         let free = ('G'..='Y').rev().find(|drive| !Path::new(&format!("{drive}:\\")).exists());
         let mapped = free.filter(|drive| {
