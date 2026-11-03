@@ -269,6 +269,11 @@ pub fn ready(mut data: MapData) -> Ready {
 
 /// One map turned, its strays brought in and fitted to its box (its points' places changed in place).
 fn fitted(layer: &mut Layer) -> Fit {
+    fitted_on(layer, None)
+}
+
+/// `fitted`, its nearest searched on `threads` (None: as many as a map that big takes).
+fn fitted_on(layer: &mut Layer, threads: Option<usize>) -> Fit {
     let points = &mut layer.points;
     let count = points.len();
     if count == 0 {
@@ -316,7 +321,10 @@ fn fitted(layer: &mut Layer) -> Fit {
             if span > 0. { (((x - low.0) / span) as f32, ((y - low.1) / span + (1. - tall / span) / 2.) as f32) } else { (0.5, 0.5) };
     }
     let aspect = if span > 0. { (wide / span).max(1e-3) } else { 1. };
-    let (apart, named) = nearest_named(points, aspect);
+    let (apart, named) = match threads {
+        Some(threads) => nearest_named_on(points, aspect, threads),
+        None => nearest_named(points, aspect),
+    };
     let mut sorted = named.clone();
     sorted.sort_unstable();
     let median = sorted[count / 2] as f64;
@@ -2330,4 +2338,48 @@ mod tests {
         }
         assert_eq!(one.1.iter().map(|named| *named as usize).sum::<usize>(), 25_000 * NEAREST, "every point names its nearest");
     }
+
+    /// A fixed map of 30,000 points (tight clusters, points on the same spot), fitted: every point's place, the map's
+    /// aspect, each point's distance to its nearest and how typical it is, as one digest of their exact bits.
+    fn fitted_digest(fit: impl Fn(&mut Layer) -> Fit) -> u64 {
+        let mut points = vec![];
+        let mut seed = 11_u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as f32 / (1u64 << 31) as f32
+        };
+        for at in 0..30_000 {
+            let (x, y) = match at % 6 {
+                0 if at > 0 => (points.last().map_or(0.5, |p: &(f32, f32, u16)| p.0), points.last().map_or(0.5, |p: &(f32, f32, u16)| p.1)),
+                1 | 2 => (0.2 + next() * 0.02, 0.7 + next() * 0.015),
+                _ => (next(), next() * 0.8),
+            };
+            points.push((x, y, (at % 9) as u16));
+        }
+        let mut layer = layer(&points);
+        let made = fit(&mut layer);
+        let mut digest = 0xcbf29ce484222325_u64;
+        let mut add = |bits: u64| {
+            for byte in bits.to_le_bytes() {
+                digest = (digest ^ byte as u64).wrapping_mul(0x100000001b3);
+            }
+        };
+        for point in &layer.points {
+            add(point.x.to_bits() as u64);
+            add(point.y.to_bits() as u64);
+        }
+        add(made.aspect.to_bits());
+        made.apart.iter().chain(&made.typical).for_each(|value| add(value.to_bits() as u64));
+        digest
+    }
+
+    /// The fit is main's, point for point, however many threads its search runs on.
+    #[test]
+    fn a_big_maps_fit_is_the_same_as_before_on_any_number_of_threads() {
+        for threads in [None, Some(1), Some(3), Some(8)] {
+            assert_eq!(fitted_digest(|layer| fitted_on(layer, threads)), MAINS_FIT, "{threads:?} threads");
+        }
+    }
+    /// What main's fit made of the fixed map (its digest, from main's tui/map.rs before this search ran on threads).
+    const MAINS_FIT: u64 = 13_404_431_125_891_730_567;
 }
