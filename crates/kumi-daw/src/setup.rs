@@ -84,4 +84,10 @@ pub trait DawSetup {
     fn surface_wait(&self) -> Duration {
         Duration::from_secs(45)
     }
+    /// Why the open Live couldn't start Kumi's bridge the last time it tried, with its fix
+    /// ([`DawProvider::start_failure`](crate::provider::DawProvider::start_failure)): the Control Surface step says it in
+    /// place of asking for the Control Surface, which is chosen already. None when it started, or nothing says.
+    async fn start_failure(&self) -> Option<String> {
+        None
+    }
 }

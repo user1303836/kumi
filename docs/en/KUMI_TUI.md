@@ -92,7 +92,9 @@ needs; a mint waveform under the wordmark moves while Kumi waits (for the
 browser, the install, or Live). ↑↓ and Enter choose, Esc leaves the step for
 later, and the session follows in the same window. While ChatGPT's sign-in waits,
 **c** copies its link (or code), **d** uses a code instead of the browser, and **b**
-the browser again. On
+the browser again. When Live has AbletonMcpBridge as a Control Surface but couldn't
+start it, the Control Surface step says why, from Live's log (its port held by another
+program, say), and what fixes it, instead of asking for it again; so does the session. On
 Linux, setup only signs in. A Kumi that's set up starts straight into the session.
 
 Below 100 columns (a window beside your DAW) the pane is a **drawer** under the

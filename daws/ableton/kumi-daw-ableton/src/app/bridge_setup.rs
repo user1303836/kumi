@@ -31,6 +31,7 @@ pub async fn is_live_running_on(run: Run, platform: &str, env: &Env) -> bool {
     false
 }
 use super::{
+    bridge_files::{self, Wrong},
     folders::{find_bridge_config, read_bridge_server, remote_scripts_dir},
     live_extension::{extension_source, install_extension, live_extensions_dir, remove_former_extension},
 };
@@ -60,6 +61,10 @@ pub struct BridgeSetupIo {
     pub bridge_dir: Option<String>,
     pub home: Option<String>,
     pub prepared: Option<String>,
+    /// Windows' owner-only check of a file the Remote Script checks before it starts, and making it so (kumi-ai's, the
+    /// credentials' own): a test's stand-ins, or None for the real ones.
+    pub owner_only: Option<Rc<dyn Fn(&Path) -> bool>>,
+    pub make_owner_only: Option<Rc<dyn Fn(&Path) -> Result<(), String>>>,
 }
 impl BridgeSetupIo {
     pub fn new(out: Rc<dyn Out>, env: Env) -> Self {
@@ -77,6 +82,8 @@ impl BridgeSetupIo {
             bridge_dir: None,
             home: None,
             prepared: None,
+            owner_only: None,
+            make_owner_only: None,
         }
     }
     /// For `install_quietly`, which keeps what's said to itself.
@@ -427,13 +434,19 @@ impl BridgeRollback {
 /// is, byte for byte, in the installed one (`<scripts>/AbletonMcpBridge`). Files the install adds
 /// (manifest, bridge reference) don't count: Live runs what it loaded, which these files are.
 pub fn remote_script_unchanged(package: &str, scripts: &str) -> bool {
-    fn same(source: &Path, installed: &Path) -> bool {
+    fn same(source: &Path, installed: &Path, top: bool) -> bool {
         let Ok(entries) = fs::read_dir(source) else { return false };
         let mut any = false;
         for entry in entries.flatten() {
+            // The manifest lists the files beside it with their hashes, and they're compared themselves. Its copies
+            // differ in their line ends on Windows (the release's build writes the package's as text, the lifecycle the
+            // installed one with \n), so comparing it would find every Windows install changed.
+            if top && entry.file_name() == "manifest.json" {
+                continue;
+            }
             let (from, to) = (entry.path(), installed.join(entry.file_name()));
             let matches = match entry.file_type() {
-                Ok(kind) if kind.is_dir() => same(&from, &to),
+                Ok(kind) if kind.is_dir() => same(&from, &to, false),
                 Ok(kind) if kind.is_file() => {
                     fs::read(&from).ok().is_some_and(|ours| fs::read(&to).ok().is_some_and(|theirs| ours == theirs))
                 }
@@ -446,7 +459,7 @@ pub fn remote_script_unchanged(package: &str, scripts: &str) -> bool {
         }
         any
     }
-    same(&Path::new(package).join("remote-script/AbletonMcpBridge"), &Path::new(scripts).join("AbletonMcpBridge"))
+    same(&Path::new(package).join("remote-script/AbletonMcpBridge"), &Path::new(scripts).join("AbletonMcpBridge"), true)
 }
 /// A bridge folder made for an install that hasn't finished: removed when the install stops early.
 struct Unfinished(Option<String>);
@@ -505,6 +518,91 @@ pub async fn install_quietly(mut io: BridgeSetupIo) -> Result<String, String> {
     }
 }
 
+/// The lifecycle's state folder and secret, when the bridge's receipt names them: its own repair takes both.
+fn owner_state<'a>(state: &'a str, secret: &'a Option<String>) -> Option<(&'a str, &'a str)> {
+    secret.as_deref().map(|secret| (state, secret))
+}
+
+/// With the bridge already current: what Live's Remote Script checks before it starts, put back where it would fail.
+/// Live shows nothing when its Control Surface fails to start (its log says why, which the session and setup say), and
+/// the fix they give is this command. The files the script reads (`bridge_files`) are made yours alone again, and the
+/// Remote Script's own files, where they differ from the package's, are put back by the lifecycle's repair, with Live
+/// closed. What Kumi did, and what it couldn't, is said; 1 when something stays wrong.
+async fn put_back_current(
+    io: &BridgeSetupIo,
+    run: Run,
+    scripts: &str,
+    package: Option<&str>,
+    config: Option<&str>,
+    owner: Option<(&str, &str)>,
+) -> i32 {
+    let say = |line: &str| io.out.write(&format!("{line}\n"));
+    let mut code = 0;
+    // On Windows each file's check is a PowerShell run: not as an update's last step, which asks for no repair.
+    if !(cfg!(windows) && io.env.get("KUMI_BRIDGE_AFTER").is_some_and(|value| value == "1")) {
+        let owner_only = io.owner_only.clone().unwrap_or_else(|| Rc::new(kumi_ai::auth::store::windows_owner_only));
+        let make_owner_only = io.make_owner_only.clone().unwrap_or_else(|| Rc::new(kumi_ai::auth::store::make_owner_only));
+        let mut found = vec![];
+        for file in bridge_files::checked(scripts) {
+            if let Some(wrong) = bridge_files::wrong(&file, owner_only.as_ref()) {
+                let done = if wrong == Wrong::Open { bridge_files::make_yours(&file, make_owner_only.as_ref()) } else { Ok(()) };
+                found.push((file, wrong, done));
+            }
+        }
+        if found.iter().any(|(_, wrong, done)| *wrong != Wrong::Open || done.is_err()) {
+            code = 1;
+        }
+        if let Some(said) = bridge_files::said(&found) {
+            say(&said);
+        }
+    }
+    // The Remote Script's own files against the package's (one cut short, or removed), where the package has them.
+    let Some(package) = package.filter(|package| Path::new(&join(package, "remote-script/AbletonMcpBridge")).is_dir()) else { return code };
+    if remote_script_unchanged(package, scripts) {
+        return code;
+    }
+    let differ = "The Remote Script's files in Live differ from the bridge's";
+    let (Some((state, secret)), Some(config)) = (owner, config) else {
+        say(&format!("{differ}, and Kumi can't put them back here: kumi report collects what's needed for a bug report."));
+        return 1;
+    };
+    if live_open(io, run.clone()).await {
+        say(&format!("{differ}. Quit Live, then run kumi bridge again to put them back."));
+        return 1;
+    }
+    let mut args: Vec<String> = [
+        "lifecycle",
+        "repair",
+        "--remote-scripts-dir",
+        scripts,
+        "--state-dir",
+        state,
+        "--package-root",
+        package,
+        "--config",
+        config,
+        "--secret",
+        secret,
+        "--apply",
+        "--confirm-live-stopped",
+    ]
+    .map(str::to_string)
+    .into();
+    if io.allow_dirty {
+        args.push("--allow-dirty-private-build".into());
+    }
+    match lifecycle_answer(run(join(package, &executable_name("ableton-mcp-server")), args, None).await) {
+        Ok(_) => {
+            say(&format!("{differ}: Kumi put them back. Open Live to start it."));
+            code
+        }
+        Err(why) => {
+            say(&format!("{differ}, and putting them back failed: {why}"));
+            1
+        }
+    }
+}
+
 pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     let say = |line: &str| io.out.write(&format!("{line}\n"));
     let run = io.run.clone().unwrap_or_else(default_run);
@@ -539,11 +637,14 @@ pub async fn setup_bridge(io: BridgeSetupIo) -> Result<i32, RuntimeError> {
     }
     if installed.as_ref().is_some_and(|s| s.native() && s.version.as_ref() == Some(&bundled)) {
         say(&format!("The Ableton bridge {bundled} is installed, the same as Kumi's."));
-        let mut roots: Vec<_> = installed.as_ref().and_then(|s| s.package_root()).into_iter().collect();
+        let package = installed.as_ref().and_then(|s| s.package_root());
+        let repaired =
+            put_back_current(&io, run.clone(), &scripts, package.as_deref(), config.as_deref(), owner_state(&state, &secret)).await;
+        let mut roots: Vec<_> = package.into_iter().collect();
         roots.push(bridge_dir);
         place_extension(&io, &roots, live_open(&io, run).await);
         place_ears(io.out.as_ref(), &scripts).await;
-        return Ok(0);
+        return Ok(repaired);
     }
     // An app rollback can leave a newer Kumi's bridge in Live: it serves this Kumi too, and the lifecycle never
     // updates to an older bridge. Its own rollback puts this Kumi's back when that's the generation it kept.

@@ -13,7 +13,7 @@ use kumi_daw::{
     check::{Bundled, Check, CheckStatus, Probe, Probes},
     io::Answers,
 };
-use kumi_daw_ableton::app::answers::{ExtensionHost, Hands, LiveRunning, Lives, NodeVersions, PortOwners};
+use kumi_daw_ableton::app::answers::{ExtensionHost, Hands, LiveRunning, Lives, NodeVersions, PortOwners, StartFailures};
 use kumi_daw_ableton::app::{
     doctor::{missing_bridge, older_bridge},
     folders::read_bridge_server,
@@ -195,6 +195,17 @@ async fn doctor_explains_live_bridge_and_terminal_in_plain_words() {
     let checks = doctor_checks(&io).await.unwrap();
     assert!(find(&checks, "couldn't reach Live").next.as_ref().unwrap().contains("answer it first"));
     assert!(!checks.iter().any(|c| c.text.contains("didn't start")));
+    // Chosen already, but Live couldn't start it (its log says why): that, never the Control Surface advice.
+    let why = "Live has AbletonMcpBridge as a Control Surface but couldn't start it: Loopback holds port 9765, which the bridge needs.";
+    let failing = io.answers.clone();
+    io.answers = io.answers.clone().with(StartFailures(Rc::new(move || async move { Some(why.to_string()) }.boxed_local())));
+    let fix = find(&doctor_checks(&io).await.unwrap(), "couldn't reach Live").next.clone().unwrap();
+    assert!(fix.starts_with(why) && !fix.contains("choose AbletonMcpBridge"), "{fix}");
+    probe(&mut io, Probe { started: true, connected: Some(false), ..Default::default() });
+    let fix = find(&doctor_checks(&io).await.unwrap(), "Live isn't connected").next.clone().unwrap();
+    assert_eq!(fix, why);
+    io.answers = failing;
+    probe(&mut io, Probe::default());
     // Live still runs the bridge it loaded before an update (the installed one is current): restart Live, never the
     // Control Surface advice.
     let said = format!("Kumi's bridge didn't start: {}", kumi_common::bridge::ANOTHER_BRIDGE);

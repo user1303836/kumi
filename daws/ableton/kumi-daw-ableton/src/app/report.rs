@@ -23,9 +23,14 @@ async fn find_live_logs(env: &Env, home: &str) -> Vec<String> {
     } else {
         join(home, "Library/Preferences/Ableton")
     };
+    logs_in(&root).await
+}
+/// Live's logs in its preferences folder `root` (one for each version it's been opened as), the newest first: the
+/// running Live writes the newest.
+pub(crate) async fn logs_in(root: &str) -> Vec<String> {
     let mut found = vec![];
-    for version in names(&root).await {
-        for file in [join(&root, &format!("{version}/Log.txt")), join(&root, &format!("{version}/Preferences/Log.txt"))] {
+    for version in names(root).await {
+        for file in [join(root, &format!("{version}/Log.txt")), join(root, &format!("{version}/Preferences/Log.txt"))] {
             if let Some(at) = modified(&file).await {
                 found.push((file, at))
             }
