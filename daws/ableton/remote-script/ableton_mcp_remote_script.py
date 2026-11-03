@@ -13,6 +13,7 @@ import hmac
 import io
 import json
 import secrets
+import select as _select
 import selectors
 import base64
 import re
@@ -13801,6 +13802,8 @@ class _MainThreadQueue:
     def drain(self, budget: int = MAX_QUEUE_ITEMS) -> int:
         count = 0
         while count < budget:
+            # (asked without raising: the timer finds it empty about 100 times a second)
+            if self.items.empty(): break
             try: callback, event, result, token, on_cancel = self.items.get_nowait()
             except queue.Empty: break
             if not token.claim():
@@ -14150,12 +14153,16 @@ class AbletonMcpBridge:
         mapper = getattr(self, "mapper", None)
         if mapper is not None: mapper.tick_deadline = deadline
         try:
-            self._accept_pending()
+            ready = self._ready_now(); fresh: list["_Connection"] = []
+            if ready is None or self._server in ready:
+                before = len(self._connections); self._accept_pending(); fresh = self._connections[before:]
             # Each tick starts with the next connection and serves every one at least one request,
             # so a client with slow reads queued can't hold the others past their deadlines.
             connections = list(self._connections); self._pump_turn += 1
             start = self._pump_turn % len(connections) if connections else 0
-            served = sum(self._service(connection, deadline) for connection in connections[start:] + connections[:start])
+            # (read: what the system says has bytes or an end, and one accepted just now)
+            served = sum(self._service(connection, deadline, ready is None or connection.socket in ready or connection in fresh)
+                         for connection in connections[start:] + connections[:start])
             while served and time.perf_counter() < deadline:
                 waiting = [connection for connection in self._connections if not connection.closing]
                 if not waiting: break
@@ -14179,6 +14186,14 @@ class AbletonMcpBridge:
         if wire is not None: return wire
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
 
+    def _ready_now(self) -> list[Any] | None:
+        """The sockets with something to read now (a connection waiting to be accepted, a client's bytes or its end),
+        from one select that doesn't wait. Live's timer pumps about 100 times a second, Kumi open or not, and an accept
+        or a recv with nothing there raises. None where select can't be asked (a descriptor past FD_SETSIZE, which a
+        Live with many files open can hand out): then each is tried, as before."""
+        try: return _select.select([self._server, *(connection.socket for connection in self._connections)], [], [], 0)[0]
+        except (OSError, ValueError): return None
+
     def _accept_pending(self) -> None:
         while len(self._connections) < MAX_BRIDGE_CONNECTIONS:
             try: client, _ = self._server.accept()
@@ -14196,8 +14211,9 @@ class AbletonMcpBridge:
                 client.close(); continue
             self._connections.append(connection); self._clients.add(client)
 
-    def _service(self, connection: "_Connection", deadline: float) -> int:
-        """Read, answer and send what a connection has: how many requests it answered."""
+    def _service(self, connection: "_Connection", deadline: float, readable: bool = True) -> int:
+        """Read, answer and send what a connection has: how many requests it answered. Not `readable` (select saw nothing
+        come), it isn't read; what it sent before is still answered, and its events and answers still go."""
         frames = 0
         try:
             subscription = connection.holder.get("subscription")
@@ -14207,7 +14223,7 @@ class AbletonMcpBridge:
                     frame: dict[str, Any] = {"version": PROTOCOL, "id": "event", "ok": True, "bridgeEpoch": connection.auth.bridge_epoch, "connectionChallenge": connection.auth.connection_challenge, "result": {"event": event}}
                     connection.outbound += connection.auth.signed_frame(frame)[1]
             inbound = connection.inbound
-            while not connection.closing:
+            while readable and not connection.closing:
                 # Before it says who it is, a connection gets no more than a first request's worth read (once
                 # it's signed in, the tick's lingering serves what it sent behind that request).
                 size = RECEIVE_CHUNK_BYTES
