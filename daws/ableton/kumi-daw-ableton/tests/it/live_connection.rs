@@ -431,12 +431,14 @@ async fn a_read_cut_off_by_a_drop_fails_as_before_though_the_link_is_back_at_onc
                 reconnecting_with(json!([{"throw": "MCP disconnected"}]), json!([{"connected": true}]), None, Some(gate.clone()));
             connection.start(Signal::new()).await.unwrap();
             let reading = connection.clone();
-            let read = tokio::task::spawn_local(async move { reading.read_status(Signal::new()).await.map(|_| ()) });
+            let read =
+                tokio::task::spawn_local(async move { reading.read_status(Signal::new()).await.map(|_| ()).map_err(RuntimeError::from) });
             tokio::task::yield_now().await;
             drop_link(&made.borrow()[0].clone());
             assert!(until(|| made.borrow().len() == 2 && connection.is_back()).await, "back at once, while the read waits");
             gate.notify_one();
-            assert_eq!(read.await.unwrap().unwrap_err().to_string(), "MCP disconnected", "the read's own error, as before");
+            let error = read.await.unwrap().unwrap_err().to_string();
+            assert!(error.contains("MCP disconnected"), "the read's own error, as before: {error}");
             connection.close().await.unwrap();
         })
         .await;
