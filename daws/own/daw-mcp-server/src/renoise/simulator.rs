@@ -1052,10 +1052,20 @@ impl RenoiseScript {
                 return Some(full_page(lines, &asked, state.keeps_bound).map(|page| retag(&page, VECTORS_EPOCH, epoch, None)));
             }
         }
-        // (a digest is asked as the vectors hold it, with values or without: the demo song fits one page, its lines always read)
+        // (a digest is asked as the vectors hold it, with values or without: the demo song fits one page, its lines always read;
+        // a pattern's body is answered as a tool from before `limit` and `around` meant anything for one answers it, with
+        // every track)
         let asked = match method {
             "digest" if asked.get("values") == Some(&Value::Bool(true)) => json!({"values": true}),
             "digest" => json!({}),
+            "focus_body" if asked["kind"] == "pattern" => {
+                let mut asked = asked;
+                if let Some(params) = asked.as_object_mut() {
+                    params.remove("limit");
+                    params.remove("around");
+                }
+                asked
+            }
             _ => asked,
         };
         if method == "read" {

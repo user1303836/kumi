@@ -535,6 +535,41 @@ test("reads: the pattern body is a window of lines around the cursor", function(
   H.no_dialogs()
 end)
 
+-- (A4-2) FOCUS draws the producer's track first, then the song's in order until its pane is full: Kumi asks for that many
+-- with `limit`, and every track it gets is the one the whole body has.
+test("reads: a pattern body with a limit reads the first tracks and the producer's past them, as the whole body has them", function()
+  local env, peer = setup()
+  fill_demo()
+  local E = epoch_of(peer)
+  local whole = call(peer, "focus_body", { kind = "pattern" }).result
+  eq(#whole.tracks, 7)
+  local function same(body, picked, why)
+    eq(#body.tracks, #picked, why)
+    for k, t in ipairs(picked) do eq(json.encode(body.tracks[k]), json.encode(whole.tracks[t]), why .. ": track " .. t) end
+    for _, key in ipairs({ "ref", "name", "lines", "from", "lpb", "cursor", "playing" }) do eq(body[key], whole[key], why .. ": " .. key) end
+    eq(body.window.from, whole.window.from, why)
+    eq(body.window.to, whole.window.to, why)
+    eq(body.truncated, whole.truncated, why)
+  end
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:4" }).result, { 1, 2, 4 }, "the producer's track past the first two")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 3, around = E .. ":track:2" }).result, { 1, 2, 3 }, "the producer's among the first")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 3 }).result, { 1, 2, 3 }, "no track of the producer's: the first")
+  -- A track past the limit named as the producer's comes too: FOCUS draws the first of that name.
+  mock.ops.rename_track(5, "Bass")
+  E = epoch_of(peer)
+  whole = call(peer, "focus_body", { kind = "pattern" }).result
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:4" }).result, { 1, 2, 4, 5 }, "a name past the limit")
+  -- What can't be kept exactly reads every track, as a Kumi that asks for no limit does.
+  local all = { 1, 2, 3, 4, 5, 6, 7 }
+  same(call(peer, "focus_body", { kind = "pattern" }).result, all, "no limit")
+  same(call(peer, "focus_body", { kind = "pattern", around = E .. ":track:4" }).result, all, "no limit, a track named")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 7, around = E .. ":track:4" }).result, all, "a limit of every track")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = "0:track:4" }).result, all, "a track of another epoch")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:40" }).result, all, "no such track")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":pattern:1" }).result, all, "not a track")
+  H.no_dialogs()
+end)
+
 test("reads: the matrix, phrase, instrument and dsp bodies", function()
   local env, peer = setup()
   fill_demo()
@@ -615,6 +650,51 @@ local function fill_cells(tracks, lines)
     end
   end
 end
+
+-- (A4-2) A song too dense for every track's lines to fit a page: the whole body cuts its window short, as it always did; a
+-- body of the tracks FOCUS can draw gets the window FOCUS asks for, each row as the whole body has it; and tracks too many for
+-- a page even then are still cut to it, marked truncated.
+test("reads: a pattern body of the tracks FOCUS draws keeps the page bound and gets a dense song's whole window", function()
+  local env, peer = setup(nil, heavy({ tracks = 12, lines = 128 }))
+  fill_cells(12, 40)
+  local E = epoch_of(peer)
+  local function same(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) ~= "table" then return a == b end
+    for k, v in pairs(a) do if not same(v, b[k]) then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+  end
+  local response, _, longest = call(peer, "focus_body", { kind = "pattern" })
+  local whole = response.result
+  ok(longest <= MAX_LINE, "the whole body is a page: " .. longest)
+  eq(whole.truncated, true, "every track's lines don't fit a page")
+  ok(whole.window.to < 33, "so its window is cut short: " .. whole.window.to)
+  response, _, longest = call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:5" })
+  local drawn = response.result
+  ok(longest <= MAX_LINE, "a page: " .. longest)
+  eq(drawn.truncated, nil, "the drawable tracks' lines fit")
+  eq(drawn.window.from, 1)
+  eq(drawn.window.to, 33, "the window FOCUS asks for")
+  eq(#drawn.tracks, 3)
+  for k, t in ipairs({ 1, 2, 5 }) do
+    local mine, theirs = drawn.tracks[k], whole.tracks[t]
+    eq(mine.ref, theirs.ref)
+    local shared = {}
+    for _, row in ipairs(mine.lines) do
+      if row.line <= whole.window.to then shared[#shared + 1] = row end
+    end
+    ok(same(shared, theirs.lines), "track " .. t .. ": the rows both windows hold are the same")
+    eq(#mine.lines, 40 < 33 and 40 or 33, "track " .. t .. ": a row for each filled line in the window")
+  end
+  -- Every track is one FOCUS might draw (a limit just under them all, the last one the producer's): cut to the page again.
+  response, _, longest = call(peer, "focus_body", { kind = "pattern", limit = 11, around = E .. ":track:12" })
+  ok(longest <= MAX_LINE, "still a page: " .. longest)
+  eq(#response.result.tracks, 12)
+  eq(response.result.truncated, true, "marked truncated")
+  eq(response.result.window.to, whole.window.to, "cut where the whole body is")
+  H.no_dialogs()
+end)
 
 test("reads: a page never goes over 256 KiB, and the pages together are every row", function()
   local env, peer = setup(nil, heavy({ tracks = 1, lines = 300 }))

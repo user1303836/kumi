@@ -291,6 +291,10 @@ pub enum BodyRequest {
     Tracker {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         item_ref: Option<String>,
+        /// The most tracks FOCUS can draw where it shows now (the producer's among them): a pattern is read for no more
+        /// (TRACKER_TRACKS when None).
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tracks: Option<usize>,
     },
     Matrix,
     Keyzones {
@@ -313,6 +317,20 @@ pub enum BodyRequest {
 }
 
 impl BodyRequest {
+    /// The most tracks this read is for, where it names a number (a tracker's).
+    pub fn tracks(&self) -> Option<usize> {
+        match self {
+            BodyRequest::Tracker { tracks, .. } => *tracks,
+            _ => None,
+        }
+    }
+    /// What the read is of, whatever number of tracks it is for: a body read for more tracks is one for fewer too.
+    pub fn view(&self) -> BodyRequest {
+        match self {
+            BodyRequest::Tracker { item_ref, .. } => BodyRequest::Tracker { item_ref: item_ref.clone(), tracks: None },
+            other => other.clone(),
+        }
+    }
     pub fn kind(&self) -> BodyKind {
         match self {
             BodyRequest::Tree { .. } => BodyKind::Tree,
@@ -549,6 +567,17 @@ pub struct TimelineItem {
     /// Its lane doesn't play (REAPER's comping: another lane plays instead).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub silent: bool,
+}
+
+/// The most tracks a tracker body is read for: the first this many, and the producer's past them. FOCUS draws the
+/// producer's track, then the others in order while they fit: at its widest (the drawer, 95 columns) 22 more of the
+/// narrowest (3 columns and a gap, after a 4-column line number). A big song's other tracks would never be drawn.
+pub const TRACKER_TRACKS: usize = 24;
+
+/// How many tracks FOCUS's tracker draws at most in `width` columns: the producer's, then the others while they fit, each
+/// at least 3 columns and a gap, after a 4-column line number (`draw_tracker`); and one more, to spare.
+pub fn tracker_tracks(width: i32) -> usize {
+    ((width - 7).max(0) / 4 + 2).min(TRACKER_TRACKS as i32) as usize
 }
 
 /// A tracker pattern (or phrase) around its cursor, as FOCUS draws it: each track's lines in the DAW's own notation.

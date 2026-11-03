@@ -165,6 +165,7 @@ impl TuiApp {
                     // (a DAW's own body is read anew once it's back)
                     state.own.key = None;
                     state.own.body = None;
+                    state.own.tracks = None;
                 }
             }
             SessionEvent::Observation { label, name } => {

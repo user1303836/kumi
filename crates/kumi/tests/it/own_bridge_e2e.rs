@@ -193,13 +193,15 @@ async fn renoises_integration_reads_what_kumis_host_answers_from_the_tool() {
             assert_eq!((focus.editor_view.as_ref(), focus.panes.as_ref(), focus.section_follows), (None, None, None), "neither pane open");
 
             // The pattern FOCUS asks for is the focus's own, by its ref.
-            let pattern = BodyRequest::Tracker { item_ref: focus.item.as_ref().and_then(|item| item.item_ref.clone()) };
+            let pattern = BodyRequest::Tracker { item_ref: focus.item.as_ref().and_then(|item| item.item_ref.clone()), tracks: None };
             let Some(FocusBody::Tracker(grid)) = renoise.focus_body(&pattern, Signal::new()).await.unwrap() else { panic!("the pattern") };
             let asked = script.asked();
             assert_eq!(
                 asked.iter().rev().find(|(method, _)| method == "focus_body").unwrap().1,
-                // (No layout: a pattern isn't on a track, so no track shift moves it.)
-                json!({"kind": "pattern", "ref": "1:pattern:1"})
+                // (No layout: a pattern isn't on a track, so no track shift moves it. The tracks FOCUS can draw and the
+                // producer's: this scripted tool, like one from before them, takes neither and sends every track, which
+                // FOCUS draws as before.)
+                json!({"kind": "pattern", "ref": "1:pattern:1", "limit": 24, "around": "1:track:1"})
             );
             assert_eq!((grid.lines, grid.from, grid.cursor), (32, 0, Some(0)));
             let kick = &grid.tracks[0];
