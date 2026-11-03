@@ -194,6 +194,9 @@ pub trait Kernel {
     fn set_profile(&self, profile: DawProfile) {
         let _ = profile;
     }
+    /// The producer began a message: the connection the next request will go on is readied meanwhile, with this
+    /// conversation's identity (ChatGPT's WebSocket). Nothing is sent, said or kept.
+    async fn warm(&self) {}
 }
 
 #[derive(Clone)]

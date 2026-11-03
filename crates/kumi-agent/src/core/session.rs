@@ -3582,6 +3582,24 @@ impl Session {
     pub fn model_controls(&self) -> Option<Rc<dyn kumi_ai::control::ModelController>> {
         self.0.options.models.clone()
     }
+    /// The producer began a message: the model controls ready its model (`ModelController::warm`), and the conversation's
+    /// kernel, once there is one, readies the connection its next request goes on (`Kernel::warm`). Nothing is said.
+    pub async fn warm(&self) {
+        let (models, kernel) = (self.model_controls(), self.0.state.borrow().kernel.as_ref().map(|held| held.value.clone()));
+        // Together: the kernel's connection needn't wait on the model controls' own.
+        futures::join!(
+            async {
+                if let Some(models) = models {
+                    models.warm().await;
+                }
+            },
+            async {
+                if let Some(kernel) = kernel {
+                    kernel.warm().await;
+                }
+            }
+        );
+    }
     pub fn open_set(&self) -> Option<String> {
         self.0.state.borrow().integration.as_ref().and_then(|integration| integration.open_set())
     }

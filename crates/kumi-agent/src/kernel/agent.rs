@@ -603,6 +603,21 @@ impl Kernel for AgentKernel {
     async fn run(&self, input: &str, signal: Signal, emit: KernelEmit) -> Result<TurnResult, RuntimeError> {
         AgentKernel::run(self, input, signal, emit).await
     }
+    async fn warm(&self) {
+        let inner = &self.inner;
+        if inner.running.borrow().is_some() || inner.closing.borrow().is_some() {
+            return;
+        }
+        // A request's headers as the binding shapes them (its conversation's session among them), with nothing in it.
+        let binding = inner.binding();
+        let request = (binding.prepare)(ModelRequest {
+            instructions: String::new(),
+            messages: Vec::new(),
+            tools: Vec::new(),
+            session_id: inner.session_id.clone(),
+        });
+        binding.model.warm(request).await
+    }
     async fn run_with(&self, input: &str, pictures: Vec<Picture>, signal: Signal, emit: KernelEmit) -> Result<TurnResult, RuntimeError> {
         AgentKernel::run_with(self, input, pictures, signal, emit).await
     }

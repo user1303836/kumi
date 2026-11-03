@@ -99,6 +99,9 @@ impl LanguageModel for Watched {
             other => other,
         }
     }
+    async fn warm(&self, call: CallOptions) {
+        self.model.warm(call).await
+    }
 }
 /// What a failed call says: the provider's answer, as far as Kumi read it.
 fn said(error: &LanguageModelError) -> String {
