@@ -8,9 +8,11 @@ use std::{
 };
 
 struct Table {
-    cos: Vec<f64>,
-    sin: Vec<f64>,
     reverse: Vec<usize>,
+    /// Each stage's twiddles in the order its butterflies take them (the stage of blocks `2 << stage` long): the same
+    /// values the one table of `size / 2` cosines and sines holds, read every `size / length` apart, laid out in a row so
+    /// the butterflies run over slices, not strided reads.
+    stages: Vec<(Vec<f64>, Vec<f64>)>,
 }
 static TABLES: LazyLock<Mutex<HashMap<usize, Arc<Table>>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 fn table(size: usize) -> Arc<Table> {
@@ -20,11 +22,15 @@ fn table(size: usize) -> Arc<Table> {
         .or_insert_with(|| {
             assert!(size >= 2 && size.is_power_of_two(), "FFT size must be a power of two");
             let bits = size.ilog2();
-            Arc::new(Table {
-                cos: (0..size / 2).map(|i| (-2.0 * PI * i as f64 / size as f64).cos()).collect(),
-                sin: (0..size / 2).map(|i| (-2.0 * PI * i as f64 / size as f64).sin()).collect(),
-                reverse: (0..size).map(|i| i.reverse_bits() >> (usize::BITS - bits)).collect(),
-            })
+            let cos: Vec<f64> = (0..size / 2).map(|i| (-2.0 * PI * i as f64 / size as f64).cos()).collect();
+            let sin: Vec<f64> = (0..size / 2).map(|i| (-2.0 * PI * i as f64 / size as f64).sin()).collect();
+            let stages = (1..=bits)
+                .map(|stage| {
+                    let (half, stride) = (1 << (stage - 1), size >> stage);
+                    ((0..half).map(|offset| cos[offset * stride]).collect(), (0..half).map(|offset| sin[offset * stride]).collect())
+                })
+                .collect();
+            Arc::new(Table { reverse: (0..size).map(|i| i.reverse_bits() >> (usize::BITS - bits)).collect(), stages })
         })
         .clone()
 }
@@ -39,25 +45,21 @@ pub fn fft(re: &mut [f64], im: &mut [f64]) {
             im.swap(index, other);
         }
     }
-    let mut length = 2;
-    while length <= size {
-        let half = length / 2;
-        let stride = size / length;
-        for start in (0..size).step_by(length) {
-            for offset in 0..half {
-                let wr = table.cos[offset * stride];
-                let wi = table.sin[offset * stride];
-                let a = start + offset;
-                let b = a + half;
-                let tr = re[b] * wr - im[b] * wi;
-                let ti = re[b] * wi + im[b] * wr;
-                re[b] = re[a] - tr;
-                im[b] = im[a] - ti;
-                re[a] += tr;
-                im[a] += ti;
+    // Each stage's butterflies, block by block: the first half of a block against its second, with the same arithmetic
+    // in the same order for each pair as ever (no fused multiply-add), so every value comes out the same, bit for bit.
+    for (stage, (cos, sin)) in table.stages.iter().enumerate() {
+        let (length, half) = (2 << stage, 1 << stage);
+        for (re, im) in re.chunks_exact_mut(length).zip(im.chunks_exact_mut(length)) {
+            let ((re_a, re_b), (im_a, im_b)) = (re.split_at_mut(half), im.split_at_mut(half));
+            for (((((re_a, re_b), im_a), im_b), wr), wi) in re_a.iter_mut().zip(re_b).zip(im_a).zip(im_b).zip(cos).zip(sin) {
+                let tr = *re_b * wr - *im_b * wi;
+                let ti = *re_b * wi + *im_b * wr;
+                *re_b = *re_a - tr;
+                *im_b = *im_a - ti;
+                *re_a += tr;
+                *im_a += ti;
             }
         }
-        length *= 2;
     }
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Default)]
@@ -361,4 +363,65 @@ pub fn percentile(values: &[f64], p: f64) -> f64 {
 }
 pub fn clock(seconds: f64) -> String {
     format!("{}:{:02}", (seconds / 60.0).floor() as i64, (seconds % 60.0).floor() as i64)
+}
+
+#[cfg(test)]
+mod fft_tests {
+    use super::*;
+
+    /// The FFT as it was, its twiddles read from one table at a stride: what `fft` must give, bit for bit.
+    fn fft_as_it_was(re: &mut [f64], im: &mut [f64]) {
+        let size = re.len();
+        let cos: Vec<f64> = (0..size / 2).map(|i| (-2.0 * PI * i as f64 / size as f64).cos()).collect();
+        let sin: Vec<f64> = (0..size / 2).map(|i| (-2.0 * PI * i as f64 / size as f64).sin()).collect();
+        let bits = size.ilog2();
+        for index in 0..size {
+            let other = index.reverse_bits() >> (usize::BITS - bits);
+            if other > index {
+                re.swap(index, other);
+                im.swap(index, other);
+            }
+        }
+        let mut length = 2;
+        while length <= size {
+            let (half, stride) = (length / 2, size / length);
+            for start in (0..size).step_by(length) {
+                for offset in 0..half {
+                    let (wr, wi) = (cos[offset * stride], sin[offset * stride]);
+                    let (a, b) = (start + offset, start + offset + half);
+                    let tr = re[b] * wr - im[b] * wi;
+                    let ti = re[b] * wi + im[b] * wr;
+                    re[b] = re[a] - tr;
+                    im[b] = im[a] - ti;
+                    re[a] += tr;
+                    im[a] += ti;
+                }
+            }
+            length *= 2;
+        }
+    }
+
+    /// Every size from 2 to 65,536, on signals real and complex, loud and quiet, gives what the FFT gave before, bit for
+    /// bit: the library's measured numbers stay the same.
+    #[test]
+    fn the_fft_gives_what_it_gave_before_bit_for_bit() {
+        let mut seed = 5_u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            ((seed >> 11) as f64 / (1u64 << 53) as f64) * 2.0 - 1.0
+        };
+        for bits in 1..=16 {
+            let size = 1usize << bits;
+            for (scale, complex) in [(1.0, false), (1e-6, false), (3.0e4, true)] {
+                let re: Vec<f64> = (0..size).map(|_| next() * scale).collect();
+                let im: Vec<f64> = (0..size).map(|_| if complex { next() * scale } else { 0.0 }).collect();
+                let (mut new_re, mut new_im, mut old_re, mut old_im) = (re.clone(), im.clone(), re, im);
+                fft(&mut new_re, &mut new_im);
+                fft_as_it_was(&mut old_re, &mut old_im);
+                let bits_of = |values: &[f64]| values.iter().map(|value| value.to_bits()).collect::<Vec<_>>();
+                assert_eq!(bits_of(&new_re), bits_of(&old_re), "size {size}, scale {scale}");
+                assert_eq!(bits_of(&new_im), bits_of(&old_im), "size {size}, scale {scale}");
+            }
+        }
+    }
 }
