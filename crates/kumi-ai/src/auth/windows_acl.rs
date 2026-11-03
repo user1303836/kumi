@@ -65,17 +65,11 @@ unsafe extern "system" {
     fn GetLengthSid(sid: Sid) -> u32;
     fn InitializeAcl(acl: Acl, length: u32, revision: u32) -> i32;
     fn AddAccessAllowedAceEx(acl: Acl, revision: u32, flags: u32, mask: u32, sid: Sid) -> i32;
-    #[cfg(test)]
     fn AddAccessDeniedAceEx(acl: Acl, revision: u32, flags: u32, mask: u32, sid: Sid) -> i32;
-    #[cfg(test)]
     fn ConvertStringSidToSidW(text: *const u16, sid: *mut Sid) -> i32;
-    #[cfg(test)]
     fn InitializeSecurityDescriptor(descriptor: *mut c_void, revision: u32) -> i32;
-    #[cfg(test)]
     fn SetSecurityDescriptorDacl(descriptor: *mut c_void, present: i32, dacl: Acl, defaulted: i32) -> i32;
-    #[cfg(test)]
     fn SetSecurityDescriptorControl(descriptor: *mut c_void, mask: u16, bits: u16) -> i32;
-    #[cfg(test)]
     fn SetFileSecurityW(name: *const u16, information: u32, descriptor: *mut c_void) -> i32;
 }
 
@@ -85,7 +79,6 @@ const SE_FILE_OBJECT: u32 = 1;
 const OWNER_SECURITY_INFORMATION: u32 = 0x1;
 const DACL_SECURITY_INFORMATION: u32 = 0x4;
 const PROTECTED_DACL_SECURITY_INFORMATION: u32 = 0x8000_0000;
-#[cfg(test)]
 const UNPROTECTED_DACL_SECURITY_INFORMATION: u32 = 0x2000_0000;
 const SE_DACL_PROTECTED: u16 = 0x1000;
 const ACL_SIZE_INFORMATION: u32 = 2;
@@ -220,6 +213,10 @@ unsafe fn shaped(account: Sid, owner: Sid, dacl: Acl, descriptor: *mut c_void) -
 /// then this account as its owner where it isn't. Then it's checked. Err when a step fails, and PowerShell's own step
 /// runs instead.
 pub fn make_kumis_shape(path: &Path) -> Result<(), String> {
+    // Nothing is written where the check would leave the verdict to PowerShell anyway (a share, a link on the way).
+    if !plain_local(path) {
+        return Err("it isn't on this computer's own disk by a plain path".into());
+    }
     let account = Account::current().ok_or("this account couldn't be read")?;
     let sid = account.sid();
     let name = wide(path);
@@ -237,7 +234,7 @@ pub fn make_kumis_shape(path: &Path) -> Result<(), String> {
         if set != 0 {
             return Err(format!("Windows didn't take the owner-only rule (error {set})"));
         }
-        if !is_kumis_shape(path) {
+        if !owned_by(&name, sid) {
             let set =
                 SetNamedSecurityInfoW(name.as_ptr(), SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION, sid, null_mut(), null_mut(), null_mut());
             if set != 0 {
@@ -248,9 +245,34 @@ pub fn make_kumis_shape(path: &Path) -> Result<(), String> {
     is_kumis_shape(path).then_some(()).ok_or_else(|| "the owner-only rule didn't take".into())
 }
 
-/// Shapes for the tests, written raw: each ACE an allow or a deny, with its flags, its mask and whose it is.
-#[cfg(test)]
-pub(super) mod shapes {
+/// Whether the file at `name` (NUL-terminated) is owned by `account`.
+fn owned_by(name: &[u16], account: Sid) -> bool {
+    let (mut owner, mut descriptor) = (null_mut(), null_mut());
+    // SAFETY: on success the descriptor is Windows' own allocation, which the owner points into, read before it's freed.
+    unsafe {
+        let read = GetNamedSecurityInfoW(
+            name.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            null_mut(),
+            null_mut(),
+            &mut descriptor,
+        );
+        if read != 0 {
+            return false;
+        }
+        let owned = !owner.is_null() && EqualSid(owner, account) != 0;
+        LocalFree(descriptor);
+        owned
+    }
+}
+
+/// Shapes for kumi-ai's tests (tests/it/auth.rs), written raw: each ACE an allow or a deny, with its flags, its mask and
+/// whose it is. Not for Kumi itself.
+#[doc(hidden)]
+pub mod shapes {
     use super::*;
 
     pub enum Whose {

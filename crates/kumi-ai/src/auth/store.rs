@@ -83,7 +83,9 @@ fn auth(message: impl Into<String>) -> RuntimeError {
 
 // On Windows the credential file is made owner-only as the bridge makes its own files: a protected DACL whose one rule
 // gives the current user full control, then checked. These are the twins of the bridge's lifecycle/delivery/acl.rs's WINDOWS_ACL_TARGET,
-// WINDOWS_ACL_CHECKS and SECURE_FILE (in ableton-mcp-server): keep them in step. KUMI_HOME or KUMI_AUTH_FILE can put
+// WINDOWS_ACL_CHECKS and SECURE_FILE (in ableton-mcp-server): keep them in step. windows_acl.rs reads and writes the
+// one shape SECURE_FILE makes with Windows' own calls, and passes it without these: a check made stricter here must be
+// made stricter there too, or the fast path goes on saying yes. KUMI_HOME or KUMI_AUTH_FILE can put
 // auth.json where other accounts read (D:\kumi), and login says it's owner-only.
 const ACL_TARGET: &str = "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:KUMI_ACL_PATH));$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;";
 const ACL_CHECKS: &str = "$c=[System.IO.File]::GetAccessControl($p);if ($c.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 2 }if (-not $c.AreAccessRulesProtected) { exit 3 }$rules=@($c.Access); if ($rules.Count -ne 1) { exit 4 }$rule=$rules[0];if ($rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 5 }if ($rule.IsInherited) { exit 6 }if ($rule.AccessControlType.ToString() -ne 'Allow') { exit 7 }if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { exit 8 }exit 0";
@@ -462,142 +464,45 @@ pub fn valid_api_key(value: &str) -> bool {
     (8..=4096).contains(&value.len()) && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
 }
 
-/// Windows' own reading of Kumi's shape against the PowerShell check, on the shapes a DACL can take: whatever the fast
-/// path calls owner-only, the check passes, and the files Kumi makes take the fast path.
-#[cfg(all(test, windows))]
-mod windows_acl_tests {
-    use super::super::windows_acl::{
-        is_kumis_shape, make_kumis_shape,
-        shapes::{own, own_mine, write, write_raw, Ace, Whose, FULL, INHERITABLE, INHERITED, INHERIT_ONLY},
-    };
-    use super::{run_acl, ACL_CHECKS, ACL_TARGET, SECURE_FILE};
+/// The PowerShell check and step, for kumi-ai's tests (tests/it/auth.rs): the Windows fast path is held to them. Not for
+/// Kumi itself.
+#[cfg(windows)]
+#[doc(hidden)]
+pub mod powershell {
+    use super::{acl_reason, run_acl, ACL_CHECKS, ACL_TARGET, SECURE_FILE};
     use std::path::Path;
 
-    const EVERYONE: &str = "S-1-1-0";
-    const ADMINISTRATORS: &str = "S-1-5-32-544";
-    const READ: u32 = 0x0012_0089;
-    const WRITE: u32 = 0x0012_0116;
-    const GENERIC_ALL: u32 = 0x1000_0000;
-
-    fn allow(flags: u32, mask: u32, whose: Whose) -> Ace {
-        Ace { allow: true, flags, mask, whose }
-    }
-    /// The PowerShell check's exit code: 0 owner-only, 2-8 why not (store.rs's acl_reason).
-    fn checked(path: &Path) -> i32 {
+    /// The check on one file, as `windows_owner_only` runs it when the fast path doesn't say: its exit code, 0 owner-only,
+    /// 2-8 why not (`acl_reason`), 1 anything else.
+    pub fn check(path: &Path) -> i32 {
         match run_acl(path, &format!("{ACL_TARGET}{ACL_CHECKS}"), 60_000) {
             Ok(()) => 0,
-            Err(why) => (2..=8).find(|code| super::acl_reason(*code) == Some(why.as_str())).unwrap_or(1),
+            Err(why) => (2..=8).find(|code| acl_reason(*code) == Some(why.as_str())).unwrap_or(1),
         }
     }
 
-    #[test]
-    fn the_fast_path_says_owner_only_only_where_the_powershell_check_does() {
-        let folder = tempfile::tempdir().unwrap();
-        // A folder that hands nothing down, so an unprotected DACL holds only what's written on it.
-        write(folder.path(), Some(&[allow(0, FULL, Whose::Me)]), true);
-        let made = |name: &str| {
-            let path = folder.path().join(name);
-            std::fs::write(&path, "{}").unwrap();
-            own_mine(&path);
-            path
-        };
-        let in_temp = tempfile::NamedTempFile::new().unwrap();
-        let mut shapes: Vec<(&str, std::path::PathBuf, Option<i32>)> = vec![("a new file in TEMP", in_temp.path().to_path_buf(), None)];
-        let natively = made("natively.json");
-        make_kumis_shape(&natively).unwrap();
-        shapes.push(("made natively", natively, Some(0)));
-        let scripted = made("scripted.json");
-        run_acl(&scripted, &format!("$ErrorActionPreference='Stop';{ACL_TARGET}{SECURE_FILE}{ACL_CHECKS}"), 60_000).unwrap();
-        shapes.push(("made by SECURE_FILE", scripted, Some(0)));
-        let cases: Vec<(&str, Option<Vec<Ace>>, bool, Option<i32>)> = vec![
-            ("Kumi's shape, written raw", Some(vec![allow(0, FULL, Whose::Me)]), true, Some(0)),
-            ("a second rule, for everyone", Some(vec![allow(0, FULL, Whose::Me), allow(0, READ, Whose::Sid(EVERYONE))]), true, Some(4)),
-            (
-                "two rules for you that add up to full control",
-                Some(vec![allow(0, READ, Whose::Me), allow(0, FULL & !READ, Whose::Me)]),
-                true,
-                None,
-            ),
-            // Windows may make a protected DACL's ACEs explicit as it writes them, Kumi's shape then: the check decides.
-            ("its one rule inherited", Some(vec![allow(INHERITED, FULL, Whose::Me)]), true, None),
-            ("its one rule inheritable", Some(vec![allow(INHERITABLE, FULL, Whose::Me)]), true, None),
-            ("its one rule inherit-only", Some(vec![allow(INHERITABLE | INHERIT_ONLY, FULL, Whose::Me)]), true, None),
-            ("generic rights in place of full control", Some(vec![allow(0, GENERIC_ALL, Whose::Me)]), true, None),
-            ("full control and generic rights besides", Some(vec![allow(0, FULL | GENERIC_ALL, Whose::Me)]), true, None),
-            ("read and write, not full control", Some(vec![allow(0, READ | WRITE, Whose::Me)]), true, Some(8)),
-            ("a deny rule", Some(vec![Ace { allow: false, flags: 0, mask: FULL, whose: Whose::Me }]), true, Some(7)),
-            ("a rule for everyone alone", Some(vec![allow(0, FULL, Whose::Sid(EVERYONE))]), true, Some(5)),
-            ("not protected", Some(vec![allow(0, FULL, Whose::Me)]), false, Some(3)),
-            ("an empty DACL", Some(vec![]), true, Some(4)),
-            ("a null DACL", None, true, None),
-        ];
-        for (n, (name, aces, protected, expected)) in cases.into_iter().enumerate() {
-            let path = made(&format!("case-{n}.json"));
-            write(&path, aces.as_deref(), protected);
-            shapes.push((name, path, expected));
-        }
-        // Written whole, flags kept: an inherited ACE in a protected DACL, and an inherit-only one.
-        for (name, flags, expected) in [
-            ("its one rule marked inherited, written raw", INHERITED, Some(6)),
-            ("its one rule inherit-only, written raw", INHERITABLE | INHERIT_ONLY, None),
-        ] {
-            let path = made(&format!("{}.json", name.replace([' ', ','], "-")));
-            write_raw(&path, &[allow(flags, FULL, Whose::Me)]);
-            shapes.push((name, path, expected));
-        }
-        // Owned by Administrators, where this account may hand it over (an elevated one can).
-        let handed = made("handed-over.json");
-        write(&handed, Some(&[allow(0, FULL, Whose::Me)]), true);
-        if own(&handed, ADMINISTRATORS) {
-            shapes.push(("owned by Administrators", handed, Some(2)));
-        } else {
-            // CI's runners are elevated, so there the case always runs.
-            assert!(std::env::var_os("CI").is_none(), "this account couldn't hand the file to Administrators");
-            println!("skipped: owned by Administrators (this account may not hand a file over)");
-        }
-        // Every row first, so a failure shows the whole matrix.
-        let rows: Vec<_> = shapes.iter().map(|(name, path, expected)| (*name, is_kumis_shape(path), checked(path), *expected)).collect();
-        let said = rows
-            .iter()
-            .map(|(name, fast, check, _)| format!("{name}: fast path {fast}, PowerShell check {check}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        println!("{said}");
-        for (name, fast, check, expected) in &rows {
-            assert!(!fast || *check == 0, "{name}: the fast path passed what the check refuses\n{said}");
-            if let Some(expected) = expected {
-                assert_eq!(check, expected, "{name}: the shape isn't what it says\n{said}");
-                assert_eq!(*fast, *expected == 0, "{name}: Kumi's own shape takes the fast path, and only it\n{said}");
-            }
-        }
+    /// The same check on many files in one PowerShell, its `exit`s made a function's `return`s: one code per file, as
+    /// `check` gives it.
+    pub fn checks(paths: &[&Path]) -> Vec<i32> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let function = ACL_CHECKS.replace("exit ", "return ");
+        let script = format!(
+            "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;function Check($p) {{ {function} }};foreach ($p in ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:KUMI_ACL_PATHS)) -split \"`n\")) {{ Check $p }}"
+        );
+        let joined = paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join("\n");
+        let mut command =
+            std::process::Command::new(kumi_types::system::system_program_default(kumi_types::system::SystemProgram::Powershell));
+        command
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
+            .env("KUMI_ACL_PATHS", STANDARD.encode(joined.as_bytes()))
+            .env_remove("PSModulePath")
+            .stdin(std::process::Stdio::null());
+        let said = command.output().expect("PowerShell starts");
+        String::from_utf8_lossy(&said.stdout).lines().filter_map(|line| line.trim().parse().ok()).collect()
     }
 
-    #[test]
-    fn the_fast_path_leaves_shares_and_links_to_the_powershell_check() {
-        let folder = tempfile::tempdir().unwrap();
-        let file = folder.path().join("auth.json");
-        std::fs::write(&file, "{}").unwrap();
-        make_kumis_shape(&file).unwrap();
-        assert!(is_kumis_shape(&file), "the file itself takes the fast path");
-        // The same file as a share names it (its drive's administrative share), and by a verbatim UNC path.
-        let local = file.display().to_string();
-        let (letter, rest) = local.split_once(":\\").unwrap();
-        for shared in [format!(r"\\localhost\{letter}$\{rest}"), format!(r"\\?\UNC\localhost\{letter}$\{rest}")] {
-            assert!(!is_kumis_shape(Path::new(&shared)), "{shared}");
-        }
-        // Through a junction to its folder, which needs no privilege to make.
-        let parent = tempfile::tempdir().unwrap();
-        let junction = parent.path().join("through");
-        let made = std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&junction).arg(folder.path()).output().unwrap();
-        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stdout));
-        let linked = junction.join("auth.json");
-        assert!(linked.is_file());
-        assert!(!is_kumis_shape(&linked), "{}", linked.display());
-        // A link to the file itself, where this account may make one.
-        let link = parent.path().join("link.json");
-        if std::os::windows::fs::symlink_file(&file, &link).is_ok() {
-            assert!(!is_kumis_shape(&link), "{}", link.display());
-        }
-        let _ = std::fs::remove_dir(&junction);
+    /// PowerShell's own step of `make_owner_only`: SECURE_FILE, then the check.
+    pub fn secure(path: &Path) -> Result<(), String> {
+        run_acl(path, &format!("$ErrorActionPreference='Stop';{ACL_TARGET}{SECURE_FILE}{ACL_CHECKS}"), 60_000)
     }
 }
