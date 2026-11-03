@@ -434,13 +434,19 @@ impl BridgeRollback {
 /// is, byte for byte, in the installed one (`<scripts>/AbletonMcpBridge`). Files the install adds
 /// (manifest, bridge reference) don't count: Live runs what it loaded, which these files are.
 pub fn remote_script_unchanged(package: &str, scripts: &str) -> bool {
-    fn same(source: &Path, installed: &Path) -> bool {
+    fn same(source: &Path, installed: &Path, top: bool) -> bool {
         let Ok(entries) = fs::read_dir(source) else { return false };
         let mut any = false;
         for entry in entries.flatten() {
+            // The manifest lists the files beside it with their hashes, and they're compared themselves. Its copies
+            // differ in their line ends on Windows (the release's build writes the package's as text, the lifecycle the
+            // installed one with \n), so comparing it would find every Windows install changed.
+            if top && entry.file_name() == "manifest.json" {
+                continue;
+            }
             let (from, to) = (entry.path(), installed.join(entry.file_name()));
             let matches = match entry.file_type() {
-                Ok(kind) if kind.is_dir() => same(&from, &to),
+                Ok(kind) if kind.is_dir() => same(&from, &to, false),
                 Ok(kind) if kind.is_file() => {
                     fs::read(&from).ok().is_some_and(|ours| fs::read(&to).ok().is_some_and(|theirs| ours == theirs))
                 }
@@ -453,7 +459,7 @@ pub fn remote_script_unchanged(package: &str, scripts: &str) -> bool {
         }
         any
     }
-    same(&Path::new(package).join("remote-script/AbletonMcpBridge"), &Path::new(scripts).join("AbletonMcpBridge"))
+    same(&Path::new(package).join("remote-script/AbletonMcpBridge"), &Path::new(scripts).join("AbletonMcpBridge"), true)
 }
 /// A bridge folder made for an install that hasn't finished: removed when the install stops early.
 struct Unfinished(Option<String>);

@@ -675,6 +675,28 @@ async fn a_current_bridge_whose_remote_script_differs_from_its_package_is_put_ba
         .borrow()
         .contains("The Remote Script's files in Live differ from the bridge's: Kumi put them back. Open Live to start it."));
 }
+/// On Windows the package's `manifest.json` ends in `\r\n` (the release's build writes it as text) and the installed one in
+/// `\n` (the lifecycle writes it). Only that differing, a current bridge is left as it is, Live open or closed.
+#[tokio::test(flavor = "current_thread")]
+async fn a_current_bridge_whose_manifest_differs_only_in_its_line_ends_is_left_alone() {
+    let w = World::new(Some("1.0.34"));
+    let (package, live) = (w.root.path().join("installed/remote-script/AbletonMcpBridge"), w.scripts.join("AbletonMcpBridge"));
+    fs::create_dir_all(&package).unwrap();
+    for folder in [&package, &live] {
+        fs::write(folder.join("ableton_mcp_remote_script.py"), "the whole bridge\n").unwrap();
+    }
+    fs::write(package.join("manifest.json"), "{\"package\":\"AbletonMcpBridge\"}\r\n").unwrap();
+    fs::write(live.join("manifest.json"), "{\"package\":\"AbletonMcpBridge\"}\n").unwrap();
+    for live_open in [true, false] {
+        let mut io = w.io();
+        io.live_running = Some(Rc::new(move || async move { live_open }.boxed_local()));
+        assert_eq!(setup_bridge(io).await.unwrap(), 0, "Live open: {live_open}");
+    }
+    let said = w.out.0.borrow().clone();
+    assert_eq!(said.matches("The Ableton bridge 1.0.34 is installed, the same as Kumi's.").count(), 2, "{said}");
+    assert!(!said.contains("differ"), "{said}");
+    assert!(w.calls.borrow().is_empty(), "nothing for the lifecycle: {:?}", w.calls.borrow());
+}
 /// After an app rollback: a newer Kumi's bridge (1.0.35) in Live and its extension, with a receipt keeping `kept` (a
 /// bridge's version) to go back to, installed from this Kumi's bundled artifact or, when `ours` is false, another.
 fn after_an_app_rollback(kept: Option<&str>, ours: bool) -> World {
