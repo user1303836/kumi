@@ -462,6 +462,39 @@ mod windows_acl_shapes {
     const WRITE: u32 = 0x0012_0116;
     const GENERIC_ALL: u32 = 0x1000_0000;
 
+    /// The Remote Script's own OwnerOnly (AbletonMcpBridge/__init__.py), on each path in one PowerShell: true where it
+    /// says owner-only.
+    fn remote_script_verdicts(paths: &[&Path]) -> Vec<bool> {
+        let source = include_str!("../../../remote-script/AbletonMcpBridge/__init__.py");
+        let start = source.find("\"function OwnerOnly($p) {\"").expect("the Remote Script's OwnerOnly");
+        let end = start + source[start..].find("\"return $true };\"").expect("its end") + "\"return $true };\"".len();
+        // Its Python string literals, joined.
+        let function: String = source[start..end]
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                line.strip_prefix('"').and_then(|line| line.strip_suffix('"'))
+            })
+            .collect();
+        let joined = paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join("\n");
+        let script = format!(
+            "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;{function}foreach ($p in ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:A5_PATHS)) -split \"`n\")) {{ $ok=$false; try {{ $ok=(OwnerOnly $p) -eq $true }} catch {{ $ok=$false }}; if ($ok) {{ 'yes' }} else {{ 'no' }} }}"
+        );
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let powershell = format!("{}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", std::env::var("SystemRoot").unwrap());
+        let said = std::process::Command::new(powershell)
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
+            .env("A5_PATHS", STANDARD.encode(joined.as_bytes()))
+            .env_remove("PSModulePath")
+            .output()
+            .expect("PowerShell starts");
+        String::from_utf8_lossy(&said.stdout)
+            .lines()
+            .filter(|line| matches!(line.trim(), "yes" | "no"))
+            .map(|line| line.trim() == "yes")
+            .collect()
+    }
+
     fn allow(flags: u32, mask: u32, whose: Whose) -> Ace {
         Ace { allow: true, flags, mask, whose }
     }
@@ -522,6 +555,18 @@ mod windows_acl_shapes {
             write_raw(&path, &[allow(flags, FULL, Whose::Me)]);
             shapes.push((name, path, expected));
         }
+        // Folders, which owner_only judges too (a diagnostics file's folder): one SECURE_DIRECTORY makes (its rule
+        // handed down to what's inside, so not Kumi's file shape), and one whose one rule has no flags.
+        let secured = folder.path().join("secured");
+        std::fs::create_dir(&secured).unwrap();
+        own_mine(&secured);
+        powershell::secure_directory(&secured).unwrap();
+        shapes.push(("a folder made by SECURE_DIRECTORY", secured, None));
+        let plain = folder.path().join("plain");
+        std::fs::create_dir(&plain).unwrap();
+        own_mine(&plain);
+        write(&plain, Some(&[allow(0, FULL, Whose::Me)]), true);
+        shapes.push(("a folder whose one rule has no flags", plain, Some(0)));
         // Owned by Administrators, where this account may hand it over: CI's elevated runners can.
         let handed = made("handed-over.json");
         write(&handed, Some(&[allow(0, FULL, Whose::Me)]), true);
@@ -536,6 +581,13 @@ mod windows_acl_shapes {
         let paths: Vec<&Path> = shapes.iter().map(|(_, path, _)| path.as_path()).collect();
         let codes = powershell::checks(&paths);
         assert_eq!(codes.len(), shapes.len(), "one code a file: {codes:?}");
+        // Live's own check, the Remote Script's OwnerOnly, which decides whether the bridge starts: the same verdict on
+        // every path.
+        let remote = remote_script_verdicts(&paths);
+        assert_eq!(remote.len(), shapes.len(), "one verdict a path: {remote:?}");
+        for (at, (name, _, _)) in shapes.iter().enumerate() {
+            assert_eq!(remote[at], codes[at] == 0, "{name}: the Remote Script's check and the bridge's agree");
+        }
         for at in [0, 1, shapes.len() - 1] {
             assert_eq!(powershell::check(paths[at]), codes[at], "{}: one run a file says what the batch does", shapes[at].0);
         }

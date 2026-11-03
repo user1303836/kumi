@@ -1,4 +1,7 @@
-//! Windows owner-only ACL scripts and their bounded execution.
+//! Windows owner-only ACL scripts and their bounded execution. native_acl.rs reads and writes the one shape SECURE_FILE
+//! makes with Windows' own calls, and passes it without these: a check made stricter here (WINDOWS_ACL_CHECKS) must be
+//! made stricter there too, or the fast path goes on saying yes. kumi-ai's auth/store.rs and auth/windows_acl.rs are
+//! the twins of both, for Kumi's credential file.
 const WINDOWS_ACL_TARGET:&str="$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:ABLETON_MCP_ACL_PATH));$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;";
 const WINDOWS_ACL_CHECKS:&str="$c=[System.IO.File]::GetAccessControl($p);if ($c.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 2 }if (-not $c.AreAccessRulesProtected) { exit 3 }$rules=@($c.Access); if ($rules.Count -ne 1) { exit 4 }$rule=$rules[0];if ($rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 5 }if ($rule.IsInherited) { exit 6 }if ($rule.AccessControlType.ToString() -ne 'Allow') { exit 7 }if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { exit 8 }exit 0";
 const SECURE_FILE:&str="$a=New-Object System.Security.AccessControl.FileSecurity;$a.SetAccessRuleProtection($true,$false);$rule=New-Object System.Security.AccessControl.FileSystemAccessRule -ArgumentList @($sid,[System.Security.AccessControl.FileSystemRights]::FullControl,[System.Security.AccessControl.AccessControlType]::Allow);[void]$a.AddAccessRule($rule);[System.IO.File]::SetAccessControl($p,$a);if ([System.IO.File]::GetAccessControl($p).GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { $o=New-Object System.Security.AccessControl.FileSecurity;$o.SetOwner($sid);[System.IO.File]::SetAccessControl($p,$o) };";
@@ -124,7 +127,7 @@ pub(super) fn secure_directory(path: &Path) -> Result<(), LiveError> {
 /// Not for the bridge itself.
 #[cfg(windows)]
 pub mod powershell {
-    use super::{run, SECURE_FILE, WINDOWS_ACL_CHECKS, WINDOWS_ACL_TARGET};
+    use super::{run, SECURE_DIRECTORY, SECURE_FILE, WINDOWS_ACL_CHECKS, WINDOWS_ACL_TARGET};
     use std::path::Path;
 
     /// The check on one file, as `owner_only` runs it when the fast path doesn't say: its exit code, 0 owner-only, 2-8
@@ -155,6 +158,17 @@ pub mod powershell {
             .output()
             .expect("PowerShell starts");
         String::from_utf8_lossy(&said.stdout).lines().filter_map(|line| line.trim().parse().ok()).collect()
+    }
+
+    /// PowerShell's own step of `secure_directory`: SECURE_DIRECTORY, then the check.
+    pub fn secure_directory(path: &Path) -> Result<(), String> {
+        let result =
+            run(path, &format!("$ErrorActionPreference='Stop';{WINDOWS_ACL_TARGET}{SECURE_DIRECTORY}{WINDOWS_ACL_CHECKS}"), 60_000);
+        if result.ran && result.status == Some(0) {
+            Ok(())
+        } else {
+            Err(format!("{:?} {}", result.status, result.stderr))
+        }
     }
 
     /// PowerShell's own step of `secure_file`: SECURE_FILE, then the check.

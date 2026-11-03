@@ -5,6 +5,9 @@
 //! ACE, for this account, with full control (what `SECURE_FILE` in store.rs writes). A file of that shape is one the
 //! PowerShell check (`ACL_CHECKS`) passes too. Any other shape goes to that check, as before: .NET canonicalizes the ACEs
 //! it counts (it merges and drops some), so only it can say no.
+//!
+//! Live's bridge keeps a copy of this for its own owner-only files (ableton-mcp-server's
+//! `lifecycle/delivery/native_acl.rs`; a bridge uses nothing of Kumi's but kumi-common): keep them in step.
 use std::{ffi::c_void, os::windows::ffi::OsStrExt, path::Path, ptr::null_mut};
 
 type Handle = *mut c_void;
