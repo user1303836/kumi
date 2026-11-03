@@ -450,12 +450,15 @@ impl Fetch for SocketFetch {
     }
     async fn fetch(&self, url: &str, init: FetchInit) -> Result<Response, LanguageModelError> {
         let shared = &self.shared;
-        // Its connection being readied: waited for. One that couldn't be opened just now isn't tried again for this request,
-        // which goes over HTTP as one whose own opening failed would.
+        // Its connection being readied: waited for, unless the request is stopped first (the readying goes on for the next).
+        // One that couldn't be opened just now isn't tried again for this request, which goes over HTTP as one whose own
+        // opening failed would.
         let readying = shared.readying.borrow().clone();
         if let Some(readying) = readying {
-            if !readying.await {
-                return self.http.fetch(url, init).await;
+            match unless_aborted(&init.signal.clone().unwrap_or_default(), readying).await {
+                None => return Err(aborted()),
+                Some(false) => return self.http.fetch(url, init).await,
+                Some(true) => {}
             }
         }
         let direct = url::Url::parse(url).is_ok_and(|address| kumi_net::proxy::current().proxy_for(&address).is_none());

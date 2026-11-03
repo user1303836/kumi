@@ -699,3 +699,30 @@ fn a_request_that_waited_on_a_readying_that_failed_goes_over_http_without_openin
         assert_eq!(http.0.borrow().len(), 1);
     });
 }
+
+#[test]
+fn a_request_waiting_on_its_connection_being_readied_is_stopped_at_once() {
+    local(async {
+        // An opening that takes 5 s: the readying is still under way when the request is stopped.
+        let server = server_after(vec![completed("r1", json!([]))], Duration::from_secs(5)).await;
+        let fetch = Rc::new(SocketFetch::new(Rc::new(Http::default())));
+        let readying = {
+            let (fetch, url) = (fetch.clone(), server.url.clone());
+            tokio::task::spawn_local(async move { fetch.warm(&url, headers()).await })
+        };
+        tokio::task::yield_now().await;
+        let signal = Signal::new();
+        let mut init = post(request(json!([user("hi")])));
+        init.signal = Some(signal.clone());
+        let stop = signal.clone();
+        tokio::task::spawn_local(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            stop.cancel();
+        });
+        let began = std::time::Instant::now();
+        let stopped = fetch.fetch(&server.url, init).await;
+        assert!(stopped.err().unwrap().to_string().contains("aborted"));
+        assert!(began.elapsed() < Duration::from_secs(1), "stopped at once, not after the opening");
+        readying.abort();
+    });
+}
