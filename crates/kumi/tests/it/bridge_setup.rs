@@ -516,28 +516,27 @@ async fn extension_installs_updates_or_stays_unchanged_and_missing_live_folder_i
     assert!(missing.out.0.borrow().contains("Kumi couldn't add its extension to Live (Live's folder isn't there"));
 }
 #[tokio::test(flavor = "current_thread")]
-async fn windows_live_detection_uses_powershell_and_falls_back_only_after_failure() {
-    for (powershell, tasklist, want, calls_want) in [
-        (Ran { stdout: "1138176\r\n".into(), ..Default::default() }, Ran::default(), true, 1),
-        (Ran::default(), Ran { stdout: "Ableton Live 12 Suite.exe".into(), ..Default::default() }, false, 1),
-        (
-            Ran { code: 1, ..Default::default() },
-            Ran { stdout: "Ableton Live 12 Suite.exe 4242 Console".into(), ..Default::default() },
-            true,
-            2,
-        ),
+async fn windows_live_detection_reads_the_process_list_and_runs_nothing() {
+    // The process list as Kumi's detection gives it on Windows (a Toolhelp snapshot's image names), stood in for here,
+    // matched as Get-Process -Name 'Ableton Live*' did: in any case, `.exe` or not.
+    for (listing, want) in [
+        ("1138176 Ableton Live 12 Suite.exe", true),
+        ("4242 ABLETON LIVE 11 LITE.EXE", true),
+        ("4242 C:\\ProgramData\\Ableton\\Live 12 Beta\\Program\\Ableton Live 12 Beta.exe", true),
+        ("7 explorer.exe\n8 Ableton Index.exe", false),
+        ("none", false),
     ] {
         let asked = Rc::new(RefCell::new(vec![]));
         let run: Run = Rc::new({
             let asked = asked.clone();
             move |command, _, _| {
                 asked.borrow_mut().push(command.clone());
-                let result = if command.to_lowercase().ends_with("powershell.exe") { powershell.clone() } else { tasklist.clone() };
-                async move { result }.boxed_local()
+                async { Ran::default() }.boxed_local()
             }
         });
-        assert_eq!(is_live_running_on(run, "win32", &Env::new()).await, want);
-        assert_eq!(asked.borrow().len(), calls_want);
+        let env = Env::from([("KUMI_PROCESSES".to_string(), listing.to_string())]);
+        assert_eq!(is_live_running_on(run, "win32", &env).await, want, "{listing}");
+        assert!(asked.borrow().is_empty(), "no PowerShell, no tasklist: {:?}", asked.borrow());
     }
 }
 #[tokio::test]

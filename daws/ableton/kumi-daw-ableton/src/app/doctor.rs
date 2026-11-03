@@ -410,17 +410,57 @@ pub async fn port_owner(port: u16, platform: &str) -> PortOwner {
             let ran = run(lsof.into(), args.map(str::to_string).into()).await;
             ran.stdout.lines().find_map(|line| line.strip_prefix('c')).map(str::to_string)
         }
-        "win32" => {
-            let script = format!(
-                "Get-NetTCPConnection -State Listen -LocalPort {port} -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess | ForEach-Object {{ (Get-Process -Id $_ -ErrorAction SilentlyContinue).ProcessName }}"
-            );
-            let powershell = system::system_program_default(system::SystemProgram::Powershell);
-            let ran = run(powershell, vec!["-NoProfile".into(), "-NonInteractive".into(), "-Command".into(), script]).await;
-            Some(ran.stdout.trim().to_string()).filter(|s| !s.is_empty())
-        }
+        // Windows' own TCP table and process list, where Get-NetTCPConnection took 0.5–1.5 s, past the 2 s above on a
+        // slow machine.
+        "win32" => windows_listener(port).and_then(|pid| windows_process_name(pid, &super::live_app::processes(&system::process_env()))),
         _ => None,
     };
     Some(named)
+}
+
+/// A process's name as `Get-Process` gives it (ProcessName): its image's name, `.exe` left off, from the process list.
+fn windows_process_name(pid: u32, listing: &[(u32, String)]) -> Option<String> {
+    let (_, listed) = listing.iter().find(|(listed, _)| *listed == pid)?;
+    let name = listed.rsplit(['/', '\\']).next().unwrap_or(listed);
+    let bare = name.len().checked_sub(4).filter(|at| name.is_char_boundary(*at) && name[*at..].eq_ignore_ascii_case(".exe"));
+    Some(bare.map_or(name, |at| &name[..at]).to_string()).filter(|name| !name.is_empty())
+}
+
+/// The pid that listens on `port`, from Windows' own TCP tables, IPv4 then IPv6 (a dual-stack `[::]` listener takes
+/// 127.0.0.1 too), as `Get-NetTCPConnection -State Listen -LocalPort` finds it.
+#[cfg(windows)]
+fn windows_listener(port: u16) -> Option<u32> {
+    #[link(name = "iphlpapi")]
+    unsafe extern "system" {
+        fn GetExtendedTcpTable(table: *mut std::ffi::c_void, size: *mut u32, order: i32, family: u32, class: u32, reserved: u32) -> u32;
+    }
+    const TCP_TABLE_OWNER_PID_LISTENER: u32 = 3;
+    // MIB_TCPROW_OWNER_PID and MIB_TCP6ROW_OWNER_PID: each row's size, and where its local port and its pid are.
+    for (family, row, port_at, pid_at) in [(2u32, 24usize, 8usize, 20usize), (23, 56, 20, 52)] {
+        let mut size = 0u32;
+        // SAFETY: the first call only says the size; the second writes at most `size` bytes into a buffer that long, then
+        // every row read lies within the count the table gives and the bytes it wrote.
+        unsafe { GetExtendedTcpTable(std::ptr::null_mut(), &mut size, 0, family, TCP_TABLE_OWNER_PID_LISTENER, 0) };
+        let mut table = vec![0u8; size as usize + 1024];
+        size = table.len() as u32;
+        if unsafe { GetExtendedTcpTable(table.as_mut_ptr().cast(), &mut size, 0, family, TCP_TABLE_OWNER_PID_LISTENER, 0) } != 0 {
+            continue;
+        }
+        let read = |at: usize| table.get(at..at + 4).map(|bytes| u32::from_ne_bytes(bytes.try_into().unwrap()));
+        let Some(rows) = read(0) else { continue };
+        for at in (0..rows as usize).map(|n| 4 + n * row) {
+            // The port is in network byte order, in the low 16 bits of its DWORD.
+            if read(at + port_at).is_some_and(|local| u16::from_be((local & 0xFFFF) as u16) == port) {
+                return read(at + pid_at);
+            }
+        }
+    }
+    None
+}
+
+#[cfg(not(windows))]
+fn windows_listener(_port: u16) -> Option<u32> {
+    None
 }
 
 fn is_live(program: &str) -> bool {
@@ -503,5 +543,39 @@ mod tests {
         assert!(unnamed.next.unwrap().starts_with("Quit it, then restart Live"));
         let other = ports_check(&[(9765, Some(Some("Live".into()))), (9766, Some(Some("node".into())))], true);
         assert_eq!(other, Check::fix("node holds port 9766, which Live's bridge needs", Some("Quit node, then restart Live".into())));
+    }
+
+    /// A port's owner by name as Get-Process gave it: the image's name with `.exe` left off, in whatever case it has.
+    #[test]
+    fn a_windows_port_owner_is_named_as_get_process_names_it() {
+        let listing = [
+            (4, "System".to_string()),
+            (812, "C:\\ProgramData\\Ableton\\Live 12 Suite\\Program\\Ableton Live 12 Suite.exe".to_string()),
+            (90, "node.EXE".to_string()),
+            (91, "ableton-mcp-server.exe".to_string()),
+        ];
+        assert_eq!(windows_process_name(4, &listing).as_deref(), Some("System"));
+        assert_eq!(windows_process_name(812, &listing).as_deref(), Some("Ableton Live 12 Suite"));
+        assert_eq!(windows_process_name(90, &listing).as_deref(), Some("node"));
+        assert_eq!(windows_process_name(91, &listing).as_deref(), Some("ableton-mcp-server"));
+        assert_eq!(windows_process_name(7, &listing), None, "a pid the list doesn't have");
+        assert!(is_live(&windows_process_name(812, &listing).unwrap()));
+    }
+
+    /// Windows' own TCP tables find this test's listener, IPv4 and IPv6, by its port. A lib test, so Extended runs it;
+    /// main's Windows job runs the doctor's IPv4 case (kumi's `doctor::` tests).
+    #[cfg(windows)]
+    #[test]
+    fn windows_names_the_pid_listening_on_a_port() {
+        for address in ["127.0.0.1:0", "[::1]:0"] {
+            let Ok(listener) = std::net::TcpListener::bind(address) else { continue };
+            let port = listener.local_addr().unwrap().port();
+            assert_eq!(windows_listener(port), Some(std::process::id()), "{address}");
+            drop(listener);
+        }
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = free.local_addr().unwrap().port();
+        drop(free);
+        assert_eq!(windows_listener(port), None, "a port nobody listens on");
     }
 }

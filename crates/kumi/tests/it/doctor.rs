@@ -870,3 +870,17 @@ async fn doctor_names_the_custom_server_that_hides_a_provider_added_later_and_sa
         )
     );
 }
+
+/// On Windows the doctor finds the program holding a bridge port from Windows' own TCP table, where
+/// Get-NetTCPConnection took half a second and more. The process list is a stand-in here (`KUMI_PROCESSES`), naming this
+/// test's own process; the owner comes from the table.
+#[cfg(windows)]
+#[tokio::test]
+async fn on_windows_the_doctor_names_a_ports_owner_from_windows_own_tables() {
+    std::env::set_var("KUMI_PROCESSES", format!("{} kumi-port-test.exe", std::process::id()));
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    assert_eq!(kumi_daw_ableton::app::doctor::port_owner(port, "win32").await, Some(Some("kumi-port-test".into())));
+    drop(listener);
+    assert_eq!(kumi_daw_ableton::app::doctor::port_owner(port, "win32").await, None, "a port nobody holds");
+}
