@@ -2765,3 +2765,102 @@ async fn an_update_brings_renoises_tool_from_the_new_kumi_and_going_back_says_it
     assert!(said.contains("Delete that folder to take it out."), "{said}");
     assert!(tools.join(folder).exists(), "going back leaves the tool where it is");
 }
+
+/// The bundle in two halves, with a look between them at what tar has put in app.new so far.
+struct Halves {
+    manifest: Value,
+    bytes: Vec<u8>,
+    fresh: PathBuf,
+    unpacked_midway: Rc<RefCell<Option<bool>>>,
+}
+#[async_trait(?Send)]
+impl Fetch for Halves {
+    async fn fetch(&self, url: &str, _init: FetchInit) -> Result<Response, LanguageModelError> {
+        use futures::StreamExt;
+        if url.ends_with(".json") {
+            return Ok(Response::json_response(200, self.manifest.clone()));
+        }
+        let (first, second) = self.bytes.split_at(self.bytes.len() / 2);
+        let (first, second) = (first.to_vec(), second.to_vec());
+        let (fresh, seen) = (self.fresh.clone(), self.unpacked_midway.clone());
+        let after_a_look = async move {
+            let mut found = false;
+            for _ in 0..100 {
+                if fs::read_dir(&fresh).is_ok_and(|mut entries| entries.next().is_some()) {
+                    found = true;
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            }
+            *seen.borrow_mut() = Some(found);
+            Ok(second)
+        };
+        let body = futures::stream::iter(vec![Ok(first)]).chain(futures::stream::once(after_a_look));
+        Ok(Response { body: Some(Box::pin(body)), ..Response::text_response(200, "") })
+    }
+}
+
+/// An update's tar unpacks the bundle while it downloads: half of it is in app.new before the rest has come, and the
+/// update ends as one unpacked from the file did.
+#[tokio::test]
+async fn an_update_unpacks_its_bundle_while_it_downloads() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env(dir.path());
+    let home = Path::new(&env["KUMI_HOME"]);
+    put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+    put(home.join("app").join(executable_name("kumi")), "earlier");
+    let bytes = fake_release(dir.path(), "99.0.0");
+    let mut good = manifest("99.0.0");
+    good["sha256"] = json!(hex::encode(Sha256::digest(&bytes)));
+    let (mut updated, out) = io(&env);
+    let unpacked_midway = Rc::new(RefCell::new(None));
+    updated.fetcher =
+        Some(Rc::new(Halves { manifest: good, bytes, fresh: home.join("app.new"), unpacked_midway: unpacked_midway.clone() }));
+    assert_eq!(update_installed(updated).await.unwrap(), 0, "{}", out.0.borrow());
+    assert_eq!(*unpacked_midway.borrow(), Some(true), "tar had unpacked part of it before the download ended");
+    assert_eq!(version_of(home.join("app")), "99.0.0");
+    assert!(!home.join("app.new").exists());
+    assert!(out.0.borrow().contains("Unpacking Kumi 99.0.0…"), "the steps say what they said: {}", out.0.borrow());
+}
+
+/// A download that doesn't match its checksum changes nothing, though tar unpacked it as it came: app.new goes, with
+/// the words it always had.
+#[tokio::test]
+async fn a_download_unpacked_as_it_came_that_doesnt_match_its_checksum_changes_nothing() {
+    let dir = tempfile::tempdir().unwrap();
+    let env = env(dir.path());
+    let home = Path::new(&env["KUMI_HOME"]);
+    put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+    put(home.join("app").join(executable_name("kumi")), "earlier");
+    let bytes = fake_release(dir.path(), "99.0.0");
+    let wrong = manifest("99.0.0");
+    let (mut updated, out) = io(&env);
+    updated.fetcher = Some(Rc::new(Serve { manifest: wrong, bytes, status: 200, offline: false, calls: RefCell::new(vec![]) }));
+    assert_eq!(update_installed(updated).await.unwrap(), 1);
+    assert!(out.0.borrow().contains("The download didn't match its checksum, so nothing was changed."), "{}", out.0.borrow());
+    assert_eq!(fs::read_to_string(home.join("app").join(executable_name("kumi"))).unwrap(), "earlier");
+    assert!(!home.join("app.new").exists(), "what tar unpacked is gone");
+    assert!(!home.join("app.previous").exists());
+}
+
+/// A bundle the streaming tar can't read (named xz, but gzipped: GNU tar's -J takes it as xz, where bsdtar looks) is
+/// unpacked from the downloaded file, as every bundle was: the update still goes through.
+#[cfg(not(windows))]
+#[tokio::test]
+async fn a_bundle_tar_cant_read_as_it_streams_is_unpacked_from_the_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut env = env(dir.path());
+    env.insert("KUMI_BUNDLE_XZ".into(), "1".into());
+    let home = Path::new(&env["KUMI_HOME"]);
+    put(home.join("app/package.json"), json!({"version":KUMI_VERSION}).to_string());
+    put(home.join("app").join(executable_name("kumi")), "earlier");
+    let gz = fake_release(dir.path(), "99.0.0");
+    let mut named_xz = manifest("99.0.0");
+    named_xz["sha256"] = json!("b".repeat(64));
+    named_xz["bundle_xz"] = json!(format!("kumi-{}.tar.xz", native_target()));
+    named_xz["sha256_xz"] = json!(hex::encode(Sha256::digest(&gz)));
+    let (mut updated, out) = io(&env);
+    updated.fetcher = Some(Rc::new(Serve { manifest: named_xz, bytes: gz, status: 200, offline: false, calls: RefCell::new(vec![]) }));
+    assert_eq!(update_installed(updated).await.unwrap(), 0, "{}", out.0.borrow());
+    assert_eq!(version_of(home.join("app")), "99.0.0");
+}
