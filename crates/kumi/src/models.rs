@@ -113,6 +113,12 @@ struct State {
 }
 struct Inner {
     options: ModelControlOptions,
+    /// The cloud providers' HTTP: their lists, sign-ins, key checks and model calls go through one client. For an API-key
+    /// provider, the connection the start's check of a saved model opened (its list) is the one the first message goes on.
+    /// ChatGPT's answers go over a WebSocket of their own beside it (`SocketFetch`), chosen because this is Kumi's own
+    /// HTTP (`Fetch::is_kumis_own`): it must stay a bare `HttpFetch` in the app. A model server keeps its own client
+    /// (`options.fetch`, its proxies the variables' alone).
+    cloud: Rc<dyn Fetch>,
     pinned: bool,
     state: RefCell<State>,
     /// Cloud models found this session to turn tools down: they're sent none from then on.
@@ -136,6 +142,7 @@ pub fn create_model_control(options: ModelControlOptions) -> ModelControl {
     let pinned = options.env.get("KUMI_MODEL").is_some_and(|s| !s.is_empty());
     ModelControl {
         inner: Rc::new(Inner {
+            cloud: options.fetch.clone().unwrap_or_else(kumi_ai::http::default_fetch),
             options,
             pinned,
             state: RefCell::new(State {
@@ -265,7 +272,7 @@ impl ModelControl {
             model: id.into(),
             store: self.inner.options.store.clone(),
             env: Some(self.inner.options.env.clone()),
-            fetch: self.inner.options.fetch.clone(),
+            fetch: Some(self.inner.cloud.clone()),
             effort,
             service_tier: tier,
         })
@@ -428,7 +435,7 @@ impl ModelControl {
                 ListOptions {
                     store: self.inner.options.store.clone(),
                     env: Some(self.inner.options.env.clone()),
-                    fetch: self.inner.options.fetch.clone(),
+                    fetch: Some(self.inner.cloud.clone()),
                     signal,
                 },
             )
@@ -510,7 +517,7 @@ impl ModelControl {
             return Err(KumiError::new(FailureKind::Config, format!("{} signs in with ChatGPT, not a key.", info.name)).into());
         }
         let key = trim(key).to_string();
-        let verdict = check_api_key(provider, &key, Transport { fetch: self.inner.options.fetch.clone(), signal }).await;
+        let verdict = check_api_key(provider, &key, Transport { fetch: Some(self.inner.cloud.clone()), signal }).await;
         if verdict == ApiKeyCheck::Refused {
             return Ok(verdict);
         }
@@ -693,5 +700,40 @@ impl ModelController for ModelControl {
     }
     fn server_names(&self) -> Vec<(String, String)> {
         self.servers().into_iter().map(|server| (server.id, server.name)).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kumi_ai::auth::store::open_credential_store;
+
+    /// The app makes its model controls with no fetch of its own: their cloud client is then Kumi's own HTTP, so ChatGPT's
+    /// answers still go over its WebSocket. A wrapper around it would quietly send them over HTTP.
+    #[test]
+    fn the_apps_cloud_client_is_kumis_own_http_so_chatgpt_keeps_its_websocket() {
+        let folder = tempfile::tempdir().unwrap();
+        let made = |fetch: Option<Rc<dyn Fetch>>| {
+            create_model_control(ModelControlOptions {
+                store: Rc::new(open_credential_store(folder.path().join("auth.json"))),
+                settings_file: folder.path().join("settings.json").to_string_lossy().into_owned(),
+                env: Env::new(),
+                changed: Rc::new(|| async { Ok(()) }.boxed_local()),
+                fetch,
+                say: None,
+                installed: None,
+            })
+        };
+        assert!(made(None).inner.cloud.is_kumis_own());
+        // A test's or a probe's fetch is used as given, and isn't Kumi's own.
+        assert!(!made(Some(Rc::new(Given))).inner.cloud.is_kumis_own());
+    }
+
+    struct Given;
+    #[async_trait::async_trait(?Send)]
+    impl Fetch for Given {
+        async fn fetch(&self, _: &str, _: kumi_ai::http::FetchInit) -> Result<kumi_ai::http::Response, kumi_ai::error::LanguageModelError> {
+            Ok(kumi_ai::http::Response::text_response(200, ""))
+        }
     }
 }

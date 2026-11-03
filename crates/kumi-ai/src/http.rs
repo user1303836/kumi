@@ -59,6 +59,11 @@ impl Response {
 #[async_trait(?Send)]
 pub trait Fetch {
     async fn fetch(&self, url: &str, init: FetchInit) -> Result<Response, LanguageModelError>;
+    /// Whether this is Kumi's own HTTP ([`HttpFetch`]), not one a test or a probe gave: ChatGPT's Responses then go over
+    /// a WebSocket beside it.
+    fn is_kumis_own(&self) -> bool {
+        false
+    }
 }
 /// The proxy settings a client goes by, asked as each connection is made.
 pub type Proxies = Arc<dyn Fn() -> Arc<proxy::Settings> + Send + Sync>;
@@ -105,6 +110,9 @@ pub fn model_server_fetch() -> Rc<dyn Fetch> {
 }
 #[async_trait(?Send)]
 impl Fetch for HttpFetch {
+    fn is_kumis_own(&self) -> bool {
+        true
+    }
     async fn fetch(&self, url: &str, init: FetchInit) -> Result<Response, LanguageModelError> {
         let method = if init.method.is_empty() {
             reqwest::Method::GET
@@ -283,6 +291,76 @@ mod transport_tests {
                     let mut request = vec![0; 8192];
                     let _ = socket.read(&mut request).await;
                     let _ = socket.write_all(answer).await;
+                });
+            }
+        });
+        (address, count)
+    }
+
+    /// One client for a provider's list and its model calls: the connection the list opened is the one the call goes on.
+    #[tokio::test]
+    async fn a_list_and_a_model_call_through_one_fetch_share_one_connection() {
+        let (address, connections) = answering_each(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}").await;
+        let fetch = HttpFetch::through(
+            std::sync::Arc::new(|| std::sync::Arc::new(kumi_net::proxy::Settings::none())),
+            std::time::Duration::from_secs(5),
+            std::time::Duration::from_secs(5),
+        );
+        let url = format!("http://{address}/v1/models");
+        assert_eq!(fetch.fetch(&url, FetchInit::default()).await.unwrap().text().await.unwrap(), "{}");
+        let call = format!("http://{address}/v1/responses");
+        let posted = post_json(&fetch, &call, Headers::new(), Rc::new(serde_json::json!({})), None);
+        assert_eq!(posted.await.unwrap().text().await.unwrap(), "{}");
+        assert_eq!(connections.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // Kumi's own HTTP, as against one a test or a probe gives (ChatGPT's WebSocket goes beside Kumi's own only).
+        assert!(fetch.is_kumis_own());
+        struct Given;
+        #[async_trait(?Send)]
+        impl Fetch for Given {
+            async fn fetch(&self, _: &str, _: FetchInit) -> Result<Response, LanguageModelError> {
+                Ok(Response::text_response(200, ""))
+            }
+        }
+        assert!(!Given.is_kumis_own());
+    }
+
+    /// A server that keeps each connection open, answering every request on it with `answer`, counting connections.
+    async fn answering_each(answer: &'static [u8]) -> (std::net::SocketAddr, std::sync::Arc<std::sync::atomic::AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let count = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counted = std::sync::Arc::clone(&count);
+        tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::spawn(async move {
+                    // Each request whole (its head, then as many bytes as it says it has), then the answer.
+                    let mut pending: Vec<u8> = Vec::new();
+                    let mut buffer = vec![0; 8192];
+                    loop {
+                        let Some(end) = pending.windows(4).position(|w| w == b"\r\n\r\n").map(|at| at + 4) else {
+                            match socket.read(&mut buffer).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(read) => pending.extend_from_slice(&buffer[..read]),
+                            }
+                            continue;
+                        };
+                        let head = String::from_utf8_lossy(&pending[..end]).to_lowercase();
+                        let length = head
+                            .lines()
+                            .find_map(|line| line.strip_prefix("content-length:").map(|n| n.trim().parse::<usize>().unwrap_or(0)))
+                            .unwrap_or(0);
+                        while pending.len() < end + length {
+                            match socket.read(&mut buffer).await {
+                                Ok(0) | Err(_) => return,
+                                Ok(read) => pending.extend_from_slice(&buffer[..read]),
+                            }
+                        }
+                        pending.drain(..end + length);
+                        if socket.write_all(answer).await.is_err() {
+                            return;
+                        }
+                    }
                 });
             }
         });
