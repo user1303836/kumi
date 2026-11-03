@@ -238,7 +238,7 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
     let provider = parsed.provider;
     let model = parsed.model;
     let row = provider.row();
-    let own_fetch = options.fetch.is_none();
+    let own_fetch = options.fetch.as_ref().is_none_or(|fetch| fetch.is_kumis_own());
     let base = options.fetch.unwrap_or_else(default_fetch);
     let identified: Rc<dyn Fetch> = Rc::new(IdentifiedFetch { fetch: base.clone(), provider });
     let (key, fetch): (String, Rc<dyn Fetch>) = match row.sign_in {

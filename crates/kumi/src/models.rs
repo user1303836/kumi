@@ -113,6 +113,10 @@ struct State {
 }
 struct Inner {
     options: ModelControlOptions,
+    /// The cloud providers' HTTP: their lists, sign-ins and model calls go through one client, so the connection a list
+    /// opened (the start's check of the saved model) is the one the first message goes on. A model server keeps its own
+    /// (`options.fetch`, its proxies the variables' alone).
+    cloud: Rc<dyn Fetch>,
     pinned: bool,
     state: RefCell<State>,
     /// Cloud models found this session to turn tools down: they're sent none from then on.
@@ -136,6 +140,7 @@ pub fn create_model_control(options: ModelControlOptions) -> ModelControl {
     let pinned = options.env.get("KUMI_MODEL").is_some_and(|s| !s.is_empty());
     ModelControl {
         inner: Rc::new(Inner {
+            cloud: options.fetch.clone().unwrap_or_else(kumi_ai::http::default_fetch),
             options,
             pinned,
             state: RefCell::new(State {
@@ -265,7 +270,7 @@ impl ModelControl {
             model: id.into(),
             store: self.inner.options.store.clone(),
             env: Some(self.inner.options.env.clone()),
-            fetch: self.inner.options.fetch.clone(),
+            fetch: Some(self.inner.cloud.clone()),
             effort,
             service_tier: tier,
         })
@@ -428,7 +433,7 @@ impl ModelControl {
                 ListOptions {
                     store: self.inner.options.store.clone(),
                     env: Some(self.inner.options.env.clone()),
-                    fetch: self.inner.options.fetch.clone(),
+                    fetch: Some(self.inner.cloud.clone()),
                     signal,
                 },
             )
@@ -510,7 +515,7 @@ impl ModelControl {
             return Err(KumiError::new(FailureKind::Config, format!("{} signs in with ChatGPT, not a key.", info.name)).into());
         }
         let key = trim(key).to_string();
-        let verdict = check_api_key(provider, &key, Transport { fetch: self.inner.options.fetch.clone(), signal }).await;
+        let verdict = check_api_key(provider, &key, Transport { fetch: Some(self.inner.cloud.clone()), signal }).await;
         if verdict == ApiKeyCheck::Refused {
             return Ok(verdict);
         }
