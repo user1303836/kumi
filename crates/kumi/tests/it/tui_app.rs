@@ -617,6 +617,32 @@ case!(failure_disconnect_focus, async {
     assert!(h.screen()[0].ends_with("● Live not connected  "));
     h.close().await;
 });
+// The DAW answers before the session's first look names its project (the focus poll goes once the look answers, and the
+// session names the project after its kernel is ready): FOCUS says it's still connecting meanwhile, never that the DAW
+// isn't connected, busy or not. (app_sessions' full-screen REAPER session caught it on a slow runner.)
+case!(connected_before_the_first_look_names_the_project_focus_says_connecting, async {
+    for (w, rows) in [(120, 36), (80, 23)] {
+        let h = Harness::new(w, rows);
+        h.start().await;
+        h.emit(json!({"type":"connection","state":"connected"}));
+        let lines = h.screen();
+        assert!(has(&lines, "Connecting to Live…") && !has(&lines, "isn't connected"), "{}", lines.join("\n"));
+        h.emit(json!({"type":"focus","focus":{"view":"Session","busy":"a dialog is open"}}));
+        let lines = h.screen();
+        assert!(!has(&lines, "isn't connected") && !has(&lines, "not connected"), "busy: {}", lines.join("\n"));
+        h.emit(json!({"type":"observation","label":"Current open Set: Night Drive — Remote Script · real-live"}));
+        h.emit(json!({"type":"focus","focus":null}));
+        let lines = h.screen();
+        assert!(has(&lines, "Night Drive") && !has(&lines, "Connecting to Live…"), "{}", lines.join("\n"));
+        // Gone, and back before the next look: the project it knew is named, as before.
+        h.emit(json!({"type":"connection","state":"disconnected"}));
+        h.has("Live isn't connected");
+        h.emit(json!({"type":"connection","state":"connected"}));
+        let lines = h.screen();
+        assert!(has(&lines, "Night Drive") && !has(&lines, "Connecting to Live…"), "{}", lines.join("\n"));
+        h.close().await;
+    }
+});
 case!(a_fixed_phrase_changes_live_at_once_and_undoes_from_history, async {
     let h = Harness::new(120, 36);
     h.control.set("instant", json!(true));
