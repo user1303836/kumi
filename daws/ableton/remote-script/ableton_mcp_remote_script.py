@@ -13981,6 +13981,9 @@ PUMP_LINGER_SECONDS = 0.012
 PUMP_LINGER_BETWEEN_TICKS_SECONDS = 0.004
 FAST_TIMER_GAP_SECONDS = 0.012
 TIMER_GAPS = 8
+# The timer's median is kept only while it's calling: one quiet longer than this (paused, without stopping) leaves the
+# display ticks serving, and they wait PUMP_LINGER_SECONDS again.
+TIMER_RECENT_SECONDS = 0.05
 # Live's own timer (Live.Base.Timer, about every 10 ms) serves the socket between display ticks, where
 # this Live has one: a request waits for the timer rather than up to a tick. Reads (Kumi's looks at the
 # Set, its background reads, a big Set's catch-up) keep to PUMP_BUDGET_SECONDS of Live's main thread in
@@ -14185,7 +14188,8 @@ class AbletonMcpBridge:
                 try:
                     with selectors.DefaultSelector() as selector:
                         for connection in waiting: selector.register(connection.socket, selectors.EVENT_READ, connection)
-                        fast = self.between_ticks and self.timer_gap is not None and self.timer_gap <= FAST_TIMER_GAP_SECONDS
+                        fast = (self.between_ticks and self.timer_gap is not None and self.timer_gap <= FAST_TIMER_GAP_SECONDS
+                                and self._timer_last is not None and time.perf_counter() - self._timer_last <= TIMER_RECENT_SECONDS)
                         linger = PUMP_LINGER_BETWEEN_TICKS_SECONDS if fast else PUMP_LINGER_SECONDS
                         ready = [key.data for key, _ in selector.select(min(linger, max(0.0, deadline - time.perf_counter())))]
                 except (OSError, ValueError): break
