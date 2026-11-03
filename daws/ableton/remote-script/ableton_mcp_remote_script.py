@@ -13969,6 +13969,8 @@ class _ReadBudget:
 
 
 MAX_BRIDGE_CONNECTIONS = 64
+# select refuses a descriptor at or past FD_SETSIZE on POSIX; Windows' sockets are handles, which its select takes.
+_SELECT_FD_LIMIT: int | None = None if os.name == "nt" else 1024
 MAX_FRAMES_PER_PUMP = 1024
 PUMP_BUDGET_SECONDS = 0.05
 # How long a tick waits for a client it just answered to ask again (the next step of a change: read,
@@ -14063,6 +14065,9 @@ class AbletonMcpBridge:
         self._server.listen(MAX_BRIDGE_CONNECTIONS)
         self._server.setblocking(False)
         self.address = self._server.getsockname()
+        # Whether every socket the pump would ask select about can be asked (a Live with many files open can hand out a
+        # descriptor past the limit): when not, each is tried, as before, rather than asking first and failing.
+        self._selectable = _SELECT_FD_LIMIT is None or self._server.fileno() < _SELECT_FD_LIMIT
         try:
             self._realtime = _RealtimePlane(self, host, int(realtime_port or 0))
         except BaseException:
@@ -14191,8 +14196,15 @@ class AbletonMcpBridge:
         from one select that doesn't wait. Live's timer pumps about 100 times a second, Kumi open or not, and an accept
         or a recv with nothing there raises. None where select can't be asked (a descriptor past FD_SETSIZE, which a
         Live with many files open can hand out): then each is tried, as before."""
+        if not getattr(self, "_selectable", True): return None
         try: return _select.select([self._server, *(connection.socket for connection in self._connections)], [], [], 0)[0]
         except (OSError, ValueError): return None
+
+    def _note_selectable(self) -> None:
+        """Whether the listening socket and every connection can be asked of select (after a connection comes or goes)."""
+        if _SELECT_FD_LIMIT is not None:
+            sockets = [self._server, *(connection.socket for connection in self._connections)]
+            self._selectable = all(sock.fileno() < _SELECT_FD_LIMIT for sock in sockets)
 
     def _accept_pending(self) -> None:
         while len(self._connections) < MAX_BRIDGE_CONNECTIONS:
@@ -14210,6 +14222,7 @@ class AbletonMcpBridge:
             except BaseException:
                 client.close(); continue
             self._connections.append(connection); self._clients.add(client)
+            if _SELECT_FD_LIMIT is not None and client.fileno() >= _SELECT_FD_LIMIT: self._selectable = False
 
     def _service(self, connection: "_Connection", deadline: float, readable: bool = True) -> int:
         """Read, answer and send what a connection has: how many requests it answered. Not `readable` (select saw nothing
@@ -14292,6 +14305,7 @@ class AbletonMcpBridge:
         self._clients.discard(connection.socket)
         try: connection.socket.close()
         except OSError: pass
+        if not getattr(self, "_selectable", True): self._note_selectable()
 
     def _subscribe_main(self, request: dict[str, Any], holder: dict[str, Any]) -> Any:
         args = request.get("args", {})

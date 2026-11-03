@@ -7893,6 +7893,25 @@ class IdlePumpTests(_BridgeSocketFixture, unittest.TestCase):
         self.assertIn(b'"status-1"', client.recv(1 << 20))
         self.assertGreaterEqual(calls["recv"], 1)
 
+    def test_what_a_connection_sent_before_is_answered_though_select_sees_nothing_new(self):
+        # (frames are taken from what was read, whatever the socket has now)
+        client, channel = self.connect()
+        def answers():
+            lines = b""
+            while select_module.select([client], [], [], 0.2)[0]:
+                chunk = client.recv(1 << 20)
+                if not chunk: break
+                lines += chunk
+            return [json.loads(line)["id"] for line in lines.splitlines() if line]
+        with patch.object(remote_module, "MAX_FRAMES_PER_PUMP", 1):
+            client.sendall(self.frame(channel, 1) + self.frame(channel, 2)); time.sleep(0.05)
+            self.bridge.serve_between_ticks()
+            self.assertEqual(answers(), ["status-1"], "one frame a pump")
+            self.assertIn(b"status-2", bytes(self.bridge._connections[0].inbound), "the other was read and waits")
+            self.assertFalse(select_module.select([self.bridge._connections[0].socket], [], [], 0)[0], "nothing new on the socket")
+            self.bridge.serve_between_ticks()
+            self.assertEqual(answers(), ["status-2"], "answered at the next pump all the same")
+
     def test_a_connection_reset_between_the_check_and_the_read_is_closed_and_the_others_served(self):
         import socket as _socket
         first, first_channel = self.connect(); second, second_channel = self.connect()
@@ -7936,6 +7955,28 @@ class IdlePumpTests(_BridgeSocketFixture, unittest.TestCase):
             self.assertGreaterEqual(calls["recv"], 5, "and a read of each connection")
             client.sendall(self.frame(channel, 1))
             self.assertEqual(self.read_lines(client, 1)[0]["id"], "status-1")
+
+    def test_with_a_connection_past_select_s_limit_select_isnt_asked_and_once_it_goes_it_is(self):
+        # (POSIX's FD_SETSIZE, 1024; a big Set opens many files before Kumi connects)
+        first, _ = self.connect()
+        asked = []
+        real = remote_module._select.select
+        def counting(*args): asked.append(1); return real(*args)
+        with patch.object(remote_module, "_select", types.SimpleNamespace(select=counting)), \
+                patch.object(remote_module, "_SELECT_FD_LIMIT", self.bridge._connections[0].socket.fileno() + 1):
+            second, channel = self.connect()
+            self.assertFalse(self.bridge._selectable)
+            calls = self.counted(); asked.clear()
+            for _ in range(5): self.bridge.serve_between_ticks()
+            self.assertEqual((len(asked), calls["accept"]), (0, 5), "not asked: each tried, as before")
+            second.sendall(self.frame(channel, 1))
+            self.assertEqual(self.read_lines(second, 1)[0]["id"], "status-1")
+            second.close(); self.clients.remove(second)
+            deadline = time.monotonic() + 5
+            while len(self.bridge._connections) > 1 and time.monotonic() < deadline: self.bridge.serve_between_ticks(); time.sleep(0.001)
+            self.assertTrue(self.bridge._selectable, "the one past the limit went")
+            asked.clear(); self.bridge.serve_between_ticks()
+            self.assertEqual(len(asked), 1)
 
     def test_with_a_descriptor_past_fd_setsize_each_is_tried_as_before(self):
         # (a Live with many files open can hand one out)
