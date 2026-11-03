@@ -193,7 +193,10 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "What's the tempo? Show me the arrangement."
+                  "text": "What's the tempo? Show me the arrangement.",
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
                 }
               ]
             },
@@ -512,7 +515,10 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "What's the tempo? Show me the arrangement."
+                  "text": "What's the tempo? Show me the arrangement.",
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
                 }
               ]
             },
@@ -763,7 +769,10 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "What's the tempo? Show me the arrangement."
+                  "text": "What's the tempo? Show me the arrangement.",
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
                 }
               ]
             },
@@ -1242,7 +1251,10 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "What's the tempo? Show me the arrangement."
+                  "text": "What's the tempo? Show me the arrangement.",
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
                 }
               ]
             },
