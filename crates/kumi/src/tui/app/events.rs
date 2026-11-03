@@ -167,7 +167,12 @@ impl TuiApp {
                     state.own.body = None;
                 }
             }
-            SessionEvent::Observation { label, name } => self.0.state.borrow_mut().set_name = observed_name(&label, name.as_deref()),
+            SessionEvent::Observation { label, name } => {
+                let mut state = self.0.state.borrow_mut();
+                state.set_name = observed_name(&label, name.as_deref());
+                // (a look that found no DAW, a start before it opened, says so too: only one made while connected read it)
+                state.observed = state.connection == ConnectionState::Connected;
+            }
             SessionEvent::Library(LibraryEvent { status: library }) => {
                 let tell = {
                     let mut state = self.0.state.borrow_mut();

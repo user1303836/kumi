@@ -379,6 +379,9 @@ struct State {
     used: Used,
     connection: ConnectionState,
     set_name: Option<String>,
+    /// A look made while connected has read the project, so a session still without a name to show is connected to one
+    /// that has none: until then, a connected DAW is still being read.
+    observed: bool,
     focus: Option<DawFocus>,
     catch_up: Option<CatchUp>,
     newer: Option<String>,
@@ -625,6 +628,7 @@ impl State {
             used: Used::default(),
             connection: if options.mode == "inference-only" { ConnectionState::Disconnected } else { ConnectionState::Connecting },
             set_name: None,
+            observed: false,
             focus: None,
             catch_up: None,
             newer: None,
