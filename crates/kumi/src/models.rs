@@ -113,8 +113,10 @@ struct State {
 }
 struct Inner {
     options: ModelControlOptions,
-    /// The cloud providers' HTTP: their lists, sign-ins and model calls go through one client, so the connection a list
-    /// opened (the start's check of the saved model) is the one the first message goes on. A model server keeps its own
+    /// The cloud providers' HTTP: their lists, sign-ins, key checks and model calls go through one client. For an API-key
+    /// provider, the connection the start's check of a saved model opened (its list) is the one the first message goes on.
+    /// ChatGPT's answers go over a WebSocket of their own beside it (`SocketFetch`), chosen because this is Kumi's own
+    /// HTTP (`Fetch::is_kumis_own`): it must stay a bare `HttpFetch` in the app. A model server keeps its own client
     /// (`options.fetch`, its proxies the variables' alone).
     cloud: Rc<dyn Fetch>,
     pinned: bool,
@@ -698,5 +700,40 @@ impl ModelController for ModelControl {
     }
     fn server_names(&self) -> Vec<(String, String)> {
         self.servers().into_iter().map(|server| (server.id, server.name)).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use kumi_ai::auth::store::open_credential_store;
+
+    /// The app makes its model controls with no fetch of its own: their cloud client is then Kumi's own HTTP, so ChatGPT's
+    /// answers still go over its WebSocket. A wrapper around it would quietly send them over HTTP.
+    #[test]
+    fn the_apps_cloud_client_is_kumis_own_http_so_chatgpt_keeps_its_websocket() {
+        let folder = tempfile::tempdir().unwrap();
+        let made = |fetch: Option<Rc<dyn Fetch>>| {
+            create_model_control(ModelControlOptions {
+                store: Rc::new(open_credential_store(folder.path().join("auth.json"))),
+                settings_file: folder.path().join("settings.json").to_string_lossy().into_owned(),
+                env: Env::new(),
+                changed: Rc::new(|| async { Ok(()) }.boxed_local()),
+                fetch,
+                say: None,
+                installed: None,
+            })
+        };
+        assert!(made(None).inner.cloud.is_kumis_own());
+        // A test's or a probe's fetch is used as given, and isn't Kumi's own.
+        assert!(!made(Some(Rc::new(Given))).inner.cloud.is_kumis_own());
+    }
+
+    struct Given;
+    #[async_trait::async_trait(?Send)]
+    impl Fetch for Given {
+        async fn fetch(&self, _: &str, _: kumi_ai::http::FetchInit) -> Result<kumi_ai::http::Response, kumi_ai::error::LanguageModelError> {
+            Ok(kumi_ai::http::Response::text_response(200, ""))
+        }
     }
 }
