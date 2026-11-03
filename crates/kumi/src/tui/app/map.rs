@@ -51,6 +51,21 @@ impl TuiApp {
         // The mouse's moves, reported while the map is open: a point plays as the mouse comes to it.
         self.0.tty.report_moves(true);
         self.0.scheduler.request();
+        // Read under the same key as the map kept from the last time it was open: that map, as it was made ready.
+        let key = self.session().op(op::MapKey {}).await.ok();
+        let kept = self.0.state.borrow_mut().map_kept.take();
+        if let Some((_, kept)) = kept.filter(|(was, _)| key.as_ref() == Some(was)) {
+            let mut state = self.0.state.borrow_mut();
+            let (palette, reached) = palette_of(&state);
+            state.map_key = key;
+            if let Some(view) = state.map.as_mut() {
+                view.reloaded(kept);
+                view.in_palette(palette, reached);
+            }
+            drop(state);
+            self.0.scheduler.request();
+            return;
+        }
         let data = match self.session().op(op::Map {}).await {
             Ok(data) => data,
             Err(error) => {
@@ -70,9 +85,10 @@ impl TuiApp {
         };
         {
             let mut state = self.0.state.borrow_mut();
-            let palette: std::collections::HashSet<String> =
-                state.palette.as_ref().map(|palette| palette.files.iter().map(|file| file.path.clone()).collect()).unwrap_or_default();
-            let reached = state.palette.as_ref().map(|palette| palette.reached.iter().cloned().collect()).unwrap_or_default();
+            let (palette, reached) = palette_of(&state);
+            if state.map.is_some() {
+                state.map_key = key;
+            }
             if let Some(view) = state.map.as_mut() {
                 view.loaded(made);
                 view.in_palette(palette, reached);
@@ -365,7 +381,9 @@ impl TuiApp {
     /// answer that waited for the producer may start now.
     fn close_map(&self) {
         let mut state = self.0.state.borrow_mut();
-        state.map = None;
+        // Kept with the key it was read under, for /map again while that holds.
+        let (view, key) = (state.map.take(), state.map_key.take());
+        state.map_kept = view.and_then(MapView::kept).zip(key).map(|(kept, key)| (key, kept));
         state.map_image = None;
         state.map_play += 1;
         state.images.forget("map");
@@ -426,4 +444,11 @@ impl TuiApp {
             app.0.scheduler.request();
         });
     }
+}
+
+/// The palette's sounds, and those it reached, as the map marks them.
+fn palette_of(state: &State) -> (std::collections::HashSet<String>, std::collections::HashSet<String>) {
+    let palette = state.palette.as_ref().map(|palette| palette.files.iter().map(|file| file.path.clone()).collect()).unwrap_or_default();
+    let reached = state.palette.as_ref().map(|palette| palette.reached.iter().cloned().collect()).unwrap_or_default();
+    (palette, reached)
 }

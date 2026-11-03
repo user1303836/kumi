@@ -140,6 +140,8 @@ pub struct SessionOptions {
     pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
     /// /map: what reads the producer's sounds and songs on their maps, each time it opens.
     pub map: Option<kumi_library::map::LoadMap>,
+    /// /map: the key its maps would be read under now, to know a map kept from before is still the same.
+    pub map_key: Option<kumi_library::map::MapKey>,
     /// The models to talk to and the sign-ins, which /model, /effort, /fast, /login and /logout ask the session about.
     pub models: Option<Rc<dyn kumi_ai::control::ModelController>>,
     pub matching: bool,
@@ -193,6 +195,7 @@ impl SessionOptions {
             music: None,
             slots: None,
             map: None,
+            map_key: None,
             models: None,
             matching: true,
             match_budget: None,
@@ -3578,6 +3581,9 @@ impl Session {
     }
     pub fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
         self.0.options.map.clone()
+    }
+    pub fn map_keyer(&self) -> Option<kumi_library::map::MapKey> {
+        self.0.options.map_key.clone()
     }
     pub fn model_controls(&self) -> Option<Rc<dyn kumi_ai::control::ModelController>> {
         self.0.options.models.clone()

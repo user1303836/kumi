@@ -1754,6 +1754,7 @@ pub(crate) fn requests() -> Vec<Op> {
         op::HoldMusic { held: true }.into(),
         op::ForgetMusic {}.into(),
         op::Map {}.into(),
+        op::MapKey {}.into(),
         op::Slots { id: 3, words: "listening off".into() }.into(),
         op::StopSlots { id: 3 }.into(),
         op::Providers {}.into(),

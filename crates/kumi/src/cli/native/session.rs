@@ -748,6 +748,7 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
     // the songs on their maps, read each time /map opens.
     options.slots = Some(slots_context);
     options.map = Some(crate::map::loader(library.clone(), load_library_dir(&env)?.into(), music.clone()));
+    options.map_key = Some(crate::map::keyer(library.clone(), load_library_dir(&env)?.into(), music.clone()));
     options.jobs = Some(JobsOptions {
         worker_factory,
         max: settings.max_jobs.map(|n| n as usize).unwrap_or(DEFAULT_MAX_JOBS),

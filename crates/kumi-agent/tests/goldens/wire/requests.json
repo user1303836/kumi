@@ -381,6 +381,9 @@
     "type": "map"
   },
   {
+    "type": "map-key"
+  },
+  {
     "type": "slots",
     "id": 3,
     "words": "listening off"
