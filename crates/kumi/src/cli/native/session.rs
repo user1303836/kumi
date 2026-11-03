@@ -1816,7 +1816,7 @@ mod watch_tests {
             let now = failures.get(look).or(failures.last()).copied().flatten().map(str::to_string);
             async move { now }
         };
-        let pace = Pace { look_ms: 1, retry_ms: 0, tries: 10, looks: 30, hold_ms };
+        let pace = Pace { look_ms: 1, quick_ms: 1, quick_for_ms: 0, retry_ms: 0, tries: 10, looks: 30, hold_ms };
         let watching = Rc::new(Cell::new(true));
         connect_when_daw_answers(
             || async { false },
