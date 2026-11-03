@@ -1210,6 +1210,38 @@ async fn the_terminal_is_asked_once_its_last_answer_ends_the_wait_and_keys_typed
     .await;
 }
 
+/// Asked while the session builds, a terminal that has answered is given back at once (ctrl+c is a signal again while
+/// Kumi starts), and one that hasn't answered within the wait stays raw and read until the screen takes it: its late
+/// answers are read (not echoed onto the screen), and handed over with what was typed.
+#[tokio::test(start_paused = true)]
+async fn an_answering_terminal_is_given_back_at_once_and_a_late_one_is_read_until_the_screen() {
+    use kumi::tui::probe::ask;
+    local(async {
+        let input = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+        let output = Rc::new(Answering { input: input.clone(), answers: "\u{1b}[?62c", written: RefCell::default() });
+        let asking = ask(&(input.clone() as Rc<dyn TtyInput>), &(output.clone() as Rc<dyn TtyOutput>)).unwrap();
+        asking.answered(Duration::from_millis(250), &kumi_common::abort::Signal::new()).await;
+        assert!(!input.is_raw() && input.listener.borrow().is_none(), "given back once DA1 is in");
+        assert!(asking.end().answers.complete);
+        // Quiet within the wait: still raw and read, so what it says late is read, then handed over as the screen starts.
+        let late = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+        let output: Rc<dyn TtyOutput> = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
+        let asking = ask(&(late.clone() as Rc<dyn TtyInput>), &output).unwrap();
+        asking.answered(Duration::from_millis(250), &kumi_common::abort::Signal::new()).await;
+        assert!(late.is_raw() && late.listener.borrow().is_some(), "kept raw and read past the wait");
+        late.write("hi\u{1b}[?62c");
+        let probed = asking.end();
+        assert!(!late.is_raw() && late.listener.borrow().is_none(), "given back as the screen takes it");
+        assert!(probed.answers.complete);
+        assert_eq!(probed.read, b"hi\x1b[?62c");
+        // Dropped without being ended (a start that failed): given back all the same.
+        let dropped = Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+        drop(ask(&(dropped.clone() as Rc<dyn TtyInput>), &output).unwrap());
+        assert!(!dropped.is_raw() && dropped.listener.borrow().is_none());
+    })
+    .await;
+}
+
 #[test]
 fn what_the_terminal_says_of_itself_comes_before_its_environment() {
     use kumi::tui::alerts::{detect_terminal_profile, NotifyChannel};
