@@ -4,7 +4,7 @@ use super::{
     presets::PresetCategory,
     sets::SetSummary,
     sources::Source,
-    store::{Entry, Log, LogEntry},
+    store::{Entries, Entry, Log, LogEntry},
 };
 use serde::{Deserialize, Serialize};
 use std::path::Path;
@@ -511,13 +511,13 @@ impl Progress {
     }
 }
 async fn gone<T: LogEntry>(
-    known: &mut IndexMap<String, T>,
+    known: &mut Entries<T>,
     seen: &[Found],
     log: &Log<T>,
     roots: &[String],
     outside: Option<&dyn Fn(&str) -> bool>,
 ) -> Result<(), RuntimeError> {
-    let present: HashSet<_> = seen.iter().map(|file| &file.file.path).collect();
+    let present: HashSet<&str> = seen.iter().map(|file| file.file.path.as_str()).collect();
     let lost: Vec<_> = known
         .keys()
         .filter(|path| {
@@ -527,12 +527,12 @@ async fn gone<T: LogEntry>(
                         (!Path::new(path).exists() && Path::new(&dirname(&dirname(path))).exists()) || skipped(path)
                     }))
         })
-        .cloned()
+        .map(str::to_owned)
         .collect();
     // In one pass: removing them one at a time moves every entry after each.
     if !lost.is_empty() {
-        let lost: HashSet<&String> = lost.iter().collect();
-        known.retain(|path, _| !lost.contains(path));
+        let lost: HashSet<&str> = lost.iter().map(String::as_str).collect();
+        known.retain(|entry| !lost.contains(entry.path()));
     }
     log.append(&lost.into_iter().map(Entry::gone).collect::<Vec<_>>()).await.map_err(io_error)
 }
@@ -703,7 +703,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             browser: if plugin { None } else { browser_path(&file.source, &file.relative).filter(|s| !s.is_empty()) },
             error,
         };
-        presets.insert(file.file.path.clone(), entry.clone());
+        presets.insert(entry.clone());
         preset_writer.add(entry);
         {
             let mut p = progress.value.borrow_mut();
@@ -729,7 +729,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
                 SetEntry { file: file.file.clone(), set: None, error: Some(head(&error.to_string(), 120)) }
             }
         };
-        sets.insert(file.file.path.clone(), entry.clone());
+        sets.insert(entry.clone());
         set_writer.add(entry);
         {
             let mut p = progress.value.borrow_mut();
@@ -787,7 +787,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
                 }
                 let known = {
                     let mut sounds = sounds.borrow_mut();
-                    sounds.insert(file.file.path.clone(), entry.clone());
+                    sounds.insert(entry.clone());
                     sounds.len()
                 };
                 sound_writer.borrow_mut().add(entry);
