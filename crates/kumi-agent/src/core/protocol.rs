@@ -355,6 +355,8 @@ requests! {
     ForgetMusic {} -> Result<(), String>;
     /// /map: the producer's sounds and songs on their maps, read afresh.
     Map {} -> MapData;
+    /// /map: the key the maps would be read under now. The same key as a map read before: that map is the same.
+    MapKey {} -> String;
     /// /slots and its words: what it says. What's under way comes as `slots-progress` events with its `id`, and
     /// [`op::StopSlots`] stops it.
     Slots { id: u32, words: String } -> Said;
@@ -825,6 +827,7 @@ impl Session {
                 answered(request, |op::ForgetMusic {}| async move { Ok(part(session.music())?.forget().await) }).await
             }
             Op::Map(request) => answered(request, |op::Map {}| async move { Ok(part(session.map_loader())?().await) }).await,
+            Op::MapKey(request) => answered(request, |op::MapKey {}| async move { Ok(part(session.map_keyer())?().await) }).await,
             Op::Slots(request) => {
                 answered(
                     request,

@@ -81,6 +81,7 @@ pub fn answer(op: Op) -> Result<Reply, RuntimeError> {
         | Op::HoldMusic(_)
         | Op::ForgetMusic(_)
         | Op::Map(_)
+        | Op::MapKey(_)
         | Op::Slots(_)
         | Op::Providers(_)
         | Op::LocalModels(_)

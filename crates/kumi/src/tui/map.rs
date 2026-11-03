@@ -243,6 +243,14 @@ struct Fit {
     typical: Vec<f32>,
 }
 
+/// Both maps as they were made ready to draw, kept after /map closes (`MapView::kept`): their data (its colours as read,
+/// which the theme draws in its own as they show again), and each map's fit.
+pub struct KeptMap {
+    data: Rc<MapData>,
+    fits: Vec<Fit>,
+    colors_read: [Vec<Rgb>; 2],
+}
+
 /// Both maps made ready to draw: worked out once as /map opens, off Kumi's thread.
 pub struct Ready {
     data: MapData,
@@ -916,14 +924,32 @@ impl MapView {
     pub fn loaded(&mut self, ready: Ready) {
         let Ready { data, fits } = ready;
         // The classes' and styles' colours as read, for each theme's own (`rethemed`).
-        self.colors_read = [&data.sounds, &data.songs].map(|layer| layer.groups.iter().map(|group| group.color).collect());
+        let colors_read = [&data.sounds, &data.songs].map(|layer| layer.groups.iter().map(|group| group.color).collect());
+        self.shown_from(KeptMap { data: Rc::new(data), fits: fits.into(), colors_read });
+    }
+
+    /// A map kept from the last time /map was open, still the same (`KeptMap`): shown as it was first shown, without
+    /// reading or fitting it again.
+    pub fn reloaded(&mut self, kept: KeptMap) {
+        self.shown_from(kept);
+    }
+
+    fn shown_from(&mut self, kept: KeptMap) {
+        let KeptMap { data, fits, colors_read } = kept;
+        self.colors_read = colors_read;
         self.views = vec![View::new(&data.sounds, fits[0].aspect), View::new(&data.songs, fits[1].aspect)];
-        self.fits = fits.into();
+        self.fits = fits;
         self.tab = usize::from(data.sounds.points.is_empty() && !data.songs.points.is_empty());
-        self.data = Some(Rc::new(data));
+        self.data = Some(data);
         self.version += 1;
         self.mark_palette();
         self.rethemed();
+    }
+
+    /// What to keep of the map as it closes, for /map again while what it was read from stays the same: its data, its
+    /// fits and its colours as read. None when it never came.
+    pub fn kept(self) -> Option<KeptMap> {
+        Some(KeptMap { data: self.data?, fits: self.fits, colors_read: self.colors_read })
     }
 
     /// Each class's and style's colour as it reads on the theme's ground (on light, one too pale deepened), from the

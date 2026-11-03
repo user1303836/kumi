@@ -406,6 +406,10 @@ struct State {
     /// /map while it's open, in place of the conversation, and the key of the image it has up.
     map: Option<super::map::MapView>,
     map_image: Option<String>,
+    /// The key the open map's data was read under (`op::MapKey`), and the map kept from the last one open with its key:
+    /// /map again under the same key shows it as it was made ready, without reading or fitting it again.
+    map_key: Option<String>,
+    map_kept: Option<(String, super::map::KeptMap)>,
     /// /map open: the map served to the browser, until /map close or Kumi quits.
     map_page: Option<crate::map_server::MapServer>,
     /// Counts /map open and what stops one (/map close, the music changing): a map read for an older one doesn't open;
@@ -638,6 +642,8 @@ impl State {
             images: shown::Images::default(),
             map: None,
             map_image: None,
+            map_key: None,
+            map_kept: None,
             map_page: None,
             map_page_asked: 0,
             map_page_opening: false,

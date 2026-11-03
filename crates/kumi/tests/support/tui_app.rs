@@ -128,6 +128,8 @@ pub struct Control {
     pub slots: RefCell<Option<Rc<kumi_listening::slots::SlotsContext>>>,
     /// What /map reads its data with.
     pub map: RefCell<Option<kumi::map::LoadMap>>,
+    /// The key /map's data would be read under now (none: the session doesn't say, and no map is kept).
+    pub map_key: RefCell<Option<String>>,
     /// The models to talk to, and the sign-ins.
     pub models: RefCell<Option<Rc<dyn kumi::models::ModelController>>>,
     /// Itself, once the harness hands it to the screen: what a request told carries on with after `tell` returns.
@@ -164,6 +166,7 @@ impl Default for Control {
             music: RefCell::default(),
             slots: RefCell::default(),
             map: RefCell::default(),
+            map_key: RefCell::default(),
             models: RefCell::default(),
             this: RefCell::default(),
             side: HandleSide::new(),
@@ -695,6 +698,7 @@ impl Control {
                 let load = part(self.map_loader())?;
                 Reply::Map(load().await)
             }
+            Op::MapKey(op::MapKey {}) => Reply::MapKey(part(self.map_key.borrow().clone())?),
             Op::Slots(op::Slots { id, words }) => Reply::Slots(self.side.slots(id, &words, &*part(self.slots_context())?).await),
             Op::StopSlots(op::StopSlots { id }) => Reply::StopSlots(self.side.stop_slots(id)),
             Op::StopSignIn(op::StopSignIn { id }) => Reply::StopSignIn(self.side.stop_sign_in(id)),

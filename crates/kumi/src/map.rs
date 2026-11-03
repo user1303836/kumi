@@ -5,7 +5,7 @@
 
 use futures::FutureExt;
 use kumi_library::{
-    map::{read_sounds_map, sounds_on_map_by_turns, MapSound},
+    map::{read_sounds_map, sounds_on_map_by_turns, MapKey, MapSound, SOUNDS_MAP},
     Library, SoundClass, CLASSES,
 };
 use kumi_listening::music::{
@@ -416,6 +416,40 @@ pub fn loader(library: Rc<Library>, library_dir: PathBuf, music: Rc<Music>) -> L
     })
 }
 
+/// The key the maps would be read under now (`MapKey`), from this session's DAW, the library's folders it offers and the
+/// files the maps are read from.
+pub fn keyer(library: Rc<Library>, library_dir: PathBuf, music: Rc<Music>) -> MapKey {
+    Rc::new(move || {
+        let (library, dir, music) = (library.clone(), library_dir.clone(), music.clone());
+        async move {
+            let daw = crate::daw::current().id();
+            let sources: Vec<String> =
+                library.sources().await.into_iter().filter(|source| source.offered_in(Some(daw))).map(|source| source.path).collect();
+            let database = kumi_listening::music::database(&music.dir());
+            let journal = PathBuf::from(format!("{}-wal", database.display()));
+            map_key(daw, &sources, &[dir.join(SOUNDS_MAP), dir.join("sounds.jsonl"), database, journal])
+        }
+        .boxed_local()
+    })
+}
+
+/// The key of maps read for `daw`, offered `sources`, from `files`: each file's size and when it last changed (or that
+/// it isn't there). A learn (the sounds' log), a map laid out again, a song learned (the music database or its
+/// write-ahead log), a folder added or taken away, or another DAW: another key.
+pub fn map_key(daw: kumi_types::daw::DawId, sources: &[String], files: &[PathBuf]) -> String {
+    let stamp = |file: &PathBuf| {
+        std::fs::metadata(file).map_or_else(
+            |_| "-".to_string(),
+            |meta| {
+                let changed =
+                    meta.modified().ok().and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |at| at.as_nanos());
+                format!("{} {changed}", meta.len())
+            },
+        )
+    };
+    format!("{daw:?}\n{}\n{}", sources.join("\n"), files.iter().map(stamp).collect::<Vec<_>>().join("\n"))
+}
+
 async fn sounds(library: &Library, dir: PathBuf) -> Layer {
     let Some(map) = tokio::task::spawn_blocking(move || read_sounds_map(&dir)).await.ok().flatten() else {
         return Layer::empty(Kind::Sounds, "Kumi hasn't put your sounds on a map yet: it does once it has learned your library.");
@@ -445,5 +479,41 @@ async fn songs(music: &Music) -> Layer {
         Ok(Ok(layer)) => layer,
         Ok(Err(error)) => Layer::empty(Kind::Songs, &format!("Kumi couldn't read your music: {error}")),
         Err(_) => songs_layer(vec![], vec![]),
+    }
+}
+
+#[cfg(test)]
+mod key_tests {
+    use super::*;
+    use kumi_types::daw::DawId;
+
+    /// A map kept from before is the same only under the same key: a changed map file (rewritten, so its size or time
+    /// changes), a learn (the sounds' log), a song learned, a folder added, or another DAW gets another.
+    #[test]
+    fn a_changed_map_file_a_learn_a_folder_or_another_daw_is_another_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let files: Vec<PathBuf> =
+            ["sounds-map.json", "sounds.jsonl", "music.db", "music.db-wal"].iter().map(|name| dir.path().join(name)).collect();
+        std::fs::write(&files[0], "{\"version\":1,\"made\":1,\"points\":[]}").unwrap();
+        std::fs::write(&files[1], "{}\n").unwrap();
+        let sources = vec!["/Users/me/Samples".to_string()];
+        let key = || map_key(DawId::Ableton, &sources, &files);
+        let first = key();
+        assert_eq!(key(), first, "nothing changed");
+        // The map made again: written afresh, another size.
+        std::fs::write(&files[0], "{\"version\":1,\"made\":2,\"points\":[[\"a\",0.5,0.5]]}").unwrap();
+        let remade = key();
+        assert_ne!(remade, first);
+        // A learn appends to the sounds' log.
+        std::fs::write(&files[1], "{}\n{\"path\":\"/Users/me/Samples/a.wav\"}\n").unwrap();
+        let learned = key();
+        assert_ne!(learned, remade);
+        // A song learned: the music database comes (or its write-ahead log grows).
+        std::fs::write(&files[3], "wal").unwrap();
+        assert_ne!(key(), learned);
+        let now = key();
+        // Another folder, and another DAW.
+        assert_ne!(map_key(DawId::Ableton, &[sources[0].clone(), "/Volumes/Drive".into()], &files), now);
+        assert_ne!(map_key(DawId::Reaper, &sources, &files), now);
     }
 }
