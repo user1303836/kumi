@@ -590,6 +590,59 @@ class RemoteScriptTests(unittest.TestCase):
         # Elsewhere there's nothing to check off it: the first tick starts it.
         self.assertEqual(package._files_check() is None, os.name != "nt")
 
+    def test_a_check_that_takes_long_is_waited_for_on_lives_thread_after_half_a_second(self):
+        """A thread of its own can be starved by Live's Python: past the bound, Live's thread waits for the check (which
+        lets the interpreter go), so the bridge never starts later than with the check on Live's thread throughout."""
+        package = __import__("AbletonMcpBridge")
+
+        class Bridge:
+            def __init__(self, *args, **kwargs): self.served = 0
+            def update_display(self): self.served += 1
+
+        with patch.object(package, "_files_check", return_value=lambda: time.sleep(0.3)), patch.object(package, "_CHECK_ON_ITS_OWN_SECONDS", 0.05), \
+                patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
+            surface = package.AbletonMcpBridge(FakeInstance())
+            surface._keep_willington = lambda: None
+            surface.update_display()
+            self.assertIsNone(surface._bridge, "within the bound: not waited for")
+            time.sleep(0.06)
+            began = time.monotonic()
+            surface.update_display()
+            waited = time.monotonic() - began
+        self.assertEqual(surface._bridge.served, 1, "waited for, then started, at that tick")
+        self.assertGreater(waited, 0.1)
+
+    def test_a_failed_start_stops_the_timer_and_a_good_one_counts_its_rate_from_the_start(self):
+        package = __import__("AbletonMcpBridge"); made = []
+
+        class Timer:
+            def __init__(self, callback, interval, repeat): self.callback, self.running = callback, False; made.append(self)
+            def start(self): self.running = True
+            def stop(self): self.running = False
+
+        class Bridge:
+            between_ticks = False
+            def __init__(self, *args, **kwargs): self.served = 0
+            def serve_between_ticks(self): self.served += 1
+
+        live = types.ModuleType("Live"); live.Base = types.SimpleNamespace(Timer=Timer)
+        def refused(): raise ValueError("bridge secret is invalid")
+        record = Path(package.__file__).with_name("start-failure.json")
+        try:
+            with patch.dict(sys.modules, {"Live": live}), patch.object(package, "_read_config", refused):
+                surface = package.AbletonMcpBridge(FakeInstance())
+                made[0].callback()
+            self.assertFalse(made[0].running, "nothing to serve: the timer stops")
+            with patch.dict(sys.modules, {"Live": live}), patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
+                surface = package.AbletonMcpBridge(FakeInstance())
+                surface._timer_counted_from = 0.0
+                made[1].callback()
+            self.assertEqual(surface._bridge.served, 1)
+            self.assertGreater(surface._timer_counted_from, 0.0, "the rate is counted from the bridge's start")
+            self.assertTrue(made[1].running)
+        finally:
+            record.unlink(missing_ok=True)
+
     @unittest.skipIf(os.name == "nt", "POSIX owners and modes; on Windows one ACL check decides")
     def test_a_refused_file_says_what_the_owner_checks_found(self):
         package = __import__("AbletonMcpBridge")

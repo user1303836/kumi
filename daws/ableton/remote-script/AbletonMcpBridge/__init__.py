@@ -701,6 +701,17 @@ class _FilesChecked:
     def done(self) -> bool:
         return self._done.is_set()
 
+    def wait(self, seconds: float) -> bool:
+        return self._done.wait(seconds)
+
+
+# Live's own Python can starve a thread of its own (a hello once took about a second from one), and the check's few
+# steps in Python after its PowerShell need the interpreter: from Live's first call this long after it made the surface,
+# Live's thread waits for the check itself (which lets the interpreter go), so the bridge never starts later than with
+# the check on Live's thread throughout. PowerShell's own run is bounded at 10 s (`_windows_acl_owner_only_all`).
+_CHECK_ON_ITS_OWN_SECONDS = 0.5
+_CHECK_WAIT_SECONDS = 15.0
+
 
 def _files_check() -> Callable[[], None] | None:
     """What checks the bridge's files off Live's thread: Windows' ACL batch for the reference, configuration and secret."""
@@ -723,6 +734,7 @@ class AbletonMcpBridge(_ControlSurface):
         self._willington = None
         self._timer = None
         # The bridge starts on Live's thread, at its timer's or a display tick's first call once its files are checked.
+        self._made_at = time.monotonic()
         self._checked = _FilesChecked(_files_check())
         self._start_timer()
 
@@ -732,17 +744,25 @@ class AbletonMcpBridge(_ControlSurface):
         if getattr(self, "_bridge", None) is not None:
             return True
         checked = getattr(self, "_checked", None)
-        if checked is None or not checked.done():
+        if checked is None:
             return False
+        if not checked.done():
+            if time.monotonic() - getattr(self, "_made_at", 0.0) < _CHECK_ON_ITS_OWN_SECONDS:
+                return False
+            checked.wait(_CHECK_WAIT_SECONDS)
         self._checked = None
         try:
             self._bridge = _Bridge(self._instance, _read_config(), song=self._song, provenance="real-live", diagnostics_validator=_diagnostics_path_safe)
         except Exception as error:
             _say_start_failure(self, self._instance, error)
+            # Nothing more for the timer to serve: the ticks find nothing to start.
+            self._stop_timer()
             return False
         _start_failure_gone()
         if getattr(self, "_timer", None) is not None:
             self._bridge.between_ticks = True
+            # The timer's rate counted from the bridge's start: its calls before it served nothing.
+            self._timer_calls, self._timer_counted_from = 0, time.perf_counter()
         return True
 
     def _start_timer(self) -> None:
