@@ -661,7 +661,8 @@ async fn renoises_pattern_is_read_for_the_producers_track_and_the_first_ones() {
     tokio::task::LocalSet::new()
         .run_until(async {
             use kumi_agent::core::view::BodyRequest;
-            let focus = json!({"epoch": "3", "view": "pattern", "selection": {"trackRef": "3:track:40"}, "transport": {"playing": false}});
+            // (a layout the book takes from the focus: a pattern's read names it only for refs of its own, which it has none of)
+            let focus = json!({"epoch": "3", "layout": 5, "view": "pattern", "selection": {"trackRef": "3:track:40"}, "transport": {"playing": false}});
             let body = json!({"ref": "3:pattern:2", "name": "Drop", "lines": 64, "from": 1, "lpb": 4, "tracks": []});
             let host = Rc::new(Host {
                 answers: RefCell::new(vec![
@@ -679,6 +680,9 @@ async fn renoises_pattern_is_read_for_the_producers_track_and_the_first_ones() {
             renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()) }, Signal::new()).await.unwrap();
             let asked = host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap();
             assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
+            // A layout makes the bridge carry (or refuse as stale) the refs on tracks a read names: the track named only to
+            // read around it brings none, so the read is never refused for it.
+            assert_eq!(asked.get("layout"), None, "{asked}");
             renoise.close().await.unwrap();
         })
         .await;

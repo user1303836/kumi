@@ -1797,16 +1797,17 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         if let (BodyRequest::Timeline, Some(track)) = (request, self.selected.borrow().clone()) {
             args.insert("around".into(), track.into());
         }
+        if let Some(layout) = self.layout.get().filter(|_| names_tracks(&self.book.borrow().scheme, &args)) {
+            args.insert("layout".into(), layout.into());
+        }
         // A pattern's tracks (a tracker's): the first that FOCUS can draw and the producer's, not a big song's every one. A
-        // bridge that takes no `limit` here sends them all, as before.
+        // bridge that takes no `limit` here sends them all, as before. (Named after the layout: a track named only to read
+        // around it is never a reason for the bridge to refuse the read as stale.)
         if matches!(request, BodyRequest::Tracker { .. }) && args.get("kind").and_then(Value::as_str) == Some("pattern") {
             args.insert("limit".into(), TRACKER_TRACKS.into());
             if let Some(track) = self.selected.borrow().clone() {
                 args.insert("around".into(), track.into());
             }
-        }
-        if let Some(layout) = self.layout.get().filter(|_| names_tracks(&self.book.borrow().scheme, &args)) {
-            args.insert("layout".into(), layout.into());
         }
         // The stretch of the timeline the DAW's view showed last, as the producer scrolled and zoomed it there: its
         // items and marks, not a whole long project's.
