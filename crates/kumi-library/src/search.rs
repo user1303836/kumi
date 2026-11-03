@@ -21,6 +21,7 @@ use std::{
     cmp::Ordering,
     collections::{HashMap, HashSet},
     path::Path,
+    rc::Rc,
     sync::LazyLock,
 };
 fn plain_word(word: &str) -> String {
@@ -296,7 +297,8 @@ pub fn letter_bit(letter: char) -> Option<u64> {
 }
 
 pub struct SoundIndex {
-    pub entries: Vec<SoundEntry>,
+    /// The library's own entries, shared with its log's reader (not copies).
+    pub entries: Vec<Rc<SoundEntry>>,
     /// The sources its sounds are under, the longest path first.
     roots: Vec<Source>,
     prepared: Vec<Prepared>,
@@ -307,18 +309,19 @@ pub struct SoundIndex {
     scale: [f32; VECTOR_LENGTH],
 }
 impl SoundIndex {
-    pub fn new(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source]) -> Self {
+    pub fn new(entries: impl IntoIterator<Item = impl Into<Rc<SoundEntry>>>, sources: &[Source]) -> Self {
         Self::rooted(entries, sources.iter().filter(|s| Path::new(&s.path).exists()).collect())
     }
     /// The sounds of every one of `sources`, its folder there now or not (the map lays them all out).
-    pub fn of_every_source(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source]) -> Self {
+    pub fn of_every_source(entries: impl IntoIterator<Item = impl Into<Rc<SoundEntry>>>, sources: &[Source]) -> Self {
         Self::rooted(entries, sources.iter().collect())
     }
-    fn rooted(entries: impl IntoIterator<Item = SoundEntry>, mut roots: Vec<&Source>) -> Self {
+    fn rooted(entries: impl IntoIterator<Item = impl Into<Rc<SoundEntry>>>, mut roots: Vec<&Source>) -> Self {
         roots.sort_by_key(|s| std::cmp::Reverse(s.path.encode_utf16().count()));
         let rows: Vec<_> = entries
             .into_iter()
-            .filter_map(|entry| {
+            .map(Into::into)
+            .filter_map(|entry: Rc<SoundEntry>| {
                 roots.iter().position(|root| below(&entry.path, &root.path).is_some()).map(|at| {
                     let prepared = prepared(&entry, roots[at], at);
                     (entry, prepared)
@@ -327,7 +330,7 @@ impl SoundIndex {
             .collect();
         Self::from_rows(rows, roots.into_iter().cloned().collect())
     }
-    fn from_rows(rows: Vec<(SoundEntry, Prepared)>, roots: Vec<Source>) -> Self {
+    fn from_rows(rows: Vec<(Rc<SoundEntry>, Prepared)>, roots: Vec<Source>) -> Self {
         let count = rows.len();
         let (entries, prepared): (Vec<_>, Vec<_>) = rows.into_iter().unzip();
         let mut index = Self {
@@ -380,12 +383,16 @@ impl SoundIndex {
         }
         index
     }
-    pub async fn build(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source]) -> Self {
+    pub async fn build(entries: impl IntoIterator<Item = impl Into<Rc<SoundEntry>>>, sources: &[Source]) -> Self {
         Self::build_after(entries, sources, None).await
     }
     /// `build`, taking from `before` what it prepared for each sound that's as it was there (the same file, numbers and
     /// source): made again after a learn added a few sounds, the index prepares only those.
-    pub async fn build_after(entries: impl IntoIterator<Item = SoundEntry>, sources: &[Source], before: Option<SoundIndex>) -> Self {
+    pub async fn build_after(
+        entries: impl IntoIterator<Item = impl Into<Rc<SoundEntry>>>,
+        sources: &[Source],
+        before: Option<SoundIndex>,
+    ) -> Self {
         let mut roots = sources.to_vec();
         roots.sort_by_key(|s| std::cmp::Reverse(s.path.encode_utf16().count()));
         let (before_entries, mut before_prepared, before_roots) =
@@ -393,7 +400,7 @@ impl SoundIndex {
         let before_rows: HashMap<&str, usize> = before_entries.iter().enumerate().map(|(row, entry)| (entry.path.as_str(), row)).collect();
         let mut rows = vec![];
         let mut count = 0;
-        for entry in entries {
+        for entry in entries.into_iter().map(Into::<Rc<SoundEntry>>::into) {
             if let Some(at) = roots.iter().position(|s| below(&entry.path, &s.path).is_some()) {
                 let kept = before_rows
                     .get(entry.path.as_str())
@@ -457,7 +464,7 @@ impl SoundIndex {
         self.entries.iter().any(|e| below(&e.path, folder).is_some())
     }
     pub fn vector_of(&self, path: &str, size: Option<u64>) -> Option<&SoundEntry> {
-        self.entries.iter().find(|e| e.path == path && size.is_none_or(|s| e.size == s))
+        self.entries.iter().find(|e| e.path == path && size.is_none_or(|s| e.size == s)).map(|entry| &**entry)
     }
     fn normalized(&self, vector: &[f64]) -> [f32; VECTOR_LENGTH] {
         std::array::from_fn(|d| ((vector.get(d).copied().unwrap_or(0.) - self.mean[d] as f64) * self.scale[d] as f64) as f32)
@@ -631,7 +638,8 @@ impl SoundIndex {
                         why.insert(0, format!("{}% like {}{}", to_string(round(close)), like.name, differences(entry, like)));
                     }
                     SoundHit {
-                        entry: entry.clone(),
+                        // A hit's own copy: a search gives few.
+                        entry: SoundEntry::clone(entry),
                         name: made.name.clone(),
                         r#where: made.where_.clone(),
                         score: round(scores[at] * 10.) / 10.,

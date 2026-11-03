@@ -77,6 +77,42 @@ pub trait LogEntry: Serialize + DeserializeOwned {
     fn path(&self) -> &str;
 }
 
+/// An entry a log reader holds and hands out shared: the sounds' index takes the same entries, not copies (a big
+/// library's sounds would otherwise be in memory twice). It reads and writes as the entry itself.
+#[derive(Debug, PartialEq)]
+pub struct Held<T>(pub std::rc::Rc<T>);
+
+impl<T> Clone for Held<T> {
+    fn clone(&self) -> Self {
+        Held(std::rc::Rc::clone(&self.0))
+    }
+}
+
+impl<T> std::ops::Deref for Held<T> {
+    type Target = T;
+    fn deref(&self) -> &T {
+        &self.0
+    }
+}
+
+impl<T: Serialize> Serialize for Held<T> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        self.0.serialize(serializer)
+    }
+}
+
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for Held<T> {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        T::deserialize(deserializer).map(|entry| Held(std::rc::Rc::new(entry)))
+    }
+}
+
+impl<T: LogEntry> LogEntry for Held<T> {
+    fn path(&self) -> &str {
+        self.0.path()
+    }
+}
+
 impl LogEntry for Entry {
     fn path(&self) -> &str {
         &self.path
