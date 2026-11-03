@@ -1242,6 +1242,46 @@ async fn an_answering_terminal_is_given_back_at_once_and_a_late_one_is_read_unti
     .await;
 }
 
+/// Held past the wait (a terminal that hasn't answered DA1), the terminal is given back the moment its DA1 comes, and a
+/// ctrl+c typed meanwhile is the signal the terminal would have sent, once the terminal is given back: a slow start still
+/// stops at ctrl+c, as when the probe never held it. (nextest runs each test in its own process, so the handler is this
+/// test's alone.)
+#[cfg(unix)]
+#[tokio::test(start_paused = true)]
+async fn a_terminal_held_past_the_wait_is_given_back_at_its_late_answer_or_a_ctrl_c() {
+    use kumi::tui::probe::ask;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    static INTERRUPTED: AtomicBool = AtomicBool::new(false);
+    extern "C" fn interrupted(_: libc::c_int) {
+        INTERRUPTED.store(true, Ordering::SeqCst);
+    }
+    local(async {
+        let output: Rc<dyn TtyOutput> = Rc::new(FakeOutput { written: RefCell::new(String::new()), resize: RefCell::new(None) });
+        let fresh = || Rc::new(FakeInput { raw: Cell::new(false), listener: RefCell::new(None), discarded: Cell::new(0) });
+        // Its DA1, late.
+        let late = fresh();
+        let asking = ask(&(late.clone() as Rc<dyn TtyInput>), &output).unwrap();
+        asking.answered(Duration::from_millis(250), &kumi_common::abort::Signal::new()).await;
+        assert!(late.is_raw(), "held past the wait");
+        late.write("\u{1b}[?62c");
+        assert!(!late.is_raw() && late.listener.borrow().is_none(), "given back at its DA1");
+        assert!(asking.end().answers.complete);
+        // A ctrl+c while it's held.
+        // SAFETY: a handler that only stores a flag, set for this test's own process.
+        unsafe {
+            libc::signal(libc::SIGINT, interrupted as extern "C" fn(libc::c_int) as libc::sighandler_t);
+        }
+        let quiet = fresh();
+        let asking = ask(&(quiet.clone() as Rc<dyn TtyInput>), &output).unwrap();
+        asking.answered(Duration::from_millis(250), &kumi_common::abort::Signal::new()).await;
+        quiet.write("ab\x03");
+        assert!(INTERRUPTED.load(Ordering::SeqCst), "ctrl+c is SIGINT");
+        assert!(!quiet.is_raw() && quiet.listener.borrow().is_none(), "given back as it goes");
+        assert_eq!(asking.end().read, b"ab");
+    })
+    .await;
+}
+
 #[test]
 fn what_the_terminal_says_of_itself_comes_before_its_environment() {
     use kumi::tui::alerts::{detect_terminal_profile, NotifyChannel};
