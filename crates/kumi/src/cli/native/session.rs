@@ -58,10 +58,11 @@ impl Kernel for UnavailableKernel {
 /// times until it stops answering (then the count starts again). It ends after `looks` (quick ones aside). A Live
 /// that's open but not answering yet gets `hold_ms` before Kumi says how to make it answer.
 ///
-/// For `quick_for_ms` from when the DAW is seen open (as the watch starts, or opening later among several DAWs), a look
-/// comes every `quick_ms`, and a reconnect that failed is tried again after `look_ms`: its bridge's port opens as its
-/// Remote Script starts, about a second before Live answers through it. A look is a connect to that port on this
-/// computer, which sends nothing: a Remote Script not listening yet refuses it, and one listening drops it at once.
+/// For `quick_for_ms` from when the DAW is seen open (as the watch starts, or opening later among several DAWs) or its
+/// port begins to answer (a Live opened after Kumi), a look comes every `quick_ms`, and a reconnect that failed is tried
+/// again after `look_ms`, without counting against `tries`: the port opens as Live's Remote Script starts, about a
+/// second before Live answers through it. A look is a connect to that port on this computer, which sends nothing: a
+/// Remote Script not listening yet refuses it, and one listening drops it at once.
 struct Pace {
     look_ms: u64,
     quick_ms: u64,
@@ -202,12 +203,13 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
     let mut tries = 0;
     let mut next: Option<std::time::Instant> = Some(std::time::Instant::now());
     let mut failure_said: Option<String> = None;
-    // When the DAW was seen open: looks come quickly for a while from then.
+    // When the DAW was seen open, or its port began to answer: looks come quickly for a while from then.
     let mut seen_open = open.then(std::time::Instant::now);
-    let mut looks = 0;
+    let quick_since =
+        |seen: Option<std::time::Instant>| seen.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(pace.quick_for_ms));
+    let (mut looks, mut was_answering) = (0, false);
     while looks < pace.looks {
-        let quick = seen_open.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(pace.quick_for_ms));
-        if !quick {
+        if !quick_since(seen_open) {
             looks += 1;
         }
         let Some(session) = controller.borrow().as_ref().and_then(Weak::upgrade) else { break };
@@ -230,9 +232,20 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
             said = true;
             emit(SessionEvent::Notice { message: words.unreachable.into() });
         }
-        if answers().await {
-            if tries < pace.tries && next.is_some_and(|at| std::time::Instant::now() >= at) {
-                tries += 1;
+        let answering = answers().await;
+        // Its port answering now and not before: Live is starting its Remote Script (opened after Kumi, say).
+        if answering && !was_answering {
+            seen_open = Some(std::time::Instant::now());
+        }
+        was_answering = answering;
+        let quick = quick_since(seen_open);
+        if answering {
+            if (quick || tries < pace.tries) && next.is_some_and(|at| std::time::Instant::now() >= at) {
+                // A quick try doesn't count against the tries: a Live that takes a while to answer after its port
+                // opens would otherwise use them all up within the minute.
+                if !quick {
+                    tries += 1;
+                }
                 // A turn under way makes this fail; it's tried again later.
                 if session.reconnect().await.is_ok() && session.connected() {
                     emit(SessionEvent::Notice { message: words.answered.into() });
@@ -1698,20 +1711,20 @@ mod watch_tests {
         notices
     }
 
-    /// How many times the watch had looked at Live's port at each of `at_ms` (from its start), and how many reconnects
-    /// it made, with Live open as it starts or not (`open`), its port answering or not, and connecting at the
-    /// `connect_on`th reconnect.
-    async fn looked_at(open: bool, answers: bool, connect_on: u32, at_ms: &[u64]) -> (Vec<usize>, u32) {
+    /// The watch at `pace`, with Live open as it starts or not (`open`), its port answering from its `answers_from`th look
+    /// on, and the session connecting at its `connect_on`th reconnect: how many looks it had made at each of `at_ms`
+    /// (from its start), and the reconnects in all.
+    async fn watched(pace: Pace, open: bool, answers_from: usize, connect_on: u32, at_ms: &[u64]) -> (Vec<usize>, u32) {
         let fake = Fake::new(connect_on);
         let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&fake))));
         let emit: Rc<dyn Fn(SessionEvent)> = Rc::new(|_| {});
         let looked = Rc::new(Cell::new(0usize));
         let counter = looked.clone();
-        let pace = Pace { look_ms: 100, quick_ms: 10, quick_for_ms: 150, retry_ms: 60_000, tries: 10, looks: 1_000, hold_ms: 60_000 };
         let watch = connect_when_live_answers(
             move || {
                 counter.set(counter.get() + 1);
-                async move { answers }
+                let answering = counter.get() >= answers_from;
+                async move { answering }
             },
             move || async move { open },
             controller,
@@ -1728,27 +1741,38 @@ mod watch_tests {
         }
         (counts, fake.reconnects.get())
     }
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn an_open_live_not_answering_yet_is_looked_at_quickly_for_a_while_then_at_the_usual_pace() {
-        // Open as Kumi starts: a look every 10 ms for its first 150 ms, then every 100 ms.
-        let (counts, _) = looked_at(true, false, u32::MAX, &[140, 460]).await;
-        assert!(counts[0] >= 5, "quickly at first: {} looks in 140 ms", counts[0]);
-        assert!(counts[1] - counts[0] <= 5, "then the usual pace: {} more in the next 320 ms", counts[1] - counts[0]);
-        // Not open: the usual pace from the start.
-        let (counts, _) = looked_at(false, false, u32::MAX, &[140]).await;
-        assert!(counts[0] <= 3, "the usual pace: {} looks in 140 ms", counts[0]);
+    fn pace(look_ms: u64, quick_ms: u64, quick_for_ms: u64, tries: u32) -> Pace {
+        Pace { look_ms, quick_ms, quick_for_ms, retry_ms: 60_000, tries, looks: 10_000, hold_ms: 60_000 }
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn while_looking_quickly_a_reconnect_that_failed_is_tried_again_at_the_look_pace() {
-        // Its port answers before Live serves through it: the first reconnect fails, and the next comes after a look's
-        // pace (100 ms), not the retry's (a minute here).
-        let (_, reconnects) = looked_at(true, true, 2, &[160]).await;
-        assert_eq!(reconnects, 2, "tried again within the quick looks");
-        // Without quick looks (Live not open as the watch began), as before: the retry's pace.
-        let (_, reconnects) = looked_at(false, true, 2, &[160]).await;
+    async fn an_open_live_not_answering_yet_is_looked_at_quickly_for_a_while_then_at_the_usual_pace() {
+        // Open as Kumi starts: every 20 ms for its first 600 ms (about 30 looks), then every 500 ms.
+        let (counts, _) = watched(pace(500, 20, 600, 10), true, usize::MAX, u32::MAX, &[550, 1550]).await;
+        assert!(counts[0] >= 10, "quickly at first: {} looks in 550 ms", counts[0]);
+        assert!(counts[1] - counts[0] <= 4, "then the usual pace: {} more in the next second", counts[1] - counts[0]);
+        // Not open, its port not answering: the usual pace from the start.
+        let (counts, _) = watched(pace(500, 20, 600, 10), false, usize::MAX, u32::MAX, &[550]).await;
+        assert!(counts[0] <= 3, "the usual pace: {} looks in 550 ms", counts[0]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_failed_reconnect_while_looking_quickly_is_tried_again_at_the_look_pace_and_not_against_the_tries() {
+        // Its port answers before Live serves through it: three reconnects fail. While looking quickly each next one
+        // comes a look's pace later (300 ms), not the retry's (a minute), and one try in all doesn't stop them.
+        let (_, reconnects) = watched(pace(300, 20, 5_000, 1), true, 0, 4, &[2_500]).await;
+        assert_eq!(reconnects, 4, "connected at the fourth, within the quick looks");
+        // No quick looks: as before, one try and then the retry's pace.
+        let (_, reconnects) = watched(pace(300, 20, 0, 1), true, 0, 4, &[2_500]).await;
         assert_eq!(reconnects, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_live_opened_after_kumi_is_looked_at_quickly_once_its_port_begins_to_answer() {
+        // Closed as Kumi starts (one DAW here, so no process check meanwhile): its port answers from the third look,
+        // the first reconnect fails (Live not serving yet), and the next comes a look's pace later, not a minute.
+        let (_, reconnects) = watched(pace(300, 20, 5_000, 10), false, 3, 2, &[2_500]).await;
+        assert_eq!(reconnects, 2, "connected at the second try");
     }
 
     #[tokio::test(flavor = "current_thread")]
