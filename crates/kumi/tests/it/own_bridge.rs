@@ -1162,6 +1162,130 @@ async fn a_busy_daw_is_looked_at_again_once_it_is_free_not_every_second() {
         .await;
 }
 
+/// Kumi started before the DAW: once the DAW opens and answers, the integration asks the session for a look, which nothing
+/// else does (the session never saw the DAW go, so it doesn't look because it came). It asks again a second later while no
+/// look has read the project (a turn under way refuses one), and stops once one has. A DAW that was there, went and came
+/// back asks for none: the session looks again by itself then.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_daw_opened_after_kumi_started_is_looked_at_once_it_answers() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let gone = json!({"error": "no REAPER with Kumi's bridge is running", "connected": false});
+            let there = json!({"epoch": "1", "view": "arrange", "selection": {}, "transport": {"playing": false}});
+            let second = || tokio::time::sleep(std::time::Duration::from_millis(1_000));
+            for at_start in [false, true] {
+                let host = Rc::new(Host {
+                    answers: RefCell::new(if at_start {
+                        vec![
+                            ("status", json!({"connected": true}), false),
+                            ("snapshot", reaper_snapshot(), false),
+                            ("focus", there.clone(), false),
+                        ]
+                    } else {
+                        vec![
+                            (
+                                "status",
+                                json!({"connected": false, "daw": "reaper", "reason": "no REAPER with Kumi's bridge is running"}),
+                                false,
+                            ),
+                            ("snapshot", gone.clone(), true),
+                            ("focus", gone.clone(), true),
+                        ]
+                    }),
+                    asked: RefCell::default(),
+                });
+                let looks_again = Rc::new(std::cell::Cell::new(0));
+                let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
+                let counted = looks_again.clone();
+                options.context.on_look_again = Some(Rc::new(move || counted.set(counted.get() + 1)));
+                options.context.on_focus = Some(Rc::new(|_| {}));
+                let reaper = create_reaper_integration(options);
+                reaper.start(Signal::new()).await.unwrap();
+                reaper.observe(Signal::new(), None).await.unwrap();
+                second().await;
+                if at_start {
+                    // REAPER quits.
+                    host.answers.borrow_mut().push(("focus", gone.clone(), true));
+                    second().await;
+                }
+                assert_eq!(looks_again.get(), 0, "no look asked for while the DAW is away (there at start: {at_start})");
+                // REAPER opens (again).
+                host.answers.borrow_mut().push(("focus", there.clone(), false));
+                host.answers.borrow_mut().push(("snapshot", reaper_snapshot(), false));
+                second().await;
+                if at_start {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    assert_eq!(looks_again.get(), 0, "the session looks again by itself");
+                } else {
+                    assert_eq!(looks_again.get(), 1, "a look is asked for once it answers");
+                    // The session was busy with a turn, which refused it: another is asked for a second later.
+                    second().await;
+                    assert_eq!(looks_again.get(), 2, "asked again while no look has read the project");
+                    // A long turn refuses them all: a refused ask costs nothing, so they go on past LOOKS_AGAIN (20).
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    let asked = looks_again.get();
+                    assert!(asked > 20, "still asking after a 30 s turn: {asked}");
+                    // The session's look reads the project: nothing more is asked for.
+                    reaper.observe(Signal::new(), None).await.unwrap();
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    assert_eq!(looks_again.get(), asked, "none once a look has read it");
+                }
+                reaper.close().await.unwrap();
+            }
+        })
+        .await;
+}
+
+/// A DAW that answers but whose looks keep failing (connected, the snapshot refused) is asked about only so often: each look
+/// the session takes and that doesn't read the project counts, so the asks stop rather than come every second for ever.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_daw_whose_looks_keep_failing_is_asked_about_only_so_often() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let gone = json!({"error": "no REAPER with Kumi's bridge is running", "connected": false});
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![
+                    ("status", json!({"connected": false, "daw": "reaper", "reason": "no REAPER with Kumi's bridge is running"}), false),
+                    ("snapshot", gone.clone(), true),
+                    ("focus", gone, true),
+                ]),
+                asked: RefCell::default(),
+            });
+            let (looks_again, waiting) = (Rc::new(std::cell::Cell::new(0)), Rc::new(std::cell::Cell::new(0)));
+            let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
+            let (counted, asked) = (looks_again.clone(), waiting.clone());
+            options.context.on_look_again = Some(Rc::new(move || {
+                counted.set(counted.get() + 1);
+                asked.set(asked.get() + 1);
+            }));
+            options.context.on_focus = Some(Rc::new(|_| {}));
+            let reaper = create_reaper_integration(options);
+            reaper.start(Signal::new()).await.unwrap();
+            reaper.observe(Signal::new(), None).await.unwrap();
+            // REAPER opens, and answers, but its snapshot is refused every time.
+            host.answers.borrow_mut().push((
+                "focus",
+                json!({"epoch": "1", "view": "arrange", "selection": {}, "transport": {"playing": false}}),
+                false,
+            ));
+            host.answers.borrow_mut().push(("snapshot", json!({"error": "REAPER couldn't read the project", "connected": true}), true));
+            // The session takes every look it's asked for.
+            let mut at = std::collections::HashMap::new();
+            for tenth in 1..=500 {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                while waiting.get() > 0 {
+                    waiting.set(waiting.get() - 1);
+                    reaper.observe(Signal::new(), None).await.unwrap();
+                }
+                at.insert(tenth, looks_again.get());
+            }
+            reaper.close().await.unwrap();
+            assert!(at[&20] >= 1, "asked for looks once it answered: {:?}", at[&20]);
+            assert_eq!(at[&450], at[&500], "the asks stop: {} at 45 s, {} at 50 s", at[&450], at[&500]);
+        })
+        .await;
+}
+
 /// A host whose calls can fail (the caller stopped, a time limit) and that can go away (its pipe closed).
 struct Leaving {
     inner: Rc<Host>,

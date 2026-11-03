@@ -124,6 +124,10 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     /// Told when a look has answered, whatever it found: FOCUS's first read goes then, right after the project's
     /// snapshot, rather than a whole poll period after the start.
     looked_once: Rc<tokio::sync::Notify>,
+    /// A look has read the project since Kumi started.
+    read: Rc<Cell<bool>>,
+    /// Looks begun (the session's and turns'): an ask the session took begins one.
+    looks: Rc<Cell<u32>>,
     /// The track the producer has selected, as the last focus said: the timeline's page is centred on it.
     selected: Rc<RefCell<Option<String>>>,
     /// What the DAW's own view of the timeline showed at the last read of it (REAPER's arrange view): the next read is
@@ -472,6 +476,8 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         closed: Rc::new(Cell::new(false)),
         watching: Cell::new(false),
         looked_once: Rc::default(),
+        read: Rc::default(),
+        looks: Rc::default(),
         selected: Rc::default(),
         timeline_view: Cell::new(None),
         identity: link.project.clone(),
@@ -523,6 +529,8 @@ const LOOK_TRIES: u32 = 20;
 const LOOK_GAP_MS: u64 = 250;
 /// A look that failed while the DAW was there asks the session for another this often, a second apart.
 const LOOKS_AGAIN: u32 = 20;
+/// How long the focus watch waits between the looks it asks for while none has read the project.
+const ASK_AGAIN: std::time::Duration = std::time::Duration::from_secs(1);
 /// The most a read's page can hold for the model: the kernel cuts a tool's result at 64 KB.
 const PAGE_TEXT_BYTES: usize = 60 * 1024;
 /// The most pages a fixed phrase reads of a list (tracks, the sequence, patterns) before it leaves the request to the
@@ -966,7 +974,11 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         // Where FOCUS is drawn, its first read goes as soon as the first look has answered (at most a period from now):
         // the look's snapshot is still the DAW's first request, and FOCUS fills right after it. Plain mode keeps its pace.
         let (looked_once, mut first) = (self.looked_once.clone(), self.options.context.focus_drawn);
+        let (read, looks) = (self.read.clone(), self.looks.clone());
         tokio::task::spawn_local(async move {
+            // The looks asked for because none had read the project yet that the session took, when the last ask was, and
+            // how many looks had begun then.
+            let (mut taken, mut asked_at, mut looks_then): (u32, Option<tokio::time::Instant>, u32) = (0, None, 0);
             let (mut last, mut last_transport, mut last_epoch): (Option<Value>, Option<Value>, Option<String>) = (None, None, None);
             // Polls in a row that found nothing moved, and whether the last answer had the DAW playing.
             let (mut quiet, mut was_playing) = (0u32, false);
@@ -1030,6 +1042,22 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 if !connected.replace(true) {
                     back_at.set(Some(tokio::time::Instant::now()));
                     on_connection(ConnectionState::Connected, None);
+                }
+                // Kumi started before the DAW: no look has read the project yet, and the session, which never saw the DAW
+                // go, doesn't look because it came. So the session is asked for one, as after a look that failed: once a
+                // second while the DAW answers and isn't busy (a dialog has its own wait), until a look reads the project.
+                // A turn under way refuses the look it's asked for, which costs nothing; only looks that began and still
+                // didn't read it count, LOOKS_AGAIN at most. A DAW that went and came back after a look read it is looked
+                // at by the session itself.
+                let free = focus.get("busy").is_none_or(Value::is_null);
+                if !read.get() && free && asked_at.is_none_or(|at| at.elapsed() >= ASK_AGAIN) {
+                    if asked_at.is_some() && looks.get() != looks_then {
+                        taken += 1;
+                    }
+                    if let Some(look_again) = look_again.as_ref().filter(|_| taken < LOOKS_AGAIN) {
+                        (asked_at, looks_then) = (Some(tokio::time::Instant::now()), looks.get());
+                        look_again();
+                    }
                 }
                 // Another project in the same tab, or another song: the epoch moved, and the project's identity with it.
                 // An epoch no event told of (a device or pattern edit in Renoise): the book follows it.
@@ -1537,6 +1565,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
             trace(format!("look: {key}"));
         }
         self.looks_again.set(0);
+        self.read.set(true);
         *self.looked.borrow_mut() = Some(snapshot.clone());
         *self.printed.borrow_mut() = Some(fingerprint_of(snapshot));
         Observation {
@@ -1790,6 +1819,7 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
         // FOCUS's first read waits for this look, whatever it comes to: an answer, a refusal, an error or a stop.
         let _told = Told(&self.looked_once);
+        self.looks.set(self.looks.get().wrapping_add(1));
         let pinned = hints.as_ref().and_then(|hints| hints.pinned.as_ref());
         let references = hints.as_ref().map(|hints| hints.references.as_slice()).unwrap_or_default();
         signal.check()?;
