@@ -456,6 +456,11 @@ mod windows_acl_shapes {
             .collect::<Vec<_>>()
             .join("\n");
         println!("{said}");
+        // Each file gets back a DACL that lets this account remove it (a deny, an empty or an inherit-only DACL leaves it
+        // none), so the folder goes when the test ends.
+        for (_, path, _) in &shapes {
+            write(path, Some(&[allow(0, FULL, Whose::Me)]), true);
+        }
         for (name, fast, check, expected) in &rows {
             assert!(!fast || *check == 0, "{name}: the fast path passed what the check refuses\n{said}");
             if let Some(expected) = expected {
@@ -480,6 +485,11 @@ mod windows_acl_shapes {
             assert!(!is_kumis_shape(Path::new(&shared)), "{shared}");
             assert!(make_kumis_shape(Path::new(&shared)).is_err(), "nothing written by a share's path: {shared}");
         }
+        // The same file by a drive-relative path, from its folder: the drive's working folder is the test's own.
+        std::env::set_current_dir(folder.path()).unwrap();
+        let relative = PathBuf::from(format!("{letter}:auth.json"));
+        assert!(relative.is_file(), "the drive-relative path reaches the file");
+        assert!(!is_kumis_shape(&relative) && make_kumis_shape(&relative).is_err(), "a drive-relative path goes to PowerShell");
         // A drive mapped to that share, which Windows calls remote: CI's runners can map one.
         let free = ('G'..='Y').rev().find(|drive| !Path::new(&format!("{drive}:\\")).exists());
         let mapped = free.filter(|drive| {

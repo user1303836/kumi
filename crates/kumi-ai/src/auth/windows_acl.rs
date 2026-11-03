@@ -119,13 +119,17 @@ fn wide(path: &Path) -> Vec<u16> {
     path.as_os_str().encode_wide().chain([0]).collect()
 }
 
-/// Whether the file is on this computer's own disk by a plain path: a drive letter that isn't a share's, and no link or
-/// junction on the way to it, the file's own included. Any other path is left to the PowerShell check.
+/// Whether the file is on this computer's own disk by a plain path: from a drive letter's root, the drive not a share's,
+/// and no link or junction on the way to it, the file's own included. Any other path is left to the PowerShell check.
 fn plain_local(path: &Path) -> bool {
     use std::{
         os::windows::fs::MetadataExt,
         path::{Component, Prefix},
     };
+    // A drive-relative path ("C:auth.json") is the drive's working folder's, which the walk below can't see.
+    if !path.has_root() {
+        return false;
+    }
     let letter = match path.components().next() {
         Some(Component::Prefix(prefix)) => match prefix.kind() {
             Prefix::Disk(letter) | Prefix::VerbatimDisk(letter) => letter,
