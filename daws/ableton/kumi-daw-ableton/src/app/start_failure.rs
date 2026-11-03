@@ -3,7 +3,7 @@
 //! Log.txt has the script's traceback (its port held by another program, Kumi's bridge files failing the script's
 //! checks): that is said instead, with what fixes it.
 use super::{
-    bridge_setup::is_live_running_on,
+    bridge_setup::{is_live_running_on, live_pids_on},
     doctor::{bridge_ports, is_live, port_owner, PortOwner},
     report::logs_in,
 };
@@ -21,6 +21,10 @@ const STARTED: &str = "info: Started: Live";
 const NOT_LOADED: &str = "Exception: Script could not be loaded.";
 /// A start of the script, from _Framework, before any of the bridge's own code runs.
 const INITIALIZING: &str = "(AbletonMcpBridge) Initializing...";
+/// The Remote Script's own line for a start that failed (since the bridge that says it in Live's status bar too), the
+/// exception after it: one that starts later than Live made it (on Windows, once its files' ACLs are checked off Live's
+/// thread) fails without a traceback Live reports.
+const SAID_FAILED: &str = "RemoteScriptMessage: (AbletonMcpBridge) AbletonMcpBridge couldn't start: ";
 
 /// A failed start of AbletonMcpBridge in Live, as Live's log has it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +88,8 @@ pub(crate) fn failed_start(log: &str) -> Option<Failed> {
             (listing, listed) = (true, 0);
         } else if text.ends_with(INITIALIZING) {
             (failed, traceback) = (None, None);
+        } else if let Some(exception) = text.strip_prefix(SAID_FAILED).filter(|exception| !exception.trim().is_empty()) {
+            failed = Some(exception.trim().to_string());
         } else if text == NOT_LOADED {
             if let Some(traceback) = traceback.take().filter(|traceback| OURS.is_match(traceback)) {
                 failed = traceback.lines().map(str::trim).filter(|line| !line.is_empty()).last().map(str::to_string);
@@ -185,8 +191,38 @@ pub(crate) async fn start_failure_now(env: &Env, platform: &str) -> Option<Strin
     let root = super::folders::live_preferences_dir(env);
     start_failure_settled(env, &root, kumi_daw::process::default_run(), platform, Duration::ZERO).await
 }
+/// What the Remote Script keeps beside itself while its last start in a running Live failed (`start-failure.json`, from
+/// the bridge that says its failure in Live's status bar on): that Live's process and the exception, taken while that
+/// process is a running Live's. Where Kumi has Live's log, the log decides (it also tells a Control Surface set to None
+/// since); this is for a Live whose log Kumi can't read.
+async fn recorded_failure(env: &Env, run: Run, platform: &str) -> Option<Found> {
+    let file = kumi_library::sources::join(&super::folders::remote_scripts_dir(env), "AbletonMcpBridge/start-failure.json");
+    let meta = tokio::fs::metadata(&file).await.ok()?;
+    let key = (file.clone(), meta.len(), meta.modified().ok()?);
+    // Asked about once for the record as it stands: a record left behind isn't a process listing at every look (four a
+    // second while the session's watch looks quickly).
+    if let Some((_, found)) = LAST_RECORD.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(held, _)| *held == key) {
+        return found.clone();
+    }
+    let found = async {
+        let record: serde_json::Value = serde_json::from_slice(&tokio::fs::read(&file).await.ok()?).ok()?;
+        let pid = record["pid"].as_u64().filter(|_| record["version"] == 1)?;
+        let exception = record["exception"].as_str().filter(|exception| !exception.trim().is_empty())?;
+        if !live_pids_on(run, platform, env).await.contains(&u32::try_from(pid).ok()?) {
+            return None;
+        }
+        Some((format!("process {pid} at {}", record["at"]), Failed { exception: exception.to_string(), slots: 1 }))
+    }
+    .await;
+    *LAST_RECORD.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, found.clone()));
+    found
+}
+/// The Remote Script's record as it was last read (its file, size and time), and what it said.
+type Record = ((String, u64, SystemTime), Option<Found>);
+static LAST_RECORD: Mutex<Option<Record>> = Mutex::new(None);
 async fn start_failure_settled(env: &Env, root: &str, run: Run, platform: &str, settled: Duration) -> Option<String> {
-    let found = last_failed(root).await?;
+    let found =
+        if logs_in(root).await.is_empty() { recorded_failure(env, run.clone(), platform).await? } else { last_failed(root).await? };
     let seen = SEEN
         .lock()
         .unwrap_or_else(|e| e.into_inner())
@@ -330,7 +366,10 @@ pub(crate) fn words(failed: &Failed, held: &[(u16, PortOwner)], windows: bool) -
 mod tests {
     use super::*;
     use futures::FutureExt;
-    use std::{cell::RefCell, rc::Rc};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
 
     /// Live's log from real starts of Live 12.4.25b1 on macOS whose bridge failed (2026-11-02, in the lab): its port
     /// held by another program, and its reference file readable by others. Cut to the lines about the bridge, with
@@ -347,6 +386,17 @@ mod tests {
     fn a_failed_start_is_put_back_together_from_the_pieces_live_logs() {
         assert_eq!(failed_start(PORT_HELD), failed(PORT_IN_USE, 1));
         assert_eq!(failed_start(UNSAFE), failed("ValueError: bridge configuration reference is missing or unsafe", 1));
+    }
+
+    #[test]
+    fn the_remote_scripts_own_line_is_a_failed_start_with_no_traceback_too() {
+        let said = "2026-11-03T07:00:00.000001: info: Started: Live 12.4.25b1\n\
+            2026-11-03T07:00:03.000001: info: RemoteScriptMessage: (AbletonMcpBridge) Initializing...\n\
+            2026-11-03T07:00:04.000001: info: RemoteScriptMessage: (AbletonMcpBridge) AbletonMcpBridge couldn't start: OSError: [Errno 48] Address already in use\n";
+        assert_eq!(failed_start(said), failed(PORT_IN_USE, 1));
+        // A start after it puts it by, as with a traceback.
+        let again = "2026-11-03T07:01:00.000001: info: RemoteScriptMessage: (AbletonMcpBridge) Initializing...\n";
+        assert_eq!(failed_start(&format!("{said}{again}")), None);
     }
 
     #[test]
@@ -509,6 +559,90 @@ mod tests {
         assert!(said.contains("the bridge's check of its files said “bridge configuration reference is missing or unsafe”"), "{said}");
         assert_eq!(start_failure_settled(&env, root, open, "darwin", settled).await, Some(said), "the same words");
         assert_eq!(asked.borrow().as_slice(), ["pgrep"], "the system asked once");
+    }
+
+    /// A stand-in for the system that says these Live processes run (`pgrep`'s output).
+    fn running_lives(pids: &str) -> Run {
+        let pids = pids.to_string();
+        Rc::new(move |_program, _args, _cwd| {
+            let stdout = pids.clone();
+            async move { kumi_daw::process::Ran { code: if stdout.is_empty() { 1 } else { 0 }, stdout, ..Default::default() } }
+                .boxed_local()
+        })
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn with_no_log_of_lives_the_remote_scripts_own_record_says_it_while_its_live_runs() {
+        let scripts = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(scripts.path().join("AbletonMcpBridge")).unwrap();
+        let env = Env::from([("KUMI_REMOTE_SCRIPTS_DIR".to_string(), scripts.path().display().to_string())]);
+        let record = |pid: u32| {
+            serde_json::json!({"version": 1, "pid": pid, "at": 1.5, "exception": "ValueError: bridge secret is invalid"}).to_string()
+        };
+        std::fs::write(scripts.path().join("AbletonMcpBridge/start-failure.json"), record(4242)).unwrap();
+        let nothing = tempfile::tempdir().unwrap();
+        let no_log = nothing.path().to_str().unwrap();
+        let said = start_failure_settled(&env, no_log, running_lives("4242\n"), "darwin", Duration::ZERO).await.unwrap();
+        assert!(said.contains("the bridge's check of its files said “bridge secret is invalid”"), "{said}");
+        // The same record looked at again (the next look, a quarter second later in the session's watch): the system isn't
+        // asked again, about the processes or whether Live runs.
+        let asked = Rc::new(Cell::new(0));
+        let counted: Run = {
+            let asked = asked.clone();
+            Rc::new(move |_program, _args, _cwd| {
+                asked.set(asked.get() + 1);
+                async move { kumi_daw::process::Ran { code: 0, stdout: "4242\n".into(), ..Default::default() } }.boxed_local()
+            })
+        };
+        assert!(start_failure_settled(&env, no_log, counted.clone(), "darwin", Duration::ZERO).await.is_some());
+        assert_eq!(asked.get(), 0, "its pid already looked up for this record, and its words already said");
+        assert!(start_failure_settled(&env, no_log, counted, "darwin", Duration::ZERO).await.is_some());
+        assert_eq!(asked.get(), 0);
+        // Kept by a Live that has quit since: not said. (Another size as well as another time: the record is read again once
+        // either changes.)
+        std::fs::write(scripts.path().join("AbletonMcpBridge/start-failure.json"), record(42430)).unwrap();
+        assert_eq!(start_failure_settled(&env, no_log, running_lives("4242\n"), "darwin", Duration::ZERO).await, None);
+        // With Live's log to read, the log decides: here, a start after the failure.
+        std::fs::write(scripts.path().join("AbletonMcpBridge/start-failure.json"), record(4242)).unwrap();
+        let started = "2026-11-02T23:26:00.000001: info: RemoteScriptMessage: (AbletonMcpBridge) Initializing...\n";
+        let (root, _newest) = logs(&format!("{PORT_HELD}{started}"));
+        assert_eq!(
+            start_failure_settled(&env, root.path().to_str().unwrap(), running_lives("4242\n"), "darwin", Duration::ZERO).await,
+            None
+        );
+    }
+
+    /// On Windows the record's Live is looked for in Windows' own process list (`KUMI_PROCESSES` stands in for it), by
+    /// name as `Get-Process -Name 'Ableton Live*'` matched, in any case. Nothing runs, PowerShell or other, whether the
+    /// record's process is a Live or not.
+    #[tokio::test(flavor = "current_thread")]
+    async fn on_windows_the_records_live_is_found_in_the_process_list_and_nothing_runs() {
+        let scripts = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(scripts.path().join("AbletonMcpBridge")).unwrap();
+        let asked = Rc::new(RefCell::new(vec![]));
+        let run: Run = {
+            let asked = asked.clone();
+            Rc::new(move |program, _args, _cwd| {
+                asked.borrow_mut().push(program);
+                async { kumi_daw::process::Ran::default() }.boxed_local()
+            })
+        };
+        let nothing = tempfile::tempdir().unwrap();
+        let no_log = nothing.path().to_str().unwrap();
+        for (pid, listing, said) in
+            [(4242, "4 System\n4242 ABLETON LIVE 12 SUITE.EXE\n90 node.exe", true), (42430, "4 System\n42430 Ableton Index.exe", false)]
+        {
+            let record = serde_json::json!({"version": 1, "pid": pid, "at": 1.5, "exception": "ValueError: bridge secret is invalid"});
+            std::fs::write(scripts.path().join("AbletonMcpBridge/start-failure.json"), record.to_string()).unwrap();
+            let env = Env::from([
+                ("KUMI_REMOTE_SCRIPTS_DIR".to_string(), scripts.path().display().to_string()),
+                ("KUMI_PROCESSES".to_string(), listing.to_string()),
+            ]);
+            let words = start_failure_settled(&env, no_log, run.clone(), "win32", Duration::ZERO).await;
+            assert_eq!(words.is_some(), said, "{listing}: {words:?}");
+            assert!(words.is_none_or(|words| words.contains("said “bridge secret is invalid”")));
+        }
+        assert!(asked.borrow().is_empty(), "nothing run: {:?}", asked.borrow());
     }
 
     #[test]

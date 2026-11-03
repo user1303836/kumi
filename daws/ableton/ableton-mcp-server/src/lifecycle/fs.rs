@@ -458,10 +458,10 @@ pub(super) fn verify_files(root: &Path, expected: &Value) -> Result<Value, LiveE
     required.entry("__pycache__").or_insert_with(|| sha256(b"").into());
     let mut current = if root.exists() { hash_regular_tree(root)? } else { serde_json::Map::new() };
     // The producer's files (Willington's switch, which /willington writes and removes, and its self-test
-    // receipt) come and go after an install: they aren't drift.
+    // receipt) and the Remote Script's own (why its last start failed) come and go after an install: they aren't drift.
     for files in [&mut required, &mut current] {
-        for name in crate::lifecycle::delivery::PRODUCER_FILES {
-            files.remove(name);
+        for name in crate::lifecycle::delivery::PRODUCER_FILES.iter().chain(&crate::lifecycle::delivery::RUNTIME_FILES) {
+            files.remove(*name);
         }
     }
     let missing = required.keys().filter(|name| !current.contains_key(*name)).cloned().collect::<Vec<_>>();
