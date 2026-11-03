@@ -100,6 +100,12 @@ const FULL_CONTROL: u32 = 0x001F_01FF;
 const FILE_FLAGS: u8 = 0;
 const FOLDER_FLAGS: u8 = 0x3;
 
+thread_local! {
+    /// Tests only (`shapes::refuse_on_this_thread`): this thread's writes fail, as a call can, and owner.rs's PowerShell
+    /// steps take them.
+    static REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// This process's account (TOKEN_USER, whose SID points into the same buffer).
 struct Account(Vec<u64>);
 
@@ -250,6 +256,9 @@ pub fn make_kumis_folder_shape(path: &Path) -> Result<(), String> {
 }
 
 fn make(path: &Path, flags: u8) -> Result<(), String> {
+    if REFUSED.with(std::cell::Cell::get) {
+        return Err("refused on this thread (a test's)".into());
+    }
     // Nothing is written where the check would leave the verdict to PowerShell anyway (a share, a link on the way).
     if !plain_local(path) {
         return Err("it isn't on this computer's own disk by a plain path".into());
@@ -328,6 +337,11 @@ pub mod shapes {
     pub const INHERITED: u32 = 0x10;
     pub const INHERITABLE: u32 = 0x3;
     pub const INHERIT_ONLY: u32 = 0x8;
+
+    /// Makes this thread's writes fail, as one of Windows' calls can, so that owner.rs's PowerShell steps take them.
+    pub fn refuse_on_this_thread(refused: bool) {
+        REFUSED.with(|cell| cell.set(refused));
+    }
 
     fn sid_of(text: &str) -> Sid {
         let text: Vec<u16> = text.encode_utf16().chain([0]).collect();

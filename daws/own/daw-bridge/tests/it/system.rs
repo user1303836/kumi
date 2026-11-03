@@ -275,6 +275,47 @@ mod windows_acl_shapes {
         Ace { allow: true, flags, mask, whose }
     }
 
+    /// Where Windows' own calls fail (as one can), owner.rs's PowerShell steps make Kumi's folders and files as they did
+    /// before the fast path: seven runs for a first install and two for an upgrade, each owner-only by owner.rs's check.
+    /// The doctor's look at a secret of another shape is owner.rs's check too, which refuses it.
+    #[test]
+    fn where_windows_own_calls_fail_owner_rs_steps_take_over_as_before() {
+        use super::{Daw, Lifecycle, Target};
+        use daw_bridge::lifecycle::{is_owner_only, native_acl::shapes::refuse_on_this_thread};
+        use daw_bridge::owner::acl_runs_on_this_thread as runs;
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("REAPER").join("UserPlugins");
+        let target = Target {
+            daw: Daw::Reaper,
+            dir: plugins.clone(),
+            name: "reaper_kumi.dll".into(),
+            folder: false,
+            reference: plugins.join("kumi-bridge-reference.json"),
+        };
+        let (one, two) = (root.path().join("one.dll"), root.path().join("two.dll"));
+        std::fs::write(&one, b"extension").unwrap();
+        std::fs::write(&two, b"extension, newer").unwrap();
+        let life = Lifecycle::new(&root.path().join("kumi"), target);
+        refuse_on_this_thread(true);
+        let before = runs();
+        let installed = life.install(&one, "0.1.0").map(drop);
+        let first = runs() - before;
+        let upgraded = life.install(&two, "0.1.1").map(drop);
+        let upgrade = runs() - before - first;
+        refuse_on_this_thread(false);
+        installed.unwrap();
+        upgraded.unwrap();
+        assert_eq!((first, upgrade), (7, 2), "owner.rs's PowerShell runs, as before: a first install's, then an upgrade's");
+        let paths = &life.paths;
+        for path in [paths.root.clone(), paths.discovery(), paths.logs(), paths.generations(), paths.receipt(), paths.secret()] {
+            assert!(owner::is_owner_only(&path), "owner.rs's check: {}", path.display());
+        }
+        write(&paths.secret(), Some(&[allow(0, FULL, Whose::Me), allow(0, READ, Whose::Sid(EVERYONE))]), true);
+        let looked = runs();
+        assert!(!is_owner_only(&paths.secret()), "a secret everyone may read isn't owner-only");
+        assert_eq!(runs() - looked, 1, "the doctor's look at it is owner.rs's check");
+    }
+
     #[test]
     fn the_fast_path_says_owner_only_only_where_the_powershell_check_does() {
         let folder = tempfile::tempdir().unwrap();
