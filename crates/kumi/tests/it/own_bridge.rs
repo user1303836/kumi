@@ -1794,3 +1794,53 @@ async fn renoises_at_offers_tracks_dsps_and_instruments_and_a_reference_is_carri
         })
         .await;
 }
+
+/// While the DAW is away (Kumi started before it, or it quit), FOCUS's poll looks for it every 50 ms, for two minutes
+/// after it went, then at the usual pace again; a DAW that's there is asked about at the usual pace, and plain mode keeps
+/// its once a second whatever happens.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn an_away_daw_is_looked_for_more_often_for_a_while() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let gone = json!({"error": "no REAPER with Kumi's bridge is running", "connected": false});
+            let there = json!({"epoch": "1", "view": "arrange", "selection": {}, "transport": {"playing": false}});
+            // (FOCUS drawn, REAPER there) → focus reads in the first second, and in a second three minutes on
+            for (drawn, present) in [(true, false), (false, false), (true, true)] {
+                let host = Rc::new(Host {
+                    answers: RefCell::new(if present {
+                        vec![("status", json!({"connected": true}), false), ("focus", there.clone(), false)]
+                    } else {
+                        vec![
+                            (
+                                "status",
+                                json!({"connected": false, "daw": "reaper", "reason": "no REAPER with Kumi's bridge is running"}),
+                                false,
+                            ),
+                            ("focus", gone.clone(), true),
+                        ]
+                    }),
+                    asked: RefCell::default(),
+                });
+                let reads = || host.asked.borrow().iter().filter(|(tool, _)| tool == "focus").count();
+                let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
+                options.context.on_focus = Some(Rc::new(|_| {}));
+                options.context.focus_drawn = drawn;
+                let reaper = create_reaper_integration(options);
+                reaper.start(Signal::new()).await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(1_010)).await;
+                let first = reads();
+                tokio::time::sleep(std::time::Duration::from_secs(180)).await;
+                let before = reads();
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let later = reads() - before;
+                reaper.close().await.unwrap();
+                let case = format!("drawn {drawn}, there {present}: {first} in the first second, {later} a second three minutes on");
+                match (drawn, present) {
+                    (true, false) => assert!(first >= 18 && later <= 7, "{case}"),
+                    (false, false) => assert!(first == 1 && later == 1, "{case}"),
+                    _ => assert!(first <= 7, "{case}"),
+                }
+            }
+        })
+        .await;
+}
