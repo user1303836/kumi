@@ -69,8 +69,9 @@ pub async fn probe(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>, budget:
 /// The terminal asked what it is ([`ask`]): raw, and what it says (and any key typed meanwhile) read. Once DA1 has come
 /// it's given back as it was at once, so ctrl+c stops a slow start again. A terminal that hasn't answered by the end of
 /// the wait stays raw and read until [`Asking::end`], so answers that come late are read, never echoed onto the screen;
-/// held so, it's given back the moment DA1 does come, and a ctrl+c, ctrl+\ or ctrl+z typed meanwhile does what the
-/// terminal would have done with it. Dropped without being ended (a start that fails), it's given back all the same.
+/// held so, it's given back the moment DA1 does come. A ctrl+c, ctrl+\ or ctrl+z typed while it's held, during the wait
+/// or past it, does what the terminal would have done with it (Unix: Windows' terminals that are asked answer at once).
+/// Dropped without being ended (a start that fails), it's given back all the same.
 pub struct Asking {
     hold: Rc<Hold>,
     answers: Rc<RefCell<Answers>>,
@@ -132,9 +133,9 @@ pub fn ask(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>) -> Option<Askin
     input.resume(Rc::new({
         let (hold, answers, read, parser) = (Rc::downgrade(&hold), answers.clone(), read.clone(), parser.clone());
         move |chunk| {
-            let held = hold.upgrade().filter(|hold| hold.past.get() && !hold.ended.get());
-            // Held past the wait: a ctrl+c (or ctrl+\, ctrl+z) is what the producer meant by it, as the terminal would
-            // have taken it. The terminal is given back first, then the signal goes with its usual effect.
+            let held = hold.upgrade().filter(|hold| !hold.ended.get());
+            // Held (the session builds meanwhile): a ctrl+c (or ctrl+\, ctrl+z) is what the producer meant by it, as the
+            // terminal would have taken it. The terminal is given back first, then the signal goes with its usual effect.
             #[cfg(unix)]
             if let Some((at, signal)) =
                 held.as_ref().and_then(|_| chunk.iter().enumerate().find_map(|(at, byte)| signal_of(*byte).map(|signal| (at, signal))))
@@ -155,7 +156,7 @@ pub fn ask(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>) -> Option<Askin
             let text = decoder.borrow_mut().write(chunk);
             parser.push(&text);
             // Held past the wait, its DA1 has come: everything asked is answered, so the terminal is given back now.
-            if let Some(hold) = held.filter(|_| answers.borrow().complete) {
+            if let Some(hold) = held.filter(|hold| hold.past.get() && answers.borrow().complete) {
                 hold.give_back();
             }
         }

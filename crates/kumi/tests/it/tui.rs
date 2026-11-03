@@ -1243,8 +1243,8 @@ async fn an_answering_terminal_is_given_back_at_once_and_a_late_one_is_read_unti
 }
 
 /// Held past the wait (a terminal that hasn't answered DA1), the terminal is given back the moment its DA1 comes, and a
-/// ctrl+c typed meanwhile is the signal the terminal would have sent, once the terminal is given back: a slow start still
-/// stops at ctrl+c, as when the probe never held it. (nextest runs each test in its own process, so the handler is this
+/// ctrl+c typed while it's held (past the wait, or during it) is the signal the terminal would have sent, once the
+/// terminal is given back: a slow start still stops at ctrl+c, as when the probe never held it. (nextest runs each test in its own process, so the handler is this
 /// test's alone.)
 #[cfg(unix)]
 #[tokio::test(start_paused = true)]
@@ -1278,6 +1278,15 @@ async fn a_terminal_held_past_the_wait_is_given_back_at_its_late_answer_or_a_ctr
         assert!(INTERRUPTED.load(Ordering::SeqCst), "ctrl+c is SIGINT");
         assert!(!quiet.is_raw() && quiet.listener.borrow().is_none(), "given back as it goes");
         assert_eq!(asking.end().read, b"ab");
+        // And during the wait itself, while the session builds.
+        INTERRUPTED.store(false, Ordering::SeqCst);
+        let waiting = fresh();
+        let asking = ask(&(waiting.clone() as Rc<dyn TtyInput>), &output).unwrap();
+        waiting.write("\x03");
+        assert!(INTERRUPTED.load(Ordering::SeqCst), "ctrl+c during the wait is SIGINT too");
+        assert!(!waiting.is_raw() && waiting.listener.borrow().is_none());
+        asking.answered(Duration::from_millis(250), &kumi_common::abort::Signal::new()).await;
+        assert!(!waiting.is_raw(), "and stays given back");
     })
     .await;
 }
