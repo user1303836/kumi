@@ -1084,7 +1084,8 @@ mod tests {
             let (signal, probing) = (signal.clone(), probing.clone());
             tokio::spawn(async move {
                 let began = std::time::Instant::now();
-                while !probing.exists() && began.elapsed() < std::time::Duration::from_secs(60) {
+                // (Inside the ci profile's 30 s, so a probe that never began says so before nextest stops the test.)
+                while !probing.exists() && began.elapsed() < std::time::Duration::from_secs(20) {
                     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
                 }
                 signal.cancel();
