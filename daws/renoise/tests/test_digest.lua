@@ -317,3 +317,100 @@ test("digest: a pattern's lines print is what it was for the same lines (perf N2
   ok(want:match("^2 notes, 0 effects #%x+$"), want)
   eq(find(records, "pattern", 2).f.lines.Kick, want)
 end)
+
+-- A4-4: reads asked while a connection's digest runs go around it, one at a time and in the order they came, ahead of
+-- its slices; anything else waits for it, and so does what comes after that. (Every look at the clock costs 1 ms here:
+-- a digest of thirty patterns is many slices.)
+local function answers_in_order(peer, ids)
+  local want, order = {}, {}
+  for _, id in ipairs(ids) do want[id] = true end
+  for _ = 1, 3000 do
+    drain(peer)
+    for _, line in ipairs(peer:frames(nil)) do
+      local frame = assert(json.decode(line))
+      if frame.type == "response" and want[frame.id] then
+        order[#order + 1] = frame.id
+        ok(frame.result, json.encode(frame.error or {}))
+      end
+    end
+    if #order >= #ids then break end
+    mock.advance(10)
+  end
+  return table.concat(order, " ")
+end
+
+local function ask(peer, id, method, params)
+  H.send(peer, { type = "request", id = id, method = method, params = params or json.object() })
+end
+
+test("digest: a FOCUS body asked while a digest runs is answered before the digest ends", function()
+  local _, peer = setup({ patterns = 30 })
+  mock.clock_step_ms = 1
+  ask(peer, 7101, "digest")
+  ask(peer, 7102, "focus_body", { kind = "mixer" })
+  local order = answers_in_order(peer, { 7101, 7102 })
+  mock.clock_step_ms = 0
+  eq(order, "7102 7101")
+  H.no_dialogs()
+end)
+
+test("digest: a request that isn't a read waits for a running digest, and so do the reads after it", function()
+  local _, peer = setup({ patterns = 30 })
+  mock.clock_step_ms = 1
+  ask(peer, 7201, "digest")
+  ask(peer, 7202, "show_status", { text = "x" })
+  ask(peer, 7203, "read", { kind = "song" })
+  local order = answers_in_order(peer, { 7201, 7202, 7203 })
+  mock.clock_step_ms = 0
+  eq(order, "7201 7202 7203")
+  H.no_dialogs()
+end)
+
+test("digest: reads that go around a digest keep their order", function()
+  local _, peer = setup({ patterns = 30 })
+  mock.clock_step_ms = 1
+  ask(peer, 7301, "digest")
+  ask(peer, 7302, "read", { kind = "track" })
+  ask(peer, 7303, "read", { kind = "song" })
+  local order = answers_in_order(peer, { 7301, 7302, 7303 })
+  mock.clock_step_ms = 0
+  eq(order, "7302 7303 7301")
+  H.no_dialogs()
+end)
+
+-- (jobs.lua's BACKGROUND_WAIT_MS at 20: the digest gets its turn while the read below still goes around it)
+local function wait_ms(ms)
+  return function(env)
+    local path = env.bundle .. "payload/jobs.lua"
+    local f = assert(io.open(path, "rb"))
+    local text = f:read("*a")
+    f:close()
+    local patched, n = text:gsub("M%.BACKGROUND_WAIT_MS = %d+", "M.BACKGROUND_WAIT_MS = " .. ms, 1)
+    assert(n == 1, "BACKGROUND_WAIT_MS was not found to set")
+    f = assert(io.open(path, "wb"))
+    f:write(patched)
+    f:close()
+  end
+end
+
+test("digest: one that ends while a read goes around it leaves that read as the connection's job", function()
+  local tracks = {}
+  for i = 1, 60 do tracks[i] = { name = "T" .. i } end
+  local env = H.setup({ song = song_spec({ tracks = tracks }), patch = wait_ms(20) })
+  local peer = H.connect(env)
+  H.frames(peer)
+  local digest_module = env.payload().digest
+  local kept = digest_module.PAGE_BYTES
+  digest_module.PAGE_BYTES = 300 -- a short first page: it ends while the long read below (60 tracks) goes around it
+  mock.clock_step_ms = 1
+  ask(peer, 7401, "digest")
+  ask(peer, 7402, "read", { kind = "track", limit = 60 })
+  ask(peer, 7403, "read", { kind = "song" })
+  local order = answers_in_order(peer, { 7401, 7402, 7403 })
+  mock.clock_step_ms = 0
+  digest_module.PAGE_BYTES = kept
+  -- (the digest gets a slice once it has waited BACKGROUND_WAIT_MS behind the read, and ends; the read is then the
+  -- connection's job, and the song read after it waits for it)
+  eq(order, "7401 7402 7403")
+  H.no_dialogs()
+end)

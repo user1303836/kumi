@@ -14,10 +14,14 @@ M.BUDGET_MS = 8
 M.STOPPED_BUDGET_MS = 14
 -- A slice while it plays, one a frame: when a producer feels the GUI most.
 M.PLAYING_BUDGET_MS = 11
+-- A background job (a digest: ctx.background says which) waits behind the reads someone is waiting for, but never for
+-- longer than this without a slice.
+M.BACKGROUND_WAIT_MS = 250
 
 -- ctx: now_ms(), unix_ms(), epoch() -> text, layout() -> number (the track layout within the epoch), shape() -> number
 -- (moves when tracks, patterns or lines are inserted or removed), finish(job, ok, value), on_active(boolean), playing() ->
--- whether Renoise's transport plays (nil when it can't tell: a slice is then BUDGET_MS)
+-- whether Renoise's transport plays (nil when it can't tell: a slice is then BUDGET_MS), background(request) -> whether
+-- its job is one nobody waits on (it runs after the others)
 function M.new(ctx)
   return setmetatable({ ctx = ctx, list = {}, last_run_ms = 0, made = 0 }, M)
 end
@@ -30,7 +34,7 @@ function M:add(record, request, fn, wrote)
   local ctx = self.ctx
   self.made = self.made + 1
   local job = { record = record, request = request, epoch = ctx.epoch(), layout = ctx.layout(), shape = ctx.shape(), deadline = 0, wrote = wrote,
-    number = self.made }
+    number = self.made, made_ms = ctx.now_ms(), background = ctx.background ~= nil and ctx.background(request) == true }
   -- Whether the song is still the one the request was made against; raises the error to answer with if it isn't.
   function job.check()
     if ctx.epoch() ~= job.epoch then
@@ -133,6 +137,7 @@ end
 local function resume(self, job, budget)
   local ctx = self.ctx
   job.deadline = ctx.now_ms() + budget
+  job.resumed_ms = ctx.now_ms()
   local ok, value, ended
   if not job.started then
     -- A job is made when its request is handled and first runs after that request's handler has returned (on a timer, or
@@ -176,7 +181,15 @@ function M:run(budget)
   -- (every tick runs the jobs: with none, nothing to make)
   if self.list[1] == nil then return end
   local finished = {}
-  for i, job in ipairs({ unpack(self.list) }) do
+  -- The jobs someone waits on first (a FOCUS body, a read), then the background ones: but a background job that has
+  -- waited BACKGROUND_WAIT_MS since its last slice goes first.
+  local first, rest = {}, {}
+  for _, job in ipairs(self.list) do
+    local waited = started - (job.resumed_ms or job.made_ms)
+    if not job.background or waited >= M.BACKGROUND_WAIT_MS then first[#first + 1] = job else rest[#rest + 1] = job end
+  end
+  for _, job in ipairs(rest) do first[#first + 1] = job end
+  for i, job in ipairs(first) do
     if i == 1 or ctx.now_ms() - started < budget then
       local ended, ok, value = resume(self, job, budget)
       if ended then finished[#finished + 1] = { job = job, ok = ok, value = value } end
