@@ -366,7 +366,10 @@ pub(crate) fn words(failed: &Failed, held: &[(u16, PortOwner)], windows: bool) -
 mod tests {
     use super::*;
     use futures::FutureExt;
-    use std::{cell::RefCell, rc::Rc};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
 
     /// Live's log from real starts of Live 12.4.25b1 on macOS whose bridge failed (2026-11-02, in the lab): its port
     /// held by another program, and its reference file readable by others. Cut to the lines about the bridge, with
@@ -581,6 +584,20 @@ mod tests {
         let no_log = nothing.path().to_str().unwrap();
         let said = start_failure_settled(&env, no_log, running_lives("4242\n"), "darwin", Duration::ZERO).await.unwrap();
         assert!(said.contains("the bridge's check of its files said “bridge secret is invalid”"), "{said}");
+        // The same record looked at again (the next look, a quarter second later in the session's watch): the system isn't
+        // asked again, about the processes or whether Live runs.
+        let asked = Rc::new(Cell::new(0));
+        let counted: Run = {
+            let asked = asked.clone();
+            Rc::new(move |_program, _args, _cwd| {
+                asked.set(asked.get() + 1);
+                async move { kumi_daw::process::Ran { code: 0, stdout: "4242\n".into(), ..Default::default() } }.boxed_local()
+            })
+        };
+        assert!(start_failure_settled(&env, no_log, counted.clone(), "darwin", Duration::ZERO).await.is_some());
+        assert_eq!(asked.get(), 0, "its pid already looked up for this record, and its words already said");
+        assert!(start_failure_settled(&env, no_log, counted, "darwin", Duration::ZERO).await.is_some());
+        assert_eq!(asked.get(), 0);
         // Kept by a Live that has quit since: not said. (Another size as well as another time: the record is read again once
         // either changes.)
         std::fs::write(scripts.path().join("AbletonMcpBridge/start-failure.json"), record(42430)).unwrap();
