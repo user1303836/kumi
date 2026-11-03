@@ -1190,8 +1190,8 @@ mod tests {
     /// The kernel's listing is `ps -axo pid=,comm=`'s, without the `ps`, held to two `ps` lists made just before and just
     /// after it, and only where those agree: another test's processes spawn, exec and end around this one. Every
     /// process in both is in the kernel's list. Where both name it alike, this account's are named exactly as `ps` names
-    /// them (a child known only by its argv[0] among them) and another account's by the same program (`ps`, setuid root,
-    /// reads their argv[0]; Kumi names them by their program's path), in the same order.
+    /// them where that's a path (and a child known only by its argv[0] by it), and another account's by the same program
+    /// (`ps`, setuid root, reads their argv[0]; Kumi names them by their program's path), in the same order.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn the_kernels_listing_is_what_ps_lists() {
@@ -1244,10 +1244,14 @@ mod tests {
             throughout.iter().filter(|(pid, uid, name)| later.get(pid).is_some_and(|(u, n)| *u == uid && *n == name)).collect();
         assert!(steady.iter().any(|(_, uid, _)| *uid != me), "another account's processes are among them");
         for (pid, uid, name) in &steady {
-            if *uid == me {
-                assert_eq!(kernel[pid], name, "pid {pid}");
-            } else {
+            if *uid != me {
                 assert_eq!(base(kernel[pid]), base(name), "pid {pid}, another account's");
+            } else if name.starts_with('/') {
+                // A program named by its path, as DAWs started from the Finder or the Dock are: named so here too.
+                // A name without one can be a title only `ps`, as root, reads: a macOS runner's Core Audio driver
+                // helper is "Core Audio Driver (NullAudio.driver)" to it and "com.apple.audio.Core-Audio-Driver-
+                // Service.helper" to its own account. The named child above holds argv[0] being read.
+                assert_eq!(kernel[pid], name, "pid {pid}");
             }
         }
         let steady_pids: HashSet<u32> = steady.iter().map(|(pid, _, _)| *pid).collect();
