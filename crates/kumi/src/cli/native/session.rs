@@ -316,6 +316,10 @@ enum Building {
     Here(Recipe),
 }
 
+/// The session as the front end holds it: its handle, its thread (when it has one of its own), what it does as it ends
+/// (when built on this thread), and what its database said as it opened.
+type Started = (Rc<dyn SessionHandle>, Option<Rc<Threaded>>, Option<LocalBoxFuture<'static, ()>>, Option<String>);
+
 /// The session, built where it lives from `recipe` (and a test's `answers`), what it says going to `emit`: its stores,
 /// its models, the producer's library and music, the DAW's integration, and what it does as it ends. Also what its
 /// database said as it opened, for the start's notice.
@@ -952,40 +956,47 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     } else {
         Building::Here(recipe)
     };
-    // While the session's thread builds it, this one does what needs no session: it asks the terminal what it is (the
-    // answer crosses the terminal meanwhile; a terminal its environment keeps quiet, the Linux console or a dumb one,
-    // isn't asked, nor one whose producer said not to, `KUMI_PROBE=off`) and reads the input history, each line redacted
-    // again with the keys known now. What either says waits for the session: a session that can't start is said first,
-    // as before.
+    // While the session's thread builds it, this one does what needs no session. It asks the terminal what it is (a
+    // terminal its environment keeps quiet, the Linux console or a dumb one, isn't asked, nor one whose producer said not
+    // to, `KUMI_PROBE=off`): the answer crosses the terminal meanwhile, and the terminal stays raw, read by the probe,
+    // until the screen takes it, so answers that come late are read rather than echoed. And it reads the input history,
+    // each line redacted again with the keys known now. A session that can't start ends the wait for the terminal, and is
+    // said first, as before.
     let platform = kumi_types::system::platform();
-    let profile = crate::tui::alerts::detect_terminal_profile(&io.env, platform);
-    let probes =
-        print.is_none() && full_screen && io.probe && profile.status && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off");
-    // (`biased`: the questions go out first, then the history is read while they're answered)
-    let (probed, history) = tokio::join!(
+    let profile = (print.is_none() && full_screen && io.probe).then(|| crate::tui::alerts::detect_terminal_profile(&io.env, platform));
+    let probes = profile.as_ref().is_some_and(|profile| profile.status) && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off");
+    let asking = if probes { crate::tui::probe::ask(&io.input, &io.out) } else { None };
+    let failed = Signal::new();
+    // (`biased`: the questions are out already; the history is read while they're answered and the session builds)
+    let (_, history, built) = tokio::join!(
         biased;
-        async { if probes { Some(crate::tui::probe::probe(&io.input, &io.out, crate::tui::probe::BUDGET).await) } else { None } },
+        async {
+            if let Some(asking) = &asking {
+                asking.answered(crate::tui::probe::BUDGET, &failed).await;
+            }
+        },
         async {
             load_input_history_file(&io.env)
                 .map(|file| Rc::new(RefCell::new(open_input_history(Some(file.into()), secrets.clone()))))
         },
+        async {
+            let built: Result<Started, RuntimeError> =
+                match building {
+                    Building::Thread(starting, heard) => match starting.ready().await {
+                        Ok(threaded) => Ok((threaded.clone(), Some(threaded), None, heard.await.ok().flatten())),
+                        Err(error) => Err(error),
+                    },
+                    Building::Here(recipe) => build_session(recipe, answers.clone(), to_screen)
+                        .await
+                        .map(|(Built { session, ending }, notice)| (session, None, ending, notice)),
+                };
+            if built.is_err() {
+                failed.cancel();
+            }
+            built
+        },
     );
-    let (session, threaded, mut ending, database_notice): (
-        Rc<dyn SessionHandle>,
-        Option<Rc<Threaded>>,
-        Option<LocalBoxFuture<'static, ()>>,
-        Option<String>,
-    ) = match building {
-        Building::Thread(starting, heard) => {
-            let threaded = starting.ready().await?;
-            let notice = heard.await.ok().flatten();
-            (threaded.clone(), Some(threaded), None, notice)
-        }
-        Building::Here(recipe) => {
-            let (Built { session, ending }, notice) = build_session(recipe, answers.clone(), to_screen).await?;
-            (session, None, ending, notice)
-        }
-    };
+    let (session, threaded, mut ending, database_notice) = built?;
     let history = history?;
     // The DAW's first-run setup reaches the session as one of its own, on this thread.
     let setup_session: Rc<dyn SetupSession> =
@@ -1108,8 +1119,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     } else if full_screen {
         let mut options = TuiOptions::new(session.clone(), io.input.clone(), io.out.clone(), mode);
         // What the terminal said of itself, asked once as the screen starts: its answers come before what its environment
-        // says of it, which stays the fallback.
-        if let Some(probed) = probed {
+        // says of it, which stays the fallback. It's given back as it was now, before the screen takes it (and notes how
+        // to leave it).
+        if let (Some(probed), Some(profile)) = (asking.map(crate::tui::probe::Asking::end), profile) {
             let version = probed.answers.version.clone();
             options.terminal = Some(profile.answered(&probed.answers, &io.env, platform));
             let depth = crate::tui::style::detect_color_depth_here();

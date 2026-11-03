@@ -61,10 +61,29 @@ pub struct Probed {
 /// Asks, and waits for DA1's answer or `budget`, whichever comes first. The terminal is raw meanwhile, and put back as
 /// it was. A terminal that can't be made raw isn't asked.
 pub async fn probe(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>, budget: Duration) -> Probed {
+    let Some(asking) = ask(input, output) else { return Probed::default() };
+    asking.answered(budget, &Signal::new()).await;
+    asking.end()
+}
+
+/// The terminal asked what it is ([`ask`]): raw, and what it says (and any key typed meanwhile) read, until
+/// [`Asking::end`] gives it back as it was. Answers that come after the wait are read too, so a terminal that answers
+/// late never has them echoed onto the screen. Dropped without being ended (a start that fails), it's given back all the
+/// same.
+pub struct Asking {
+    input: Rc<dyn TtyInput>,
+    was_raw: bool,
+    answers: Rc<RefCell<Answers>>,
+    read: Rc<RefCell<Vec<u8>>>,
+    done: Signal,
+    parser: InputParser,
+    ended: bool,
+}
+
+/// Makes the terminal raw, reads it, and asks: None when it can't be made raw (then it isn't asked).
+pub fn ask(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>) -> Option<Asking> {
     let was_raw = input.is_raw();
-    if input.set_raw_mode(true).is_err() {
-        return Probed::default();
-    }
+    input.set_raw_mode(true).ok()?;
     let answers = Rc::new(RefCell::new(Answers::default()));
     let read = Rc::new(RefCell::new(Vec::new()));
     let done = Signal::new();
@@ -90,11 +109,38 @@ pub async fn probe(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>, budget:
         }
     }));
     output.write(QUERIES);
-    let _ = tokio::time::timeout(budget, done.cancelled()).await;
-    input.pause();
-    parser.dispose();
-    let _ = input.set_raw_mode(was_raw);
-    let answers = answers.borrow().clone();
-    let read = std::mem::take(&mut *read.borrow_mut());
-    Probed { answers, read }
+    Some(Asking { input: input.clone(), was_raw, answers, read, done, parser, ended: false })
+}
+
+impl Asking {
+    /// Until DA1's answer (what was asked before it has been answered, or won't be), `budget`, or `stop`.
+    pub async fn answered(&self, budget: Duration, stop: &Signal) {
+        tokio::select! {
+            _ = tokio::time::timeout(budget, self.done.cancelled()) => {}
+            _ = stop.cancelled() => {}
+        }
+    }
+
+    /// Gives the terminal back as it was: what it said, and every byte read (keys typed meanwhile among them, for the
+    /// screen's own reader to read again, which also takes the answers there as answers).
+    pub fn end(mut self) -> Probed {
+        self.give_back();
+        let answers = self.answers.borrow().clone();
+        let read = std::mem::take(&mut *self.read.borrow_mut());
+        Probed { answers, read }
+    }
+
+    fn give_back(&mut self) {
+        if !std::mem::replace(&mut self.ended, true) {
+            self.input.pause();
+            self.parser.dispose();
+            let _ = self.input.set_raw_mode(self.was_raw);
+        }
+    }
+}
+
+impl Drop for Asking {
+    fn drop(&mut self) {
+        self.give_back();
+    }
 }
