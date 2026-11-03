@@ -562,7 +562,8 @@ mod tests {
         assert!(is_live(&windows_process_name(812, &listing).unwrap()));
     }
 
-    /// Windows' own TCP tables find this test's listener, IPv4 and IPv6, by its port.
+    /// Windows' own TCP tables find this test's listener, IPv4 and IPv6, by its port. A lib test, so Extended runs it;
+    /// main's Windows job runs the doctor's IPv4 case (kumi's `doctor::` tests).
     #[cfg(windows)]
     #[test]
     fn windows_names_the_pid_listening_on_a_port() {

@@ -674,7 +674,7 @@ fn open_live_max() -> Option<PathBuf> {
         live_max_in(&bounded("/bin/ps", &RUNNING_PROGRAMS, std::time::Duration::from_secs(5))?)
     } else if cfg!(windows) {
         let env = kumi_types::system::process_env();
-        windows_live_max(crate::app::live_app::windows_lives(&crate::app::live_app::processes(&env)).first()?)
+        windows_live_max(&crate::app::live_app::windows_live(&crate::app::live_app::processes(&env))?)
     } else {
         None
     }

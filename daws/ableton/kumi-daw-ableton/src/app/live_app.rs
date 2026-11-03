@@ -18,29 +18,69 @@ pub(crate) fn processes(env: &Env) -> Vec<(u32, String)> {
     daw_bridge::detect::list_processes(&|name| env.get(name).cloned())
 }
 
-/// Whether a listed program is a Live on Windows, as `Get-Process -Name 'Ableton Live*'` matches: its name (the file's,
-/// `.exe` left off) starts "Ableton Live", in any case.
-pub(crate) fn is_windows_live(listed: &str) -> bool {
-    let name = listed.rsplit(['/', '\\']).next().unwrap_or(listed).to_lowercase();
-    name.strip_suffix(".exe").unwrap_or(&name).starts_with("ableton live")
+/// A listed program's name as `Get-Process` gives it (ProcessName): the file's name with `.exe` left off.
+fn process_name(listed: &str) -> &str {
+    let name = listed.rsplit(['/', '\\']).next().unwrap_or(listed);
+    name.len()
+        .checked_sub(4)
+        .filter(|at| name.is_char_boundary(*at) && name[*at..].eq_ignore_ascii_case(".exe"))
+        .map_or(name, |at| &name[..at])
 }
 
-/// The Lives running on Windows, by their programs' paths, as `Get-Process -Name 'Ableton Live*'` gives them: by name,
-/// then pid. A listing that names a path (a stand-in) gives it; else the system names the process's own, and one it
-/// won't name is left out.
-pub(crate) fn windows_lives(listing: &[(u32, String)]) -> Vec<String> {
-    let mut lives: Vec<&(u32, String)> = listing.iter().filter(|(_, listed)| is_windows_live(listed)).collect();
-    lives.sort_by_key(|(pid, listed)| (listed.rsplit(['/', '\\']).next().unwrap_or(listed).to_lowercase(), *pid));
-    lives
-        .into_iter()
-        .filter_map(|(pid, listed)| {
-            if listed.contains(['/', '\\']) {
-                Some(listed.clone())
-            } else {
-                daw_bridge::detect::program_of(*pid).map(|path| path.display().to_string())
-            }
-        })
-        .collect()
+/// Whether a listed program is a Live on Windows, as `Get-Process -Name 'Ableton Live*'` matches: its name starts
+/// "Ableton Live", in any case.
+pub(crate) fn is_windows_live(listed: &str) -> bool {
+    process_name(listed).to_lowercase().starts_with("ableton live")
+}
+
+/// The Live that's open on Windows, by its program's path, as `Get-Process -Name 'Ableton Live*' | Select-Object -First
+/// 1 -ExpandProperty Path` gave it: the first by name (compared as upper case, as Get-Process sorts), then pid, and its
+/// Path as .NET reads it, which a Live running elevated doesn't give (None then, as that first Live's empty Path was). A
+/// listing that names a path (a stand-in) gives it.
+pub(crate) fn windows_live(listing: &[(u32, String)]) -> Option<String> {
+    let (pid, listed) = listing
+        .iter()
+        .filter(|(_, listed)| is_windows_live(listed))
+        .min_by_key(|(pid, listed)| (process_name(listed).to_uppercase(), *pid))?;
+    if listed.contains(['/', '\\']) {
+        return Some(listed.clone());
+    }
+    get_process_path(*pid)
+}
+
+/// A process's Path as `Get-Process` reads it (its main module, which needs PROCESS_QUERY_INFORMATION and
+/// PROCESS_VM_READ): None for a process this account can't open so, such as one running elevated.
+#[cfg(windows)]
+fn get_process_path(pid: u32) -> Option<String> {
+    use std::os::windows::ffi::OsStringExt;
+    type Handle = *mut std::ffi::c_void;
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> Handle;
+        fn QueryFullProcessImageNameW(process: Handle, flags: u32, name: *mut u16, size: *mut u32) -> i32;
+        fn CloseHandle(handle: Handle) -> i32;
+    }
+    const PROCESS_QUERY_INFORMATION: u32 = 0x0400;
+    const PROCESS_VM_READ: u32 = 0x0010;
+    let mut name = vec![0u16; 32_768];
+    let mut size = name.len() as u32;
+    // SAFETY: the handle is checked before use and closed once; the buffer holds `size` UTF-16 units, which the call
+    // reduces to the length it wrote.
+    let read = unsafe {
+        let process = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let read = QueryFullProcessImageNameW(process, 0, name.as_mut_ptr(), &mut size);
+        CloseHandle(process);
+        read
+    };
+    (read != 0).then(|| std::ffi::OsString::from_wide(&name[..size as usize]).to_string_lossy().into_owned())
+}
+
+#[cfg(not(windows))]
+fn get_process_path(_pid: u32) -> Option<String> {
+    None
 }
 
 /// The Live that's open: its app, a `.app` on macOS and an `.exe` on Windows.
@@ -70,7 +110,7 @@ fn quoted(text: &str) -> String {
 pub async fn open_live(run: &Run, platform: &str, env: &Env) -> Option<OpenLive> {
     match platform {
         "darwin" => run("ps".into(), args(&RUNNING_PROGRAMS), None).await.stdout.lines().find_map(live_app_of),
-        "win32" => windows_lives(&processes(env)).into_iter().next().map(|app| OpenLive { app }),
+        "win32" => windows_live(&processes(env)).map(|app| OpenLive { app }),
         _ => None,
     }
 }
@@ -555,11 +595,13 @@ mod tests {
             (10, "C:\\Lives\\ableton live 12 suite.exe".to_string()),
             (5, "C:\\Windows\\explorer.exe".to_string()),
         ];
-        assert_eq!(
-            windows_lives(&listing),
-            ["C:\\Lives\\Ableton Live 11 Suite.exe", "C:\\Lives\\ableton live 12 suite.exe", "C:\\Lives\\Ableton Live 12 Suite.exe"],
-            "by name in any case, then pid"
-        );
+        assert_eq!(windows_live(&listing).as_deref(), Some("C:\\Lives\\Ableton Live 11 Suite.exe"), "the first by name");
+        let same_name = &listing[..1].iter().chain(&listing[2..3]).cloned().collect::<Vec<_>>();
+        assert_eq!(windows_live(same_name).as_deref(), Some("C:\\Lives\\ableton live 12 suite.exe"), "then by pid, in any case");
+        // Get-Process compares names as upper case: "_" (after "Z") sorts after the letters.
+        let marks = [(1, "C:\\L\\Ableton Live 12_Beta.exe".to_string()), (2, "C:\\L\\Ableton Live 12b.exe".to_string())];
+        assert_eq!(windows_live(&marks).as_deref(), Some("C:\\L\\Ableton Live 12b.exe"));
+        assert_eq!(windows_live(&[(5, "C:\\Windows\\explorer.exe".to_string())]), None);
         let asked = Rc::new(RefCell::new(0));
         let run: Run = {
             let asked = asked.clone();
