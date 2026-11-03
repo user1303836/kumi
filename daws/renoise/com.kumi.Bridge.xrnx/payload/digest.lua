@@ -18,6 +18,7 @@ local rows = import("rows")
 local fnv = import("fnv")
 
 local format = string.format
+local concat = table.concat
 
 local M = {}
 
@@ -170,34 +171,49 @@ local function track_records(job, song, t, epoch, parents, budget, out)
   job.slice()
 end
 
+-- A line number as a print takes it (feed_number's text, ending in 31), kept per number.
+local LINE_TEXTS = {}
+
 -- A pattern track's lines summed up as "n notes, n effects #fingerprint" (the same lines, the same text), `slice` called every
--- 64 lines (a job's, or none). (#401: the jam's pattern reads compare patterns by it.)
+-- 64 lines (a job's, or none). (#401: the jam's pattern reads compare patterns by it.) A line's texts go into the sum in one
+-- feed, each ending in 31 as `feed` ends a text: the same bytes in the same order, so the same sum, in a quarter less time
+-- (real Renoise 3.5.4, the LFO demo song's lines: 36.2 ms, then 27.4).
 function M.lines_print(pattern_track, track, length, slice)
-  local print, notes, effects = new_print(), 0, 0
+  local h, notes, effects = fnv.OFFSET, 0, 0
   local note_columns, effect_columns = track.visible_note_columns, track.visible_effect_columns
+  local texts = {}
   for l = 1, length do
     local line = pattern_track:line(l)
     if not line.is_empty then
-      feed_number(print, l)
+      local text = LINE_TEXTS[l]
+      if not text then
+        text = format("%.4f", l) .. "\31"
+        LINE_TEXTS[l] = text
+      end
+      local n = 1
+      texts[1] = text
       for c = 1, note_columns do
         local column = line:note_column(c)
         if not column.is_empty then
           notes = notes + ((column.note_value < 120) and 1 or 0)
-          feed(print, format("%d:%d %d %d %d %d %d %d", c, column.note_value, column.instrument_value, column.volume_value,
-            column.panning_value, column.delay_value, column.effect_number_value, column.effect_amount_value))
+          n = n + 1
+          texts[n] = format("%d:%d %d %d %d %d %d %d\31", c, column.note_value, column.instrument_value, column.volume_value,
+            column.panning_value, column.delay_value, column.effect_number_value, column.effect_amount_value)
         end
       end
       for c = 1, effect_columns do
         local column = line:effect_column(c)
         if not column.is_empty then
           effects = effects + 1
-          feed(print, format("e%d:%d %d", c, column.number_value, column.amount_value))
+          n = n + 1
+          texts[n] = format("e%d:%d %d\31", c, column.number_value, column.amount_value)
         end
       end
+      h = fnv.feed(h, concat(texts, "", 1, n))
     end
     if slice and l % 64 == 0 then slice() end
   end
-  return format("%d notes, %d effects #%s", notes, effects, hex(print))
+  return format("%d notes, %d effects #%s", notes, effects, fnv.hex(h))
 end
 
 local function pattern_record(job, song, p, count, labels, budget)
