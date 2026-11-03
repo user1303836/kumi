@@ -1637,3 +1637,42 @@ case!(the_technique_offer_with_another_list_in_its_place_lets_kumi_follow_a_daw,
     assert_eq!(*followed.borrow(), [DawId::Renoise]);
     assert_eq!(done.await, 0);
 });
+// (A4-3) What the DAW tells once (connected or gone, the project read, where the producer is, what they point at, what
+// changed while Kumi was away) is drawn within the 16 ms floor, not at the animation's pace, which is 2 s here; words as
+// they stream still wait for that pace.
+case!(what_the_daw_tells_once_is_drawn_without_waiting_for_the_animation, async {
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |opts| {
+        opts.frame_ms = Some(16.0);
+        opts.animation_ms = Some(2_000.0);
+    });
+    h.start().await;
+    h.connect();
+    // Whether the event is drawn within 80 ms (the frames and reads before it come and go first).
+    async fn drawn(h: &Harness, event: &serde_json::Value) -> bool {
+        delay(300).await;
+        let before = h.output.text.borrow().len();
+        h.emit(event.clone());
+        delay(80).await;
+        h.output.text.borrow().len() > before
+    }
+    let last = kumi_common::time::now_ms() - 86400000;
+    let device = json!({"track":{"name":"Bass","color":"#f59a3c","kind":"midi"},"device":"Operator","detail":"Device","view":"Session"});
+    let mut touched = device.clone();
+    touched["parameter"] = json!({"name":"Filter Freq","value":"1.20 kHz","owner":"Operator"});
+    let told = [
+        json!({"type":"observation","label":"Current open Set: Moon Garden — Remote Script · real-live"}),
+        json!({"type":"focus","focus":device}),
+        // (the same device, a parameter touched: no body is read for it, so only the event asks for its frame)
+        json!({"type":"focus","focus":touched}),
+        json!({"type":"pointed","pin":{"trackRef":"3:track:1","ref":"3:track:1","node":"selection","name":"Bass","trail":[],"siblings":["Drums"],"live":true,"track":"Bass","time":{"fromBeat":64,"toBeat":80}}}),
+        json!({"type":"catch-up","catchUp":{"set":"Moon Garden","lastSeenAt":last,"lines":["Tempo 120 → 124 BPM"],"more":0}}),
+        json!({"type":"connection","state":"disconnected"}),
+    ];
+    for event in &told {
+        assert!(drawn(&h, event).await, "drawn within 80 ms: {event}");
+    }
+    // An answer under way: its words wait for the next frame of the animation, 2 s after the last.
+    h.emit(json!({"type":"state","state":"running"}));
+    assert!(!drawn(&h, &json!({"type":"text","text":"Words as they stream"})).await, "streamed words wait for the animation's pace");
+    h.close().await;
+});
