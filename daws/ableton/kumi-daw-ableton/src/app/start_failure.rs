@@ -21,6 +21,10 @@ const STARTED: &str = "info: Started: Live";
 const NOT_LOADED: &str = "Exception: Script could not be loaded.";
 /// A start of the script, from _Framework, before any of the bridge's own code runs.
 const INITIALIZING: &str = "(AbletonMcpBridge) Initializing...";
+/// The Remote Script's own line for a start that failed (since the bridge that says it in Live's status bar too), the
+/// exception after it: one that starts later than Live made it (on Windows, once its files' ACLs are checked off Live's
+/// thread) fails without a traceback Live reports.
+const SAID_FAILED: &str = "RemoteScriptMessage: (AbletonMcpBridge) AbletonMcpBridge couldn't start: ";
 
 /// A failed start of AbletonMcpBridge in Live, as Live's log has it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +88,8 @@ pub(crate) fn failed_start(log: &str) -> Option<Failed> {
             (listing, listed) = (true, 0);
         } else if text.ends_with(INITIALIZING) {
             (failed, traceback) = (None, None);
+        } else if let Some(exception) = text.strip_prefix(SAID_FAILED).filter(|exception| !exception.trim().is_empty()) {
+            failed = Some(exception.trim().to_string());
         } else if text == NOT_LOADED {
             if let Some(traceback) = traceback.take().filter(|traceback| OURS.is_match(traceback)) {
                 failed = traceback.lines().map(str::trim).filter(|line| !line.is_empty()).last().map(str::to_string);
@@ -362,6 +368,17 @@ mod tests {
     fn a_failed_start_is_put_back_together_from_the_pieces_live_logs() {
         assert_eq!(failed_start(PORT_HELD), failed(PORT_IN_USE, 1));
         assert_eq!(failed_start(UNSAFE), failed("ValueError: bridge configuration reference is missing or unsafe", 1));
+    }
+
+    #[test]
+    fn the_remote_scripts_own_line_is_a_failed_start_with_no_traceback_too() {
+        let said = "2026-11-03T07:00:00.000001: info: Started: Live 12.4.25b1\n\
+            2026-11-03T07:00:03.000001: info: RemoteScriptMessage: (AbletonMcpBridge) Initializing...\n\
+            2026-11-03T07:00:04.000001: info: RemoteScriptMessage: (AbletonMcpBridge) AbletonMcpBridge couldn't start: OSError: [Errno 48] Address already in use\n";
+        assert_eq!(failed_start(said), failed(PORT_IN_USE, 1));
+        // A start after it puts it by, as with a traceback.
+        let again = "2026-11-03T07:01:00.000001: info: RemoteScriptMessage: (AbletonMcpBridge) Initializing...\n";
+        assert_eq!(failed_start(&format!("{said}{again}")), None);
     }
 
     #[test]
