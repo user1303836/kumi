@@ -599,11 +599,19 @@ fn listed_as(stand_in: Option<&str>) -> Vec<(u32, String)> {
     }
 }
 
-/// This computer's processes, listed now: Windows' from a snapshot (tasklist, when one can't be taken).
+/// This computer's processes, listed now: Windows' from a snapshot, macOS's and Linux's from the kernel's own table (each
+/// `ps`, or tasklist, when those can't be read).
 fn listing_now() -> Vec<(u32, String)> {
     #[cfg(windows)]
     {
         let listed = snapshot();
+        if !listed.is_empty() {
+            return listed;
+        }
+    }
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    {
+        let listed = kernel_listing();
         if !listed.is_empty() {
             return listed;
         }
@@ -615,6 +623,107 @@ fn listing_now() -> Vec<(u32, String)> {
     };
     let Ok(output) = listing else { return vec![] };
     parse_processes(&String::from_utf8_lossy(&output.stdout), cfg!(windows))
+}
+
+/// macOS's processes as `ps -axo pid=,comm=` lists them, read from the kernel in about 2 ms where `ps` takes about 20: each
+/// by its argv[0] where it can be read (the producer's own processes; `ps comm` prints argv[0]), else by its program's
+/// path, else by its short name; the kernel's own process (pid 0) left out, and in `ps`'s order, by controlling terminal
+/// then pid. Empty when the list can't be read.
+#[cfg(target_os = "macos")]
+fn kernel_listing() -> Vec<(u32, String)> {
+    use std::{ffi::CStr, mem::size_of, ptr::null_mut};
+    // SAFETY: a null buffer asks only how many there are; then the buffer holds room for that many and more (processes
+    // start meanwhile), and the call says how many it wrote.
+    let pids = unsafe {
+        let wanted = libc::proc_listallpids(null_mut(), 0);
+        if wanted <= 0 {
+            return vec![];
+        }
+        let mut pids: Vec<libc::pid_t> = vec![0; wanted as usize + 64];
+        let listed = libc::proc_listallpids(pids.as_mut_ptr().cast(), (pids.len() * size_of::<libc::pid_t>()) as libc::c_int);
+        if listed <= 0 {
+            return vec![];
+        }
+        pids.truncate((listed as usize).min(pids.len()));
+        pids
+    };
+    let mut argmax: libc::c_int = 0;
+    let mut length = size_of::<libc::c_int>();
+    let mut name = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    // SAFETY: the answer is one c_int, which `argmax` holds.
+    unsafe { libc::sysctl(name.as_mut_ptr(), 2, (&raw mut argmax).cast(), &mut length, null_mut(), 0) };
+    let mut arguments = vec![0u8; usize::try_from(argmax).unwrap_or(0).max(64 * 1024)];
+    let mut listed: Vec<(i32, u32, String)> = pids
+        .into_iter()
+        // The kernel's own (pid 0), which `ps -ax` leaves out; only root can read it.
+        .filter(|pid| *pid > 0)
+        .filter_map(|pid| {
+            // SAFETY: proc_bsdinfo is plain data, filled in by the call up to the size it's given.
+            let info = unsafe {
+                let mut info: libc::proc_bsdinfo = std::mem::zeroed();
+                let size = size_of::<libc::proc_bsdinfo>() as libc::c_int;
+                (libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) == size).then_some(info)
+            };
+            // A process that ended since the pids were listed is left out, as `ps` never saw it.
+            let info = info?;
+            let program = argv0(pid, &mut arguments).or_else(|| program_path(pid)).unwrap_or_else(|| {
+                // SAFETY: pbi_comm ends with a NUL within its length (the kernel's MAXCOMLEN + 1 array, zeroed first).
+                unsafe { CStr::from_ptr(info.pbi_comm.as_ptr()) }.to_string_lossy().into_owned()
+            });
+            Some((info.e_tdev as i32, pid as u32, program.trim().to_string()))
+        })
+        .collect();
+    listed.sort_by_key(|(terminal, pid, _)| (*terminal, *pid));
+    listed.into_iter().map(|(_, pid, program)| (pid, program)).collect()
+}
+
+/// A process's argv[0], from its arguments as the kernel keeps them (KERN_PROCARGS2: the count, the program's path, then
+/// the arguments, each ended by a NUL); None for one this account can't read or that has none.
+#[cfg(target_os = "macos")]
+fn argv0(pid: libc::pid_t, buffer: &mut [u8]) -> Option<String> {
+    let mut name = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
+    let mut size = buffer.len();
+    // SAFETY: the kernel writes at most `size` bytes into the buffer and says how many it wrote.
+    if unsafe { libc::sysctl(name.as_mut_ptr(), 3, buffer.as_mut_ptr().cast(), &mut size, std::ptr::null_mut(), 0) } != 0 {
+        return None;
+    }
+    let written = buffer.get(..size)?;
+    let count = i32::from_ne_bytes(written.get(..4)?.try_into().ok()?);
+    if count < 1 {
+        return None;
+    }
+    let after_path = &written[4..][memchr::memchr(0, &written[4..])?..];
+    let start = after_path.iter().position(|byte| *byte != 0)?;
+    let first = &after_path[start..];
+    let end = memchr::memchr(0, first).unwrap_or(first.len());
+    Some(String::from_utf8_lossy(&first[..end]).into_owned())
+}
+
+/// A process's program, by the path of the file it runs.
+#[cfg(target_os = "macos")]
+fn program_path(pid: libc::pid_t) -> Option<String> {
+    let mut path = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: the call writes at most the buffer's size and says how many bytes it wrote.
+    let written = unsafe { libc::proc_pidpath(pid, path.as_mut_ptr().cast(), path.len() as u32) };
+    (written > 0).then(|| String::from_utf8_lossy(&path[..written as usize]).into_owned())
+}
+
+/// Linux's processes as `ps -axo pid=,comm=` lists them, by pid: each by its command name (`/proc/<pid>/comm`), read in
+/// a moment where `ps` takes a fork and a scan of its own. Empty when /proc can't be read.
+#[cfg(target_os = "linux")]
+fn kernel_listing() -> Vec<(u32, String)> {
+    let Ok(entries) = std::fs::read_dir("/proc") else { return vec![] };
+    let mut listed: Vec<(u32, String)> = entries
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
+            // One that ended since /proc was read is left out.
+            let name = std::fs::read_to_string(entry.path().join("comm")).ok()?;
+            Some((pid, name.trim().to_string()))
+        })
+        .collect();
+    listed.sort_by_key(|(pid, _)| *pid);
+    listed
 }
 
 /// Windows' processes by their image names, from a Toolhelp snapshot: a moment's work, where tasklist takes a good part
@@ -1055,6 +1164,75 @@ mod tests {
             running_programs(Daw::Renoise, &env(Os::Mac, Path::new("/"), &renoise)),
             [PathBuf::from("/Applications/Renoise.app/Contents/MacOS/Renoise")]
         );
+    }
+
+    /// The kernel's listing is `ps -axo pid=,comm=`'s, without the `ps`: each of this account's processes by the same name
+    /// (a child named only by argv[0] among them), in the same order. Processes that start or end between the two
+    /// listings are left out of the comparison.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    fn the_kernels_listing_is_what_ps_lists() {
+        use std::{collections::HashMap, os::unix::process::CommandExt};
+        let mut named = std::process::Command::new("/bin/sleep").arg0("kumi-listing-test").arg("30").spawn().unwrap();
+        let ps = std::process::Command::new("ps").args(["-axo", "pid=,uid=,comm="]).output().unwrap();
+        let listed = kernel_listing();
+        let _ = named.kill();
+        let _ = named.wait();
+        // SAFETY: getuid has no preconditions.
+        let me = unsafe { libc::getuid() }.to_string();
+        let mut mine: HashMap<u32, String> = HashMap::new();
+        let mut order = vec![];
+        for line in String::from_utf8_lossy(&ps.stdout).lines() {
+            // As parse_processes reads a line: the pid, then (here) the uid, then the rest, trimmed.
+            let Some((pid, rest)) = line.trim_start().split_once(char::is_whitespace) else { continue };
+            let Some((uid, name)) = rest.trim_start().split_once(char::is_whitespace) else { continue };
+            let Ok(pid) = pid.parse::<u32>() else { continue };
+            order.push(pid);
+            if uid == me {
+                mine.insert(pid, name.trim().to_string());
+            }
+        }
+        let kernel: HashMap<u32, &String> = listed.iter().map(|(pid, name)| (*pid, name)).collect();
+        let expected = if cfg!(target_os = "linux") { "sleep" } else { "kumi-listing-test" };
+        assert_eq!(kernel.get(&named.id()).map(|name| name.as_str()), Some(expected), "the child, by argv[0] on macOS and comm on Linux");
+        assert!(!kernel.contains_key(&0), "the kernel's own process isn't listed, as ps -ax leaves it out");
+        let compared: Vec<_> = mine.iter().filter(|(pid, _)| kernel.contains_key(pid)).collect();
+        assert!(compared.len() > 1, "this account's processes are in both listings");
+        for (pid, name) in compared {
+            assert_eq!(kernel[pid], name, "pid {pid}");
+        }
+        let in_both: Vec<u32> = order.iter().copied().filter(|pid| kernel.contains_key(pid)).collect();
+        let kernel_order: Vec<u32> = listed.iter().map(|(pid, _)| *pid).filter(|pid| in_both.contains(pid)).collect();
+        assert_eq!(kernel_order, in_both, "in ps's order");
+    }
+
+    /// What a listing costs, the kernel's against `ps`'s, for a PR's numbers: `--run-ignored only --no-capture`, built
+    /// optimized.
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    #[test]
+    #[ignore = "a timing, not a check"]
+    fn a_listing_from_the_kernel_takes_a_moment() {
+        let time = |f: &dyn Fn() -> usize| {
+            let mut runs: Vec<f64> = (0..21)
+                .map(|_| {
+                    let start = std::time::Instant::now();
+                    assert!(f() > 0);
+                    start.elapsed().as_secs_f64() * 1000.0
+                })
+                .collect();
+            let first = runs[0];
+            runs.sort_by(f64::total_cmp);
+            format!("first {first:.2} ms, median {:.2} ms", runs[10])
+        };
+        let ps = || {
+            parse_processes(
+                &String::from_utf8_lossy(&std::process::Command::new("ps").args(["-axo", "pid=,comm="]).output().unwrap().stdout),
+                false,
+            )
+            .len()
+        };
+        println!("kernel: {}", time(&|| kernel_listing().len()));
+        println!("ps:     {}", time(&ps));
     }
 
     /// This computer's listing has this test's own process in it, and where Kumi asks the system for a program's path
