@@ -3,7 +3,7 @@
 //! last, so its answer says the others have come. Over SSH, where `TERM_PROGRAM` doesn't arrive, the answers are what
 //! turn on kitty's pictures and the terminal's own notifications; the environment stays the fallback.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -66,10 +66,10 @@ pub async fn probe(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>, budget:
     asking.end()
 }
 
-/// The terminal asked what it is ([`ask`]): raw, and what it says (and any key typed meanwhile) read, until
-/// [`Asking::end`] gives it back as it was. Answers that come after the wait are read too, so a terminal that answers
-/// late never has them echoed onto the screen. Dropped without being ended (a start that fails), it's given back all the
-/// same.
+/// The terminal asked what it is ([`ask`]): raw, and what it says (and any key typed meanwhile) read. Once DA1 has come
+/// it's given back as it was at once, so ctrl+c stops a slow start again. A terminal that hasn't answered by the end of
+/// the wait stays raw and read until [`Asking::end`], so answers that come late are read, never echoed onto the screen.
+/// Dropped without being ended (a start that fails), it's given back all the same.
 pub struct Asking {
     input: Rc<dyn TtyInput>,
     was_raw: bool,
@@ -77,7 +77,7 @@ pub struct Asking {
     read: Rc<RefCell<Vec<u8>>>,
     done: Signal,
     parser: InputParser,
-    ended: bool,
+    ended: Cell<bool>,
 }
 
 /// Makes the terminal raw, reads it, and asks: None when it can't be made raw (then it isn't asked).
@@ -109,29 +109,33 @@ pub fn ask(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>) -> Option<Askin
         }
     }));
     output.write(QUERIES);
-    Some(Asking { input: input.clone(), was_raw, answers, read, done, parser, ended: false })
+    Some(Asking { input: input.clone(), was_raw, answers, read, done, parser, ended: Cell::new(false) })
 }
 
 impl Asking {
-    /// Until DA1's answer (what was asked before it has been answered, or won't be), `budget`, or `stop`.
+    /// Until DA1's answer (what was asked before it has been answered, or won't be), `budget`, or `stop`. With DA1 in,
+    /// the terminal is given back now.
     pub async fn answered(&self, budget: Duration, stop: &Signal) {
         tokio::select! {
             _ = tokio::time::timeout(budget, self.done.cancelled()) => {}
             _ = stop.cancelled() => {}
         }
+        if self.answers.borrow().complete {
+            self.give_back();
+        }
     }
 
     /// Gives the terminal back as it was: what it said, and every byte read (keys typed meanwhile among them, for the
     /// screen's own reader to read again, which also takes the answers there as answers).
-    pub fn end(mut self) -> Probed {
+    pub fn end(self) -> Probed {
         self.give_back();
         let answers = self.answers.borrow().clone();
         let read = std::mem::take(&mut *self.read.borrow_mut());
         Probed { answers, read }
     }
 
-    fn give_back(&mut self) {
-        if !std::mem::replace(&mut self.ended, true) {
+    fn give_back(&self) {
+        if !self.ended.replace(true) {
             self.input.pause();
             self.parser.dispose();
             let _ = self.input.set_raw_mode(self.was_raw);

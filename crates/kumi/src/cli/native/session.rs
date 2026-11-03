@@ -958,8 +958,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     };
     // While the session's thread builds it, this one does what needs no session. It asks the terminal what it is (a
     // terminal its environment keeps quiet, the Linux console or a dumb one, isn't asked, nor one whose producer said not
-    // to, `KUMI_PROBE=off`): the answer crosses the terminal meanwhile, and the terminal stays raw, read by the probe,
-    // until the screen takes it, so answers that come late are read rather than echoed. And it reads the input history,
+    // to, `KUMI_PROBE=off`): the answer crosses the terminal meanwhile. It's given back once its last answer (DA1) is in,
+    // so ctrl+c still stops a slow start; one that hasn't answered within the wait stays raw, read by the probe, until
+    // the screen takes it, so answers that come late are read rather than echoed. And it reads the input history,
     // each line redacted again with the keys known now. A session that can't start ends the wait for the terminal, and is
     // said first, as before.
     let platform = kumi_types::system::platform();
