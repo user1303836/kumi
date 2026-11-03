@@ -664,3 +664,38 @@ fn a_request_sent_while_its_connection_is_readied_waits_for_it_rather_than_openi
         server.messages.recv().await.unwrap();
     });
 }
+
+#[test]
+fn a_request_that_waited_on_a_readying_that_failed_goes_over_http_without_opening_again() {
+    local(async {
+        // A server that takes 100 ms to refuse each opening, counting them.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let url = format!("http://{}/backend-api/codex/responses", listener.local_addr().unwrap());
+        let tries = Arc::new(Mutex::new(0));
+        let counted = tries.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                *counted.lock().unwrap() += 1;
+                tokio::spawn(async move {
+                    let mut bytes = [0; 4096];
+                    let _ = stream.read(&mut bytes).await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    let _ = stream.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n").await;
+                });
+            }
+        });
+        let http = Rc::new(Http::default());
+        let fetch = Rc::new(SocketFetch::new(http.clone()));
+        let readying = {
+            let (fetch, url) = (fetch.clone(), url.clone());
+            tokio::task::spawn_local(async move { fetch.warm(&url, headers()).await })
+        };
+        tokio::task::yield_now().await;
+        let response = fetch.fetch(&url, post(request(json!([user("hi")])))).await.unwrap();
+        assert_eq!(response.headers["x-over"], "http");
+        readying.await.unwrap();
+        assert_eq!(*tries.lock().unwrap(), 1, "the readying's opening only");
+        assert_eq!(http.0.borrow().len(), 1);
+    });
+}

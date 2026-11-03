@@ -87,7 +87,7 @@ struct Shared {
     busy: Cell<bool>,
     /// A connection being readied while the producer types (`SocketFetch::ready`): a request that comes meanwhile waits
     /// for it rather than opening one of its own.
-    readying: RefCell<Option<Joint<LocalBoxFuture<'static, ()>>>>,
+    readying: RefCell<Option<Joint<LocalBoxFuture<'static, bool>>>>,
     failures: Cell<u8>,
     /// HTTP until then: the server wouldn't open one, or connections kept failing.
     resting: Cell<Option<Instant>>,
@@ -156,20 +156,25 @@ impl SocketFetch {
                     line = None;
                 }
             }
+            let mut ready = true;
             if line.is_none() {
-                if let Ok(opened) = open(&url, &identity).await {
-                    // A new connection keeps no earlier response, as a request that opens one finds.
-                    *held.last.borrow_mut() = None;
-                    line = Some(opened);
+                match open(&url, &identity).await {
+                    Ok(opened) => {
+                        // A new connection keeps no earlier response, as a request that opens one finds.
+                        *held.last.borrow_mut() = None;
+                        line = Some(opened);
+                    }
+                    Err(_) => ready = false,
                 }
             }
             *held.line.borrow_mut() = line;
             *held.readying.borrow_mut() = None;
+            ready
         }
         .boxed_local()
         .shared();
         *shared.readying.borrow_mut() = Some(readying.clone());
-        readying.await;
+        let _ = readying.await;
     }
 }
 
@@ -445,9 +450,13 @@ impl Fetch for SocketFetch {
     }
     async fn fetch(&self, url: &str, init: FetchInit) -> Result<Response, LanguageModelError> {
         let shared = &self.shared;
+        // Its connection being readied: waited for. One that couldn't be opened just now isn't tried again for this request,
+        // which goes over HTTP as one whose own opening failed would.
         let readying = shared.readying.borrow().clone();
         if let Some(readying) = readying {
-            readying.await;
+            if !readying.await {
+                return self.http.fetch(url, init).await;
+            }
         }
         let direct = url::Url::parse(url).is_ok_and(|address| kumi_net::proxy::current().proxy_for(&address).is_none());
         let body = streamed(url, &init).filter(|_| direct && !shared.resting() && !shared.busy.get());
