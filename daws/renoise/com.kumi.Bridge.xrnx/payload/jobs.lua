@@ -9,8 +9,10 @@ M.BUDGET_MS = 8
 -- A slice while Renoise's transport is stopped. Renoise fires the tool's timers once a frame, about every 20 ms whatever
 -- their interval (3.5.4, measured), so 8 ms a frame gave reads 40% of the time where the 10 ms job timer meant 80%; 14 ms
 -- is 70%, and the frame holds (measured, the song stopped: p50 19.7 ms with no slice, 19.9 with 14-16 ms of Lua in
--- every frame). While it plays a slice keeps 8 ms: that is when a producer feels the GUI most.
+-- every frame).
 M.STOPPED_BUDGET_MS = 14
+-- A slice while it plays, one a frame: when a producer feels the GUI most.
+M.PLAYING_BUDGET_MS = 11
 
 -- ctx: now_ms(), unix_ms(), epoch() -> text, layout() -> number (the track layout within the epoch), shape() -> number
 -- (moves when tracks, patterns or lines are inserted or removed), finish(job, ok, value), on_active(boolean), playing() ->
@@ -71,11 +73,12 @@ function M:pending()
   return #self.list
 end
 
--- A slice's budget now: STOPPED_BUDGET_MS while Renoise's transport is stopped, BUDGET_MS while it plays or when that
--- can't be told.
+-- A slice's budget now: STOPPED_BUDGET_MS while Renoise's transport is stopped, PLAYING_BUDGET_MS while it plays,
+-- BUDGET_MS when that can't be told.
 function M:slice_budget()
-  local playing = self.ctx.playing
-  if playing and playing() == false then return M.STOPPED_BUDGET_MS end
+  local playing = self.ctx.playing and self.ctx.playing()
+  if playing == false then return M.STOPPED_BUDGET_MS end
+  if playing == true then return M.PLAYING_BUDGET_MS end
   return M.BUDGET_MS
 end
 
