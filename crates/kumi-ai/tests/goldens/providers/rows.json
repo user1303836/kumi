@@ -381,7 +381,10 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "What's the tempo?"
+                  "text": "What's the tempo?",
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
                 }
               ]
             },
@@ -1892,7 +1895,10 @@
               "content": [
                 {
                   "type": "text",
-                  "text": "What's the tempo?"
+                  "text": "What's the tempo?",
+                  "cache_control": {
+                    "type": "ephemeral"
+                  }
                 }
               ]
             },
