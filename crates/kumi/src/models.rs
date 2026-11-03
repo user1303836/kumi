@@ -109,6 +109,10 @@ const WARM_AGAIN: std::time::Duration = std::time::Duration::from_secs(20);
 type Defaulting = Shared<LocalBoxFuture<'static, Result<Option<DefaultModel>, RuntimeError>>>;
 /// A cloud provider's list, asked for: under way, or answered.
 type Listing = Shared<LocalBoxFuture<'static, Result<Vec<ModelInfo>, RuntimeError>>>;
+/// What a model's binding reads of its list's entry: the faster tier it asks for, whether it's sent tools, its name.
+fn bound_by(info: Option<ModelInfo>) -> Option<(Option<String>, Option<bool>, String)> {
+    info.map(|info| (info.service_tiers.into_iter().next().map(|tier| tier.id), info.tools, info.name))
+}
 struct State {
     model: Option<String>,
     /// The model that carries on while this one can't (`fallbackModel`).
@@ -562,7 +566,7 @@ impl ModelControl {
                 // What the model in use was, as the list kept from an earlier run said (it was bound from that).
                 let model = inner.state.borrow().model.clone();
                 let kept = !inner.state.borrow().listed.contains(id) && inner.state.borrow().catalog.contains_key(id);
-                let before = kept.then(|| control.info_for(model.as_deref())).flatten();
+                let before = kept.then(|| bound_by(control.info_for(model.as_deref()))).flatten();
                 {
                     let mut state = inner.state.borrow_mut();
                     state.catalog.insert(id.into(), listed.clone());
@@ -571,11 +575,11 @@ impl ModelControl {
                 if let (Some(lists), Some(who)) = (lists, who) {
                     lists.keep(id, &who, kumi_common::time::now_ms(), &listed);
                 }
-                // The provider says otherwise of it now (its faster tier, whether it takes tools): bound again, from the
-                // next message on, as when the producer changes the model.
+                // The provider says otherwise now of what the binding read of it (its faster tier, whether it takes tools,
+                // its name): bound again, from the next message on, as when the producer changes the model.
                 if kept
                     && control.parse(model.as_deref()).is_some_and(|parsed| parsed.provider == id)
-                    && before != control.info_for(model.as_deref())
+                    && before != bound_by(control.info_for(model.as_deref()))
                 {
                     inner.state.borrow_mut().bound = None;
                     let _ = (inner.options.changed)().await;
