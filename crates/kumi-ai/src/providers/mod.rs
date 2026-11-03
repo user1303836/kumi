@@ -198,6 +198,11 @@ impl Fetch for IdentifiedFetch {
         usage::record(self.provider.as_str(), &response.headers);
         Ok(response)
     }
+    async fn warm(&self, url: &str, mut headers: crate::http::Headers) {
+        let agent = headers.get("user-agent").cloned().unwrap_or_default();
+        headers.insert("user-agent".into(), format!("{} {agent}", *USER_AGENT).trim().into());
+        self.fetch.warm(url, headers).await
+    }
 }
 struct CodexFetch {
     fetch: Rc<dyn Fetch>,
@@ -215,6 +220,15 @@ impl Fetch for CodexFetch {
         init.headers.insert("originator".into(), "kumi".into());
         init.headers.insert("openai-beta".into(), "responses=experimental".into());
         self.fetch.fetch(url, init).await
+    }
+    async fn warm(&self, url: &str, mut headers: crate::http::Headers) {
+        // A sign-in that can't be read now (or refreshed) leaves the request to say so.
+        let Ok(token) = (self.token)().await else { return };
+        headers.insert("authorization".into(), format!("Bearer {}", token.access));
+        headers.insert("chatgpt-account-id".into(), token.account_id);
+        headers.insert("originator".into(), "kumi".into());
+        headers.insert("openai-beta".into(), "responses=experimental".into());
+        self.fetch.warm(url, headers).await
     }
 }
 /// The headers a provider's requests carry beside the format's own: the conversation's ID, where it takes one.

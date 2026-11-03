@@ -103,3 +103,68 @@ async fn budget_a_plan_that_finishes_the_request_is_one_model_reply_with_no_repl
     assert_eq!(replies.get(), 1, "model replies for a finished plan: {}, each seconds long", replies.get());
     kernel.close().await;
 }
+
+/// A model that answers at once, recording the headers of each warm-up it's asked for and of each request.
+struct Warming {
+    warmed: Rc<std::cell::RefCell<Vec<Option<kumi_ai::http::Headers>>>>,
+    asked: Rc<std::cell::RefCell<Vec<Option<kumi_ai::http::Headers>>>>,
+}
+
+#[async_trait(?Send)]
+impl LanguageModel for Warming {
+    async fn do_stream(&self, options: CallOptions) -> Result<StreamParts, LanguageModelError> {
+        self.asked.borrow_mut().push(options.headers);
+        let finish = StreamPart::Finish {
+            usage: Usage { input_tokens: InputTokens::default(), output_tokens: OutputTokens::default(), raw: None },
+            finish_reason: FinishReason { unified: FinishReasonUnified::Stop, raw: Some("stop".into()) },
+            provider_metadata: None,
+        };
+        Ok(stream::iter(vec![
+            StreamPart::TextStart { id: "t".into(), provider_metadata: None },
+            StreamPart::TextDelta { id: "t".into(), delta: "Done.".into(), provider_metadata: None },
+            StreamPart::TextEnd { id: "t".into(), provider_metadata: None },
+            finish,
+        ])
+        .boxed_local())
+    }
+    async fn warm(&self, options: CallOptions) {
+        self.warmed.borrow_mut().push(options.headers);
+    }
+}
+
+/// A conversation's kernel readies the connection its next request goes on with that request's own identity (the
+/// conversation's session, as its binding shapes it), and the readying keeps nothing: no message, no request.
+#[tokio::test]
+async fn a_kernel_readies_its_next_requests_connection_with_its_conversations_identity_and_keeps_nothing() {
+    use kumi_agent::core::contracts::Kernel;
+    let (warmed, asked) = (Rc::default(), Rc::default());
+    let binding = ModelBinding {
+        id: "test/warm".into(),
+        model: Rc::new(Warming { warmed: Rc::clone(&warmed), asked: Rc::clone(&asked) }),
+        prepare: Box::new(|request| CallOptions {
+            prompt: request.messages,
+            headers: Some([("session-id".to_string(), request.session_id)].into()),
+            ..CallOptions::default()
+        }),
+        budget: None,
+    };
+    let kernel = create_agent_kernel(AgentKernelOptions {
+        conversation: Some("conversation-1".into()),
+        binding,
+        instructions: "warm".into(),
+        tools: vec![],
+        signal: signal(),
+        checkpoint: None,
+        max_steps: None,
+        budget: None,
+    })
+    .unwrap();
+    Kernel::warm(&kernel).await;
+    assert_eq!(warmed.borrow().len(), 1);
+    assert!(asked.borrow().is_empty(), "nothing asked of the model");
+    assert!(kernel.checkpoint().unwrap().messages.is_empty(), "nothing kept");
+    kernel.run("hi", signal(), Rc::new(|_| Ok(()))).await.unwrap();
+    assert_eq!(warmed.borrow()[0], asked.borrow()[0], "readied with the identity its request went with");
+    assert!(warmed.borrow()[0].as_ref().is_some_and(|headers| !headers["session-id"].is_empty()));
+    kernel.close().await;
+}

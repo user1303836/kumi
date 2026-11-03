@@ -38,20 +38,30 @@ struct Server {
     url: String,
     messages: mpsc::UnboundedReceiver<Value>,
     openings: Arc<Mutex<Vec<Vec<(String, String)>>>>,
+    /// How many connections have ended from the client's side.
+    ended: Arc<Mutex<usize>>,
 }
 
 async fn server(script: Script) -> Server {
+    server_after(script, Duration::ZERO).await
+}
+
+/// [`server`], taking `delay` to answer each opening, as a network's connection and TLS take.
+async fn server_after(script: Script, delay: Duration) -> Server {
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
     let url = format!("http://{}/backend-api/codex/responses", listener.local_addr().unwrap());
     let (sent, messages) = mpsc::unbounded_channel();
     let openings = Arc::new(Mutex::new(vec![]));
     let heard = openings.clone();
+    let ended = Arc::new(Mutex::new(0));
+    let ending = ended.clone();
     tokio::spawn(async move {
         let script = Arc::new(Mutex::new(script.into_iter()));
         loop {
             let (stream, _) = listener.accept().await.unwrap();
-            let (sent, heard, script) = (sent.clone(), heard.clone(), script.clone());
+            let (sent, heard, script, ending) = (sent.clone(), heard.clone(), script.clone(), ending.clone());
             tokio::spawn(async move {
+                tokio::time::sleep(delay).await;
                 let socket = tokio_tungstenite::accept_hdr_async(stream, |request: &Request, mut answer: Opening| {
                     let headers = request.headers().iter().map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string())).collect();
                     heard.lock().unwrap().push(headers);
@@ -74,10 +84,11 @@ async fn server(script: Script) -> Server {
                         socket.send(Message::text(event.to_string())).await.unwrap();
                     }
                 }
+                *ending.lock().unwrap() += 1;
             });
         }
     });
-    Server { url, messages, openings }
+    Server { url, messages, openings, ended }
 }
 
 /// A server that takes each connection and answers its opening with `answer` (raw HTTP, or nothing at all), counting
@@ -551,4 +562,167 @@ fn openings_that_fail_twice_in_a_row_leave_requests_to_http_for_a_while() {
             assert_eq!(http.0.borrow().len(), 4);
         });
     }
+}
+
+/// A request's headers, as the connection is readied with them while the producer types (`Fetch::warm`).
+fn headers() -> Headers {
+    post(request(json!([]))).headers
+}
+
+#[test]
+fn a_connection_readied_while_the_producer_types_is_the_one_the_request_goes_on() {
+    local(async {
+        let mut server = server(vec![completed("r1", json!([]))]).await;
+        let http = Rc::new(Http::default());
+        let fetch = SocketFetch::new(http.clone());
+        fetch.warm(&server.url, headers()).await;
+        // Opened as the request would open it, with its identity, and nothing sent on it.
+        assert_eq!(server.openings.lock().unwrap().len(), 1);
+        assert!(server.messages.try_recv().is_err());
+        let response = fetch.fetch(&server.url, post(request(json!([user("hi")])))).await.unwrap();
+        // The opening's plan reading still goes with the first answer on it.
+        assert_eq!(response.headers.get("x-codex-primary-used-percent").map(String::as_str), Some("60"));
+        assert_eq!(events(response).await, completed("r1", json!([])));
+        assert_eq!(server.openings.lock().unwrap().len(), 1, "the request went on it");
+        assert_eq!(server.messages.recv().await.unwrap()["input"], json!([user("hi")]));
+        let opening = server.openings.lock().unwrap()[0].clone();
+        assert!(opening.contains(&("session-id".to_string(), "s1".to_string())));
+        assert!(http.0.borrow().is_empty());
+    });
+}
+
+#[test]
+fn a_connection_gone_while_idle_is_opened_again_while_the_producer_types_and_the_request_sends_the_whole_conversation() {
+    local(async {
+        let mut deaf = completed("r1", json!([call("c1")]));
+        deaf.push(json!("hold"));
+        let mut server = server(vec![deaf, completed("r2", json!([]))]).await;
+        let fetch =
+            SocketFetch::new(Rc::new(Http::default())).with_timing(Duration::ZERO, Duration::from_millis(300), Duration::from_secs(600));
+        let (first, next) = a_call_then_its_result();
+        events(fetch.fetch(&server.url, post(first)).await.unwrap()).await;
+        fetch.warm(&server.url, headers()).await;
+        assert_eq!(server.openings.lock().unwrap().len(), 2, "opened anew while typing");
+        assert_eq!(events(fetch.fetch(&server.url, post(next.clone())).await.unwrap()).await, completed("r2", json!([])));
+        assert_eq!(server.openings.lock().unwrap().len(), 2, "the request went on it");
+        server.messages.recv().await.unwrap();
+        // A new connection keeps no earlier response: the whole request, as without the readying.
+        let again = server.messages.recv().await.unwrap();
+        assert_eq!((again.get("previous_response_id"), &again["input"]), (None, &next["input"]));
+    });
+}
+
+#[test]
+fn a_connection_readied_and_never_used_sends_nothing_and_closes_with_its_fetch() {
+    local(async {
+        let mut server = server(vec![]).await;
+        let fetch = SocketFetch::new(Rc::new(Http::default()));
+        fetch.warm(&server.url, headers()).await;
+        assert_eq!(server.openings.lock().unwrap().len(), 1);
+        drop(fetch);
+        for _ in 0..200 {
+            if *server.ended.lock().unwrap() == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert_eq!(*server.ended.lock().unwrap(), 1, "closed");
+        assert!(server.messages.try_recv().is_err(), "having carried nothing");
+    });
+}
+
+#[test]
+fn a_readying_that_fails_says_nothing_counts_for_nothing_and_the_request_opens_its_own_as_before() {
+    local(async {
+        let (url, tries) = refusing(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n").await;
+        let http = Rc::new(Http::default());
+        let fetch = SocketFetch::new(http.clone());
+        fetch.warm(&url, headers()).await;
+        assert_eq!(*tries.lock().unwrap(), 1);
+        assert!(http.0.borrow().is_empty(), "nothing went over HTTP");
+        // As without it: two failed openings of requests' own before HTTP takes over for a while.
+        for _ in 0..3 {
+            assert_eq!(fetch.fetch(&url, post(request(json!([user("hi")])))).await.unwrap().headers["x-over"], "http");
+        }
+        assert_eq!(*tries.lock().unwrap(), 3);
+    });
+}
+
+#[test]
+fn a_request_sent_while_its_connection_is_readied_waits_for_it_rather_than_opening_another() {
+    local(async {
+        let mut server = server_after(vec![completed("r1", json!([]))], Duration::from_millis(100)).await;
+        let fetch = Rc::new(SocketFetch::new(Rc::new(Http::default())));
+        let readying = {
+            let (fetch, url) = (fetch.clone(), server.url.clone());
+            tokio::task::spawn_local(async move { fetch.warm(&url, headers()).await })
+        };
+        tokio::task::yield_now().await;
+        assert_eq!(events(fetch.fetch(&server.url, post(request(json!([user("hi")])))).await.unwrap()).await, completed("r1", json!([])));
+        readying.await.unwrap();
+        assert_eq!(server.openings.lock().unwrap().len(), 1);
+        server.messages.recv().await.unwrap();
+    });
+}
+
+#[test]
+fn a_request_that_waited_on_a_readying_that_failed_goes_over_http_without_opening_again() {
+    local(async {
+        // A server that takes 100 ms to refuse each opening, counting them.
+        let listener = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        let url = format!("http://{}/backend-api/codex/responses", listener.local_addr().unwrap());
+        let tries = Arc::new(Mutex::new(0));
+        let counted = tries.clone();
+        tokio::spawn(async move {
+            loop {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                *counted.lock().unwrap() += 1;
+                tokio::spawn(async move {
+                    let mut bytes = [0; 4096];
+                    let _ = stream.read(&mut bytes).await;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    let _ = stream.write_all(b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\n\r\n").await;
+                });
+            }
+        });
+        let http = Rc::new(Http::default());
+        let fetch = Rc::new(SocketFetch::new(http.clone()));
+        let readying = {
+            let (fetch, url) = (fetch.clone(), url.clone());
+            tokio::task::spawn_local(async move { fetch.warm(&url, headers()).await })
+        };
+        tokio::task::yield_now().await;
+        let response = fetch.fetch(&url, post(request(json!([user("hi")])))).await.unwrap();
+        assert_eq!(response.headers["x-over"], "http");
+        readying.await.unwrap();
+        assert_eq!(*tries.lock().unwrap(), 1, "the readying's opening only");
+        assert_eq!(http.0.borrow().len(), 1);
+    });
+}
+
+#[test]
+fn a_request_waiting_on_its_connection_being_readied_is_stopped_at_once() {
+    local(async {
+        // An opening that takes 5 s: the readying is still under way when the request is stopped.
+        let server = server_after(vec![completed("r1", json!([]))], Duration::from_secs(5)).await;
+        let fetch = Rc::new(SocketFetch::new(Rc::new(Http::default())));
+        let readying = {
+            let (fetch, url) = (fetch.clone(), server.url.clone());
+            tokio::task::spawn_local(async move { fetch.warm(&url, headers()).await })
+        };
+        tokio::task::yield_now().await;
+        let signal = Signal::new();
+        let mut init = post(request(json!([user("hi")])));
+        init.signal = Some(signal.clone());
+        let stop = signal.clone();
+        tokio::task::spawn_local(async move {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            stop.cancel();
+        });
+        let began = std::time::Instant::now();
+        let stopped = fetch.fetch(&server.url, init).await;
+        assert!(stopped.err().unwrap().to_string().contains("aborted"));
+        assert!(began.elapsed() < Duration::from_secs(1), "stopped at once, not after the opening");
+        readying.abort();
+    });
 }

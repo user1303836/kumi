@@ -64,6 +64,11 @@ pub trait Fetch {
     fn is_kumis_own(&self) -> bool {
         false
     }
+    /// The producer began a message whose request will go to `url` with `headers`: whatever connection it needs is readied
+    /// meanwhile (ChatGPT's WebSocket). Nothing is sent and nothing said; most fetches do nothing.
+    async fn warm(&self, url: &str, headers: Headers) {
+        let _ = (url, headers);
+    }
 }
 /// The proxy settings a client goes by, asked as each connection is made.
 pub type Proxies = Arc<dyn Fn() -> Arc<proxy::Settings> + Send + Sync>;

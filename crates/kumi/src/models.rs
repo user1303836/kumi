@@ -675,8 +675,11 @@ impl ModelControl {
         if self.binding_with_info().await.is_err() {
             return;
         }
-        // ChatGPT's answers go over a WebSocket of their own, which the first request opens.
-        if provider.row().sign_in == SignIn::Chatgpt {
+        // ChatGPT's answers go over a WebSocket of their own, which its conversation's kernel readies (`Kernel::warm`); a
+        // session's first message still opens it. Through a proxy they go over HTTP, readied here as any provider's.
+        let direct =
+            reqwest::Url::parse(provider.row().base_url).is_ok_and(|address| kumi_net::proxy::current().proxy_for(&address).is_none());
+        if provider.row().sign_in == SignIn::Chatgpt && direct {
             return;
         }
         // Any answer will do: the connection it went on stays open for the message (a HEAD, so nothing is read).

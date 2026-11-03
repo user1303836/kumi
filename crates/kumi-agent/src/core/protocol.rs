@@ -844,13 +844,13 @@ impl Session {
             | Op::SaveKey(_)
             | Op::SignOut(_)
             | Op::SignInChatgpt(_)
-            | Op::MissingModel(_)
-            | Op::Warm(_)) => {
+            | Op::MissingModel(_)) => {
                 // If this list and models_answer's ever part ways, a request the controls don't answer is "Not available", not a
                 // panic.
                 models_answer(&op, session.model_controls(), side).await.unwrap_or_else(|| Err(RuntimeError::plain("Not available")))
             }
             Op::StopSignIn(request) => answered(request, |op::StopSignIn { id }| async move { Ok(side.stop_sign_in(id)) }).await,
+            Op::Warm(request) => answered(request, |op::Warm {}| async move { Ok(session.warm().await) }).await,
             Op::FocusBody(request) => {
                 answered(request, |op::FocusBody { request }| async move { session.focus_body(&request).await }).await
             }

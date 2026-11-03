@@ -770,13 +770,9 @@ fn output_chunk(value: &Value) -> bool {
         )
     )
 }
-#[async_trait(?Send)]
-impl LanguageModel for ResponsesModel {
-    async fn do_stream(&self, call: CallOptions) -> Result<StreamParts, LanguageModelError> {
-        let (mut body, warnings, opts) = self.arguments(&call)?;
-        // One copy of the request: what goes on the wire is what an error reports.
-        body["stream"] = json!(true);
-        let body = Rc::new(body);
+impl ResponsesModel {
+    /// Where a request with `call`'s headers goes, and the headers it goes with.
+    fn address(&self, call: &CallOptions) -> (String, Headers) {
         // A server on the producer's network may take no key.
         let mut headers = Headers::new();
         if !self.0.api_key.is_empty() {
@@ -792,7 +788,23 @@ impl LanguageModel for ResponsesModel {
             headers.extend(call.iter().map(|(k, v)| (k.to_lowercase(), v.clone())));
         }
         headers.entry("user-agent".into()).or_default().push_str(" ai-sdk/provider-utils/5.0.49 runtime/node.js/24");
-        let url = format!("{}/responses", self.0.base_url.trim_end_matches('/'));
+        (format!("{}/responses", self.0.base_url.trim_end_matches('/')), headers)
+    }
+}
+#[async_trait(?Send)]
+impl LanguageModel for ResponsesModel {
+    async fn warm(&self, call: CallOptions) {
+        let (url, mut headers) = self.address(&call);
+        // As `post_json` sends it.
+        headers.entry("content-type".into()).or_insert_with(|| "application/json".into());
+        self.0.fetch.warm(&url, headers).await
+    }
+    async fn do_stream(&self, call: CallOptions) -> Result<StreamParts, LanguageModelError> {
+        let (mut body, warnings, opts) = self.arguments(&call)?;
+        // One copy of the request: what goes on the wire is what an error reports.
+        body["stream"] = json!(true);
+        let body = Rc::new(body);
+        let (url, headers) = self.address(&call);
         let response = post_json(self.0.fetch.as_ref(), &url, headers, body.clone(), call.abort_signal).await?;
         let mut input: Pin<Box<dyn Stream<Item = Result<Value, LanguageModelError>>>> = Box::pin(json_stream(response.body.unwrap()));
         let mut initial = vec![];
