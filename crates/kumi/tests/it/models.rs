@@ -641,18 +641,30 @@ async fn sign_in_chatgpt_as(store: &Rc<dyn CredentialStore>, account: &str) {
 }
 /// A run of Kumi in `folder`: its sign-ins, settings and kept lists there.
 fn run_in(folder: &std::path::Path, fetch: Rc<dyn Fetch>) -> (ModelControl, Rc<dyn CredentialStore>) {
+    let (control, store, _) = run_counting(folder, fetch);
+    (control, store)
+}
+/// `run_in`, counting the times the model's binding changed (the session's kernel is rebuilt for each).
+fn run_counting(folder: &std::path::Path, fetch: Rc<dyn Fetch>) -> (ModelControl, Rc<dyn CredentialStore>, Rc<Cell<usize>>) {
     let store: Rc<dyn CredentialStore> = Rc::new(open_credential_store(folder.join("auth.json")));
+    let changes = Rc::new(Cell::new(0));
     let control = create_model_control(ModelControlOptions {
         store: store.clone(),
         settings_file: folder.join("settings.json").to_string_lossy().into(),
         env: Env::new(),
         fetch: Some(fetch),
-        changed: Rc::new(|| async { Ok(()) }.boxed_local()),
+        changed: Rc::new({
+            let changes = changes.clone();
+            move || {
+                changes.set(changes.get() + 1);
+                async { Ok(()) }.boxed_local()
+            }
+        }),
         say: None,
         installed: Some(Rc::new(|_| false)),
         lists: Some(kumi::model_lists::KeptLists::new(folder.join("cache").join("model-lists.json"))),
     });
-    (control, store)
+    (control, store, changes)
 }
 fn slugs(listed: &[kumi_ai::providers::models::ModelInfo]) -> Vec<String> {
     listed.iter().map(|info| info.model.clone()).collect()
@@ -679,13 +691,16 @@ async fn a_kept_list_answers_at_once_and_the_providers_own_comes_in_behind_it() 
             // The next run: the provider's answer is held back, and has changed (Astra's faster tier gone, Nova new).
             listing.held.set(true);
             *listing.models.borrow_mut() = json!([row("gpt-6-astra", false, true), row("gpt-6-nova", false, true)]);
-            let (next, _) = run_in(folder.path(), listing.clone());
+            let (next, _, changes) = run_counting(folder.path(), listing.clone());
             assert_eq!(slugs(&next.models("openai-codex", false).await.unwrap()), ["gpt-6-astra", "gpt-6-luna"]);
             next.choose("openai-codex/gpt-6-astra").await.unwrap();
             assert_eq!(next.set_fast(true).await.unwrap().map(|tier| tier.id).as_deref(), Some("priority"));
+            let bound = changes.get();
             until("the provider asked again", || listing.asks.get() == 2).await;
             listing.held.set(false);
             until("its answer known", || next.current().fast.is_none()).await;
+            // Astra's tier is gone: the model is bound again (the session's next message goes without it).
+            until("bound again", || changes.get() == bound + 1).await;
             assert_eq!(slugs(&next.models("openai-codex", false).await.unwrap()), ["gpt-6-astra", "gpt-6-nova"]);
             assert_eq!(listing.asks.get(), 2, "asked once behind the kept list");
             // And kept for the run after.
@@ -795,6 +810,24 @@ async fn a_kept_list_never_hides_a_refused_sign_in() {
             until("the refusal let go of the kept list", || kept().is_null()).await;
             let error = next.models("openai-codex", false).await.unwrap_err();
             assert_eq!(error.kumi().map(|failure| failure.kind), Some(FailureKind::Auth), "{error:?}");
+        })
+        .await;
+}
+/// With no model chosen, the default comes from the list the provider gives this run, never one kept from an earlier
+/// run: a model gone since isn't chosen.
+#[tokio::test(flavor = "current_thread")]
+async fn a_default_model_is_chosen_from_this_runs_list_not_a_kept_one() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let listing = Listing::new(json!([row("gpt-5.5", false, true), row("gpt-6-luna", false, true)]));
+            let (first, store) = run_in(folder.path(), listing.clone());
+            sign_in_chatgpt(&store).await;
+            first.models("openai-codex", false).await.unwrap();
+            *listing.models.borrow_mut() = json!([row("gpt-5.5", false, false), row("gpt-6-luna", false, true)]);
+            let (next, _) = run_in(folder.path(), listing.clone());
+            let chosen = next.choose_default().await.unwrap().unwrap();
+            assert_eq!(chosen.model.id, "openai-codex/gpt-6-luna");
         })
         .await;
 }

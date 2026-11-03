@@ -426,7 +426,8 @@ impl ModelControl {
     }
     async fn choose_first(&self) -> Result<Option<DefaultModel>, RuntimeError> {
         for provider in self.providers().await?.into_iter().filter(|p| p.signed_in) {
-            if let Some(first) = self.models(provider.id.as_str(), false).await.unwrap_or_default().into_iter().next() {
+            // The provider's list as it gives it this run: a default is never chosen from a list kept from an earlier one.
+            if let Some(first) = self.listed_now(provider.id.as_str()).await.unwrap_or_default().into_iter().next() {
                 self.choose(&first.id).await?;
                 return Ok(Some(DefaultModel { model: first, note: None }));
             }
@@ -557,6 +558,11 @@ impl ModelControl {
             let Some(inner) = inner.upgrade() else { return Ok(listed) };
             if inner.state.borrow().signed == signed {
                 let id = provider.as_str();
+                let control = ModelControl { inner: inner.clone() };
+                // What the model in use was, as the list kept from an earlier run said (it was bound from that).
+                let model = inner.state.borrow().model.clone();
+                let kept = !inner.state.borrow().listed.contains(id) && inner.state.borrow().catalog.contains_key(id);
+                let before = kept.then(|| control.info_for(model.as_deref())).flatten();
                 {
                     let mut state = inner.state.borrow_mut();
                     state.catalog.insert(id.into(), listed.clone());
@@ -564,6 +570,15 @@ impl ModelControl {
                 }
                 if let (Some(lists), Some(who)) = (lists, who) {
                     lists.keep(id, &who, kumi_common::time::now_ms(), &listed);
+                }
+                // The provider says otherwise of it now (its faster tier, whether it takes tools): bound again, from the
+                // next message on, as when the producer changes the model.
+                if kept
+                    && control.parse(model.as_deref()).is_some_and(|parsed| parsed.provider == id)
+                    && before != control.info_for(model.as_deref())
+                {
+                    inner.state.borrow_mut().bound = None;
+                    let _ = (inner.options.changed)().await;
                 }
             }
             Ok(listed)
