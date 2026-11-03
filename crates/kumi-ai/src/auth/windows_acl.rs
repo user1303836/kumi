@@ -69,6 +69,14 @@ unsafe extern "system" {
     fn AddAccessDeniedAceEx(acl: Acl, revision: u32, flags: u32, mask: u32, sid: Sid) -> i32;
     #[cfg(test)]
     fn ConvertStringSidToSidW(text: *const u16, sid: *mut Sid) -> i32;
+    #[cfg(test)]
+    fn InitializeSecurityDescriptor(descriptor: *mut c_void, revision: u32) -> i32;
+    #[cfg(test)]
+    fn SetSecurityDescriptorDacl(descriptor: *mut c_void, present: i32, dacl: Acl, defaulted: i32) -> i32;
+    #[cfg(test)]
+    fn SetSecurityDescriptorControl(descriptor: *mut c_void, mask: u16, bits: u16) -> i32;
+    #[cfg(test)]
+    fn SetFileSecurityW(name: *const u16, information: u32, descriptor: *mut c_void) -> i32;
 }
 
 const DRIVE_REMOTE: u32 = 4;
@@ -298,6 +306,37 @@ pub(super) mod shapes {
         };
         unsafe { LocalFree(sid) };
         set == 0
+    }
+
+    /// Writes this DACL on the file as it is, ACE flags and all: SetFileSecurityW takes the descriptor whole, where
+    /// SetNamedSecurityInfoW (`write`) tidies a file's ACEs first (it drops inheritance flags and inherit-only ACEs).
+    pub fn write_raw(path: &Path, aces: &[Ace]) {
+        let account = Account::current().unwrap();
+        let name = wide(path);
+        unsafe {
+            let mut buffer = vec![0u32; 1024];
+            let acl: Acl = buffer.as_mut_ptr().cast();
+            assert!(InitializeAcl(acl, 4096, ACL_REVISION) != 0);
+            for ace in aces {
+                let sid = match ace.whose {
+                    Whose::Me => account.sid(),
+                    Whose::Sid(_) => panic!("raw shapes are this account's"),
+                };
+                let added = if ace.allow {
+                    AddAccessAllowedAceEx(acl, ACL_REVISION, ace.flags, ace.mask, sid)
+                } else {
+                    AddAccessDeniedAceEx(acl, ACL_REVISION, ace.flags, ace.mask, sid)
+                };
+                assert!(added != 0);
+            }
+            // SECURITY_DESCRIPTOR (absolute) is at most 40 bytes on 64-bit Windows.
+            let mut descriptor = vec![0u64; 8];
+            let descriptor: *mut c_void = descriptor.as_mut_ptr().cast();
+            assert!(InitializeSecurityDescriptor(descriptor, 1) != 0);
+            assert!(SetSecurityDescriptorDacl(descriptor, 1, acl, 0) != 0);
+            assert!(SetSecurityDescriptorControl(descriptor, SE_DACL_PROTECTED, SE_DACL_PROTECTED) != 0);
+            assert!(SetFileSecurityW(name.as_ptr(), DACL_SECURITY_INFORMATION, descriptor) != 0, "{}", path.display());
+        }
     }
 
     /// Writes this DACL on the file: protected or not, and `None` for a null DACL.

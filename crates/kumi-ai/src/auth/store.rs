@@ -468,7 +468,7 @@ pub fn valid_api_key(value: &str) -> bool {
 mod windows_acl_tests {
     use super::super::windows_acl::{
         is_kumis_shape, make_kumis_shape,
-        shapes::{own, own_mine, write, Ace, Whose, FULL, INHERITABLE, INHERITED, INHERIT_ONLY},
+        shapes::{own, own_mine, write, write_raw, Ace, Whose, FULL, INHERITABLE, INHERITED, INHERIT_ONLY},
     };
     use super::{run_acl, ACL_CHECKS, ACL_TARGET, SECURE_FILE};
     use std::path::Path;
@@ -534,6 +534,15 @@ mod windows_acl_tests {
         for (n, (name, aces, protected, expected)) in cases.into_iter().enumerate() {
             let path = made(&format!("case-{n}.json"));
             write(&path, aces.as_deref(), protected);
+            shapes.push((name, path, expected));
+        }
+        // Written whole, flags kept: an inherited ACE in a protected DACL, and an inherit-only one.
+        for (name, flags, expected) in [
+            ("its one rule marked inherited, written raw", INHERITED, Some(6)),
+            ("its one rule inherit-only, written raw", INHERITABLE | INHERIT_ONLY, None),
+        ] {
+            let path = made(&format!("{}.json", name.replace([' ', ','], "-")));
+            write_raw(&path, &[allow(flags, FULL, Whose::Me)]);
             shapes.push((name, path, expected));
         }
         // Owned by Administrators, where this account may hand it over (an elevated one can).
