@@ -648,10 +648,12 @@ def _say_start_failure(surface: Any, c_instance: Any, error: BaseException) -> N
     log, and _START_FAILURE. Best effort: none of it may hide the failure itself, which Live goes on to report."""
     exception = f"{type(error).__name__}: {error}"
     words = "AbletonMcpBridge couldn't start: " + exception
-    for say in (getattr(c_instance, "show_message", None), getattr(surface, "log_message", None)):
+    # (the status bar is one short line: where the fix is comes before the exception, which it may cut off)
+    shown = "AbletonMcpBridge couldn't start (kumi doctor says how to fix it): " + exception
+    for say, said in ((getattr(c_instance, "show_message", None), shown), (getattr(surface, "log_message", None), words)):
         if callable(say):
             try:
-                say(words)
+                say(said)
             except Exception:
                 pass
     # (written in place: a file cut short is no JSON to Kumi, which then reads Live's log alone; a temporary one left by a

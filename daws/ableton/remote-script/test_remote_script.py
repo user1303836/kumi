@@ -534,7 +534,8 @@ class RemoteScriptTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     package.AbletonMcpBridge(Instance())
             exception = "ValueError: bridge configuration reference is missing or unsafe: others can read it (mode 644)"
-            self.assertEqual((said, logged), (["AbletonMcpBridge couldn't start: " + exception], ["AbletonMcpBridge couldn't start: " + exception]))
+            self.assertEqual(said, ["AbletonMcpBridge couldn't start (kumi doctor says how to fix it): " + exception])
+            self.assertEqual(logged, ["AbletonMcpBridge couldn't start: " + exception], "Kumi reads the log's line as it was")
             kept = json.loads(record.read_text(encoding="utf-8"))
             self.assertEqual((kept["version"], kept["pid"], kept["exception"]), (1, os.getpid(), exception))
             # A Live without show_message (or whose log refuses) still gets the record, and the failure.

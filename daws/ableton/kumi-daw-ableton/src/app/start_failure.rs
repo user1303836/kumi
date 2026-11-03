@@ -197,14 +197,29 @@ pub(crate) async fn start_failure_now(env: &Env, platform: &str) -> Option<Strin
 /// since); this is for a Live whose log Kumi can't read.
 async fn recorded_failure(env: &Env, run: Run, platform: &str) -> Option<Found> {
     let file = kumi_library::sources::join(&super::folders::remote_scripts_dir(env), "AbletonMcpBridge/start-failure.json");
-    let record: serde_json::Value = serde_json::from_slice(&tokio::fs::read(&file).await.ok()?).ok()?;
-    let pid = record["pid"].as_u64().filter(|_| record["version"] == 1)?;
-    let exception = record["exception"].as_str().filter(|exception| !exception.trim().is_empty())?;
-    if !live_pids_on(run, platform, env).await.contains(&u32::try_from(pid).ok()?) {
-        return None;
+    let meta = tokio::fs::metadata(&file).await.ok()?;
+    let key = (file.clone(), meta.len(), meta.modified().ok()?);
+    // Asked about once for the record as it stands: a record left behind isn't a process listing at every look (four a
+    // second while the session's watch looks quickly).
+    if let Some((_, found)) = LAST_RECORD.lock().unwrap_or_else(|e| e.into_inner()).as_ref().filter(|(held, _)| *held == key) {
+        return found.clone();
     }
-    Some((format!("process {pid} at {}", record["at"]), Failed { exception: exception.to_string(), slots: 1 }))
+    let found = async {
+        let record: serde_json::Value = serde_json::from_slice(&tokio::fs::read(&file).await.ok()?).ok()?;
+        let pid = record["pid"].as_u64().filter(|_| record["version"] == 1)?;
+        let exception = record["exception"].as_str().filter(|exception| !exception.trim().is_empty())?;
+        if !live_pids_on(run, platform, env).await.contains(&u32::try_from(pid).ok()?) {
+            return None;
+        }
+        Some((format!("process {pid} at {}", record["at"]), Failed { exception: exception.to_string(), slots: 1 }))
+    }
+    .await;
+    *LAST_RECORD.lock().unwrap_or_else(|e| e.into_inner()) = Some((key, found.clone()));
+    found
 }
+/// The Remote Script's record as it was last read (its file, size and time), and what it said.
+type Record = ((String, u64, SystemTime), Option<Found>);
+static LAST_RECORD: Mutex<Option<Record>> = Mutex::new(None);
 async fn start_failure_settled(env: &Env, root: &str, run: Run, platform: &str, settled: Duration) -> Option<String> {
     let found =
         if logs_in(root).await.is_empty() { recorded_failure(env, run.clone(), platform).await? } else { last_failed(root).await? };
@@ -566,8 +581,9 @@ mod tests {
         let no_log = nothing.path().to_str().unwrap();
         let said = start_failure_settled(&env, no_log, running_lives("4242\n"), "darwin", Duration::ZERO).await.unwrap();
         assert!(said.contains("the bridge's check of its files said “bridge secret is invalid”"), "{said}");
-        // Kept by a Live that has quit since: not said.
-        std::fs::write(scripts.path().join("AbletonMcpBridge/start-failure.json"), record(4243)).unwrap();
+        // Kept by a Live that has quit since: not said. (Another size as well as another time: the record is read again once
+        // either changes.)
+        std::fs::write(scripts.path().join("AbletonMcpBridge/start-failure.json"), record(42430)).unwrap();
         assert_eq!(start_failure_settled(&env, no_log, running_lives("4242\n"), "darwin", Duration::ZERO).await, None);
         // With Live's log to read, the log decides: here, a start after the failure.
         std::fs::write(scripts.path().join("AbletonMcpBridge/start-failure.json"), record(4242)).unwrap();
