@@ -687,7 +687,13 @@ impl State {
             next_sign_in: 1,
             sign_ins: std::collections::HashMap::new(),
             transport: None,
-            activity: format!("connecting to {}", crate::daw::words().app),
+            // What the session's start is doing, said while it runs: connecting to the DAW, or getting ready without one
+            // (`--inference-only`, or no bridge in the DAW yet).
+            activity: if options.mode == "inference-only" {
+                "getting ready".into()
+            } else {
+                format!("connecting to {}", crate::daw::words().app)
+            },
             overlays: Overlays::default(),
             offer: None,
             set_ask: None,

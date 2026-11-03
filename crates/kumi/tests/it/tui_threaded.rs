@@ -830,3 +830,86 @@ async fn a_message_begun_tells_the_session_to_ready_its_model_once_and_a_command
         })
         .await;
 }
+
+/// A session busy starting (its status says so from the first look) until its start answers, a while later.
+struct SlowStart {
+    emit: Rc<dyn Fn(SessionEvent)>,
+    status: RefCell<SessionStatus>,
+}
+
+/// What the session does, asked through its handle below.
+impl SlowStart {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        self.status.borrow_mut().state = TurnState::Idle;
+        (self.emit)(SessionEvent::State { state: TurnState::Idle });
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        self.status.borrow().clone()
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Ok(None)
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for SlowStart {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::default()
+    }
+    fn status(&self) -> SessionStatus {
+        SlowStart::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, {})
+    }
+    alike!();
+}
+
+/// While the session starts, the screen says what it does: connecting to Live, or, chatting without a DAW
+/// (`--inference-only`, no bridge yet), getting ready, never connecting to a DAW it won't connect to.
+#[tokio::test(flavor = "current_thread")]
+async fn a_start_without_a_daw_says_kumi_is_getting_ready_not_connecting_to_live() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (mode, said, not) in [("inference-only", "getting ready", "connecting to"), ("live", "connecting to Live", "getting ready")]
+            {
+                let build: Build = Box::new(move |emit| {
+                    async move {
+                        let mut status = idle();
+                        status.state = TurnState::Running;
+                        Ok(Built::new(Rc::new(SlowStart { emit, status: RefCell::new(status) })))
+                    }
+                    .boxed_local()
+                });
+                let h = Harness::on(120, 36, Threaded::spawn(build).await.unwrap(), |options| options.mode = mode.into());
+                h.start().await;
+                until("the start's activity", || has(&h.screen(), said)).await;
+                assert!(!has(&h.screen(), not), "{mode}:\n{}", h.screen().join("\n"));
+                h.close().await;
+            }
+        })
+        .await;
+}
