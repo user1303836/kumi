@@ -1816,11 +1816,11 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
             match selected {
                 Some(_) if shifted => {}
                 Some(track) => {
-                    args.insert("limit".into(), TRACKER_TRACKS.into());
+                    args.insert("limit".into(), request.tracks().unwrap_or(TRACKER_TRACKS).into());
                     args.insert("around".into(), track.into());
                 }
                 None => {
-                    args.insert("limit".into(), TRACKER_TRACKS.into());
+                    args.insert("limit".into(), request.tracks().unwrap_or(TRACKER_TRACKS).into());
                 }
             }
         }

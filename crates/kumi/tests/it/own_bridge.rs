@@ -616,7 +616,7 @@ async fn renoises_bodies_are_its_pattern_matrix_and_keyzones_in_its_own_notation
                 ]}),
                 false,
             ));
-            let Some(FocusBody::Tracker(grid)) = renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()) }, Signal::new()).await.unwrap() else {
+            let Some(FocusBody::Tracker(grid)) = renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()), tracks: None }, Signal::new()).await.unwrap() else {
                 panic!("a pattern")
             };
             // (A4-2) The tracks FOCUS can draw, not a big song's every one; a tool that takes no limit answers them all, and
@@ -625,7 +625,7 @@ async fn renoises_bodies_are_its_pattern_matrix_and_keyzones_in_its_own_notation
             assert_eq!((grid.from, grid.cursor, grid.playing), (0, Some(1), Some(0)), "lines from 1 in Renoise, from 0 in FOCUS");
             assert_eq!(grid.tracks[0].cells, ["C-4 01 .. .. .. 0A10", "OFF .. .. .. .. ...."], "each column kept in its place");
 
-            renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:phrase:1.2".into()) }, Signal::new()).await.unwrap();
+            renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:phrase:1.2".into()), tracks: None }, Signal::new()).await.unwrap();
             assert_eq!(host.asked.borrow().last().unwrap().1["kind"], "phrase", "a phrase is asked for as one");
             assert_eq!(host.asked.borrow().last().unwrap().1.get("limit"), None, "a phrase is one track's");
 
@@ -723,11 +723,18 @@ async fn renoises_pattern_is_read_for_the_producers_track_and_the_first_ones() {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
             // The pattern's read, and what the host was asked for it.
             async fn read(renoise: &dyn Integration, host: &Host) -> Value {
-                renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()) }, Signal::new()).await.unwrap();
+                renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()), tracks: None }, Signal::new()).await.unwrap();
                 host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap()
             }
             let asked = read(&*renoise, &host).await;
             assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
+            // FOCUS says how many it can draw where it shows: that many.
+            renoise
+                .focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()), tracks: Some(9) }, Signal::new())
+                .await
+                .unwrap();
+            let narrow = host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap();
+            assert_eq!(narrow["limit"], json!(9), "{narrow}");
             // A layout makes the bridge carry (or refuse as stale) the refs on tracks a read names: the track named only to
             // read around it brings none, so the read is never refused for it.
             assert_eq!(asked.get("layout"), None, "{asked}");

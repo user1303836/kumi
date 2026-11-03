@@ -316,7 +316,9 @@ impl TuiApp {
             return None;
         }
         let request = match state.touched? {
-            Touched::Tracker if main_kind(focus) == Some(ViewKind::PatternEditor) => BodyRequest::Tracker { item_ref: item_ref(focus) },
+            Touched::Tracker if main_kind(focus) == Some(ViewKind::PatternEditor) => {
+                BodyRequest::Tracker { item_ref: item_ref(focus), tracks: Some(self.tracker_tracks()) }
+            }
             Touched::Matrix
                 if main_kind(focus) == Some(ViewKind::Sequencer)
                     || focus.panes.iter().flatten().any(|pane| pane.kind == ViewKind::Sequencer) =>
@@ -341,14 +343,21 @@ impl TuiApp {
             self.0.state.borrow_mut().own.body = None;
             return;
         };
-        let key = format!("{request:?}");
+        // (what is read, whatever number of tracks: a body read for more tracks draws for fewer)
+        let key = format!("{:?}", request.view());
+        let tracks = request.tracks();
         {
             let mut state = self.0.state.borrow_mut();
-            if !again && state.own.key.as_ref() == Some(&key) {
+            let covered = match (state.own.tracks, tracks) {
+                (None, _) => true,
+                (Some(_), None) => false,
+                (Some(had), Some(wanted)) => had >= wanted,
+            };
+            if !again && state.own.key.as_ref() == Some(&key) && covered {
                 return;
             }
             if state.own.key.as_ref() != Some(&key) {
-                state.own.body = None;
+                (state.own.body, state.own.tracks) = (None, None);
             }
             state.own.key = Some(key.clone());
             if state.own.reading {
@@ -365,7 +374,7 @@ impl TuiApp {
                 // with nothing shown yet, the request is forgotten, so the next focus asks again.
                 if state.own.key.as_ref() == Some(&key) {
                     match result {
-                        Ok(Some(body)) => state.own.body = Some(body),
+                        Ok(Some(body)) => (state.own.body, state.own.tracks) = (Some(body), tracks),
                         _ if state.own.body.is_none() => state.own.key = None,
                         _ => {}
                     }
@@ -419,11 +428,17 @@ impl TuiApp {
             self.read_own(true);
         }
     }
+    /// How many tracks FOCUS's tracker can draw where it shows now: in the drawer below 100 columns, else in the side pane.
+    pub(super) fn tracker_tracks(&self) -> usize {
+        let size = self.0.tty.size();
+        let width = if super::drawer::drawer_fits(size.columns, size.rows) { size.columns } else { Self::layout_for(size.columns).0 };
+        kumi_agent::core::view::tracker_tracks(width - 4)
+    }
     /// The DAW's own body FOCUS draws now, read for where the producer is.
     pub(super) fn own_shown(&self) -> Option<FocusBody> {
         let request = self.own_request()?;
         let state = self.0.state.borrow();
-        (state.own.key.as_deref() == Some(format!("{request:?}").as_str())).then(|| state.own.body.clone()).flatten()
+        (state.own.key.as_deref() == Some(format!("{:?}", request.view()).as_str())).then(|| state.own.body.clone()).flatten()
     }
     pub(super) fn clip_shown(&self) -> Option<NoteView> {
         let state = self.0.state.borrow();

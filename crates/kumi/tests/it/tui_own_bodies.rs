@@ -305,7 +305,8 @@ case!(renoises_pattern_draws_under_an_open_dsp_frame, async {
     h.emit(json!({"type":"focus","focus":focus}));
     shows(&h, "FOCUS · Pattern").await;
     h.has("Pattern · 64 lines");
-    assert!(h.calls().contains(&"own:Tracker { item_ref: Some(\"55cef1:pattern:1\") }".to_string()), "{:?}", h.calls());
+    // (at 120 columns the side pane's FOCUS is 36 wide: 8 of the narrowest tracks, and one to spare)
+    assert!(h.calls().contains(&"own:Tracker { item_ref: Some(\"55cef1:pattern:1\"), tracks: Some(9) }".to_string()), "{:?}", h.calls());
     h.close().await;
 });
 
@@ -412,6 +413,71 @@ case!(renoises_pattern_at_focus_widest_draws_no_track_past_the_ones_read, async 
     assert_eq!(drawn.first(), Some(&40), "the producer's track first: {names}");
     assert!(drawn.len() > 20, "the widest FOCUS draws many narrow tracks: {names}");
     assert!(drawn[1..].iter().all(|n| *n <= TRACKER_TRACKS), "none past the first {TRACKER_TRACKS}: {names}");
+    assert!(h.calls().iter().any(|call| call.ends_with(&format!("tracks: Some({TRACKER_TRACKS}) }}"))), "{:?}", h.calls());
+    h.close().await;
+});
+
+/// The tracker requests FOCUS has made, newest last, once one has come (a little while at most).
+async fn tracker_asks(h: &Harness, at_least: usize) -> Vec<String> {
+    for _ in 0..200 {
+        let asked: Vec<String> = h.calls().into_iter().filter(|call| call.starts_with("own:Tracker")).collect();
+        if asked.len() >= at_least {
+            return asked;
+        }
+        delay(5).await;
+    }
+    h.calls().into_iter().filter(|call| call.starts_with("own:Tracker")).collect()
+}
+
+// (A4-2) A tracker's body is read for the tracks FOCUS can draw where it shows: the side pane's width at 100 and 140
+// columns, the drawer's at 99. FOCUS widened is read again at once for more; narrowed, nothing is read (a body with
+// more tracks than fit draws as before).
+case!(renoises_pattern_is_read_for_the_tracks_focus_can_draw_where_it_shows, async {
+    work_with(DawId::Renoise);
+    let grid = || {
+        FocusBody::Tracker(TrackerGrid {
+            item_ref: "3:pattern:2".into(),
+            name: "Wide".into(),
+            lines: 64,
+            from: 0,
+            cursor: Some(1),
+            playing: None,
+            lpb: Some(4.),
+            heading: None,
+            facts: vec![],
+            tracks: (1..=64).map(|n| TrackerTrack { name: format!("T{n:02}"), color: None, cells: vec!["...".into(); 33] }).collect(),
+        })
+    };
+    let focus = json!({"track":{"name":"T40","kind":"sequencer"},"trackRef":"3:track:40","mainView":{"kind":"pattern-editor","label":"Pattern Editor"},"item":{"kind":"pattern-track","itemRef":"3:pattern:2","name":"Wide"}});
+    // (the side pane: 36 and 46 columns, FOCUS 32 and 42 wide; the drawer: 99, FOCUS 95)
+    for (columns, tracks) in [(100, 8), (140, 10), (99, 24)] {
+        let c = Rc::new(Control::default());
+        *c.own.borrow_mut() = Some(grid());
+        let h = Harness::with(columns, 40, c.clone(), |_| {});
+        h.start().await;
+        h.connect();
+        h.emit(json!({"type":"focus","focus":focus}));
+        let asked = tracker_asks(&h, 1).await;
+        assert!(asked.last().is_some_and(|call| call.ends_with(&format!("tracks: Some({tracks}) }}"))), "{columns} columns: {asked:?}");
+        h.close().await;
+    }
+    let c = Rc::new(Control::default());
+    *c.own.borrow_mut() = Some(grid());
+    let h = Harness::with(100, 40, c.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"focus","focus":focus}));
+    shows(&h, "Wide · 64 lines").await;
+    let before = tracker_asks(&h, 1).await.len();
+    h.resize(140, 40);
+    let asked = tracker_asks(&h, before + 1).await;
+    assert_eq!(asked.len(), before + 1, "wider: read again at once: {asked:?}");
+    assert!(asked.last().unwrap().ends_with("tracks: Some(10) }"), "{asked:?}");
+    shows(&h, "Wide · 64 lines").await;
+    h.resize(100, 40);
+    delay(100).await;
+    assert_eq!(tracker_asks(&h, 0).await.len(), before + 1, "narrower: nothing read");
+    h.has("Wide · 64 lines");
     h.close().await;
 });
 
@@ -512,7 +578,7 @@ scene!(renoise_phrase, DawId::Renoise, BODY_SHOTS, |h| {
             {"line": 5, "notes": [{"col": 1, "note": "E-4", "instrument": "00"}, {"col": 2, "note": "G-4", "instrument": "01", "volume": "40"}]},
             {"line": 9, "notes": [{"col": 1, "note": "OFF"}]},
             {"line": 13, "notes": [{"col": 2, "note": "B-4", "instrument": "01", "delay": "80"}]}]}]});
-    let request = BodyRequest::Tracker { item_ref: Some("e1:phrase:2.1".into()) };
+    let request = BodyRequest::Tracker { item_ref: Some("e1:phrase:2.1".into()), tracks: None };
     *h.control.own.borrow_mut() = (renoise::DAW.to_body)(&request, &body);
     let focus = json!({"view": "phrase", "selection": {"track": {"name": "Lead", "type": "sequencer"}, "trackRef": "e1:track:2", "phraseRef": "e1:phrase:2.1"}});
     h.emit(focus_of(renoise::DAW.fill_focus, focus));
