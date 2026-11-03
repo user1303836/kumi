@@ -634,6 +634,10 @@ pub fn focus_pause(period: u64, quiet: u32, playing: bool) -> u64 {
 const FOCUS_QUIET_POLLS: u32 = 20;
 const FOCUS_QUIETER_POLLS: u32 = 110;
 const FOCUS_SLOWEST_MS: u64 = 600;
+/// While the DAW is away (it quit, or Kumi started before it), FOCUS's poll looks for it this often, for this long after it
+/// went: one opened again is seen within 50 ms rather than 150, and one left closed is asked about at the usual pace.
+const AWAY_MS: u64 = 50;
+const AWAY_FAST: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// Tells whoever waits for a look that it has answered, however it ends (its future dropped included).
 struct Told<'a>(&'a tokio::sync::Notify);
@@ -975,7 +979,11 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         // the look's snapshot is still the DAW's first request, and FOCUS fills right after it. Plain mode keeps its pace.
         let (looked_once, mut first) = (self.looked_once.clone(), self.options.context.focus_drawn);
         let (project_read, looks) = (self.read.clone(), self.looks.clone());
+        // (where FOCUS is drawn: plain mode asks once a second whatever happens)
+        let (look_for_it, away_at_start) = (self.options.context.focus_drawn, !self.connected.get());
         tokio::task::spawn_local(async move {
+            // Since when the DAW has been away, while it is.
+            let mut away_since = away_at_start.then(tokio::time::Instant::now);
             // The looks asked for because none had read the project yet that the session took, when the last ask was, and
             // how many looks had begun then.
             let (mut taken, mut asked_at, mut looks_then): (u32, Option<tokio::time::Instant>, u32) = (0, None, 0);
@@ -999,7 +1007,12 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 }
             };
             while !closed.get() {
-                let pause = tokio::time::sleep(std::time::Duration::from_millis(focus_pause(period, quiet, was_playing)));
+                let away = look_for_it && away_since.is_some_and(|since| since.elapsed() < AWAY_FAST);
+                let pause = tokio::time::sleep(std::time::Duration::from_millis(if away {
+                    AWAY_MS.min(period)
+                } else {
+                    focus_pause(period, quiet, was_playing)
+                }));
                 if std::mem::take(&mut first) {
                     tokio::select! {
                         _ = looked_once.notified() => {}
@@ -1017,6 +1030,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     Some(Ok(focus)) if focus.is_object() => focus,
                     // The DAW went away (it quit, or its bridge did): the session says so, and FOCUS empties with it.
                     Some(Err(Refused { there: false, .. })) => {
+                        away_since.get_or_insert_with(tokio::time::Instant::now);
                         quiet = 0;
                         if connected.replace(false) {
                             on_connection(ConnectionState::Disconnected, Some(DisconnectCause::Live));
@@ -1039,6 +1053,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 // The DAW's change counter: the project's snapshot is kept again once the edits settle.
                 remembered.noted(focus.get("changed"));
                 // Back after it went away: the session looks again, once the DAW has loaded what it opened.
+                away_since = None;
                 if !connected.replace(true) {
                     back_at.set(Some(tokio::time::Instant::now()));
                     on_connection(ConnectionState::Connected, None);
