@@ -1637,3 +1637,31 @@ case!(the_technique_offer_with_another_list_in_its_place_lets_kumi_follow_a_daw,
     assert_eq!(*followed.borrow(), [DawId::Renoise]);
     assert_eq!(done.await, 0);
 });
+// (A4-3) What the DAW tells once (connected or gone, the project read, where the producer is, what changed while Kumi was
+// away) is drawn within the 16 ms floor, not at the animation's pace, which is 2 s here; words as they stream still wait for
+// it.
+case!(what_the_daw_tells_once_is_drawn_without_waiting_for_the_animation, async {
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |opts| {
+        opts.frame_ms = Some(16.0);
+        opts.animation_ms = Some(2_000.0);
+    });
+    h.start().await;
+    h.connect();
+    // (the start's own frames and reads come and go)
+    delay(300).await;
+    let last = kumi_common::time::now_ms() - 86400000;
+    let told = [
+        json!({"type":"observation","label":"Current open Set: Moon Garden — Remote Script · real-live"}),
+        json!({"type":"focus","focus":{"track":{"name":"Bass","color":"#f59a3c","kind":"midi"},"device":"Operator","detail":"Device","view":"Session"}}),
+        json!({"type":"catch-up","catchUp":{"set":"Moon Garden","lastSeenAt":last,"lines":["Tempo 120 → 124 BPM"],"more":0}}),
+        json!({"type":"connection","state":"disconnected"}),
+    ];
+    for event in told {
+        delay(300).await;
+        let before = h.output.text.borrow().len();
+        h.emit(event.clone());
+        delay(80).await;
+        assert!(h.output.text.borrow().len() > before, "drawn within 80 ms: {event}");
+    }
+    h.close().await;
+});

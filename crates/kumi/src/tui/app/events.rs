@@ -40,6 +40,16 @@ impl TuiApp {
         }
         // A turn's state or a job's may be when a job's request carries on, once it's handled.
         let carry_on = matches!(event, SessionEvent::State { .. } | SessionEvent::Job(_));
+        // What the DAW tells once, not as a stream (connected or gone, the project read, where the producer is in it, what
+        // they point at, what changed while Kumi was away): drawn within the 16 ms floor, as the producer's own input is.
+        let at_once = matches!(
+            event,
+            SessionEvent::Connection { .. }
+                | SessionEvent::Observation { .. }
+                | SessionEvent::Focus { .. }
+                | SessionEvent::Pointed { .. }
+                | SessionEvent::CatchUp { .. }
+        );
         match event {
             SessionEvent::Kernel(KernelEvent::Retry { reason, wait_ms, wait, cause, proxy_down }) => {
                 let reason = self.clean_line(&reason, 80);
@@ -922,9 +932,12 @@ impl TuiApp {
         if carry_on {
             self.maybe_carry_on();
         }
-        // What the session sends (words as they stream, state, the DAW's events) is drawn at the animation's pace;
-        // only the producer's own input is drawn within the 16 ms floor.
-        self.0.scheduler.request_animation();
+        // The rest of what the session sends (words as they stream, state, the transport) is drawn at the animation's pace.
+        if at_once {
+            self.0.scheduler.request();
+        } else {
+            self.0.scheduler.request_animation();
+        }
     }
     fn replaying(&self) -> bool {
         self.0.state.borrow().replaying
