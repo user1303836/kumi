@@ -10,7 +10,7 @@ M.BUDGET_MS = 8
 -- ctx: now_ms(), unix_ms(), epoch() -> text, layout() -> number (the track layout within the epoch), shape() -> number
 -- (moves when tracks, patterns or lines are inserted or removed), finish(job, ok, value), on_active(boolean)
 function M.new(ctx)
-  return setmetatable({ ctx = ctx, list = {}, last_run_ms = 0 }, M)
+  return setmetatable({ ctx = ctx, list = {}, last_run_ms = 0, made = 0 }, M)
 end
 
 -- fn(job) does the work, calling job.slice() between steps (it answers true when the job waited there, so an object held
@@ -19,7 +19,9 @@ end
 -- `job.wrote` does once a job writes.
 function M:add(record, request, fn, wrote)
   local ctx = self.ctx
-  local job = { record = record, request = request, epoch = ctx.epoch(), layout = ctx.layout(), shape = ctx.shape(), deadline = 0, wrote = wrote }
+  self.made = self.made + 1
+  local job = { record = record, request = request, epoch = ctx.epoch(), layout = ctx.layout(), shape = ctx.shape(), deadline = 0, wrote = wrote,
+    number = self.made }
   -- Whether the song is still the one the request was made against; raises the error to answer with if it isn't.
   function job.check()
     if ctx.epoch() ~= job.epoch then
@@ -66,9 +68,13 @@ function M:pending()
 end
 
 -- Runs a slice when none has run for `stale_ms`: the timers stop behind a modal dialog in Renoise, its sockets don't,
--- and a read waiting on the timers would wait for ever.
+-- and a read waiting on the timers would wait for ever. True when it ran.
 function M:run_if_stale(stale_ms, budget)
-  if self.list[1] and self.ctx.now_ms() - self.last_run_ms >= stale_ms then self:run(budget) end
+  if self.list[1] and self.ctx.now_ms() - self.last_run_ms >= stale_ms then
+    self:run(budget)
+    return true
+  end
+  return false
 end
 
 -- Drops the jobs of a connection that is gone. A job that has written to the song (`job.wrote`) runs to its end, unheard:
@@ -100,6 +106,43 @@ function M:abort_all(code, message)
   if any then self.ctx.on_active(false) end
 end
 
+-- One slice of `job`: whether it ended, and how (ok, value).
+local function resume(self, job, budget)
+  local ctx = self.ctx
+  job.deadline = ctx.now_ms() + budget
+  local ok, value, ended
+  if not job.started then
+    -- A job is made when its request is handled and first runs after that request's handler has returned (on a timer, or
+    -- in the same callback: M:run_first): what it names is checked before it reads.
+    -- (One whose change is written already runs on whatever the producer did meanwhile: ended here, it would answer as if
+    -- nothing was written.)
+    job.started = true
+    if not job.wrote then
+      ok, value = pcall(job.check)
+      ended = not ok
+    end
+  end
+  if not ended then
+    ok, value = coroutine.resume(job.co, job)
+    ended = coroutine.status(job.co) == "dead"
+    if ended and not ok and type(value) == "string" then value = debug.traceback(job.co, value) end
+  end
+  return ended, ok, value
+end
+
+-- Takes the ended jobs off the list, then answers them (which may start the requests that waited behind them).
+local function settle(self, finished)
+  for _, done in ipairs(finished) do
+    for i, job in ipairs(self.list) do
+      if job == done.job then table.remove(self.list, i) break end
+    end
+  end
+  if #finished > 0 and #self.list == 0 then self.ctx.on_active(false) end
+  for _, done in ipairs(finished) do
+    if not done.job.unheard then self.ctx.finish(done.job, done.ok, done.value) end
+  end
+end
+
 -- Resumes each job for a slice, until the budget is used (the first always gets one); the job that went first goes last
 -- next time.
 function M:run(budget)
@@ -112,36 +155,27 @@ function M:run(budget)
   local finished = {}
   for i, job in ipairs({ unpack(self.list) }) do
     if i == 1 or ctx.now_ms() - started < budget then
-      job.deadline = ctx.now_ms() + budget
-      local ok, value, ended
-      if not job.started then
-        -- A job is made when its request is handled and first runs on a later turn: what it names is checked before it reads.
-        -- (One whose change is written already runs on whatever the producer did meanwhile: ended here, it would answer as if
-        -- nothing was written.)
-        job.started = true
-        if not job.wrote then
-          ok, value = pcall(job.check)
-          ended = not ok
-        end
-      end
-      if not ended then
-        ok, value = coroutine.resume(job.co, job)
-        ended = coroutine.status(job.co) == "dead"
-        if ended and not ok and type(value) == "string" then value = debug.traceback(job.co, value) end
-      end
+      local ended, ok, value = resume(self, job, budget)
       if ended then finished[#finished + 1] = { job = job, ok = ok, value = value } end
     end
   end
-  for _, done in ipairs(finished) do
-    for i, job in ipairs(self.list) do
-      if job == done.job then table.remove(self.list, i) break end
-    end
-  end
   if #self.list > 1 and finished[1] == nil then table.insert(self.list, table.remove(self.list, 1)) end
-  if #finished > 0 and #self.list == 0 then ctx.on_active(false) end
-  for _, done in ipairs(finished) do
-    if not done.job.unheard then ctx.finish(done.job, done.ok, done.value) end
+  settle(self, finished)
+end
+
+-- The first slice of the job made after the `after`th (M.made counts them), when `wanted(job)` says so: in the callback
+-- that made it, not on the next timer. Renoise fires its timers once a frame, about every 20 ms whatever their interval,
+-- so a read waited 8-25 ms for its first slice (measured, 3.5.4). One job and one slice: whatever its end lets start
+-- (the requests that waited behind it) waits for the timer, and the other jobs keep their turns. True when it ran.
+function M:run_first(after, wanted, budget)
+  local job
+  for _, j in ipairs(self.list) do
+    if j.number > after and not j.started and (job == nil or j.number < job.number) then job = j end
   end
+  if not job or not wanted(job) then return false end
+  local ended, ok, value = resume(self, job, budget or M.BUDGET_MS)
+  if ended then settle(self, { { job = job, ok = ok, value = value } }) end
+  return true
 end
 
 return M

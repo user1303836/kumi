@@ -1577,7 +1577,14 @@ local function say_kept(result, from)
   return result
 end
 
+-- The requests that never write to the song (the reads, and what is answered at once). A message that asked anything else
+-- doesn't start a read in its own callback (M.on_message): what a write sets off in Renoise is seen first, as before.
+local READ_ONLY = { ping = true, status = true, focus = true, read = true, snapshot = true, focus_body = true, digest = true }
+-- The reads whose job may take its first slice in the callback of the message that asked for it.
+local EARLY = { read = true, snapshot = true, focus_body = true, digest = true }
+
 function M.handle(_, request)
+  if not READ_ONLY[request.method] then b.asked_write = true end
   local handler = handlers[request.method]
   if not handler then error({ code = "unknown-method", message = "no method " .. request.method }) end
   -- (M5 m5-renoise: while Kumi's render runs, only the requests that read its state are answered)
@@ -1845,14 +1852,26 @@ function M.on_accept(client)
   conns:accept(client)
 end
 
--- (Every message also gives the reads in progress a slice if the timers haven't: see jobs.lua.)
+-- (Every message also gives the reads in progress a slice if the timers haven't: see jobs.lua.) A read this message
+-- asked for takes its first slice here, once the message is handled, rather than on the next timer, which Renoise fires
+-- once a frame (3.5.4: about every 20 ms, whatever the interval; a snapshot waited 8-16 ms for it, a digest 18-25 ms):
+-- only a read (EARLY), only when nothing this message asked can write, and only one slice, within what is left of a
+-- slice's budget once the message was handled.
 function M.on_message(client, data)
-  b.work_ms = M.now_ms()
+  local started = M.now_ms()
+  b.work_ms, b.asked_write = started, false
   local ok, err = pcall(function()
+    local made = jobs.made
     conns:receive(client, data)
-    jobs:run_if_stale(M.STALE_JOBS_MS, M.STALE_SLICE_MS)
+    if not jobs:run_if_stale(M.STALE_JOBS_MS, M.STALE_SLICE_MS) and not b.asked_write then
+      local left = jobs.BUDGET_MS - (M.now_ms() - started)
+      if left > 0 then
+        local function early(job) return job.request ~= nil and EARLY[job.request.method] and not job.wrote end
+        jobs:run_first(made, early, left)
+      end
+    end
   end)
-  b.work_ms = nil
+  b.work_ms, b.asked_write = nil, false
   if not ok then error(err, 0) end
 end
 

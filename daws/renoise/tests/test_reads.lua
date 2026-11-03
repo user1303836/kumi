@@ -1318,30 +1318,104 @@ test("reads: a cursor made before a track was inserted or removed is refused, ne
   H.no_dialogs()
 end)
 
+-- Two requests in one message: the first is a read that takes its first slice in the message's callback and ends there;
+-- the second, made as the first ends, waits for the timer (A4-8: one job, one slice in a callback).
+local function behind_a_read(peer, request)
+  peer:send(json.encode({ type = "request", id = request.id - 100, method = "read", params = { kind = "song" } }) .. "\n"
+    .. json.encode(request) .. "\n")
+end
+
+local function answer_to(peer, id)
+  for _ = 1, 50 do
+    for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == id then return f end end
+    mock.advance(10)
+  end
+end
+
 test("reads: a read waiting for its first turn is ended if the song changed before it", function()
   local env, peer = setup()
   fill_demo()
   local E = epoch_of(peer)
-  H.send(peer, { type = "request", id = 900, method = "read", params = { ref = E .. ":instrument:1" } })
+  behind_a_read(peer, { type = "request", id = 900, method = "read", params = { ref = E .. ":instrument:1" } })
   mock.ops.remove_instrument(1) -- before the timer has run the job
-  local response
-  for _ = 1, 50 do
-    mock.advance(10)
-    for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == 900 then response = f end end
-    if response then break end
-  end
-  ok(response, "answered")
-  failure(response, "epoch-changed")
+  failure(answer_to(peer, 900), "epoch-changed")
   -- and the same for a track inserted
-  H.send(peer, { type = "request", id = 901, method = "read", params = { kind = "track" } })
+  behind_a_read(peer, { type = "request", id = 901, method = "read", params = { kind = "track" } })
   mock.ops.insert_track(1, { name = "New" })
-  response = nil
-  for _ = 1, 50 do
-    mock.advance(10)
-    for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == 901 then response = f end end
-    if response then break end
+  failure(answer_to(peer, 901), "changed")
+  H.no_dialogs()
+end)
+
+-- A4-8: Renoise fires its timers once a frame (about every 20 ms): a read takes its first slice in the callback of the
+-- message that asked for it, rather than waiting for one.
+local function answered_now(peer, id)
+  for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == id then return f end end
+end
+
+test("reads: a read is answered in the callback of the message that asked for it", function()
+  local env, peer = setup()
+  fill_demo()
+  local timers = #mock.timers
+  for i, method in ipairs({ "snapshot", "read", "digest" }) do
+    local params = method == "read" and { kind = "track" } or json.object()
+    H.send(peer, { type = "request", id = 910 + i, method = method, params = params })
+    local response = answered_now(peer, 910 + i)
+    ok(response and response.result, method .. " answered before any timer ran")
+    eq(#mock.timers, timers, "no fast timer left behind")
   end
-  failure(response, "changed")
+  H.no_dialogs()
+end)
+
+test("reads: of two reads in one message, only the first takes a slice in its callback", function()
+  local env, peer = setup()
+  fill_demo()
+  behind_a_read(peer, { type = "request", id = 920, method = "snapshot", params = json.object() })
+  ok(answered_now(peer, 820), "the first read answered in the callback")
+  local waiting = answered_now(peer, 920)
+  ok(not waiting, "the second waits for the timer")
+  local response = answer_to(peer, 920)
+  ok(response and response.result, "and is answered on it")
+  H.no_dialogs()
+end)
+
+test("reads: a message that asked for more than reads leaves its read to the timer", function()
+  local env, peer = setup()
+  fill_demo()
+  peer:send(json.encode({ type = "request", id = 930, method = "show_status", params = { text = "x" } }) .. "\n"
+    .. json.encode({ type = "request", id = 931, method = "snapshot", params = json.object() }) .. "\n")
+  ok(not answered_now(peer, 931), "the read waits for the timer")
+  local response = answer_to(peer, 931)
+  ok(response and response.result, "and is answered on it")
+  H.no_dialogs()
+end)
+
+-- (the slice's budget at 60 ms, so what is left after the message is a slice's worth: every look at the clock costs 1 ms)
+local function budget(ms)
+  return function(env)
+    local path = env.bundle .. "payload/jobs.lua"
+    local f = assert(io.open(path, "rb"))
+    local text = f:read("*a")
+    f:close()
+    local patched, n = text:gsub("M%.BUDGET_MS = %d+", "M.BUDGET_MS = " .. ms, 1)
+    assert(n == 1, "BUDGET_MS was not found to set")
+    f = assert(io.open(path, "wb"))
+    f:write(patched)
+    f:close()
+  end
+end
+
+test("reads: a read's slice in its callback is what is left of a slice's budget after the message", function()
+  local env, peer = setup({ patch = budget(60) }, heavy({ tracks = 60, lines = 32 }))
+  mock.clock_step_ms = 1
+  local before = mock.time
+  H.send(peer, { type = "request", id = 940, method = "read", params = { kind = "track", limit = 60 } })
+  local spent = mock.time - before
+  mock.clock_step_ms = 0
+  ok(not answered_now(peer, 940), "60 tracks are more than one slice")
+  ok(spent >= 60 and spent <= 64, "the callback took the budget and no more: " .. spent .. " ms")
+  local response = answer_to(peer, 940)
+  ok(response and response.result, "the rest on the timers")
+  eq(#response.result.items, 60)
   H.no_dialogs()
 end)
 
