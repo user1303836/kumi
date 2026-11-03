@@ -486,6 +486,7 @@ class RemoteScriptTests(unittest.TestCase):
         for at in (101.0, 102.0, 103.0, 104.0, 105.0, 106.0):
             with patch.object(package.time, "perf_counter", return_value=at): made[0].callback()
         self.assertEqual(logged, ["Bridge timer: 1 calls a second"])
+        self.assertEqual(surface._bridge.timer_rate, 1.0, "and the bridge is told it, for its wait")
 
     def test_a_live_without_a_timer_is_served_by_its_ticks(self):
         package = __import__("AbletonMcpBridge")
@@ -7837,8 +7838,8 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
         self.assertLess(self.bridge._window_spent, 0.05, "a change made through invoke doesn't")
 
     def test_while_lives_timer_serves_a_tick_waits_4_ms_for_the_next_step_and_a_display_tick_alone_12(self):
-        # (A9-L1) each wait holds Live's UI thread; the timer comes back within about 10 ms anyway
-        client, channel = self.connect(); waits = []
+        # (A9-L1) each wait holds Live's UI thread; a fast timer comes back within about 10 ms anyway
+        client, channel = self.connect(); waits = []; self.bridge.timer_rate = 100.0
         real = remote_module.selectors.DefaultSelector
         class Recording:
             def __init__(self): self.inner = real()
@@ -7859,6 +7860,25 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
         self.assertTrue(between and max(between) <= remote_module.PUMP_LINGER_BETWEEN_TICKS_SECONDS, between)
         self.assertTrue(alone and abs(alone[0] - remote_module.PUMP_LINGER_SECONDS) < 0.001, alone)
         self.assertEqual([line["id"] for line in self.read_lines(client, 2)], ["status-1", "status-2"])
+
+    def test_a_timer_not_measured_yet_or_slower_than_90_a_second_keeps_the_12_ms_wait(self):
+        # (Windows' timer calls about 64 times a second; Live's first 5 s haven't been counted)
+        client, channel = self.connect(); waits = []; self.bridge.between_ticks = True
+        real = remote_module.selectors.DefaultSelector
+        class Recording:
+            def __init__(self): self.inner = real()
+            def __enter__(self): return self
+            def __exit__(self, *rest): self.inner.close()
+            def register(self, *args, **kwargs): return self.inner.register(*args, **kwargs)
+            def select(self, timeout=None): waits.append(timeout); return self.inner.select(timeout)
+        seen = {}
+        with patch.object(remote_module.selectors, "DefaultSelector", Recording):
+            for sequence, rate in enumerate((None, 64.0, 89.0, 90.0, 100.0), 1):
+                self.bridge.timer_rate = rate; waits.clear()
+                client.sendall(self.frame(channel, sequence)); time.sleep(0.05)
+                self.bridge.serve_between_ticks()
+                seen[rate] = max(waits)
+        self.assertEqual(seen, {None: 0.012, 64.0: 0.012, 89.0: 0.012, 90.0: 0.004, 100.0: 0.004})
 
     def test_a_tick_that_answered_no_one_doesnt_wait(self):
         self.connect()

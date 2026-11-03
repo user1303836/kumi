@@ -13972,11 +13972,14 @@ PUMP_BUDGET_SECONDS = 0.05
 # change, confirm), within the tick's budget: on loopback it asks within a few milliseconds, and serving
 # it now saves a whole display tick (about 100 ms) a step.
 PUMP_LINGER_SECONDS = 0.012
-# While Live's timer serves (about every 10 ms, below), a client's next step that doesn't come within this waits for the
-# timer's next call rather than for a display tick, so the tick waits less: each wait holds Live's UI thread, and after
-# the last request of a burst (FOCUS's reads as the producer clicks through tracks) there's nothing to wait for. A
-# change's next step comes within 1 ms nearly always, and within 4 ms for almost all the rest.
+# Where Live's timer serves and is measured to call back at least FAST_TIMER_CALLS_PER_SECOND times a second (about
+# every 10 ms on a Mac), a client's next step that doesn't come within this waits for the timer's next call rather than
+# for a display tick, so the tick waits less: each wait holds Live's UI thread, and after the last request of a burst
+# (FOCUS's reads as the producer clicks through tracks) there's nothing to wait for. A change's next step comes within
+# 1 ms nearly always, and within 4 ms for almost all the rest. A timer not measured yet (its first 5 s) or a slower one
+# (Windows' calls about 64 times a second, at its 15.6 ms granularity) keeps PUMP_LINGER_SECONDS.
 PUMP_LINGER_BETWEEN_TICKS_SECONDS = 0.004
+FAST_TIMER_CALLS_PER_SECOND = 90
 # Live's own timer (Live.Base.Timer, about every 10 ms) serves the socket between display ticks, where
 # this Live has one: a request waits for the timer rather than up to a tick. Reads (Kumi's looks at the
 # Set, its background reads, a big Set's catch-up) keep to PUMP_BUDGET_SECONDS of Live's main thread in
@@ -14078,8 +14081,10 @@ class AbletonMcpBridge:
         self._clients: set[socket.socket] = set()
         self._connections: list[_Connection] = []
         self._pump_turn = 0
-        # Set while Live's timer serves the socket between ticks (the Control Surface starts it).
+        # Set while Live's timer serves the socket between ticks (the Control Surface starts it), and how often it calls
+        # back, once the Control Surface has counted it.
         self.between_ticks = False
+        self.timer_rate: float | None = None
         self._window_started = 0.0; self._window_spent = 0.0; self._change_seconds = 0.0
         self._secret_value = secret
         self._executed_mutations: dict[str, dict[str, Any]] = {}
@@ -14169,7 +14174,8 @@ class AbletonMcpBridge:
                 try:
                     with selectors.DefaultSelector() as selector:
                         for connection in waiting: selector.register(connection.socket, selectors.EVENT_READ, connection)
-                        linger = PUMP_LINGER_BETWEEN_TICKS_SECONDS if self.between_ticks else PUMP_LINGER_SECONDS
+                        fast = self.between_ticks and (self.timer_rate or 0.0) >= FAST_TIMER_CALLS_PER_SECOND
+                        linger = PUMP_LINGER_BETWEEN_TICKS_SECONDS if fast else PUMP_LINGER_SECONDS
                         ready = [key.data for key, _ in selector.select(min(linger, max(0.0, deadline - time.perf_counter())))]
                 except (OSError, ValueError): break
                 served = sum(self._service(connection, deadline) for connection in ready)

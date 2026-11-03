@@ -659,6 +659,8 @@ class AbletonMcpBridge(_ControlSurface):
             elapsed = time.perf_counter() - counted_from
             if elapsed >= 5.0:
                 self._timer_counted_from = None
+                # (the bridge waits less for a client's next step where the timer is known to come back soon)
+                self._bridge.timer_rate = self._timer_calls / elapsed
                 log = getattr(self, "log_message", None)
                 if callable(log): log("Bridge timer: " + str(round(self._timer_calls / elapsed)) + " calls a second")
         try:
