@@ -430,6 +430,13 @@ fn anthropic_request(request: ModelRequest, effort: Option<Effort>) -> CallOptio
     let lasting = Map::from_iter([("anthropic".into(), json!({"cacheControl":{"type":"ephemeral","ttl":"1h"}}))]);
     let cache = Map::from_iter([("anthropic".into(), json!({"cacheControl":{"type":"ephemeral"}}))]);
     let mut messages = request.messages;
+    // The message before the model's latest answer ended the last request, whose breakpoint was there: marked again, so a
+    // step that adds more than Anthropic looks back over (20 blocks: ten calls and their results) still finds what's
+    // cached. Three breakpoints of the four allowed.
+    let before_answer = messages.iter().rposition(|message| matches!(message, Message::Assistant { .. })).and_then(|at| at.checked_sub(1));
+    if let Some(at) = before_answer {
+        messages[at].provider_options_mut().get_or_insert_with(Map::new).extend(cache.clone());
+    }
     if let Some(last) = messages.last_mut() {
         last.provider_options_mut().get_or_insert_with(Map::new).extend(cache);
     }
