@@ -529,3 +529,56 @@ async fn a_key_from_the_environment_names_the_variable_it_came_from() {
     let openrouter = f.control.providers().await.unwrap().into_iter().find(|p| p.id.as_str() == "openrouter").unwrap();
     assert_eq!((openrouter.signed_in, openrouter.key_env.as_deref()), (false, Some("OPENROUTER_API_KEY")));
 }
+
+/// What a fetch was asked, each method and address, answering as Anthropic does.
+#[derive(Default)]
+struct Asked(RefCell<Vec<(String, String)>>);
+#[async_trait(?Send)]
+impl Fetch for Asked {
+    async fn fetch(&self, url: &str, init: FetchInit) -> Result<Response, LanguageModelError> {
+        self.0.borrow_mut().push((init.method.clone(), url.to_string()));
+        Anthropic.fetch(url, init).await
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_message_begun_readies_its_cloud_model_and_its_connection_once_and_says_nothing_when_it_cant() {
+    let asked = Rc::new(Asked::default());
+    let f = Fixture::with_fetch(Env::new(), asked.clone());
+    // No model chosen: nothing asked, and none chosen by it.
+    f.control.warm().await;
+    assert!(asked.0.borrow().is_empty());
+    assert_eq!(f.control.current().model, None);
+    // A model chosen, but not signed in: nothing asked, nothing changed.
+    std::fs::write(&f.settings_file, r#"{"model":"anthropic/claude-sonnet-5-5"}"#).unwrap();
+    let f = Fixture { control: kumi::models::create_model_control(options_like(&f, asked.clone())), ..f };
+    f.control.warm().await;
+    assert!(asked.0.borrow().is_empty());
+    // Signed in: the model's binding is made and its provider's address asked once (a HEAD), not again while typing on.
+    f.store.update("anthropic", Box::new(|_| async { Ok(Some(Credential::ApiKey { key: GOOD.into() })) }.boxed_local())).await.unwrap();
+    let f = Fixture { control: kumi::models::create_model_control(options_like(&f, asked.clone())), ..f };
+    f.control.warm().await;
+    f.control.warm().await;
+    assert_eq!(*asked.0.borrow(), [("HEAD".to_string(), "https://api.anthropic.com/v1".to_string())]);
+    assert_eq!(f.changes.get(), 0, "nothing the producer sees changed");
+    assert_eq!(f.control.current().model.as_deref(), Some("anthropic/claude-sonnet-5-5"));
+}
+
+/// The options a fixture's control was made with, on `fetch`.
+fn options_like(f: &Fixture, fetch: Rc<dyn Fetch>) -> ModelControlOptions {
+    ModelControlOptions {
+        store: f.store.clone(),
+        settings_file: f.settings_file.clone(),
+        env: Env::new(),
+        fetch: Some(fetch),
+        changed: Rc::new({
+            let changes = f.changes.clone();
+            move || {
+                changes.set(changes.get() + 1);
+                async { Ok(()) }.boxed_local()
+            }
+        }),
+        say: None,
+        installed: Some(Rc::new(|_| false)),
+    }
+}

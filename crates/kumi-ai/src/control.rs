@@ -114,6 +114,9 @@ pub trait ModelController {
     fn server_names(&self) -> Vec<(String, String)> {
         Vec::new()
     }
+    /// The producer began a message: what it will wait on (the chosen model's sign-in, its connection) is made ready
+    /// meanwhile. Nothing is said, whatever comes of it.
+    async fn warm(&self) {}
 }
 
 /// The saved model, when its provider's own list (the one /model shows, read once a session) no longer shows it:
