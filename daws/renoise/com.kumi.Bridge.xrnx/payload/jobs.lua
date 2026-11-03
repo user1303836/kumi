@@ -6,9 +6,15 @@ local M = {}
 M.__index = M
 
 M.BUDGET_MS = 8
+-- A slice while Renoise's transport is stopped. Renoise fires the tool's timers once a frame, about every 20 ms whatever
+-- their interval (3.5.4, measured), so 8 ms a frame gave reads 40% of the time where the 10 ms job timer meant 80%; 14 ms
+-- is 70%, and the frame holds (measured, the song stopped: p50 19.7 ms with no slice, 19.9 with 14-16 ms of Lua in
+-- every frame). While it plays a slice keeps 8 ms: that is when a producer feels the GUI most.
+M.STOPPED_BUDGET_MS = 14
 
 -- ctx: now_ms(), unix_ms(), epoch() -> text, layout() -> number (the track layout within the epoch), shape() -> number
--- (moves when tracks, patterns or lines are inserted or removed), finish(job, ok, value), on_active(boolean)
+-- (moves when tracks, patterns or lines are inserted or removed), finish(job, ok, value), on_active(boolean), playing() ->
+-- whether Renoise's transport plays (nil when it can't tell: a slice is then BUDGET_MS)
 function M.new(ctx)
   return setmetatable({ ctx = ctx, list = {}, last_run_ms = 0 }, M)
 end
@@ -65,6 +71,19 @@ function M:pending()
   return #self.list
 end
 
+-- A slice's budget now: STOPPED_BUDGET_MS while Renoise's transport is stopped, BUDGET_MS while it plays or when that
+-- can't be told.
+function M:slice_budget()
+  local playing = self.ctx.playing
+  if playing and playing() == false then return M.STOPPED_BUDGET_MS end
+  return M.BUDGET_MS
+end
+
+-- The timers ran, and left the jobs to the fast timer (bridge.lua's tick): for run_if_stale that is as good as a run.
+function M:timers_ran()
+  self.last_run_ms = self.ctx.now_ms()
+end
+
 -- Runs a slice when none has run for `stale_ms`: the timers stop behind a modal dialog in Renoise, its sockets don't,
 -- and a read waiting on the timers would wait for ever.
 function M:run_if_stale(stale_ms, budget)
@@ -104,7 +123,7 @@ end
 -- next time.
 function M:run(budget)
   local ctx = self.ctx
-  budget = budget or M.BUDGET_MS
+  budget = budget or self:slice_budget()
   local started = ctx.now_ms()
   self.last_run_ms = started
   -- (every tick runs the jobs: with none, nothing to make)
