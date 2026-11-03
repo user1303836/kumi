@@ -2826,8 +2826,10 @@ async fn an_update_unpacks_its_bundle_while_it_downloads() {
     let unpacked_midway = Rc::new(RefCell::new(None));
     updated.fetcher =
         Some(Rc::new(Halves { manifest: good, bytes, fresh: home.join("app.new"), unpacked_midway: unpacked_midway.clone() }));
+    let from_file = unpacks_from_file();
     assert_eq!(update_installed(updated).await.unwrap(), 0, "{}", out.0.borrow());
     assert_eq!(*unpacked_midway.borrow(), Some(true), "tar had unpacked part of it before the download ended");
+    assert_eq!(unpacks_from_file() - from_file, 0, "what tar unpacked as it came is what went in, not an unpacking from the file");
     assert_eq!(version_of(home.join("app")), "99.0.0");
     assert!(!home.join("app.new").exists());
     assert!(out.0.borrow().contains("Unpacking Kumi 99.0.0…"), "the steps say what they said: {}", out.0.borrow());
@@ -2871,6 +2873,10 @@ async fn a_bundle_tar_cant_read_as_it_streams_is_unpacked_from_the_file() {
     named_xz["sha256_xz"] = json!(hex::encode(Sha256::digest(&gz)));
     let (mut updated, out) = io(&env);
     updated.fetcher = Some(Rc::new(Serve { manifest: named_xz, bytes: gz, status: 200, offline: false, calls: RefCell::new(vec![]) }));
+    let from_file = unpacks_from_file();
     assert_eq!(update_installed(updated).await.unwrap(), 0, "{}", out.0.borrow());
     assert_eq!(version_of(home.join("app")), "99.0.0");
+    // GNU tar takes -J at its word and fails on gzip, so the file's unpacking took over; bsdtar looks, and read it.
+    let expected = if cfg!(target_os = "linux") { 1 } else { 0 };
+    assert_eq!(unpacks_from_file() - from_file, expected, "unpacked from the file this many times");
 }

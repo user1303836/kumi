@@ -598,12 +598,24 @@ fn tar_reads_xz(env: &Env) -> bool {
 /// tar unpacking the bundle into `app.new` while it downloads, from what the download hands it on tar's stdin, so the
 /// unpacking (most of a second for an xz bundle) is done by the time the download is. Nothing it unpacks is used until
 /// the download's checksum has matched: the probe and the swap come after that, as before. When anything goes wrong
-/// here (tar didn't start, stopped early or failed), the unpacking runs again from the downloaded file, as it always did.
+/// here (tar didn't start, stalled, failed, or the download was stopped), the unpacking runs again from the downloaded
+/// file, as it always did.
 struct Unpacking {
     child: tokio::process::Child,
     stdin: Option<tokio::process::ChildStdin>,
-    /// tar stopped taking what it was given.
+    /// tar stopped taking what it was given before it had ended well, or was given up on.
     broke: bool,
+}
+/// How long tar may take to take one piece of the download before it's given up on, and how long it may take to end.
+const UNPACK_PIECE: Duration = Duration::from_secs(30);
+const UNPACK_END: Duration = Duration::from_secs(600);
+thread_local! {
+    static FROM_FILE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// How many updates on this thread unpacked their bundle from the downloaded file (the streaming wasn't used), for tests.
+#[doc(hidden)]
+pub fn unpacks_from_file() -> usize {
+    FROM_FILE.with(std::cell::Cell::get)
 }
 impl Unpacking {
     /// tar, reading its stdin into `fresh` (made empty first), run in `home` with the paths inside it, as the unpacking
@@ -624,21 +636,39 @@ impl Unpacking {
         let mut child = command.spawn().ok()?;
         Some(Self { stdin: child.stdin.take(), child, broke: false })
     }
-    /// Hands tar the next piece; one it doesn't take stops the handing, and the unpacking from the file takes over.
-    async fn feed(&mut self, piece: &[u8]) {
+    /// Hands tar the next piece, within UNPACK_PIECE and until `signal` (the producer's Ctrl-C, the download's own
+    /// limit). One it doesn't take ends the handing: a tar that has read the archive's end takes no more (and ends
+    /// well, below); one that stalls or is stopped is given up on, and the unpacking from the file takes over.
+    async fn feed(&mut self, piece: &[u8], signal: &abort::Signal) {
         use tokio::io::AsyncWriteExt;
-        if let Some(stdin) = self.stdin.as_mut() {
-            if stdin.write_all(piece).await.is_err() {
+        let Some(stdin) = self.stdin.as_mut() else { return };
+        let taken = tokio::select! {
+            taken = tokio::time::timeout(UNPACK_PIECE, stdin.write_all(piece)) => taken.map(|written| written.is_ok()).map_err(|_| ()),
+            _ = signal.cancelled() => Err(()),
+        };
+        match taken {
+            Ok(true) => {}
+            // tar no longer reads: done with the archive, or failed; how it ends says which.
+            Ok(false) => self.stdin = None,
+            // Stalled, or stopped: given up on.
+            Err(_) => {
                 self.stdin = None;
                 self.broke = true;
+                let _ = self.child.start_kill();
             }
         }
     }
-    /// Whether tar unpacked all it was given and finished well.
+    /// Whether tar unpacked the whole archive: it ended well within UNPACK_END, and wasn't given up on. A tar that read
+    /// the archive's end and so took no more of what followed it counts, as the unpacking from the file stops there too.
     async fn finished(mut self) -> bool {
         drop(self.stdin.take());
-        let done = self.child.wait().await.is_ok_and(|status| status.success());
-        done && !self.broke
+        match tokio::time::timeout(UNPACK_END, self.child.wait()).await {
+            Ok(status) => status.is_ok_and(|status| status.success()) && !self.broke,
+            Err(_) => {
+                let _ = self.child.kill().await;
+                false
+            }
+        }
     }
     /// Stops tar, and waits for it to end, so nothing more lands in `app.new`.
     async fn stop(mut self) {
@@ -646,6 +676,7 @@ impl Unpacking {
         let _ = self.child.kill().await;
     }
 }
+
 /// The new bridge host's first start (`daw-mcp-server --version`, which only says its version), beside the new Kumi's
 /// probe. macOS checks a new program once, at its first launch (50-80 ms for the host, 0.4-0.7 s for Kumi), and side by
 /// side the two checks take as long as the longer: done here, REAPER's and Renoise's first connect after an update
@@ -708,7 +739,7 @@ async fn download(
             digest.update(&chunk);
             out.write_all(&chunk).await.map_err(Stopped::Disk)?;
             if let Some(unpacking) = unpacking.as_deref_mut() {
-                unpacking.feed(&chunk).await;
+                unpacking.feed(&chunk, &signal).await;
             }
         }
     }
@@ -860,6 +891,7 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
                     None => false,
                 };
                 if !streamed {
+                    FROM_FILE.with(|count| count.set(count.get() + 1));
                     if let Err(error) = remove(&fresh).and_then(|()| fs::create_dir_all(&fresh)) {
                         return not_in_place(&home, &error).into();
                     }
