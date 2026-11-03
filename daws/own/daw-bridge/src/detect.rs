@@ -625,52 +625,73 @@ fn listing_now() -> Vec<(u32, String)> {
     parse_processes(&String::from_utf8_lossy(&output.stdout), cfg!(windows))
 }
 
-/// macOS's processes as `ps -axo pid=,comm=` lists them, read from the kernel in about 2 ms where `ps` takes about 20: each
-/// by its argv[0] where it can be read (the producer's own processes; `ps comm` prints argv[0]), else by its program's
-/// path, else by its short name; the kernel's own process (pid 0) left out, and in `ps`'s order, by controlling terminal
-/// then pid. Empty when the list can't be read.
+/// Where `ps` reads a process's fields in the kernel's table (KERN_PROC_ALL): each entry a `struct kinfo_proc`, the same
+/// on arm64 and x86_64 macOS. libc doesn't declare it, so a table that isn't laid out so is left to `ps`.
+#[cfg(target_os = "macos")]
+mod kinfo {
+    pub const SIZE: usize = 648;
+    /// kp_proc.p_stat: SZOMB for a process that ended and wasn't waited for.
+    pub const STAT: usize = 36;
+    pub const PID: usize = 40;
+    /// kp_proc.p_comm: its short name, MAXCOMLEN + 1 bytes.
+    pub const COMM: usize = 243;
+    pub const COMM_LEN: usize = 17;
+    /// kp_eproc.e_tdev: its controlling terminal, NODEV (-1) for none.
+    pub const TDEV: usize = 572;
+    pub const SZOMB: u8 = 5;
+}
+
+/// macOS's processes as `ps -axo pid=,comm=` lists them, from the kernel's own table in about 2 ms where `ps` takes
+/// about 17: every process, as `ps -ax` lists every one. Each is named by its argv[0] where it can be read (the
+/// producer's own processes; `ps comm` prints argv[0]), else by its program's path (another account's), else by its short
+/// name, and `<defunct>` for one that ended and wasn't waited for. The kernel's own (pid 0) is left out, and they come in
+/// `ps`'s order: by controlling terminal, then pid. Empty when the table can't be read as laid out here.
 #[cfg(target_os = "macos")]
 fn kernel_listing() -> Vec<(u32, String)> {
     use std::{ffi::CStr, mem::size_of, ptr::null_mut};
-    // SAFETY: a null buffer asks only how many there are; then the buffer holds room for that many and more (processes
-    // start meanwhile), and the call says how many it wrote.
-    let pids = unsafe {
-        let wanted = libc::proc_listallpids(null_mut(), 0);
-        if wanted <= 0 {
-            return vec![];
-        }
-        let mut pids: Vec<libc::pid_t> = vec![0; wanted as usize + 64];
-        let listed = libc::proc_listallpids(pids.as_mut_ptr().cast(), (pids.len() * size_of::<libc::pid_t>()) as libc::c_int);
-        if listed <= 0 {
-            return vec![];
-        }
-        pids.truncate((listed as usize).min(pids.len()));
-        pids
-    };
+    let mut name = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_ALL, 0];
+    let mut size = 0usize;
+    // SAFETY: a null buffer asks only for the table's size.
+    if unsafe { libc::sysctl(name.as_mut_ptr(), 3, null_mut(), &mut size, null_mut(), 0) } != 0 || size == 0 {
+        return vec![];
+    }
+    // Room for processes that start between the two calls.
+    size += size / 8 + 16 * kinfo::SIZE;
+    let mut table = vec![0u8; size];
+    // SAFETY: the kernel writes at most `size` bytes into the table and says how many it wrote.
+    if unsafe { libc::sysctl(name.as_mut_ptr(), 3, table.as_mut_ptr().cast(), &mut size, null_mut(), 0) } != 0 {
+        return vec![];
+    }
+    table.truncate(size);
+    let int = |entry: &[u8], at: usize| i32::from_ne_bytes(entry[at..at + 4].try_into().unwrap());
+    // Laid out as read here: whole entries, and this process at its own pid among them.
+    if size % kinfo::SIZE != 0 || !table.chunks_exact(kinfo::SIZE).any(|entry| int(entry, kinfo::PID) == std::process::id() as i32) {
+        return vec![];
+    }
     let mut argmax: libc::c_int = 0;
     let mut length = size_of::<libc::c_int>();
-    let mut name = [libc::CTL_KERN, libc::KERN_ARGMAX];
+    let mut limit = [libc::CTL_KERN, libc::KERN_ARGMAX];
     // SAFETY: the answer is one c_int, which `argmax` holds.
-    unsafe { libc::sysctl(name.as_mut_ptr(), 2, (&raw mut argmax).cast(), &mut length, null_mut(), 0) };
+    unsafe { libc::sysctl(limit.as_mut_ptr(), 2, (&raw mut argmax).cast(), &mut length, null_mut(), 0) };
     let mut arguments = vec![0u8; usize::try_from(argmax).unwrap_or(0).max(64 * 1024)];
-    let mut listed: Vec<(i32, u32, String)> = pids
-        .into_iter()
-        // The kernel's own (pid 0), which `ps -ax` leaves out; only root can read it.
-        .filter(|pid| *pid > 0)
-        .filter_map(|pid| {
-            // SAFETY: proc_bsdinfo is plain data, filled in by the call up to the size it's given.
-            let info = unsafe {
-                let mut info: libc::proc_bsdinfo = std::mem::zeroed();
-                let size = size_of::<libc::proc_bsdinfo>() as libc::c_int;
-                (libc::proc_pidinfo(pid, libc::PROC_PIDTBSDINFO, 0, (&raw mut info).cast(), size) == size).then_some(info)
+    let mut listed: Vec<(i32, u32, String)> = table
+        .chunks_exact(kinfo::SIZE)
+        .filter_map(|entry| {
+            let pid = int(entry, kinfo::PID);
+            // The kernel's own, which `ps -ax` leaves out.
+            if pid <= 0 {
+                return None;
+            }
+            let program = if entry[kinfo::STAT] == kinfo::SZOMB {
+                "<defunct>".to_string()
+            } else {
+                argv0(pid, &mut arguments).or_else(|| program_path(pid)).unwrap_or_else(|| {
+                    let comm = &entry[kinfo::COMM..kinfo::COMM + kinfo::COMM_LEN];
+                    CStr::from_bytes_until_nul(comm)
+                        .map_or_else(|_| String::from_utf8_lossy(comm).into_owned(), |c| c.to_string_lossy().into_owned())
+                })
             };
-            // A process that ended since the pids were listed is left out, as `ps` never saw it.
-            let info = info?;
-            let program = argv0(pid, &mut arguments).or_else(|| program_path(pid)).unwrap_or_else(|| {
-                // SAFETY: pbi_comm ends with a NUL within its length (the kernel's MAXCOMLEN + 1 array, zeroed first).
-                unsafe { CStr::from_ptr(info.pbi_comm.as_ptr()) }.to_string_lossy().into_owned()
-            });
-            Some((info.e_tdev as i32, pid as u32, program.trim().to_string()))
+            Some((int(entry, kinfo::TDEV), pid as u32, program.trim().to_string()))
         })
         .collect();
     listed.sort_by_key(|(terminal, pid, _)| (*terminal, *pid));
@@ -718,8 +739,8 @@ fn kernel_listing() -> Vec<(u32, String)> {
             let entry = entry.ok()?;
             let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
             // One that ended since /proc was read is left out.
-            let name = std::fs::read_to_string(entry.path().join("comm")).ok()?;
-            Some((pid, name.trim().to_string()))
+            let name = std::fs::read(entry.path().join("comm")).ok()?;
+            Some((pid, String::from_utf8_lossy(&name).trim().to_string()))
         })
         .collect();
     listed.sort_by_key(|(pid, _)| *pid);
@@ -1166,44 +1187,73 @@ mod tests {
         );
     }
 
-    /// The kernel's listing is `ps -axo pid=,comm=`'s, without the `ps`: each of this account's processes by the same name
-    /// (a child named only by argv[0] among them), in the same order. Processes that start or end between the two
-    /// listings are left out of the comparison.
+    /// The kernel's listing is `ps -axo pid=,comm=`'s, without the `ps`, held to two `ps` lists made just before and just
+    /// after it, and only where those agree: another test's processes spawn, exec and end around this one. Every
+    /// process in both is in the kernel's list. Where both name it alike, this account's are named exactly as `ps` names
+    /// them (a child known only by its argv[0] among them) and another account's by the same program (`ps`, setuid root,
+    /// reads their argv[0]; Kumi names them by their program's path), in the same order.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     #[test]
     fn the_kernels_listing_is_what_ps_lists() {
-        use std::{collections::HashMap, os::unix::process::CommandExt};
+        use std::{
+            collections::{HashMap, HashSet},
+            os::unix::process::CommandExt,
+        };
+        // (pid, uid, name) as parse_processes reads a line: the pid, then (here) the uid, then the rest, trimmed.
+        let ps = || -> Vec<(u32, String, String)> {
+            let out = std::process::Command::new("ps").args(["-axo", "pid=,uid=,comm="]).output().unwrap().stdout;
+            String::from_utf8_lossy(&out)
+                .lines()
+                .filter_map(|line| {
+                    let (pid, rest) = line.trim_start().split_once(char::is_whitespace)?;
+                    let (uid, name) = rest.trim_start().split_once(char::is_whitespace)?;
+                    Some((pid.parse().ok()?, uid.to_string(), name.trim().to_string()))
+                })
+                .collect()
+        };
         let mut named = std::process::Command::new("/bin/sleep").arg0("kumi-listing-test").arg("30").spawn().unwrap();
-        let ps = std::process::Command::new("ps").args(["-axo", "pid=,uid=,comm="]).output().unwrap();
+        // A child that has ended and isn't waited for yet: `ps` names such a one `<defunct>` on macOS.
+        let mut ended_child = std::process::Command::new("/usr/bin/true").spawn().unwrap();
+        // SAFETY: waitid with WNOWAIT waits for the child to end and leaves it to be waited for (reaped) below.
+        unsafe {
+            let mut info: libc::siginfo_t = std::mem::zeroed();
+            libc::waitid(libc::P_PID, ended_child.id(), &mut info, libc::WEXITED | libc::WNOWAIT);
+        }
+        let before = ps();
         let listed = kernel_listing();
+        let after = ps();
         let _ = named.kill();
         let _ = named.wait();
+        let _ = ended_child.wait();
         // SAFETY: getuid has no preconditions.
         let me = unsafe { libc::getuid() }.to_string();
-        let mut mine: HashMap<u32, String> = HashMap::new();
-        let mut order = vec![];
-        for line in String::from_utf8_lossy(&ps.stdout).lines() {
-            // As parse_processes reads a line: the pid, then (here) the uid, then the rest, trimmed.
-            let Some((pid, rest)) = line.trim_start().split_once(char::is_whitespace) else { continue };
-            let Some((uid, name)) = rest.trim_start().split_once(char::is_whitespace) else { continue };
-            let Ok(pid) = pid.parse::<u32>() else { continue };
-            order.push(pid);
-            if uid == me {
-                mine.insert(pid, name.trim().to_string());
-            }
-        }
+        let base = |name: &str| name.rsplit('/').next().unwrap_or(name).to_string();
         let kernel: HashMap<u32, &String> = listed.iter().map(|(pid, name)| (*pid, name)).collect();
         let expected = if cfg!(target_os = "linux") { "sleep" } else { "kumi-listing-test" };
         assert_eq!(kernel.get(&named.id()).map(|name| name.as_str()), Some(expected), "the child, by argv[0] on macOS and comm on Linux");
+        let defunct = if cfg!(target_os = "linux") { "true" } else { "<defunct>" };
+        assert_eq!(kernel.get(&ended_child.id()).map(|name| name.as_str()), Some(defunct), "the child that ended, unwaited for");
         assert!(!kernel.contains_key(&0), "the kernel's own process isn't listed, as ps -ax leaves it out");
-        let compared: Vec<_> = mine.iter().filter(|(pid, _)| kernel.contains_key(pid)).collect();
-        assert!(compared.len() > 1, "this account's processes are in both listings");
-        for (pid, name) in compared {
-            assert_eq!(kernel[pid], name, "pid {pid}");
+        let later: HashMap<u32, (&String, &String)> = after.iter().map(|(pid, uid, name)| (*pid, (uid, name))).collect();
+        // In both of ps's lists: there all along, so in the kernel's too.
+        let throughout: Vec<&(u32, String, String)> = before.iter().filter(|(pid, _, _)| later.contains_key(pid)).collect();
+        let missing: Vec<_> = throughout.iter().filter(|(pid, _, _)| !kernel.contains_key(pid)).collect();
+        assert!(missing.is_empty(), "in ps's lists before and after, not in the kernel's: {missing:?}");
+        // Named alike before and after: named so in the kernel's list too.
+        let steady: Vec<&&(u32, String, String)> =
+            throughout.iter().filter(|(pid, uid, name)| later.get(pid).is_some_and(|(u, n)| *u == uid && *n == name)).collect();
+        assert!(steady.iter().any(|(_, uid, _)| *uid != me), "another account's processes are among them");
+        for (pid, uid, name) in &steady {
+            if *uid == me {
+                assert_eq!(kernel[pid], name, "pid {pid}");
+            } else {
+                assert_eq!(base(kernel[pid]), base(name), "pid {pid}, another account's");
+            }
         }
-        let in_both: Vec<u32> = order.iter().copied().filter(|pid| kernel.contains_key(pid)).collect();
-        let kernel_order: Vec<u32> = listed.iter().map(|(pid, _)| *pid).filter(|pid| in_both.contains(pid)).collect();
-        assert_eq!(kernel_order, in_both, "in ps's order");
+        let steady_pids: HashSet<u32> = steady.iter().map(|(pid, _, _)| *pid).collect();
+        let ps_order: Vec<u32> = before.iter().map(|(pid, _, _)| *pid).filter(|pid| steady_pids.contains(pid)).collect();
+        let kernel_order: Vec<u32> = listed.iter().map(|(pid, _)| *pid).filter(|pid| steady_pids.contains(pid)).collect();
+        assert_eq!(kernel_order, ps_order, "in ps's order");
     }
 
     /// What a listing costs, the kernel's against `ps`'s, for a PR's numbers: `--run-ignored only --no-capture`, built
