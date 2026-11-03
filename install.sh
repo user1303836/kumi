@@ -325,8 +325,9 @@ main() {
     [ -f "$artifact" ] || continue
     tar -xzf "$artifact" -C "$work/app/bridge" || fail "couldn't unpack Live's bridge."
   done
-  # REAPER's and Renoise's host starts once beside the check below, saying only its version: macOS and Windows check a
-  # new program at its first launch, and done here the first connect doesn't wait for it. Whatever it does is ignored.
+  # REAPER's and Renoise's host starts once beside the check below, saying only its version: macOS checks a new program
+  # at its first launch (Linux has no such check), and done here the first connect doesn't wait for it. Whatever it
+  # does is ignored.
   if [ -x "$work/app/daw-mcp-server" ]; then ("$work/app/daw-mcp-server" --version >/dev/null 2>&1 </dev/null &); fi
   KUMI_INSTALLED=1 KUMI_HOME="$KUMI_HOME" "$work/app/kumi" --version >/dev/null 2>"$work/start.err"; started=$?
   if [ "$started" -ne 0 ]; then
