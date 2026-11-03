@@ -570,9 +570,12 @@ async fn anthropic_marks_where_the_last_request_ended_so_a_step_of_many_calls_st
         .iter()
         .enumerate()
         .flat_map(|(at, message)| {
-            message["content"].as_array().unwrap().iter().enumerate().filter_map(move |(part, block)| {
-                block.get("cache_control").map(|cache| format!("{at}.{part} {cache}"))
-            })
+            message["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .filter_map(move |(part, block)| block.get("cache_control").map(|cache| format!("{at}.{part} {cache}")))
         })
         .collect();
     assert_eq!(marked, [r#"0.0 {"type":"ephemeral"}"#, r#"2.11 {"type":"ephemeral"}"#], "the last request's end, and this one's");
