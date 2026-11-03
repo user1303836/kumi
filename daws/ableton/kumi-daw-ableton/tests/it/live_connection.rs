@@ -104,7 +104,7 @@ async fn model_reads_match_source_authority_epoch_errors_and_dispatches() {
   let mut case=original.clone();case["responses"]=json!(case["responses"].as_array().unwrap().iter().map(|id|fixture["values"][id.as_u64().unwrap() as usize].clone()).collect::<Vec<_>>());
   let endpoint=Rc::new(Fixture{case:case.clone(),calls:RefCell::new(Vec::new()),disconnects:RefCell::new(Vec::new()),closes:Cell::new(0),owner:RefCell::new(Weak::new())});
   let states=Rc::new(RefCell::new(Vec::<Value>::new()));let out=states.clone();let mut options=ConnectionOptions::new(Rc::new(move|state,cause|out.borrow_mut().push(json!([state,cause]))));
-  let connected=endpoint.clone();options.connect=Some(Rc::new(move|_|{let endpoint:Rc<dyn McpEndpoint>=connected.clone();async move{Ok(endpoint)}.boxed_local()}));options.now=Some(Rc::new(||chrono::DateTime::parse_from_rfc3339("2026-10-03T12:00:00.000Z").unwrap().with_timezone(&chrono::Utc)));options.generation=Some("connection".into());options.reconnect_interval_ms=Some(3600000);
+  let connected=endpoint.clone();options.connect=Some(Rc::new(move|_|{let endpoint:Rc<dyn McpEndpoint>=connected.clone();async move{Ok(endpoint)}.boxed_local()}));options.now=Some(Rc::new(||chrono::DateTime::parse_from_rfc3339("2026-10-03T12:00:00.000Z").unwrap().with_timezone(&chrono::Utc)));options.generation=Some("connection".into());options.reconnect_interval_ms=Some(3600000);options.quick_looks=Some(false);
   let connection=LiveConnection::new(options);*endpoint.owner.borrow_mut()=Rc::downgrade(&connection);let signal=Signal::new();connection.start(signal.clone()).await.unwrap();connection.tools().unwrap().refresh(signal.clone()).await.unwrap();
   let seed=&case["seed"];connection.epoch.set(seed["epoch"].as_f64());connection.last_epoch.set(seed["epoch"].as_f64());*connection.set.borrow_mut()=seed["set"].as_str().map(str::to_owned);connection.available.set(seed["available"]!=false);connection.lost.set(seed["lost"]==true);
   for row in seed["rows"].as_array().unwrap(){connection.register_rows(row[0].as_str().unwrap(),&row[1].as_array().unwrap().iter().map(|v|v.as_object().unwrap().clone()).collect::<Vec<_>>(),row[2].as_object().unwrap(),None).unwrap();}
@@ -125,6 +125,8 @@ struct LifeEndpoint {
     calls: Rc<RefCell<Vec<Value>>>,
     closes: Cell<usize>,
     disconnects: RefCell<Vec<Listener>>,
+    /// Each call waits for this first, when there is one: a read in flight.
+    gate: Option<Rc<tokio::sync::Notify>>,
 }
 #[async_trait(?Send)]
 impl McpEndpoint for LifeEndpoint {
@@ -146,6 +148,9 @@ impl McpEndpoint for LifeEndpoint {
     }
     async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
         signal.check()?;
+        if let Some(gate) = &self.gate {
+            gate.notified().await;
+        }
         self.calls.borrow_mut().push(json!({"endpoint":self.id,"name":name,"args":args}));
         let at = self.at.get();
         self.at.set(at + 1);
@@ -214,6 +219,7 @@ async fn connection_start_close_disconnection_and_reconnection_match_source() {
                             calls: calls.clone(),
                             closes: Cell::new(0),
                             disconnects: RefCell::new(Vec::new()),
+                            gate: None,
                         })
                     })
                     .collect();
@@ -257,6 +263,9 @@ async fn connection_start_close_disconnection_and_reconnection_match_source() {
                 }
                 options.generation = Some("connection".into());
                 options.reconnect_interval_ms = Some(3600000);
+                // The TypeScript Kumi recorded here looked for Live only at the interval: no look at once after a
+                // dropped link, nor quick looks for a Live that still runs (A3-1, A3-2), which their own tests cover.
+                options.quick_looks = Some(false);
                 let connection = LiveConnection::new(options);
                 let mut results = Vec::new();
                 for command in case["commands"].as_array().unwrap() {
@@ -333,6 +342,127 @@ async fn connection_start_close_disconnection_and_reconnection_match_source() {
                 eq(&json!(*transports.borrow()), &case["transports"], &format!("{label} transport events"));
                 eq(&json!(*connections.borrow()), &case["connections"], &format!("{label} connections"));
                 eq(&json!(endpoints.iter().map(|e| e.closes.get()).collect::<Vec<_>>()), &case["closes"], &format!("{label} closes"));
+            }
+        })
+        .await;
+}
+
+/// A connection whose bridges are `LifeEndpoint`s made on demand: the first with `statuses`, those after it connected.
+fn reconnecting(statuses: Value, running: Option<bool>) -> (Rc<LiveConnection>, Rc<RefCell<Vec<Rc<LifeEndpoint>>>>) {
+    reconnecting_with(statuses, json!([{"connected": true}]), running, None)
+}
+/// The same, those after the first with `later`, and the first one's calls each waiting for `gate`.
+fn reconnecting_with(
+    statuses: Value,
+    later: Value,
+    running: Option<bool>,
+    gate: Option<Rc<tokio::sync::Notify>>,
+) -> (Rc<LiveConnection>, Rc<RefCell<Vec<Rc<LifeEndpoint>>>>) {
+    let made = Rc::new(RefCell::new(Vec::<Rc<LifeEndpoint>>::new()));
+    let calls = Rc::new(RefCell::new(vec![]));
+    let mut options = ConnectionOptions::new(Rc::new(|_, _| {}));
+    options.connect = Some(Rc::new({
+        let made = made.clone();
+        move |_| {
+            let endpoint = Rc::new(LifeEndpoint {
+                transport: false,
+                config: json!({"statuses": if made.borrow().is_empty() { statuses.clone() } else { later.clone() }}),
+                id: made.borrow().len(),
+                at: Cell::new(0),
+                calls: calls.clone(),
+                closes: Cell::new(0),
+                disconnects: RefCell::new(vec![]),
+                gate: if made.borrow().is_empty() { gate.clone() } else { None },
+            });
+            made.borrow_mut().push(endpoint.clone());
+            async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+        }
+    }));
+    // Only the quick looks can happen in a test's time.
+    options.reconnect_interval_ms = Some(3_600_000);
+    options.live_running = running.map(|running| Rc::new(move || async move { running }.boxed_local()) as kumi_daw::process::AsyncBool);
+    (LiveConnection::new(options), made)
+}
+fn drop_link(endpoint: &LifeEndpoint) {
+    for listener in endpoint.disconnects.borrow().clone() {
+        if listener.on.get() {
+            (listener.callback)();
+        }
+    }
+}
+async fn until(what: impl Fn() -> bool) -> bool {
+    for _ in 0..200 {
+        if what() {
+            return true;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    false
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_dropped_link_is_looked_for_at_once_and_one_that_keeps_dropping_at_the_usual_pace() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let (connection, made) = reconnecting(json!([{"connected": true}]), None);
+            connection.start(Signal::new()).await.unwrap();
+            // The bridge's process ends: Live is looked for now, not at the interval (an hour here).
+            drop_link(&made.borrow()[0].clone());
+            assert!(until(|| made.borrow().len() == 2 && connection.is_back()).await, "back at once: {} bridges", made.borrow().len());
+            // It drops again within the minute: the usual pace, so a link that keeps dropping isn't reconnected as fast
+            // as it drops.
+            drop_link(&made.borrow()[1].clone());
+            tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+            assert_eq!(made.borrow().len(), 2, "no bridge started at once the second time");
+            assert!(!connection.is_back());
+            connection.close().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_read_cut_off_by_a_drop_fails_as_before_though_the_link_is_back_at_once() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            // A status read is in flight on the first bridge when its process ends, and the new bridge is attached
+            // before the read's answer comes: the read still fails with the dropped transport's own error.
+            let gate = Rc::new(tokio::sync::Notify::new());
+            let (connection, made) =
+                reconnecting_with(json!([{"throw": "MCP disconnected"}]), json!([{"connected": true}]), None, Some(gate.clone()));
+            connection.start(Signal::new()).await.unwrap();
+            let reading = connection.clone();
+            let read = tokio::task::spawn_local(async move { reading.read_status(Signal::new()).await.map(|_| ()) });
+            tokio::task::yield_now().await;
+            drop_link(&made.borrow()[0].clone());
+            assert!(until(|| made.borrow().len() == 2 && connection.is_back()).await, "back at once, while the read waits");
+            gate.notify_one();
+            assert_eq!(read.await.unwrap().unwrap_err().to_string(), "MCP disconnected", "the read's own error, as before");
+            connection.close().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_lost_live_that_still_runs_is_looked_for_every_quarter_second_and_a_closed_one_at_the_usual_pace() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for running in [true, false] {
+                // Live's status says it's away, so each look reads it again through the bridge that's still there (the
+                // fresh bridge the first look starts isn't ready either, and the next is due only 30 s later).
+                let away = json!([{"connected": false}]);
+                let (connection, made) = reconnecting_with(away.clone(), away, Some(running), None);
+                connection.start(Signal::new()).await.unwrap();
+                let first = made.borrow()[0].clone();
+                let before = first.at.get();
+                connection.lose_live();
+                tokio::time::sleep(std::time::Duration::from_millis(900)).await;
+                let looks = first.at.get() - before;
+                if running {
+                    assert!((2..=5).contains(&looks), "every 250 ms while Live runs: {looks} looks in 900 ms");
+                } else {
+                    assert_eq!(looks, 0, "Live closed: the usual interval");
+                }
+                connection.close().await.unwrap();
             }
         })
         .await;
