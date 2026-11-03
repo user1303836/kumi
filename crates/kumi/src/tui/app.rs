@@ -379,7 +379,7 @@ struct State {
     used: Used,
     connection: ConnectionState,
     set_name: Option<String>,
-    /// A look has read the project (an observation came), so a session still without a name to show is connected to one
+    /// A look made while connected has read the project, so a session still without a name to show is connected to one
     /// that has none: until then, a connected DAW is still being read.
     observed: bool,
     focus: Option<DawFocus>,

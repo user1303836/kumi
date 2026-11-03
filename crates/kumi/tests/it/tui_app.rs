@@ -642,6 +642,20 @@ case!(connected_before_the_first_look_names_the_project_focus_says_connecting, a
         assert!(has(&lines, "Night Drive") && !has(&lines, "Connecting to Live…"), "{}", lines.join("\n"));
         h.close().await;
     }
+    // Kumi started before the DAW: the start's look found nothing to read, and says so. The DAW opens: FOCUS says it's
+    // connecting until a look made now names the project.
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.emit(json!({"type":"connection","state":"disconnected"}));
+    h.emit(json!({"type":"observation","label":"Live isn't open"}));
+    h.emit(json!({"type":"connection","state":"connected"}));
+    h.emit(json!({"type":"focus","focus":null}));
+    let lines = h.screen();
+    assert!(has(&lines, "Connecting to Live…") && !has(&lines, "isn't connected"), "{}", lines.join("\n"));
+    h.emit(json!({"type":"observation","label":"Current open Set: Night Drive — Remote Script · real-live"}));
+    let lines = h.screen();
+    assert!(has(&lines, "Night Drive") && !has(&lines, "Connecting to Live…"), "{}", lines.join("\n"));
+    h.close().await;
 });
 case!(a_fixed_phrase_changes_live_at_once_and_undoes_from_history, async {
     let h = Harness::new(120, 36);
