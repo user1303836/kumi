@@ -8087,8 +8087,11 @@ class IdlePumpTests(_BridgeSocketFixture, unittest.TestCase):
             client.sendall(self.frame(channel, 1))
             self.assertEqual(self.read_lines(client, 1)[0]["id"], "status-1")
 
+    @unittest.skipIf(os.name == "nt", "POSIX's FD_SETSIZE; Windows has no such limit, and its socket handles come in no order")
     def test_with_a_connection_past_select_s_limit_select_isnt_asked_and_once_it_goes_it_is(self):
-        # (POSIX's FD_SETSIZE, 1024; a big Set opens many files before Kumi connects)
+        # (POSIX's FD_SETSIZE, 1024; a big Set opens many files before Kumi connects. The limit is put just above the
+        # first connection's descriptor, so the second's must come after it: POSIX gives the lowest free one, but Windows'
+        # socket handles come in no order, and there _SELECT_FD_LIMIT is None anyway, #901.)
         first, _ = self.connect()
         asked = []
         real = remote_module._select.select
