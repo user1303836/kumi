@@ -189,8 +189,9 @@ async fn until(what: &str, done: impl Fn() -> bool) {
 }
 
 /// A session whose answer waits until it's told to go on (`go`), then says a burst of words all at once and works on
-/// until Kumi closes. It takes what the producer says meanwhile only once the burst is said (`steers` counts each ask),
-/// and moves a step to the background each time it's asked (`moves` counts them).
+/// until Kumi closes, saying a word every 20 ms as a real session does while it works. It takes what the producer says
+/// meanwhile only once the burst is said (`steers` counts each ask), and moves a step to the background each time it's
+/// asked (`moves` counts them).
 struct Steers {
     emit: Rc<dyn Fn(SessionEvent)>,
     status: RefCell<SessionStatus>,
@@ -217,8 +218,15 @@ impl Steers {
             (self.emit)(SessionEvent::Kernel(KernelEvent::Text { text: "w".into() }));
         }
         self.said.set(true);
+        // Then on working, and saying so now and then, as a real session does. The screen asks again only on an event
+        // that comes after an ask's answer. When that answer and the whole burst reach the screen in one drain (a slow
+        // runner can line them up), the burst holds no such event, and without more words the second ask never came
+        // (#897).
         while !self.closed.get() {
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if !self.closed.get() {
+                (self.emit)(SessionEvent::Kernel(KernelEvent::Text { text: "w".into() }));
+            }
         }
         Ok(())
     }
