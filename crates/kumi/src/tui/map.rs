@@ -50,6 +50,8 @@ const MOST_RADIUS: f64 = 5.;
 const TOUCHING: f64 = 0.45;
 /// How typical a point is: how many others have it among their nearest this many on the map.
 const NEAREST: usize = 8;
+/// From how many points a map's nearest are searched on more than one core.
+const PARALLEL_FROM: usize = 20_000;
 /// A map fitted to the screen: past this share of its points' distances from its middle, a stray's distance beyond it
 /// grows as a log, this part of that distance at a time; and a map at most this many times as wide as it's tall.
 const STRAYS: f64 = 0.985;
@@ -325,6 +327,15 @@ fn fitted(layer: &mut Layer) -> Fit {
 /// Each point's distance to its nearest other on a map `aspect` wide, and how many others have it among their NEAREST
 /// nearest: a grid of about two points a cell, searched ring by ring out from each point's cell.
 fn nearest_named(points: &[Point], aspect: f64) -> (Vec<f32>, Vec<u32>) {
+    // A big map's points are searched on some of the cores: at most half, as a DAW playing beside Kumi keeps the rest.
+    let threads =
+        if points.len() < PARALLEL_FROM { 1 } else { std::thread::available_parallelism().map_or(1, |cores| (cores.get() / 2).max(1)) };
+    nearest_named_on(points, aspect, threads)
+}
+
+/// `nearest_named` on `threads` threads, each a run of the points: each point's search is the same wherever it runs, and
+/// the counts add up the same, so it gives the same on any number of them.
+fn nearest_named_on(points: &[Point], aspect: f64, threads: usize) -> (Vec<f32>, Vec<u32>) {
     let count = points.len();
     let across = ((count as f64 / 2. * aspect).sqrt().ceil() as usize).clamp(1, 4096);
     let down = ((count as f64 / 2. / aspect).sqrt().ceil() as usize).clamp(1, 4096);
@@ -347,42 +358,70 @@ fn nearest_named(points: &[Point], aspect: f64) -> (Vec<f32>, Vec<u32>) {
         next[y * across + x] += 1;
     }
     let (step, wanted) = (cell_width.min(cell_height), NEAREST.min(count - 1));
-    let (mut apart, mut named) = (vec![0f32; count], vec![0u32; count]);
-    let mut best: Vec<(f64, u32)> = Vec::with_capacity(NEAREST + 1);
-    for (at, point) in points.iter().enumerate() {
-        let (cx, cy) = cell(point);
-        let (cx, cy) = (cx as isize, cy as isize);
-        best.clear();
-        for ring in 0..across.max(down) as isize {
-            for y in (cy - ring).max(0)..=(cy + ring).min(down as isize - 1) {
-                for x in (cx - ring).max(0)..=(cx + ring).min(across as isize - 1) {
-                    // The ring's edge only: what's inside it was searched.
-                    if (x - cx).abs() != ring && (y - cy).abs() != ring {
-                        continue;
-                    }
-                    let c = y as usize * across + x as usize;
-                    for other in &order[starts[c]..starts[c + 1]] {
-                        if *other as usize == at {
+    // Each point's nearest, `from` to `to`: its distance to the nearest, and the counts it adds to those it names.
+    let search = |from: usize, to: usize| {
+        let mut apart = vec![0f32; to - from];
+        let mut named = vec![0u32; count];
+        let mut best: Vec<(f64, u32)> = Vec::with_capacity(NEAREST + 1);
+        for (at, point) in points.iter().enumerate().take(to).skip(from) {
+            let (cx, cy) = cell(point);
+            let (cx, cy) = (cx as isize, cy as isize);
+            best.clear();
+            for ring in 0..across.max(down) as isize {
+                for y in (cy - ring).max(0)..=(cy + ring).min(down as isize - 1) {
+                    for x in (cx - ring).max(0)..=(cx + ring).min(across as isize - 1) {
+                        // The ring's edge only: what's inside it was searched.
+                        if (x - cx).abs() != ring && (y - cy).abs() != ring {
                             continue;
                         }
-                        let there = &points[*other as usize];
-                        let d = (there.x as f64 - point.x as f64).powi(2) + (there.y as f64 - point.y as f64).powi(2);
-                        if best.len() < NEAREST || d < best[NEAREST - 1].0 {
-                            let place = best.partition_point(|(seen, _)| *seen <= d);
-                            best.insert(place, (d, *other));
-                            best.truncate(NEAREST);
+                        let c = y as usize * across + x as usize;
+                        for other in &order[starts[c]..starts[c + 1]] {
+                            if *other as usize == at {
+                                continue;
+                            }
+                            let there = &points[*other as usize];
+                            let d = (there.x as f64 - point.x as f64).powi(2) + (there.y as f64 - point.y as f64).powi(2);
+                            if best.len() < NEAREST || d < best[NEAREST - 1].0 {
+                                let place = best.partition_point(|(seen, _)| *seen <= d);
+                                best.insert(place, (d, *other));
+                                best.truncate(NEAREST);
+                            }
                         }
                     }
                 }
+                // Past this ring every point is at least `ring` cells away.
+                if best.len() == wanted && (wanted < NEAREST || best[wanted - 1].0.sqrt() <= ring as f64 * step) {
+                    break;
+                }
             }
-            // Past this ring every point is at least `ring` cells away.
-            if best.len() == wanted && (wanted < NEAREST || best[wanted - 1].0.sqrt() <= ring as f64 * step) {
-                break;
+            apart[at - from] = best.first().map_or(0., |(d, _)| d.sqrt() as f32);
+            for (_, other) in &best {
+                named[*other as usize] += 1;
             }
         }
-        apart[at] = best.first().map_or(0., |(d, _)| d.sqrt() as f32);
-        for (_, other) in &best {
-            named[*other as usize] += 1;
+        (apart, named)
+    };
+    let runs = threads.clamp(1, count);
+    let size = count.div_ceil(runs);
+    let parts: Vec<(Vec<f32>, Vec<u32>)> = if runs == 1 {
+        vec![search(0, count)]
+    } else {
+        std::thread::scope(|scope| {
+            let searching: Vec<_> = (0..runs)
+                .map(|run| {
+                    let search = &search;
+                    scope.spawn(move || search((run * size).min(count), ((run + 1) * size).min(count)))
+                })
+                .collect();
+            searching.into_iter().map(|run| run.join().expect("a map's search")).collect()
+        })
+    };
+    let mut apart = Vec::with_capacity(count);
+    let mut named = vec![0u32; count];
+    for (part_apart, part_named) in parts {
+        apart.extend(part_apart);
+        for (total, part) in named.iter_mut().zip(part_named) {
+            *total += part;
         }
     }
     (apart, named)
@@ -2262,5 +2301,33 @@ mod tests {
         let mut screen = Screen::new(100, 30);
         map.draw(&mut screen, &mut |_, _, _, _| 0);
         assert!(!screen.lines()[28].contains("Added"));
+    }
+
+    /// A big map's nearest are searched on several threads and come out as on one: each point's distance to its nearest
+    /// and how many others name it, on a map with tight clusters and points on the very same spot.
+    #[test]
+    fn a_maps_nearest_are_the_same_on_one_thread_or_several() {
+        let mut points = vec![];
+        let mut seed = 7_u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as f32 / (1u64 << 31) as f32
+        };
+        for at in 0..25_000 {
+            let (x, y) = match at % 5 {
+                // The same spot as the point before.
+                0 if at > 0 => (points.last().map_or(0.5, |p: &(f32, f32, u16)| p.0), points.last().map_or(0.5, |p: &(f32, f32, u16)| p.1)),
+                // A tight cluster.
+                1 | 2 => (0.3 + next() * 0.01, 0.6 + next() * 0.01),
+                _ => (next(), next()),
+            };
+            points.push((x, y, (at % 7) as u16));
+        }
+        let layer = layer(&points);
+        let one = nearest_named_on(&layer.points, 1.4, 1);
+        for threads in [3, 8] {
+            assert_eq!(nearest_named_on(&layer.points, 1.4, threads), one, "{threads} threads");
+        }
+        assert_eq!(one.1.iter().map(|named| *named as usize).sum::<usize>(), 25_000 * NEAREST, "every point names its nearest");
     }
 }
