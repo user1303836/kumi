@@ -507,14 +507,14 @@ class RemoteScriptTests(unittest.TestCase):
         with patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge), \
                 patch.object(package.AbletonMcpBridge, "schedule_message", lambda self, delay, callback: scheduled.append(callback), create=True):
             surface = package.AbletonMcpBridge(FakeInstance())
-        surface._keep_willington = lambda: None
-        for _ in range(3): surface.update_display()
+            surface._keep_willington = lambda: None
+            for _ in range(3): surface.update_display()
         self.assertEqual((surface._bridge.served, scheduled), (3, []))
 
     def test_a_failed_start_is_said_in_lives_status_bar_its_log_and_beside_the_script_and_a_good_one_clears_it(self):
-        """Live says nothing of a Control Surface that fails as it starts: the producer sees the reason in Live's status
-        bar (show_message, never a dialog), and Kumi reads it beside the script, with this Live's process. The failure
-        still reaches Live, which reports it as before."""
+        """Live says nothing of a Control Surface whose bridge fails to start (it starts at a tick, after Live made the
+        surface): the producer sees the reason in Live's status bar (show_message, never a dialog), Live's log has it
+        with its traceback, and Kumi reads it beside the script with this Live's process."""
         package = __import__("AbletonMcpBridge")
         record = Path(package.__file__).with_name("start-failure.json")
         said, logged = [], []
@@ -526,30 +526,69 @@ class RemoteScriptTests(unittest.TestCase):
             raise ValueError("bridge configuration reference is missing or unsafe: others can read it (mode 644)")
 
         class Bridge:
-            def __init__(self, *args, **kwargs): pass
+            def __init__(self, *args, **kwargs): self.served = 0
+            def update_display(self): self.served += 1
 
         try:
             with patch.object(package, "_read_config", refused), \
                     patch.object(package.AbletonMcpBridge, "log_message", lambda self, text: logged.append(text), create=True):
-                with self.assertRaises(ValueError):
-                    package.AbletonMcpBridge(Instance())
+                surface = package.AbletonMcpBridge(Instance())
+                self.assertEqual((said, logged), ([], []), "nothing until it starts, at Live's first tick")
+                surface.update_display()
+                surface.update_display()
             exception = "ValueError: bridge configuration reference is missing or unsafe: others can read it (mode 644)"
-            self.assertEqual(said, ["AbletonMcpBridge couldn't start (kumi doctor says how to fix it): " + exception])
-            self.assertEqual(logged, ["AbletonMcpBridge couldn't start: " + exception], "Kumi reads the log's line as it was")
+            self.assertEqual(said, ["AbletonMcpBridge couldn't start (kumi doctor says how to fix it): " + exception], "said once: not tried again")
+            self.assertEqual(len(logged), 1)
+            self.assertTrue(logged[0].startswith("AbletonMcpBridge couldn't start: " + exception + "\nTraceback"), "Kumi reads the log's line as it was: " + logged[0])
             kept = json.loads(record.read_text(encoding="utf-8"))
             self.assertEqual((kept["version"], kept["pid"], kept["exception"]), (1, os.getpid(), exception))
-            # A Live without show_message (or whose log refuses) still gets the record, and the failure.
+            self.assertIsNone(surface._bridge)
+            surface.disconnect()
+            # A Live without show_message (or whose log refuses) still gets the record.
             record.unlink()
             with patch.object(package, "_read_config", refused):
-                with self.assertRaises(ValueError):
-                    package.AbletonMcpBridge(FakeInstance())
+                package.AbletonMcpBridge(FakeInstance()).update_display()
             self.assertTrue(record.exists())
             # A start that succeeds removes it.
             with patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
-                package.AbletonMcpBridge(FakeInstance())
+                surface = package.AbletonMcpBridge(FakeInstance())
+                surface._keep_willington = lambda: None
+                surface.update_display()
             self.assertFalse(record.exists())
+            self.assertEqual(surface._bridge.served, 1)
         finally:
             record.unlink(missing_ok=True)
+
+    def test_the_bridges_files_are_checked_off_lives_thread_and_it_starts_at_the_next_tick_after(self):
+        """On Windows the ACL check of the bridge's files is a PowerShell batch, 160 ms and more of Live's main thread as
+        Live starts: it runs on a thread of its own, and Live's thread starts the bridge at its first tick after."""
+        package = __import__("AbletonMcpBridge")
+        release, ran_on = threading.Event(), []
+
+        def check():
+            ran_on.append(threading.get_ident())
+            release.wait(5)
+
+        class Bridge:
+            def __init__(self, *args, **kwargs): self.served = 0
+            def update_display(self): self.served += 1
+
+        with patch.object(package, "_files_check", return_value=check), patch.object(package, "_read_config", return_value={}), \
+                patch.object(package, "_Bridge", Bridge):
+            surface = package.AbletonMcpBridge(FakeInstance())
+            surface._keep_willington = lambda: None
+            surface.update_display()
+            self.assertIsNone(surface._bridge, "not before its files are checked")
+            self.assertIsNone(surface.address)
+            release.set()
+            deadline = time.time() + 5
+            while not surface._checked.done() and time.time() < deadline: time.sleep(0.01)
+            surface.update_display()
+        self.assertEqual(surface._bridge.served, 1, "started, and served, at the next tick")
+        self.assertEqual(len(ran_on), 1)
+        self.assertNotEqual(ran_on[0], threading.get_ident(), "checked off Live's thread")
+        # Elsewhere there's nothing to check off it: the first tick starts it.
+        self.assertEqual(package._files_check() is None, os.name != "nt")
 
     @unittest.skipIf(os.name == "nt", "POSIX owners and modes; on Windows one ACL check decides")
     def test_a_refused_file_says_what_the_owner_checks_found(self):
