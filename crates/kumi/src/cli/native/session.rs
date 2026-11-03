@@ -959,11 +959,8 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // as before.
     let platform = kumi_types::system::platform();
     let profile = crate::tui::alerts::detect_terminal_profile(&io.env, platform);
-    let probes = print.is_none()
-        && full_screen
-        && io.probe
-        && profile.status
-        && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off");
+    let probes =
+        print.is_none() && full_screen && io.probe && profile.status && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off");
     // (`biased`: the questions go out first, then the history is read while they're answered)
     let (probed, history) = tokio::join!(
         biased;
