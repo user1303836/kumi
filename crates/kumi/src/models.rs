@@ -675,7 +675,7 @@ impl ModelControl {
         if self.binding_with_info().await.is_err() {
             return;
         }
-        // ChatGPT's answers go over a WebSocket of their own, which the first request opens.
+        // ChatGPT's answers go over a WebSocket of their own, which its conversation's kernel readies (`Kernel::warm`).
         if provider.row().sign_in == SignIn::Chatgpt {
             return;
         }
