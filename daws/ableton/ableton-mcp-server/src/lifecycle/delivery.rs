@@ -10,8 +10,14 @@ use std::{
     path::{Path, PathBuf},
 };
 mod acl;
+#[cfg(windows)]
+#[doc(hidden)]
+pub use acl::powershell;
 mod diagnostics;
 mod install;
+#[cfg(windows)]
+#[doc(hidden)]
+pub mod native_acl;
 pub use diagnostics::{default_package_root, diagnostics, diagnostics_async, native_entrypoint, DiagnosticReport};
 pub use install::{install_remote_script, registry_digest, reject_symlink_tree, InstallOptions, InstallResult};
 pub const CONFIG_VERSION: u8 = 1;

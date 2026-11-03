@@ -442,3 +442,191 @@ fn diagnostic_package_and_config_evidence_stays_distinct_from_live_readiness() {
     assert_eq!(missing["secretPermissions"], "unavailable");
     assert_eq!(missing["bridgeConfigured"], false);
 }
+
+/// Windows' own reading of Kumi's shape (`lifecycle::delivery::native_acl`) held to the bridge's PowerShell check, on the shapes a DACL can
+/// take: whatever the fast path calls owner-only the check passes, and the files Kumi makes take the fast path.
+#[cfg(windows)]
+mod windows_acl_shapes {
+    use ableton_mcp_server::lifecycle::delivery::{
+        native_acl::{
+            is_kumis_shape, make_kumis_shape,
+            shapes::{own, own_mine, write, write_raw, Ace, Whose, FULL, INHERITABLE, INHERITED, INHERIT_ONLY},
+        },
+        powershell,
+    };
+    use std::path::{Path, PathBuf};
+
+    const EVERYONE: &str = "S-1-1-0";
+    const ADMINISTRATORS: &str = "S-1-5-32-544";
+    const READ: u32 = 0x0012_0089;
+    const WRITE: u32 = 0x0012_0116;
+    const GENERIC_ALL: u32 = 0x1000_0000;
+
+    fn allow(flags: u32, mask: u32, whose: Whose) -> Ace {
+        Ace { allow: true, flags, mask, whose }
+    }
+
+    #[test]
+    fn the_fast_path_says_owner_only_only_where_the_powershell_check_does() {
+        let folder = tempfile::tempdir().unwrap();
+        // A folder that hands nothing down, so an unprotected DACL holds only what's written on it.
+        write(folder.path(), Some(&[allow(0, FULL, Whose::Me)]), true);
+        let made = |name: &str| {
+            let path = folder.path().join(name);
+            std::fs::write(&path, "{}").unwrap();
+            own_mine(&path);
+            path
+        };
+        let in_temp = tempfile::NamedTempFile::new().unwrap();
+        // (name, file, the check's code where the shape fixes it)
+        let mut shapes: Vec<(&str, PathBuf, Option<i32>)> = vec![("a new file in TEMP", in_temp.path().to_path_buf(), None)];
+        let natively = made("natively.json");
+        make_kumis_shape(&natively).unwrap();
+        shapes.push(("made natively", natively, Some(0)));
+        let scripted = made("scripted.json");
+        powershell::secure(&scripted).unwrap();
+        shapes.push(("made by SECURE_FILE", scripted, Some(0)));
+        let cases: Vec<(&str, Option<Vec<Ace>>, bool, Option<i32>)> = vec![
+            ("Kumi's shape, written raw", Some(vec![allow(0, FULL, Whose::Me)]), true, Some(0)),
+            ("a second rule, for everyone", Some(vec![allow(0, FULL, Whose::Me), allow(0, READ, Whose::Sid(EVERYONE))]), true, Some(4)),
+            (
+                "two rules for you that add up to full control",
+                Some(vec![allow(0, READ, Whose::Me), allow(0, FULL & !READ, Whose::Me)]),
+                true,
+                None,
+            ),
+            // Windows tidies a file's ACEs as it writes them (flags dropped, generic rights mapped): the check decides.
+            ("its one rule inherited", Some(vec![allow(INHERITED, FULL, Whose::Me)]), true, None),
+            ("its one rule inheritable", Some(vec![allow(INHERITABLE, FULL, Whose::Me)]), true, None),
+            ("its one rule inherit-only", Some(vec![allow(INHERITABLE | INHERIT_ONLY, FULL, Whose::Me)]), true, None),
+            ("generic rights in place of full control", Some(vec![allow(0, GENERIC_ALL, Whose::Me)]), true, None),
+            ("full control and generic rights besides", Some(vec![allow(0, FULL | GENERIC_ALL, Whose::Me)]), true, None),
+            ("read and write, not full control", Some(vec![allow(0, READ | WRITE, Whose::Me)]), true, Some(8)),
+            ("a deny rule", Some(vec![Ace { allow: false, flags: 0, mask: FULL, whose: Whose::Me }]), true, Some(7)),
+            ("a rule for everyone alone", Some(vec![allow(0, FULL, Whose::Sid(EVERYONE))]), true, Some(5)),
+            ("not protected", Some(vec![allow(0, FULL, Whose::Me)]), false, Some(3)),
+            ("an empty DACL", Some(vec![]), true, Some(4)),
+            ("a null DACL", None, true, None),
+        ];
+        for (n, (name, aces, protected, expected)) in cases.into_iter().enumerate() {
+            let path = made(&format!("case-{n}.json"));
+            write(&path, aces.as_deref(), protected);
+            shapes.push((name, path, expected));
+        }
+        // Written whole, flags kept: an inherited ACE in a protected DACL, and an inherit-only one.
+        for (name, flags, expected) in [
+            ("its one rule marked inherited, written whole", INHERITED, Some(6)),
+            ("its one rule inherit-only, written whole", INHERITABLE | INHERIT_ONLY, None),
+        ] {
+            let path = made(&format!("{}.json", name.replace([' ', ','], "-")));
+            write_raw(&path, &[allow(flags, FULL, Whose::Me)]);
+            shapes.push((name, path, expected));
+        }
+        // Owned by Administrators, where this account may hand it over: CI's elevated runners can.
+        let handed = made("handed-over.json");
+        write(&handed, Some(&[allow(0, FULL, Whose::Me)]), true);
+        if own(&handed, ADMINISTRATORS) {
+            shapes.push(("owned by Administrators", handed, Some(2)));
+        } else {
+            assert!(std::env::var_os("CI").is_none(), "this account couldn't hand the file to Administrators");
+            println!("skipped: owned by Administrators (this account may not hand a file over)");
+        }
+        // Every shape in one PowerShell, the same check as the one `windows_owner_only` runs file by file (held to it on
+        // three of them), then the whole matrix before any assertion.
+        let paths: Vec<&Path> = shapes.iter().map(|(_, path, _)| path.as_path()).collect();
+        let codes = powershell::checks(&paths);
+        assert_eq!(codes.len(), shapes.len(), "one code a file: {codes:?}");
+        for at in [0, 1, shapes.len() - 1] {
+            assert_eq!(powershell::check(paths[at]), codes[at], "{}: one run a file says what the batch does", shapes[at].0);
+        }
+        let rows: Vec<_> =
+            shapes.iter().zip(&codes).map(|((name, path, expected), code)| (*name, is_kumis_shape(path), *code, *expected)).collect();
+        let said = rows
+            .iter()
+            .map(|(name, fast, check, _)| format!("{name}: fast path {fast}, PowerShell check {check}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        println!("{said}");
+        // Each file gets back a DACL that lets this account remove it (a deny, an empty or an inherit-only DACL leaves it
+        // none), so the folder goes when the test ends.
+        for (_, path, _) in &shapes {
+            write(path, Some(&[allow(0, FULL, Whose::Me)]), true);
+        }
+        for (name, fast, check, expected) in &rows {
+            assert!(!fast || *check == 0, "{name}: the fast path passed what the check refuses\n{said}");
+            if let Some(expected) = expected {
+                assert_eq!(check, expected, "{name}: the shape isn't what it says\n{said}");
+                assert_eq!(*fast, *expected == 0, "{name}: Kumi's own shape takes the fast path, and only it\n{said}");
+            }
+        }
+    }
+
+    /// A file the fast path takes by its own path goes to the PowerShell check by any other way to it: a share, a drive
+    /// mapped to one, a junction or a link on the way. Nothing is written there either.
+    #[test]
+    fn the_fast_path_leaves_shares_and_links_to_the_powershell_check() {
+        let folder = tempfile::tempdir().unwrap();
+        let file = folder.path().join("auth.json");
+        std::fs::write(&file, "{}").unwrap();
+        make_kumis_shape(&file).unwrap();
+        assert!(is_kumis_shape(&file), "the file itself takes the fast path");
+        let local = file.display().to_string();
+        let (letter, rest) = local.split_once(":\\").unwrap();
+        for shared in [format!(r"\\localhost\{letter}$\{rest}"), format!(r"\\?\UNC\localhost\{letter}$\{rest}")] {
+            assert!(!is_kumis_shape(Path::new(&shared)), "{shared}");
+            assert!(make_kumis_shape(Path::new(&shared)).is_err(), "nothing written by a share's path: {shared}");
+        }
+        // The same file by a drive-relative path, from its folder: the drive's working folder is the test's own, and goes
+        // back to what it was (Windows can't remove a process's working folder, and other tests start from it).
+        struct Back(PathBuf);
+        impl Drop for Back {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.0);
+            }
+        }
+        let back = Back(std::env::current_dir().unwrap());
+        std::env::set_current_dir(folder.path()).unwrap();
+        let relative = PathBuf::from(format!("{letter}:auth.json"));
+        let (reached, fast, written) = (relative.is_file(), is_kumis_shape(&relative), make_kumis_shape(&relative).is_ok());
+        drop(back);
+        assert!(reached, "the drive-relative path reaches the file");
+        assert!(!fast && !written, "a drive-relative path goes to PowerShell");
+        // A drive mapped to that share, which Windows calls remote: CI's runners can map one.
+        let free = ('G'..='Y').rev().find(|drive| !Path::new(&format!("{drive}:\\")).exists());
+        let mapped = free.filter(|drive| {
+            std::process::Command::new("net")
+                .args(["use", &format!("{drive}:"), &format!(r"\\localhost\{letter}$")])
+                .output()
+                .is_ok_and(|made| made.status.success())
+        });
+        match mapped {
+            Some(drive) => {
+                let through = PathBuf::from(format!(r"{drive}:\{rest}"));
+                let reached = through.is_file();
+                let (fast, written) = (is_kumis_shape(&through), make_kumis_shape(&through).is_ok());
+                let _ = std::process::Command::new("net").args(["use", &format!("{drive}:"), "/delete", "/y"]).output();
+                assert!(reached, "the mapped drive reaches the file");
+                assert!(!fast && !written, "a mapped drive goes to PowerShell");
+            }
+            None => {
+                assert!(std::env::var_os("CI").is_none(), "this runner couldn't map a drive to its own share");
+                println!("skipped: a mapped drive (no drive could be mapped)");
+            }
+        }
+        // Through a junction to its folder, which needs no privilege to make.
+        let parent = tempfile::tempdir().unwrap();
+        let junction = parent.path().join("through");
+        let made = std::process::Command::new("cmd").args(["/c", "mklink", "/J"]).arg(&junction).arg(folder.path()).output().unwrap();
+        assert!(made.status.success(), "{}", String::from_utf8_lossy(&made.stdout));
+        let linked = junction.join("auth.json");
+        assert!(linked.is_file());
+        assert!(!is_kumis_shape(&linked), "{}", linked.display());
+        assert!(make_kumis_shape(&linked).is_err(), "nothing written through a junction");
+        // A link to the file itself, where this account may make one.
+        let link = parent.path().join("link.json");
+        if std::os::windows::fs::symlink_file(&file, &link).is_ok() {
+            assert!(!is_kumis_shape(&link), "{}", link.display());
+        }
+        let _ = std::fs::remove_dir(&junction);
+    }
+}
