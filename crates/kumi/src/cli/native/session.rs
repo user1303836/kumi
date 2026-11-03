@@ -63,6 +63,9 @@ impl Kernel for UnavailableKernel {
 /// again after `look_ms`, without counting against `tries`: the port opens as Live's Remote Script starts, about a
 /// second before Live answers through it. A look is a connect to that port on this computer, which sends nothing: a
 /// Remote Script not listening yet refuses it, and one listening drops it at once.
+///
+/// Why the DAW couldn't start Kumi's bridge is looked for every `look_ms` all the while: it's said once it has been seen
+/// a while, and a Live just opened may not have logged its own start yet, its log still ending with the start before.
 struct Pace {
     look_ms: u64,
     quick_ms: u64,
@@ -203,6 +206,8 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
     let mut tries = 0;
     let mut next: Option<std::time::Instant> = Some(std::time::Instant::now());
     let mut failure_said: Option<String> = None;
+    // When a failed start is next looked for: at the usual pace, quick looks or not.
+    let mut next_failure = std::time::Instant::now();
     // When the DAW was seen open, or its port began to answer: looks come quickly for a while from then.
     let mut seen_open = open.then(std::time::Instant::now);
     let quick_since =
@@ -225,10 +230,13 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
                 emit(SessionEvent::Notice { message: words.starting.into() });
             }
         }
-        if let Some(failure) = failure().await.filter(|failure| failure_said.as_ref() != Some(failure)) {
-            said = true;
-            emit(SessionEvent::Notice { message: failure.clone() });
-            failure_said = Some(failure);
+        if std::time::Instant::now() >= next_failure {
+            next_failure = std::time::Instant::now() + std::time::Duration::from_millis(pace.look_ms);
+            if let Some(failure) = failure().await.filter(|failure| failure_said.as_ref() != Some(failure)) {
+                said = true;
+                emit(SessionEvent::Notice { message: failure.clone() });
+                failure_said = Some(failure);
+            }
         }
         if !said && began.is_some_and(|at| at.elapsed() >= std::time::Duration::from_millis(pace.hold_ms)) {
             said = true;
@@ -1851,6 +1859,39 @@ mod watch_tests {
         assert_eq!(watch_failing(false, &[None, None, None, held], 60_000).await, [live_words().unreachable, "the port is held"]);
         // Nothing found: as before.
         assert_eq!(watch_failing(true, &[None], 5).await, [live_words().starting, live_words().unreachable]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn while_looking_quickly_a_failed_start_is_looked_for_at_the_usual_pace() {
+        // Open as Kumi starts and not answering: a look every 10 ms for its first 600 ms, but why Live couldn't start the
+        // bridge is looked for every 200 ms, the usual pace. A failure is said once it's been seen a while, and a Live
+        // just opened may not have logged its own start yet, so quick looks don't make that while shorter.
+        let fake = Fake::new(u32::MAX);
+        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&fake))));
+        let emit: Rc<dyn Fn(SessionEvent)> = Rc::new(|_| {});
+        let (looks, reads) = (Rc::new(Cell::new(0u32)), Rc::new(Cell::new(0u32)));
+        let (looked, read) = (looks.clone(), reads.clone());
+        let watch = connect_when_daw_answers(
+            move || {
+                looked.set(looked.get() + 1);
+                async { false }
+            },
+            || async { true },
+            move || {
+                read.set(read.get() + 1);
+                async { None::<String> }
+            },
+            live_words(),
+            None,
+            controller,
+            emit,
+            Rc::new(Cell::new(true)),
+            false,
+            Pace { look_ms: 200, quick_ms: 10, quick_for_ms: 600, retry_ms: 60_000, tries: 10, looks: 10_000, hold_ms: 60_000 },
+        );
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(550), watch).await;
+        assert!(looks.get() >= 15, "quick looks: {} in 550 ms", looks.get());
+        assert!((1..=3).contains(&reads.get()), "looked for at the usual pace: {} times in 550 ms", reads.get());
     }
 
     /// A screen that takes the DAW handed to it the `takes`th time (busy before that).
