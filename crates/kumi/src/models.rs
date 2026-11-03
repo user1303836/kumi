@@ -533,7 +533,27 @@ impl ModelControl {
             let saved = store.get(provider.row().credential).await.ok().flatten();
             let who = model_lists::identity(provider, saved.as_ref(), &env);
             let signal = Some(abort::any([abort::timeout(15000), closed]));
-            let listed = list_models(provider, ListOptions { store, env: Some(env), fetch, signal }).await?;
+            let listed = match list_models(provider, ListOptions { store, env: Some(env), fetch, signal }).await {
+                Ok(listed) => listed,
+                Err(error) => {
+                    // The provider refuses this sign-in: a list kept for it mustn't hide that. It goes, and the next look
+                    // asks again and says so, as without one.
+                    let refused = error.kumi().is_some_and(|failure| failure.kind == FailureKind::Auth);
+                    if let Some(inner) = inner.upgrade().filter(|inner| refused && inner.state.borrow().signed == signed) {
+                        let id = provider.as_str();
+                        {
+                            let mut state = inner.state.borrow_mut();
+                            if !state.listed.contains(id) {
+                                state.catalog.remove(id);
+                            }
+                        }
+                        if let Some(lists) = &lists {
+                            lists.forget(&[id]);
+                        }
+                    }
+                    return Err(error);
+                }
+            };
             let Some(inner) = inner.upgrade() else { return Ok(listed) };
             if inner.state.borrow().signed == signed {
                 let id = provider.as_str();

@@ -587,15 +587,17 @@ fn options_like(f: &Fixture, fetch: Rc<dyn Fetch>) -> ModelControlOptions {
         lists: None,
     }
 }
-/// ChatGPT's model list as the test sets it now, with the asks for it counted. While held, an ask waits.
+/// ChatGPT's model list as the test sets it now, with the asks for it counted. While held, an ask waits; while
+/// refused, it's answered as a sign-in ChatGPT no longer takes.
 struct Listing {
     models: RefCell<Value>,
     asks: Cell<usize>,
     held: Cell<bool>,
+    refused: Cell<bool>,
 }
 impl Listing {
     fn new(models: Value) -> Rc<Self> {
-        Rc::new(Self { models: RefCell::new(models), asks: Cell::new(0), held: Cell::new(false) })
+        Rc::new(Self { models: RefCell::new(models), asks: Cell::new(0), held: Cell::new(false), refused: Cell::new(false) })
     }
 }
 #[async_trait(?Send)]
@@ -607,6 +609,9 @@ impl Fetch for Listing {
         self.asks.set(self.asks.get() + 1);
         while self.held.get() {
             tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+        if self.refused.get() {
+            return Ok(Response::json_response(401, json!({"error": {"message": "Your authentication token has expired."}})));
         }
         Ok(Response::json_response(200, json!({"models": self.models.borrow().clone()})))
     }
@@ -768,6 +773,28 @@ async fn a_sign_in_that_changes_lets_go_of_its_kept_lists() {
             assert!(kept()["openai-codex"].is_object());
             assert!(control.sign_out(ProviderId::parse("openai-codex").unwrap()).await.unwrap());
             assert!(kept()["openai-codex"].is_null(), "{}", kept());
+        })
+        .await;
+}
+/// A kept list never hides a sign-in the provider now refuses: once its refusal comes in behind the kept list, the kept
+/// list goes, and the next look asks again and says so (`/model`'s "refused"), as without one.
+#[tokio::test(flavor = "current_thread")]
+async fn a_kept_list_never_hides_a_refused_sign_in() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let listing = Listing::new(json!([row("gpt-6-astra", true, true)]));
+            let (first, store) = run_in(folder.path(), listing.clone());
+            sign_in_chatgpt(&store).await;
+            first.models("openai-codex", false).await.unwrap();
+            listing.refused.set(true);
+            let (next, _) = run_in(folder.path(), listing.clone());
+            assert_eq!(slugs(&next.models("openai-codex", false).await.unwrap()), ["gpt-6-astra"], "kept, at once");
+            let file = folder.path().join("cache").join("model-lists.json");
+            let kept = || serde_json::from_str::<Value>(&std::fs::read_to_string(&file).unwrap()).unwrap()["lists"]["openai-codex"].clone();
+            until("the refusal let go of the kept list", || kept().is_null()).await;
+            let error = next.models("openai-codex", false).await.unwrap_err();
+            assert_eq!(error.kumi().map(|failure| failure.kind), Some(FailureKind::Auth), "{error:?}");
         })
         .await;
 }
