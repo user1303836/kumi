@@ -21,7 +21,7 @@ use kumi_agent::{
         session_log::SessionLog,
         store_backed::{SqliteMemoryStore, SqlitePlaybookStore, SqliteTechniqueStore},
         store_client::StoreClient,
-        threaded::{Build, Built, Threaded},
+        threaded::{Build, Built, Starting, Threaded},
     },
     *,
 };
@@ -307,6 +307,13 @@ struct Recipe {
     absent_words: Option<String>,
     /// Where the session finds the DAW's bridge: first-run setup sets it once the bridge is in place.
     bridge: Arc<Mutex<Option<String>>>,
+}
+
+/// Where the session is being built: on a thread of its own, started already (with what its database said as it opened,
+/// to come), or here, from its recipe, once this thread gets to it (a test's stand-ins).
+enum Building {
+    Thread(Starting, tokio::sync::oneshot::Receiver<Option<String>>),
+    Here(Recipe),
 }
 
 /// The session, built where it lives from `recipe` (and a test's `answers`), what it says going to `emit`: its stores,
@@ -931,12 +938,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         absent_words,
         bridge: session_bridge.clone(),
     };
-    let (session, threaded, mut ending, database_notice): (
-        Rc<dyn SessionHandle>,
-        Option<Rc<Threaded>>,
-        Option<LocalBoxFuture<'static, ()>>,
-        Option<String>,
-    ) = if io.threaded && answers.is_empty() {
+    let building = if io.threaded && answers.is_empty() {
         let (said, heard) = tokio::sync::oneshot::channel();
         let build: Build = Box::new(move |emit| {
             async move {
@@ -946,13 +948,48 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             }
             .boxed_local()
         });
-        let threaded = Threaded::spawn(build).await?;
-        let notice = heard.await.ok().flatten();
-        (threaded.clone(), Some(threaded), None, notice)
+        Building::Thread(Threaded::start(build)?, heard)
     } else {
-        let (Built { session, ending }, notice) = build_session(recipe, answers.clone(), to_screen).await?;
-        (session, None, ending, notice)
+        Building::Here(recipe)
     };
+    // While the session's thread builds it, this one does what needs no session: it asks the terminal what it is (the
+    // answer crosses the terminal meanwhile; a terminal its environment keeps quiet, the Linux console or a dumb one,
+    // isn't asked, nor one whose producer said not to, `KUMI_PROBE=off`) and reads the input history, each line redacted
+    // again with the keys known now. What either says waits for the session: a session that can't start is said first,
+    // as before.
+    let platform = kumi_types::system::platform();
+    let profile = crate::tui::alerts::detect_terminal_profile(&io.env, platform);
+    let probes = print.is_none()
+        && full_screen
+        && io.probe
+        && profile.status
+        && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off");
+    // (`biased`: the questions go out first, then the history is read while they're answered)
+    let (probed, history) = tokio::join!(
+        biased;
+        async { if probes { Some(crate::tui::probe::probe(&io.input, &io.out, crate::tui::probe::BUDGET).await) } else { None } },
+        async {
+            load_input_history_file(&io.env)
+                .map(|file| Rc::new(RefCell::new(open_input_history(Some(file.into()), secrets.clone()))))
+        },
+    );
+    let (session, threaded, mut ending, database_notice): (
+        Rc<dyn SessionHandle>,
+        Option<Rc<Threaded>>,
+        Option<LocalBoxFuture<'static, ()>>,
+        Option<String>,
+    ) = match building {
+        Building::Thread(starting, heard) => {
+            let threaded = starting.ready().await?;
+            let notice = heard.await.ok().flatten();
+            (threaded.clone(), Some(threaded), None, notice)
+        }
+        Building::Here(recipe) => {
+            let (Built { session, ending }, notice) = build_session(recipe, answers.clone(), to_screen).await?;
+            (session, None, ending, notice)
+        }
+    };
+    let history = history?;
     // The DAW's first-run setup reaches the session as one of its own, on this thread.
     let setup_session: Rc<dyn SetupSession> =
         Rc::new(SessionForSetup { session: Rc::downgrade(&session), bridge: live_config.clone(), shared: session_bridge });
@@ -1047,7 +1084,6 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             Rc::new(move || update_after.set(true))
         },
     };
-    let history = Rc::new(RefCell::new(open_input_history(Some(load_input_history_file(&io.env)?.into()), secrets.clone())));
     // What's new is for someone reading it: the full screen, or plain lines at a terminal (a screen reader).
     // A script piping Kumi neither sees it nor uses it up.
     let whats_new = if full_screen || io.input.is_tty() {
@@ -1074,13 +1110,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         Rc::new(front)
     } else if full_screen {
         let mut options = TuiOptions::new(session.clone(), io.input.clone(), io.out.clone(), mode);
-        // What the terminal is, asked once as the screen starts: its answers come before what its environment says of
-        // it, which stays the fallback. A terminal its environment keeps quiet (the Linux console, a dumb one) isn't asked,
-        // nor one whose producer said not to (`KUMI_PROBE=off`).
-        let platform = kumi_types::system::platform();
-        let profile = crate::tui::alerts::detect_terminal_profile(&io.env, platform);
-        if io.probe && profile.status && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off") {
-            let probed = crate::tui::probe::probe(&io.input, &io.out, crate::tui::probe::BUDGET).await;
+        // What the terminal said of itself, asked once as the screen starts: its answers come before what its environment
+        // says of it, which stays the fallback.
+        if let Some(probed) = probed {
             let version = probed.answers.version.clone();
             options.terminal = Some(profile.answered(&probed.answers, &io.env, platform));
             let depth = crate::tui::style::detect_color_depth_here();

@@ -356,13 +356,33 @@ impl Threaded {
     /// The session `build` makes, on a thread of its own, once it's ready. Why not, when it couldn't be built, or its
     /// thread panicked or ended first.
     pub async fn spawn(build: Build) -> Result<Rc<Threaded>, RuntimeError> {
+        Threaded::start(build)?.ready().await
+    }
+    /// The thread that builds the session, started now: the front end's thread does what doesn't need the session
+    /// meanwhile, then waits for it with [`Starting::ready`].
+    pub fn start(build: Build) -> Result<Starting, RuntimeError> {
         hook_panics();
         let (down, down_rx) = mpsc::unbounded_channel();
-        let (back_tx, mut back) = mpsc::unbounded_channel();
+        let (back_tx, back) = mpsc::unbounded_channel();
         std::thread::Builder::new()
             .name("kumi-session".into())
             .spawn(move || session_thread(build, down_rx, back_tx))
             .map_err(|error| RuntimeError::plain(format!("its thread couldn't start: {error}")))?;
+        Ok(Starting { down, back })
+    }
+}
+
+/// A session's thread, started and building it ([`Threaded::start`]).
+pub struct Starting {
+    down: mpsc::UnboundedSender<Down>,
+    back: mpsc::UnboundedReceiver<Back>,
+}
+
+impl Starting {
+    /// The session, once its thread has built it. Why not, when it couldn't be built, or its thread panicked or ended
+    /// first.
+    pub async fn ready(self) -> Result<Rc<Threaded>, RuntimeError> {
+        let Starting { down, mut back } = self;
         let (capabilities, snapshot) = match back.recv().await {
             Some(Back::Hello { capabilities, snapshot }) => (capabilities, snapshot),
             Some(Back::Fatal(why)) => return Err(RuntimeError::plain(why)),
@@ -388,6 +408,9 @@ impl Threaded {
         tokio::task::spawn_local(pump(Rc::downgrade(&threaded), back, threaded.heard.clone(), ended));
         Ok(threaded)
     }
+}
+
+impl Threaded {
     /// Where the session's ending goes, when it ends on its own (its thread panicked, or ended unasked): what it said.
     /// Kumi ends then. One that ended already is said at once.
     pub fn on_fatal(&self, fatal: Rc<dyn Fn(String)>) {
