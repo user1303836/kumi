@@ -605,6 +605,19 @@ case!(esc_at_the_control_surface_says_how_kumi_connects, async {
     h.close().await;
 });
 
+case!(esc_while_the_bridge_couldnt_start_doesnt_ask_for_the_control_surface, async {
+    let live = FakeLive::new(false);
+    *live.failure.borrow_mut() =
+        Some("Live has AbletonMcpBridge as a Control Surface but couldn't start it: Loopback holds port 9765.".into());
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.wait_for("didn't start").await;
+    h.type_text("\x1b").await;
+    wait_for_said(&h, "Kumi connects to Live by itself once Live answers.").await;
+    assert!(!said(&h).contains("set a Control Surface"), "{}", rows(&h));
+    h.close().await;
+});
+
 case!(a_default_model_is_looked_for_once, async {
     // Nothing to choose from: setup asks to sign in, having looked once.
     let models = unsigned();
@@ -1043,7 +1056,7 @@ case!(a_control_surface_live_couldnt_start_says_why_in_place_of_asking_for_it, a
     let live = FakeLive::new(false);
     *live.menu.borrow_mut() = Some("Settings is in Live's Live menu (⌘,).".into());
     live.surface_ms.set(300);
-    let why = "Live has AbletonMcpBridge as a Control Surface, but it couldn't start: Loopback holds port 9765, which it needs. Quit Loopback, then restart Live. Kumi connects by itself once Live answers.";
+    let why = "Live has AbletonMcpBridge as a Control Surface but couldn't start it: Loopback holds port 9765, which the bridge needs. Quit Loopback, then restart Live. Kumi connects by itself once Live answers.";
     *live.failure.borrow_mut() = Some(why.into());
     let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
     h.start().await;

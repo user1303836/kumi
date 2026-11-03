@@ -153,7 +153,7 @@ fn run_acl(path: &Path, script: &str, timeout_ms: u64) -> Result<(), String> {
 }
 /// Gives the file a protected DACL with one rule, full control for you, and checks it took (Windows). Windows' own calls
 /// do it in a moment; when one of them fails, PowerShell's step runs, as it always did.
-fn make_owner_only(path: &Path) -> Result<(), String> {
+pub fn make_owner_only(path: &Path) -> Result<(), String> {
     #[cfg(windows)]
     if super::windows_acl::make_kumis_shape(path).is_ok() {
         return Ok(());

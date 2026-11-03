@@ -2,6 +2,7 @@
 //! and the Remote Script put in, brought up to date, rolled back and taken out, Kumi's Live Extension, Willington's
 //! bindings, Live's side of first-run setup), its part of the doctor and the report, and the answers its tests give.
 pub mod answers;
+pub mod bridge_files;
 pub mod bridge_setup;
 pub mod doctor;
 pub mod folders;

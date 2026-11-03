@@ -163,22 +163,27 @@ struct Seen {
     words: Option<String>,
 }
 static SEEN: Mutex<Option<Seen>> = Mutex::new(None);
-/// A failed start found while Live was closed, and when: the system isn't asked again about the same one for a while
-/// (the session's watch looks every 2 s while it isn't connected). A Live that opens soon logs a start of its own, which
-/// is asked about at once.
-static CLOSED: Mutex<Option<(Found, Instant)>> = Mutex::new(None);
-const CLOSED_LOOK: Duration = Duration::from_secs(10);
+/// A failed start found while Live was closed: the system isn't asked again about the same one (the session's watch
+/// looks every 2 s, for an hour, while it isn't connected). A Live that opens logs a start of its own at once, which is
+/// another failed start, asked about anew, or none.
+static CLOSED: Mutex<Option<Found>> = Mutex::new(None);
 /// How long a failed start is seen before it's said. A Live that has just opened may not have logged its start yet, and
 /// its log then still ends with the start before (whose bridge may have failed): by the next look, a second or two
 /// later, it has.
 const SETTLED: Duration = Duration::from_secs(1);
 
-/// Why the open Live couldn't start the bridge the last time it tried, and its fix: None when it started, Live isn't
-/// open (a Live killed leaves no end to its start in the log, so only an open Live's start is the one running now), its
-/// log doesn't say, or the failure was first seen less than `settled` ago. Said once it's settled, and the same words
-/// after that for the same failure, without asking the system again.
+/// Why the open Live couldn't start the bridge the last time it tried, and its fix: None when it started, Live wasn't
+/// open when the failure was first seen (a Live killed leaves no end to its start in the log, so only an open Live's
+/// start is the one running now), its log doesn't say, or the failure was first seen less than `settled` ago. Once said,
+/// the same words come back for the same failure until Live logs another start, without asking the system again: a Live
+/// quit since isn't looked for, and the words say to restart it.
 pub(crate) async fn start_failure(env: &Env, root: &str, run: Run, platform: &str) -> Option<String> {
     start_failure_settled(env, root, run, platform, SETTLED).await
+}
+/// The same, from Live's own preferences folder, said at once: for a look made once (the doctor's).
+pub(crate) async fn start_failure_now(env: &Env, platform: &str) -> Option<String> {
+    let root = super::folders::live_preferences_dir(env);
+    start_failure_settled(env, &root, kumi_daw::process::default_run(), platform, Duration::ZERO).await
 }
 async fn start_failure_settled(env: &Env, root: &str, run: Run, platform: &str, settled: Duration) -> Option<String> {
     let found = last_failed(root).await?;
@@ -192,13 +197,11 @@ async fn start_failure_settled(env: &Env, root: &str, run: Run, platform: &str, 
         Some((_, Some(words))) => return Some(words),
         Some((since, None)) => since,
         None => {
-            let closed =
-                |held: &Option<(Found, Instant)>| held.as_ref().is_some_and(|(seen, at)| *seen == found && at.elapsed() < CLOSED_LOOK);
-            if closed(&CLOSED.lock().unwrap_or_else(|e| e.into_inner())) {
+            if CLOSED.lock().unwrap_or_else(|e| e.into_inner()).as_ref() == Some(&found) {
                 return None;
             }
             if !is_live_running_on(run, platform, env).await {
-                *CLOSED.lock().unwrap_or_else(|e| e.into_inner()) = Some((found, Instant::now()));
+                *CLOSED.lock().unwrap_or_else(|e| e.into_inner()) = Some(found);
                 return None;
             }
             let since = Instant::now();
@@ -270,7 +273,7 @@ fn quoted(text: &str) -> String {
 /// What Kumi says of a failed start, from the exception Live logged, who holds the bridge's ports now (`held`, looked
 /// up for a port in use), and whether this is Windows. Each says only what the exception says, then the fix.
 pub(crate) fn words(failed: &Failed, held: &[(u16, PortOwner)], windows: bool) -> String {
-    const LEAD: &str = "Live has AbletonMcpBridge as a Control Surface, but it couldn't start";
+    const LEAD: &str = "Live has AbletonMcpBridge as a Control Surface but couldn't start it";
     const AGAIN: &str = "Kumi connects by itself once Live answers.";
     const REPORT: &str = "If Live says this again, kumi report collects what's needed for a bug report.";
     let exception = quoted(&failed.exception);
@@ -283,19 +286,23 @@ pub(crate) fn words(failed: &Failed, held: &[(u16, PortOwner)], windows: bool) -
                     failed.slots
                 ),
                 Some((port, Some(name))) if is_live(&name) => {
-                    format!("{LEAD}: Live itself still had port {port}, which it needs. Restart Live. {AGAIN}")
+                    format!("{LEAD}: Live itself still had port {port}, which the bridge needs. Restart Live. {AGAIN}")
                 }
                 Some((port, Some(name))) => {
-                    format!("{LEAD}: {name} holds port {port}, which it needs. Quit {name}, then restart Live. {AGAIN}")
+                    format!("{LEAD}: {name} holds port {port}, which the bridge needs. Quit {name}, then restart Live. {AGAIN}")
                 }
                 Some((port, None)) => format!(
-                    "{LEAD}: another program holds port {port}, which it needs. Quit it, then restart Live ({} names it). {AGAIN}",
-                    if windows { format!("netstat -ano | findstr :{port}") } else { format!("lsof -nP -iTCP:{port} -sTCP:LISTEN") }
+                    "{LEAD}: another program holds port {port}, which the bridge needs. Quit it, then restart Live ({}). {AGAIN}",
+                    if windows {
+                        format!("netstat -ano | findstr :{port} shows its PID; Task Manager's Details tab names it")
+                    } else {
+                        format!("lsof -nP -iTCP:{port} -sTCP:LISTEN names it")
+                    }
                 ),
                 None => format!("{LEAD}: its port was in use as Live started it ({exception}). Restart Live. {AGAIN}"),
             }
         }
-        Cause::PortRefused => format!("{LEAD}: Windows didn't let it have its port ({exception}). Restart Live. {REPORT}"),
+        Cause::PortRefused => format!("{LEAD}: Windows didn't let the bridge have its port ({exception}). Restart Live. {REPORT}"),
         Cause::Files => {
             let message = failed.exception.split_once(": ").map_or(failed.exception.as_str(), |(_, message)| message);
             // On Windows the bridge checks its files' owner and permissions with PowerShell, and a check that can't
@@ -303,7 +310,7 @@ pub(crate) fn words(failed: &Failed, held: &[(u16, PortOwner)], windows: bool) -
             let powershell = windows
                 && ["reference is missing or unsafe", "must be an existing regular file"].iter().any(|said| message.contains(said));
             format!(
-                "{LEAD}: its check of Kumi's bridge files said {}. Quit Live and run kumi bridge to put them back, then open Live. {}",
+                "{LEAD}: the bridge's check of its files said {}. Quit Live and run kumi bridge to put them back, then open Live. {}",
                 quoted(message),
                 if powershell {
                     "If Live says this again, Windows may be keeping the bridge from running PowerShell, which it checks the files with: kumi report collects what's needed for a bug report."
@@ -499,7 +506,7 @@ mod tests {
         assert_eq!(start_failure_settled(&env, root, open.clone(), "darwin", settled).await, None, "still settling");
         tokio::time::sleep(settled).await;
         let said = start_failure_settled(&env, root, open.clone(), "darwin", settled).await.unwrap();
-        assert!(said.contains("its check of Kumi's bridge files said “bridge configuration reference is missing or unsafe”"), "{said}");
+        assert!(said.contains("the bridge's check of its files said “bridge configuration reference is missing or unsafe”"), "{said}");
         assert_eq!(start_failure_settled(&env, root, open, "darwin", settled).await, Some(said), "the same words");
         assert_eq!(asked.borrow().as_slice(), ["pgrep"], "the system asked once");
     }
@@ -509,11 +516,11 @@ mod tests {
         let port = |owner: PortOwner, slots| words(&Failed { exception: PORT_IN_USE.into(), slots }, &[(9765, owner), (9766, None)], false);
         assert_eq!(
             port(Some(Some("Loopback".into())), 1),
-            "Live has AbletonMcpBridge as a Control Surface, but it couldn't start: Loopback holds port 9765, which it needs. Quit Loopback, then restart Live. Kumi connects by itself once Live answers."
+            "Live has AbletonMcpBridge as a Control Surface but couldn't start it: Loopback holds port 9765, which the bridge needs. Quit Loopback, then restart Live. Kumi connects by itself once Live answers."
         );
         assert_eq!(
             port(Some(None), 1),
-            "Live has AbletonMcpBridge as a Control Surface, but it couldn't start: another program holds port 9765, which it needs. Quit it, then restart Live (lsof -nP -iTCP:9765 -sTCP:LISTEN names it). Kumi connects by itself once Live answers."
+            "Live has AbletonMcpBridge as a Control Surface but couldn't start it: another program holds port 9765, which the bridge needs. Quit it, then restart Live (lsof -nP -iTCP:9765 -sTCP:LISTEN names it). Kumi connects by itself once Live answers."
         );
         // Live itself: the bridge in two slots, or an earlier start of it in the same Live.
         assert_eq!(
@@ -522,20 +529,23 @@ mod tests {
         );
         assert_eq!(
             port(Some(Some("Ableton Live 12 Suite".into())), 1),
-            "Live has AbletonMcpBridge as a Control Surface, but it couldn't start: Live itself still had port 9765, which it needs. Restart Live. Kumi connects by itself once Live answers."
+            "Live has AbletonMcpBridge as a Control Surface but couldn't start it: Live itself still had port 9765, which the bridge needs. Restart Live. Kumi connects by itself once Live answers."
         );
         // Free again by now.
         assert_eq!(
             port(None, 1),
-            "Live has AbletonMcpBridge as a Control Surface, but it couldn't start: its port was in use as Live started it (“OSError: [Errno 48] Address already in use”). Restart Live. Kumi connects by itself once Live answers."
+            "Live has AbletonMcpBridge as a Control Surface but couldn't start it: its port was in use as Live started it (“OSError: [Errno 48] Address already in use”). Restart Live. Kumi connects by itself once Live answers."
         );
         let windows_port =
             words(&Failed { exception: "OSError: [WinError 10048] Only one usage".into(), slots: 1 }, &[(9765, Some(None))], true);
-        assert!(windows_port.contains("(netstat -ano | findstr :9765 names it)"), "{windows_port}");
+        assert!(
+            windows_port.contains("(netstat -ano | findstr :9765 shows its PID; Task Manager's Details tab names it)"),
+            "{windows_port}"
+        );
         let files = |message: &str, windows| words(&Failed { exception: format!("ValueError: {message}"), slots: 1 }, &[], windows);
         assert_eq!(
             files("bridge configuration reference is missing or unsafe", false),
-            "Live has AbletonMcpBridge as a Control Surface, but it couldn't start: its check of Kumi's bridge files said “bridge configuration reference is missing or unsafe”. Quit Live and run kumi bridge to put them back, then open Live. Kumi connects by itself once Live answers."
+            "Live has AbletonMcpBridge as a Control Surface but couldn't start it: the bridge's check of its files said “bridge configuration reference is missing or unsafe”. Quit Live and run kumi bridge to put them back, then open Live. Kumi connects by itself once Live answers."
         );
         // On Windows that check also fails when PowerShell couldn't run it, which putting the files back can't fix.
         assert!(files("bridge configuration reference is missing or unsafe", true).ends_with(
@@ -544,15 +554,15 @@ mod tests {
         assert!(files("bridge secret is invalid", true).ends_with("Kumi connects by itself once Live answers."), "no owner check in it");
         assert_eq!(
             words(&Failed { exception: "OSError: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions".into(), slots: 1 }, &[], true),
-            "Live has AbletonMcpBridge as a Control Surface, but it couldn't start: Windows didn't let it have its port (“OSError: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions”). Restart Live. If Live says this again, kumi report collects what's needed for a bug report."
+            "Live has AbletonMcpBridge as a Control Surface but couldn't start it: Windows didn't let the bridge have its port (“OSError: [WinError 10013] An attempt was made to access a socket in a way forbidden by its access permissions”). Restart Live. If Live says this again, kumi report collects what's needed for a bug report."
         );
         assert_eq!(
             words(&Failed { exception: "ModuleNotFoundError: No module named 'AbletonMcpBridge.ableton_mcp_remote_script'".into(), slots: 1 }, &[], false),
-            "Live has AbletonMcpBridge as a Control Surface, but it couldn't start: Kumi's bridge files in Live look incomplete (“ModuleNotFoundError: No module named 'AbletonMcpBridge.ableton_mcp_remote_script'”). Quit Live and run kumi bridge to put them back, then open Live. Kumi connects by itself once Live answers."
+            "Live has AbletonMcpBridge as a Control Surface but couldn't start it: Kumi's bridge files in Live look incomplete (“ModuleNotFoundError: No module named 'AbletonMcpBridge.ableton_mcp_remote_script'”). Quit Live and run kumi bridge to put them back, then open Live. Kumi connects by itself once Live answers."
         );
         assert_eq!(
             words(&Failed { exception: "RuntimeError: something else".into(), slots: 1 }, &[], false),
-            "Live has AbletonMcpBridge as a Control Surface, but it couldn't start: “RuntimeError: something else”. Quit Live and run kumi bridge to put Kumi's bridge back, then open Live. If Live says this again, kumi report collects what's needed for a bug report."
+            "Live has AbletonMcpBridge as a Control Surface but couldn't start it: “RuntimeError: something else”. Quit Live and run kumi bridge to put Kumi's bridge back, then open Live. If Live says this again, kumi report collects what's needed for a bug report."
         );
         let long = words(&Failed { exception: format!("RuntimeError: {}", "x".repeat(400)), slots: 1 }, &[], false);
         assert!(long.contains(&format!("“RuntimeError: {}…”", "x".repeat(186))), "{long}");

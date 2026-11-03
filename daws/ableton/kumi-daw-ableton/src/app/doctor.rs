@@ -3,7 +3,7 @@
 //! its User Library, the bridge's ports, Developer Mode), and Kumi's hands in Live's menus.
 use super::folders::{find_bridge_config, live_user_library, read_bridge_server, remote_scripts_dir, BridgeServer};
 use super::{
-    answers::{ExtensionHost, Hands, LiveRunning, Lives, NodeVersions, PortOwners},
+    answers::{ExtensionHost, Hands, LiveRunning, Lives, NodeVersions, PortOwners, StartFailures},
     bridge_setup::is_live_running,
     live_app::{installed_lives, installed_with, runs_on, InstalledLive, MIN_LIVE_MAJOR},
     live_extension::*,
@@ -107,11 +107,16 @@ pub(crate) async fn bridge_checks(io: &DawIo, node: &Check) -> Vec<Check> {
             ))
         } else if !live.started {
             let current = server.version.as_ref().zip(bundled.as_ref()).is_some_and(|(installed, bundled)| !newer(bundled, installed));
-            checks.push(if node.status==CheckStatus::Fix{Check::note("The bridge didn't start; it needs Node 22 or 24 too",None)}else if current{Check::fix("Kumi's bridge couldn't reach Live",Some(format!("Open Live and choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI); if Live is showing a dialog, answer it first. Then: {} doctor",*KUMI)))}else{Check::fix("The bridge didn't start",Some(format!("{}, and bring Live's part up to date: quit Live, then run {} bridge. Then: {} doctor",if *INSTALLED{format!("Run {} to repair Kumi",*KUMI_REPAIR)}else{format!("Build it ({})",*KUMI_REPAIR)},*KUMI,*KUMI)))})
+            // Chosen already but failed to start, Live's log says why: that in place of asking for the Control Surface.
+            let failure = if node.status != CheckStatus::Fix && current { start_failure(io, system::platform()).await } else { None };
+            checks.push(if node.status==CheckStatus::Fix{Check::note("The bridge didn't start; it needs Node 22 or 24 too",None)}else if current{Check::fix("Kumi's bridge couldn't reach Live",Some(match failure { Some(failure) => format!("{failure} Then: {} doctor", *KUMI), None => format!("Open Live and choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI); if Live is showing a dialog, answer it first. Then: {} doctor",*KUMI)}))}else{Check::fix("The bridge didn't start",Some(format!("{}, and bring Live's part up to date: quit Live, then run {} bridge. Then: {} doctor",if *INSTALLED{format!("Run {} to repair Kumi",*KUMI_REPAIR)}else{format!("Build it ({})",*KUMI_REPAIR)},*KUMI,*KUMI)))})
         } else if live.connected != Some(true) {
+            let failure = start_failure(io, system::platform()).await;
             checks.push(Check::fix(
                 "Live isn't connected",
-                Some("Open Live and choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI)".into()),
+                Some(failure.unwrap_or_else(|| {
+                    "Open Live and choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI)".into()
+                })),
             ))
         } else {
             let location = format!(
@@ -377,6 +382,14 @@ fn live_checks(env: &Env, platform: &str, lives: &[InstalledLive], running: bool
         ));
     }
     checks
+}
+
+/// Why the open Live couldn't start its bridge the last time it tried, from its log, at once (the doctor looks once).
+async fn start_failure(io: &DawIo, platform: &str) -> Option<String> {
+    match io.answers.get::<StartFailures>() {
+        Some(failures) => (failures.0)().await,
+        None => super::start_failure::start_failure_now(&io.env, platform).await,
+    }
 }
 
 /// The bridge's ports: its configuration's, or the ones it installs with.
