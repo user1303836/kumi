@@ -152,9 +152,14 @@ async fn follow_the_daw<L, F>(
 /// With `absent` (the producer works in several DAWs here), a DAW that isn't open gets those words instead, which say
 /// to open one of them: Kumi follows the producer to the one they open. This one opening later is said as it starts,
 /// and the hold runs from then.
-async fn connect_when_daw_answers<F, A, O, B, S>(
+///
+/// When the open DAW couldn't start Kumi's bridge (`failure`: Live's log says why, with AbletonMcpBridge chosen), that
+/// is said in place of how to make it answer, at the look it's found: each reason once, and a new one when it changes.
+#[allow(clippy::too_many_arguments)]
+async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
     answers: F,
     live_open: O,
+    failure: W,
     words: WatchWords,
     absent: Option<Absent>,
     controller: Rc<RefCell<Option<Weak<S>>>>,
@@ -167,6 +172,8 @@ async fn connect_when_daw_answers<F, A, O, B, S>(
     A: std::future::Future<Output = bool>,
     O: FnOnce() -> B,
     B: std::future::Future<Output = bool>,
+    W: Fn() -> R,
+    R: std::future::Future<Output = Option<String>>,
     S: Reconnect + ?Sized,
 {
     let mut began = Some(std::time::Instant::now());
@@ -187,6 +194,7 @@ async fn connect_when_daw_answers<F, A, O, B, S>(
     }
     let mut tries = 0;
     let mut next: Option<std::time::Instant> = Some(std::time::Instant::now());
+    let mut failure_said: Option<String> = None;
     for _ in 0..pace.looks {
         let Some(session) = controller.borrow().as_ref().and_then(Weak::upgrade) else { break };
         if session.connected() {
@@ -197,6 +205,11 @@ async fn connect_when_daw_answers<F, A, O, B, S>(
                 began = Some(std::time::Instant::now());
                 emit(SessionEvent::Notice { message: words.starting.into() });
             }
+        }
+        if let Some(failure) = failure().await.filter(|failure| failure_said.as_ref() != Some(failure)) {
+            said = true;
+            emit(SessionEvent::Notice { message: failure.clone() });
+            failure_said = Some(failure);
         }
         if !said && began.is_some_and(|at| at.elapsed() >= std::time::Duration::from_millis(pace.hold_ms)) {
             said = true;
@@ -256,7 +269,7 @@ async fn connect_when_live_answers<F, A, O, B, S>(
     S: Reconnect + ?Sized,
 {
     let words = live_words();
-    connect_when_daw_answers(answers, live_open, words, None, controller, emit, watching, told, pace).await
+    connect_when_daw_answers(answers, live_open, || async { None }, words, None, controller, emit, watching, told, pace).await
 }
 /// Live's words for its watch, as the DAW table has them.
 #[cfg(test)]
@@ -656,7 +669,7 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
                     } else if !watching_live.replace(true) {
                         // Said once, by the watch: its own retries fall back here too, quietly.
                         let config = bridge_config.clone();
-                        let (env, answers_env, listed_env) = (env.clone(), env.clone(), env.clone());
+                        let (env, answers_env, listed_env, failure_env) = (env.clone(), env.clone(), env.clone(), env.clone());
                         let absent = absent_words.clone().map(|words| Absent {
                             words,
                             opened: Rc::new(move || {
@@ -675,6 +688,7 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
                         *live_watch.borrow_mut() = Some(tokio::task::spawn_local(connect_when_daw_answers(
                             move || provider.bridge_answers(&config, &answers_env),
                             move || provider.app_open(&env),
+                            move || provider.start_failure(&failure_env),
                             provider.watch_words(),
                             absent,
                             controller.clone(),
@@ -1596,6 +1610,7 @@ mod watch_tests {
         connect_when_daw_answers(
             || async { false },
             move || async move { open },
+            || async { None },
             live_words(),
             Some(absent),
             controller,
@@ -1618,6 +1633,64 @@ mod watch_tests {
             "opened later: said as it starts, and how to make it answer once the hold is over"
         );
         assert_eq!(watch_absent(true, 0).await, [live_words().starting, live_words().unreachable], "open as Kumi starts: as before");
+    }
+
+    /// What the watch says when the DAW, open as Kumi starts or not (`open`), couldn't start Kumi's bridge: at each
+    /// look, the next of `failures` (the last one staying), with a hold of `hold_ms` and Live never answering.
+    async fn watch_failing(open: bool, failures: &[Option<&'static str>], hold_ms: u64) -> Vec<String> {
+        let fake = Fake::new(u32::MAX);
+        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&fake))));
+        let notices = Rc::new(RefCell::new(Vec::new()));
+        let emit: Rc<dyn Fn(SessionEvent)> = {
+            let notices = notices.clone();
+            Rc::new(move |event| {
+                if let SessionEvent::Notice { message } = event {
+                    notices.borrow_mut().push(message)
+                }
+            })
+        };
+        let looks = Rc::new(Cell::new(0usize));
+        let failures = failures.to_vec();
+        let failure = move || {
+            let look = looks.replace(looks.get() + 1);
+            let now = failures.get(look).or(failures.last()).copied().flatten().map(str::to_string);
+            async move { now }
+        };
+        let pace = Pace { look_ms: 1, retry_ms: 0, tries: 10, looks: 30, hold_ms };
+        let watching = Rc::new(Cell::new(true));
+        connect_when_daw_answers(
+            || async { false },
+            move || async move { open },
+            failure,
+            live_words(),
+            None,
+            controller,
+            emit,
+            watching,
+            false,
+            pace,
+        )
+        .await;
+        let notices = notices.borrow().clone();
+        notices
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_bridge_live_couldnt_start_is_said_in_place_of_how_to_make_it_answer_each_reason_once() {
+        let (held, unsafe_files) = (Some("the port is held"), Some("its files are unsafe"));
+        // Found at the third look, before the hold is over: in place of how to make it answer, not beside it.
+        assert_eq!(watch_failing(true, &[None, None, held], 60_000).await, [live_words().starting, "the port is held"]);
+        assert_eq!(watch_failing(true, &[held], 5).await, [live_words().starting, "the port is held"], "nor after the hold");
+        // Each reason once: gone a while (Live starting it again) and back, it isn't said again; a new reason is.
+        assert_eq!(
+            watch_failing(true, &[held, held, None, held, unsafe_files], 60_000).await,
+            [live_words().starting, "the port is held", "its files are unsafe"]
+        );
+        // Live closed as Kumi starts: how to make it answer at once, as before; then, once it opens, why its bridge
+        // couldn't start.
+        assert_eq!(watch_failing(false, &[None, None, None, held], 60_000).await, [live_words().unreachable, "the port is held"]);
+        // Nothing found: as before.
+        assert_eq!(watch_failing(true, &[None], 5).await, [live_words().starting, live_words().unreachable]);
     }
 
     /// A screen that takes the DAW handed to it the `takes`th time (busy before that).

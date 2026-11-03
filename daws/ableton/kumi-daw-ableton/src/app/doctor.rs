@@ -380,7 +380,7 @@ fn live_checks(env: &Env, platform: &str, lives: &[InstalledLive], running: bool
 }
 
 /// The bridge's ports: its configuration's, or the ones it installs with.
-fn bridge_ports(env: &Env) -> Vec<u16> {
+pub(crate) fn bridge_ports(env: &Env) -> Vec<u16> {
     let config = find_bridge_config(env).and_then(|file| serde_json::from_slice::<Value>(&std::fs::read(file).ok()?).ok());
     let port = |key: &str, default: u16| {
         config.as_ref().and_then(|c| c["bridge"][key].as_u64()).and_then(|p| u16::try_from(p).ok()).unwrap_or(default)
@@ -463,7 +463,7 @@ fn windows_listener(_port: u16) -> Option<u32> {
     None
 }
 
-fn is_live(program: &str) -> bool {
+pub(crate) fn is_live(program: &str) -> bool {
     program == "Live" || program.starts_with("Ableton Live")
 }
 

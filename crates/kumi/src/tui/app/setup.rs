@@ -169,6 +169,9 @@ const CODE_HINT: &[(&[&str], &str)] =
 const LATER_HINT: &[(&[&str], &str)] = &[(&["setup.later"], "later")];
 /// How often the sign-in step looks again for models on this computer while the producer chooses.
 const LOCAL_LOOK: Duration = Duration::from_secs(3);
+/// How often the Control Surface step looks again at why the DAW couldn't start Kumi's bridge (Live reads its log again
+/// only once it has changed).
+const FAILURE_LOOK: Duration = Duration::from_secs(1);
 /// Where the Set is that Kumi's restart closed, when Kumi didn't know it to open it again.
 fn open_recent() -> String {
     let words = crate::daw::words();
@@ -852,26 +855,57 @@ impl TuiApp {
 
     /// Live connects through the bridge once it has it as a Control Surface: Kumi watches for that. Still not
     /// chosen a while later, Kumi adds where Live's Settings are, and that a dialog in Live comes first: still
-    /// one instruction, carried out in Live by the producer, never by Kumi.
+    /// one instruction, carried out in Live by the producer, never by Kumi. Chosen already, but the bridge couldn't
+    /// start (Live's log says why), Kumi says why and what fixes it in place of the instruction, until it connects or
+    /// the reason changes.
     async fn setup_surface(&self, live: Rc<dyn DawSetup>, app: Option<String>, enable: EnableStep) -> bool {
         let stop = self.setup_wait();
         let note = self.0.state.borrow().setup.as_ref().and_then(|s| s.set_note.clone());
         let hint = self.keys_hint(LATER_HINT);
+        // What the step says: the instruction, or why the bridge couldn't start; where the Settings are, once said; and
+        // the Set's note.
+        let say = move |first: &str, more: Option<&str>| -> Vec<String> {
+            std::iter::once(first.to_string()).chain(more.map(str::to_string)).chain(note.clone()).collect()
+        };
+        let said = say(enable.say, None);
         self.setup_show(move |s| {
             s.step = Step::Surface;
             s.status = enable.waiting.into();
-            s.say = std::iter::once(enable.say.to_string()).chain(note).collect();
+            s.say = said;
             s.hint = hint;
             s.waiting = true;
         });
-        let mut more = live.settings_menu().map(|menu| format!("{menu} If {} shows a dialog, answer it first.", crate::daw::words().app));
+        let more = live.settings_menu().map(|menu| format!("{menu} If {} shows a dialog, answer it first.", crate::daw::words().app));
         let more_at = std::time::Instant::now() + live.surface_wait();
+        let (mut more_said, mut failure, mut looked) = (false, None::<String>, None::<std::time::Instant>);
         while !self.connected() {
             if self.closing() {
                 return false;
             }
-            if let Some(more) = more.take_if(|_| std::time::Instant::now() >= more_at) {
-                self.setup_show(move |s| s.say.insert(1, more));
+            if looked.is_none_or(|at| at.elapsed() >= FAILURE_LOOK) {
+                looked = Some(std::time::Instant::now());
+                let now = tokio::select! {
+                    now = live.start_failure() => now,
+                    _ = stop.cancelled() => return false,
+                };
+                if now != failure {
+                    failure = now;
+                    let said = say(failure.as_deref().unwrap_or(enable.say), more.as_deref().filter(|_| more_said && failure.is_none()));
+                    let failing = failure.is_some();
+                    self.setup_show(move |s| {
+                        s.say = said;
+                        s.status = if failing { "didn't start".into() } else { enable.waiting.into() };
+                        s.warn = failing;
+                    });
+                }
+            }
+            // Where the Settings are helps choose the Control Surface: not once it's chosen and failed to start.
+            if !more_said && failure.is_none() && std::time::Instant::now() >= more_at {
+                if let Some(more) = more.as_deref() {
+                    more_said = true;
+                    let said = say(enable.say, Some(more));
+                    self.setup_show(move |s| s.say = said);
+                }
             }
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_millis(200)) => {}
@@ -881,6 +915,7 @@ impl TuiApp {
         let version = live.version(app).await;
         self.setup_show(|s| {
             s.problem = None;
+            s.warn = false;
             s.live = Some(version.map(|v| format!("{} {v}", crate::daw::words().app)).unwrap_or_else(|| crate::daw::words().app.into()));
         });
         true

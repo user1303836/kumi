@@ -93,6 +93,14 @@ impl DawProvider for Ableton {
     fn watch_words(&self) -> WatchWords {
         WatchWords { starting: LIVE_STARTING, unreachable: NO_LIVE, answered: "Live answered, so Kumi is connected to it now." }
     }
+    fn start_failure(&self, env: &Env) -> LocalBoxFuture<'static, Option<String>> {
+        let env = env.clone();
+        async move {
+            let root = super::folders::live_preferences_dir(&env);
+            super::start_failure::start_failure(&env, &root, kumi_daw::process::default_run(), kumi_types::system::platform()).await
+        }
+        .boxed_local()
+    }
     fn enable_step(&self) -> Option<EnableStep> {
         Some(EnableStep {
             label: "Control Surface",
