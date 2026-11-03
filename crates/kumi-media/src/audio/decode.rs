@@ -1002,23 +1002,29 @@ mod tests {
     async fn a_files_length_is_read_only_when_the_copy_cant_say_it() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let (copy, ran, said, fail, slow) = (
+        let (copy, ran, said, fail, slow, probing) = (
             dir.path().join("copy.wav"),
             dir.path().join("ran"),
             dir.path().join("said"),
             dir.path().join("fail"),
             dir.path().join("slow"),
+            dir.path().join("probing"),
         );
         write_test_wav(&copy, &[0.25; 8_000], 8_000);
         let scripts = [
             (
                 "ffprobe",
-                format!("#!/bin/sh\necho probe >> '{}'\n[ -f '{}' ] && exec /bin/sleep 5\necho 240.5\n", ran.display(), slow.display()),
+                format!(
+                    "#!/bin/sh\necho probe >> '{}'\n[ -f '{}' ] && {{ : > '{}'; exec /bin/sleep 5; }}\necho 240.5\n",
+                    ran.display(),
+                    slow.display(),
+                    probing.display()
+                ),
             ),
             (
                 "ffmpeg",
                 format!(
-                    "#!/bin/sh\necho convert >> '{0}'\n[ -f '{1}' ] && exit 1\n[ -f '{2}' ] && /bin/cat '{2}' >&2\nfor last; do :; done\n/bin/cp '{3}' \"$last\"\n",
+                    "#!/bin/sh\necho convert >> '{0}'\n[ -f '{1}' ] && exit 1\n[ -f '{2}' ] && /bin/cat '{2}' >&2\nfor last; do :; done\n[ \"$last\" = - ] || /bin/cp '{3}' \"$last\"\n",
                     ran.display(),
                     fail.display(),
                     said.display(),
@@ -1073,15 +1079,21 @@ mod tests {
         say("00:04:00.48");
         std::fs::write(&slow, "").unwrap();
         let signal = Signal::new();
+        // Stopped once the probe is under way (the fake one says so as it begins), not at a time a slow runner can miss.
         let stopping = {
-            let signal = signal.clone();
+            let (signal, probing) = (signal.clone(), probing.clone());
             tokio::spawn(async move {
-                tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+                let began = std::time::Instant::now();
+                // (Inside the ci profile's 30 s, so a probe that never began says so before nextest stops the test.)
+                while !probing.exists() && began.elapsed() < std::time::Duration::from_secs(20) {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
                 signal.cancel();
             })
         };
         let stopped = prepare_audio_range(&song, Some(signal), 0., 30.).await;
         stopping.await.unwrap();
+        assert!(probing.exists(), "the probe never began");
         assert!(stopped.is_err(), "stopped, not read");
         // (ffmpeg's own reading, tried when the probe stops, may start before it's stopped too.)
         assert_eq!(runs()[..2], ["convert", "probe"]);
