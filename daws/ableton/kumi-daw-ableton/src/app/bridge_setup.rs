@@ -30,6 +30,23 @@ pub async fn is_live_running_on(run: Run, platform: &str, env: &Env) -> bool {
     }
     false
 }
+/// The running Lives' process ids: pgrep's on macOS, PowerShell's Get-Process on Windows; none where it can't be told.
+pub async fn live_pids_on(run: Run, platform: &str, env: &Env) -> Vec<u32> {
+    let ran = match platform {
+        "darwin" => run("pgrep".into(), vec!["-x".into(), "Live".into()], None).await,
+        "win32" => {
+            let script = "Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue | ForEach-Object { $_.Id }";
+            run(
+                system::system_program(SystemProgram::Powershell, env, platform),
+                ["-NoProfile", "-NonInteractive", "-Command", script].map(str::to_string).into(),
+                None,
+            )
+            .await
+        }
+        _ => return vec![],
+    };
+    ran.stdout.split_whitespace().filter_map(|pid| pid.parse().ok()).collect()
+}
 use super::{
     bridge_files::{self, Wrong},
     folders::{find_bridge_config, read_bridge_server, remote_scripts_dir},

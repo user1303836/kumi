@@ -511,6 +511,61 @@ class RemoteScriptTests(unittest.TestCase):
         for _ in range(3): surface.update_display()
         self.assertEqual((surface._bridge.served, scheduled), (3, []))
 
+    def test_a_failed_start_is_said_in_lives_status_bar_its_log_and_beside_the_script_and_a_good_one_clears_it(self):
+        """Live says nothing of a Control Surface that fails as it starts: the producer sees the reason in Live's status
+        bar (show_message, never a dialog), and Kumi reads it beside the script, with this Live's process. The failure
+        still reaches Live, which reports it as before."""
+        package = __import__("AbletonMcpBridge")
+        record = Path(package.__file__).with_name("start-failure.json")
+        said, logged = [], []
+
+        class Instance(FakeInstance):
+            def show_message(self, text): said.append(text)
+
+        def refused():
+            raise ValueError("bridge configuration reference is missing or unsafe: others can read it (mode 644)")
+
+        class Bridge:
+            def __init__(self, *args, **kwargs): pass
+
+        try:
+            with patch.object(package, "_read_config", refused), \
+                    patch.object(package.AbletonMcpBridge, "log_message", lambda self, text: logged.append(text), create=True):
+                with self.assertRaises(ValueError):
+                    package.AbletonMcpBridge(Instance())
+            exception = "ValueError: bridge configuration reference is missing or unsafe: others can read it (mode 644)"
+            self.assertEqual((said, logged), (["AbletonMcpBridge couldn't start: " + exception], ["AbletonMcpBridge couldn't start: " + exception]))
+            kept = json.loads(record.read_text(encoding="utf-8"))
+            self.assertEqual((kept["version"], kept["pid"], kept["exception"]), (1, os.getpid(), exception))
+            # A Live without show_message (or whose log refuses) still gets the record, and the failure.
+            record.unlink()
+            with patch.object(package, "_read_config", refused):
+                with self.assertRaises(ValueError):
+                    package.AbletonMcpBridge(FakeInstance())
+            self.assertTrue(record.exists())
+            # A start that succeeds removes it.
+            with patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
+                package.AbletonMcpBridge(FakeInstance())
+            self.assertFalse(record.exists())
+        finally:
+            record.unlink(missing_ok=True)
+
+    @unittest.skipIf(os.name == "nt", "POSIX owners and modes; on Windows one ACL check decides")
+    def test_a_refused_file_says_what_the_owner_checks_found(self):
+        package = __import__("AbletonMcpBridge")
+        with tempfile.TemporaryDirectory() as folder:
+            file = Path(folder) / "bridge-config.json"
+            file.write_text("{}")
+            os.chmod(file, 0o644)
+            self.assertEqual(package._refused_because(file), ": others can read it (mode 644)")
+            os.chmod(file, 0o600)
+            self.assertEqual(package._refused_because(file), "")
+            link = Path(folder) / "link.json"
+            link.symlink_to(file)
+            self.assertEqual(package._refused_because(link), ": it's a link")
+            self.assertEqual(package._refused_because(Path(folder) / "gone.json"), ": it isn't there")
+            self.assertEqual(package._refused_because(Path(folder)), ": it isn't a file")
+
     def test_authentication_and_replay_protection(self):
         remote = AuthenticatedRemoteScript("0123456789abcdef0123456789abcdef", lambda method, request: fake_status_result())
         unsigned = remote.bound({"version": PROTOCOL, "id": "one", "method": "status", "nonce": "0000000000000001", "sequence": 1})

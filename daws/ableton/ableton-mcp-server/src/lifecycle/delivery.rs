@@ -41,6 +41,9 @@ pub const WILLINGTON_RECEIPT: &str = "willington/WillingtonBindings/self-test.js
 /// without counting as drift, and an install carries them over.
 pub const WILLINGTON_EDITING_RECEIPT: &str = "willington/WillingtonEditing/self-test.json";
 pub const PRODUCER_FILES: [&str; 3] = [WILLINGTON_CONFIG, WILLINGTON_RECEIPT, WILLINGTON_EDITING_RECEIPT];
+/// What the Remote Script writes beside itself as Live runs it: while its last start failed, why (for Kumi to say). It
+/// isn't drift either, and an install doesn't carry it over: the next start writes it again, or removes it.
+pub const RUNTIME_FILES: [&str; 1] = ["start-failure.json"];
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ServerCommand {
     pub command: String,
