@@ -966,7 +966,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     let platform = kumi_types::system::platform();
     let profile = (print.is_none() && full_screen && io.probe).then(|| crate::tui::alerts::detect_terminal_profile(&io.env, platform));
     let probes = profile.as_ref().is_some_and(|profile| profile.status) && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off");
-    let asking = if probes { crate::tui::probe::ask(&io.input, &io.out) } else { None };
+    // (Unix: a ctrl+c the held terminal keeps from the producer is raised as its signal. Windows' console has no such
+    // way back, so there the terminal is asked once the session is built, just before the screen, as before.)
+    let asking = if probes && cfg!(unix) { crate::tui::probe::ask(&io.input, &io.out) } else { None };
     let failed = Signal::new();
     // (`biased`: the questions are out already; the history is read while they're answered and the session builds)
     let (_, history, built) = tokio::join!(
@@ -1122,6 +1124,16 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         // What the terminal said of itself, asked once as the screen starts: its answers come before what its environment
         // says of it, which stays the fallback. It's given back as it was now, before the screen takes it (and notes how
         // to leave it).
+        let asking = match asking {
+            None if probes => {
+                let asking = crate::tui::probe::ask(&io.input, &io.out);
+                if let Some(asking) = &asking {
+                    asking.answered(crate::tui::probe::BUDGET, &Signal::new()).await;
+                }
+                asking
+            }
+            asking => asking,
+        };
         if let (Some(probed), Some(profile)) = (asking.map(crate::tui::probe::Asking::end), profile) {
             let version = probed.answers.version.clone();
             options.terminal = Some(profile.answered(&probed.answers, &io.env, platform));
