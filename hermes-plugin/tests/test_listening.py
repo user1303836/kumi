@@ -22,7 +22,7 @@ def measured(*, centroid=1800.0, lufs=-18.0, spectrum=True):
         "sampleRate": 48000,
         "channels": 2,
         "seconds": 3.25,
-        "analyzed": {"from": "0:04", "to": "0:07", "focus": "mix"},
+        "analyzed": {"from": "0:00", "to": "0:03", "focus": "mix"},
         "loudness": {
             "integratedLufs": lufs,
             "shortTermMaxLufs": -16.2,
@@ -137,6 +137,9 @@ class ListeningInterpretationTests(unittest.TestCase):
         call = model.calls[0]
         self.assertNotIn(secret, repr(call))
         self.assertNotIn("/private/", repr(call))
+        payload = json.loads(call["input"][0]["text"])["current"]
+        self.assertIsNone(payload["analyzedFromSeconds"])
+        self.assertIsNone(payload["analyzedToSeconds"])
         self.assertEqual(call["task"], "kumi_listen")
         self.assertFalse({"provider", "model", "profile", "agent_id"} & call.keys())
         self.assertEqual(interpreted["inputs"], ["metrics", "spectrogram", "comparison_metrics", "comparison_spectrogram"])
@@ -168,16 +171,45 @@ class ListeningInterpretationTests(unittest.TestCase):
         self.assertEqual(top[1], bottom[1])
         legend = json.loads(model.calls[0]["input"][0]["text"])["current"]["bandEnergyImage"]
         self.assertEqual([row["band"] for row in legend["rowsTopToBottom"]], ["air", "bass"])
-        self.assertEqual(legend["relativeWindowSeconds"], 3.25)
+        payload = json.loads(model.calls[0]["input"][0]["text"])["current"]
+        self.assertEqual((payload["fileSeconds"], payload["analyzedFromSeconds"], payload["analyzedToSeconds"]), (3.25, 0, 3))
+
+    def test_image_times_describe_the_analyzed_span_not_the_whole_file(self):
+        analysis = measured()
+        analysis.update(seconds=200, analyzed={"from": "1:00", "to": "1:03", "focus": "mix"})
+        model = LocalModel()
+        listening.interpret(model, {"metrics": analysis}, timeout=30)
+        payload = json.loads(model.calls[0]["input"][0]["text"])["current"]
+        self.assertEqual(payload["fileSeconds"], 200)
+        self.assertEqual((payload["analyzedFromSeconds"], payload["analyzedToSeconds"]), (60, 63))
+        self.assertEqual(payload["analyzedClockResolutionSeconds"], 1)
+        self.assertEqual(payload["bandEnergyImage"]["timeColumns"], 3)
+
+    def test_unavailable_clock_labels_do_not_become_a_file_length_window(self):
+        for end in ("1:60", "1:02:03", "1:02\nPRIVATE", "0000000000:02", "-1:02", "0:00"):
+            with self.subTest(end=end):
+                analysis = measured()
+                analysis.update(seconds=200, analyzed={"from": "1:00", "to": end})
+                model = LocalModel()
+                listening.interpret(model, {"metrics": analysis}, timeout=30)
+                payload = json.loads(model.calls[0]["input"][0]["text"])["current"]
+                self.assertIsNone(payload["analyzedFromSeconds"])
+                self.assertIsNone(payload["analyzedToSeconds"])
+                self.assertNotIn("PRIVATE", repr(model.calls))
 
     def test_unavailable_loudness_and_mono_width_do_not_become_zero(self):
         analysis = measured(lufs=None, spectrum=False)
         analysis.update(channels=1, stereo=None, key=None, tempo=None, sound=None)
+        for band in analysis["balance"]["bands"]:
+            band.update(width=0, correlation=1)
         model = LocalModel()
         interpreted = listening.interpret(model, {"metrics": analysis}, timeout=30)
         payload = json.loads(model.calls[0]["input"][0]["text"])["current"]
         self.assertIsNone(payload["loudness"]["integratedLufs"])
         self.assertIsNone(payload["stereo"])
+        for band in payload["balance"]["bands"]:
+            self.assertIsNone(band["width"])
+            self.assertIsNone(band["correlation"])
         self.assertEqual(interpreted["inputs"], ["metrics"])
 
     def test_malformed_or_oversized_spectra_stop_before_a_model_call(self):
@@ -208,7 +240,15 @@ class ListeningInterpretationTests(unittest.TestCase):
                 self.assertNotIn("PRIVATE_VALUE", str(error.exception))
                 self.assertEqual(model.calls, [])
 
-    def test_provider_failure_is_sanitized_and_never_retried(self):
+    def test_non_success_with_metrics_never_calls_the_model(self):
+        for state in ("refused", "cancelled", "unsure", "partial"):
+            with self.subTest(state=state):
+                model = LocalModel()
+                with self.assertRaises(listening.InterpretationError):
+                    listening.interpret(model, {"state": state, "metrics": measured()}, timeout=30)
+                self.assertEqual(model.calls, [])
+
+    def test_provider_failure_is_sanitized_and_not_retried_by_the_plugin(self):
         for failure in (TimeoutError("PRIVATE_TOKEN"), PermissionError("PRIVATE_TOKEN"), RuntimeError("PRIVATE_TOKEN")):
             with self.subTest(failure=type(failure)):
                 result = {"metrics": measured()}
@@ -230,7 +270,15 @@ class ListeningInterpretationTests(unittest.TestCase):
                 self.assertNotIn("UNPARSED PRIVATE OUTPUT", str(error.exception))
                 self.assertEqual(len(model.calls), 1)
 
-    def test_timeout_is_bounded_and_invalid_values_do_not_call_the_model(self):
+    def test_model_text_cannot_emit_terminal_control_characters(self):
+        model = LocalModel(parsed={"text": "Measured\x00 result\x1b.\nNext\tline.\x7f"})
+        interpreted = listening.interpret(model, {"metrics": measured()}, timeout=30)
+        self.assertTrue(interpreted["text"].endswith("Measured result.\nNext\tline."))
+        self.assertFalse(any(ord(char) < 32 and char not in "\n\t" or ord(char) == 127 for char in interpreted["text"]))
+        with self.assertRaises(listening.InterpretationError):
+            listening.interpret(LocalModel(parsed={"text": "\x00\x07"}), {"metrics": measured()}, timeout=30)
+
+    def test_per_attempt_timeout_is_bounded_and_invalid_values_do_not_call_the_model(self):
         for timeout in (0, -1, True, float("inf"), float("nan"), 10**400):
             with self.subTest(timeout=timeout):
                 model = LocalModel()

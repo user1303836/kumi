@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import struct
 import zlib
 from typing import Any
@@ -23,9 +24,12 @@ AUX_TASK = {
     "defaults": {"timeout": 60},
 }
 
-_MAX_TIMEOUT = 120.0
+# Hermes applies this to each attempt; its own retries and provider fallbacks
+# can make the complete host call take longer.
+_MAX_ATTEMPT_TIMEOUT = 120.0
 _MAX_REPLY = 2400
 _CELL_SIZE = 12
+_CLOCK = re.compile(r"([0-9]{1,9}):([0-5][0-9])")
 # kumi_media::audio::analyze::BANDS. Names below are fixed measurement labels,
 # never a file, track, sound or project name supplied by the runtime.
 _BANDS = {
@@ -60,6 +64,11 @@ do not compare image brightness between files: each image is peak-normalized.
 LUFS is integrated loudness, dBTP is true peak, and centroid is in Hz. Mono has no
 stereo-width evidence. Nulls mean unavailable, not zero. Tempo/key confidence is
 uncertainty, not proof. Do not invent missing measurements or perceptual facts.
+fileSeconds is the whole file's length, NOT the measured window. The analyzed
+from/to values are runtime clock labels floored to whole seconds, not precise
+sample boundaries; equal labels can mean a sub-second span, not empty audio.
+Images cover that analyzed span. If its labels are unavailable, do not infer the
+image's duration from the file length.
 
 Images are coarse band-energy heatmaps, NOT high-resolution FFT spectrograms.
 Their fixed band labels and time window are in the text. Left to right is time;
@@ -99,13 +108,36 @@ def _optional_numbers(value: Any, fields: tuple[str, ...]) -> dict[str, Any] | N
     return None if value is None else _numbers(value, fields)
 
 
+def _clock_seconds(value: Any) -> int | None:
+    """Read only the runtime's M:SS format; never forward its clock strings."""
+    matched = _CLOCK.fullmatch(value) if isinstance(value, str) else None
+    return int(matched[1]) * 60 + int(matched[2]) if matched else None
+
+
+def _analyzed_window(analysis: dict[str, Any], file_seconds: Any) -> dict[str, Any]:
+    window = analysis.get("analyzed")
+    start = _clock_seconds(window.get("from")) if isinstance(window, dict) else None
+    end = _clock_seconds(window.get("to")) if isinstance(window, dict) else None
+    if start is None or end is None or end < start or (file_seconds is not None and end > file_seconds):
+        start = end = None
+    return {
+        "analyzedFromSeconds": start,
+        "analyzedToSeconds": end,
+        "analyzedClockResolutionSeconds": 1,
+        "analyzedClockRounding": "floor",
+    }
+
+
 def _measurements(analysis: Any) -> dict[str, Any]:
     """Project Analysis onto numeric fields and fixed labels; never forward it."""
     if not isinstance(analysis, dict) or analysis.get("kumiAudio") != 1:
         raise InterpretationError("The runtime did not return a supported audio measurement.")
     if not all(name in analysis for name in ("sampleRate", "channels", "seconds", "loudness", "balance", "dynamics")):
         raise InterpretationError("The runtime returned an incomplete measurement.")
-    result = _numbers(analysis, ("sampleRate", "channels", "seconds"))
+    result = _numbers(analysis, ("sampleRate", "channels"))
+    result["fileSeconds"] = _number(analysis["seconds"])
+    result.update(_analyzed_window(analysis, result["fileSeconds"]))
+    mono = result["channels"] == 1
     result["loudness"] = _numbers(
         analysis["loudness"],
         ("integratedLufs", "shortTermMaxLufs", "rangeLu", "truePeakDbtp", "samplePeakDbfs", "clippedSamples"),
@@ -124,10 +156,14 @@ def _measurements(analysis: Any) -> dict[str, Any]:
         if not isinstance(name, str) or name not in _BANDS or name in seen:
             raise InterpretationError("The runtime returned an unknown or repeated frequency band.")
         seen.add(name)
-        measured_bands.append({"band": name, "hz": _BANDS[name], **_numbers(band, ("db", "width", "correlation"))})
+        fields = ("db",) if mono else ("db", "width", "correlation")
+        measured_band = {"band": name, "hz": _BANDS[name], **_numbers(band, fields)}
+        if mono:
+            measured_band.update(width=None, correlation=None)
+        measured_bands.append(measured_band)
     result["balance"]["bands"] = measured_bands
     result["dynamics"] = _numbers(analysis["dynamics"], ("crestDb", "peakToLoudnessDb", "onsetsPerSecond"))
-    result["stereo"] = _optional_numbers(analysis.get("stereo"), ("correlation", "width"))
+    result["stereo"] = None if mono else _optional_numbers(analysis.get("stereo"), ("correlation", "width"))
     result["tempo"] = _optional_numbers(analysis.get("tempo"), ("bpm", "confidence"))
     key = analysis.get("key")
     result["key"] = _optional_numbers(key, ("confidence",))
@@ -155,7 +191,7 @@ def _chunk(kind: bytes, data: bytes) -> bytes:
     return struct.pack(">I", len(data)) + body + struct.pack(">I", zlib.crc32(body))
 
 
-def _heatmap(spectrum: Any, seconds: Any) -> tuple[bytes, dict[str, Any]]:
+def _heatmap(spectrum: Any) -> tuple[bytes, dict[str, Any]]:
     """Rasterize the existing quantized grid, without decoding or reading audio."""
     if not isinstance(spectrum, dict):
         raise InterpretationError("The runtime returned an invalid measured spectrogram.")
@@ -193,7 +229,6 @@ def _heatmap(spectrum: Any, seconds: Any) -> tuple[bytes, dict[str, Any]]:
     return png, {
         "rowsTopToBottom": labels,
         "timeColumns": columns,
-        "relativeWindowSeconds": _number(seconds),
         "dbPerStep": 3,
         "scale": "peak-relative",
         "black": "below-display-floor-or-silence",
@@ -205,6 +240,9 @@ def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, 
 
     Only W2's opted-in handler calls this. A failure must not cause that handler
     to discard the measurements or repeat a render/capture.
+    Timeout is per attempt, not an overall deadline: Hermes owns its retries
+    and configured provider fallbacks. This helper neither retries nor chooses
+    another provider.
     """
     try:
         timeout = float(timeout) if type(timeout) in (int, float) else math.nan
@@ -214,6 +252,8 @@ def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, 
         raise InterpretationError("The listening interpretation timeout must be a positive finite number.")
     if not isinstance(result, dict):
         raise InterpretationError("The runtime did not return a measured result.")
+    if result.get("state") not in (None, "done") or "error" in result:
+        raise InterpretationError("The runtime did not complete the measurement; no interpretation was requested.")
     analyses = [("current", "metrics", "spectrogram", result.get("metrics"))]
     comparison = result.get("compare")
     if comparison is not None:
@@ -228,7 +268,7 @@ def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, 
         spectrum = analysis.get("spectrogram")
         image = None
         if spectrum is not None:
-            image, measured["bandEnergyImage"] = _heatmap(spectrum, measured["seconds"])
+            image, measured["bandEnergyImage"] = _heatmap(spectrum)
             supplied.append(spectrum_input)
         else:
             measured["bandEnergyImage"] = None
@@ -244,16 +284,14 @@ def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, 
             json_schema=_SCHEMA,
             schema_name="kumi_audio_measurement_interpretation",
             max_tokens=700,
-            timeout=min(float(timeout), _MAX_TIMEOUT),
+            timeout=min(float(timeout), _MAX_ATTEMPT_TIMEOUT),
         )
     except TimeoutError:
         raise InterpretationError("Model interpretation timed out; the measured results remain available.") from None
     except PermissionError:
         raise InterpretationError("Hermes refused the listening auxiliary task; check its model settings. The measurements remain available.") from None
     except Exception:
-        raise InterpretationError(
-            "Model interpretation failed; choose an image-capable model for Kumi listening in Hermes. The measurements remain available."
-        ) from None
+        raise InterpretationError("Model interpretation failed; the measurements remain available.") from None
     parsed = getattr(completed, "parsed", None)
     # Hermes validates JSON Schema only when its optional jsonschema dependency
     # is available. Never substitute an unparsed or malformed model reply.
@@ -262,11 +300,14 @@ def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, 
     text = parsed["text"]
     if not isinstance(text, str) or not text.strip() or len(text) > _MAX_REPLY:
         raise InterpretationError("The model returned an empty or oversized interpretation; the measurements remain available.")
+    text = "".join(char for char in text if char in "\n\t" or (ord(char) >= 32 and ord(char) != 127)).strip()
+    if not text:
+        raise InterpretationError("The model returned an empty interpretation; the measurements remain available.")
     interpretation = {
-        "text": "Model interpretation of measurements (no raw audio heard):\n" + text.strip(),
+        "text": "Model interpretation of measurements (no raw audio heard):\n" + text,
         "inputs": supplied,
     }
     model = getattr(completed, "model", None)
-    if isinstance(model, str) and model.strip() and len(model) <= 200 and not any(ord(char) < 32 for char in model):
+    if isinstance(model, str) and model.strip() and len(model) <= 200 and not any(ord(char) < 32 or ord(char) == 127 for char in model):
         interpretation["model"] = model.strip()
     return interpretation
