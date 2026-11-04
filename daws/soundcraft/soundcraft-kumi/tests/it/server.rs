@@ -66,6 +66,8 @@ struct Shown {
     playing: bool,
     recording: bool,
     bpm: f64,
+    /// What the session's look says of the transport while it hasn't caught up with the app (`playing`, `recording`).
+    held: Option<(bool, bool)>,
     history: Value,
 }
 
@@ -93,6 +95,7 @@ impl Lab {
             playing: false,
             recording: false,
             bpm: 120.0,
+            held: None,
             history: json!({"undo": [], "can_redo": false}),
         }));
         let answering = shown.clone();
@@ -105,7 +108,7 @@ impl Lab {
                         "name": shown.name, "path": null, "tracks": shown.tracks, "undo": shown.undo, "redo": null,
                         "sample_rate": 48000, "tempo": [{"bpm": shown.bpm, "tick": 0}], "meter": [{"denominator": 4, "numerator": 4, "tick": 0}],
                         "selection": shown.selection,
-                        "transport": {"playing": shown.playing, "position": shown.position, "recording": shown.recording},
+                        "transport": {"playing": shown.held.map_or(shown.playing, |held| held.0), "position": shown.position, "recording": shown.held.map_or(shown.recording, |held| held.1)},
                     }));
                     match request["params"]["detail"] == "full" && shown.slow_reads {
                         true => Answer::After(ms(2000), session),
@@ -690,9 +693,15 @@ async fn a_new_session_is_told_as_a_project_event_and_the_discovery_file_follows
     assert_eq!((told.name.as_str(), &told.data["name"]), ("project", &json!("Next Song")));
     assert!(told.data["epoch"].is_string() && told.data["epoch"] != before, "a new epoch for its refs: {:?} after {before}", told.data);
     assert_eq!(lab.discovery().await["project"]["name"], "Next Song");
-    // Saved under another name, nothing else changed: told, and the same session, its refs kept.
+    // Saved under another name, nothing else changed: told, and the same session, its refs kept. (The new session's tracks
+    // and selection, told in its epoch, come first.)
     lab.shown.lock().unwrap().name = "Next Song v2".into();
-    let saved = tokio::time::timeout(WAIT, events.recv()).await.unwrap().unwrap();
+    let saved = loop {
+        let told = next_event(&mut events).await;
+        if told.name == "project" {
+            break told;
+        }
+    };
     assert_eq!((&saved.data["name"], &saved.data["epoch"]), (&json!("Next Song v2"), &told.data["epoch"]));
 }
 
@@ -803,6 +812,45 @@ async fn the_selected_tracks_are_told_once_when_they_change() {
     lab.shown.lock().unwrap().selection = json!({"tracks": [], "clips": [], "start": 0, "end": 0});
     let none = next_event(&mut events).await;
     assert_eq!((none.name.as_str(), &none.data), ("selection", &json!({"tracks": []})));
+    quiet(&lab, &mut events).await;
+}
+
+#[tokio::test]
+async fn a_take_started_from_a_stop_is_told_recording_from_the_first() {
+    let lab = Lab::new().await;
+    let (_client, mut events) = listening(&lab).await;
+    // Record from a stop, the window's look seeing it play before the session's look sees the take: nothing told on
+    // the window's word alone, then the take, recording from the first.
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        (shown.held, shown.playing, shown.recording) = (Some((false, false)), true, true);
+    }
+    looked(&lab, "ui.inspect").await;
+    looked(&lab, "ui.inspect").await;
+    lab.shown.lock().unwrap().held = None;
+    let take = next_event(&mut events).await;
+    assert_eq!((take.name.as_str(), &take.data), ("transport", &json!({"playing": true, "recording": true, "bpm": 120.0})));
+    quiet(&lab, &mut events).await;
+}
+
+#[tokio::test]
+async fn another_session_on_the_same_ids_tells_its_tracks_and_selection_again() {
+    let lab = Lab::new().await;
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        (shown.tracks, shown.undo) = (kick_and_keys(), json!("New Track"));
+        shown.selection = json!({"tracks": [5], "clips": [], "start": 0, "end": 0});
+    }
+    let (_client, mut events) = listening(&lab).await;
+    // File > New with the same tracks, ids and selection: nothing left to undo, so another session and a new epoch. Its
+    // refs read the same, but they're its own: told again in its epoch.
+    lab.shown.lock().unwrap().undo = Value::Null;
+    let project = next_event(&mut events).await;
+    assert_eq!(project.name, "project");
+    let tracks = next_event(&mut events).await;
+    assert_eq!((tracks.name.as_str(), &tracks.data), ("tracks", &json!({"count": 2, "epoch": project.data["epoch"]})));
+    let selection = next_event(&mut events).await;
+    assert_eq!((selection.name.as_str(), &selection.data), ("selection", &json!({"tracks": [{"guid": "s:track:5", "name": "Keys"}]})));
     quiet(&lab, &mut events).await;
 }
 

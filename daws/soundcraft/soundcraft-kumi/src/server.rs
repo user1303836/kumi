@@ -314,19 +314,23 @@ impl Schedule {
 /// tracks. Each is told when a look sees it otherwise than the last did; the first look at it tells nothing.
 #[derive(Default)]
 struct Told {
-    /// Whether the app plays (`ui.inspect`); whether its session records, and its tempo at the playhead (the session).
-    playing: Option<bool>,
-    take: Option<(bool, Value)>,
+    /// Whether the session plays and records, and its tempo at the playhead: all from one look at the session, so a take
+    /// started from a stop is told recording from the first. A `ui.inspect` tells only a stop, at once.
     transport: Option<Value>,
-    tracks: Option<Vec<u64>>,
-    selection: Option<Vec<String>>,
+    /// The tracks' ids and the selected tracks, each with the epoch it was seen in: another session on the same ids
+    /// (SoundCraft numbers a new session's objects from 1 again) is news, and never named in the last one's words.
+    tracks: Option<(String, Vec<u64>)>,
+    selection: Option<(String, Vec<String>)>,
 }
 
 impl Told {
-    /// A `ui.inspect` saw the app playing or not: the transport, if that's news.
+    /// A `ui.inspect` saw the app playing or not: a stop is told at once. A start waits for the look at the session,
+    /// which says whether it records.
     fn played(&mut self, playing: bool) -> Vec<(&'static str, Value)> {
-        self.playing = Some(playing);
-        self.transport().into_iter().collect()
+        let Some(told) = self.transport.as_ref().filter(|told| !playing && told["playing"] == true) else { return vec![] };
+        let now = json!({"playing": false, "recording": false, "bpm": told["bpm"].clone()});
+        self.transport = Some(now.clone());
+        vec![(event::TRANSPORT, now)]
     }
 
     /// A look at the session saw `glance`, with the playhead at `position` samples: the transport, the tracks and the
@@ -337,27 +341,25 @@ impl Told {
             (Some(timebase), Some(samples)) => timebase.tempo(timebase.beats(samples)).into(),
             _ => session["tempo"][0]["bpm"].clone(),
         };
-        self.take = Some((session["transport"]["recording"] == true, bpm));
-        let mut news: Vec<(&'static str, Value)> = self.transport().into_iter().collect();
+        // (a stopped take doesn't record)
+        let playing = session["transport"]["playing"] == true;
+        let transport = json!({"playing": playing, "recording": playing && session["transport"]["recording"] == true, "bpm": bpm});
+        let mut news = Vec::new();
+        if changed(&mut self.transport, transport.clone()) {
+            news.push((event::TRANSPORT, transport));
+        }
         let mut ids: Vec<u64> = session["tracks"].as_array().into_iter().flatten().filter_map(|track| track["id"].as_u64()).collect();
         ids.sort_unstable();
         let count = ids.len();
-        if changed(&mut self.tracks, ids) {
+        if changed(&mut self.tracks, (glance.epoch.clone(), ids)) {
             news.push((event::TRACKS, json!({"count": count, "epoch": glance.epoch})));
         }
         let refs = glance.selected.iter().map(|(key, _)| key.clone()).collect();
-        if changed(&mut self.selection, refs) {
+        if changed(&mut self.selection, (glance.epoch.clone(), refs)) {
             let tracks: Vec<Value> = glance.selected.iter().map(|(key, name)| json!({"guid": key, "name": name})).collect();
             news.push((event::SELECTION, json!({"tracks": tracks})));
         }
         news
-    }
-
-    /// The transport, once both its looks have seen it, if that's news: a stopped take doesn't record.
-    fn transport(&mut self) -> Option<(&'static str, Value)> {
-        let (Some(playing), Some((recording, bpm))) = (self.playing, &self.take) else { return None };
-        let now = json!({"playing": playing, "recording": playing && *recording, "bpm": bpm});
-        changed(&mut self.transport, now.clone()).then_some((event::TRANSPORT, now))
     }
 }
 
