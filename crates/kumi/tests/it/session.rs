@@ -1009,6 +1009,71 @@ local_test!(with_every_session_tool_on_only_a_few_go_with_every_request, {
     }
     h.session.close().await.unwrap();
 });
+// A DAW Kumi only reads (SoundCraft's, while it has no change kinds; its provider says so): nothing in the session builds
+// or changes anything. No recipe or technique tools, nor their guidance; a gap is the producer's to make, and so is any
+// change a job's report calls for; a request the judge could measure gets no judged rounds; /goal, /loop and a recipe run
+// say why they can't; the menu leaves those out; and listen says the DAW's own words, though it's connected.
+local_test!(a_daw_kumi_only_reads_hears_nothing_of_making_changes, {
+    use kumi_agent::core::techniques::create_technique_store;
+    let dir = tempfile::tempdir().unwrap();
+    let h = harness(None, |o| {
+        o.profile = kumi_types::daw::DawProfile::SOUNDCRAFT;
+        o.reads_only = true;
+        o.listen = true;
+        o.recipes = Some(kumi_agent::create_recipe_store(dir.path().join("recipes")));
+        o.techniques = Some(create_technique_store(dir.path().join("techniques.json")));
+        o.gaps = Some(dir.path().join("gaps.jsonl").to_string_lossy().into_owned());
+        o.jobs = Some(JobsOptions {
+            worker_factory: Rc::new(|_| async { Err(RuntimeError::plain("no workers here")) }.boxed_local()),
+            max: 3,
+            store: None,
+        });
+    });
+    let can = h.session.capabilities();
+    assert!(can.reads_only && !can.recipes && !can.run_recipe && !can.techniques, "{can:?}");
+    let fronts = kumi_agent::core::commands::Fronts::default();
+    for left_out in ["/undo", "/loop", "/goal", "/recipes", "/recipe"] {
+        let command = kumi_agent::core::commands::named(left_out).unwrap();
+        assert!(!command.offered(&can, &fronts), "{left_out} is offered");
+    }
+    h.session.start().await.unwrap();
+    let (listen, start_job, system) = {
+        let created = h.record.created.borrow();
+        let names: Vec<&str> = created[0].tools.iter().map(|tool| tool.name()).collect();
+        for building in ["save_recipe", "run_recipe", "forget_recipe", "technique"] {
+            assert!(!names.contains(&building), "{building}: {names:?}");
+        }
+        let tool = |name: &str| created[0].tools.iter().find(|tool| tool.name() == name).cloned().unwrap();
+        (tool("listen"), tool("start_job"), created[0].instructions.clone())
+    };
+    for building in ["make_changes", "take the way round", "give it a technique", "make any change to the session yourself"] {
+        assert!(!system.contains(building), "{building} in: {system}");
+    }
+    assert!(system.contains("Kumi reads SoundCraft but can't change it yet"), "{system}");
+    assert!(system.contains("act on it only as far as the producer's request asks."), "the job guidance, ending there: {system}");
+    assert!(!start_job.description().contains("only you change"), "{}", start_job.description());
+    h.session.submit("fix the muddy low end", None).await.unwrap();
+    let asked = h.record.calls.borrow().last().cloned().unwrap();
+    assert!(!asked.contains("judged rounds"), "{asked}");
+    let calls = h.record.calls.borrow().len();
+    let loop_refused = || {
+        let refusal = "Kumi can't change SoundCraft yet, so a loop of changes can't run there.";
+        h.events.borrow().iter().filter(|e| matches!(e, SessionEvent::Notice { message } if message == refusal)).count()
+    };
+    for (line, times) in [("/loop", 1), ("/loop master this to -9 LUFS", 2)] {
+        h.session.submit(line, None).await.unwrap();
+        assert_eq!(loop_refused(), times, "{line}");
+    }
+    assert!(!h.notice("Nothing to pick up here"), "a bare /loop invites none where none can run");
+    h.session.goal(Some("make the chorus lift")).await.unwrap();
+    assert!(h.notice("Kumi can't change SoundCraft yet, so it can't work toward a goal there."));
+    assert_eq!(h.record.calls.borrow().len(), calls, "neither reached the model");
+    let recipe = h.session.run_recipe("anything", serde_json::Map::new()).await.unwrap();
+    assert!(recipe.is_error && recipe.text.contains("can't change SoundCraft yet"), "{}", recipe.text);
+    let heard = listen.execute(json!({"mix": true}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+    assert_eq!((heard.is_error, heard.text.as_str()), (true, "Kumi doesn't listen in SoundCraft yet."));
+    h.session.close().await.unwrap();
+});
 fn project(h: &Harness, id: &str) {
     let mut o = h.observation.borrow_mut();
     o.key = id.into();
@@ -5365,11 +5430,16 @@ local_test!(what_a_session_can_do_says_which_of_its_parts_it_has, {
     };
     let dir = tempfile::tempdir().unwrap();
     let at = |name: &str| dir.path().join(name);
-    // What it can't do, by name.
+    // What it can't do, by name (`readsOnly` says what its DAW is, not something it can do).
     let cannot = |h: &Harness| {
         let can = serde_json::to_value(h.session.capabilities()).unwrap();
-        let mut cannot: Vec<String> =
-            can.as_object().unwrap().iter().filter(|(_, can)| can.as_bool() == Some(false)).map(|(name, _)| name.clone()).collect();
+        let mut cannot: Vec<String> = can
+            .as_object()
+            .unwrap()
+            .iter()
+            .filter(|(name, can)| *name != "readsOnly" && can.as_bool() == Some(false))
+            .map(|(name, _)| name.clone())
+            .collect();
         cannot.sort();
         cannot
     };

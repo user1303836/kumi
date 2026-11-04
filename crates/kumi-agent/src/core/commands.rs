@@ -189,7 +189,7 @@ pub const COMMANDS: &[Command] = {
         ),
         command("/reconnect", "⇄", Daw, "Connect to {app} again, keeping the conversation", &[], can(|c| c.reconnect)),
         command("/daw", "▤", Daw, "Which DAW Kumi works with; /daw <name> opens Kumi again with another", &[], front(Front::SwitchDaw)),
-        command("/undo", "↶", Daw, "Undo Kumi's last change", &["history", "revert"], ALWAYS),
+        command("/undo", "↶", Daw, "Undo Kumi's last change", &["history", "revert"], can(|c| !c.reads_only)),
         command(
             "/takeback",
             "«",
@@ -271,14 +271,21 @@ pub const COMMANDS: &[Command] = {
             can(|c| c.map),
         ),
         command("/login", "⇥", Models, "Sign in to a provider", &["key"], can(|c| c.models)),
-        command("/loop", "∞", Work, "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop", &[], ALWAYS),
+        command(
+            "/loop",
+            "∞",
+            Work,
+            "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop",
+            &[],
+            can(|c| !c.reads_only),
+        ),
         command(
             "/goal",
             "◎",
             Work,
             "Keep at one goal until it's met: /goal <what>, then resume, edit, pause, clear",
             &["objective"],
-            can(|c| c.goal),
+            can(|c| c.goal && !c.reads_only),
         ),
         command("/memory", "★", Work, "What Kumi remembers", &["notes"], can(|c| c.memory)),
         command("/note", "✎", Work, "Change a note's words: /note <id> <new words>", &[], can(|c| c.change_note)),
@@ -522,6 +529,8 @@ pub enum Why {
     NotKept,
     /// Kumi is working: `verb` runs once it's done.
     Busy { verb: String },
+    /// The DAW is one Kumi only reads, and `verb` changes it (a recipe is changes).
+    ReadsOnly { verb: String },
 }
 
 /// What a line asks for, which the front end carries out. A command's words, where the front end reads them itself,
@@ -649,6 +658,10 @@ pub fn run(line: &str, now: &Now) -> Effect {
         if let Some(name) = argument(line, "/fork") {
             return Effect::Fork { name };
         }
+    }
+    // A DAW Kumi only reads keeps and runs no recipes, busy or not: they're changes.
+    if can.reads_only && (with_words("/recipes") || with_words("/recipe")) {
+        return Effect::Refused(Why::ReadsOnly { verb: verb.to_string() });
     }
     if with_words("/recipe") && can.run_recipe {
         return Effect::Recipe;

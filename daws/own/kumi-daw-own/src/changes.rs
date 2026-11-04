@@ -250,6 +250,15 @@ pub struct OwnChangeSet {
     pub most_track_adds: Option<usize>,
 }
 
+impl OwnChangeSet {
+    /// Kumi can't change the DAW yet: it has no kind and no action (SoundCraft's, while its bridge only reads). Its
+    /// integration then offers no change tools (make_changes, undo_change, watch_me), and its rules have the producer make
+    /// a fix Kumi names.
+    pub const fn changes_nothing(&self) -> bool {
+        self.kinds.is_empty() && self.actions.is_empty()
+    }
+}
+
 /// make_changes' input: the same shape for every DAW (its steps' tool enum is filled in for the DAW).
 const PLAN_SCHEMA: &str = r#"{"type":"object","additionalProperties":false,"required":["steps"],"properties":{"steps":{"type":"array","minItems":1,"maxItems":5000,"items":{"type":"object","additionalProperties":false,"required":["tool","input"],"properties":{"tool":{"type":"string"},"input":{"type":"object","description":"What that step takes; \"@name\" for what an earlier step made; wait takes {\"beats\": 8} or {\"seconds\": 4}"},"as":{"type":"string","pattern":"^[a-zA-Z][a-zA-Z0-9_]{0,31}$","description":"Name what this step makes (a new track, an added effect) for later steps"},"each":{"type":"object","description":"Repeat this step: each field's list gives that input field its value run by run, e.g. {\"volumeDb\": [-6, -3]}, or several lists of one length","additionalProperties":{"type":"array","maxItems":5000}}}}},"final":{"type":"boolean","description":"These changes complete the request: Kumi says what changed and you aren't called again. Leave it out to see the results and carry on."}}}"#;
 const UNDO_SCHEMA: &str = r#"{"type":"object","properties":{"change":{"type":"string","minLength":1,"maxLength":32,"description":"A change id such as c3, or \"last\""},"discard":{"type":"boolean","description":"Put the change's values back even though the producer changed them since (only when they asked for that)"},"final":{"type":"boolean","description":"true when the undo completes the request: Kumi tells the producer, and the answer ends there"}},"required":["change"],"additionalProperties":false}"#;
@@ -747,9 +756,12 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
     }
 
     /// The tools for this DAW's changes: each core kind's and action's, make_changes with every kind and action as a step,
-    /// and undo_change.
+    /// and undo_change; none for a DAW Kumi can't change yet.
     pub fn tools(self: &Rc<Self>) -> Vec<Rc<dyn KernelTool>> {
         let set = self.link().daw.changes;
+        if set.changes_nothing() {
+            return Vec::new();
+        }
         let mut tools: Vec<Rc<dyn KernelTool>> = Vec::new();
         let mut lines = Vec::new();
         // Every kind and action is a tool: the core ones go with every request, the others wait behind find_tools (which

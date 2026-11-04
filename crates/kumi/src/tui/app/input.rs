@@ -903,6 +903,11 @@ impl TuiApp {
                 self.notice(&super::not_kept(), NoticeTone::Info);
                 return Ok(());
             }
+            Effect::Refused(Why::ReadsOnly { verb }) => {
+                self.clear_editor();
+                self.notice(&super::reads_only(&verb), NoticeTone::Info);
+                return Ok(());
+            }
             Effect::Resume { word } => {
                 self.clear_editor();
                 let found = if word.is_empty() { None } else { Some(session.op(op::FindConversation { word: word.to_string() }).await?) };
@@ -1027,6 +1032,12 @@ impl TuiApp {
                 }
                 if self.busy() {
                     let _ = session.op(op::Cancel {}).await;
+                }
+                // A DAW Kumi can't stop says so (its own key stops it), not that a stop failed just now.
+                if !crate::daw::profile().caps.stop_transport {
+                    let app = crate::daw::words().app;
+                    self.notice(&format!("Kumi can't stop {app} yet; press space in {app} to stop it."), NoticeTone::Info);
+                    return Ok(());
                 }
                 if !session.op(op::StopDaw {}).await? {
                     self.notice(

@@ -109,6 +109,9 @@ pub struct Capabilities {
     /// Choosing a model and signing in (/model, /effort, /fast, /login, /logout).
     pub models: bool,
     pub take_back: bool,
+    /// Not a thing it can do but what its DAW is: one Kumi only reads. The menu then leaves out what changes it (/undo,
+    /// /goal, /loop), and the session refuses those if they're typed.
+    pub reads_only: bool,
 }
 
 /// A request a front end makes, by its struct in [`op`]: it travels as an [`Op`], and its answer is a [`Reply`].

@@ -1257,8 +1257,12 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
     }
 
     /// M6, after a look at the project: catch-up for one it hasn't run for (another project, or the DAW back after it
-    /// went away), else the snapshot kept again when the last one is old.
+    /// went away), else the snapshot kept again when the last one is old. Nothing for a DAW without catch-up, whose host
+    /// has no such tool.
     fn remember_look(&self, identity: Option<&str>, name: &str) {
+        if !self.daw.profile.caps.catch_up {
+            return;
+        }
         let Some(identity) = identity.filter(|identity| !identity.is_empty()) else { return };
         let Some(host) = self.endpoint.borrow().clone() else { return };
         let remembered = self.remembered.clone();
@@ -1282,13 +1286,15 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
     fn tools(&self) -> Vec<Rc<dyn KernelTool>> {
         let mut tools = vec![self.read_tool()];
         tools.extend(self.changes.tools());
-        // M6: learning a routine the producer does by hand, for a recipe.
-        tools.push(Rc::new(WatchTool {
-            endpoint: self.endpoint.clone(),
-            words: self.daw.catch_up,
-            app: self.daw.profile.words.app,
-            on_watch: self.options.context.on_watch.clone(),
-        }));
+        // M6: learning a routine the producer does by hand, for a recipe in the DAW's change kinds.
+        if !self.daw.changes.changes_nothing() {
+            tools.push(Rc::new(WatchTool {
+                endpoint: self.endpoint.clone(),
+                words: self.daw.catch_up,
+                app: self.daw.profile.words.app,
+                on_watch: self.options.context.on_watch.clone(),
+            }));
+        }
         tools.extend(self.listening.tools());
         // M7: the variations loop, where the DAW offers it.
         if let Some(variations) = &self.variations {
@@ -1755,7 +1761,7 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         Ok(self.call("show_status", json!({"text": text}), signal).await?.is_ok())
     }
     fn has_stop_live(&self) -> bool {
-        true
+        self.daw.profile.caps.stop_transport
     }
     async fn stop_live(&self, signal: Signal) -> Result<bool, RuntimeError> {
         // What Kumi plays out loud stops too (a preview isn't the DAW's playback).
@@ -2209,13 +2215,21 @@ pub fn instructions_of(daw: &OwnDaw) -> String {
 /// gives only its facts (its setup's fields in its instructions, its mechanical mistakes in `OwnDaw::mechanical`). Two equal
 /// routes are a mistake to fix; a route through FX is the producer's sound, so a choice to ask about.
 pub fn own_rules(daw: &OwnDaw) -> String {
-    let app = daw.profile.words.app;
-    let mut rules = format!(
-        "The look's setup is how this producer set {app} up: follow it rather than {app}'s factory defaults. When the producer reports a problem: a clear mechanical mistake with one obvious fix ({}) gets that fix as one change, said with what you did and how to take it back (Kumi's undo or {app}'s own); when the fix means choosing between the producer's own routes or settings (one route running through FX, two settings they may have meant), name them exactly and ask one question. Never ask only because nothing is selected. Never change {app}'s preferences, key bindings, mouse modifiers or theme. Describe each change in words, naming what it touched and where. Offer alternatives as separate takes, each undoable, and never make a whole song or part unasked.",
-        daw.mechanical
-    );
-    // (#401, R35) after time away, what's new first
-    rules.push_str(" After a catch-up, start from what changed since last time: say what's new, and propose or change only that, never what came before.");
+    let (app, mechanical) = (daw.profile.words.app, daw.mechanical);
+    let mistake = "a clear mechanical mistake with one obvious fix";
+    let choice = "when the fix means choosing between the producer's own routes or settings (one route running through FX, two settings they may have meant), name them exactly and ask one question. Never ask only because nothing is selected.";
+    let mut rules = if daw.changes.changes_nothing() {
+        // A DAW Kumi can't change yet: the producer makes the fix Kumi names.
+        format!("When the producer reports a problem: name {mistake} ({mechanical}) and how to make that fix in {app}; {choice}")
+    } else {
+        format!(
+            "The look's setup is how this producer set {app} up: follow it rather than {app}'s factory defaults. When the producer reports a problem: {mistake} ({mechanical}) gets that fix as one change, said with what you did and how to take it back (Kumi's undo or {app}'s own); {choice} Never change {app}'s preferences, key bindings, mouse modifiers or theme. Describe each change in words, naming what it touched and where. Offer alternatives as separate takes, each undoable, and never make a whole song or part unasked."
+        )
+    };
+    // (#401, R35) after time away, what's new first: for a DAW Kumi catches up on
+    if daw.profile.caps.catch_up {
+        rules.push_str(" After a catch-up, start from what changed since last time: say what's new, and propose or change only that, never what came before.");
+    }
     // (#401) a chore kept as a script: once it ran, and only once the producer said yes
     if daw.profile.caps.scripts {
         rules.push_str(" A chore the producer repeats can be kept as a script (scripts): list what's kept first; a new one runs once with run_lua, and is kept only once they said yes.");

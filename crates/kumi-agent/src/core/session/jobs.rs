@@ -52,6 +52,10 @@ kumi_types::daw_text!(
     START_JOB_DESCRIPTION, start_job_description:
     "Start work in the background for anything that takes more than about 30 seconds and doesn't change the DAW: research on the web, a tutorial video", (if manual: ", the manual"), ", the producer's library or earlier conversations", (if max_for_live_devices: ", or a device's file"), ". It returns at once: say in one line what's running, then keep going or end your answer. A worker (task) has only tools away from the DAW and can't see or change it; whatever it finds comes back to you as words, and only you change the ", place, ". Independent jobs run together. Never for an ordinary edit."
 );
+/// [`start_job_description`] for a DAW Kumi only reads: nobody in Kumi changes it.
+fn start_job_description_read_only(profile: &DawProfile) -> String {
+    start_job_description(profile).replace(&format!(", and only you change the {}", profile.words.place), "")
+}
 static JOBS_SCHEMA: LazyLock<JsonObject> = LazyLock::new(|| {
     serde_json::from_value(json!({
         "type": "object",
@@ -275,7 +279,11 @@ impl Session {
         vec![
             Rc::new(StartJobTool {
                 session: Rc::downgrade(&self.0),
-                description: start_job_description(&self.0.options.profile),
+                description: if self.reads_only() {
+                    start_job_description_read_only(&self.0.options.profile)
+                } else {
+                    start_job_description(&self.0.options.profile)
+                },
                 schema: start_job_schema(&self.0.options.profile),
             }) as Rc<dyn KernelTool>,
             Rc::new(JobsTool { session: Rc::downgrade(&self.0) }),

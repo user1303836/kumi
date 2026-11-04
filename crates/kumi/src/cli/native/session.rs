@@ -759,6 +759,8 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
     let mut options = SessionOptions::new(kernel_factory, integration_factory, emit.clone());
     // The session speaks the words of the DAW it works with (Live's for Live).
     options.profile = *provider.profile();
+    // A DAW Kumi only reads: the session builds nothing, and offers and says nothing that changes it.
+    options.reads_only = provider.reads_only();
     options.conversations = conversations.map(|store| store as Rc<dyn ConversationStore>);
     options.log = log;
     options.resume = taken_up;
@@ -874,9 +876,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
     // The DAW this session works with: the one chosen (config), else Live.
     let provider = crate::daw::provider(daw.unwrap_or(kumi_types::daw::DawId::Ableton)).expect("a chosen DAW is registered");
     crate::daw::work_with(provider.id());
-    // The DAW used last decides only among several bridges: a producer with one (Live alone) never gets the file.
-    if bridge_config.is_some() && crate::daw::providers().into_iter().filter(|p| p.bridge_installed(&io.env)).count() > 1 {
-        crate::daw::remember_used(provider.id(), &io.env);
+    // The DAW used last decides only among several bridges Kumi picks between by itself.
+    if bridge_config.is_some() {
+        crate::daw::remember_started(provider, &io.env);
     }
     let mode = if bridge_config.is_some() { "live" } else { "inference-only" };
     let store = Rc::new(open_credential_store(&inference.auth_file));

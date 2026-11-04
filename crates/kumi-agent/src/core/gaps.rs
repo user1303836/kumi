@@ -27,6 +27,10 @@ kumi_types::daw_text!(
     pub GAP_GUIDANCE, gap_guidance:
     "When a request needs something Kumi's tools or ", app, "'s scripting don't offer, take the way round first (another tool, a plan of several, a recording, a device you make) and do it, cleanup included; then note the gap with note_gap beside your answer (final: true once nothing is left to do), and say in a sentence what you did instead."
 );
+kumi_types::daw_text!(
+    pub GAP_GUIDANCE_READ_ONLY, gap_guidance_read_only:
+    "Kumi reads ", app, " but can't change it yet: when a request needs a change, say exactly what to change and where, for the producer to make in ", app, ". When it needs something else Kumi's tools don't offer, say so, and note the gap with note_gap beside your answer (final: true once nothing is left to do)."
+);
 const MAX_BYTES: u64 = 256 * 1024;
 const KEEP_LINES: usize = 500;
 kumi_types::daw_text!(

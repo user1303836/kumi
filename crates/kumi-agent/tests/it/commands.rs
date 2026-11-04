@@ -49,6 +49,7 @@ fn everything() -> Now {
         slots: true,
         models: true,
         take_back: true,
+        reads_only: false,
     };
     let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
     Now { busy: false, goal_running: false, can, fronts }
@@ -232,6 +233,21 @@ fn a_command_this_session_has_not_reads_as_unknown_idle_and_as_waiting_busy() {
         assert_eq!(run(line, &nothing()), Effect::Refused(Why::NotKept), "{line}");
         assert_eq!(run(line, &Now { busy: true, ..nothing() }), Effect::Refused(Why::NotKept), "{line}, busy");
     }
+}
+
+#[test]
+fn a_session_kumi_only_reads_refuses_recipes_with_why_busy_or_not() {
+    // (#921) A typed /recipe there read as a command there's none of; a recipe is changes, so it says why instead.
+    let reads =
+        |busy| Now { busy, can: Capabilities { reads_only: true, recipes: false, run_recipe: false, ..everything().can }, ..everything() };
+    for line in ["/recipes", "/recipe", "/recipe tidy the drums"] {
+        let verb = line.split_whitespace().next().unwrap();
+        for busy in [false, true] {
+            assert_eq!(run(line, &reads(busy)), Effect::Refused(Why::ReadsOnly { verb: verb.into() }), "{line}, busy {busy}");
+        }
+    }
+    // What changes nothing runs as before.
+    assert_eq!(run("/memory", &reads(false)), Effect::Memory);
 }
 
 #[test]

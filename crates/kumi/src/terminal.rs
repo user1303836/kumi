@@ -121,7 +121,9 @@ fn all_on() -> Now {
         *value = Value::Bool(true);
     }
     let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
-    Now { busy: false, goal_running: false, can: serde_json::from_value(can).unwrap_or_default(), fronts }
+    // (`reads_only` says what the DAW is, not something the session can do: off, as the most a session can do)
+    let can = Capabilities { reads_only: false, ..serde_json::from_value(can).unwrap_or_default() };
+    Now { busy: false, goal_running: false, can, fronts }
 }
 /// Plain mode's words for a command where the table's are the full-screen app's: plain mode takes words where that app
 /// opens a panel, and only lists what that app also changes.
@@ -866,6 +868,12 @@ impl PlainTerminal {
                 if self.busy() {
                     let _ = session.op(op::Cancel {}).await;
                 }
+                // A DAW Kumi can't stop says so (its own key stops it), not that a stop failed just now.
+                if !crate::daw::profile().caps.stop_transport {
+                    let app = crate::daw::words().app;
+                    self.notice(&format!("[stop] Kumi can't stop {app} yet; press space in {app}."));
+                    return Ok(());
+                }
                 if !session.op(op::StopDaw {}).await? {
                     self.notice(&format!("[stop] Kumi couldn't stop {0} just now; press space in {0}.", crate::daw::words().app));
                 }
@@ -973,6 +981,9 @@ impl PlainTerminal {
                 self.notice(&format!("[plain] {verb} isn't available in plain mode: the full-screen app has it."))
             }
             Effect::Refused(Why::NotKept) => self.notice(&format!("[conversations] {}", crate::tui::app::not_kept())),
+            Effect::Refused(Why::ReadsOnly { verb }) => {
+                self.notice(&format!("[{}] {}", verb.trim_start_matches('/'), crate::tui::app::reads_only(&verb)))
+            }
             // Told to wait only for what this session and plain mode can do once Kumi is done.
             Effect::Refused(Why::Busy { verb }) if self.offers(&verb) && !the_apps_own(&verb) => self.wait_for(&verb),
             Effect::Refused(Why::Busy { verb: name }) | Effect::Unknown { name } => self.not_here(&name),

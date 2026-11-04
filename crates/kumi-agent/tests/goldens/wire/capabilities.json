@@ -38,5 +38,6 @@
   "map": true,
   "slots": false,
   "models": true,
-  "takeBack": true
+  "takeBack": true,
+  "readsOnly": false
 }

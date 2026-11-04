@@ -5,7 +5,7 @@ use crate::core::text::cut;
 use crate::core::{
     contracts::*,
     file_sync::FileSync,
-    gaps::{gap_guidance, gap_tools_for},
+    gaps::{gap_guidance, gap_guidance_read_only, gap_tools_for},
     memory::{memory_instructions_for, memory_tools_for, MemoryTools, MemoryToolsOptions},
     recall::{recall_tool_for, RecallOptions},
     recipes::{recipe_instructions, recipe_tools_for, RecipeStore, RecipeToolsOptions, RUN_RECIPE_TOOL},
@@ -115,6 +115,10 @@ pub struct SessionOptions {
     pub missing_after_ms: Option<u64>,
     pub memory: Option<Rc<dyn MemoryStore>>,
     pub listen: bool,
+    /// The DAW is one Kumi only reads (its provider says so, while it has no change kinds): the session builds nothing and
+    /// says nothing of making changes (recipes, techniques, goals, loops, judged rounds), and a gap is the producer's to
+    /// make.
+    pub reads_only: bool,
     pub recipes: Option<Rc<dyn RecipeStore>>,
     pub watch: Option<VideoDirectories>,
     /// Where measured references are kept (the reference tool is offered with listening when it's set).
@@ -180,6 +184,7 @@ impl SessionOptions {
             missing_after_ms: None,
             memory: None,
             listen: false,
+            reads_only: false,
             recipes: None,
             watch: None,
             references: None,
@@ -604,6 +609,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
         let recipes = options
             .recipes
             .as_ref()
+            .filter(|_| !options.reads_only)
             .map(|store| {
                 let weak = weak.clone();
                 let emit = emit.clone();
@@ -623,8 +629,8 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 options.profile,
                 RecallOptions {
                     conversations: Some(store.clone()),
-                    techniques: options.techniques.clone(),
-                    recipes: options.recipes.clone(),
+                    techniques: options.techniques.clone().filter(|_| !options.reads_only),
+                    recipes: options.recipes.clone().filter(|_| !options.reads_only),
                     current: Rc::new(move || {
                         let inner = weak.upgrade()?;
                         let s = inner.state.borrow();
@@ -633,7 +639,7 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                 },
             )
         });
-        let learned = options.techniques.as_ref().map(|store| {
+        let learned = options.techniques.as_ref().filter(|_| !options.reads_only).map(|store| {
             let emit = emit.clone();
             Rc::new(technique_tools_for(
                 options.profile,
@@ -664,6 +670,8 @@ pub fn create_session(options: SessionOptions) -> Result<Session, RuntimeError> 
                         async move {
                             match integration {
                                 Some(i) if i.has_hear() => i.hear(&request, signal).await,
+                                // A DAW Kumi never hears says so in its own words, connected or not.
+                                _ if !profile.caps.hear => Ok(Err(profile.vocab.listen_method.into())),
                                 _ => Ok(Err(format!(
                                     "Kumi isn't connected to {}, so it can't hear the {}.",
                                     profile.words.app, profile.words.place
@@ -1837,6 +1845,7 @@ impl Session {
         let noun = self.0.state.borrow().integration.as_ref().map(|i| i.words().1).unwrap_or(DAW_WORDS.1);
         // Their own music, once Kumi has heard some of it.
         let music = self.0.options.music.as_ref().map(|music| taste_line(music.status().heard())).unwrap_or_default();
+        let reads_only = self.reads_only();
         let extra = [
             memory
                 .as_ref()
@@ -1845,11 +1854,21 @@ impl Session {
             habits,
             crate::core::plugin_tools::GUIDANCE.into(),
             music,
-            recipe_instructions(&recipes),
+            // A DAW Kumi only reads gets nothing about making changes (its recipe and technique tools aren't made): its
+            // recipes go unsaid, a gap is the producer's to make, and a job's report changes nothing.
+            if reads_only { String::new() } else { recipe_instructions(&recipes) },
             if self.0.learned.is_some() { technique_guidance(&self.0.options.profile) } else { String::new() },
             technique_instructions_for(&self.0.options.profile, &techniques),
-            if self.0.gaps.is_empty() { String::new() } else { gap_guidance(&self.0.options.profile) },
-            if self.0.jobs.is_none() { String::new() } else { crate::core::jobs::job_guidance(&self.0.options.profile) },
+            match (self.0.gaps.is_empty(), reads_only) {
+                (true, _) => String::new(),
+                (false, false) => gap_guidance(&self.0.options.profile),
+                (false, true) => gap_guidance_read_only(&self.0.options.profile),
+            },
+            match (self.0.jobs.is_none(), reads_only) {
+                (true, _) => String::new(),
+                (false, false) => crate::core::jobs::job_guidance(&self.0.options.profile),
+                (false, true) => crate::core::jobs::job_guidance_read_only(&self.0.options.profile),
+            },
             addendum.into(),
             if imported { imported_guidance(noun) } else { String::new() },
         ]
@@ -2797,14 +2816,16 @@ impl Session {
             forget_taste: self.0.options.library.is_some(),
             forget: true,
             change_note: true,
-            recipes: true,
+            recipes: !self.reads_only(),
             instant: true,
-            run_recipe: true,
+            run_recipe: !self.reads_only(),
             forget_recipe: true,
-            techniques: true,
+            techniques: !self.reads_only(),
             forget_technique: true,
             answer_technique: self.0.learned.is_some(),
+            // (kept, so a typed /goal hears why it can't run here; the menu leaves it out, by `reads_only`)
             goal: true,
+            reads_only: self.reads_only(),
             stop_goal: true,
             stop_loop: true,
             goal_status: true,
@@ -3707,6 +3728,10 @@ impl Session {
         if !self.0.state.borrow().started {
             return Err(RuntimeError::plain("Session is not started"));
         }
+        if self.reads_only() {
+            let app = self.0.options.profile.words.app;
+            return Ok(RecipeOutcome { text: format!("Kumi can't change {app} yet, so a recipe doesn't run there."), is_error: true });
+        }
         let Some(run) = self.0.recipes.iter().find(|t| t.name() == RUN_RECIPE_TOOL).cloned() else {
             return Ok(RecipeOutcome { text: "Kumi keeps no recipes here.".into(), is_error: true });
         };
@@ -3800,6 +3825,11 @@ impl Session {
             if !s.started {
                 return Err(RuntimeError::plain("Session is not started"));
             }
+        }
+        if self.reads_only() {
+            let app = self.0.options.profile.words.app;
+            self.notice(&format!("Kumi can't change {app} yet, so it can't work toward a goal there."));
+            return Ok(());
         }
         if words.as_ref().is_some_and(|s| s.len() > 4096) {
             return Err(RuntimeError::plain("Say the goal in at most 4 KiB"));
@@ -3909,6 +3939,11 @@ impl Session {
             self.emit(SessionEvent::Action(ActionEvent { title: "Stopped".into(), playing: Some(false), recording: Some(false) }));
         }
         Ok(stopped)
+    }
+    /// Kumi only reads the DAW this session works with (its integration changes nothing): nothing the session says builds
+    /// or changes anything.
+    pub(crate) fn reads_only(&self) -> bool {
+        self.0.options.reads_only
     }
     pub fn answering_fallback(&self) -> Option<String> {
         self.0.state.borrow().kernel.as_ref().and_then(|held| held.value.answering_fallback())

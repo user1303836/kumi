@@ -79,7 +79,7 @@ fn without_any_bridge_kumi_chats_in_lives_words() {
     let env = env();
     assert_eq!(
         providers().map(|provider| provider.id()).collect::<Vec<_>>(),
-        [DawId::Ableton, DawId::Reaper, DawId::Renoise],
+        [DawId::Ableton, DawId::Reaper, DawId::Renoise, DawId::SoundCraft],
         "Live first"
     );
     let (provider, found) = chosen(None, &env);
@@ -352,4 +352,58 @@ fn with_no_daw_open_kumi_says_to_open_one_of_theirs() {
         open_one_words(&env).as_deref(),
         Some("No DAW is open yet: open Live, REAPER or Renoise, and Kumi connects to the one you open.")
     );
+}
+
+/// SoundCraft is experimental: open or on this computer, Kumi never works with it, asks about it, follows to it or offers
+/// it by itself; `--daw soundcraft`, KUMI_DAW and `/daw soundcraft` reach it.
+#[test]
+fn an_experimental_daw_is_reached_only_by_asking_for_it() {
+    use kumi::daw::{chosen_among, daw_command_among, to_ask, to_follow, DawCommand};
+    use kumi_types::daw::DawId;
+    let env = env();
+    let soundcraft = open(&[DawId::SoundCraft]);
+    let (chosen, bridge) = chosen_among(None, &env, &soundcraft, &soundcraft);
+    assert_eq!((chosen.id(), bridge), (DawId::Ableton, None), "open and here, it isn't chosen: Live's words, as with no DAW");
+    // Beside Renoise, Renoise is the only DAW here: chosen without asking which.
+    let both = open(&[DawId::SoundCraft, DawId::Renoise]);
+    assert!(to_ask(&env, &both, &|_| false).is_empty());
+    assert_eq!(chosen_among(None, &env, &|_| false, &both).0.id(), DawId::Renoise);
+    assert!(to_follow(DawId::Ableton, &env, &soundcraft).is_none(), "a session in Live doesn't follow to it");
+
+    // Asked for, it's the one.
+    assert_eq!(chosen_among(Some(DawId::SoundCraft), &env, &|_| false, &|_| false).0.id(), DawId::SoundCraft);
+    let asked: serde_json::Value = serde_json::from_str(&config(&["--daw", "soundcraft"], &env).unwrap()).unwrap();
+    assert_eq!(asked["daw"], "soundcraft");
+    let mut named = env.clone();
+    named.insert("KUMI_DAW".into(), "soundcraft".into());
+    let read: serde_json::Value = serde_json::from_str(&config(&[], &named).unwrap()).unwrap();
+    assert_eq!(read["daw"], "soundcraft");
+
+    // /daw switches to it by name, and never offers it.
+    assert_eq!(
+        daw_command_among("soundcraft", &soundcraft),
+        DawCommand::Switch(DawId::SoundCraft, "Kumi closes and opens again with SoundCraft.".into())
+    );
+    assert_eq!(
+        daw_command_among("", &soundcraft),
+        DawCommand::Say("Kumi works with Live, the only DAW it works with on this computer.".into())
+    );
+    assert_eq!(
+        daw_command_among("bitwig", &soundcraft),
+        DawCommand::Say("Kumi doesn't know bitwig: /daw live, /daw reaper, /daw renoise.".into())
+    );
+}
+
+/// The DAW used last is kept only among several bridges Kumi picks between by itself: a session with SoundCraft, which
+/// nothing picks by itself, leaves it as it was.
+#[test]
+fn a_session_with_an_experimental_daw_leaves_the_daw_used_last_alone() {
+    use kumi::daw::{last_used, provider, remember_started};
+    use kumi_types::daw::DawId;
+    let (_dir, env) = live_and_renoise_home();
+    own_bridge_in(&env, daw_bridge::Daw::Renoise);
+    remember_started(provider(DawId::Renoise).unwrap(), &env);
+    assert_eq!(last_used(&env), Some(DawId::Renoise), "Live's and Renoise's bridges are in: Renoise's session keeps it");
+    remember_started(provider(DawId::SoundCraft).unwrap(), &env);
+    assert_eq!(last_used(&env), Some(DawId::Renoise), "SoundCraft never writes it");
 }

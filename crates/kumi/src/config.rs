@@ -173,9 +173,9 @@ pub(crate) fn daw_env_problem(env: &Env) -> Option<String> {
     take_daw(&[], env).err().map(|error| error.message())
 }
 
-/// The DAWs this Kumi integrates, by the names `--daw` and KUMI_DAW take.
-fn registered_daws() -> String {
-    crate::daw::registry::registered().filter_map(|profile| profile.id).map(DawId::as_str).collect::<Vec<_>>().join(", ")
+/// The DAWs `--daw` and KUMI_DAW name in their usage, by the names they take (an experimental one is taken too, unlisted).
+fn offered_daws() -> String {
+    crate::daw::offered().map(|provider| provider.id().as_str()).collect::<Vec<_>>().join(", ")
 }
 
 /// A DAW this Kumi integrates, by its name in any case: "live" is another name for Live's ("ableton", the one written), as
@@ -202,8 +202,8 @@ pub(crate) fn take_daw_flag(args: &[String]) -> Result<(Vec<String>, Option<DawI
         };
         match word {
             Some(word) => {
-                let daw = known_daw(word)
-                    .ok_or_else(|| RuntimeError::plain(format!("Use: --daw <daw>, with daw one of {}.", registered_daws())))?;
+                let daw =
+                    known_daw(word).ok_or_else(|| RuntimeError::plain(format!("Use: --daw <daw>, with daw one of {}.", offered_daws())))?;
                 asked = Some(daw);
             }
             None => rest.push(args[at].clone()),
@@ -218,7 +218,7 @@ pub(crate) fn take_daw(args: &[String], env: &Env) -> Result<(Vec<String>, Optio
     let (rest, mut asked) = take_daw_flag(args)?;
     if asked.is_none() {
         if let Some(word) = env.get("KUMI_DAW").filter(|s| !s.is_empty()) {
-            asked = Some(known_daw(word).ok_or_else(|| RuntimeError::plain(format!("KUMI_DAW must be one of: {}.", registered_daws())))?);
+            asked = Some(known_daw(word).ok_or_else(|| RuntimeError::plain(format!("KUMI_DAW must be one of: {}.", offered_daws())))?);
         }
     }
     // Live asked for is kept: among several bridges it decides; the configuration never writes it (as before).

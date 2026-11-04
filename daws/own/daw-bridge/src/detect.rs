@@ -1,6 +1,6 @@
-//! Finding REAPER and Renoise on this computer: the apps, their versions and architectures, REAPER's resource
-//! folders (portable installs included) and Renoise's per-version preferences folders. Read-only: nothing is
-//! launched and no permission is asked for.
+//! Finding REAPER, Renoise and SoundCraft on this computer: the apps, their versions and architectures, REAPER's resource
+//! folders (portable installs included), Renoise's per-version preferences folders and SoundCraft's settings folder.
+//! Read-only: nothing is launched and no permission is asked for.
 use crate::daw::Daw;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
@@ -575,6 +575,133 @@ fn windows_documents() -> Option<PathBuf> {
     found
 }
 
+/// SoundCraft on this computer: its app (the `.app` on macOS, else its program) and its version where a file says it (its
+/// bundle's, on macOS; elsewhere the program says it only when run).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SoundCraftApp {
+    pub path: PathBuf,
+    pub version: Option<String>,
+}
+
+/// Names SoundCraft's app in place of looking for it (Kumi's bridge beside SoundCraft takes it too).
+pub const SOUNDCRAFT_APP: &str = "KUMI_SOUNDCRAFT_APP";
+
+/// Where SoundCraft is: the app [`SOUNDCRAFT_APP`] names (only it, and only once it's there), else SoundCraft.app in
+/// /Applications or ~/Applications on macOS; on Windows the folder its installer recorded (for this user, else for
+/// everyone), else its default folders; elsewhere `soundcraft` on PATH.
+pub fn detect_soundcraft(env: &Env) -> Option<SoundCraftApp> {
+    let path = match env.var_path(SOUNDCRAFT_APP) {
+        Some(named) => Some(named).filter(|path| path.exists())?,
+        None => soundcraft_installed(env)?,
+    };
+    let version = (env.os == Os::Mac).then(|| plist_value(&path, "CFBundleShortVersionString")).flatten();
+    Some(SoundCraftApp { path, version })
+}
+
+fn soundcraft_installed(env: &Env) -> Option<PathBuf> {
+    match env.os {
+        Os::Mac => [env.system("/Applications"), env.home.join("Applications")]
+            .into_iter()
+            .map(|folder| folder.join("SoundCraft.app"))
+            .find(|app| app.exists()),
+        Os::Windows => {
+            // The installer's record is this computer's: a test, with a root of its own, has none.
+            let recorded = env
+                .root
+                .is_none()
+                .then(|| windows_install_dir(r"Software\SoundCraft"))
+                .flatten()
+                .map(|folder| folder.join("soundcraft.exe"));
+            let defaults = [
+                env.var_path("LOCALAPPDATA").map(|data| data.join("Programs").join("ArtCraft").join("SoundCraft").join("soundcraft.exe")),
+                env.var_path("ProgramFiles").map(|files| files.join("ArtCraft").join("SoundCraft").join("soundcraft.exe")),
+            ];
+            recorded.into_iter().chain(defaults.into_iter().flatten()).find(|program| program.exists())
+        }
+        Os::Linux => std::env::split_paths(&env.var("PATH")?).map(|folder| folder.join("soundcraft")).find(|program| program.is_file()),
+    }
+}
+
+/// SoundCraft's settings folder (its `ui.json`, autosaves and logs), as the app at `app` finds it: SOUNDCRAFT_CONFIG_DIR
+/// when it's set (set empty: none at all), else `SoundCraftData` beside the program of a portable copy (one with
+/// `portable.txt` beside it), else the system's place for it.
+pub fn soundcraft_settings(env: &Env, app: Option<&Path>) -> Option<PathBuf> {
+    if let Some(named) = (env.var)("SOUNDCRAFT_CONFIG_DIR") {
+        return (!named.is_empty()).then(|| PathBuf::from(named));
+    }
+    let program_folder = |app: &Path| match app.extension().is_some_and(|ext| ext == "app") {
+        true => app.join("Contents").join("MacOS"),
+        false => app.parent().map(Path::to_path_buf).unwrap_or_default(),
+    };
+    if let Some(beside) = app.map(program_folder).filter(|folder| folder.join("portable.txt").is_file()) {
+        return Some(beside.join("SoundCraftData"));
+    }
+    Some(match env.os {
+        Os::Mac => env.home.join("Library").join("Application Support").join("SoundCraft"),
+        Os::Windows => env.var_path("APPDATA").unwrap_or_else(|| env.home.join("AppData").join("Roaming")).join("SoundCraft"),
+        Os::Linux => env.config_home().join("soundcraft"),
+    })
+}
+
+/// The session SoundCraft opened or saved last, from its settings folder's `ui.json` (its Open Recent, newest first),
+/// while that session is still there.
+pub fn soundcraft_last_session(settings: &Path) -> Option<PathBuf> {
+    let ui: serde_json::Value = serde_json::from_slice(&std::fs::read(settings.join("ui.json")).ok()?).ok()?;
+    let newest = ui.get("recent_sessions")?.as_array()?.first()?.as_str()?;
+    Some(PathBuf::from(newest)).filter(|session| session.is_file())
+}
+
+/// The folder an installer recorded under `key` (`InstallDir`), for this user, else for everyone.
+#[cfg(windows)]
+fn windows_install_dir(key: &str) -> Option<PathBuf> {
+    use std::os::windows::ffi::OsStringExt;
+    const CURRENT_USER: isize = 0x8000_0001_u32 as i32 as isize;
+    const LOCAL_MACHINE: isize = 0x8000_0002_u32 as i32 as isize;
+    const RRF_RT_REG_SZ: u32 = 0x2;
+    #[link(name = "advapi32")]
+    unsafe extern "system" {
+        fn RegGetValueW(
+            key: isize,
+            subkey: *const u16,
+            value: *const u16,
+            flags: u32,
+            kind: *mut u32,
+            data: *mut std::ffi::c_void,
+            size: *mut u32,
+        ) -> i32;
+    }
+    let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
+    let (key, name) = (wide(key), wide("InstallDir"));
+    // Read in UTF-16: `reg.exe` writes in the console's code page, which loses what it can't show, such as a folder's
+    // name in another script.
+    [CURRENT_USER, LOCAL_MACHINE].into_iter().find_map(|root| {
+        let mut size = 0u32;
+        // SAFETY: both names end in NUL; without a buffer, the call only says the size the value needs, in bytes.
+        let status = unsafe {
+            RegGetValueW(root, key.as_ptr(), name.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), std::ptr::null_mut(), &mut size)
+        };
+        if status != 0 {
+            return None;
+        }
+        let mut buffer = vec![0u16; size as usize / 2 + 1];
+        size = (buffer.len() * 2) as u32;
+        // SAFETY: the buffer has the `size` bytes of room it's said to have.
+        let status = unsafe {
+            RegGetValueW(root, key.as_ptr(), name.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buffer.as_mut_ptr().cast(), &mut size)
+        };
+        if status != 0 {
+            return None;
+        }
+        let end = buffer.iter().position(|&unit| unit == 0).unwrap_or(buffer.len());
+        Some(PathBuf::from(std::ffi::OsString::from_wide(&buffer[..end]))).filter(|folder| !folder.as_os_str().is_empty())
+    })
+}
+
+#[cfg(not(windows))]
+fn windows_install_dir(_key: &str) -> Option<PathBuf> {
+    None
+}
+
 /// What stands in for the listing of this computer's processes when it's set: lines of "pid program", as `ps` writes
 /// them (other lines list nothing). The isolated test runner sets it to `none`, so no test sees a DAW running on the
 /// computer it runs on.
@@ -1026,6 +1153,74 @@ mod tests {
     fn touch(path: &Path, bytes: &[u8]) {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(path, bytes).unwrap();
+    }
+
+    #[test]
+    fn soundcraft_is_found_where_it_installs_and_where_a_variable_names_it() {
+        let root = tempfile::tempdir().unwrap();
+        let none = |_: &str| None;
+        assert_eq!(detect_soundcraft(&env(Os::Mac, root.path(), &none)), None, "nothing installed");
+        let plist = "<plist><dict><key>CFBundleShortVersionString</key>\n<string>0.17.0</string></dict></plist>";
+        touch(&root.path().join("home/Applications/SoundCraft.app/Contents/Info.plist"), plist.as_bytes());
+        let found = detect_soundcraft(&env(Os::Mac, root.path(), &none)).unwrap();
+        assert_eq!(found, SoundCraftApp { path: root.path().join("home/Applications/SoundCraft.app"), version: Some("0.17.0".into()) });
+
+        // The variable names the only one, and only once it's there.
+        let lab = root.path().join("lab/SoundCraft.app").to_string_lossy().into_owned();
+        let named = move |name: &str| (name == SOUNDCRAFT_APP).then(|| lab.clone());
+        assert_eq!(detect_soundcraft(&env(Os::Mac, root.path(), &named)), None, "named but not there");
+        touch(&root.path().join("lab/SoundCraft.app/Contents/Info.plist"), b"<plist></plist>");
+        let found = detect_soundcraft(&env(Os::Mac, root.path(), &named)).unwrap();
+        assert_eq!((found.path, found.version), (root.path().join("lab/SoundCraft.app"), None));
+
+        // Windows: the installer's default folder for one user; no version without running it.
+        let local = root.path().join("local").to_string_lossy().into_owned();
+        let windows = move |name: &str| (name == "LOCALAPPDATA").then(|| local.clone());
+        touch(&root.path().join("local/Programs/ArtCraft/SoundCraft/soundcraft.exe"), b"MZ");
+        let found = detect_soundcraft(&env(Os::Windows, root.path(), &windows)).unwrap();
+        assert_eq!((found.path, found.version), (root.path().join("local/Programs/ArtCraft/SoundCraft/soundcraft.exe"), None));
+
+        // Linux: on PATH.
+        let bin = root.path().join("bin").to_string_lossy().into_owned();
+        let path = move |name: &str| (name == "PATH").then(|| bin.clone());
+        touch(&root.path().join("bin/soundcraft"), b"");
+        assert_eq!(detect_soundcraft(&env(Os::Linux, root.path(), &path)).unwrap().path, root.path().join("bin/soundcraft"));
+    }
+
+    #[test]
+    fn soundcrafts_settings_folder_is_its_variables_a_portable_copys_or_the_systems() {
+        let root = tempfile::tempdir().unwrap();
+        let none = |_: &str| None;
+        let mac = env(Os::Mac, root.path(), &none);
+        assert_eq!(soundcraft_settings(&mac, None), Some(root.path().join("home/Library/Application Support/SoundCraft")));
+        let linux = env(Os::Linux, root.path(), &none);
+        assert_eq!(soundcraft_settings(&linux, None), Some(root.path().join("home/.config/soundcraft")));
+
+        // A portable copy keeps its settings beside its program.
+        let app = root.path().join("usb/SoundCraft.app");
+        touch(&app.join("Contents/MacOS/portable.txt"), b"");
+        assert_eq!(soundcraft_settings(&mac, Some(&app)), Some(app.join("Contents/MacOS/SoundCraftData")));
+
+        // The variable wins; set empty, there's no folder at all.
+        let named = |name: &str| (name == "SOUNDCRAFT_CONFIG_DIR").then(|| "/lab/profile".to_string());
+        assert_eq!(soundcraft_settings(&env(Os::Mac, root.path(), &named), Some(&app)), Some(PathBuf::from("/lab/profile")));
+        let empty = |name: &str| (name == "SOUNDCRAFT_CONFIG_DIR").then(String::new);
+        assert_eq!(soundcraft_settings(&env(Os::Mac, root.path(), &empty), Some(&app)), None);
+    }
+
+    #[test]
+    fn soundcrafts_last_session_is_its_newest_recent_while_that_file_is_there() {
+        let settings = tempfile::tempdir().unwrap();
+        assert_eq!(soundcraft_last_session(settings.path()), None, "no ui.json yet");
+        let (newest, older) = (settings.path().join("Beat.scraft"), settings.path().join("Older.scraft"));
+        touch(&older, b"{}");
+        let recent = serde_json::json!({ "recent_sessions": [newest, older] });
+        touch(&settings.path().join("ui.json"), recent.to_string().as_bytes());
+        assert_eq!(soundcraft_last_session(settings.path()), None, "the newest is gone: not an older one in its place");
+        touch(&newest, b"{}");
+        assert_eq!(soundcraft_last_session(settings.path()), Some(newest));
+        touch(&settings.path().join("ui.json"), b"{not json");
+        assert_eq!(soundcraft_last_session(settings.path()), None);
     }
 
     fn mach_universal() -> Vec<u8> {
