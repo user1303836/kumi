@@ -30,11 +30,12 @@ pub enum TargetError {
     Older(Daw, String),
 }
 
-/// The oldest version of the DAW Kumi's bridge works with, as people write it ("7", "3.5").
+/// The oldest version of the DAW Kumi's bridge works with, as people write it ("7", "3.5", "0.17.0").
 pub fn min_version(daw: Daw) -> &'static str {
     match daw {
         Daw::Reaper => "7",
         Daw::Renoise => "3.5",
+        Daw::SoundCraft => "0.17.0",
     }
 }
 

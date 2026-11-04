@@ -74,6 +74,8 @@ pub fn kinds(daw: Daw) -> Kinds {
                 "edit-settings",
             ],
         },
+        // (its bridge reads nothing yet: its kinds come with its reads, M2)
+        Daw::SoundCraft => Kinds { read: &[], bodies: &[], outside_undo: &[] },
     }
 }
 
