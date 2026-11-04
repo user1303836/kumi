@@ -2,8 +2,8 @@
 //!
 //! `soundcraft-kumi launch [--kumi-home <folder>] [--background] [<session>]` starts SoundCraft with its control channel
 //! on, opening the session if one is named, or finds the copy an earlier start left running. It prints that copy as JSON
-//! on stdout (its pid, port, app and version, and whether it started now). It starts no second copy beside one opened
-//! another way, which has no channel: it says so and fails.
+//! on stdout (its pid, port, app and version, whether it started now, and whether its channel answers yet). It starts no
+//! second copy beside one opened another way, which has no channel: it says so and fails.
 use soundcraft_kumi::launch;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -45,40 +45,48 @@ fn launch_command(args: &[String]) -> ExitCode {
         return ExitCode::FAILURE;
     };
     let folder = kumi_home.join("bridges").join("soundcraft");
-    if let Some(running) = launch::attach(&folder) {
-        return said(&running, false);
+    // Held until the copy is found or recorded: a second start waits, then finds the first one's copy.
+    let _lock = match launch::lock(&folder) {
+        Ok(lock) => lock,
+        Err(why) => return failed(&why),
+    };
+    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
+    if let Some(found) = runtime.block_on(launch::attach(&folder, launch::Waits::USUAL.answer)) {
+        return said(&found, false);
     }
-    if let Some(pid) = launch::running(&var).first() {
-        eprintln!(
+    if let Some(pid) = launch::running(&var).first().copied() {
+        if launch::recorded(&folder).is_some_and(|launched| launched.pid == pid) {
+            return failed(&format!(
+                "The SoundCraft Kumi started (pid {pid}) no longer takes Kumi's requests on its control channel. Save, quit \
+                 it, and Kumi starts it again."
+            ));
+        }
+        return failed(&format!(
             "SoundCraft is open without its control channel (pid {pid}): it was opened from the Dock or the Start menu, or \
              restarted by its own update. Save, quit it, and Kumi opens your session again."
-        );
-        return ExitCode::FAILURE;
+        ));
     }
     let Some(app) = launch::find(&var) else {
-        eprintln!("SoundCraft isn't installed here (or {} names a program that isn't there)", launch::APP_VARIABLE);
-        return ExitCode::FAILURE;
+        return failed(&format!("SoundCraft isn't installed here (or {} names a program that isn't there)", launch::APP_VARIABLE));
     };
-    if let Some(settings) = launch::settings_folder(&var) {
+    if let Some(settings) = launch::settings_folder(&var, Some(&app.path)) {
         let waiting = launch::recovery_waiting(&settings);
         if !waiting.is_empty() {
             eprintln!("SoundCraft will offer to recover what it was doing when it last stopped: {}", waiting.join(", "));
         }
     }
-    let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     match runtime.block_on(launch::launch(&app, session.as_deref(), &folder, background)) {
-        Ok(launched) => said(&launched, true),
-        Err(why) => {
-            eprintln!("{why}");
-            ExitCode::FAILURE
-        }
+        Ok(found) => said(&found, true),
+        Err(why) => failed(&why),
     }
 }
 
 /// The copy on stdout, its token left out: the bridge reads that from launched.json, owner-only.
-fn said(launched: &launch::Launched, started: bool) -> ExitCode {
+fn said(found: &launch::Found, started: bool) -> ExitCode {
+    let launched = &found.launched;
     let shown = serde_json::json!({
         "started": started,
+        "answering": found.answering,
         "pid": launched.pid,
         "port": launched.port,
         "app": launched.app,
@@ -87,6 +95,11 @@ fn said(launched: &launch::Launched, started: bool) -> ExitCode {
     });
     println!("{shown}");
     ExitCode::SUCCESS
+}
+
+fn failed(why: &str) -> ExitCode {
+    eprintln!("{why}");
+    ExitCode::FAILURE
 }
 
 fn usage() -> ExitCode {
