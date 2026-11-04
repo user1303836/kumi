@@ -22,6 +22,7 @@ What ships is read from main since the last release tag:
   same way, when a pull request changes what that DAW loads (its `loads` there). --<id> gives one a new version
   whatever changed (--reaper, say); --no-<id> keeps it. A pull request that changes one of them and nothing else that
   ships has its lines under that one's heading, as do lines written "Changelog (<id>):". --no-bridge is only Live's.
+  A DAW's program (SoundCraft's soundcraft-kumi) takes Kumi's version, and its changes are Kumi's.
 - A pull request's files count where they are now: one from before a move (scripts/moves.toml) by their new places,
   and an older release's versions are read where it had them.
 The version goes up by a patch, by a minor with --minor, or is given with --version.
@@ -54,19 +55,24 @@ if native is None:
 # A change under these, besides tests and Markdown, is a new bridge for Live to load. The host links kumi-common.
 BRIDGE = ("daws/ableton/ableton-mcp-server/", "crates/kumi-common/", "daws/ableton/remote-script/", "daws/ableton/protocol/",
           "daws/ableton/live-extension/", "vendor/willington/")
-# Each other DAW's bridge, by the DAW's id (scripts/daws.toml): what it is and what it's built from. A change under its
-# `loads`, besides tests, examples and Markdown, is a new bridge for that DAW to load.
-DAWS = native.DAW_BRIDGES
-# Kumi's own, daw-bridge and its host for the other DAWs (daw-mcp-server) among them, and each other DAW's integration.
+# Each other DAW's bridge with a version of its own, by the DAW's id (scripts/daws.toml): what it is and what it's built
+# from. A change under its `loads`, besides tests, examples and Markdown, is a new bridge for that DAW to load. A DAW's
+# program isn't one: it takes Kumi's version (CRATES), so it has no flags, heading or ships-with line of its own.
+DAWS = native.VERSIONED_BRIDGES
+# Each DAW's program, by its crate's package name: its crate's folder.
+PROGRAMS = {tomllib.loads((ROOT / daw["program"]["crate"] / "Cargo.toml").read_text(encoding="utf-8"))["package"]["name"]:
+            daw["program"]["crate"] for daw in native.DAW_BRIDGES.values() if "program" in daw}
+# Kumi's own, daw-bridge and its host for the other DAWs (daw-mcp-server) among them, each other DAW's integration, and
+# the DAWs' programs that host starts.
 KUMI = ("crates/kumi/", "crates/kumi-agent/", "crates/kumi-types/", "crates/kumi-net/", "crates/kumi-media/", "crates/kumi-ai/",
         "crates/kumi-web/", "crates/kumi-library/", "crates/kumi-daw/",
         "crates/kumi-listening/", "crates/kumi-common/", "crates/kumi-store/", "daws/ableton/kumi-daw-ableton/",
-        *(daw["integration"] + "/" for daw in DAWS.values()), "daws/own/kumi-daw-own/",
-        "daws/own/daw-bridge/", "daws/own/daw-mcp-server/", "install.sh", "install.ps1")
-# Kumi's own crates, at Kumi's version, and their folders: Kumi, its common parts and shared types (with the version), and
-# its host for the other DAWs.
+        *(daw["integration"] + "/" for daw in native.DAW_BRIDGES.values()), "daws/own/kumi-daw-own/",
+        "daws/own/daw-bridge/", "daws/own/daw-mcp-server/", *(crate + "/" for crate in PROGRAMS.values()), "install.sh", "install.ps1")
+# Kumi's own crates, at Kumi's version, and their folders: Kumi, its common parts and shared types (with the version), its
+# host for the other DAWs, and the DAWs' programs it starts.
 CRATES = {"kumi": "crates/kumi", "kumi-common": "crates/kumi-common", "kumi-types": "crates/kumi-types",
-          "daw-mcp-server": "daws/own/daw-mcp-server"}
+          "daw-mcp-server": "daws/own/daw-mcp-server", **PROGRAMS}
 # Where paths moved in the repository, oldest first (scripts/moves.toml, which `dev.py rebase-moves` reads too).
 MOVES = [(move["from"], move["to"]) for move in
          tomllib.loads((ROOT / "scripts/moves.toml").read_text(encoding="utf-8")).get("move", [])]

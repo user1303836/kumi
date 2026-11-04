@@ -23,19 +23,25 @@ from urllib.parse import quote
 ROOT = Path(__file__).resolve().parents[1]
 SCHEMA = "ableton-mcp-native-release/v1"
 BRIDGE_BINARIES = ("ableton-mcp-server", "ableton-mcp-analysis-worker")
-# daw-mcp-server is Kumi's host for the other DAWs: Kumi starts it from beside its own binary.
+# The other DAWs' bridges, by the DAW's id (scripts/daws.toml, which release.py and build-migration-release.py read
+# through here). A library or a Renoise tool is in daws/<id> in the bundle, where Kumi installs it from
+# (daws/own/kumi-daw-own/src/provider.rs): a library with its version, its crate's, in a file beside it, or the tool's
+# folder. A program is one more of the bundle's binaries.
+DAWS = "daws"
+DAW_BRIDGES = {daw["id"]: daw for daw in tomllib.loads((ROOT / "scripts/daws.toml").read_text(encoding="utf-8"))["daw"]}
+# The bridges with versions of their own, which the manifests name by the DAW's id: every one but a program, which
+# takes Kumi's.
+VERSIONED_BRIDGES = {daw_id: daw for daw_id, daw in DAW_BRIDGES.items() if "program" not in daw}
+# daw-mcp-server is Kumi's host for the other DAWs: Kumi starts it from beside its own binary, and it starts a DAW's
+# program (SoundCraft's soundcraft-kumi) from beside its own.
 # The library learner and the sound measurer are doors of kumi's own (`kumi __library-learner`, `kumi __library-measure`),
 # not programs of their own.
-BINARIES = ("kumi", *BRIDGE_BINARIES, "daw-mcp-server", "kumi-harness")
+BINARIES = ("kumi", *BRIDGE_BINARIES, "daw-mcp-server",
+            *(daw["program"]["binary"] for daw in DAW_BRIDGES.values() if "program" in daw), "kumi-harness")
 # What a bundle carries beside kumi. The bridge's own binaries, Remote Script and Live extension are in its package under
 # bridge/, the lifecycle's artifact unpacked, and Kumi runs the bridge from there: shipping them beside kumi too made the
 # download a fifth bigger.
 BUNDLE_BINARIES = tuple(name for name in BINARIES if name not in BRIDGE_BINARIES)
-# The other DAWs' bridges, by the DAW's id (scripts/daws.toml, which release.py and build-migration-release.py read
-# through here). Each is in daws/<id> in the bundle, where Kumi installs it from (daws/own/kumi-daw-own/src/provider.rs):
-# a library with its version, its crate's, in a file beside it, or a Renoise tool's folder.
-DAWS = "daws"
-DAW_BRIDGES = {daw["id"]: daw for daw in tomllib.loads((ROOT / "scripts/daws.toml").read_text(encoding="utf-8"))["daw"]}
 # What Kumi's installer or the DAW writes into a bridge's folder: never shipped (daw-bridge's NOT_PAYLOAD).
 NOT_PAYLOAD = ("bridge-reference.json", "preferences.xml")
 # A Renoise tool's own files.
@@ -619,10 +625,11 @@ def renoise_tool(daw: dict, root: Path) -> tuple[Path, str, dict[str, str]]:
     return folder, version, files
 
 def stage_daws(root: Path, bundle: Path, target: str, extensions: dict[str, Path]) -> dict[str, str]:
-    """Each other DAW's bridge into the bundle's daws/<id> folder: a library from `extensions` (checked, with its
-    version beside it) or a Renoise tool; their versions, by the DAW's id."""
+    """Each other DAW's bridge with a version of its own into the bundle's daws/<id> folder: a library from
+    `extensions` (checked, with its version beside it) or a Renoise tool; their versions, by the DAW's id. A program is
+    staged with the bundle's binaries (BINARIES), at its root."""
     versions = {}
-    for daw_id, daw in DAW_BRIDGES.items():
+    for daw_id, daw in VERSIONED_BRIDGES.items():
         folder = bundle / DAWS / daw_id
         if "library" in daw:
             check_extension(daw, extensions[daw_id], target)
@@ -678,7 +685,7 @@ def build_extension(daw: dict, root: Path, target: str, profile: str, out: Path)
 def build_release(root: Path, binaries: Path, out: Path, target: str, source: dict, builder: dict, recipe: str, bridge_only=False,
                   extensions: dict[str, Path] | None = None) -> dict:
     """The target's bundle in `out` (or, `bridge_only`, the Ableton bridge's artifact alone). A bundle carries each other
-    DAW's bridge: a library built for it (`extensions`, by the DAW's id) or a Renoise tool."""
+    DAW's bridge: a library built for it (`extensions`, by the DAW's id), a Renoise tool, or a program among its binaries."""
     out.mkdir(parents=True, exist_ok=True)
     extensions = extensions or {}
     unbuilt = [daw for daw in DAW_BRIDGES.values() if "library" in daw and extensions.get(daw["id"]) is None]

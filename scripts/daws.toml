@@ -4,16 +4,20 @@
 # here. In the order the CHANGELOG, the notes and a bundle's manifests name them.
 #
 # - id: the DAW's id: `kumi --daw <id>`, "Changelog (<id>):" lines, release.py's --<id> and --no-<id>, the bundle's
-#   daws/<id> folder and the manifests' key for its bridge's version.
+#   daws/<id> folder and the manifests' key for its bridge's version (a library's or a tool's: a program has none).
 # - name and bridge: the DAW's name and what its bridge is ("REAPER extension", "REAPER's extension"); words: what the
 #   docs call the bridge in their other languages.
 # - integration: Kumi's code for the DAW, which ships in Kumi.
-# - loads: what the DAW loads. A change under these, besides tests, examples and Markdown, gives its bridge a new
-#   version.
+# - loads: what the DAW loads (a library or a tool). A change under these, besides tests, examples and Markdown, gives
+#   its bridge a new version.
 # - library: a library Cargo builds from `crate` for each bundle's system, which the DAW loads and calls `entry` in. Its
 #   version is its crate's.
 # - tool: a Renoise tool, its `folder` (named for the tool's id) shipped as it is. Its manifest names the id and the
 #   `api` the tool declares; its version is payload/version.lua's, and the manifest's Version is that as a number.
+# - program: a program, `binary`, from the workspace's `crate`, which Kumi's host starts from beside its own binary
+#   (daw-mcp-server's spawn.rs). It ships at the bundle's root beside kumi and daw-mcp-server, not in daws/<id>, and
+#   takes Kumi's version (release.py's CRATES): no version, flags, changelog heading or manifest key of its own, and no
+#   `loads`, since the DAW loads nothing of it.
 
 [[daw]]
 id = "reaper"
@@ -53,3 +57,12 @@ integration = "daws/renoise/kumi-daw-renoise"
 # API 6.2 is Renoise 3.5's.
 tool = { folder = "daws/renoise/com.kumi.Bridge.xrnx", api = "6.2" }
 loads = ["daws/renoise/com.kumi.Bridge.xrnx/"]
+
+[[daw]]
+id = "soundcraft"
+name = "SoundCraft"
+bridge = "program"
+words = { ja = "SoundCraft プログラム", zh-CN = "SoundCraft 程序" }
+integration = "daws/soundcraft/kumi-daw-soundcraft"
+# SoundCraft never loads it: it runs beside SoundCraft and reaches it over SoundCraft's control channel.
+program = { crate = "daws/soundcraft/soundcraft-kumi", binary = "soundcraft-kumi" }

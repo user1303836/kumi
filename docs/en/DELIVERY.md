@@ -59,7 +59,9 @@ Kumi's bridges in REAPER and Renoise go in through a lifecycle of Kumi's own
 [Kumi guide](KUMI_GUIDE.md#connect-to-reaper-or-renoise) covers this from a
 producer's side.
 
-- **In the bundle:** `daw-mcp-server` beside `kumi`, and a `daws` folder:
+- **In the bundle:** `daw-mcp-server` and `soundcraft-kumi` (SoundCraft's
+  program, which the host starts; at Kumi's version) beside `kumi`, and a
+  `daws` folder:
   `daws/reaper/reaper_kumi.dylib` (`.dll` on Windows, `.so` on Linux) with
   `reaper_kumi.version`, and `daws/renoise/com.kumi.Bridge.xrnx/`. The bundle's
   `package.json` and `kumi-install.json`, and the release's `kumi-release.json`,

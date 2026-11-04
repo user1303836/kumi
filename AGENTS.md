@@ -111,6 +111,7 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
 - Kumi has one version, `X.Y.Z`. Live's bridge, REAPER's extension and Renoise's tool have their own, bumped when what that DAW loads changes (tests and Markdown aside):
   - Live: `daws/ableton/` (bridge, Remote Script, protocol, Live extension), `crates/kumi-common`, `vendor/willington`.
   - REAPER and Renoise: what `scripts/daws.toml` says each loads: REAPER's extension (`daws/reaper/reaper-kumi`) and the parts of `daws/own/daw-bridge` it links; Renoise's tool (`daws/renoise/com.kumi.Bridge.xrnx`).
+- SoundCraft's program (`soundcraft-kumi`, beside `kumi` in the bundle) has no version of its own: it takes Kumi's, like `daw-mcp-server`.
 - **In a PR, never bump a version or edit CHANGELOG.md.** Write `Changelog:` lines: they become the release notes and the app's What's new, so each is one thing a producer will notice, most important first. `Changelog: none` for internal work; `Changelog (bridge):`, `Changelog (reaper):` or `Changelog (renoise):` files a line under that heading.
 - Releasing is for the owner, or an agent asked to (`gh` signed in as a repository admin), right after a merge:
   - `python3 scripts/release.py`: the dry run (version, CHANGELOG entry, notes, checks).

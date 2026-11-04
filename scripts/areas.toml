@@ -135,6 +135,8 @@ paths = [
   "daws/own/daw-bridge/src/paths.rs",
   "daws/own/daw-mcp-server/Cargo.toml",
   "daws/own/daw-mcp-server/src/bin/**",
+  "daws/soundcraft/soundcraft-kumi/Cargo.toml",
+  "daws/soundcraft/soundcraft-kumi/src/main.rs",
   "daws/reaper/reaper-kumi/build.rs",
   "daws/reaper/reaper-kumi/Cargo.toml",
   "daws/reaper/reaper-kumi/shim/**",

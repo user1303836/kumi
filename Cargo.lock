@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-kumi"
-version = "0.1.0"
+version = "1.24.64"
 dependencies = [
  "daw-bridge",
  "daw-mcp-server",

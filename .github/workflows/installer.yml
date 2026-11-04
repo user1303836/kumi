@@ -70,6 +70,7 @@ jobs:
             daws/own/kumi-daw-own/src/provider.rs daws/reaper/kumi-daw-reaper/src/provider.rs daws/renoise/kumi-daw-renoise/src/provider.rs \
             daws/own/daw-bridge/src/lifecycle.rs daws/own/daw-bridge/src/install.rs daws/own/daw-bridge/src/detect.rs \
             daws/reaper/reaper-kumi/build.rs daws/reaper/reaper-kumi/src/lib.rs daws/own/daw-mcp-server/src/bin/daw-mcp-server.rs \
+            daws/soundcraft/soundcraft-kumi/src/main.rs \
             daws/own/daw-bridge/src/files.rs daws/own/daw-bridge/src/owner.rs daws/own/daw-bridge/src/paths.rs daws/reaper/reaper-kumi/shim/csurf.cpp \
             daws/renoise/com.kumi.Bridge.xrnx/manifest.xml daws/renoise/com.kumi.Bridge.xrnx/main.lua daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua; do
             test -e "$path" || { echo "::error::$path, which the installs depend on, isn't there: point this check at its new name"; exit 1; }
@@ -163,7 +164,7 @@ jobs:
         run: |
           want=arm64
           if [[ '${{ matrix.target }}' == x86_64-* ]]; then want=x86_64; fi
-          for name in kumi ableton-mcp-server ableton-mcp-analysis-worker daw-mcp-server kumi-harness; do
+          for name in kumi ableton-mcp-server ableton-mcp-analysis-worker daw-mcp-server soundcraft-kumi kumi-harness; do
             archs="$(lipo -archs "target/${{ matrix.target }}/$PROFILE/$name")"
             echo "$name: $archs"
             test "$archs" = "$want"
@@ -297,13 +298,14 @@ jobs:
           test -f "$RUNNER_TEMP/User Library/Remote Scripts/AbletonMcpBridge/ableton_mcp_remote_script.py"
           # REAPER's extension and Renoise's tool from the bundle, through Kumi's lifecycle: each exactly the copy the bundle
           # carries, with its reference, receipt and kept generation; the extension loads, with REAPER's entry point; and
-          # Kumi's host for them starts.
+          # Kumi's host for them, and SoundCraft's program it starts, start.
           kumi --daw reaper bridge --yes
           kumi --daw renoise bridge --yes
           daws() { python3 scripts/tests/daw_bridges.py placed "$KUMI_HOME/app" "$KUMI_HOME" "$reaper" "$renoise" "$@"; }
           daws --load
           daws > daws.txt
           "$KUMI_HOME/app/daw-mcp-server" --version
+          "$KUMI_HOME/app/soundcraft-kumi" --version
           kumi --daw reaper doctor || true
           kumi update | tee update.txt; grep -q "up to date" update.txt
           test "$(daws)" = "$(cat daws.txt)"   # up to date: both bridges as they were, the one to roll back to kept
@@ -559,6 +561,8 @@ jobs:
           $daws = Daws
           & (Join-Path $env:KUMI_HOME 'app\daw-mcp-server.exe') --version
           if ($LASTEXITCODE -ne 0) { throw 'daw-mcp-server did not start' }
+          & (Join-Path $env:KUMI_HOME 'app\soundcraft-kumi.exe') --version
+          if ($LASTEXITCODE -ne 0) { throw 'soundcraft-kumi did not start' }
           $update = & $kumi update | Out-String; Write-Host $update
           if ($update -notmatch 'up to date') { throw 'update did not say up to date' }
           if ((Daws) -ne $daws) { throw "the update changed REAPER's or Renoise's bridge: $(Daws)" }

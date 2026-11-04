@@ -26,7 +26,7 @@ FILES = ["package.json", "Cargo.lock", "CHANGELOG.md", "README.md", "README.ja.m
          "crates/kumi/Cargo.toml", "crates/kumi-common/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml",
          "crates/kumi-types/src/version.rs", "crates/kumi-types/Cargo.toml", "daws/ableton/ableton-mcp-server/Cargo.toml",
          "docs/en/KUMI_CHANGES.md", "docs/ja/KUMI_CHANGES.md", "docs/zh-CN/KUMI_CHANGES.md",
-         REAPER_CARGO, RENOISE_VERSION, RENOISE_MANIFEST]
+         REAPER_CARGO, RENOISE_VERSION, RENOISE_MANIFEST, *(f"{folder}/Cargo.toml" for folder in release.PROGRAMS.values())]
 LONG = ("Kumi does a new thing, described at enough length that its changelog bullet wraps onto a second line, "
         "as most of them do.")
 
@@ -358,6 +358,36 @@ class DawPlans(unittest.TestCase):
                     release.main()
 
 
+class DawPrograms(unittest.TestCase):
+    """SoundCraft's soundcraft-kumi: a program Kumi's host starts, at Kumi's version, with nothing of its own to release."""
+    SOUNDCRAFT = "daws/soundcraft/soundcraft-kumi"
+
+    def test_a_program_is_one_of_kumis_crates_and_no_daw_bridge(self):
+        self.assertEqual(release.CRATES["soundcraft-kumi"], self.SOUNDCRAFT)
+        self.assertNotIn("soundcraft", release.DAWS)
+        self.assertNotIn("soundcraft", release.NAMES)
+        self.assertNotIn("soundcraft", release.DAW_SHIPS)
+        self.assertTrue(f"{self.SOUNDCRAFT}/src/server.rs".startswith(release.KUMI))
+        self.assertTrue("daws/soundcraft/kumi-daw-soundcraft/src/lib.rs".startswith(release.KUMI))
+
+    def test_a_programs_changes_and_lines_are_kumis(self):
+        paths = [f"{self.SOUNDCRAFT}/src/server.rs"]
+        self.assertEqual(release.classify(1, "Changelog: SoundCraft does X.", paths).lines, [("kumi", "SoundCraft does X.")])
+        # No heading of its own: such a line isn't a Changelog line at all.
+        self.assertEqual(release.classify(2, "Changelog (soundcraft): SoundCraft does X.", paths).lines, [])
+        plan = DawPlans.plan(DawPlans(), [("Changelog: SoundCraft does X.", paths), DawPlans.REAPER])
+        self.assertEqual(plan.kumi, ["SoundCraft does X."])
+        self.assertNotIn("soundcraft", plan.daws)
+        self.assertEqual(plan.daw("soundcraft"), (None, None, []))
+        self.assertEqual(plan.moved(), ["reaper"])
+
+    def test_a_program_has_no_flags(self):
+        for flag in ("--soundcraft", "--no-soundcraft"):
+            with self.subTest(flag=flag), patch.object(sys, "argv", ["release.py", flag]), patch("sys.stderr"):
+                with self.assertRaises(SystemExit):
+                    release.main()
+
+
 class DawEdits(unittest.TestCase):
     def released(self, reaper=False, renoise=False, docs=None, brought=(), new_bridge=False):
         """apply() on copies of this checkout's files (and `docs`): the plan, every file's text after, the files apply
@@ -419,8 +449,8 @@ class DawEdits(unittest.TestCase):
         plan, texts, changed, really = self.released()
         self.assertEqual(sorted(changed), really)
         # what a release changed before REAPER and Renoise, the host for them and kumi-types, less kumi-runtime's manifest
-        # (kumi-agent, which took its place, isn't at Kumi's version)
-        self.assertEqual(len(changed), 14)
+        # (kumi-agent, which took its place, isn't at Kumi's version), and each DAW's program at Kumi's version
+        self.assertEqual(len(changed), 14 + len(release.PROGRAMS))
         new = entry(texts["CHANGELOG.md"], plan.new)
         self.assertNotIn("REAPER", new)
         self.assertNotIn("Renoise", new)

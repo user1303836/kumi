@@ -143,15 +143,17 @@ class NativeRelease(unittest.TestCase):
         cargo_version = lambda name: tomllib.loads((root / name).read_text())["package"]["version"]
         version = cargo_version("crates/kumi/Cargo.toml")
         self.assertEqual(read_json("package.json")["version"], version)
-        # Kumi's host for REAPER and Renoise ships beside it and moves with it (its MCP serverInfo and hello say it).
-        for name in ("crates/kumi-common/Cargo.toml", "crates/kumi-types/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml"):
+        # Kumi's host for REAPER and Renoise ships beside it and moves with it (its MCP serverInfo and hello say it), as
+        # does SoundCraft's program, which that host starts.
+        for name in ("crates/kumi-common/Cargo.toml", "crates/kumi-types/Cargo.toml", "daws/own/daw-mcp-server/Cargo.toml",
+                     "daws/soundcraft/soundcraft-kumi/Cargo.toml"):
             self.assertEqual(cargo_version(name), version, name)
         declared = re.search(r'KUMI_VERSION[^=]*=\s*"([^"\n]+)"', (root / "crates/kumi-types/src/version.rs").read_text())
         self.assertIsNotNone(declared)
         self.assertEqual(declared[1], version)
         cargo_lock = tomllib.loads((root / "Cargo.lock").read_text())["package"]
         for package in cargo_lock:
-            if package["name"] in ("kumi", "kumi-types", "kumi-common", "daw-mcp-server"):
+            if package["name"] in ("kumi", "kumi-types", "kumi-common", "daw-mcp-server", "soundcraft-kumi"):
                 self.assertEqual(package["version"], version, package["name"])
         bridge = cargo_version("daws/ableton/ableton-mcp-server/Cargo.toml")
         self.assertEqual(next(p["version"] for p in cargo_lock if p["name"] == "ableton-mcp-server"), bridge)
@@ -711,6 +713,32 @@ class NativeRelease(unittest.TestCase):
             versions = [line for line in tar.extractfile("package.json").read().decode().splitlines() if '"version"' in line]
             self.assertEqual(versions, [f'  "version": "{result["kumi"]}",'])
         self.assertEqual(json.loads((out / "kumi-release.json").read_text())["reaper"], reaper)
+
+    def test_a_daws_program_ships_at_the_bundles_root_with_no_version_of_its_own(self):
+        # SoundCraft's soundcraft-kumi, which Kumi's host starts from beside its own binary: one more bundle binary.
+        program = release.DAW_BRIDGES["soundcraft"]["program"]["binary"]
+        self.assertEqual(program, "soundcraft-kumi")
+        self.assertIn(program, release.BUNDLE_BINARIES)
+        self.assertEqual(set(release.VERSIONED_BRIDGES), {"reaper", "renoise"})
+        out = self.root / "release"
+        result = self.build(out)
+        self.assertNotIn("soundcraft", result)
+        with tarfile.open(out / result["bundle"]) as tar:
+            names = set(tar.getnames())
+            self.assertEqual(tar.extractfile(program).read(), (self.binaries / program).read_bytes())
+            if EXEC_BITS:
+                self.assertEqual(tar.getmember(program).mode, 0o755)
+            self.assertFalse(any(name.startswith("daws/soundcraft") for name in names), names)
+            for name in ("package.json", "kumi-install.json"):
+                self.assertNotIn("soundcraft", json.load(tar.extractfile(name)), name)
+        self.assertNotIn("soundcraft", json.loads((out / "kumi-release.json").read_text()))
+        for name in release.BINARIES:
+            (self.binaries / (name + ".exe")).write_bytes(b"MZ fixture " + name.encode())
+        dll = self.library(pe_library(), "reaper_kumi.dll")
+        windows = release.build_release(release.ROOT, self.binaries, self.root / "windows", "x86_64-pc-windows-msvc", self.source,
+                                        self.builder, "fixture", extensions={"reaper": dll})
+        with tarfile.open(self.root / "windows" / windows["bundle"]) as tar:
+            self.assertIn(program + ".exe", tar.getnames())
 
     def test_a_bundle_carries_a_checked_extension_or_none_is_built(self):
         with self.assertRaisesRegex(ValueError, "a bundle carries REAPER's extension"):
