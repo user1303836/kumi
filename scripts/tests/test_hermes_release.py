@@ -16,6 +16,8 @@ SPEC.loader.exec_module(pin)
 
 VERSION, REPOSITORY = "1.24.66", "user1303836/kumi"
 TAG = f"v{VERSION}"
+# A plugin.yaml as the plugin has it: the pinned version on one top-level line, and a nested key of the same name.
+MANIFEST = 'name: kumi\n# The Kumi release the plugin pins\nversion: "1.24.60"\nconfig_schema:\n  daw:\n    version: "keep"\n'
 
 
 def tar_xz(members: dict[str, bytes], links: dict[str, str] | None = None) -> bytes:
@@ -192,6 +194,39 @@ class PinTest(unittest.TestCase):
                 self.out.unlink(missing_ok=True)
                 self.github.replace_bundle(target, data)
                 self.assertIn(f"kumi-{target}.tar.xz", self.refused())
+
+    def manifest(self, text: str) -> Path:
+        """A plugin.yaml holding `text` beside the pin, and no pin yet."""
+        self.out.unlink(missing_ok=True)
+        path = self.out.parent / "plugin.yaml"
+        path.write_bytes(text.encode())
+        return path
+
+    def test_the_pin_sets_the_manifests_version_line_and_nothing_else(self) -> None:
+        for newline in ("\n", "\r\n"):
+            with self.subTest(newline=repr(newline)):
+                path = self.manifest(MANIFEST.replace("\n", newline))
+                code, err = run(self.github, VERSION, "--out", str(self.out))
+                self.assertEqual(code, 0, err)
+                expected = MANIFEST.replace('"1.24.60"', f'"{VERSION}"').replace("\n", newline)
+                self.assertEqual(path.read_bytes().decode(), expected)
+                self.assertEqual(run(self.github, VERSION, "--out", str(self.out), "--check")[0], 0)
+
+    def test_a_manifest_without_exactly_one_version_line_leaves_both_files_alone(self) -> None:
+        for problem, text in {"none": "name: kumi\n", "two": 'version: "1.0.0"\nversion: "2.0.0"\n',
+                              "unquoted": "version: 1.24.60\n", "only nested": 'a:\n  version: "1.0.0"\n'}.items():
+            with self.subTest(problem):
+                path = self.manifest(text)
+                self.assertIn("exactly one", self.refused())
+                self.assertEqual(path.read_bytes().decode(), text)
+
+    def test_check_fails_when_the_manifest_names_another_version(self) -> None:
+        path = self.manifest(MANIFEST)
+        self.assertEqual(run(self.github, VERSION, "--out", str(self.out))[0], 0)
+        path.write_bytes(MANIFEST.encode())  # the manifest's version changed by hand afterwards
+        code, err = run(self.github, VERSION, "--out", str(self.out), "--check")
+        self.assertEqual(code, 1, err)
+        self.assertIn('says version "1.24.60"', err)
 
 
 if __name__ == "__main__":

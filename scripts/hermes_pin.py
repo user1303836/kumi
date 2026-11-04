@@ -16,7 +16,9 @@ Both also download each bundle once (about 170 MB, one at a time, deleted after)
 and read it as setup will: a `.tar.xz` of plain files and folders, with `kumi` (`kumi.exe` on Windows) at its root.
 
 The file (schema 1) holds the version, the tag and, for each target, the exact URL, SHA-256, download size and
-unpacked size of its `.tar.xz` bundle, with the DAW component versions it carries.
+unpacked size of its `.tar.xz` bundle, with the DAW component versions it carries. When a `plugin.yaml` sits beside
+it, the script also sets that manifest's one top-level `version: "x.y.z"` line to the pinned version (the catalog
+shows it as the plugin's version), and `--check` fails when the two differ. It changes nothing else in the manifest.
 """
 from __future__ import annotations
 
@@ -216,12 +218,31 @@ def text_of(pin: dict) -> str:
     return json.dumps(pin, indent=2) + "\n"
 
 
-def write(path: Path, pin: dict) -> None:
+def replace(path: Path, data: bytes) -> None:
     if not path.parent.is_dir():
         raise Refused(f"{path.parent} doesn't exist")
     scratch = path.with_name(f".{path.name}.tmp")
-    scratch.write_text(text_of(pin), encoding="utf-8", newline="\n")
+    scratch.write_bytes(data)
     os.replace(scratch, path)
+
+
+# A manifest's top-level `version: "x.y.z"` line (not one nested in config_schema), with its line ending.
+MANIFEST_VERSION = re.compile(r'^version:[ \t]*"([^"\r\n]*)"[ \t]*(\r?)$', re.M)
+
+
+def manifest_line(manifest: Path) -> tuple[str, re.Match[str]] | None:
+    """The plugin.yaml beside the pin: its text and its one top-level version line, or None when there's no
+    plugin.yaml. Anything but exactly one such line is refused: that line is all this script may change there."""
+    try:
+        text = manifest.read_bytes().decode("utf-8")
+    except FileNotFoundError:
+        return None
+    except (OSError, UnicodeDecodeError) as error:
+        raise Refused(f"can't read {manifest}: {error}") from None
+    lines = list(MANIFEST_VERSION.finditer(text))
+    if len(lines) != 1:
+        raise Refused(f'{manifest} has {len(lines)} top-level version: "x.y.z" lines; the pin sets exactly one')
+    return text, lines[0]
 
 
 def main(argv: list[str] | None = None, github: GitHub | None = None) -> int:
@@ -237,6 +258,8 @@ def main(argv: list[str] | None = None, github: GitHub | None = None) -> int:
             raise Refused(f"{args.version!r} isn't a version like 1.24.67: the pin names one exact release")
         github = github or GitHub(args.repository)
         pin = measured(github, read_pin(github, version))
+        manifest = args.out.parent / "plugin.yaml"
+        line = manifest_line(manifest)
         if args.check:
             try:
                 committed = json.loads(args.out.read_text(encoding="utf-8"))
@@ -244,11 +267,20 @@ def main(argv: list[str] | None = None, github: GitHub | None = None) -> int:
                 raise Refused(f"can't read {args.out}: {error}") from None
             if committed != pin:
                 raise Refused(f"{args.out} doesn't match the published {pin['tag']}; rewrite it with this script")
-            print(f"{args.out} matches the published {pin['tag']}")
+            if line and line[1].group(1) != version:
+                raise Refused(f'{manifest} says version "{line[1].group(1)}", not {version}; '
+                              "rewrite both with this script")
+            print(f"{args.out} matches the published {pin['tag']}"
+                  + (f", and {manifest.name} says {version}" if line else ""))
             return 0
-        write(args.out, pin)
+        replace(args.out, text_of(pin).encode("utf-8"))
+        if line:
+            text, match = line
+            replace(manifest, (text[:match.start()] + f'version: "{version}"' + match.group(2)
+                               + text[match.end():]).encode("utf-8"))
         print(f"wrote {args.out}: Kumi {version}, {len(pin['targets'])} targets, each checked against "
-              "kumi-release.json, its target's file, SHA256SUMS, GitHub's digest and the downloaded bundle")
+              "kumi-release.json, its target's file, SHA256SUMS, GitHub's digest and the downloaded bundle"
+              + (f"; {manifest.name}'s version is {version}" if line else f"; no {manifest.name} beside it"))
         return 0
     except Refused as refusal:
         print(f"hermes_pin.py: {refusal}", file=sys.stderr)
