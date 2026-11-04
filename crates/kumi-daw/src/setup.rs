@@ -75,6 +75,16 @@ pub trait DawSetup {
     fn can_ask_to_quit(&self) -> bool {
         true
     }
+    /// Why the DAW, open now, has to restart for Kumi, in the producer's words: by default, it loads Kumi's bridge as it
+    /// starts.
+    fn restart_why(&self, app: &str) -> String {
+        format!("{app} loads the bridge when it starts.")
+    }
+    /// What Kumi does once the producer has quit the DAW, in their words: by default, it puts its bridge in place and opens
+    /// the DAW again.
+    fn once_closed(&self, app: &str) -> String {
+        format!("Kumi then puts its bridge in place and opens {app} again.")
+    }
     /// How long Live gets to quit once asked, before Kumi says it's still open (its save dialog
     /// cancelled, say) and offers to ask again.
     fn quit_wait(&self) -> Duration {

@@ -610,7 +610,7 @@ impl TuiApp {
                     }
                     continue;
                 }
-                let mut say = vec![format!("{app} loads the bridge when it starts."), format!("{app} will ask to save first.")];
+                let mut say = vec![live.restart_why(app), format!("{app} will ask to save first.")];
                 // Asking Live to quit is an Apple Event: the first time, macOS asks whether this terminal may send it.
                 let permission = live.asks_permission();
                 if let Some(terminal) = &permission {
@@ -772,9 +772,7 @@ impl TuiApp {
         let stop = self.setup_wait();
         let app = crate::daw::words().app;
         loop {
-            let yourself = refused
-                .clone()
-                .unwrap_or_else(|| format!("Quit {app} when you're ready. Kumi then puts its bridge in place and opens {app} again."));
+            let yourself = refused.clone().unwrap_or_else(|| format!("Quit {app} when you're ready. {}", live.once_closed(app)));
             let hint = self.keys_hint(LATER_HINT);
             self.setup_show(move |s| {
                 s.status = if asked { format!("waiting for {app} to close") } else { format!("waiting for you to quit {app}") };

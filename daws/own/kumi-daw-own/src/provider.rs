@@ -104,8 +104,104 @@ pub struct Own {
 #[derive(Clone)]
 pub struct OwnHosts(pub Rc<dyn Fn(DawId) -> crate::bridge::Connect>);
 
-fn kumi_home(env: &Env) -> PathBuf {
+pub(crate) fn kumi_home(env: &Env) -> PathBuf {
     PathBuf::from(kumi_daw::io::kumi_home(env))
+}
+
+/// Whether a bridge of Kumi's for `daw` answers now: one its discovery files name, alive, takes Kumi's secret.
+pub(crate) fn answers(daw: Daw, home: PathBuf) -> LocalBoxFuture<'static, bool> {
+    async move {
+        tokio::task::spawn_blocking(move || {
+            let paths = BridgePaths::new(&home, daw);
+            let Ok(secret) = files::read_secret(&paths.secret()) else { return false };
+            files::scan_discovery(&paths.discovery(), daw).into_iter().filter(|found| found.alive).any(|found| {
+                let Ok(discovery) = found.discovery else { return false };
+                let address = std::net::SocketAddr::from(([127, 0, 0, 1], discovery.port));
+                daw_bridge::probe::probe(address, &secret, "kumi", Duration::from_secs(2)).is_ok()
+            })
+        })
+        .await
+        .unwrap_or(false)
+    }
+    .boxed_local()
+}
+
+/// The session's integration started once, as the doctor's look reads it: whether Kumi's host started, and whether it
+/// reached the DAW and which project it has open.
+pub(crate) fn probe_host(
+    create: fn(OwnOptions) -> Rc<dyn Integration>,
+    home: PathBuf,
+    connect: Option<crate::bridge::Connect>,
+) -> LocalBoxFuture<'static, Probe> {
+    async move {
+        let integration = create(OwnOptions { context: IntegrationContext::new(Rc::new(|_, _| {})), kumi_home: home, connect });
+        if let Err(error) = integration.start(abort::timeout(20_000)).await {
+            let _ = integration.close().await;
+            return Probe { started: false, said: Some(error.to_string()), ..Default::default() };
+        }
+        let probe = match integration.observe(abort::timeout(20_000), None).await {
+            Ok(observation) if !observation.tools.is_empty() => Probe {
+                started: true,
+                connected: Some(true),
+                set: observation.label.split(" — ").nth(1).map(str::to_owned),
+                ..Default::default()
+            },
+            _ => Probe { started: true, connected: Some(false), ..Default::default() },
+        };
+        let _ = integration.close().await;
+        probe
+    }
+    .boxed_local()
+}
+
+/// The doctor's fix when Kumi's host for `name` won't start: a Kumi missing it (or one that won't run) can't reach the
+/// DAW at all. Nothing when it started, or no probe was given.
+pub(crate) async fn host_check(probe: Option<Probes>, id: DawId, name: &str) -> Option<Check> {
+    let host = (probe?.0)(id, String::new()).await.unwrap_or_default();
+    if host.started {
+        return None;
+    }
+    let said = host.said.map(|said| format!(": {said}")).unwrap_or_default();
+    let repair = if *kumi_types::command::INSTALLED {
+        format!("Run {} to repair Kumi", *kumi_types::command::KUMI_REPAIR)
+    } else {
+        format!("Build it ({})", *kumi_types::command::KUMI_REPAIR)
+    };
+    Some(Check::fix(format!("Kumi's host for {name} didn't start{said}"), Some(repair)))
+}
+
+/// The last lines of each of the bridge's logs for `daw`, oldest first, under the report's heading for `name`.
+pub(crate) fn bridge_log(name: &str, daw: Daw, env: &Env) -> LocalBoxFuture<'static, (String, String)> {
+    let heading = format!("{name}'s bridge log");
+    let folder = BridgePaths::new(&kumi_home(env), daw).logs();
+    async move {
+        // Oldest first, so the report reads in the order things happened.
+        let mut files: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&folder)
+            .into_iter()
+            .flatten()
+            .flatten()
+            .map(|entry| (entry.metadata().and_then(|meta| meta.modified()).unwrap_or(std::time::UNIX_EPOCH), entry.path()))
+            .collect();
+        files.sort();
+        let mut lines = vec![];
+        for (_, file) in files {
+            if let Ok(text) = std::fs::read_to_string(&file) {
+                lines.extend(text.lines().rev().take(200).map(str::to_owned).collect::<Vec<_>>().into_iter().rev());
+            }
+        }
+        (heading, lines.join("\n"))
+    }
+    .boxed_local()
+}
+
+/// What a rollback to a Kumi that doesn't know `id` says while KUMI_DAW names it: that Kumi won't start (1.19 and before
+/// refuse a DAW they don't know). Nothing otherwise.
+pub(crate) fn unknown_to(env: &Env, id: DawId, name: &str, version: &str) -> Option<String> {
+    env.get("KUMI_DAW").filter(|daw| daw.eq_ignore_ascii_case(id.as_str()))?;
+    Some(format!(
+        "KUMI_DAW is set to {} where you run Kumi, and Kumi {version} doesn't know {name}: it won't start while it's set. Unset KUMI_DAW to use Kumi {version}.\n",
+        id.as_str()
+    ))
 }
 
 /// What putting the bridge in did: its version, whether the DAW's copy changed (a DAW that's open loads the new one when
@@ -312,22 +408,7 @@ impl DawProvider for Own {
     }
     fn bridge_answers(&self, bridge_config: &str, env: &Env) -> LocalBoxFuture<'static, bool> {
         let _ = bridge_config;
-        let daw = self.daw;
-        let home = kumi_home(env);
-        async move {
-            tokio::task::spawn_blocking(move || {
-                let paths = BridgePaths::new(&home, daw);
-                let Ok(secret) = files::read_secret(&paths.secret()) else { return false };
-                files::scan_discovery(&paths.discovery(), daw).into_iter().filter(|found| found.alive).any(|found| {
-                    let Ok(discovery) = found.discovery else { return false };
-                    let address = std::net::SocketAddr::from(([127, 0, 0, 1], discovery.port));
-                    daw_bridge::probe::probe(address, &secret, "kumi", Duration::from_secs(2)).is_ok()
-                })
-            })
-            .await
-            .unwrap_or(false)
-        }
-        .boxed_local()
+        answers(self.daw, kumi_home(env))
     }
     fn here(&self, env: &Env) -> bool {
         (self.here)(self, env)
@@ -353,28 +434,7 @@ impl DawProvider for Own {
         (self.create)(OwnOptions { context, kumi_home: kumi_home(&session.env), connect })
     }
     fn probe(&self, _bridge_config: String, answers: &Answers, env: &Env) -> LocalBoxFuture<'static, Probe> {
-        let create = self.create;
-        let home = kumi_home(env);
-        let connect = answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id));
-        async move {
-            let integration = create(OwnOptions { context: IntegrationContext::new(Rc::new(|_, _| {})), kumi_home: home, connect });
-            if let Err(error) = integration.start(abort::timeout(20_000)).await {
-                let _ = integration.close().await;
-                return Probe { started: false, said: Some(error.to_string()), ..Default::default() };
-            }
-            let probe = match integration.observe(abort::timeout(20_000), None).await {
-                Ok(observation) if !observation.tools.is_empty() => Probe {
-                    started: true,
-                    connected: Some(true),
-                    set: observation.label.split(" — ").nth(1).map(str::to_owned),
-                    ..Default::default()
-                },
-                _ => Probe { started: true, connected: Some(false), ..Default::default() },
-            };
-            let _ = integration.close().await;
-            probe
-        }
-        .boxed_local()
+        probe_host(self.create, kumi_home(env), answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id)))
     }
     fn bridge_state(&self, _env: &Env, _found: bool, missing: bool, _bundled: Option<&str>, command: &str) -> BridgeState {
         if !missing {
@@ -449,18 +509,8 @@ impl DawProvider for Own {
             })
             .await
             .unwrap_or_default();
-            // Kumi's host, started once: a Kumi missing it (or one that won't run) can't reach the DAW at all.
-            if let Some(probe) = probe {
-                let host = (probe.0)(id, String::new()).await.unwrap_or_default();
-                if !host.started {
-                    let said = host.said.map(|said| format!(": {said}")).unwrap_or_default();
-                    let repair = if *kumi_types::command::INSTALLED {
-                        format!("Run {} to repair Kumi", *kumi_types::command::KUMI_REPAIR)
-                    } else {
-                        format!("Build it ({})", *kumi_types::command::KUMI_REPAIR)
-                    };
-                    checks.push(Check::fix(format!("Kumi's host for {name} didn't start{said}"), Some(repair)));
-                }
+            if let Some(fix) = host_check(probe, id, name).await {
+                checks.push(fix);
             }
             checks
         }
@@ -480,26 +530,7 @@ impl DawProvider for Own {
         async { Ok(vec![]) }.boxed_local()
     }
     fn report_log<'a>(&'a self, io: &'a DawIo, _home: &'a str) -> LocalBoxFuture<'a, (String, String)> {
-        let heading = format!("{}'s bridge log", self.name());
-        let folder = BridgePaths::new(&kumi_home(&io.env), self.daw).logs();
-        async move {
-            // Oldest first, so the report reads in the order things happened.
-            let mut files: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(&folder)
-                .into_iter()
-                .flatten()
-                .flatten()
-                .map(|entry| (entry.metadata().and_then(|meta| meta.modified()).unwrap_or(std::time::UNIX_EPOCH), entry.path()))
-                .collect();
-            files.sort();
-            let mut lines = vec![];
-            for (_, file) in files {
-                if let Ok(text) = std::fs::read_to_string(&file) {
-                    lines.extend(text.lines().rev().take(200).map(str::to_owned).collect::<Vec<_>>().into_iter().rev());
-                }
-            }
-            (heading, lines.join("\n"))
-        }
-        .boxed_local()
+        bridge_log(self.name(), self.daw, &io.env)
     }
     fn after_update<'a>(&'a self, io: &'a DawIo, _home: &'a str, app: &'a str, back_to: Option<&'a str>) -> LocalBoxFuture<'a, i32> {
         async move {
@@ -750,13 +781,10 @@ impl BridgeRollbackStep for OwnRollback {
     async fn after_swap(&self, io: &DawIo, _home: &str, app: &str, version: &str, _native: bool) -> i32 {
         let own = &self.0;
         // An earlier Kumi that doesn't know this DAW refuses to start while KUMI_DAW names it (1.19 and before).
-        let asked = io.env.get("KUMI_DAW").is_some_and(|daw| daw.eq_ignore_ascii_case(own.id.as_str()));
-        if asked && own.carried_by(Path::new(app)).is_none() {
-            io.out.write(&format!(
-                "KUMI_DAW is set to {} where you run Kumi, and Kumi {version} doesn't know {}: it won't start while it's set. Unset KUMI_DAW to use Kumi {version}.\n",
-                own.id.as_str(),
-                own.name()
-            ));
+        if own.carried_by(Path::new(app)).is_none() {
+            if let Some(said) = unknown_to(&io.env, own.id, own.name(), version) {
+                io.out.write(&said);
+            }
         }
         if own.receipt(&io.env).is_none() {
             return 0;
@@ -816,8 +844,36 @@ impl OwnSetup {
 }
 
 /// Whether the DAW runs now, from a listing made now (KUMI_PROCESSES in the session's environment stands in for it).
-fn open_now(daw: Daw, env: &Env) -> bool {
+pub(crate) fn open_now(daw: Daw, env: &Env) -> bool {
     detected(env, |found| detect::list_processes(found.var)).iter().any(|(_, name)| detect::process_is(daw, name))
+}
+
+/// The app of the DAW running now, from where it runs (a portable REAPER on another drive, a Renoise outside the app
+/// folders); Some(None) while it runs but its app can't be told; None when it isn't running.
+pub(crate) async fn running_app(daw: Daw, env: &Env) -> Option<Option<PathBuf>> {
+    let env = env.clone();
+    tokio::task::spawn_blocking(move || {
+        let listing = detected(&env, |found| detect::list_processes(found.var));
+        let open = listing.iter().any(|(_, name)| detect::process_is(daw, name));
+        open.then(|| detect::programs(daw, &listing).first().map(|program| detect::app_of(Os::current(), program)))
+    })
+    .await
+    .ok()
+    .flatten()
+}
+
+/// Waits until `daw` has closed: true once it has, false when `stop` comes first.
+pub(crate) async fn closed(daw: Daw, env: &Env, stop: &Signal) -> bool {
+    loop {
+        let env = env.clone();
+        if !tokio::task::spawn_blocking(move || open_now(daw, &env)).await.unwrap_or(true) {
+            return true;
+        }
+        if stop.is_cancelled() {
+            return false;
+        }
+        tokio::select! { _ = tokio::time::sleep(Duration::from_millis(500)) => {}, _ = stop.cancelled() => return false }
+    }
 }
 
 /// Opens the DAW's app apart from Kumi: on macOS through `open`, whose answer says whether it opened; elsewhere as a
@@ -833,7 +889,7 @@ fn open_app(app: &Path) -> bool {
 
 /// Starts `command` with no terminal and in a process group of its own, so the DAW's output never prints over Kumi's,
 /// and closing Kumi's terminal (or Ctrl-C) never takes the DAW and its unsaved project with it. Whether it started.
-fn start_apart(mut command: std::process::Command) -> bool {
+pub(crate) fn start_apart(mut command: std::process::Command) -> bool {
     use std::process::Stdio;
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(unix)]
@@ -862,15 +918,7 @@ impl DawSetup for OwnSetup {
     /// The DAW's app when it's open: the one running, from where it runs (a portable REAPER on another drive, a Renoise
     /// outside the app folders), else the one setup would open.
     async fn open_live(&self) -> Option<String> {
-        let (daw, env) = (self.own().daw, self.env.clone());
-        let running = tokio::task::spawn_blocking(move || {
-            let listing = detected(&env, |found| detect::list_processes(found.var));
-            let open = listing.iter().any(|(_, name)| detect::process_is(daw, name));
-            open.then(|| detect::programs(daw, &listing).first().map(|program| detect::app_of(Os::current(), program)))
-        })
-        .await
-        .ok()
-        .flatten()?;
+        let running = running_app(self.own().daw, &self.env).await?;
         if let Ok(target) = self.own.target(&self.env) {
             *self.seen.borrow_mut() = Some(target);
         }
@@ -884,17 +932,7 @@ impl DawSetup for OwnSetup {
         false
     }
     async fn closed(&self, stop: &Signal) -> bool {
-        let daw = self.own().daw;
-        loop {
-            let env = self.env.clone();
-            if !tokio::task::spawn_blocking(move || open_now(daw, &env)).await.unwrap_or(true) {
-                return true;
-            }
-            if stop.is_cancelled() {
-                return false;
-            }
-            tokio::select! { _ = tokio::time::sleep(Duration::from_millis(500)) => {}, _ = stop.cancelled() => return false }
-        }
+        closed(self.own().daw, &self.env, stop).await
     }
     async fn install(&self) -> Result<String, String> {
         let seen = self.seen.borrow().clone();
