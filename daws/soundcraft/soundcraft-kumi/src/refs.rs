@@ -250,7 +250,7 @@ fn param_id(text: &str) -> bool {
 /// What a lane moves, as SoundCraft's own automation ids spell it (its UI's, which its automation commands take):
 /// `volume`, `pan`, `pan2`, `mute`, `send_<a-j>_level`, `_pan` or `_mute`, `plugin:<a-j>:<parameter>`, and the trim
 /// lane, `plugin:255:trim`. (The commands take other spellings too, `vol` or `send_A_level`: those aren't refs.)
-fn lane(text: &str) -> bool {
+pub(crate) fn lane(text: &str) -> bool {
     let slot = |letter: &str| matches!(letter.as_bytes(), [b'a'..=b'j']);
     if matches!(text, "volume" | "pan" | "pan2" | "mute" | "plugin:255:trim") {
         return true;
