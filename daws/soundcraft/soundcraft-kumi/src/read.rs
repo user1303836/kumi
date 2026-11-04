@@ -1,7 +1,9 @@
 //! `read`: SoundCraft's session as rows, a page at a time, each object named by its ref ([`crate::refs`]).
 //!
 //! The session's objects come from `session.inspect {"detail":"full"}`, asked again at most once a second and shared by the
-//! reads in between, and a clip's notes from `midi.notes`. The lives of the objects learn from every look at the session:
+//! reads in between; a clip's notes from `midi.notes`; and the built-in plug-ins' parameters' names, ranges and units from
+//! `engine.plugins`, asked once. Automation lanes are named as SoundCraft's automation commands name them. The lives of the
+//! objects learn from every look at the session:
 //! a read's, and the look loop's every few seconds. Every answer carries the epoch of the table of lives its refs are
 //! from. A new one starts when the bridge starts again, and when a look sees another session open: by its name or path,
 //! by an undo history emptied with nothing to redo (only a session opened, made or closed does that), or by none of the
@@ -20,8 +22,9 @@ use tokio::sync::watch;
 
 pub const DEFAULT_LIMIT: usize = 50;
 pub const MAX_LIMIT: usize = 200;
-/// What `read` takes as a kind (`note` with a clip as its parent).
-pub const KINDS: [&str; 10] = ["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note"];
+/// What `read` takes as a kind (`note` with a clip as its parent, `param` with an insert, `point` with a lane).
+pub const KINDS: [&str; 13] =
+    ["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"];
 /// The bytes a page's rows may take: the host takes answers of up to 256 KiB, and the rest is the envelope.
 const ANSWER_BYTES: usize = 224 * 1024;
 /// How long one inspection serves the reads after it.
@@ -49,13 +52,15 @@ pub struct Reads {
     inspected: Option<(Instant, Arc<Value>)>,
     /// The epoch as it changes, for whoever can't wait for a read to end.
     told: watch::Sender<String>,
+    /// The built-in plug-ins as `engine.plugins` describes them, asked once: they come with the app's version.
+    plugins: Option<Vec<Value>>,
 }
 
 impl Reads {
     pub fn new(control: Control) -> Self {
         let lives = Lives::new();
         let (told, _) = watch::channel(lives.epoch().to_string());
-        Self { control, lives, looked: None, inspected: None, told }
+        Self { control, lives, looked: None, inspected: None, told, plugins: None }
     }
 
     /// The epoch as it changes, readable while a read holds the reads.
@@ -104,6 +109,9 @@ impl Reads {
             (text(params, "kind")?, text(params, "ref")?, text(params, "parent")?, text(params, "cursor")?, text(params, "epoch")?);
         let limit = limit(params)?;
         let one = one.map(|one| one.parse::<Ref>().map_err(bad)).transpose()?;
+        if let Some(refused) = one.as_ref().and_then(not_yet) {
+            return Err(refused);
+        }
         let parent = parent.map(|parent| parent.parse::<Ref>().map_err(bad)).transpose()?;
         let cursor = cursor.as_deref().map(Cursor::parse).transpose()?;
         if (one.is_some() || parent.is_some()) && epoch.is_none() {
@@ -131,6 +139,10 @@ impl Reads {
         // (each row with its ref, which a cursor names it by)
         let rows: Vec<(String, Value)> = match listing {
             Listing::Notes(clip) => self.notes(&session, &clip, until).await?,
+            Listing::Params(track, slot) => {
+                self.know_plugins(until).await?;
+                self.params(&session, track, slot)?
+            }
             listing => self.rows(&session, listing)?,
         };
         self.page(&rows, cursor.as_ref(), limit)
@@ -150,7 +162,8 @@ impl Reads {
         Ok(session)
     }
 
-    /// The rows of a listing the session alone answers: every listing but a clip's notes, which come from the app.
+    /// The rows of a listing the session alone answers: every listing but a clip's notes and an insert's parameters,
+    /// which need the app's word too.
     fn rows(&self, session: &Value, listing: Listing) -> Result<Vec<(String, Value)>, Refusal> {
         let lives = &self.lives;
         Ok(match listing {
@@ -173,7 +186,17 @@ impl Reads {
             Listing::Markers => list(session, "markers").iter().filter_map(|marker| marker_row(session, marker, lives)).collect(),
             Listing::Groups => list(session, "groups").iter().filter_map(|group| group_row(group, lives)).collect(),
             Listing::Sources => list(session, "sources").iter().filter_map(|source| source_row(session, source, lives)).collect(),
-            Listing::Notes(_) => unreachable!("a clip's notes are read from the app"),
+            Listing::Lanes(of) => self
+                .tracks_of(session, of)?
+                .into_iter()
+                .flat_map(|track| list(track, "automation").iter().filter_map(move |lane| lane_row(track, lane, lives)))
+                .collect(),
+            Listing::Points(track, id) => {
+                let lane = lane_of(self.track(session, &track)?, &id)
+                    .ok_or_else(|| gone(Missing::Gone, &Ref::Lane { track, param: id.clone() }))?;
+                point_rows(session, track, &id, lane)
+            }
+            Listing::Notes(_) | Listing::Params(..) => unreachable!("read with the app's word"),
         })
     }
 
@@ -257,9 +280,21 @@ impl Reads {
                     None => Ok(row),
                 }
             }
-            Ref::Param { .. } | Ref::Lane { .. } | Ref::Point { .. } | Ref::Playlist { .. } => {
-                Err(bad(format!("{named}: SoundCraft's bridge doesn't read parameters, automation or playlists yet")))
+            Ref::Param { track, slot, .. } => {
+                self.know_plugins(until).await?;
+                let key = named.to_string();
+                self.params(session, *track, *slot)?.into_iter().find(|(at, _)| *at == key).map(|(_, row)| row).ok_or_else(missing)
             }
+            Ref::Lane { track, param } => {
+                let in_track = self.track(session, track)?;
+                lane_of(in_track, param).and_then(|lane| lane_row(in_track, lane, &self.lives)).map(|(_, row)| row).ok_or_else(missing)
+            }
+            Ref::Point { track, param, .. } => {
+                let lane = lane_of(self.track(session, track)?, param).ok_or_else(missing)?;
+                let key = named.to_string();
+                point_rows(session, *track, param, lane).into_iter().find(|(at, _)| *at == key).map(|(_, row)| row).ok_or_else(missing)
+            }
+            Ref::Playlist { .. } => unreachable!("refused before the app is asked"),
         }
     }
 
@@ -315,6 +350,29 @@ impl Reads {
             .collect())
     }
 
+    /// An insert's parameters, as the built-in plug-ins' descriptions name them ([`Reads::know_plugins`] first).
+    fn params(&self, session: &Value, track: Id, slot: Slot) -> Result<Vec<(String, Value)>, Refusal> {
+        let named = Ref::Insert { track, slot };
+        let insert = list(self.track(session, &track)?, "inserts")
+            .iter()
+            .find(|insert| slot_of(insert) == Some(slot))
+            .ok_or_else(|| gone(Missing::Gone, &named))?;
+        Ok(param_rows(track, slot, insert, self.plugins.as_deref().unwrap_or_default()))
+    }
+
+    /// Asks the app for its built-in plug-ins' descriptions the first time a parameter is read: they come with its
+    /// version, so one answer serves the bridge's run.
+    async fn know_plugins(&mut self, until: Instant) -> Result<(), Refusal> {
+        if self.plugins.is_none() {
+            let answer = self.control.execute("engine.plugins", json!({}), wait_within(until)?).await.map_err(asked)?;
+            self.plugins = Some(match answer {
+                Value::Array(plugins) => plugins,
+                _ => Vec::new(),
+            });
+        }
+        Ok(())
+    }
+
     /// A page of rows from the cursor's row: up to `limit`, and no more bytes than an answer may take.
     fn page(&self, rows: &[(String, Value)], cursor: Option<&Cursor>, limit: usize) -> Result<Value, Refusal> {
         let from = match cursor {
@@ -366,6 +424,12 @@ enum Listing {
     Sources,
     /// A MIDI clip's notes.
     Notes(Id),
+    /// An insert's parameters (a slot's: an instrument's aren't read yet).
+    Params(Id, Slot),
+    /// A track's automation lanes, or every track's.
+    Lanes(Option<Id>),
+    /// A lane's points: a track's, and what the lane moves.
+    Points(Id, String),
 }
 
 impl Listing {
@@ -383,6 +447,23 @@ impl Listing {
                 return match parent {
                     Some(Ref::Object(clip @ Id { kind: Kind::Clip, .. })) => Ok(Listing::Notes(clip)),
                     _ => Err(bad("parent: the clip whose notes to read (s:clip:…)".into())),
+                }
+            }
+            "param" => {
+                return match parent {
+                    Some(Ref::Insert { track, slot: Slot::Instrument }) => Err(bad(format!(
+                        "parent: {}'s parameters are only in the session file, which SoundCraft's bridge doesn't read yet",
+                        Ref::Insert { track, slot: Slot::Instrument }
+                    ))),
+                    Some(Ref::Insert { track, slot }) => Ok(Listing::Params(track, slot)),
+                    _ => Err(bad("parent: the insert whose parameters to read (s:insert:…)".into())),
+                }
+            }
+            "env" => return Ok(Listing::Lanes(track(parent)?)),
+            "point" => {
+                return match parent {
+                    Some(Ref::Lane { track, param }) => Ok(Listing::Points(track, param)),
+                    _ => Err(bad("parent: the lane whose points to read (s:env:…)".into())),
                 }
             }
             "session" => Listing::Session,
@@ -443,6 +524,18 @@ fn wait_within(until: Instant) -> Result<Duration, Refusal> {
     match READ_WAIT.min(until.saturating_duration_since(Instant::now())) {
         wait if wait.is_zero() => Err((code::DEADLINE, "the read's deadline passed before it started: nothing was read".into())),
         wait => Ok(wait),
+    }
+}
+
+/// What the bridge doesn't read yet, refused before the app is asked: playlists, and an instrument's parameters, which are
+/// only in the session file.
+fn not_yet(named: &Ref) -> Option<Refusal> {
+    match named {
+        Ref::Playlist { .. } => Some(bad(format!("{named}: SoundCraft's bridge doesn't read playlists yet"))),
+        Ref::Param { slot: Slot::Instrument, .. } => Some(bad(format!(
+            "{named}: an instrument's parameters are only in the session file, which SoundCraft's bridge doesn't read yet"
+        ))),
+        _ => None,
     }
 }
 
@@ -658,6 +751,109 @@ fn insert_row(track: &Value, insert: &Value, lives: &Lives) -> Option<(String, V
 
 fn bus_row(bus: &Value, lives: &Lives) -> Option<(String, Value)> {
     object_row(Kind::Bus, bus, lives, |bus| json!({"name": bus["name"], "format": bus["format"]}))
+}
+
+/// An insert's parameters. A built-in's are as `engine.plugins` describes them (name, range, default, unit, taper and
+/// choices), with their values now; a hosted plug-in's are by number, with only their values: SoundCraft names no
+/// hosted parameter yet.
+fn param_rows(track: Id, slot: Slot, insert: &Value, plugins: &[Value]) -> Vec<(String, Value)> {
+    let values = insert["params"].as_object();
+    let insert_ref = Ref::Insert { track, slot }.to_string();
+    let param_ref = |id: &str| Ref::Param { track, slot, param: id.into() }.to_string();
+    match plugins.iter().find(|plugin| plugin["id"] == insert["plugin"]).and_then(|plugin| plugin["params"].as_array()) {
+        Some(described) => described
+            .iter()
+            .filter_map(|param| {
+                let id = param["id"].as_str()?;
+                let key = param_ref(id);
+                let value = values.and_then(|values| values.get(id)).cloned().unwrap_or(Value::Null);
+                let mut row = json!({
+                    "ref": key,
+                    "insertRef": insert_ref,
+                    "id": id,
+                    "name": param["name"],
+                    "value": value,
+                    "min": param["min"],
+                    "max": param["max"],
+                    "default": param["default"],
+                    "unit": param["unit"],
+                    "taper": param["taper"],
+                });
+                if let Some(choices) = param["choices"].as_array().filter(|choices| !choices.is_empty()) {
+                    // (a choice's value is its index)
+                    row["choice"] = value.as_f64().and_then(|at| choices.get(at.round() as usize)).cloned().unwrap_or(Value::Null);
+                    row["choices"] = choices.clone().into();
+                }
+                Some((key, row))
+            })
+            .collect(),
+        None => values
+            .into_iter()
+            .flatten()
+            .map(|(id, value)| {
+                let key = param_ref(id);
+                (key.clone(), json!({"ref": key, "insertRef": insert_ref, "id": id, "value": value}))
+            })
+            .collect(),
+    }
+}
+
+/// SoundCraft's automation id for the lane inspect labels `label`, as its UI writes it and its automation commands take
+/// it: `insert A hpf_freq` is `plugin:a:hpf_freq`, `send B level` is `send_b_level`, `pan 2` is `pan2`, and the trim lane,
+/// `insert Z trim` (its slot is past the letters), is `plugin:255:trim`.
+fn lane_id(label: &str) -> Option<String> {
+    let slot = |letter: &str| matches!(letter.as_bytes(), [b'A'..=b'J']).then(|| letter.to_ascii_lowercase());
+    if label == "insert Z trim" {
+        return Some("plugin:255:trim".into());
+    }
+    if let Some(rest) = label.strip_prefix("insert ") {
+        let (letter, param) = rest.split_once(' ')?;
+        return Some(format!("plugin:{}:{param}", slot(letter)?));
+    }
+    if let Some(rest) = label.strip_prefix("send ") {
+        let (letter, what) = rest.split_once(' ').filter(|(_, what)| matches!(*what, "level" | "pan" | "mute"))?;
+        return Some(format!("send_{}_{what}", slot(letter)?));
+    }
+    match label {
+        "volume" | "pan" | "mute" => Some(label.into()),
+        "pan 2" => Some("pan2".into()),
+        _ => None,
+    }
+}
+
+/// The lane on a track that moves `id` (an automation id).
+fn lane_of<'a>(track: &'a Value, id: &str) -> Option<&'a Value> {
+    list(track, "automation").iter().find(|lane| lane["param"].as_str().and_then(lane_id).as_deref() == Some(id))
+}
+
+fn lane_row(track: &Value, lane: &Value, lives: &Lives) -> Option<(String, Value)> {
+    let track_id = now(lives, Kind::Track, track)?;
+    let label = lane["param"].as_str()?;
+    let id = lane_id(label)?;
+    let key = Ref::Lane { track: track_id, param: id.clone() }.to_string();
+    let row = json!({
+        "ref": key,
+        "trackRef": Ref::Object(track_id).to_string(),
+        "id": id,
+        "label": label,
+        "points": list(lane, "points").len(),
+    });
+    Some((key, row))
+}
+
+/// A lane's points: one at a sample, as SoundCraft keeps them (`set_point` replaces the point there).
+fn point_rows(session: &Value, track: Id, id: &str, lane: &Value) -> Vec<(String, Value)> {
+    let lane_ref = Ref::Lane { track, param: id.into() }.to_string();
+    list(lane, "points")
+        .iter()
+        .filter_map(|point| {
+            let at = point["at"].as_i64()?;
+            let key = Ref::Point { track, param: id.into(), sample: at }.to_string();
+            let row =
+                json!({"ref": key, "laneRef": lane_ref, "at": at, "seconds": seconds(session, &point["at"]), "value": point["value"]});
+            Some((key, row))
+        })
+        .collect()
 }
 
 fn send_row(track: &Value, send: &Value, lives: &Lives) -> Option<(String, Value)> {
