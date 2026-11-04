@@ -321,15 +321,17 @@ jobs:
             echo "::error::self-updating code in the plugin (it fetches from GitHub and writes files): $updater"
             exit 1
           fi
-      - if: steps.affected.outputs.hermes_plugin == 'true' && hashFiles('hermes-plugin/package.json') != ''
+      # The UI halves' sources and build live in hermes-plugin/ui/ (a package.json at the plugin's root would make Hermes
+      # offer to install Node dependencies); their committed bundles are desktop/plugin.js and dashboard/dist/index.js.
+      - if: steps.affected.outputs.hermes_plugin == 'true' && hashFiles('hermes-plugin/ui/package.json') != ''
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0 (Node 24)
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: hermes-plugin/package-lock.json
+          cache-dependency-path: hermes-plugin/ui/package-lock.json
       - name: The Desktop and dashboard halves' types and tests (on stub SDKs), and their committed builds match
-        if: steps.affected.outputs.hermes_plugin == 'true' && hashFiles('hermes-plugin/package.json') != ''
-        working-directory: hermes-plugin
+        if: steps.affected.outputs.hermes_plugin == 'true' && hashFiles('hermes-plugin/ui/package.json') != ''
+        working-directory: hermes-plugin/ui
         run: |
           npm ci --ignore-scripts
           npm run typecheck
