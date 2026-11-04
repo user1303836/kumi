@@ -14,10 +14,11 @@ import os
 import stat
 import subprocess
 import sys
+import threading
 import time
 import traceback
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 try:  # Live supplies this module; local contract tests deliberately do not.
     from _Framework.ControlSurface import ControlSurface as _ControlSurface
@@ -273,13 +274,14 @@ def _windows_acl_owner_only(path: Path) -> bool:
     return verdict
 
 
-def _prefetch_acl_verdicts(paths: list[Path]) -> None:
+def _prefetch_acl_verdicts(paths: list[Path], fresh: bool = False) -> None:
     """Check several files' ACLs in one PowerShell run and keep the verdicts, so the checks after it don't each
-    start one. Best effort: a path that can't be looked at is left for its own check."""
+    start one. Best effort: a path that can't be looked at is left for its own check. `fresh` asks about every path,
+    a verdict still kept too, so each one kept starts its time again."""
     wanted = []
     for path in paths:
         key = _acl_key(path) if path is not None else None
-        if key is not None and _acl_cached(key) is None and key not in [held for _, held in wanted]:
+        if key is not None and (fresh or _acl_cached(key) is None) and key not in [held for _, held in wanted]:
             wanted.append((path, key))
     for start in range(0, len(wanted), _ACL_BATCH):
         batch = wanted[start:start + _ACL_BATCH]
@@ -316,10 +318,13 @@ def _windows_acl_owner_only_all(paths: list[Path]) -> list[bool]:
         environment["ABLETON_MCP_ACL_PATHS"] = encoded
         # By its full path: a bare name is looked for in Live's own folder and the working folder first.
         powershell = os.path.join(os.environ.get("SYSTEMROOT") or r"C:\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-        # Live has no console of its own: without this flag each check would open a console window.
+        # Live has no console of its own: without this flag each check would open a console window. Only the exit code is
+        # read, so no pipes: on Windows each pipe has a reader thread, which Live's Python can starve past the timeout even
+        # once PowerShell has answered. Without them, a call that gets its turn late still sees an exit that came in time.
         result = subprocess.run(
             [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-            capture_output=True, timeout=10, env=environment, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, env=environment,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         code = result.returncode
         if not isinstance(code, int) or code & ~((1 << len(paths)) - 1) != _ACL_ANSWERED:
@@ -645,12 +650,15 @@ _START_FAILURE = "start-failure.json"
 
 def _say_start_failure(surface: Any, c_instance: Any, error: BaseException) -> None:
     """A failed start, said where the producer and Kumi see it: Live's status bar (show_message, never a dialog), Live's
-    log, and _START_FAILURE. Best effort: none of it may hide the failure itself, which Live goes on to report."""
+    log (with its traceback after the line) and _START_FAILURE. The bridge starts at one of Live's ticks, where Live
+    reports nothing of a failure: this is all there is. Best effort, so none of it may raise."""
     exception = f"{type(error).__name__}: {error}"
     words = "AbletonMcpBridge couldn't start: " + exception
-    # (the status bar is one short line: where the fix is comes before the exception, which it may cut off)
+    # (the status bar is one short line: where the fix is comes before the exception, which it may cut off; the log's
+    # line stays as Kumi reads it, with the traceback after it)
     shown = "AbletonMcpBridge couldn't start (kumi doctor says how to fix it): " + exception
-    for say, said in ((getattr(c_instance, "show_message", None), shown), (getattr(surface, "log_message", None), words)):
+    lines = words + "\n" + "".join(traceback.format_exception(type(error), error, error.__traceback__, limit=8))
+    for say, said in ((getattr(c_instance, "show_message", None), shown), (getattr(surface, "log_message", None), lines)):
         if callable(say):
             try:
                 say(said)
@@ -672,22 +680,120 @@ def _start_failure_gone() -> None:
         pass
 
 
+class _FilesChecked:
+    """The bridge's files checked off Live's main thread before it starts: on Windows the ACL verdicts the start then
+    reads from their cache, one PowerShell batch that otherwise holds Live's main thread 160 ms and more as Live starts
+    (seconds just after a boot). Nothing of Live's is called there. Done at once with nothing to check (elsewhere, where
+    owners and modes are read in the start itself)."""
+
+    def __init__(self, check: Callable[[], None] | None) -> None:
+        self._done = threading.Event()
+        self._finished_at: float | None = None
+        if check is None:
+            self._done.set()
+            return
+
+        def run() -> None:
+            try:
+                check()
+            except Exception:
+                pass  # (the start checks again, failing closed)
+            finally:
+                self._finished_at = time.monotonic()  # (the verdicts' clock, _keep_acl_verdict)
+                self._done.set()
+
+        threading.Thread(target=run, name="AbletonMcpBridge file check", daemon=True).start()
+
+    def done(self) -> bool:
+        return self._done.is_set()
+
+    def wait(self, seconds: float) -> bool:
+        return self._done.wait(seconds)
+
+    def stale(self) -> bool:
+        """Whether its verdicts may be gone by the time the start reads them (_CHECK_FRESH_SECONDS)."""
+        return self._finished_at is not None and time.monotonic() - self._finished_at >= _CHECK_FRESH_SECONDS
+
+
+# Live's own Python can starve a thread of its own (a hello once took about a second from one), and the check's few
+# steps in Python after its PowerShell need the interpreter. From this long after Live made the surface, its display
+# ticks wait a moment for the check, at most this often, which lets the interpreter go to the check's thread: it gets
+# its turn, Live's thread is held at most a tenth of the time, and Live's window (showing by then) never freezes. The
+# bridge then starts at most about half a second later than with the check on Live's thread throughout, where it held
+# Live's start for the whole of PowerShell's run (bounded at 10 s, `_windows_acl_owner_only_all`).
+_CHECK_ON_ITS_OWN_SECONDS = 0.5
+_CHECK_WAIT_SECONDS = 0.01
+_CHECK_WAIT_EVERY_SECONDS = 0.1
+# A check's verdicts last _ACL_VERDICT_SECONDS from when it kept them. A start later than this after the check (Live's
+# first callback held back by a dialog, say) could find them gone and run PowerShell again on Live's thread: it checks
+# again off it instead, asking PowerShell about every file whatever is still kept, and the bridge starts at the first
+# callback after that check.
+_CHECK_FRESH_SECONDS = _ACL_VERDICT_SECONDS - 5
+
+
+def _files_check(fresh: bool = False) -> Callable[[], None] | None:
+    """What checks the bridge's files off Live's thread: Windows' ACL batch for the reference, configuration and secret
+    (`fresh`: all of them again, whatever verdicts are still kept)."""
+    if os.name != "nt":
+        return None
+    reference = Path(__file__).with_name("bridge-reference.json")
+    return lambda: _prefetch_acl_verdicts(_config_paths(reference), fresh=fresh)
+
+
 class AbletonMcpBridge(_ControlSurface):
     """Control Surface lifecycle wrapper around the dependency-free bridge."""
 
     def __init__(self, c_instance: Any) -> None:
         super().__init__(c_instance)
         accessor = getattr(self, "song", None)
-        try:
-            self._bridge = _Bridge(c_instance, _read_config(), song=accessor() if callable(accessor) else None, provenance="real-live", diagnostics_validator=_diagnostics_path_safe)
-        except Exception as error:
-            _say_start_failure(self, c_instance, error)
-            raise
-        _start_failure_gone()
+        self._song = accessor() if callable(accessor) else None
+        self._instance = c_instance
+        self._bridge = None
         self._disconnected = False
         self._willington = None
         self._timer = None
+        # The bridge starts on Live's thread, at its timer's or a display tick's first call once its files are checked.
+        # (perf_counter for the gates below: before 3.13, monotonic on Windows moves in 15.6 ms steps)
+        self._made_at = time.perf_counter()
+        self._checked = _FilesChecked(_files_check())
         self._start_timer()
+
+    def _start_when_ready(self, display_tick: bool = False) -> bool:
+        """Whether the bridge runs, starting it here (on Live's thread) once its files are checked. A start that fails is
+        said (_say_start_failure) and isn't tried again. A display tick past _CHECK_ON_ITS_OWN_SECONDS gives a check
+        still running a moment of the interpreter (_CHECK_WAIT_SECONDS, at most every _CHECK_WAIT_EVERY_SECONDS). A check
+        done longer ago than _CHECK_FRESH_SECONDS is done again, off Live's thread, before the bridge starts."""
+        if getattr(self, "_bridge", None) is not None:
+            return True
+        checked = getattr(self, "_checked", None)
+        if checked is None:
+            return False
+        if not checked.done():
+            now = time.perf_counter()
+            if not display_tick or now - getattr(self, "_made_at", 0.0) < _CHECK_ON_ITS_OWN_SECONDS:
+                return False
+            if now - getattr(self, "_waited_at", 0.0) < _CHECK_WAIT_EVERY_SECONDS:
+                return False
+            self._waited_at = now
+            if not checked.wait(_CHECK_WAIT_SECONDS):
+                return False
+        if checked.stale():
+            self._checked = _FilesChecked(_files_check(fresh=True))
+            return False
+        self._checked = None
+        try:
+            self._bridge = _Bridge(self._instance, _read_config(), song=self._song, provenance="real-live", diagnostics_validator=_diagnostics_path_safe)
+        except Exception as error:
+            _say_start_failure(self, self._instance, error)
+            # Nothing more for the timer to serve: the ticks find nothing to start.
+            self._stop_timer()
+            return False
+        _start_failure_gone()
+        if getattr(self, "_timer", None) is not None:
+            self._bridge.between_ticks = True
+            # The timer's rate counted from the bridge's start: its calls before it served nothing.
+            self._timer_calls, self._timer_counted_from = 0, time.perf_counter()
+        return True
 
     def _start_timer(self) -> None:
         """Live's own timer serves the bridge between display ticks, where this Live has one; without it,
@@ -700,7 +806,8 @@ class AbletonMcpBridge(_ControlSurface):
             return
         self._timer = timer
         self._timer_calls, self._timer_counted_from = 0, time.perf_counter()
-        self._bridge.between_ticks = True
+        if getattr(self, "_bridge", None) is not None:
+            self._bridge.between_ticks = True
 
     def _stop_timer(self) -> None:
         timer, self._timer = getattr(self, "_timer", None), None
@@ -711,8 +818,8 @@ class AbletonMcpBridge(_ControlSurface):
             except Exception: pass
 
     def _between_ticks(self) -> None:
-        # A stopped timer's callback already on its way does nothing.
-        if self._disconnected or self._timer is None:
+        # A stopped timer's callback already on its way does nothing, and nothing is served before the bridge starts.
+        if self._disconnected or self._timer is None or not self._start_when_ready():
             return
         counted_from = getattr(self, "_timer_counted_from", None)
         if counted_from is not None:
@@ -757,6 +864,8 @@ class AbletonMcpBridge(_ControlSurface):
         # Each display tick serves the bridge once (Live's timer serves it between ticks). The base class's own
         # update_display isn't called: _Framework delivers schedule_message's tasks from there, and this surface
         # schedules none.
+        if not self._start_when_ready(display_tick=True):
+            return
         self._keep_willington()
         self._bridge.update_display()
 
@@ -768,14 +877,16 @@ class AbletonMcpBridge(_ControlSurface):
             except Exception:
                 log = getattr(self, "log_message", None)
                 if callable(log): log("Willington teardown failed; bridge disconnect continues")
-        self._bridge.disconnect()
+        self._checked = None
+        if self._bridge is not None:
+            self._bridge.disconnect()
         parent_disconnect = getattr(super(), "disconnect", None)
         if callable(parent_disconnect):
             parent_disconnect()
 
     @property
     def address(self) -> Any:
-        return self._bridge.address
+        return self._bridge.address if self._bridge is not None else None
 
 
 def create_instance(c_instance: Any) -> AbletonMcpBridge:

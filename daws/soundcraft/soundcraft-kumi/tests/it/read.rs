@@ -568,9 +568,18 @@ async fn a_snapshot_shows_the_session_on_one_screen() {
     assert!(snapshot.get("truncated").is_none(), "nothing left out");
 }
 
+/// A session file's path, absolute on every system (Windows' needs a drive), so its place has an id.
+fn session_file(path: &str) -> String {
+    if cfg!(windows) {
+        format!("C:{path}")
+    } else {
+        path.to_string()
+    }
+}
+
 #[tokio::test]
 async fn a_saved_sessions_id_is_its_files_place_and_the_session_read_says_the_same() {
-    let path = json!("/sessions/Midnight Groove/Midnight Groove.scraft");
+    let path = json!(session_file("/sessions/Midnight Groove/Midnight Groove.scraft"));
     let mut app = App::new(json!([])).await;
     app.session.lock().unwrap()["path"] = path.clone();
     let project = snapshot(&mut app).await["project"].clone();
@@ -619,7 +628,7 @@ async fn a_save_or_a_save_as_is_the_same_session_with_its_refs_and_identity() {
         (session["name"], session["path"]) = (json!(name), json!(path));
     };
     // Its first save: SoundCraft names the session after its file, and nothing else changes.
-    names(&app, "Groove", "/sessions/Groove.scraft");
+    names(&app, "Groove", &session_file("/sessions/Groove.scraft"));
     tokio::time::sleep(STALE_AFTER).await;
     let saved = snapshot(&mut app).await;
     assert_eq!((&saved["epoch"], &saved["project"]["identity"]), (&epoch, &identity), "the same session");
@@ -627,13 +636,13 @@ async fn a_save_or_a_save_as_is_the_same_session_with_its_refs_and_identity() {
     let kick = app.read(json!({"ref": "s:track:3", "epoch": epoch})).await.unwrap();
     assert_eq!(kick["items"][0]["name"], "Kick", "its refs hold");
     // Save As: another file and place, the same session.
-    names(&app, "Groove 2", "/sessions/Groove 2.scraft");
+    names(&app, "Groove 2", &session_file("/sessions/Groove 2.scraft"));
     tokio::time::sleep(STALE_AFTER).await;
     let saved_as = snapshot(&mut app).await;
     assert_eq!((&saved_as["epoch"], &saved_as["project"]["identity"]), (&epoch, &identity));
     assert_ne!(saved_as["project"]["id"], saved["project"]["id"]);
     // Another file opened, whose objects aren't these: another session.
-    names(&app, "Other", "/sessions/Other.scraft");
+    names(&app, "Other", &session_file("/sessions/Other.scraft"));
     app.session.lock().unwrap()["tracks"][0]["name"] = json!("Snare");
     tokio::time::sleep(STALE_AFTER).await;
     let other = snapshot(&mut app).await;
@@ -649,7 +658,7 @@ async fn another_file_whose_objects_are_who_they_were_but_hold_other_things_is_a
     let epoch = snapshot(&mut app).await["epoch"].clone();
     {
         let mut session = app.session.lock().unwrap();
-        (session["name"], session["path"]) = (json!("Groove v2"), json!("/sessions/Groove v2.scraft"));
+        (session["name"], session["path"]) = (json!("Groove v2"), json!(session_file("/sessions/Groove v2.scraft")));
         let tracks = session["tracks"].as_array_mut().unwrap();
         for clip in tracks.iter_mut().flat_map(|track| track["clips"].as_array_mut().into_iter().flatten()) {
             if clip.get("source").is_some() {
@@ -666,7 +675,7 @@ async fn another_file_whose_objects_are_who_they_were_but_hold_other_things_is_a
 async fn a_session_renamed_on_the_same_path_is_the_same_session() {
     // Setup > Session renames it as a step of its own: the history moves, the file and the objects stay.
     let mut app = App::new(json!([])).await;
-    app.session.lock().unwrap()["path"] = json!("/sessions/Groove.scraft");
+    app.session.lock().unwrap()["path"] = json!(session_file("/sessions/Groove.scraft"));
     let epoch = snapshot(&mut app).await["epoch"].clone();
     {
         let mut session = app.session.lock().unwrap();

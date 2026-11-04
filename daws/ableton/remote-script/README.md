@@ -82,18 +82,23 @@ start, and Live's log (Log.txt) has the reason.
 - **Windows:** the file's owner is your user, and its access list is protected
   (no inherited entries) with exactly one entry: your user, allowed full
   control. The script checks this by running Windows PowerShell
-  (`powershell.exe`, found on Live's PATH, with no console window, up to 10
-  seconds a check). Live's own Python has no `ctypes`, so the access-list check
-  decides alone there; mode bits aren't checked on Windows. Each Live start
-  runs a check for every file involved.
+  (`powershell.exe`, by its full path under `%SystemRoot%`, with no console
+  window, up to 10 seconds a check). Live's own Python has no `ctypes`, so the
+  access-list check decides alone there; mode bits aren't checked on Windows.
+  Each Live start runs a check for every file involved. The start's check of
+  the reference, the configuration and the secret runs on a thread of its own,
+  in one PowerShell run, not on Live's main thread.
 
 `kumi bridge` and the lifecycle set these permissions themselves.
 
 ## How it runs inside Live
 
+The bridge starts at Live's first timer or display callback after its files
+are checked, not when Live makes the Control Surface.
+
 Live's embedded Python starves background threads, so the script does its work
 on Live's main thread, in the Control Surface's display callback (about ten
-times a second) and a scheduled callback. Each tick it:
+times a second) and Live's timer (below). Each tick it:
 
 1. serves the TCP connections for at most 50 ms: reads requests, runs them and
    writes the answers, serving every connection at least one request, and
@@ -111,9 +116,12 @@ the ticks' together. A change isn't counted: it takes what Live takes to make
 it. A timer that fails stops, and the ticks serve as before.
 
 A read stops after about 30 ms of work and returns a cursor for the rest, so no
-request holds Live's interface for long. Only two other threads exist: the
-realtime UDP receiver, which decodes and checks packets and queues writes for
-the main thread, and the diagnostics writer. Neither touches Live's objects.
+request holds Live's interface for long. Only two other threads run for as
+long as the script does: the realtime UDP receiver, which decodes and checks
+packets and queues writes for the main thread, and the diagnostics writer. On
+Windows a third, "AbletonMcpBridge file check", runs the start's PowerShell
+check and ends with it; the check reads only PowerShell's exit code, so no
+pipe-reader threads come with it. None of them touches Live's objects.
 
 When Live closes the script (Live quits, or you deselect the Control Surface),
 it closes the sockets, stops realtime and any capture, closes an open Live undo
