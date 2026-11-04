@@ -72,13 +72,16 @@ pub struct Reads {
     plugins: Option<Vec<Value>>,
     /// The ids of the app's commands (`engine.commands`), asked once, for what `call` refuses.
     commands: Option<Vec<String>>,
+    /// The app's version, when it says one: `call` runs only on the one its list was checked against.
+    version: Option<String>,
 }
 
 impl Reads {
-    pub fn new(control: Control) -> Self {
+    /// The reads of the SoundCraft `control` reaches, of `version` (the identity's `daw_version`) when known.
+    pub fn new(control: Control, version: Option<String>) -> Self {
         let lives = Lives::new();
         let (told, _) = watch::channel(lives.epoch().to_string());
-        Self { control, lives, looked: None, inspected: None, told, plugins: None, commands: None }
+        Self { control, lives, looked: None, inspected: None, told, plugins: None, commands: None, version }
     }
 
     /// The epoch as it changes, readable while a read holds the reads.

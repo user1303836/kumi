@@ -49,7 +49,7 @@ impl App {
             _ => Answer::Now(json!({"ok": false, "error": "unknown method `x`"})),
         })
         .await;
-        let reads = Reads::new(Control::new(fake.port(), None));
+        let reads = Reads::new(Control::new(fake.port(), None), Some("0.17.0".into()));
         App { fake, session, notes, reads }
     }
 
@@ -279,7 +279,7 @@ async fn a_ref_or_parent_without_its_epoch_is_refused_and_one_from_another_table
     assert_eq!(app.read_bare(json!({"kind": "clip", "parent": "s:track:3"})).await.unwrap_err().0, "bad-params");
     assert_eq!(app.read_bare(json!({"kind": "track"})).await.unwrap()["total"], 9, "a list of everything needs none");
     // The bridge started again, with SoundCraft still open: its table names the same ids, and refs from before aren't its.
-    let before = Reads::new(Control::new(app.fake.port(), None)).epoch().to_string();
+    let before = Reads::new(Control::new(app.fake.port(), None), Some("0.17.0".into())).epoch().to_string();
     let stale = app.read_bare(json!({"ref": "s:track:23", "epoch": before})).await.unwrap_err();
     assert_eq!(stale.0, "stale", "{stale:?}");
 }
