@@ -15,5 +15,6 @@ mod renoise_presets;
 mod renoise_reads;
 mod renoise_tools;
 mod retire;
+mod spawn;
 mod tools;
 mod vst3_files;

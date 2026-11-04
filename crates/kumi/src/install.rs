@@ -1882,9 +1882,9 @@ fn own_parts(home: &str, all: bool, kept: &[&str]) -> Result<Parts, RuntimeError
 }
 /// What goes of `bridges`, a folder per DAW (`all`: --all, in a folder of Kumi's alone): Kumi's own entries; the
 /// baselines too with `all`; never the copies kept for the producer, or what Kumi doesn't make. A DAW's folder goes
-/// whole once all in it goes, and so does `bridges`; else their entries go one by one, and the folders stay. Only
-/// REAPER's and Renoise's folders are Kumi's, and in a folder the producer also uses only those its lifecycle wrote
-/// ([`BRIDGES_MARKS`]): a `bridges` there may be someone else's, and stays unless Kumi's folders were all it held.
+/// whole once all in it goes, and so does `bridges`; else their entries go one by one, and the folders stay. Only the
+/// folders of the DAWs with Kumi's own bridge are Kumi's, and in a folder the producer also uses only those its lifecycle
+/// wrote ([`BRIDGES_MARKS`]): a `bridges` there may be someone else's, and stays unless Kumi's folders were all it held.
 fn bridges_parts(bridges: &str, all: bool, parts: &mut Parts) {
     let Ok(daws) = fs::read_dir(bridges) else {
         // Not a folder: Kumi makes none by this name.

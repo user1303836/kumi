@@ -13,16 +13,20 @@ pub const PORTS_PER_DAW: u16 = 10;
 pub enum Daw {
     Reaper,
     Renoise,
+    /// Its bridge is a program beside the app (`soundcraft-kumi`), which the host starts: nothing of Kumi's goes in
+    /// SoundCraft.
+    SoundCraft,
 }
 
 impl Daw {
-    pub const ALL: [Daw; 2] = [Daw::Reaper, Daw::Renoise];
+    pub const ALL: [Daw; 3] = [Daw::Reaper, Daw::Renoise, Daw::SoundCraft];
 
     /// The id on the wire, in file names and on the command line.
     pub fn id(self) -> &'static str {
         match self {
             Daw::Reaper => "reaper",
             Daw::Renoise => "renoise",
+            Daw::SoundCraft => "soundcraft",
         }
     }
 
@@ -35,6 +39,7 @@ impl Daw {
         match self {
             Daw::Reaper => "REAPER",
             Daw::Renoise => "Renoise",
+            Daw::SoundCraft => "SoundCraft",
         }
     }
 
@@ -43,6 +48,8 @@ impl Daw {
         match self {
             Daw::Reaper => 9770,
             Daw::Renoise => 9780,
+            // (9790-9799 are kept for Logic's bridge, #374)
+            Daw::SoundCraft => 9800,
         }
     }
 

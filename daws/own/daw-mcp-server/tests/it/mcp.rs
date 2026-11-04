@@ -2,12 +2,13 @@
 //! JSON-RPC out, with golden transcripts (tests/golden/*-mcp.ndjson; KUMI_BLESS=1 rewrites them).
 use daw_bridge::files::ensure_secret;
 use daw_bridge::paths::BridgePaths;
+use daw_bridge::wire::Project;
 use daw_bridge::Daw;
 use daw_mcp_server::host::Host;
 use daw_mcp_server::simulator::{Simulator, SimulatorConfig};
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 fn golden(name: &str, made: &str) {
@@ -216,5 +217,69 @@ async fn the_bridges_events_reach_the_client_as_notifications() {
         json!({"jsonrpc": "2.0", "method": "notifications/daw_event", "params": {"name": "tracks", "data": {"count": 8, "made": [1], "gone": [], "layout": 1}}})
     );
     simulator.stop();
+    session.finish().await;
+}
+
+#[tokio::test]
+async fn soundcrafts_host_lists_what_its_bridge_serves_and_starts_nothing_while_soundcraft_is_closed() {
+    let home = tempfile::tempdir().unwrap();
+    let mut session = Session::start(Daw::SoundCraft, home.path());
+    session.call(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"kumi","version":"test"}}})).await;
+    session.call(json!({"jsonrpc":"2.0","method":"notifications/initialized"})).await;
+    let listed = session.call(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await;
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    assert_eq!(
+        tools.iter().filter_map(|tool| tool["name"].as_str()).collect::<Vec<_>>(),
+        ["status", "discover", "read", "snapshot", "focus"]
+    );
+    let said = tools[0]["description"].as_str().unwrap();
+    assert!(said.starts_with("Whether Kumi's bridge beside SoundCraft is connected") && said.contains("the open session"), "{said}");
+    let read = &tools[2]["inputSchema"]["properties"];
+    assert_eq!(
+        read["kind"]["enum"],
+        json!(["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"])
+    );
+    assert!(read["epoch"].is_object() && read["grid"].is_null(), "its refs carry an epoch, and it reads no parameter texts: {read}");
+    let snapshot = tools[3]["description"].as_str().unwrap();
+    assert!(snapshot.starts_with("The open SoundCraft session on one screen"), "{snapshot}");
+    let view = session
+        .call(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"focus_body","arguments":{"kind": "mixer"}}}))
+        .await;
+    assert_eq!(view["error"]["message"], "Unknown tool: focus_body", "the other DAWs' views aren't SoundCraft's yet");
+    // (the isolated runner's process listing shows no SoundCraft running: no bridge is started for it)
+    let status = session.tool(4, "status", json!({})).await;
+    assert_eq!((&status["connected"], &status["reason"]), (&json!(false), &json!("no SoundCraft is running: open SoundCraft")), "{status}");
+    session.finish().await;
+}
+
+#[tokio::test]
+async fn soundcrafts_read_goes_to_its_bridge_as_asked_and_comes_back_as_it_answered() {
+    let home = tempfile::tempdir().unwrap();
+    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
+    let secret = ensure_secret(&paths.secret()).unwrap();
+    let asked = Arc::new(Mutex::new(Vec::<Value>::new()));
+    let heard = asked.clone();
+    let mut config = SimulatorConfig::reaper(secret, "/lab/SoundCraft").with_methods(
+        &["read"],
+        Arc::new(move |method: &str, params: &Value| {
+            heard.lock().unwrap().push(params.clone());
+            (method == "read").then(|| Ok(json!({"items": [{"ref": "s:track:3", "name": "Kick"}], "epoch": "1a-1", "total": 9, "nextCursor": "c1.1a-1.1~s:track:3"})))
+        }),
+    );
+    config.identity.daw = Daw::SoundCraft.id().into();
+    config.identity.daw_version = "0.17.0".into();
+    config.identity.project = Some(Project { name: Some("Midnight Groove".into()), ..Project::default() });
+    config.discovery_dir = Some(paths.discovery());
+    let bridge = Simulator::start(config).await.unwrap();
+    let mut session = Session::start(Daw::SoundCraft, home.path());
+    session.call(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"kumi","version":"test"}}})).await;
+    let read = session.tool(2, "read", json!({"kind": "track", "limit": 1, "epoch": "1a-1"})).await;
+    assert_eq!(
+        (&read["items"][0]["ref"], &read["total"], &read["nextCursor"]),
+        (&json!("s:track:3"), &json!(9), &json!("c1.1a-1.1~s:track:3")),
+        "{read}"
+    );
+    assert_eq!(*asked.lock().unwrap(), [json!({"kind": "track", "limit": 1, "epoch": "1a-1"})], "the request as asked, and no more");
+    bridge.stop();
     session.finish().await;
 }

@@ -730,7 +730,8 @@ fn program_path(pid: libc::pid_t) -> Option<String> {
 }
 
 /// Linux's processes as `ps -axo pid=,comm=` lists them, by pid: each by its command name (`/proc/<pid>/comm`), read in
-/// a moment where `ps` takes a fork and a scan of its own. Empty when /proc can't be read.
+/// a moment where `ps` takes a fork and a scan of its own; an AppImage's by its program ([`listed_name`]). Empty when
+/// /proc can't be read.
 #[cfg(target_os = "linux")]
 fn kernel_listing() -> Vec<(u32, String)> {
     let Ok(entries) = std::fs::read_dir("/proc") else { return vec![] };
@@ -740,11 +741,22 @@ fn kernel_listing() -> Vec<(u32, String)> {
             let pid: u32 = entry.file_name().to_str()?.parse().ok()?;
             // One that ended since /proc was read is left out.
             let name = std::fs::read(entry.path().join("comm")).ok()?;
-            Some((pid, String::from_utf8_lossy(&name).trim().to_string()))
+            let name = String::from_utf8_lossy(&name).trim().to_string();
+            Some((pid, listed_name(name, || std::fs::read_link(entry.path().join("exe")).ok())))
         })
         .collect();
     listed.sort_by_key(|(pid, _)| *pid);
     listed
+}
+
+/// What a Linux process is listed as: its command name, but an AppImage's program by its file. An AppImage runs its
+/// entry, `AppRun`, which is often a link to the app's program, so the command name is `AppRun` while the process's
+/// program (`/proc/<pid>/exe`, which follows the link) is the app's.
+pub fn listed_name(command: String, program: impl FnOnce() -> Option<PathBuf>) -> String {
+    if command != "AppRun" {
+        return command;
+    }
+    program().map(|program| program.display().to_string()).unwrap_or(command)
 }
 
 /// Windows' processes by their image names, from a Toolhelp snapshot: a moment's work, where tasklist takes a good part
@@ -910,13 +922,17 @@ pub fn parse_processes(listing: &str, windows: bool) -> Vec<(u32, String)> {
         .collect()
 }
 
-/// Whether a process name (a path or an image name) is this DAW's main program.
+/// Whether a process name (a path or an image name) is this DAW's main program. Linux names a program whose file was
+/// replaced since it started (a package upgrade) `<path> (deleted)`: still that program.
 pub fn process_is(daw: Daw, name: &str) -> bool {
+    let name = name.strip_suffix(" (deleted)").unwrap_or(name);
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let base = base.strip_suffix(".exe").or_else(|| base.strip_suffix(".EXE")).unwrap_or(base);
     match daw {
         Daw::Reaper => matches!(base, "REAPER" | "REAPER64" | "reaper"),
         Daw::Renoise => base == "Renoise" || base == "renoise" || base.starts_with("Renoise ") || base.starts_with("renoise-"),
+        // (macOS's bundle runs `SoundCraft`, Windows `soundcraft.exe`, Linux `soundcraft`; never its `soundcraft-cli`)
+        Daw::SoundCraft => base.eq_ignore_ascii_case("soundcraft"),
     }
 }
 
@@ -1192,8 +1208,9 @@ mod tests {
     /// The kernel's listing is `ps -axo pid=,comm=`'s, without the `ps`, held to two `ps` lists made just before and just
     /// after it, and only where those agree: another test's processes spawn, exec and end around this one. Every
     /// process in both is in the kernel's list, another account's too, in the same order. Where both name it alike, this
-    /// account's are named exactly as `ps` names them: on Linux every one, and on macOS those it names by a path, as a
-    /// DAW started from the Finder or the Dock is (and a child known only by its argv[0] by it). Other names aren't
+    /// account's are named as `ps` names them: on Linux every one (an AppImage's entry, `AppRun` to `ps`, by its program's
+    /// path, as Kumi lists it), and on macOS those it names by a path, as a DAW started from the Finder or the Dock is (and
+    /// a child known only by its argv[0] by it). Other names aren't
     /// compared: on macOS `ps`, setuid root, reads any process's argv[0], which can be a title ("Core Audio Driver
     /// (NullAudio.driver)" on a runner), where Kumi, not root, names another account's by its program's path.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1255,7 +1272,12 @@ mod tests {
             steady.iter().filter(|(_, uid, name)| *uid == me && (cfg!(target_os = "linux") || name.starts_with('/'))).collect();
         assert!(!compared.is_empty(), "this account's processes are compared");
         for (pid, _, name) in &compared {
-            assert_eq!(kernel[pid], name, "pid {pid}");
+            let name = if cfg!(target_os = "linux") {
+                listed_name(name.clone(), || std::fs::read_link(format!("/proc/{pid}/exe")).ok())
+            } else {
+                name.clone()
+            };
+            assert_eq!(kernel[pid], &name, "pid {pid}");
         }
         let steady_pids: HashSet<u32> = steady.iter().map(|(pid, _, _)| *pid).collect();
         let ps_order: Vec<u32> = before.iter().map(|(pid, _, _)| *pid).filter(|pid| steady_pids.contains(pid)).collect();
@@ -1358,5 +1380,32 @@ mod tests {
         let windows = parse_processes("\"reaper.exe\",\"4242\",\"Console\",\"1\",\"300,000 K\"\r\n", true);
         assert_eq!(windows, [(4242, "reaper.exe".to_string())]);
         assert!(process_is(Daw::Reaper, "reaper.exe"));
+    }
+
+    #[test]
+    fn soundcrafts_app_is_told_from_its_command_line_tool() {
+        for name in [
+            "/Applications/SoundCraft.app/Contents/MacOS/SoundCraft",
+            r"C:\Users\p\AppData\Local\Programs\ArtCraft\SoundCraft\soundcraft.exe",
+            "/usr/bin/soundcraft",
+            "/usr/bin/soundcraft (deleted)",
+        ] {
+            assert!(process_is(Daw::SoundCraft, name), "{name}");
+        }
+        for name in
+            ["soundcraft-cli", "/usr/local/bin/soundcraft-cli", "SoundCraftHelper", "/Applications/REAPER.app/Contents/MacOS/REAPER"]
+        {
+            assert!(!process_is(Daw::SoundCraft, name), "{name}");
+        }
+    }
+
+    #[test]
+    fn an_appimages_process_is_listed_by_its_program_not_its_entry() {
+        let program = || Some(PathBuf::from("/tmp/.mount_SoundCrQ1w2/usr/bin/soundcraft"));
+        let listed = listed_name("AppRun".into(), program);
+        assert_eq!(listed, "/tmp/.mount_SoundCrQ1w2/usr/bin/soundcraft");
+        assert!(process_is(Daw::SoundCraft, &listed));
+        assert_eq!(listed_name("AppRun".into(), || None), "AppRun", "a program the system won't say: its command name");
+        assert_eq!(listed_name("reaper".into(), || unreachable!("only an AppImage's entry is looked through")), "reaper");
     }
 }

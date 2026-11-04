@@ -1,4 +1,4 @@
-//! The `daw-mcp-server` command: `daw-mcp-server --daw reaper|renoise`.
+//! The `daw-mcp-server` command: `daw-mcp-server --daw reaper|renoise|soundcraft`.
 use std::sync::Arc;
 
 fn main() {

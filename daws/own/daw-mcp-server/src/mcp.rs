@@ -25,6 +25,31 @@ pub fn tools(host: &Host) -> Value {
 }
 
 fn tool_list(daw: Daw) -> Value {
+    let pick = json!({
+        "pid": {"type": "integer", "minimum": 1, "description": format!("The {daw} process to use, from discover, when several run.")},
+        "resource": {"type": "string", "description": format!("The {daw} resource or preferences folder to use, from discover, when several run.")},
+    });
+    // (SoundCraft's bridge serves ping, status, read, snapshot and focus so far: its change and listening tools come as it
+    // learns them)
+    if daw == Daw::SoundCraft {
+        let [status, discover] = finding(daw, "session", &pick);
+        let epoch = json!({"epoch": {
+            "type": "string",
+            "description": "The epoch of the answer the ref or parent came from, needed with ref or parent: SoundCraft gives ids out again, so a ref means nothing without its epoch. If another session is open now, or the bridge started again, the call is refused as stale instead of reading something else.",
+        }});
+        let read = read_tool(
+            daw,
+            (
+                "session",
+                "a track's clips, inserts, sends or automation lanes, a clip's notes, an insert's parameters or a lane's points",
+                "The ref of what the rows are in: a track for its clips, inserts, sends or lanes (env), a clip for its notes, an insert for its parameters, a lane for its points.",
+            ),
+            &kinds(daw),
+            &pick,
+            epoch,
+        );
+        return json!([status, discover, read, snapshot_tool(daw, "session", &pick), focus_tool(daw, &pick)]);
+    }
     let kinds = kinds(daw);
     // Each DAW's own words: what it opens, what a read's parent holds, what a view is about.
     let (place, inside, parent, about) = match daw {
@@ -34,12 +59,13 @@ fn tool_list(daw: Daw) -> Value {
             "The ref of what the rows are in: a track for its devices, a device for its parameters, an instrument for its samples or phrases, a pattern (with track) for its lines.",
             "the track, pattern or instrument it is about",
         ),
-        _ => (
+        Daw::Reaper => (
             "project",
             "a track's items or an FX's parameters",
             "The ref of what the rows are in: a track for its items or sends, an FX for its parameters.",
             "the take or track it is about",
         ),
+        Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
     };
     // Renoise plays from a slot and line; REAPER from where it is (cursor_set moves it).
     let play = match daw {
@@ -47,55 +73,20 @@ fn tool_list(daw: Daw) -> Value {
             "Starts Renoise's playback from where it is, or from sequence (a slot, from 1) and line (from 0, as Renoise numbers lines).",
             json!({"sequence": {"type": "integer", "minimum": 1}, "line": {"type": "integer", "minimum": 0}, "epoch": {"type": "string"}}),
         ),
-        _ => ("Starts REAPER's playback from where it is (cursor_set moves it first).", json!({"epoch": {"type": "string"}})),
+        Daw::Reaper => ("Starts REAPER's playback from where it is (cursor_set moves it first).", json!({"epoch": {"type": "string"}})),
+        Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
     };
-    let pick = json!({
-        "pid": {"type": "integer", "minimum": 1, "description": format!("The {daw} process to use, from discover, when several run.")},
-        "resource": {"type": "string", "description": format!("The {daw} resource or preferences folder to use, from discover, when several run.")},
+    let [status, discover] = finding(daw, place, &pick);
+    let grid = json!({
+        "grid": {"type": "integer", "minimum": 2, "maximum": MAX_GRID, "description": "For kind param: each parameter's text read at this many points across its range (grid), or its steps' texts (items)."},
     });
+    let read = read_tool(daw, (place, inside, parent), &kinds, &pick, grid);
     let mut list = json!([
-        {
-            "name": "status",
-            "title": format!("{daw} status"),
-            "description": format!("Whether Kumi's bridge in {daw} is connected: the {daw} and bridge versions, the open {place}, and whether {daw} is busy (a dialog, a render). With several {daw} instances running, pass pid or resource from discover."),
-            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
-        },
-        {
-            "name": "discover",
-            "title": format!("Find running {daw}"),
-            "description": format!("Every running {daw} with Kumi's bridge: process id, port, resource folder, versions, open {place}, and whether it answers. Use it when status reports none, or to choose among several."),
-            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
-        },
-        {
-            "name": "read",
-            "title": format!("Read {daw}"),
-            "description": format!("Rows of one kind from the open {daw} {place}, a page at a time: {{items, nextCursor?, epoch}}. Pass parent (a row's ref) to read what is inside it, such as {inside}; pass the previous page's nextCursor as cursor for the next page. Or pass ref alone for the one object it names. Refs hold until the epoch changes. With several {daw} instances running, pass pid or resource from discover."),
-            "inputSchema": {"type": "object", "properties": merged(&pick, json!({
-                "kind": {"type": "string", "enum": kinds.read, "description": format!("What to read in {daw}.")},
-                "parent": {"type": "string", "description": parent},
-                "ref": {"type": "string", "description": "The ref of one object to read instead of a page of rows."},
-                "cursor": {"type": "string", "description": "The nextCursor an earlier page gave, unchanged."},
-                "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": format!("Rows in a page ({DEFAULT_LIMIT} by default).")},
-                "grid": {"type": "integer", "minimum": 2, "maximum": MAX_GRID, "description": "For kind param: each parameter's text read at this many points across its range (grid), or its steps' texts (items)."},
-            })), "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
-        },
-        {
-            "name": "snapshot",
-            "title": format!("{daw} snapshot"),
-            "description": format!("The open {daw} {place} on one screen: {{epoch, project, transport, tracks, selection, markers?}}. What is too big to include is named under truncated, to read with `read`."),
-            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
-        },
-        {
-            "name": "focus",
-            "title": format!("{daw} focus"),
-            "description": format!("What the producer is looking at in {daw}: {{epoch, view, selection, transport, changed}}. Cheap enough to poll about every 150 ms; read again only when changed moves."),
-            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": false, "openWorldHint": false},
-        },
+        status,
+        discover,
+        read,
+        snapshot_tool(daw, place, &pick),
+        focus_tool(daw, &pick),
         {
             "name": "focus_body",
             "title": format!("{daw} view"),
@@ -198,7 +189,8 @@ fn tool_list(daw: Daw) -> Value {
     // undo. The bridge's `project_save`; Renoise refuses `version`.
     let (save_title, save) = match daw {
         Daw::Reaper => ("Save the REAPER project", "Saves the open REAPER project where it is, or as its next version (version: true). A project never saved is saved only under path, a .rpp inside the folder REAPER saves projects in, and never over a file."),
-        _ => ("Save the Renoise song", "Saves the open Renoise song where it is, or as path (a whole path to a .xrns file that isn't there yet; the song is that file from then on). A song never saved is saved only under path, and never over a file. (version is REAPER's: Renoise refuses it.)"),
+        Daw::Renoise => ("Save the Renoise song", "Saves the open Renoise song where it is, or as path (a whole path to a .xrns file that isn't there yet; the song is that file from then on). A song never saved is saved only under path, and never over a file. (version is REAPER's: Renoise refuses it.)"),
+        Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
     };
     if let Some(tools) = list.as_array_mut() {
         tools.push(json!({
@@ -442,6 +434,70 @@ fn tool_list(daw: Daw) -> Value {
     ]);
     list.as_array_mut().expect("a list").extend(catchup.as_array().cloned().unwrap_or_default());
     list
+}
+
+/// The `read` tool, in the DAW's words: what it opens, what a read's parent holds and the words for `parent`; the kinds it
+/// reads; and properties of its own after the common ones.
+fn read_tool(daw: Daw, (place, inside, parent): (&str, &str, &str), kinds: &crate::tools::Kinds, pick: &Value, more: Value) -> Value {
+    let common = json!({
+        "kind": {"type": "string", "enum": kinds.read, "description": format!("What to read in {daw}.")},
+        "parent": {"type": "string", "description": parent},
+        "ref": {"type": "string", "description": "The ref of one object to read instead of a page of rows."},
+        "cursor": {"type": "string", "description": "The nextCursor an earlier page gave, unchanged."},
+        "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": format!("Rows in a page ({DEFAULT_LIMIT} by default).")},
+    });
+    json!({
+        "name": "read",
+        "title": format!("Read {daw}"),
+        "description": format!("Rows of one kind from the open {daw} {place}, a page at a time: {{items, nextCursor?, epoch}}. Pass parent (a row's ref) to read what is inside it, such as {inside}; pass the previous page's nextCursor as cursor for the next page. Or pass ref alone for the one object it names. Refs hold until the epoch changes. With several {daw} instances running, pass pid or resource from discover."),
+        "inputSchema": {"type": "object", "properties": merged(pick, merged(&common, more)), "additionalProperties": false},
+        "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
+    })
+}
+
+/// The `snapshot` tool: the project, in the DAW's words, on one screen.
+fn snapshot_tool(daw: Daw, place: &str, pick: &Value) -> Value {
+    json!({
+        "name": "snapshot",
+        "title": format!("{daw} snapshot"),
+        "description": format!("The open {daw} {place} on one screen: {{epoch, project, transport, tracks, selection, markers?}}. What is too big to include is named under truncated, to read with `read`."),
+        "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
+        "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
+    })
+}
+
+/// The `focus` tool: what the producer is looking at, cheap enough to poll.
+fn focus_tool(daw: Daw, pick: &Value) -> Value {
+    json!({
+        "name": "focus",
+        "title": format!("{daw} focus"),
+        "description": format!("What the producer is looking at in {daw}: {{epoch, view, selection, transport, changed}}. Cheap enough to poll about every 150 ms; read again only when changed moves."),
+        "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
+        "annotations": {"readOnlyHint": true, "idempotentHint": false, "openWorldHint": false},
+    })
+}
+
+/// The tools every DAW's host lists: whether its bridge is connected, and which copies of the DAW run with one.
+fn finding(daw: Daw, place: &str, pick: &Value) -> [Value; 2] {
+    // (a bridge the host starts runs beside its DAW; the others are loaded into it)
+    let bridge =
+        if crate::spawn::bridge_program(daw).is_some() { format!("Kumi's bridge beside {daw}") } else { format!("Kumi's bridge in {daw}") };
+    [
+        json!({
+            "name": "status",
+            "title": format!("{daw} status"),
+            "description": format!("Whether {bridge} is connected: the {daw} and bridge versions, the open {place}, and whether {daw} is busy (a dialog, a render). With several {daw} instances running, pass pid or resource from discover."),
+            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
+            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
+        }),
+        json!({
+            "name": "discover",
+            "title": format!("Find running {daw}"),
+            "description": format!("Every running {daw} with Kumi's bridge: process id, port, resource folder, versions, open {place}, and whether it answers. Use it when status reports none, or to choose among several."),
+            "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false},
+            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
+        }),
+    ]
 }
 
 /// The listening tools (M5): renders and captures as jobs, playing a file out loud, the audio behind a ref, scratch
