@@ -1257,8 +1257,12 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
     }
 
     /// M6, after a look at the project: catch-up for one it hasn't run for (another project, or the DAW back after it
-    /// went away), else the snapshot kept again when the last one is old.
+    /// went away), else the snapshot kept again when the last one is old. Nothing for a DAW without catch-up, whose host
+    /// has no such tool.
     fn remember_look(&self, identity: Option<&str>, name: &str) {
+        if !self.daw.profile.caps.catch_up {
+            return;
+        }
         let Some(identity) = identity.filter(|identity| !identity.is_empty()) else { return };
         let Some(host) = self.endpoint.borrow().clone() else { return };
         let remembered = self.remembered.clone();
@@ -1757,7 +1761,11 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         Ok(self.call("show_status", json!({"text": text}), signal).await?.is_ok())
     }
     fn has_stop_live(&self) -> bool {
-        true
+        self.daw.profile.caps.stop_transport
+    }
+    /// A DAW with no change kinds is only read.
+    fn changes_nothing(&self) -> bool {
+        self.daw.changes.changes_nothing()
     }
     async fn stop_live(&self, signal: Signal) -> Result<bool, RuntimeError> {
         // What Kumi plays out loud stops too (a preview isn't the DAW's playback).

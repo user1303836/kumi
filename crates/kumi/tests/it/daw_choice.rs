@@ -393,3 +393,17 @@ fn an_experimental_daw_is_reached_only_by_asking_for_it() {
         DawCommand::Say("Kumi doesn't know bitwig: /daw live, /daw reaper, /daw renoise.".into())
     );
 }
+
+/// The DAW used last is kept only among several bridges Kumi picks between by itself: a session with SoundCraft, which
+/// nothing picks by itself, leaves it as it was.
+#[test]
+fn a_session_with_an_experimental_daw_leaves_the_daw_used_last_alone() {
+    use kumi::daw::{last_used, provider, remember_started};
+    use kumi_types::daw::DawId;
+    let (_dir, env) = live_and_renoise_home();
+    own_bridge_in(&env, daw_bridge::Daw::Renoise);
+    remember_started(provider(DawId::Renoise).unwrap(), &env);
+    assert_eq!(last_used(&env), Some(DawId::Renoise), "Live's and Renoise's bridges are in: Renoise's session keeps it");
+    remember_started(provider(DawId::SoundCraft).unwrap(), &env);
+    assert_eq!(last_used(&env), Some(DawId::Renoise), "SoundCraft never writes it");
+}

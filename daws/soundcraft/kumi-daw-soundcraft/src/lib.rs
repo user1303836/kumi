@@ -149,8 +149,10 @@ impl RefScheme for SoundCraftRefs {
         reference.into()
     }
     fn refs_in<'a>(&self, text: &'a str) -> Vec<&'a str> {
-        // (a dot only inside a ref, as a later life's `3.2`: never the sentence's period after it)
-        static REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"s:[a-z]+:[0-9A-Za-z{}:_-]+(?:\.[0-9A-Za-z{}:_-]+)*").unwrap());
+        // (a ref starts a word and ends with a part: never the colon of "s:clip:40: …" or the period after it, and a dot
+        // only inside, as a later life's `3.2`)
+        static REF: LazyLock<Regex> =
+            LazyLock::new(|| Regex::new(r"\bs:[a-z]+(?::[0-9A-Za-z{}_-]+)+(?:\.[0-9A-Za-z{}_-]+(?::[0-9A-Za-z{}_-]+)*)*").unwrap());
         REF.find_iter(text).map(|found| found.as_str()).collect()
     }
     fn reference_fields(&self) -> &[String] {
@@ -227,6 +229,9 @@ mod tests {
             refs.refs_in("moved s:clip:25 to s:track:3.2, then s:param:3:a:high_shelf_gain."),
             ["s:clip:25", "s:track:3.2", "s:param:3:a:high_shelf_gain"]
         );
+        assert_eq!(refs.refs_in("s:clip:40: isn't a MIDI clip"), ["s:clip:40"], "the bridge's refusal: no colon in the ref");
+        assert_eq!(refs.refs_in("s:note:40:-5.60.0 and s:point:3:volume:-2."), ["s:note:40:-5.60.0", "s:point:3:volume:-2"]);
+        assert!(refs.refs_in("Drums:kick:1").is_empty(), "inside a word, no ref");
         assert_eq!(refs.parents("note"), Some(vec!["clip".to_string()]));
         assert_eq!(refs.parents("marker"), None, "read under nothing");
         assert_eq!(refs.track_of("s:track:7"), Some("s:track:7".into()));

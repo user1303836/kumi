@@ -412,7 +412,7 @@ async fn bridges_after(io: &InstalledIo, home: &str, app: &str, back_to: Option<
 /// After an update, with Kumi in no DAW yet: how to set it up in the producer's, whichever that is. None once it's in
 /// any.
 pub fn no_daw_yet(env: &Env) -> Option<String> {
-    (!crate::daw::providers().into_iter().any(|provider| provider.bridge_installed(env)))
+    (!crate::daw::offered().any(|provider| provider.bridge_installed(env)))
         .then(|| format!("Kumi isn't in a DAW yet: run {}, and it sets itself up for the one you work in.", *KUMI_START))
 }
 /// What a swap does to Kumi's folders. The tests stand in for Windows holding one.

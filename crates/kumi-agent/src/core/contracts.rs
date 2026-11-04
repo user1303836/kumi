@@ -590,6 +590,12 @@ pub trait Integration {
     fn worker_tools(&self) -> Vec<Rc<dyn KernelTool>> {
         Vec::new()
     }
+    /// Whether Kumi only reads the DAW through this integration and can't change it yet (a DAW with no change kinds): the
+    /// session then says nothing of making changes (recipes, techniques, judged rounds) and words a gap as the producer's
+    /// to make.
+    fn changes_nothing(&self) -> bool {
+        false
+    }
     fn has_undo(&self) -> bool {
         self.profile().caps.undo
     }

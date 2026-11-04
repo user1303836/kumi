@@ -833,8 +833,8 @@ async fn the_report_reads_the_bridge_logs_oldest_first() {
 }
 
 /// SoundCraft's bridge is a program beside Kumi: setup finds the app a variable names, its version (its bundle's, on
-/// macOS) and the session to open again once the producer has quit SoundCraft (its newest recent); Kumi isn't set up in
-/// it until it has opened SoundCraft through the program; and nothing went into SoundCraft for uninstall to take out.
+/// macOS) and the session to open again once the producer has quit SoundCraft (its newest recent); and nothing went into
+/// SoundCraft for uninstall to take out.
 #[tokio::test(flavor = "current_thread")]
 async fn soundcraft_is_found_with_the_session_to_open_again_and_nothing_goes_into_it() {
     use kumi_daw::provider::Installed;
@@ -857,7 +857,6 @@ async fn soundcraft_is_found_with_the_session_to_open_again_and_nothing_goes_int
     ]);
     let soundcraft: &dyn DawProvider = &kumi_daw_soundcraft::PROVIDER;
     assert!(soundcraft.experimental() && soundcraft.here(&env));
-    assert_eq!(soundcraft.bridge_config(&env), None, "Kumi hasn't opened SoundCraft through its program yet");
     let setup = soundcraft.setup(&env, Rc::default(), false, Rc::default());
     assert_eq!(setup.installed().await, Installed::Ready);
     assert_eq!(setup.open_set(), Some(session.to_string_lossy().into_owned()));

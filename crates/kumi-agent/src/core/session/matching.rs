@@ -241,7 +241,9 @@ impl Session {
         if !carried {
             self.judge_lesson(&text);
         }
-        let run = if !self.0.options.matching {
+        // A DAW Kumi only reads gets no judged rounds: they change the DAW between judgings.
+        let reads_only = self.reads_only();
+        let run = if !self.0.options.matching || reads_only {
             None
         } else if matched {
             Some(Rc::new(RefCell::new(MatchRun::new(&text, budget).in_daw(self.0.options.profile))))
@@ -257,7 +259,8 @@ impl Session {
         let looping = looping.filter(|_| run.is_none());
         // A request the judge can measure gets a hint to work in judged rounds; the model decides, and its own judge
         // call starts the loop.
-        let note = if run.is_none() && explicit.is_none() && wants_loop(&text) { format!("{note}{LOOP_HINT}") } else { note };
+        let note =
+            if run.is_none() && explicit.is_none() && !reads_only && wants_loop(&text) { format!("{note}{LOOP_HINT}") } else { note };
         // A conversation carried on in another Set says so once, with the first request there.
         let moved = self.0.state.borrow_mut().next_note.take().unwrap_or_default();
         // The session's palette, each turn: what's in it, and how far Kumi may look past it.

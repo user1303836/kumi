@@ -290,6 +290,15 @@ pub fn remember_used(id: DawId, env: &Env) {
     }
 }
 
+/// After a session started with `provider`'s bridge: keeps it as the DAW used last, which decides only among several
+/// bridges Kumi picks between by itself, so a producer with one (Live alone) never gets the file, and an experimental
+/// DAW, which nothing picks by itself, never writes it.
+pub fn remember_started(provider: &dyn DawProvider, env: &Env) {
+    if !provider.experimental() && offered().filter(|other| other.bridge_installed(env)).count() > 1 {
+        remember_used(provider.id(), env);
+    }
+}
+
 thread_local! {
     static CURRENT: Cell<DawId> = const { Cell::new(DawId::Ableton) };
 }
@@ -322,7 +331,7 @@ pub fn in_use(provider: &dyn DawProvider, env: &Env) -> bool {
     if provider.id() != DawId::Ableton {
         return provider.bridge_installed(env) || current().id() == provider.id();
     }
-    provider.bridge_installed(env) || !providers().into_iter().any(|other| other.id() != DawId::Ableton && other.bridge_installed(env))
+    provider.bridge_installed(env) || !offered().any(|other| other.id() != DawId::Ableton && other.bridge_installed(env))
 }
 
 /// The DAWs the producer works with here, by name, for the doctor's heading: those whose bridge is in (Live when none
