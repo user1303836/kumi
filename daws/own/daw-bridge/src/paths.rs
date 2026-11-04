@@ -24,6 +24,14 @@ pub struct BridgePaths {
 }
 
 impl BridgePaths {
+    /// What a bridge program beside its DAW (SoundCraft's) keeps of the copy of the DAW it started last
+    /// ([`crate::files::Launched`]).
+    pub const LAUNCH_RECORD: &str = "launched.json";
+    /// Held from a look for the copy the program started through a start's record of it.
+    pub const LAUNCH_LOCK: &str = "launch.lock";
+    /// The output of the program's last starts of its DAW, a folder each.
+    pub const RUNS: &str = "runs";
+
     pub fn new(kumi_home: &Path, daw: Daw) -> Self {
         Self { daw, root: kumi_home.join("bridges").join(daw.id()) }
     }
@@ -67,6 +75,32 @@ impl BridgePaths {
     pub fn journal(&self) -> PathBuf {
         self.root.join("lifecycle-journal.json")
     }
+
+    /// The program's record of the copy of the DAW it started last ([`Self::LAUNCH_RECORD`]).
+    pub fn launch_record(&self) -> PathBuf {
+        self.root.join(Self::LAUNCH_RECORD)
+    }
+
+    /// Held (locked) from a look for the copy the program started through a start's record of it, so a second look waits
+    /// and finds the first one's copy instead of starting another.
+    pub fn launch_lock(&self) -> PathBuf {
+        self.root.join(Self::LAUNCH_LOCK)
+    }
+
+    /// The output of the program's last starts of its DAW, a folder each.
+    pub fn runs(&self) -> PathBuf {
+        self.root.join(Self::RUNS)
+    }
+
+    /// Held (locked) by the one bridge program serving the copy of the DAW whose process is `pid`.
+    pub fn serving_lock(&self, pid: u32) -> PathBuf {
+        self.root.join(format!("serving-{pid}.lock"))
+    }
+
+    /// The pid a file in the bridge's folder is the serving lock of ([`Self::serving_lock`]), by its name.
+    pub fn serving_lock_pid(name: &str) -> Option<u32> {
+        name.strip_prefix("serving-")?.strip_suffix(".lock")?.parse().ok()
+    }
 }
 
 #[cfg(test)]
@@ -82,5 +116,10 @@ mod tests {
         let paths = BridgePaths::new(Path::new("/k"), Daw::Renoise);
         assert_eq!(paths.secret(), Path::new("/k/bridges/renoise/bridge.secret"));
         assert_eq!(paths.discovery(), Path::new("/k/bridges/renoise/discovery"));
+        let soundcraft = BridgePaths::new(Path::new("/k"), Daw::SoundCraft);
+        assert_eq!(soundcraft.launch_record(), Path::new("/k/bridges/soundcraft/launched.json"));
+        assert_eq!(soundcraft.serving_lock(42), Path::new("/k/bridges/soundcraft/serving-42.lock"));
+        assert_eq!(BridgePaths::serving_lock_pid("serving-42.lock"), Some(42));
+        assert_eq!(BridgePaths::serving_lock_pid("serving-x.lock"), None);
     }
 }

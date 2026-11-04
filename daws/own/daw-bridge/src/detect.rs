@@ -34,6 +34,14 @@ pub struct Env<'a> {
     pub root: Option<PathBuf>,
 }
 
+impl<'a> Env<'a> {
+    /// This computer, as its environment (`var`) says: the home is HOME (else USERPROFILE), else the account's own.
+    pub fn current(var: &'a dyn Fn(&str) -> Option<String>) -> Env<'a> {
+        let named = ["HOME", "USERPROFILE"].into_iter().find_map(|name| var(name).filter(|home| !home.is_empty()));
+        Env { os: Os::current(), home: named.map(PathBuf::from).or_else(home::home_dir).unwrap_or_default(), var, root: None }
+    }
+}
+
 impl Env<'_> {
     fn var(&self, name: &str) -> Option<String> {
         (self.var)(name).filter(|value| !value.is_empty())
@@ -588,7 +596,8 @@ pub const SOUNDCRAFT_APP: &str = "KUMI_SOUNDCRAFT_APP";
 
 /// Where SoundCraft is: the app [`SOUNDCRAFT_APP`] names (only it, and only once it's there), else SoundCraft.app in
 /// /Applications or ~/Applications on macOS; on Windows the folder its installer recorded (for this user, else for
-/// everyone), else its default folders; elsewhere `soundcraft` on PATH.
+/// everyone), else its default folders; elsewhere `soundcraft` on PATH. As for the other DAWs, nothing else is searched
+/// (no Spotlight): a SoundCraft kept elsewhere is named by the variable.
 pub fn detect_soundcraft(env: &Env) -> Option<SoundCraftApp> {
     let path = match env.var_path(SOUNDCRAFT_APP) {
         Some(named) => Some(named).filter(|path| path.exists())?,
@@ -622,12 +631,16 @@ fn soundcraft_installed(env: &Env) -> Option<PathBuf> {
     }
 }
 
-/// SoundCraft's settings folder (its `ui.json`, autosaves and logs), as the app at `app` finds it: SOUNDCRAFT_CONFIG_DIR
-/// when it's set (set empty: none at all), else `SoundCraftData` beside the program of a portable copy (one with
-/// `portable.txt` beside it), else the system's place for it.
+/// SoundCraft's settings folder (its `ui.json`, autosaves and logs), as the app at `app` finds it (its `config.rs`):
+/// SOUNDCRAFT_CONFIG_DIR when it's set (set empty: none at all), else `SoundCraftData` beside the program of a portable
+/// copy (one with `portable.txt` beside it), else the system's place for it (none on Windows without APPDATA). The
+/// variable is made absolute against this process's folder, as Kumi's bridge program gives it to the app it starts (the
+/// app would read a relative one against its own working folder, `/` when macOS's `open` starts it). (A portable copy
+/// that can't write beside itself uses the system's place; that's left out.)
 pub fn soundcraft_settings(env: &Env, app: Option<&Path>) -> Option<PathBuf> {
     if let Some(named) = (env.var)("SOUNDCRAFT_CONFIG_DIR") {
-        return (!named.is_empty()).then(|| PathBuf::from(named));
+        let named = PathBuf::from(named);
+        return (!named.as_os_str().is_empty()).then(|| std::path::absolute(&named).unwrap_or(named));
     }
     let program_folder = |app: &Path| match app.extension().is_some_and(|ext| ext == "app") {
         true => app.join("Contents").join("MacOS"),
@@ -636,11 +649,11 @@ pub fn soundcraft_settings(env: &Env, app: Option<&Path>) -> Option<PathBuf> {
     if let Some(beside) = app.map(program_folder).filter(|folder| folder.join("portable.txt").is_file()) {
         return Some(beside.join("SoundCraftData"));
     }
-    Some(match env.os {
-        Os::Mac => env.home.join("Library").join("Application Support").join("SoundCraft"),
-        Os::Windows => env.var_path("APPDATA").unwrap_or_else(|| env.home.join("AppData").join("Roaming")).join("SoundCraft"),
-        Os::Linux => env.config_home().join("soundcraft"),
-    })
+    match env.os {
+        Os::Mac => Some(env.home.join("Library").join("Application Support").join("SoundCraft")),
+        Os::Windows => env.var_path("APPDATA").map(|data| data.join("SoundCraft")),
+        Os::Linux => Some(env.config_home().join("soundcraft")),
+    }
 }
 
 /// The session SoundCraft opened or saved last, from its settings folder's `ui.json` (its Open Recent, newest first),
@@ -970,8 +983,7 @@ pub fn running(daw: Daw) -> Vec<u32> {
 }
 
 /// The programs of the DAW's processes in a listing, by their paths: as listed where the listing names a path (macOS's
-/// `ps`, a stand-in), else as the system names the process's own (Linux's `/proc`, Windows' image name). One the system
-/// won't say is left out.
+/// `ps`, a stand-in), else as the system names the process's own ([`program_of`]). One the system won't say is left out.
 pub fn programs(daw: Daw, listing: &[(u32, String)]) -> Vec<PathBuf> {
     let mut found: Vec<PathBuf> = vec![];
     for (pid, name) in listing.iter().filter(|(_, name)| process_is(daw, name)) {
@@ -988,8 +1000,8 @@ pub fn running_programs(daw: Daw, env: &Env) -> Vec<PathBuf> {
     programs(daw, &processes(env.var))
 }
 
-/// A process's program, by its path, as the system names it (Linux's /proc, Windows' image name); None elsewhere, or for a
-/// process the system won't say.
+/// A process's program, by its path, as the system names it (Linux's /proc, Windows' image name, macOS's path of the file
+/// it runs); None elsewhere, or for a process the system won't say.
 #[cfg(target_os = "linux")]
 pub fn program_of(pid: u32) -> Option<PathBuf> {
     std::fs::read_link(format!("/proc/{pid}/exe")).ok()
@@ -1022,7 +1034,12 @@ pub fn program_of(pid: u32) -> Option<PathBuf> {
     (read != 0).then(|| PathBuf::from(std::ffi::OsString::from_wide(&name[..size as usize])))
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+#[cfg(target_os = "macos")]
+pub fn program_of(pid: u32) -> Option<PathBuf> {
+    program_path(libc::pid_t::try_from(pid).ok()?).map(PathBuf::from)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
 pub fn program_of(_pid: u32) -> Option<PathBuf> {
     None
 }
@@ -1061,6 +1078,25 @@ pub fn process_is(daw: Daw, name: &str) -> bool {
         // (macOS's bundle runs `SoundCraft`, Windows `soundcraft.exe`, Linux `soundcraft`; never its `soundcraft-cli`)
         Daw::SoundCraft => base.eq_ignore_ascii_case("soundcraft"),
     }
+}
+
+/// The program a variable names in place of looking for the DAW (SoundCraft's [`SOUNDCRAFT_APP`]), when it's set; None
+/// for a DAW without one.
+pub fn named_app(daw: Daw, var: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
+    match daw {
+        Daw::SoundCraft => var(SOUNDCRAFT_APP).filter(|named| !named.is_empty()).map(PathBuf::from),
+        Daw::Reaper | Daw::Renoise => None,
+    }
+}
+
+/// Whether a process name (a path or an image name) is this DAW's: its main program under its usual names
+/// ([`process_is`]), or the program at `app` under whatever name it has (one [`named_app`] names, or the one a bridge
+/// program started).
+pub fn process_is_app(daw: Daw, name: &str, app: Option<&Path>) -> bool {
+    let program = name.strip_suffix(" (deleted)").unwrap_or(name);
+    let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let app_name = app.and_then(Path::file_name).map(|app| app.to_string_lossy()).filter(|app| !app.is_empty());
+    process_is(daw, name) || app_name.is_some_and(|app| base.eq_ignore_ascii_case(&app))
 }
 
 /// Whether macOS marked the file as downloaded (Gatekeeper then blocks a library loading from it).
@@ -1195,15 +1231,29 @@ mod tests {
         assert_eq!(soundcraft_settings(&mac, None), Some(root.path().join("home/Library/Application Support/SoundCraft")));
         let linux = env(Os::Linux, root.path(), &none);
         assert_eq!(soundcraft_settings(&linux, None), Some(root.path().join("home/.config/soundcraft")));
+        // Windows: APPDATA's, and none without it, as the app has it.
+        let roaming = root.path().join("roaming").to_string_lossy().into_owned();
+        let appdata = move |name: &str| (name == "APPDATA").then(|| roaming.clone());
+        assert_eq!(soundcraft_settings(&env(Os::Windows, root.path(), &appdata), None), Some(root.path().join("roaming/SoundCraft")));
+        assert_eq!(soundcraft_settings(&env(Os::Windows, root.path(), &none), None), None);
 
         // A portable copy keeps its settings beside its program.
         let app = root.path().join("usb/SoundCraft.app");
         touch(&app.join("Contents/MacOS/portable.txt"), b"");
         assert_eq!(soundcraft_settings(&mac, Some(&app)), Some(app.join("Contents/MacOS/SoundCraftData")));
+        let program = root.path().join("stick/soundcraft.exe");
+        touch(&program, b"MZ");
+        assert_eq!(soundcraft_settings(&linux, Some(&program)), Some(root.path().join("home/.config/soundcraft")), "not portable");
+        touch(&root.path().join("stick/portable.txt"), b"");
+        assert_eq!(soundcraft_settings(&linux, Some(&program)), Some(root.path().join("stick/SoundCraftData")));
 
-        // The variable wins; set empty, there's no folder at all.
+        // The variable wins, made absolute as the app is given it; set empty, there's no folder at all.
         let named = |name: &str| (name == "SOUNDCRAFT_CONFIG_DIR").then(|| "/lab/profile".to_string());
-        assert_eq!(soundcraft_settings(&env(Os::Mac, root.path(), &named), Some(&app)), Some(PathBuf::from("/lab/profile")));
+        let lab = std::path::absolute("/lab/profile").unwrap();
+        assert_eq!(soundcraft_settings(&env(Os::Mac, root.path(), &named), Some(&app)), Some(lab));
+        let relative = |name: &str| (name == "SOUNDCRAFT_CONFIG_DIR").then(|| "profile".to_string());
+        let here = std::env::current_dir().unwrap().join("profile");
+        assert_eq!(soundcraft_settings(&env(Os::Mac, root.path(), &relative), None), Some(here), "where the app is told it is");
         let empty = |name: &str| (name == "SOUNDCRAFT_CONFIG_DIR").then(String::new);
         assert_eq!(soundcraft_settings(&env(Os::Mac, root.path(), &empty), Some(&app)), None);
     }
@@ -1510,13 +1560,13 @@ mod tests {
     }
 
     /// This computer's listing has this test's own process in it, and where Kumi asks the system for a program's path
-    /// (Linux's /proc, Windows' image name) it names this test's.
+    /// (Linux's /proc, Windows' image name, macOS's path of the file it runs) it names this test's.
     #[test]
     fn this_computers_listing_has_this_test_in_it() {
         let pid = std::process::id();
         let listed = listing_now();
         assert!(listed.iter().any(|(listed, _)| *listed == pid), "{pid} in {listed:?}");
-        if cfg!(any(target_os = "linux", windows)) {
+        if cfg!(any(target_os = "linux", target_os = "macos", windows)) {
             let canonical = |path: PathBuf| std::fs::canonicalize(&path).unwrap_or(path);
             assert_eq!(program_of(pid).map(canonical), std::env::current_exe().ok().map(canonical));
         }
@@ -1592,6 +1642,23 @@ mod tests {
         {
             assert!(!process_is(Daw::SoundCraft, name), "{name}");
         }
+    }
+
+    #[test]
+    fn kumis_copy_is_known_by_its_program_after_an_upgrade_or_under_the_name_the_variable_gives_it() {
+        let app = Path::new("/usr/bin/soundcraft");
+        assert!(process_is_app(Daw::SoundCraft, "/usr/bin/soundcraft (deleted)", Some(app)), "replaced since it started");
+        let renamed = Path::new("/opt/studio/SoundCraft-0.17.0");
+        assert!(process_is_app(Daw::SoundCraft, "/opt/studio/SoundCraft-0.17.0", Some(renamed)), "the program the variable names");
+        assert!(process_is_app(Daw::SoundCraft, "/opt/studio/SoundCraft-0.17.0 (deleted)", Some(renamed)));
+        assert!(!process_is_app(Daw::SoundCraft, "/opt/studio/SoundCraft-0.17.0", None), "under another name, only when named");
+        assert!(process_is_app(Daw::SoundCraft, r"C:\ArtCraft\SoundCraft\SOUNDCRAFT.EXE", Some(Path::new(r"C:\x\soundcraft.exe"))));
+        assert!(!process_is_app(Daw::SoundCraft, "/usr/bin/bwrap", Some(renamed)));
+        assert!(!process_is_app(Daw::SoundCraft, "/usr/local/bin/soundcraft-cli", Some(app)));
+        let var = |name: &str| (name == SOUNDCRAFT_APP).then(|| "/opt/studio/SoundCraft-0.17.0".to_string());
+        assert_eq!(named_app(Daw::SoundCraft, &var).as_deref(), Some(renamed));
+        assert_eq!(named_app(Daw::Reaper, &var), None, "only SoundCraft's app is named so");
+        assert_eq!(named_app(Daw::SoundCraft, &|_| Some(String::new())), None, "set empty, it's unset");
     }
 
     #[test]

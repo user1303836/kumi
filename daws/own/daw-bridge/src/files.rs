@@ -123,6 +123,49 @@ impl Reference {
     }
 }
 
+/// What a bridge program beside its DAW (SoundCraft's `soundcraft-kumi`) keeps of the copy of the DAW it started, in
+/// [`crate::paths::BridgePaths::launch_record`], owner-only: Kumi finds that copy again through it, and only that copy
+/// takes Kumi's requests. (Its Debug leaves the token out.)
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Launched {
+    /// The app's process.
+    pub pid: u32,
+    pub started_ms: u64,
+    /// Its control channel's port, and the token its requests carry.
+    pub port: u16,
+    pub token: String,
+    /// The app started (the `.app` on macOS, else its program), and its version when it said one.
+    pub app: PathBuf,
+    pub version: Option<String>,
+}
+
+impl Launched {
+    /// The record at `path`, when it's a plain file (not a link) of at most [`MAX_SMALL_FILE_BYTES`], this user's alone
+    /// in a folder of this user's alone: another account that can write the folder can't plant a port and a token. (On
+    /// Windows that check is a PowerShell run, so the folder the program made owner-only stands for it, as for the
+    /// bridge's secret.)
+    pub fn read(path: &Path) -> Option<Launched> {
+        let text = read_small(path).ok()?;
+        if cfg!(unix) && !(path.parent().is_some_and(owner::is_owner_only) && owner::is_owner_only(path)) {
+            return None;
+        }
+        serde_json::from_str(&text).ok()
+    }
+}
+
+impl std::fmt::Debug for Launched {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Launched")
+            .field("pid", &self.pid)
+            .field("started_ms", &self.started_ms)
+            .field("port", &self.port)
+            .field("app", &self.app)
+            .field("version", &self.version)
+            .finish_non_exhaustive()
+    }
+}
+
 /// A running bridge's notice of where it listens, in `<discovery folder>/<daw>-<pid>-<key>.json`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -404,5 +447,43 @@ mod tests {
         std::fs::write(dir.path().join(dead.file_name()), serde_json::to_string(&dead).unwrap()).unwrap();
         assert_eq!(prune_discovery(dir.path(), Daw::Reaper), 1);
         assert_eq!(scan_discovery(dir.path(), Daw::Reaper).len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_launch_record_that_isnt_this_users_alone_is_not_followed() {
+        use std::os::unix::fs::PermissionsExt;
+        let home = tempfile::tempdir().unwrap();
+        let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
+        owner::create_owner_only_dir(&paths.root).unwrap();
+        let launched = Launched {
+            pid: std::process::id(),
+            started_ms: 1,
+            port: 9,
+            token: "kept".into(),
+            app: PathBuf::from("/lab/SoundCraft.app"),
+            version: None,
+        };
+        assert!(!format!("{launched:?}").contains("kept"), "its Debug leaves the token out");
+        let path = paths.launch_record();
+        let bytes = serde_json::to_vec(&launched).unwrap();
+        owner::write_owner_only(&path, &bytes).unwrap();
+        assert_eq!(Launched::read(&path), Some(launched));
+        let mode = |path: &Path, mode| std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
+        mode(&path, 0o644);
+        assert_eq!(Launched::read(&path), None, "others can read it");
+        mode(&path, 0o600);
+        mode(&paths.root, 0o777);
+        assert_eq!(Launched::read(&path), None, "others can write its folder");
+        mode(&paths.root, 0o700);
+        let mut big = bytes.clone();
+        big.resize(MAX_SMALL_FILE_BYTES as usize + 1, b' ');
+        owner::write_owner_only(&path, &big).unwrap();
+        assert_eq!(Launched::read(&path), None, "bigger than the program writes");
+        let planted = home.path().join("planted.json");
+        owner::write_owner_only(&planted, &bytes).unwrap();
+        std::fs::remove_file(&path).unwrap();
+        std::os::unix::fs::symlink(&planted, &path).unwrap();
+        assert_eq!(Launched::read(&path), None, "a link isn't followed");
     }
 }
