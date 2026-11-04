@@ -10,7 +10,7 @@ use daw_bridge::handshake::{ClientHandshake, ClientStep};
 use daw_mcp_server::client::{BridgeClient, RequestError};
 use serde_json::{json, Value};
 use soundcraft_kumi::launch::{Launched, LAUNCHED};
-use soundcraft_kumi::server::{self, Config, End};
+use soundcraft_kumi::server::{self, Config, End, Schedule};
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -49,8 +49,8 @@ impl std::ops::DerefMut for Reaped {
 }
 
 /// What the fake app shows: its session's name, tracks, selection and last undo, an open dialog, whether it answers late,
-/// and whether a full inspection (a read's) takes it two seconds; its windows (`ui.inspect`'s `ui`), its playhead and
-/// whether it plays; and its undo history as `engine.history` answers it.
+/// whether it answers nothing in time, and whether a full inspection (a read's) takes it two seconds; its windows
+/// (`ui.inspect`'s `ui`), its playhead and whether it plays or records; and its undo history as `engine.history` answers it.
 struct Shown {
     name: String,
     tracks: Value,
@@ -58,10 +58,12 @@ struct Shown {
     undo: Value,
     dialog: Option<String>,
     late: bool,
+    hung: bool,
     slow_reads: bool,
     ui: Value,
     position: u64,
     playing: bool,
+    recording: bool,
     history: Value,
 }
 
@@ -82,22 +84,25 @@ impl Lab {
             undo: Value::Null,
             dialog: None,
             late: false,
+            hung: false,
             slow_reads: false,
             ui: json!({"window": "Edit", "show_midi_editor": false, "plugin_windows": []}),
             position: 0,
             playing: false,
+            recording: false,
             history: json!({"undo": [], "can_redo": false}),
         }));
         let answering = shown.clone();
         let fake = Fake::start(16, move |request| {
             let shown = answering.lock().unwrap();
             match (request["method"].as_str(), request["params"]["command"].as_str()) {
+                _ if shown.hung => Answer::After(ms(400), ok(json!({}))),
                 (Some("session.inspect"), _) => {
                     let session = ok(json!({
                         "name": shown.name, "path": null, "tracks": shown.tracks, "undo": shown.undo, "redo": null,
                         "sample_rate": 48000, "tempo": [{"bpm": 120.0, "tick": 0}], "meter": [{"denominator": 4, "numerator": 4, "tick": 0}],
                         "selection": shown.selection,
-                        "transport": {"playing": shown.playing, "position": shown.position, "recording": false},
+                        "transport": {"playing": shown.playing, "position": shown.position, "recording": shown.recording},
                     }));
                     match request["params"]["detail"] == "full" && shown.slow_reads {
                         true => Answer::After(ms(2000), session),
@@ -362,8 +367,16 @@ async fn focus_answers_with_the_window_the_selection_and_the_playhead() {
     let shows = |ui: Value| lab.shown.lock().unwrap().ui = ui;
     shows(json!({"window": "Mix", "show_midi_editor": false, "plugin_windows": []}));
     assert_eq!(asked_until(&client, "focus", |focus| focus["view"] == "mixer").await["view"], "mixer");
+    // The MIDI Editor is a panel of the Edit window: left open while Mix shows, it isn't what the producer sees.
     shows(json!({"window": "Mix", "show_midi_editor": true, "plugin_windows": []}));
+    looked(&lab, "ui.inspect").await;
+    assert_eq!(client.request("focus", json!({}), WAIT).await.unwrap()["view"], "mixer");
+    shows(json!({"window": "Edit", "show_midi_editor": true, "plugin_windows": []}));
     assert_eq!(asked_until(&client, "focus", |focus| focus["view"] == "midi").await["view"], "midi");
+    // With Mix in a window of its own, the main window draws Edit, and the MIDI Editor in it.
+    shows(json!({"window": "Mix", "mix_separate": true, "show_midi_editor": true, "plugin_windows": []}));
+    looked(&lab, "ui.inspect").await;
+    assert_eq!(client.request("focus", json!({}), WAIT).await.unwrap()["view"], "midi");
     shows(json!({"window": "Edit", "show_midi_editor": false, "plugin_windows": [[3, 0]]}));
     let fx = asked_until(&client, "focus", |focus| focus["selection"]["fxRef"].is_string()).await;
     assert_eq!(
@@ -428,6 +441,101 @@ async fn while_soundcraft_plays_its_playhead_is_looked_at_four_times_as_often_an
     let focus = asked_until(&client, "focus", |focus| focus["ageMs"].as_u64() >= Some(10)).await;
     let (seconds, age) = (focus["transport"]["seconds"].as_f64().unwrap(), focus["ageMs"].as_f64().unwrap());
     assert!(age >= 10.0 && (seconds * 1000.0 - age).abs() < 5.0, "{focus}");
+}
+
+#[tokio::test]
+async fn a_take_shows_as_recording_and_a_stopped_one_as_stopped() {
+    let lab = Lab::new().await;
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
+    let records = |recording: bool| {
+        let mut shown = lab.shown.lock().unwrap();
+        (shown.playing, shown.recording) = (recording, recording);
+    };
+    records(true);
+    let take = asked_until(&client, "focus", |focus| focus["transport"]["state"] == "recording").await;
+    assert_eq!(take["transport"]["state"], "recording");
+    records(false);
+    let stopped = asked_until(&client, "focus", |focus| focus["transport"]["playing"] == false).await;
+    assert_eq!(stopped["transport"]["state"], "stopped");
+}
+
+#[tokio::test]
+async fn changed_also_moves_when_the_session_changes_though_its_history_reads_the_same() {
+    let lab = Lab::new().await;
+    let fader = |db: f64| json!([{"id": 3, "kind": "audio", "format": "Mono", "name": "Kick", "instrument": null, "inserts": [], "clips": [], "volume_db": db}]);
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        (shown.tracks, shown.history) = (fader(0.0), json!({"undo": ["Volume"], "can_redo": false}));
+    }
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
+    // The playhead moving, or the selection, isn't a change.
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        (shown.position, shown.selection) = (48000, json!({"tracks": [3], "clips": [], "start": 0, "end": 0}));
+    }
+    looked(&lab, "session.inspect").await;
+    assert_eq!(client.request("focus", json!({}), WAIT).await.unwrap()["changed"], 0);
+    // A fader gesture SoundCraft merges into its last step: the history reads as it did, the session doesn't.
+    lab.shown.lock().unwrap().tracks = fader(-6.0);
+    assert_eq!(asked_until(&client, "focus", |focus| focus["changed"] != 0).await["changed"], 1);
+}
+
+#[tokio::test]
+async fn a_soundcraft_that_answers_nothing_is_asked_only_ui_inspect_and_is_stalled_after_three_looks() {
+    let lab = Lab::new().await;
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
+    let hung = Instant::now();
+    lab.shown.lock().unwrap().hung = true;
+    let before = lab.fake.requests().len();
+    let stalled = asked_until(&client, "status", |status| status["busy"] == "stalled").await;
+    let took = hung.elapsed();
+    assert_eq!(stalled["busy"], "stalled");
+    // From the first look it missed, nothing but `ui.inspect` was asked of it.
+    let asked: Vec<Value> = lab.fake.requests()[before..].iter().map(|request| request["method"].clone()).collect();
+    let first_miss = asked.iter().position(|method| method == "ui.inspect").unwrap();
+    assert!(asked[first_miss..].iter().all(|method| method == "ui.inspect"), "{asked:?}");
+    // (three looks of 100 ms, where asking the history and the session too would take two seconds)
+    assert!(took < ms(1500), "stalled after {took:?}");
+}
+
+#[test]
+fn the_session_is_looked_at_ten_times_its_cost_apart_from_half_a_look_to_five() {
+    let (every, start) = (Duration::from_secs(1), Instant::now());
+    for (cost, wait) in [(5, 500), (80, 800), (700, 5000)] {
+        let mut schedule = Schedule::new(every, start);
+        let ended = start + ms(cost);
+        schedule.looked_at_session(start, ended);
+        assert!(!schedule.session_due(ended + ms(wait - 1)), "a {cost} ms look: not sooner than {wait} ms after it");
+        assert!(schedule.session_due(ended + ms(wait)), "a {cost} ms look: due {wait} ms after it");
+    }
+}
+
+#[test]
+fn something_changing_brings_the_session_look_forward_as_far_as_its_cost_allows() {
+    let (every, start) = (Duration::from_secs(1), Instant::now());
+    let looked = |cost: u64| {
+        let mut schedule = Schedule::new(every, start);
+        schedule.looked_at_session(start, start + ms(cost));
+        schedule
+    };
+    // A 10 ms look: the next would wait half a look; an edit brings it to 100 ms after the last was asked, and one after
+    // that, at once.
+    let mut cheap = looked(10);
+    cheap.soon(start + ms(20));
+    assert!(!cheap.session_due(start + ms(99)) && cheap.session_due(start + ms(100)));
+    let mut later = looked(10);
+    later.soon(start + ms(300));
+    assert!(later.session_due(start + ms(300)));
+    // A 300 ms look: an edit can't bring the next sooner than three seconds after the last was asked.
+    let mut costly = looked(300);
+    costly.soon(start + ms(400));
+    assert!(!costly.session_due(start + ms(2999)) && costly.session_due(start + ms(3000)));
 }
 
 #[tokio::test]

@@ -7,7 +7,7 @@ use super::vectors::vectors;
 use daw_bridge::contract::{key_holds_a_ref, key_holds_refs};
 use serde_json::{json, Value};
 use soundcraft_kumi::control::Control;
-use soundcraft_kumi::read::Reads;
+use soundcraft_kumi::read::{content, Reads};
 use soundcraft_kumi::refs::Ref;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -768,4 +768,47 @@ async fn a_tempo_map_with_more_than_steps_gives_the_transport_no_beats() {
     let transport = snapshot(&mut app).await["transport"].clone();
     assert_eq!((&transport["seconds"], &transport["state"]), (&json!(0.0), &json!("stopped")));
     assert!(transport.get("beat").is_none() && transport.get("timeSignature").is_none(), "no beats rather than wrong ones: {transport}");
+}
+
+#[test]
+fn the_sessions_content_reads_the_same_from_its_summary_and_moves_only_with_an_edit() {
+    let full = recorded();
+    // (the summary of the same session: no plug-in's parameters, and automation points counted)
+    let mut summary = full.clone();
+    for track in summary["tracks"].as_array_mut().unwrap() {
+        for insert in track["inserts"].as_array_mut().unwrap() {
+            insert["params"] = Value::Null;
+        }
+        for lane in track["automation"].as_array_mut().into_iter().flatten() {
+            lane["points"] = json!(lane["points"].as_array().map_or(0, Vec::len));
+        }
+    }
+    assert_eq!(content(&summary), content(&full));
+    let mut moved = full.clone();
+    moved["selection"]["tracks"] = json!([23]);
+    moved["transport"]["position"] = json!(96000);
+    moved["dirty"] = json!(true);
+    assert_eq!(content(&moved), content(&full), "a selection, the playhead and a save aren't edits");
+    let mut edited = full.clone();
+    edited["tracks"][0]["volume_db"] = json!(-6.0);
+    assert_ne!(content(&edited), content(&full), "a fader is");
+}
+
+#[tokio::test]
+async fn a_look_that_sees_the_session_as_it_was_leaves_the_reads_their_inspection() {
+    let mut app = App::new(json!([])).await;
+    let inspections = |app: &App| app.fake.requests().iter().filter(|request| request["params"]["detail"] == "full").count();
+    app.read(json!({"kind": "track"})).await.unwrap();
+    let session = app.session.lock().unwrap().clone();
+    app.reads.looked(&session, content(&session));
+    app.read(json!({"kind": "marker"})).await.unwrap();
+    assert_eq!(inspections(&app), 1, "nothing new: the first read's inspection serves the next");
+    let edited = {
+        let mut session = app.session.lock().unwrap();
+        session["tracks"][0]["volume_db"] = json!(-6.0);
+        session.clone()
+    };
+    app.reads.looked(&edited, content(&edited));
+    app.read(json!({"kind": "track"})).await.unwrap();
+    assert_eq!(inspections(&app), 2, "the look saw a change: the next read inspects again");
 }

@@ -60,7 +60,8 @@ pub struct Reads {
     control: Control,
     lives: Lives,
     looked: Option<Look>,
-    inspected: Option<(Instant, Arc<Value>)>,
+    /// The last full inspection, when it came, and its content ([`content`]).
+    inspected: Option<(Instant, Arc<Value>, u64)>,
     /// The epoch as it changes, for whoever can't wait for a read to end.
     told: watch::Sender<String>,
     /// The built-in plug-ins as `engine.plugins` describes them, asked once: they come with the app's version.
@@ -149,6 +150,16 @@ impl Reads {
         self.inspected = None;
     }
 
+    /// A look at the session's summary, whose content the look took ([`content`]): the lives learn from it as from any
+    /// look ([`Reads::saw`]), and the reads' last full inspection goes on serving them while it shows that content still,
+    /// in the same epoch.
+    pub fn looked(&mut self, summary: &Value, content: u64) {
+        let (kept, epoch) = (self.inspected.take(), self.lives.epoch().to_string());
+        self.saw(summary);
+        let same = self.lives.epoch() == epoch;
+        self.inspected = kept.filter(|(_, _, held)| same && *held == content);
+    }
+
     /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, or `{ref}` for one object, with the `epoch` the ref or
     /// parent came from. Not started after `until` (the request's deadline).
     pub async fn read(&mut self, params: &Value, until: Instant) -> Result<Value, Refusal> {
@@ -235,15 +246,16 @@ impl Reads {
 
     /// The session as the app shows it now, from the last inspection when it's fresh enough.
     async fn inspect(&mut self, until: Instant) -> Result<Arc<Value>, Refusal> {
-        if let Some((at, session)) = &self.inspected {
+        if let Some((at, session, _)) = &self.inspected {
             if at.elapsed() < FRESH {
                 return Ok(Arc::clone(session));
             }
         }
         let session = self.control.call("session.inspect", json!({"detail": "full"}), wait_within(until)?).await.map_err(asked)?;
         self.saw(&session);
+        let held = content(&session);
         let session = Arc::new(session);
-        self.inspected = Some((Instant::now(), Arc::clone(&session)));
+        self.inspected = Some((Instant::now(), Arc::clone(&session), held));
         Ok(session)
     }
 
@@ -737,6 +749,39 @@ fn place_id(path: &str) -> Option<String> {
     let canonical = std::fs::canonicalize(path).ok();
     let named = canonical.as_deref().unwrap_or(path).to_string_lossy();
     Some(sha256_hex(named.as_bytes())[..32].to_string())
+}
+
+/// A fingerprint of what an edit changes in the session (`session.inspect`), the same from its summary as from its full
+/// inspection: all of it but what moves without an edit (the selection, the transport, zoom, the tool, whether it's
+/// saved, the undo history's labels, which sources have loaded into memory) and what only the full inspection holds
+/// (plug-ins' parameters; automation points, which count instead). For this run of the bridge only.
+pub fn content(session: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut seen = session.clone();
+    if let Some(fields) = seen.as_object_mut() {
+        for moving in ["selection", "transport", "zoom", "tool", "dirty", "undo", "redo"] {
+            fields.remove(moving);
+        }
+    }
+    let each = |seen: &mut Value, key: &str| seen.get_mut(key).and_then(Value::as_array_mut).map(std::mem::take).unwrap_or_default();
+    let mut sources = each(&mut seen, "sources");
+    for source in sources.iter_mut().filter_map(Value::as_object_mut) {
+        source.remove("loaded");
+    }
+    let mut tracks = each(&mut seen, "tracks");
+    for track in &mut tracks {
+        for insert in track.get_mut("inserts").and_then(Value::as_array_mut).into_iter().flatten().filter_map(Value::as_object_mut) {
+            insert.remove("params");
+        }
+        for lane in track.get_mut("automation").and_then(Value::as_array_mut).into_iter().flatten() {
+            if let Some(points) = lane["points"].as_array().map(Vec::len) {
+                lane["points"] = points.into();
+            }
+        }
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (seen.to_string(), Value::Array(sources).to_string(), Value::Array(tracks).to_string()).hash(&mut hasher);
+    hasher.finish()
 }
 
 fn session_row(session: &Value, lives: &Lives, epoch: &str) -> Value {
