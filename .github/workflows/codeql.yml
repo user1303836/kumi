@@ -1,10 +1,11 @@
 name: CodeQL
 
-# Code scanning for the languages CodeQL reads here: the Live extension's TypeScript and JavaScript, the Remote Script's
-# and the scripts' Python, REAPER's C++ shim and SDK headers, and the workflows themselves. Each language's analysis is
-# the repository's former default setup's (build-mode none, the default queries, its category), so its alerts carry on.
-# It runs only for a change to one of those (a pull request's, and main's once it merges), and each Monday over all of
-# them, which brings new queries to unchanged code. The default setup it replaces ran all four on every push.
+# Code scanning for the languages CodeQL reads here: the Live extension's TypeScript and JavaScript and the map page's
+# inline scripts, the Remote Script's and the scripts' Python, REAPER's C++ shim and SDK headers, and the workflows
+# themselves. Each language's analysis is the repository's former default setup's (build-mode none, the default queries,
+# its category), so its alerts carry on. It runs only for a change to one of those (a pull request's, and main's once it
+# merges), and each Monday over all of them, which brings new queries to unchanged code. The default setup it replaces
+# ran all four on every push.
 
 on:
   push:
@@ -16,6 +17,7 @@ on:
       - "**/*.cjs"
       - "**/*.ts"
       - "**/*.tsx"
+      - "**/*.html"
       - "**/*.c"
       - "**/*.cc"
       - "**/*.cpp"
@@ -30,6 +32,7 @@ on:
       - "**/*.cjs"
       - "**/*.ts"
       - "**/*.tsx"
+      - "**/*.html"
       - "**/*.c"
       - "**/*.cc"
       - "**/*.cpp"
