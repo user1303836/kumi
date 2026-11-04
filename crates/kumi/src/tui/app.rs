@@ -214,6 +214,8 @@ pub struct ConnectDaw {
     pub bridge: String,
     /// The DAW's side of setup (named `live` as it always was).
     pub live: Rc<dyn DawSetup>,
+    /// The producer asked for this DAW by name (`--daw`, KUMI_DAW, `/daw`): setup opens it, closed, without asking first.
+    pub asked: bool,
 }
 /// The DAW's part of first-run setup, as the app and its tests have always named it.
 pub use ConnectDaw as ConnectLive;

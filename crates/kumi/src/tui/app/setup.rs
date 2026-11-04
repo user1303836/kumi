@@ -667,8 +667,10 @@ impl TuiApp {
                         continue;
                     }
                 }
-                // A DAW Kumi only opens, to reach it, opens once the producer says so: never unasked.
-                if live.asks_to_open() {
+                // A DAW Kumi only opens, to reach it, opens once the producer says so: never unasked. Asked for by name
+                // (`--daw`, KUMI_DAW, `/daw`), it's been said.
+                let asked = self.0.options.connect_live.as_ref().is_some_and(|l| l.asked);
+                if live.asks_to_open() && !asked {
                     let session = live.closed_set();
                     let with = session.as_deref().and_then(|set| std::path::Path::new(set).file_name());
                     let with = with.map_or(String::new(), |name| format!(" with {}", name.to_string_lossy()));
