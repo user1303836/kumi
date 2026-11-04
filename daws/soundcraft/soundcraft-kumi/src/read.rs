@@ -1,15 +1,16 @@
 //! `read`: SoundCraft's session as rows, a page at a time, each object named by its ref ([`crate::refs`]).
 //!
 //! The session's objects come from `session.inspect {"detail":"full"}`, asked again at most once a second and shared by the
-//! reads in between, and a clip's notes from `midi.notes`. Every answer carries the session's epoch: a new one starts when
-//! another session is open (its name or path changes), and refs or cursors from an earlier one are stale. A page ends at
-//! the limit asked for (50, at most 200) or at the bytes an answer may take. Its cursor names the position and the object
-//! there, so a list that changed between pages says so rather than skipping or repeating rows.
+//! reads in between, and a clip's notes from `midi.notes`. Every answer carries the epoch of the table of lives its refs
+//! are from: a new one starts when another session is open (its name or path changes) and when the bridge starts again.
+//! SoundCraft gives ids out again, so a ref or parent comes with the epoch it came from, and one from another epoch is
+//! stale. A page ends at the limit asked for (50, at most 200) or at the bytes an answer may take. Its cursor names the
+//! position and the object there, so a list that changed between pages says so rather than skipping or repeating rows.
 use crate::control::{Control, Error};
 use crate::refs::{note_index, Id, Kind, Lives, Missing, NoteMissing, Ref, Slot};
 use daw_bridge::wire::code;
 use serde_json::{json, Map, Value};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 pub const DEFAULT_LIMIT: usize = 50;
 pub const MAX_LIMIT: usize = 200;
@@ -25,30 +26,27 @@ const READ_WAIT: Duration = Duration::from_secs(5);
 /// Why a read has no answer: its kumi-daw/1 code, and the words.
 pub type Refusal = (&'static str, String);
 
-/// The bridge's reads of one copy of SoundCraft: the lives of its objects, the session's epoch, and the last inspection.
+/// The bridge's reads of one copy of SoundCraft: the lives of its objects (and their epoch), and the last inspection.
 pub struct Reads {
     control: Control,
     lives: Lives,
-    started: u64,
-    serial: u32,
-    /// The session the epoch is for: its name and path.
+    /// The session the lives are for: its name and path.
     session: Option<(Value, Value)>,
     inspected: Option<(Instant, Value)>,
 }
 
 impl Reads {
     pub fn new(control: Control) -> Self {
-        let started = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64);
-        Self { control, lives: Lives::default(), started, serial: 1, session: None, inspected: None }
+        Self { control, lives: Lives::new(), session: None, inspected: None }
     }
 
-    /// The session's epoch now: `<start, hex>-<serial>`.
-    pub fn epoch(&self) -> String {
-        format!("{:x}-{}", self.started, self.serial)
+    /// The epoch now: its table's.
+    pub fn epoch(&self) -> &str {
+        self.lives.epoch()
     }
 
-    /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, or `{ref}` for one object, with the `epoch` the refs
-    /// came from. Not started after `until` (the request's deadline).
+    /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, or `{ref}` for one object, with the `epoch` the ref or
+    /// parent came from. Not started after `until` (the request's deadline).
     pub async fn read(&mut self, params: &Value, until: Instant) -> Result<Value, Refusal> {
         let (kind, one, parent, cursor, epoch) =
             (text(params, "kind")?, text(params, "ref")?, text(params, "parent")?, text(params, "cursor")?, text(params, "epoch")?);
@@ -56,11 +54,17 @@ impl Reads {
         if kind.is_none() && one.is_none() {
             return Err(bad(format!("kind: what to read, one of {} (or ref: one object)", KINDS.join(", "))));
         }
+        if (one.is_some() || parent.is_some()) && epoch.is_none() {
+            return Err(bad("epoch: the epoch of the answer the ref or parent came from (SoundCraft gives ids out again)".into()));
+        }
         let session = self.inspect(until).await?;
-        if let Some(epoch) = epoch.filter(|epoch| *epoch != self.epoch()) {
+        if let Some(epoch) = epoch.filter(|epoch| epoch != self.epoch()) {
             return Err((
                 code::STALE,
-                format!("those refs are from an earlier epoch ({epoch}; now {}): another session is open, read again", self.epoch()),
+                format!(
+                    "those refs are from another epoch ({epoch}; now {}): another session is open, or the bridge started again: read again",
+                    self.epoch()
+                ),
             ));
         }
         if let Some(one) = one {
@@ -111,8 +115,7 @@ impl Reads {
         let session = self.control.call("session.inspect", json!({"detail": "full"}), wait).await.map_err(asked)?;
         let named = (session["name"].clone(), session["path"].clone());
         if self.session.as_ref().is_some_and(|before| *before != named) {
-            self.serial += 1;
-            self.lives = Lives::default();
+            self.lives = Lives::new();
         }
         self.session = Some(named);
         self.lives.saw_session(&session);

@@ -22,7 +22,7 @@ fn recorded() -> Value {
 
 /// A fake SoundCraft showing `session`, whose MIDI clips have `notes`.
 struct App {
-    _fake: Fake,
+    fake: Fake,
     session: Arc<Mutex<Value>>,
     reads: Reads,
 }
@@ -38,10 +38,19 @@ impl App {
         })
         .await;
         let reads = Reads::new(Control::new(fake.port(), None));
-        App { _fake: fake, session, reads }
+        App { fake, session, reads }
     }
 
-    async fn read(&mut self, params: Value) -> Result<Value, (&'static str, String)> {
+    /// A read as Kumi's app sends it: a ref or parent with the epoch it came from, here the epoch now.
+    async fn read(&mut self, mut params: Value) -> Result<Value, (&'static str, String)> {
+        if (params.get("ref").is_some() || params.get("parent").is_some()) && params.get("epoch").is_none() {
+            params["epoch"] = self.reads.epoch().into();
+        }
+        self.read_bare(params).await
+    }
+
+    /// A read as given.
+    async fn read_bare(&mut self, params: Value) -> Result<Value, (&'static str, String)> {
         self.reads.read(&params, Instant::now() + Duration::from_secs(5)).await
     }
 }
@@ -168,6 +177,18 @@ async fn one_object_reads_by_its_ref() {
     assert_eq!(app.read(json!({"ref": "s:insert:3:j"})).await.unwrap_err().0, "failed", "no insert in slot j");
     assert_eq!(app.read(json!({"ref": "s:param:3:a:hpf_freq"})).await.unwrap_err().0, "bad-params", "not read yet");
     assert_eq!(app.read(json!({"ref": "track 3"})).await.unwrap_err().0, "bad-params");
+}
+
+#[tokio::test]
+async fn a_ref_or_parent_without_its_epoch_is_refused_and_one_from_another_table_is_stale() {
+    let mut app = App::new(json!([])).await;
+    assert_eq!(app.read_bare(json!({"ref": "s:track:23"})).await.unwrap_err().0, "bad-params");
+    assert_eq!(app.read_bare(json!({"kind": "clip", "parent": "s:track:3"})).await.unwrap_err().0, "bad-params");
+    assert_eq!(app.read_bare(json!({"kind": "track"})).await.unwrap()["total"], 9, "a list of everything needs none");
+    // The bridge started again, with SoundCraft still open: its table names the same ids, and refs from before aren't its.
+    let before = Reads::new(Control::new(app.fake.port(), None)).epoch().to_string();
+    let stale = app.read_bare(json!({"ref": "s:track:23", "epoch": before})).await.unwrap_err();
+    assert_eq!(stale.0, "stale", "{stale:?}");
 }
 
 #[tokio::test]
