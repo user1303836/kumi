@@ -110,10 +110,17 @@ class Files(StateTest):
 
 
 class Media(StateTest):
-    def test_an_artifact_in_the_plugin_data_is_served_with_its_size_and_type(self) -> None:
+    def _add_artifact(self, artifact_id: str, path: Path) -> None:
+        artifacts = json.loads((self.state / "artifacts.json").read_text(encoding="utf-8"))
+        artifacts["artifacts"][artifact_id] = {"path": str(path), "kind": "audio"}
+        (self.state / "artifacts.json").write_text(json.dumps(artifacts), encoding="utf-8")
+
+    def test_an_artifact_in_the_state_folders_artifacts_is_served_with_its_size_and_type(self) -> None:
         found = snapshots.media(self.state, "a-7f32")
         self.assertEqual((found["kind"], found["mime"]), ("audio", "audio/wav"))
         self.assertEqual(found["bytes"], os.path.getsize(found["path"]))
+        info, data = snapshots.read_media(self.state, "a-7f32")
+        self.assertEqual((info["bytes"], data[:4]), (len(data), b"RIFF"))
 
     def test_a_map_sound_is_served_only_from_an_approved_sample_folder(self) -> None:
         self.assertIsNone(snapshots.media(self.state, "s-r7-0091"))
@@ -122,35 +129,82 @@ class Media(StateTest):
         # A sound with no file on disk isn't served.
         self.assertIsNone(snapshots.media(self.state, "s-r7-0001", [str(self.library)]))
 
+    def test_nothing_else_in_the_plugin_data_is_served_kumis_home_and_the_runtime_included(self) -> None:
+        for place in ("kumi-home/bridge/token.json", "runtime/1.24.70/kumi", "setup/receipt.json", "state/status.json"):
+            target = self.data / place
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if not target.exists():
+                target.write_bytes(b"secret")
+            self._add_artifact(f"a-{target.name}", target)
+            self.assertIsNone(snapshots.media(self.state, f"a-{target.name}", [str(self.library)]), place)
+        # A map sound whose file sits in the plugin data, not an approved folder, isn't served either.
+        current = json.loads((self.state / "map" / "r7.json").read_text(encoding="utf-8"))
+        current["sounds"]["s-r7-0091"]["path"] = str(self.data / "kumi-home" / "bridge" / "token.json")
+        (self.state / "map" / "r7.json").write_text(json.dumps(current), encoding="utf-8")
+        self.assertIsNone(snapshots.media(self.state, "s-r7-0091", [str(self.library)]))
+
     def test_a_path_outside_every_approved_root_is_refused_even_through_a_symlink(self) -> None:
         outside = Path(self.tmp.name) / "elsewhere"
         outside.mkdir()
         (outside / "private.wav").write_bytes(b"RIFF")
-        artifacts = json.loads((self.state / "artifacts.json").read_text(encoding="utf-8"))
-        artifacts["artifacts"]["a-out"] = {"path": str(outside / "private.wav"), "kind": "audio"}
-        link = self.data / "artifacts" / "link.wav"
+        self._add_artifact("a-out", outside / "private.wav")
+        link = self.state / "artifacts" / "link.wav"
         link.symlink_to(outside / "private.wav")
-        artifacts["artifacts"]["a-link"] = {"path": str(link), "kind": "audio"}
-        (self.state / "artifacts.json").write_text(json.dumps(artifacts), encoding="utf-8")
+        self._add_artifact("a-link", link)
         self.assertIsNone(snapshots.media(self.state, "a-out", [str(self.library)]))
         self.assertIsNone(snapshots.media(self.state, "a-link", [str(self.library)]))
+        self.assertIsNone(snapshots.read_media(self.state, "a-link", [str(self.library)]))
         self.assertIsNone(snapshots.media(self.state, "nothing-like-it"))
 
+    def test_a_file_swapped_for_a_link_after_the_check_is_not_followed(self) -> None:
+        if not hasattr(os, "O_NOFOLLOW"):
+            self.skipTest("this system has no O_NOFOLLOW")
+        outside = Path(self.tmp.name) / "elsewhere.wav"
+        outside.write_bytes(b"RIFF-private")
+        target = self.state / "artifacts" / "a-7f32-dusty.wav"
+        real_media = snapshots.media
+
+        def swapped(*args, **kwargs):
+            found = real_media(*args, **kwargs)
+            target.unlink()
+            target.symlink_to(outside)
+            return found
+
+        snapshots.media = swapped
+        try:
+            self.assertIsNone(snapshots.read_media(self.state, "a-7f32"))
+        finally:
+            snapshots.media = real_media
+
     def test_a_file_over_fifty_mib_is_not_served(self) -> None:
-        big = self.data / "artifacts" / "big.wav"
+        big = self.state / "artifacts" / "big.wav"
         with big.open("wb") as file:
             file.truncate(snapshots.MEDIA_MAX_BYTES + 1)
-        artifacts = json.loads((self.state / "artifacts.json").read_text(encoding="utf-8"))
-        artifacts["artifacts"]["a-big"] = {"path": str(big), "kind": "audio"}
-        (self.state / "artifacts.json").write_text(json.dumps(artifacts), encoding="utf-8")
+        self._add_artifact("a-big", big)
         self.assertIsNone(snapshots.media(self.state, "a-big"))
+
+
+class PublicViews(StateTest):
+    def test_the_map_and_a_sound_as_clients_see_them_carry_no_file_path(self) -> None:
+        self.assertIn("path", snapshots.sound(self.state, "s-r7-0091"))
+        public = snapshots.public_map(self.state)
+        self.assertEqual(public["revision"], "r7")
+        self.assertNotIn("schema", public)
+        self.assertTrue(public["sounds"])
+        self.assertFalse(any("path" in sound for sound in public["sounds"].values()))
+        self.assertNotIn(str(self.library), json.dumps(public))
+        sound = snapshots.public_sound(self.state, "s-r7-0091")
+        self.assertEqual((sound["class"], sound["revision"]), ("snare", "r7"))
+        self.assertNotIn("path", sound)
+        self.assertIsNone(snapshots.public_sound(self.state, "s-r6-0091"))
+        self.assertIsNone(snapshots.public_map(self.state, "r6"))
 
 
 class Imports(unittest.TestCase):
     def test_the_module_imports_with_the_standard_library_alone(self) -> None:
         source = (HERE.parent / "snapshots.py").read_text(encoding="utf-8")
         top = [line for line in source.splitlines() if line.startswith(("import ", "from "))]
-        allowed = {"__future__", "json", "os", "re", "time", "pathlib", "typing"}
+        allowed = {"__future__", "json", "os", "re", "stat", "time", "pathlib", "typing"}
         self.assertEqual({line.split()[1].split(".")[0] for line in top} - allowed, set())
 
 

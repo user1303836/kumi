@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import stat
 import time
 from pathlib import Path
 from typing import Any
@@ -151,7 +152,8 @@ def map_revision(state: Path, revision: str | None = None) -> dict | None:
 
 
 def sound(state: Path, sound_id: str) -> dict | None:
-    """A sound of the current map revision, with its id and revision."""
+    """A sound of the current map revision, with its id and revision. Carries the backend-only `path` (CC-4): for
+    anything that leaves the backend, use `public_sound`."""
     revision = map_current(state)
     current = map_revision(state, revision)
     sounds = (current or {}).get("sounds")
@@ -159,6 +161,28 @@ def sound(state: Path, sound_id: str) -> dict | None:
     if not isinstance(entry, dict):
         return None
     return {**entry, "sound_id": sound_id, "revision": revision}
+
+
+def public_sound(state: Path, sound_id: str) -> dict | None:
+    """`sound()` without the file's path, which stays on the backend (CC-4)."""
+    found = sound(state, sound_id)
+    return None if found is None else {key: value for key, value in found.items() if key != "path"}
+
+
+def public_map(state: Path, revision: str | None = None) -> dict | None:
+    """A map revision as a client may see it: its sounds without their paths (CC-4), and without the envelope's
+    schema number."""
+    data = map_revision(state, revision)
+    if data is None:
+        return None
+    sounds = data.get("sounds")
+    public = {key: value for key, value in data.items() if key not in ("schema", "sounds")}
+    public["sounds"] = (
+        {sound_id: {k: v for k, v in entry.items() if k != "path"} for sound_id, entry in sounds.items() if isinstance(entry, dict)}
+        if isinstance(sounds, dict)
+        else {}
+    )
+    return public
 
 
 def job(state: Path, job_id: str) -> dict | None:
@@ -191,19 +215,23 @@ def _artifacts(state: Path) -> dict:
 
 
 def media(state: Path, media_id: str, library_folders: list[str] | None = None) -> dict | None:
-    """The file behind a media id: an artifact (artifacts.json) or a sound of the current map revision, and only
-    when its real path is a regular file inside the plugin data or an approved sample folder, under the size cap.
-    `{id, path, kind, mime, bytes}`, or None."""
+    """The file behind a media id, `{id, path, kind, mime, bytes}`, or None. Only two kinds of id have one (CC-4):
+    an artifact (artifacts.json) whose real path is inside `<state>/artifacts` or an approved sample folder, and a
+    sound of the current map revision whose real path is inside an approved sample folder. Nothing else in the plugin
+    data (Kumi's home, the runtime, setup) is ever served. The file must be a regular one, at most 50 MiB."""
+    approved = [Path(os.path.realpath(os.path.expanduser(f))) for f in library_folders or [] if isinstance(f, str) and f]
     entry: dict | None = _artifacts(state).get(media_id)
-    if entry is None:
+    if entry is not None:
+        roots = [Path(os.path.realpath(state / "artifacts")), *approved]
+    else:
         found = sound(state, media_id)
-        if found is not None:
-            entry = {"path": found.get("path"), "kind": "audio", "mime": found.get("mime")}
-    path = entry.get("path") if entry else None
+        if found is None:
+            return None
+        entry = {"path": found.get("path"), "kind": "audio", "mime": found.get("mime")}
+        roots = approved
+    path = entry.get("path")
     if not isinstance(path, str) or not path:
         return None
-    roots = [Path(os.path.realpath(state.parent))]
-    roots += [Path(os.path.realpath(os.path.expanduser(folder))) for folder in library_folders or [] if isinstance(folder, str) and folder]
     real = os.path.realpath(path)
     if not _inside(real, roots) or not os.path.isfile(real):
         return None
@@ -212,6 +240,26 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
         return None
     mime = entry.get("mime") if isinstance(entry.get("mime"), str) else _mime_of(real)
     return {"id": media_id, "path": real, "kind": entry.get("kind") or "audio", "mime": mime, "bytes": size}
+
+
+def read_media(state: Path, media_id: str, library_folders: list[str] | None = None) -> tuple[dict, bytes] | None:
+    """`media()`'s file and its bytes. The resolved path is opened without following a link (a file swapped for one
+    after the check is refused) and checked again on the open file: regular, within the size cap."""
+    found = media(state, media_id, library_folders)
+    if found is None:
+        return None
+    try:
+        handle = os.open(found["path"], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
+    except OSError:
+        return None
+    with os.fdopen(handle, "rb") as file:
+        info = os.fstat(file.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_size > MEDIA_MAX_BYTES:
+            return None
+        data = file.read(MEDIA_MAX_BYTES + 1)
+    if len(data) > MEDIA_MAX_BYTES:
+        return None
+    return {**found, "bytes": len(data)}, data
 
 
 _MIMES = {

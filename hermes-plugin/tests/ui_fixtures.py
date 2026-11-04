@@ -204,7 +204,7 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
             _tone(Path(sound["path"]), min(sound["duration"], 1.5), sound["kind"], int(sound_id[-4:]))
     _write_json(state / "map" / "r7.json", {**_envelope(3, now), "revision": "r7", "made": now - 3600_000, "points": points, "groups": groups, "sounds": sounds})
     (state / "map" / "current").write_text("r7\n", encoding="utf-8")
-    artifacts_dir = plugin_data / "artifacts"
+    artifacts_dir = state / "artifacts"
     original = artifacts_dir / "a-7f31-original.wav"
     replaced = artifacts_dir / "a-7f32-dusty.wav"
     if audio != "none":
