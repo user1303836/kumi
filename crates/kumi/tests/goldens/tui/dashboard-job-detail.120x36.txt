@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                ◐ 1 job   ● Live
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  Ready · 1 job running in the backgr…
-
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY   JOBS 1 ───────────────────
-                             “What's on this track?”                              ⠉ Burial vocal chops            stop
-                             “Set the tempo to 124”                                 reading a page · 1:05
-                       “Why might my low end sound muddy?”
-
-   Job 1 · Burial vocal chops                                running · 1:05
-
-   Asked: Find how Burial chops vocals
-   ✓ searched “Burial vocal chops”
-   ✗ read a page
-   ⠁ searching the web
-
-
-
-   Ask Kumi about your Set
-        ↑↓ to scroll · x stops it · r runs it again · c copies · esc to close
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready · 1 job running in the backgr… │
+                                                                                │                                      │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY   JOBS 1 ───────────────────┤
+                             “What's on this track?”                            │ ⠉ Burial vocal chops            stop │
+                             “Set the tempo to 124”                             │   reading a page · 1:05              │
+                       “Why might my low end sound muddy?”                      │                                      │
+                                                                                │                                      │
+      Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
+╭─ Job 1 · Burial vocal chops ────────────────────────────── running · 1:05 ─╮  │                                      │
+│                                                                            │  │                                      │
+│  Asked: Find how Burial chops vocals                                       │  │                                      │
+│  ✓ searched “Burial vocal chops”                                           │  │                                      │
+│  ✗ read a page                                                             │  │                                      │
+│  ⠁ searching the web                                                       │  │                                      │
+╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+                                                                                │                                      │
+╭───── ↑↓ to scroll · x stops it · r runs it again · c copies · esc to close ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

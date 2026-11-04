@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-   /goal master this to -9 LUFS                                                                                     FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    Ready
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                    HISTORY   GOAL ───────────────────────────
-                                                                                                                    master this to -9 LUFS
-                                                                                                                    blocked · /goal resume once it's dealt
-                                                                                                                    with · turn 3 of 12 · 2:00 of 1:00:00
-                                                                                                                    checked: the Limiter is frozen
-
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                                                  enter to send
+   /goal master this to -9 LUFS                                                                                   ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ HISTORY   GOAL ───────────────────────────┤
+                                                                                                                  │ master this to -9 LUFS                     │
+                                                                                                                  │ blocked · /goal resume once it's dealt     │
+                                                                                                                  │ with · turn 3 of 12 · 2:00 of 1:00:00      │
+                                                                                                                  │ checked: the Limiter is frozen             │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

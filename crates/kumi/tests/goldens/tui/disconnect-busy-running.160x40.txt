@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                    ● Live not connected
 
-   make the kick punchier                                                                                           FOCUS
-                                                                                                                    Live isn't connected
-   Raising the kick's transient first.
-
-   Live is busy and answering slowly, so Kumi is waiting for it: your request carries on once it answers.
-                                                                                                                    NOW                              ● working
-                                                                                                                    ⠋ thinking
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                    HISTORY ──────────────────────────────────
-                                                                                                                    Nothing changed yet
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-   Tell Kumi more while it works
-                                                                                                    esc to stop
+   make the kick punchier                                                                                         ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Live isn't connected                       │
+   Raising the kick's transient first.                                                                            │                                            │
+                                                                                                                  │                                            │
+   Live is busy and answering slowly, so Kumi is waiting for it: your request carries on once it answers.         │                                            │
+                                                                                                                  ├─ NOW ────────────────────────── ● working ─┤
+                                                                                                                  │ ⠋ thinking                                 │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ HISTORY ──────────────────────────────────┤
+                                                                                                                  │ Nothing changed yet                        │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭───────────────────────────────────────────────────────────────────────────────────────────────── esc to stop ─╮ │                                            │
+╰─ Tell Kumi more while it works                                                                               ─╯ ╰────────────────────────────────────────────╯
 

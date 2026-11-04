@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                        ● REAPER
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  ✓ ReaEQ 3 parameters on “Kick”
-                                                                                  █──▏───── Freq-Band 1 220.0 Hz → 12…
-                         ██                          ▀▀                           ███──▏─── Gain-Band 1 0.0 dB → −3.5…
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY 1 ──────────────────────────
-                             “What's on this track?”                              ✓ ReaEQ 3 parameters on “Kick”  undo
-                             “Set the tempo to 124”                                 █─▏───── Freq-Band 1 220.0 Hz → 1…
-                       “Why might my low end sound muddy?”                          ███─▏─── Gain-Band 1 0.0 dB → −3.…
-                                                                                    ██████── BW-Band 2 1.00 → 3.00
-    Kumi keeps each project's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-   Ask Kumi about your project
-                                                                enter to send
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ ✓ ReaEQ 3 parameters on “Kick”       │
+                                                                                │ █──▏───── Freq-Band 1 220.0 Hz → 12… │
+                         ██                          ▀▀                         │ ███──▏─── Gain-Band 1 0.0 dB → −3.5… │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY 1 ──────────────────────────┤
+                             “What's on this track?”                            │ ✓ ReaEQ 3 parameters on “Kick”  undo │
+                             “Set the tempo to 124”                             │   █─▏───── Freq-Band 1 220.0 Hz → 1… │
+                       “Why might my low end sound muddy?”                      │   ███─▏─── Gain-Band 1 0.0 dB → −3.… │
+                                                                                │   ██████── BW-Band 2 1.00 → 3.00     │
+    Kumi keeps each project's conversations: /conversations goes back to one.   │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your project                                               ─╯ ╰──────────────────────────────────────╯
 

@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                        ● REAPER
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  ✓ Changed 3 notes in “Bass take”
-                                                                                  3 notes → 3 notes · 2 new · 2 gone
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY 1 ──────────────────────────
-                             “What's on this track?”                              ✓ Changed 3 notes in “Bass      undo
-                             “Set the tempo to 124”                                 take”
-                       “Why might my low end sound muddy?”                          3 notes → 3 notes · 2 new · 2 gone
-
-    Kumi keeps each project's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-   Ask Kumi about your project
-                                                                enter to send
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ ✓ Changed 3 notes in “Bass take”     │
+                                                                                │ 3 notes → 3 notes · 2 new · 2 gone   │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY 1 ──────────────────────────┤
+                             “What's on this track?”                            │ ✓ Changed 3 notes in “Bass      undo │
+                             “Set the tempo to 124”                             │   take”                              │
+                       “Why might my low end sound muddy?”                      │   3 notes → 3 notes · 2 new · 2 gone │
+                                                                                │                                      │
+    Kumi keeps each project's conversations: /conversations goes back to one.   │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your project                                               ─╯ ╰──────────────────────────────────────╯
 

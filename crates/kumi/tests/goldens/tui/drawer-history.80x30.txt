@@ -16,15 +16,15 @@
 
 
 
-  NOW   FOCUS   HISTORY 4 ────────────────────────────────────── ctrl+\ closes
-  ♪ Tried 3 pads against the reference                                     82%
-  ○ Renamed 2-MIDI to Lead                                              undone
-  ■ Bass width 100% → 140%                                                undo
-  ✓ Tempo 120 → 124 BPM                                                   undo
+╭─ NOW   FOCUS   HISTORY 4 ──────────────────────────────────── ctrl+\ closes ─╮
+│ ♪ Tried 3 pads against the reference                                     82% │
+│ ○ Renamed 2-MIDI to Lead                                              undone │
+│ ■ Bass width 100% → 140%                                                undo │
+│ ✓ Tempo 120 → 124 BPM                                                   undo │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
-
-
-
-   Ask Kumi about your Set
-                                                                enter to send
+╭────────────────────────────────────────────────────────────── enter to send ─╮
+╰─ Ask Kumi about your Set                                                    ─╯
 

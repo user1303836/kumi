@@ -502,7 +502,7 @@ case!(narrow_resize_paste_and_scroll, async {
     h.connect();
     // No side pane: the drawer under the conversation, folded to its row of tabs.
     assert!(!has(&h.screen(), "Your selection will show here"));
-    assert!(h.screen()[15..].iter().any(|line| line.starts_with("  NOW   FOCUS   HISTORY")));
+    assert!(h.screen()[15..].iter().any(|line| line.chars().skip(3).collect::<String>().starts_with("NOW   FOCUS   HISTORY")));
     h.has("Ask Kumi about your Set");
     h.resize(90, 28);
     delay(10).await;
@@ -1127,7 +1127,7 @@ case!(device_tree_reads_mouse_keyboard_and_selection_colors, async {
     let row = lines.iter().position(|s| s.contains("│ │ ├ ≈  Saturator")).unwrap();
     h.type_text(&click(&lines, row, "Saturator")).await;
     h.has("≈  Audio Effect Rack › Chain 1 › Saturator  ×");
-    assert!(h.screen()[row].trim_end().ends_with("pinned"));
+    assert!(framed(&h.screen()[row]).ends_with("pinned"));
     h.type_text("make it gentler\r").await;
     assert_eq!(
         serde_json::to_value(c.pins.borrow().last().unwrap()).unwrap(),
@@ -1161,7 +1161,8 @@ case!(clip_session_arrangement_and_fractional_scene_forwarding, async {
         h.has(s)
     }
     assert!(h.screen().iter().filter(|s| s.chars().skip(80).any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))).count() >= 2);
-    assert!(h.output.text.borrow().contains("38;2;134;227;181;48;2;20;22;26m"));
+    // The selected note in mint, on the pane's ground.
+    assert!(h.output.text.borrow().contains("38;2;134;227;181;48;2;14;15;18m"));
     h.emit(json!({"type":"focus","focus":focus}));
     let mut changed = focus;
     changed["selectedNotes"] = json!(2);
@@ -1182,8 +1183,8 @@ case!(clip_session_arrangement_and_fractional_scene_forwarding, async {
         h.has(s)
     }
     let lines = h.screen();
-    assert!(lines.iter().find(|s| s.contains("Verse")).unwrap().trim_end().ends_with("playing"));
-    assert!(lines.iter().find(|s| s.contains("Drop")).unwrap().trim_end().ends_with("queued"));
+    assert!(framed(lines.iter().find(|s| s.contains("Verse")).unwrap()).ends_with("playing"));
+    assert!(framed(lines.iter().find(|s| s.contains("Drop")).unwrap()).ends_with("queued"));
     focus["view"] = json!("Arrangement");
     h.emit(json!({"type":"focus","focus":focus}));
     delay(5).await;

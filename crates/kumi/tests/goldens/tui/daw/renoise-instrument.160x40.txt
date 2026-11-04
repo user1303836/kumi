@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                               ● Renoise
 
-                                                                                                                    FOCUS · Keyzones
-                                                                                                                    Kit
-                                                                                                                    A·B···C···D·E
-                                                                                                                    A·B···C···D·E
-                                                                                                                    C-3       C-4
-                                                                                                                    A C-3       Kick
-                                                                                                                    B D-3       Snare · mute group 1
-                                                                                                                    C F#3       Hat closed · mute group 2
-                                                                                                                    D A#3       Hat open · mute group 2
-                                                                                                                    E C-4       Break 01 · slice
-                                          ██                          ▀▀                                            5 zones · 2 macros · 2 phrases · 1 modula…
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                            macros: Drive 25% · Tone 60%
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                            phrases by program: ▸Groove · Fill C-5–B-5
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░                                            NOW
-                                                                                                                    Ready
-                                             Kumi can see Night Drive.
-
-                                                        Try                                                         HISTORY ──────────────────────────────────
-                                              “What's on this track?”                                               Nothing changed yet
-                                              “Set the tempo to 124”
-                                        “Why might my low end sound muddy?”
-
-                      Kumi keeps each song's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your song
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS · Keyzones ─────────────────────────╮
+                                                                                                                  │ Kit                                        │
+                                                                                                                  │ A·B···C···D·E                              │
+                                                                                                                  │ A·B···C···D·E                              │
+                                                                                                                  │ C-3       C-4                              │
+                                                                                                                  │ A C-3       Kick                           │
+                                                                                                                  │ B D-3       Snare · mute group 1           │
+                                                                                                                  │ C F#3       Hat closed · mute group 2      │
+                                                                                                                  │ D A#3       Hat open · mute group 2        │
+                                                                                                                  │ E C-4       Break 01 · slice               │
+                                          ██                          ▀▀                                          │ 5 zones · 2 macros · 2 phrases · 1 modula… │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │ macros: Drive 25% · Tone 60%               │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │ phrases by program: ▸Groove · Fill C-5–B-5 │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY ──────────────────────────────────┤
+                                              “What's on this track?”                                             │ Nothing changed yet                        │
+                                              “Set the tempo to 124”                                              │                                            │
+                                        “Why might my low end sound muddy?”                                       │                                            │
+                                                                                                                  │                                            │
+                      Kumi keeps each song's conversations: /conversations goes back to one.                      │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your song                                                                                    ─╯ ╰────────────────────────────────────────────╯
 

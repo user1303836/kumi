@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-                                                                                                                    FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    Ready
-
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                              Nothing changed since you were last here, 3 hours ago.
-                                                                                                                    HISTORY ──────────────────────────────────
-                                                        Try                                                         Nothing changed yet
-                                              “What's on this track?”
-                                              “Set the tempo to 124”
-                                        “Why might my low end sound muddy?”
-
-                       Kumi keeps each Set's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                              Nothing changed since you were last here, 3 hours ago.                              │                                            │
+                                                                                                                  ├─ HISTORY ──────────────────────────────────┤
+                                                        Try                                                       │ Nothing changed yet                        │
+                                              “What's on this track?”                                             │                                            │
+                                              “Set the tempo to 124”                                              │                                            │
+                                        “Why might my low end sound muddy?”                                       │                                            │
+                                                                                                                  │                                            │
+                       Kumi keeps each Set's conversations: /conversations goes back to one.                      │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

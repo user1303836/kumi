@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-   /goal master this to -9 LUFS                                                                                     FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW              ● goal · turn 2/12 · 1:05
-                                                                                                                    ⠋ thinking
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                    HISTORY   GOAL ───────────────────────────
-                                                                                                                    master this to -9 LUFS
-                                                                                                                    working · turn 1 of 12 · 1:05 of 1:00:00
-                                                                                                                    checked: not met yet, by the model's own
-                                                                                                                    check
-                                                                                                                    next: raise the limiter
-
-
-
-
-
-
-
-
-
-
-   Tell Kumi more while it works
-                                                                                                    esc to stop
+   /goal master this to -9 LUFS                                                                                   ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ────────── ● goal · turn 2/12 · 1:05 ─┤
+                                                                                                                  │ ⠋ thinking                                 │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ HISTORY   GOAL ───────────────────────────┤
+                                                                                                                  │ master this to -9 LUFS                     │
+                                                                                                                  │ working · turn 1 of 12 · 1:05 of 1:00:00   │
+                                                                                                                  │ checked: not met yet, by the model's own   │
+                                                                                                                  │ check                                      │
+                                                                                                                  │ next: raise the limiter                    │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭───────────────────────────────────────────────────────────────────────────────────────────────── esc to stop ─╮ │                                            │
+╰─ Tell Kumi more while it works                                                                               ─╯ ╰────────────────────────────────────────────╯
 

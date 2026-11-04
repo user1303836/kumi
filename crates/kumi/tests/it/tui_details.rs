@@ -156,7 +156,7 @@ case!(what_the_view_covers_cant_be_clicked_through_it, async {
     h.connect();
     h.emit(json!({"type":"change","change":{"id":"c1","family":"mixer","title":"Bass width 100% → 140%","state":"applied","at":1}}));
     let lines = h.screen();
-    let row = lines.iter().position(|line| line.trim_end().ends_with("undo")).expect("NOW's undo");
+    let row = lines.iter().position(|line| framed(line).ends_with("undo")).expect("NOW's undo");
     let column = lines[row][..lines[row].rfind("undo").unwrap()].chars().count();
     opened(&h).await;
     h.type_text(&format!("\x1b[<0;{};{}M\x1b[<0;{};{}m", column + 1, row + 1, column + 1, row + 1)).await;

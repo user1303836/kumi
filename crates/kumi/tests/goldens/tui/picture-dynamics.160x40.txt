@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-                                                                                                                    FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    ✓ Compressor · Threshold -12.0 dB → -18.0…
-                                                                                                                                       ⣀⣀⣀⣀⣀⣠⣤⣤⠤⠤⠤⠤⠤⠤⠶⠶⠖⠒⠒⠒⠛⠛⠛
-                                                                                                                    ⣀⣤⣤⡤⠤⠤⠤⠶⠶⠖⠒⠒⠒⠛⠛⠋⠉⠉⠉⠉⠉⠁
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                                        Try                                                         HISTORY 1 ────────────────────────────────
-                                              “What's on this track?”                                               ■ Compressor · Threshold -12.0 dB →   undo
-                                              “Set the tempo to 124”                                                  -18.0 dB, Ratio 2.00 : 1 → 4.00 : 1
-                                        “Why might my low end sound muddy?”                                                                            ⢀⣀⣠⣤⣒⣒⡭
-                                                                                                                                              ⢀⣀⣠⣤⡤⠴⠖⠒⠛⠛⠛⠛⠊⠉⠉⠉
-                       Kumi keeps each Set's conversations: /conversations goes back to one.                                            ⣀⣠⣤⡶⠶⠟⠛⠉⠉
-                                                                                                                                 ⣀⣀⣤⣴⠶⠾⠛⠋⠉⠁
-                                                                                                                          ⣀⣀⣤⣴⠶⠾⠛⠋⠉⠁
-                                                                                                                      ⣴⠶⠾⠛⠋⠉⠁
-                                                                                                                      Threshold -12.0 dB → -18.0 dB
-                                                                                                                      Ratio 2.00 : 1 → 4.00 : 1
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ ✓ Compressor · Threshold -12.0 dB → -18.0… │
+                                                                                                                  │                    ⣀⣀⣀⣀⣀⣠⣤⣤⠤⠤⠤⠤⠤⠤⠶⠶⠖⠒⠒⠒⠛⠛⠛ │
+                                                                                                                  │ ⣀⣤⣤⡤⠤⠤⠤⠶⠶⠖⠒⠒⠒⠛⠛⠋⠉⠉⠉⠉⠉⠁                     │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY 1 ────────────────────────────────┤
+                                              “What's on this track?”                                             │ ■ Compressor · Threshold -12.0 dB →   undo │
+                                              “Set the tempo to 124”                                              │   -18.0 dB, Ratio 2.00 : 1 → 4.00 : 1      │
+                                        “Why might my low end sound muddy?”                                       │                                    ⢀⣀⣠⣤⣒⣒⡭ │
+                                                                                                                  │                           ⢀⣀⣠⣤⡤⠴⠖⠒⠛⠛⠛⠛⠊⠉⠉⠉ │
+                       Kumi keeps each Set's conversations: /conversations goes back to one.                      │                     ⣀⣠⣤⡶⠶⠟⠛⠉⠉              │
+                                                                                                                  │              ⣀⣀⣤⣴⠶⠾⠛⠋⠉⠁                    │
+                                                                                                                  │       ⣀⣀⣤⣴⠶⠾⠛⠋⠉⠁                           │
+                                                                                                                  │   ⣴⠶⠾⠛⠋⠉⠁                                  │
+                                                                                                                  │   Threshold -12.0 dB → -18.0 dB            │
+                                                                                                                  │   Ratio 2.00 : 1 → 4.00 : 1                │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

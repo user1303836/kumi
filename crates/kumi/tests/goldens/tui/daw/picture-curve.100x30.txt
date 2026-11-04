@@ -1,30 +1,30 @@
   Kumi  ·  Night Drive                                                                    ● REAPER
 
-                                                                  FOCUS
-                                                                  Night Drive
-                                                                  Your selection will show here
-
-
-                 ██                          ▀▀                   NOW
-                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                   ✓ Added 3 points to “Pad”'s Vol…
-                 ██▀█▄   ██  ██  ██  ██  ██  ██                   ⠤⠤⠤⠤⣤⣤⣤⣤⣤⣤⠤⠤⠤⠤⠶⠶⠶⠶⠶⠶⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤
-                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                 ░▒▓████████████████████████▓▒░
-
-                    Kumi can see Night Drive.
-
-                               Try                                HISTORY 1 ──────────────────────
-                     “What's on this track?”                      ✓ Added 3 points to “Pad”'s undo
-                     “Set the tempo to 124”                         Volume envelope
-               “Why might my low end sound muddy?”
-                                                                    ⠤⣤⣤⠤⠤⠤⠤⠤⠤⠤⠤⣤⠤⠴⠮⠭⠶⠶⠤⢤⣤⡤⠤⠤⣤⣤⣤⣤⠤⠤
-   Kumi keeps each project's conversations: /conversations go…         ⠉⠉⠒⠒⠤⠔⠊⠉          ⠈⠉⠉
-
-
-
-                                                                    Volume · 2 → 5 points
-                                                                    −18 to 0 dB over bars 33–37
-   Ask Kumi about your project
-                                                enter to send
+                                                                ╭─ FOCUS ──────────────────────────╮
+                                                                │ Night Drive                      │
+                                                                │ Your selection will show here    │
+                                                                │                                  │
+                                                                │                                  │
+                 ██                          ▀▀                 ├─ NOW ────────────────────────────┤
+                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                 │ ✓ Added 3 points to “Pad”'s Vol… │
+                 ██▀█▄   ██  ██  ██  ██  ██  ██                 │ ⠤⠤⠤⠤⣤⣤⣤⣤⣤⣤⠤⠤⠤⠤⠶⠶⠶⠶⠶⠶⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤⠤ │
+                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                 │                                  │
+                                                                │                                  │
+                 ░▒▓████████████████████████▓▒░                 │                                  │
+                                                                │                                  │
+                    Kumi can see Night Drive.                   │                                  │
+                                                                │                                  │
+                               Try                              ├─ HISTORY 1 ──────────────────────┤
+                     “What's on this track?”                    │ ✓ Added 3 points to “Pad”'s undo │
+                     “Set the tempo to 124”                     │   Volume envelope                │
+               “Why might my low end sound muddy?”              │                                  │
+                                                                │   ⠤⣤⣤⠤⠤⠤⠤⠤⠤⠤⠤⣤⠤⠴⠮⠭⠶⠶⠤⢤⣤⡤⠤⠤⣤⣤⣤⣤⠤⠤ │
+   Kumi keeps each project's conversations: /conversations go…  │      ⠉⠉⠒⠒⠤⠔⠊⠉          ⠈⠉⠉       │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │   Volume · 2 → 5 points          │
+                                                                │   −18 to 0 dB over bars 33–37    │
+╭───────────────────────────────────────────── enter to send ─╮ │                                  │
+╰─ Ask Kumi about your project                               ─╯ ╰──────────────────────────────────╯
 

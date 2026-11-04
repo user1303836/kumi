@@ -150,7 +150,7 @@ case!(the_drawers_now_shows_the_last_changes_picture_under_it, async {
     h.emit(eq_change("c1", -4.));
     let lines = h.screen();
     let row = lines.iter().position(|line| line.contains("✓ EQ Eight")).expect("NOW's last change");
-    assert!(lines[row].trim_end().ends_with("undo") && !braille(&lines[row..=row]), "{}", lines[row]);
+    assert!(framed(&lines[row]).ends_with("undo") && !braille(&lines[row..=row]), "{}", lines[row]);
     // The curve under it, as tall as the drawer holds (its 7 rows: the tabs, NOW, the change, then 4), then what moved.
     assert!(braille(&lines[row + 1..row + 4]), "{}", lines.join("\n"));
     assert!(lines[row + 4].contains("3 Gain A 0.00 dB → -4.00 dB"), "{}", lines.join("\n"));

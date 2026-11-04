@@ -1,36 +1,36 @@
   Kumi  ·  Morning Run                                                                                          ● Live
 
-   make the kick punchier                                                         FOCUS
-                                                                                  Morning Run
-   Raising the kick's transient first.                                            Your selection will show here
-   stopped
-
-   Live is busy and answering slowly, so Kumi is waiting for it: your request     NOW
-   carries on once it answers.                                                    Ready
-
-   Live opened another Set while it was busy, so Kumi stopped what it was
-   doing: nothing it was doing lands in the other Set.
-
-   Live has the other Set open.
-
-
-
-
-
-                                                                                  HISTORY ────────────────────────────
-                                                                                  Nothing changed yet
-
-
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                enter to send
+   make the kick punchier                                                       ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Morning Run                          │
+   Raising the kick's transient first.                                          │ Your selection will show here        │
+   stopped                                                                      │                                      │
+                                                                                │                                      │
+   Live is busy and answering slowly, so Kumi is waiting for it: your request   ├─ NOW ────────────────────────────────┤
+   carries on once it answers.                                                  │ Ready                                │
+                                                                                │                                      │
+   Live opened another Set while it was busy, so Kumi stopped what it was       │                                      │
+   doing: nothing it was doing lands in the other Set.                          │                                      │
+                                                                                │                                      │
+   Live has the other Set open.                                                 │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ HISTORY ────────────────────────────┤
+                                                                                │ Nothing changed yet                  │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

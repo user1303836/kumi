@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                        ● REAPER
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  ✓ Moved “vox.wav” to bar 6
-                                                                                  Start bar 5 → bar 6
-                         ██                          ▀▀                           Fade out 0 s → 0.5 s
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY 1 ──────────────────────────
-                             “What's on this track?”                              ✓ Moved “vox.wav” to bar 6      undo
-                             “Set the tempo to 124”                                 Start bar 5 → bar 6
-                       “Why might my low end sound muddy?”                          Fade out 0 s → 0.5 s
-
-    Kumi keeps each project's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-   Ask Kumi about your project
-                                                                enter to send
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ ✓ Moved “vox.wav” to bar 6           │
+                                                                                │ Start bar 5 → bar 6                  │
+                         ██                          ▀▀                         │ Fade out 0 s → 0.5 s                 │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY 1 ──────────────────────────┤
+                             “What's on this track?”                            │ ✓ Moved “vox.wav” to bar 6      undo │
+                             “Set the tempo to 124”                             │   Start bar 5 → bar 6                │
+                       “Why might my low end sound muddy?”                      │   Fade out 0 s → 0.5 s               │
+                                                                                │                                      │
+    Kumi keeps each project's conversations: /conversations goes back to one.   │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your project                                               ─╯ ╰──────────────────────────────────────╯
 

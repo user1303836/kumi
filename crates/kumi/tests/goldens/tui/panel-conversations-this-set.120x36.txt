@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  Ready
-
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY ────────────────────────────
-                             “What's on this track?”                              Nothing changed yet
-                             “Set the tempo to 124”
-                       “Why might my low end sound muddy?”
-
-      Kumi keeps each Set's conversations: /conversations goes back to one.
-
-   Conversations   This Set · All Sets                       type to filter
-
-     add a hi-hat groove  now001                      this one · 2 requests
-     make the bass wider  old001                   2 hours ago · 5 requests
-
-
-
-   Ask Kumi about your Set
-
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                                                                │                                      │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY ────────────────────────────┤
+                             “What's on this track?”                            │ Nothing changed yet                  │
+                             “Set the tempo to 124”                             │                                      │
+                       “Why might my low end sound muddy?”                      │                                      │
+                                                                                │                                      │
+      Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭─ Conversations   This Set · All Sets ───────────────────── type to filter ─╮  │                                      │
+│                                                                            │  │                                      │
+│    add a hi-hat groove  now001                      this one · 2 requests  │  │                                      │
+│    make the bass wider  old001                   2 hours ago · 5 requests  │  │                                      │
+╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+                                                                                │                                      │
+╭─────────────────────────────────────────────────────────────────────────────╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

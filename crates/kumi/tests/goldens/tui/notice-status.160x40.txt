@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-   Ready · Live connected · no model · 0 of 30 turns · Your library: 1,020 sounds · 40 presets · 3 Sets             FOCUS
-                                                                                                                    Night Drive
-   Conversation: Bass ideas · now001                                                                                Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    Ready
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                    HISTORY ──────────────────────────────────
-                                                                                                                    Nothing changed yet
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                                                  enter to send
+   Ready · Live connected · no model · 0 of 30 turns · Your library: 1,020 sounds · 40 presets · 3 Sets           ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+   Conversation: Bass ideas · now001                                                                              │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ HISTORY ──────────────────────────────────┤
+                                                                                                                  │ Nothing changed yet                        │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

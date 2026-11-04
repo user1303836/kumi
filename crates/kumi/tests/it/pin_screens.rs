@@ -1349,10 +1349,10 @@ scene!(dashboard_matching_done, |width, height| {
 
 const DRAWER_SIZES: [(i32, i32); 2] = [(80, 30), (90, 40)];
 
-/// A click on one of the drawer's tabs.
+/// A click on one of the drawer's tabs, set into its edge (`╭─ NOW   FOCUS`, `── NOW   FOCUS` folded).
 async fn drawer_tab(h: &Harness, tab: &str) {
     let lines = h.screen();
-    let row = lines.iter().position(|line| line.starts_with("  NOW   FOCUS")).expect("the drawer's tabs");
+    let row = lines.iter().position(|line| line.chars().skip(3).collect::<String>().starts_with("NOW   FOCUS")).expect("the drawer's tabs");
     h.type_text(&click(&lines, row, tab)).await;
 }
 

@@ -4,6 +4,7 @@
 
 
 
+
                          ██                          ▀▀
                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
                          ██▀█▄   ██  ██  ██  ██  ██  ██
@@ -22,9 +23,8 @@
 
 
 
-  NOW   FOCUS   HISTORY ───────────────────────────────────────── ctrl+\ opens
+── NOW   FOCUS   HISTORY ─────────────────────────────────────── ctrl+\ opens ──
 
-
-   Ask Kumi about your Set
-                                                                enter to send
+╭────────────────────────────────────────────────────────────── enter to send ─╮
+╰─ Ask Kumi about your Set                                                    ─╯
 

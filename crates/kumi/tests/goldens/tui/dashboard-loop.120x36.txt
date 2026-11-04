@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-   /goal master this to -9 LUFS                                                   FOCUS
-                                                                                  Night Drive
-   Round 1 · loudness                                                             Your selection will show here
-     change: Limiter gain +2 dB
-     kept: louder, punch kept
-     3 listens · 0:30                                      ● loop · round 2 · 1 kept · 1 back · next: true peak · 0:42
-                                                                                  ⠋ thinking
-   Round 2 · true peak
-     change: Limiter ceiling -1 → -3.5 dB
-     reverted: it hurt punch (crest)
-     4 listens · 0:42
-
-
-
-
-
-
-                                                                                  HISTORY   GOAL ─────────────────────
-                                                                                  master this to -9 LUFS
-                                                                                  working · turn 1 of 12 · 1:05 of
-                                                                                  1:00:00
-                                                                                  checked: not met yet, by the model's
-                                                                                  own check
-                                                                                  next: raise the limiter
-
-
-
-
-
-
-
-   Tell Kumi more while it works
-                                                                  esc to stop
+   /goal master this to -9 LUFS                                                 ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+   Round 1 · loudness                                                           │ Your selection will show here        │
+     change: Limiter gain +2 dB                                                 │                                      │
+     kept: louder, punch kept                                                   │                                      │
+     3 listens · 0:30                                                           ├─ NOW  ● loop · round 2 · 1 kept · … ─┤
+                                                                                │ ⠋ thinking                           │
+   Round 2 · true peak                                                          │                                      │
+     change: Limiter ceiling -1 → -3.5 dB                                       │                                      │
+     reverted: it hurt punch (crest)                                            │                                      │
+     4 listens · 0:42                                                           │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ HISTORY   GOAL ─────────────────────┤
+                                                                                │ master this to -9 LUFS               │
+                                                                                │ working · turn 1 of 12 · 1:05 of     │
+                                                                                │ 1:00:00                              │
+                                                                                │ checked: not met yet, by the model's │
+                                                                                │ own check                            │
+                                                                                │ next: raise the limiter              │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭─────────────────────────────────────────────────────────────── esc to stop ─╮ │                                      │
+╰─ Tell Kumi more while it works                                             ─╯ ╰──────────────────────────────────────╯
 

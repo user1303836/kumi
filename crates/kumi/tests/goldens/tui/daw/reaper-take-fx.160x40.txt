@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                ● REAPER
 
-                                                                                                                    FOCUS · FX
-                                                                                                                    ■  Kick · take “kick.wav”
-                                                                                                                    ├ □  VST3: ReaPitch (Cockos)
-                                                                                                                    └ □  VST: ReaDelay (Cockos)
-
-
-                                                                                                                    NOW
-                                                                                                                    Ready
-
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                                        Try                                                         HISTORY ──────────────────────────────────
-                                              “What's on this track?”                                               Nothing changed yet
-                                              “Set the tempo to 124”
-                                        “Why might my low end sound muddy?”
-
-                     Kumi keeps each project's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your project
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS · FX ───────────────────────────────╮
+                                                                                                                  │ ■  Kick · take “kick.wav”                  │
+                                                                                                                  │ ├ □  VST3: ReaPitch (Cockos)               │
+                                                                                                                  │ └ □  VST: ReaDelay (Cockos)                │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY ──────────────────────────────────┤
+                                              “What's on this track?”                                             │ Nothing changed yet                        │
+                                              “Set the tempo to 124”                                              │                                            │
+                                        “Why might my low end sound muddy?”                                       │                                            │
+                                                                                                                  │                                            │
+                     Kumi keeps each project's conversations: /conversations goes back to one.                    │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your project                                                                                 ─╯ ╰────────────────────────────────────────────╯
 

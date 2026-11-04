@@ -1,30 +1,30 @@
   Kumi  ·  Night Drive                                                                   ● Renoise
 
-                                                                  FOCUS
-                                                                  Night Drive
-                                                                  Your selection will show here
-
-
-                 ██                          ▀▀                   NOW
-                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                   ✓ “Pad” settings: volume −3 dB,…
-                 ██▀█▄   ██  ██  ██  ██  ██  ██                   ██████▏─ Volume −6 dB → −3 dB
-                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                   Transpose 0 → 12
-
-                 ░▒▓████████████████████████▓▒░
-
-                    Kumi can see Night Drive.
-
-                               Try                                HISTORY 1 ──────────────────────
-                     “What's on this track?”                      ✓ “Pad” settings: volume −3 undo
-                     “Set the tempo to 124”                         dB, transpose 12, loop forward
-               “Why might my low end sound muddy?”                  ██████─ Volume −6 dB → −3 dB
-                                                                    Transpose 0 → 12
-   Kumi keeps each song's conversations: /conversations goes …      Loop off → forward
-
-
-
-
-
-   Ask Kumi about your song
-                                                enter to send
+                                                                ╭─ FOCUS ──────────────────────────╮
+                                                                │ Night Drive                      │
+                                                                │ Your selection will show here    │
+                                                                │                                  │
+                                                                │                                  │
+                 ██                          ▀▀                 ├─ NOW ────────────────────────────┤
+                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                 │ ✓ “Pad” settings: volume −3 dB,… │
+                 ██▀█▄   ██  ██  ██  ██  ██  ██                 │ ██████▏─ Volume −6 dB → −3 dB    │
+                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                 │ Transpose 0 → 12                 │
+                                                                │                                  │
+                 ░▒▓████████████████████████▓▒░                 │                                  │
+                                                                │                                  │
+                    Kumi can see Night Drive.                   │                                  │
+                                                                │                                  │
+                               Try                              ├─ HISTORY 1 ──────────────────────┤
+                     “What's on this track?”                    │ ✓ “Pad” settings: volume −3 undo │
+                     “Set the tempo to 124”                     │   dB, transpose 12, loop forward │
+               “Why might my low end sound muddy?”              │   ██████─ Volume −6 dB → −3 dB   │
+                                                                │   Transpose 0 → 12               │
+   Kumi keeps each song's conversations: /conversations goes …  │   Loop off → forward             │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+╭───────────────────────────────────────────── enter to send ─╮ │                                  │
+╰─ Ask Kumi about your song                                  ─╯ ╰──────────────────────────────────╯
 

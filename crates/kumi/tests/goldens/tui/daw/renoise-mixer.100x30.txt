@@ -1,30 +1,30 @@
   Kumi  ·  Night Drive                                                                   ● Renoise
 
-                                                                  FOCUS · Mixer
-                                                                  ■  Kick             0.0    C
-                                                                  ■  Bass            −6.0  50L S
-                                                                  ■  Pad            −12.0  25R M
-                                                                  ▣  Drums           −1.5    C M
-                 ██                          ▀▀                   ●  Master           0.0    C
-                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                   Renoise gives no meters
-                 ██▀█▄   ██  ██  ██  ██  ██  ██
-                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-                                                                  NOW
-                 ░▒▓████████████████████████▓▒░                   Ready
-
-                    Kumi can see Night Drive.
-
-                               Try                                HISTORY ────────────────────────
-                     “What's on this track?”                      Nothing changed yet
-                     “Set the tempo to 124”
-               “Why might my low end sound muddy?”
-
-   Kumi keeps each song's conversations: /conversations goes …
-
-
-
-
-
-   Ask Kumi about your song
-                                                enter to send
+                                                                ╭─ FOCUS · Mixer ──────────────────╮
+                                                                │ ■  Kick             0.0    C     │
+                                                                │ ■  Bass            −6.0  50L S   │
+                                                                │ ■  Pad            −12.0  25R M   │
+                                                                │ ▣  Drums           −1.5    C M   │
+                 ██                          ▀▀                 │ ●  Master           0.0    C     │
+                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                 │ Renoise gives no meters          │
+                 ██▀█▄   ██  ██  ██  ██  ██  ██                 │                                  │
+                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                 │                                  │
+                                                                ├─ NOW ────────────────────────────┤
+                 ░▒▓████████████████████████▓▒░                 │ Ready                            │
+                                                                │                                  │
+                    Kumi can see Night Drive.                   │                                  │
+                                                                │                                  │
+                               Try                              ├─ HISTORY ────────────────────────┤
+                     “What's on this track?”                    │ Nothing changed yet              │
+                     “Set the tempo to 124”                     │                                  │
+               “Why might my low end sound muddy?”              │                                  │
+                                                                │                                  │
+   Kumi keeps each song's conversations: /conversations goes …  │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+╭───────────────────────────────────────────── enter to send ─╮ │                                  │
+╰─ Ask Kumi about your song                                  ─╯ ╰──────────────────────────────────╯
 

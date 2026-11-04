@@ -1,4 +1,5 @@
 use super::super::{
+    frame,
     picker::NoteTone,
     render::Cursor,
     screen::Screen,
@@ -123,8 +124,9 @@ impl TuiApp {
         }
         self.draw_lines(screen, area.box_top, width, &lines, None)
     }
-    /// A panel's `lines` in a box `width` wide over the conversation, down to the input box, whose top row is `box_top`;
-    /// the cursor where `cursor_at` puts it, when that line shows.
+    /// A panel's `lines` in a frame `width` wide inside, over the conversation, down to the input box, whose top row is
+    /// `box_top`: the first line, its title, is set into the frame's top edge, with what it says at its right. The
+    /// cursor where `cursor_at` puts it, when that line shows.
     pub(super) fn draw_lines(
         &self,
         screen: &mut Screen,
@@ -133,18 +135,28 @@ impl TuiApp {
         lines: &[Line],
         cursor_at: Option<(usize, i32)>,
     ) -> Option<Cursor> {
-        let x = 3;
+        let x = frame::INSET;
         let inner = width - 4;
-        let gap = i32::from(lines.len() as i32 + 3 <= box_top - 2);
-        let height = lines.len() as i32 + gap + 2;
+        let gap = i32::from(lines.len() as i32 + 2 <= box_top - 2);
+        let height = lines.len() as i32 + gap + 1;
         let top = (box_top - 1 - height).max(1);
-        let area = Rect::new(1, top, width, height.min(box_top - 1 - top));
-        screen.fill(area, &st::RAISED);
+        let area = Rect::new(0, top, width + 2, height.min(box_top - 1 - top));
+        let bottom = area.y + area.height - 1;
+        frame::border(screen, area, &frame::LIT, self.corners());
         self.cover(area);
-        let row_of = |index: usize| top + 1 + index as i32 + if index > 0 { gap } else { 0 };
-        for (index, line) in lines.iter().enumerate() {
+        // A drag over it copies what's inside its frame.
+        self.0.state.borrow_mut().select_areas.insert(0, Rect::new(1, top + 1, width, (area.height - 2).max(0)));
+        if let Some(title) = lines.first() {
+            let words = title.spans.clone().unwrap_or_else(|| vec![sp(&title.text, title.style)]);
+            let after = frame::left_words(screen, area, top, &words);
+            if let Some(right) = &title.right {
+                frame::right_words(screen, area, top, std::slice::from_ref(right), after);
+            }
+        }
+        let row_of = |index: usize| top + index as i32 + if index > 0 { gap } else { 0 };
+        for (index, line) in lines.iter().enumerate().skip(1) {
             let y = row_of(index);
-            if y >= box_top - 1 {
+            if y >= bottom {
                 continue;
             }
             if line.band {
@@ -167,6 +179,6 @@ impl TuiApp {
                 screen.put(x + inner - text_width(&right.text), y, &right.text, &right.style);
             }
         }
-        cursor_at.filter(|(line, _)| row_of(*line) < box_top - 1).map(|(line, column)| Cursor { x: x + column, y: row_of(line) })
+        cursor_at.filter(|(line, _)| *line > 0 && row_of(*line) < bottom).map(|(line, column)| Cursor { x: x + column, y: row_of(line) })
     }
 }

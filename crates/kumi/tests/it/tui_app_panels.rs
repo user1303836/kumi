@@ -927,7 +927,7 @@ case!(after_reconnecting_history_says_kumi_cant_undo_what_it_could, async {
     let lines = h.screen();
     let history = lines.iter().position(|s| s.contains("HISTORY")).unwrap();
     let row = lines[history + 1].clone();
-    assert!(row.contains("Tempo 120 → 128 BPM") && row.trim_end().ends_with("undo") && !row.contains("no undo"), "{row}");
+    assert!(row.contains("Tempo 120 → 128 BPM") && framed(&row).ends_with("undo") && !row.contains("no undo"), "{row}");
     // Reconnecting changes the records in place: HISTORY's own row says so, not only NOW.
     h.type_text("/reconnect\r").await;
     let row = h.screen()[history + 1].clone();
@@ -1325,9 +1325,9 @@ case!(a_free_answer_that_starts_with_a_question_mark_is_words, async {
     h.has("? not sure yet");
     h.close().await;
 });
-/// How many of the help's rows are above what shows, and below it, as its title says.
+/// How many of the help's rows are above what shows, and below it, as its frame's top edge says beside its title.
 fn help_scrolled(h: &Harness) -> (usize, usize) {
-    let counts = regex::Regex::new(r"Keys and commands *(?:↑ (\d+) · ↓ (\d+) more|↑ (\d+) more|↓ (\d+) more)?").unwrap();
+    let counts = regex::Regex::new(r"Keys and commands[ ─]*(?:↑ (\d+) · ↓ (\d+) more|↑ (\d+) more|↓ (\d+) more)?").unwrap();
     let screen = h.screen().join("\n");
     let found = counts.captures(&screen).expect("the help is open");
     let count = |at: usize| found.get(at).map_or(0, |count| count.as_str().parse::<usize>().unwrap());

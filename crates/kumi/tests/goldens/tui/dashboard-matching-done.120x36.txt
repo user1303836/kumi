@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-   match the reference's low end                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-   Matching: 58% → 81% (Low shelf +3 dB) · 1:05 · close enough
-
-                                                                                  NOW
-                                                                                  Ready
-
-
-
-
-
-
-
-
-
-
-                                                                                  HISTORY ────────────────────────────
-                                                                                  Nothing changed yet
-
-
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                enter to send
+   match the reference's low end                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+   Matching: 58% → 81% (Low shelf +3 dB) · 1:05 · close enough                  │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ HISTORY ────────────────────────────┤
+                                                                                │ Nothing changed yet                  │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 
