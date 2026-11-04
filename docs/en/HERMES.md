@@ -34,7 +34,8 @@ Then, in your DAW:
 - **Renoise:** enable the Kumi tool.
 
 If Kumi on its own already installed its part in your DAW, setup says so and offers to use that installation instead of
-replacing it. Kumi in Hermes then uses that installation's connection files, never its sign-in.
+replacing it. Kumi in Hermes then reads that installation's connection files and writes its own connection state there,
+never its sign-in or settings.
 
 Setup never starts or quits your DAW, chooses a Control Surface, or saves your project.
 
@@ -69,7 +70,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - **Your conversation:** the project details Kumi notes (FOCUS, what changed) and its measurements go to the model you
   use in Hermes, as part of the chat.
 - **Interpret measurements** (off unless you turn it on) sends the measured numbers and a small image of the measured
-  band energy, never the audio or file paths, to the model you choose for Kumi's listening task.
+  band energy, never the audio or file paths, to the model you choose for Kumi's listening task in Hermes, or to the
+  fallback providers Hermes is set to try for that task. Retries and fallbacks can add time and token cost.
 - **Audio stays here:** Kumi measures audio on your computer and uploads none of it.
 - **Listening to a track or the mix** asks first, and plays only the beat window you approve (60 seconds at most),
   only while the DAW is stopped. Routing and transport may change briefly and are put back after. Live captures it

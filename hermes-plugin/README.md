@@ -106,10 +106,12 @@ it through Kumi Ears (Max for Live); REAPER and Renoise render it into the liste
 that owns their component, and Kumi copies the file it asked for and removes exactly that file. Audio is measured on
 this computer and not uploaded. The project details Kumi notes for FOCUS, and the measurements it
 returns, go to the model you use in Hermes as part of the conversation. With `listen_interpretation` on, Kumi also
-sends the measurements and a small image of the measured band energy (never the audio or file paths) to your Hermes
-model through Hermes's own model access, using the model you choose for the `kumi_listen` auxiliary task, which must
-accept images. If you let Kumi use an existing Kumi installation, its runtime reads that installation's DAW connection
-files, never its sign-in. Kumi's own sign-in, model providers, account files and updater are never used. No telemetry.
+sends the measurements and a small image of the measured band energy (never the audio or file paths) through Hermes's
+own model access: to the auxiliary model you choose for the `kumi_listen` task in Hermes (it must accept images), or to
+the fallback providers Hermes is configured to try for that task. Hermes retries a failed attempt and may fall back,
+which can add time and token cost. If you let Kumi use an existing Kumi installation, its runtime reads that
+installation's DAW connection files and writes its own connection state there, never its sign-in or settings. Kumi's
+own sign-in, model providers, account files and updater are never used. No telemetry.
 
 ## Compatibility
 
