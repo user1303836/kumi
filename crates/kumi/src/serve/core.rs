@@ -1,7 +1,7 @@
 //! The runtime core's operations (W1). `status` says what the runtime is and what it can reach; the DAW connection,
 //! looks, reads, changes, undo, HISTORY and setup join it.
 
-use super::ctx::{reads, Call, Ctx, OpFuture, Operation};
+use super::ctx::{reads, Call, Ctx, OpError, OpFuture, Operation};
 use super::PROTOCOL;
 use serde_json::{json, Value};
 
@@ -21,6 +21,29 @@ fn no_arguments() -> Value {
 
 fn run_status(ctx: &Ctx, _call: Call) -> OpFuture<'_> {
     Box::pin(async move { Ok(publish_status(ctx, false).await) })
+}
+
+pub static JOB: Operation = Operation {
+    name: "job",
+    description: "A background job another call started (a library scan, say): its state (running, done, failed, \
+                  cancelled, or interrupted when the runtime stopped first), its progress, and its result once done. \
+                  Changes nothing.",
+    schema: job_schema,
+    effect: reads,
+    run: run_job,
+};
+
+fn job_schema() -> Value {
+    json!({"type": "object", "additionalProperties": false, "required": ["job_id"], "properties": {
+        "job_id": {"type": "string", "minLength": 1, "maxLength": 64, "description": "The id the call that started it answered with"}
+    }})
+}
+
+fn run_job(ctx: &Ctx, call: Call) -> OpFuture<'_> {
+    Box::pin(async move {
+        let id = call.args.get("job_id").and_then(Value::as_str).unwrap_or_default();
+        ctx.jobs().get(id, &ctx.paths().state_dir).ok_or_else(|| OpError::Invalid { reason: format!("there's no job {id}") })
+    })
 }
 
 /// The runtime's status now, also written as `status.json` (`stale` there: whether the runtime has stopped).

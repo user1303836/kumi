@@ -4,7 +4,7 @@
 use super::core;
 use super::ctx::Operation;
 
-pub static OPERATIONS: &[&Operation] = &[&core::STATUS];
+pub static OPERATIONS: &[&Operation] = &[&core::STATUS, &core::JOB];
 
 #[cfg(test)]
 mod tests {
