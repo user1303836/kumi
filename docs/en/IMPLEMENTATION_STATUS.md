@@ -31,9 +31,11 @@ says which Kumi ships with which.
 The real-Live records below are from earlier TypeScript releases. Native CI
 and migration checks do not replace a new real-Live acceptance run.
 
-- **Every pull request:** native Rust builds and tests, the Remote Script's and
-  the Live extension's tests, six target bundles, and installation and
-  migration tests; see [CI](TESTING.md#ci).
+- **Every pull request:** native Rust builds and tests on Linux, and the Remote
+  Script's and the Live extension's tests; macOS and Windows after each merge;
+  for a change to installing, bundles for the three systems and installation
+  tests; all six target bundles and the migration tests on each release tag;
+  see [CI](TESTING.md#ci).
 - **Real Live on macOS** (Apple silicon, Live 12.4.15 beta): every kind of change
   Kumi makes, each undone through Kumi (65 of 65 on bridges 1.0.62 and 1.0.63,
   in 19- and 200-track Sets), playing, bouncing, listening and watching, offline

@@ -42,7 +42,7 @@ Run from the repository root.
 | `sh scripts/test-isolated.sh` (Windows: `./scripts/test-isolated.ps1`) | Every test with cargo-nextest, each in a process of its own, in a home of its own; arguments go to `cargo nextest run` (`KUMI_NEXTEST=0`: `cargo test`, a crate's tests in one process; `KUMI_NEXTEST_ARCHIVE`: tests built elsewhere, from a `cargo nextest archive`, unpacked into the checkout's `target/`) |
 | `sh scripts/test-isolated.sh -p kumi-daw-ableton -E 'test(/^hands_transport::/)'` | One test file of one crate: a crate's tests are one binary, `tests/it/`, a module a file |
 | `cargo fmt --all --check` | Formatting, as CI checks it |
-| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints; advisory in CI for now |
+| `cargo clippy --workspace --all-targets --locked -- -D warnings` | Lints; CI doesn't run them |
 | `cargo clippy --workspace --lib --bins --examples --locked -- -A clippy::all -D clippy::await_holding_refcell_ref` | A `RefCell` borrow held across an await; fails the Lint CI job |
 | `sh scripts/test-isolated.sh --profile ci` | The tests the `Rust / Linux` parts run, with cargo-nextest (`-p <crate>` or `--exclude <crate>` for one part's; `--profile ci-os`: what macOS and Windows run; `--profile extended`: every test) |
 | `python3 scripts/dev.py check` | Required CI's checks for what this branch changes since `origin/main` (`--base` for another): the change's whitespace, every file in a crate or an area, the crates' layers (`dev.py deps --check`: a dependency points down, and no DAW's crates use another's), then for the crates it affects `cargo fmt --check`, the `RefCell` lint and their `ci` tests (with cargo-nextest), then the Remote Script's, the Live extension's and the Renoise tool's tests when they changed, and the release scripts' tests. `--dry-run` says what it would run |
@@ -148,60 +148,60 @@ versions this checkout carries.
 
 ## CI
 
-These workflows run on every pull request, and the CI, Willington files, Installer and Network workflows on every push to `main` too:
+CI is kept to a minimum ([AGENTS.md](../../AGENTS.md), "Minimal CI"). A pull request runs one gate, on Linux, for what it
+changes. macOS and Windows run on `main` after each merge, and on any branch by hand (`gh workflow run CI --ref
+<branch>`). Every test runs once a week.
 
 | Workflow | Jobs | What runs |
 | --- | --- | --- |
-| **CI** | `Rust / Linux`, `Rust / Linux (Kumi's crates)`, `Rust / Linux (bridges)` | The `ci` set of `.config/nextest.toml` through the isolated runner, in three parts at once by crate, of about the same test time (the app; Kumi's other crates; `ableton-mcp-server`, `daw-bridge`, `daw-mcp-server` and `reaper-kumi`), so no runner builds every test binary: every test but the long ones the Extended workflow runs (REAPER's and Renoise's whole-flow simulations among them), which the config lists with why. On a pull request, each part tests only its crates the change affects (`scripts/dev.py`, as `dev.py check` picks them), and a part with none skips. A test that runs past 30 s fails, by name. Then `git diff --check`. Each Rust job, Extended's too, keeps the list of the tests it selected as an artifact (`nextest-list-*`), to compare one run's tests with another's |
-| | `Rust / macOS`, `Rust / Windows`, `Rust / Windows (Kumi's crates and bridges)` | The `ci-os` set: the tests that differ by platform (installing, launching and updating; the terminal, stdin and the Windows console; Hands; paths, files and child processes; the store), and only those built. On a pull request, macOS tests the affected packages among them, as the Linux parts do, and only macOS counts for Required CI. Windows runs on each push to main, in two parts at once of about the same test time (the app's tests, and the rest), without its slowest tests, which Extended runs; a pull request labelled `full-tests` runs every Windows test in Extended |
-| | `Rust / Lint` (Ubuntu) | `cargo fmt --check`, the examples' build and Clippy (advisory, except a `RefCell` borrow held across an await, which fails the job) |
-| | `Python Remote Script / ubuntu-24.04`, `macos-15`, `windows-2025` (Python 3.11) | The Remote Script's tests; compiles the package |
-| | `Live extension` (Ubuntu, Node 24) | The extension's tests, against its committed build |
-| | `Release scripts` (Ubuntu) | The whitespace check of the change, then the packaging tests, the release script's tests and `scripts/check-installers.sh` (install.sh is POSIX sh; install.ps1 parses and is ASCII). Pushes to `main` also check `main`'s raw installers and the latest release's |
-| | `REAPER extension loads / macos-15`, `ubuntu-22.04`, `windows-2025` | REAPER's extension as it ships: the release build and the platform's own strip, the release script's check of what a bundle may carry (REAPER's entry point; signed and named for itself on macOS; the C runtime linked in on Windows; no newer glibc than Kumi's on Linux), loaded by the system's loader, and REAPER's calls through the C++ shim |
-| | `Renoise tool` (Ubuntu) | The tool's Lua tests on a pinned LuaJIT, against a mock of Renoise's API, and `lua-language-server --check` against Renoise's API 6.2 definitions |
+| **CI** | `Rust / Linux`, `Rust / Linux (Kumi's crates)`, `Rust / Linux (bridges)` | The `ci` set of `.config/nextest.toml` through the isolated runner, in three parts at once by crate, of about the same test time (the app; Kumi's other crates; `ableton-mcp-server`, `daw-bridge`, `daw-mcp-server`, `reaper-kumi` and `soundcraft-kumi`), so no runner builds every test binary: every test but the long ones the Extended workflow runs (REAPER's and Renoise's whole-flow simulations among them), which the config lists with why. On a pull request, each part tests only its crates the change affects (`scripts/dev.py`, as `dev.py check` picks them), and a part with none passes at once. A test that runs past 30 s fails, by name. Each Rust job, Extended's too, keeps the list of the tests it selected as an artifact (`nextest-list-*`), to compare one run's tests with another's |
+| | `Rust / Lint` (Ubuntu) | `cargo fmt --check`, and the one Clippy check that fails the job: a `RefCell` borrow held across an await |
+| | `Checks` (Ubuntu) | The change's whitespace (`git diff --check`); every tracked file in a crate or an area, the crates' layers and `dev.py`'s tests; the packaging tests, the release script's tests and the models catalog; `scripts/check-installers.sh` (install.sh is POSIX sh; install.ps1 parses and is ASCII). Then, for a change that reaches them: the Remote Script's tests on Live's Python (3.11); the Live extension's tests against its committed build (Node 24); the Renoise tool's Lua tests on a pinned LuaJIT against a mock of Renoise's API, and `lua-language-server --check` against Renoise's API 6.2 definitions |
+| | `REAPER extension loads / ubuntu-22.04` (on `main` and by hand also `macos-15` and `windows-2025`) | REAPER's extension as it ships: the release build and the platform's own strip, the release script's check of what a bundle may carry (REAPER's entry point; signed and named for itself on macOS; the C runtime linked in on Windows; no newer glibc than Kumi's on Linux), loaded by the system's loader, and REAPER's calls through the C++ shim |
 | | `Required CI` | Passes only when all of the above passed |
-| **Extended** | `Extended / Linux / build`, `(1/3)` to `(3/3)`; `Extended / macOS / build`, `(1/2)`, `(2/2)`; `Extended / Windows / build`, `(1/6)` to `(6/6)`; `Extended / documentation and eval runner tests` | Each system's tests built once and archived (`cargo nextest archive`), then run in shares from the archive, which start when their own system's build is done (`extended-system.yml`). Every test (the `extended` set) with the official SDKs installed: what `ci` leaves out (the recorded-source oracles, the long listening, form and rendering simulations, video with ffmpeg, the benchmarks, the interoperability tests beside the official MCP and model SDKs, the migration from Kumi 1.7.5, the long sweeps of the timing building blocks) and each platform's every test; then the documentation tests. It runs each week, by hand, and on a pull request labelled `full-tests`, and blocks nothing |
-| | `Extended / REAPER SDK, newest header` | REAPER's extension built against the newest SDK headers Cockos has published, its generated function table checked, and the functions a move to them would bring listed |
-| **Network** | `Network / What changed`, then `Network / Linux`, `macOS`, `Windows` | Kumi's HTTP clients with a certificate authority in each system's own trust store, and through the proxy in its own settings (`network.rs`'s ignored tests). The systems' jobs run only for a change to how the clients are made (the `network` area in `scripts/areas.toml`) |
+| | `Rust / macOS`, `Rust / Windows`, `Rust / Windows (Kumi's crates and bridges)`, `Python Remote Script / macos-15`, `windows-2025` | Only on `main` after each merge and by hand: never on a pull request, and not part of `Required CI`. The `ci-os` set: the tests that differ by platform (installing, launching and updating; the terminal, stdin and the Windows console; Hands; paths, files and child processes; the store), and only those built. Windows runs in two parts at once of about the same test time (the app's tests, and the rest), without its slowest tests, which Extended runs. Then the Remote Script's tests on Live's Python on each system |
+| **Extended** | `Extended / Linux / build`, `(1/2)`, `(2/2)`; `Extended / macOS / build`, `(1/2)`, `(2/2)`; `Extended / Windows / build`, `(1/3)` to `(3/3)` | Each system's tests built once and archived (`cargo nextest archive`), then run in shares from the archive, which start when their own system's build is done (`extended-system.yml`). Every test (the `extended` set) with the official SDKs installed: what `ci` leaves out (the recorded-source oracles, the long listening, form and rendering simulations, video with ffmpeg, the interoperability tests beside the official MCP and model SDKs, the migration from Kumi 1.7.5, the long sweeps of the timing building blocks) and each platform's every test. It runs each Monday and by hand (`gh workflow run Extended --ref <branch>`), never on a pull request, and blocks nothing |
+| **Network** | `Network / Linux`, `macOS`, `Windows` | Kumi's HTTP clients with a certificate authority in each system's own trust store, and through the proxy in its own settings (`network.rs`'s ignored tests). Only for a pull request, or a push to `main`, that changes how the clients are made (the `network` area in `scripts/areas.toml`, which the workflow's `paths:` repeat), and by hand |
 | **Willington files** | `Willington files` (Ubuntu) | Only the repository owner's pull requests, from a `willington/` branch in this repository, change `vendor/willington/`, and such a pull request changes nothing else. `main`'s copy of the check runs, reading the pull request's file list, never its code |
-| **Installer** | `Native bundle / <target>`, `Aggregate native and existing-installer releases`, then `Install / <system>` and `Existing installer transition / <system>`; `Installer edges / <system>` (three) needs no bundle | Each push to `main`, and a pull request that changes installing, builds a bundle for Linux and Windows on x64 and macOS on Apple silicon and, on each, installs, checks and uninstalls as below. Tags, a run by hand and a pull request labelled `full-tests` do all of it: build a native bundle for Intel and ARM on macOS, Linux and Windows (each Mac bundle with the helper Kumi uses Live's menus with, universal and ad hoc signed; the Intel one cross-built on Apple Silicon), then the compatibility release that existing installations update from, and serves them locally with the installers, as GitHub serves a release's files. On each system: installs with the one-liner from that copy, as producers do (Windows PowerShell 5.1 on Windows, with `KUMI_HOME` in a folder named in non-ASCII letters), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, puts REAPER's extension and Renoise's tool into scratch DAW folders that each hold a file of the producer's (`kumi --daw reaper|renoise bridge --yes`), checks each is the bundle's copy with its reference, receipt and kept generation, loads the extension with REAPER's entry point and starts Kumi's host for them, then runs `kumi update` (both bridges as they were), `kumi update --rollback` twice (both to an earlier Kumi's copies and back) and `kumi uninstall` (both out, a producer's copy of the tool kept, the producer's own files left). One install on each system (macOS arm64, Linux x64, Windows x64) then, in a home with spaces and non-ASCII letters, installs GitHub's latest release with this build's installer and then, with `KUMI_VERSION`, the release before this build; puts that release's bridge in; updates to this build and rolls back twice, checking the Kumi and the bridge each time (with REAPER's and Renoise's bridges in, which that release doesn't know and leaves be); and uninstalls. The PATH line goes in zsh's `ZDOTDIR` on macOS and fish's `conf.d` on Linux, where that shell finds `kumi`, and the uninstall takes it out; Windows runs this in PowerShell 7: this build's install, the bridge, the rollbacks and the uninstall with `KUMI_HOME` in a folder named in non-ASCII letters, and the update from the release before in a home with spaces only (that release's own updater unpacks it). The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. The edges jobs run install.sh and install.ps1 against stand-in releases: a missing release, no answer, a sign-in page, a bad checksum, a Kumi that doesn't start, Ctrl-C. On a `v*` tag's push, once all these pass, `publish` attaches the bundle and the installers to the release, and publishes it when `scripts/release.py` wrote its notes. |
+| **Installer** | `Native bundle / <target>`, `Aggregate native and existing-installer releases`, then `Install / <system>` and `Existing installer transition / <system>`; `Installer edges / <system>` (three) needs no bundle | A pull request that changes installing, and `main` once one merges, builds a bundle for Linux and Windows on x64 and macOS on Apple silicon and, on each, installs, checks and uninstalls as below. Tags and a run by hand do all of it: build a native bundle for Intel and ARM on macOS, Linux and Windows (each Mac bundle with the helper Kumi uses Live's menus with, universal and ad hoc signed; the Intel one cross-built on Apple Silicon), then the compatibility release that existing installations update from, and serves them locally with the installers, as GitHub serves a release's files. On each system: installs with the one-liner from that copy, as producers do (Windows PowerShell 5.1 on Windows, with `KUMI_HOME` in a folder named in non-ASCII letters), checks the version, `doctor`, the bridge and its analysis worker, installs again as a repair, runs `kumi bridge --yes` into a scratch Remote Scripts folder, puts REAPER's extension and Renoise's tool into scratch DAW folders that each hold a file of the producer's (`kumi --daw reaper\|renoise bridge --yes`), checks each is the bundle's copy with its reference, receipt and kept generation, loads the extension with REAPER's entry point and starts Kumi's host for them, then runs `kumi update` (both bridges as they were), `kumi update --rollback` twice (both to an earlier Kumi's copies and back) and `kumi uninstall` (both out, a producer's copy of the tool kept, the producer's own files left). One install on each system (macOS arm64, Linux x64, Windows x64) then, in a home with spaces and non-ASCII letters, installs GitHub's latest release with this build's installer and then, with `KUMI_VERSION`, the release before this build; puts that release's bridge in; updates to this build and rolls back twice, checking the Kumi and the bridge each time (with REAPER's and Renoise's bridges in, which that release doesn't know and leaves be); and uninstalls. The PATH line goes in zsh's `ZDOTDIR` on macOS and fish's `conf.d` on Linux, where that shell finds `kumi`, and the uninstall takes it out; Windows runs this in PowerShell 7: this build's install, the bridge, the rollbacks and the uninstall with `KUMI_HOME` in a folder named in non-ASCII letters, and the update from the release before in a home with spaces only (that release's own updater unpacks it). The transition jobs run the migration tests with Kumi 1.7.5 and the new bundles. The edges jobs run install.sh and install.ps1 against stand-in releases: a missing release, no answer, a sign-in page, a bad checksum, a Kumi that doesn't start, Ctrl-C. On a `v*` tag's push, once all these pass, `publish` attaches the bundle and the installers to the release, and publishes it when `scripts/release.py` wrote its notes. |
 
-On a pull request, less runs:
+On a pull request:
 
-- `Python Remote Script` skips macOS.
+- Only the Linux jobs run. macOS and Windows run once it merges, or by hand
+  on its branch.
 - Rust's build caches are saved from `main` only: a pull request restores
   `main`'s and saves none.
-- Each world's jobs run for what they test, as `scripts/dev.py` reads it from
-  the crates and `scripts/areas.toml` (`python3 scripts/dev.py affected --base
+- Each job runs for what it tests, as `scripts/dev.py` reads it from the
+  crates and `scripts/areas.toml` (`python3 scripts/dev.py affected --base
   origin/main` says what a branch runs): Rust's skip a change to the Renoise
   tool's Lua alone, `REAPER extension loads` runs for the extension's crate,
   what it builds with (`daw-bridge`, the lockfile) and the release script, and
-  `Renoise tool` for `daws/renoise`. `Release scripts` checks that every tracked
-  file belongs to a crate or an area.
+  `Checks` runs the Renoise tool's tests for `daws/renoise`. `Checks` also
+  checks that every tracked file belongs to a crate or an area.
 - The Installer builds and installs on one machine of each system only for a
   change to the install surface: the installers, installing, updating and
   releasing, Willington's files, the Mac helper, the `tar` and PowerShell Kumi
   runs, how it downloads (its HTTP client and network settings) and builds
-  paths, how Kumi's extension goes into Live, how REAPER's and Renoise's bridges
-  are built and go in, and the Installer's workflow; not their tests. Any other
-  pull request builds nothing, and `main`'s run checks it once merged. All six,
-  the updates from GitHub's releases, the edges and the transition run with the
-  `full-tests` label.
+  paths, how Kumi's extension goes into Live, how REAPER's and Renoise's
+  bridges are built and go in, and the Installer's workflow; not their tests.
+  Any other pull request doesn't run it. All six, the updates from GitHub's
+  releases, the edges and the transition run on a tag and by hand.
 - The Installer's bundles, on pull requests and pushes to `main`, build with
   the `ci-release` profile, which skips the release profile's whole-program
   optimization and optimizes less. Tags build with `release`.
 
-Each push to `main` runs what a pull request that changes installing runs, and
-each tag all of the Installer. The Extended workflow runs every test each week.
-Each night the Installer builds all six bundles with the `release` profile,
-which keeps that profile's build cache warm for the next tag; when that fails,
-it opens an issue ("The nightly Installer build failed"). Each day the Caches
-workflow deletes every Rust build cache but the newest of its kind, so older
-lockfile generations don't push the caches pull requests restore out of the
+Each push to `main` runs CI on Linux, macOS and Windows over every crate, and
+the Installer and Network for a change to theirs; each tag runs all of the
+Installer. The Extended workflow runs every test each Monday. Each night the
+Installer builds all six bundles with the `release` profile, which keeps that
+profile's build cache warm for the next tag; when that fails, it opens an
+issue ("The nightly Installer build failed"). Each day the Caches workflow
+deletes every Rust build cache but the newest of its kind, so older lockfile
+generations don't push the caches pull requests restore out of the
 repository's 10 GB.
 
-To merge into `main`, `Required CI` and `Willington files` must pass. The Installer isn't required.
+To merge into `main`, `Required CI` and `Willington files` must pass. The
+Installer isn't required.
 [Releases and distribution](DISTRIBUTION_POLICY.md#merge-gate) has the rest of
 the rules.
 
@@ -224,3 +224,8 @@ failed compensation, a change made in Live meanwhile, and undo. Keep fake Live,
 the simulator and real Live apart in what a test claims (`fake-live`,
 `simulator` and `real-live` provenance). Keep fixtures small and free of
 private data, and never let a test reach real Live folders or `~/.kumi`.
+
+A test waits on a state, never on a clock, and asserts no speed; benchmarks
+stay out of the suite. A test that fails on a change it has nothing to do with
+is deleted, or fixed if the fix is small and certain ([AGENTS.md](../../AGENTS.md),
+"Minimal CI").
