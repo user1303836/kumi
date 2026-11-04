@@ -74,8 +74,8 @@ jobs:
       matrix:
         include:
           - { part: app, label: Linux, cache: kumi, crates: "-p kumi" }
-          - { part: crates, label: "Linux (Kumi's crates)", cache: kumi, crates: "--exclude kumi --exclude ableton-mcp-server --exclude daw-bridge --exclude daw-mcp-server --exclude reaper-kumi" }
-          - { part: bridges, label: "Linux (bridges)", cache: bridges, crates: "-p ableton-mcp-server -p daw-bridge -p daw-mcp-server -p reaper-kumi" }
+          - { part: crates, label: "Linux (Kumi's crates)", cache: kumi, crates: "--exclude kumi --exclude ableton-mcp-server --exclude daw-bridge --exclude daw-mcp-server --exclude reaper-kumi --exclude soundcraft-kumi" }
+          - { part: bridges, label: "Linux (bridges)", cache: bridges, crates: "-p ableton-mcp-server -p daw-bridge -p daw-mcp-server -p reaper-kumi -p soundcraft-kumi" }
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       # This part's packages that the change affects, as `dev.py check` picks them (main's pushes: all of them). A part
