@@ -4,7 +4,7 @@ version = 4
 
 [[package]]
 name = "ableton-mcp-server"
-version = "1.0.103"
+version = "1.0.104"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -577,7 +577,7 @@ dependencies = [
 
 [[package]]
 name = "daw-mcp-server"
-version = "1.24.64"
+version = "1.24.65"
 dependencies = [
  "base64 0.22.1",
  "daw-bridge",
@@ -1355,7 +1355,7 @@ dependencies = [
 
 [[package]]
 name = "kumi"
-version = "1.24.64"
+version = "1.24.65"
 dependencies = [
  "ableton-mcp-server",
  "async-trait",
@@ -1478,7 +1478,7 @@ dependencies = [
 
 [[package]]
 name = "kumi-common"
-version = "1.24.64"
+version = "1.24.65"
 dependencies = [
  "icu_collator",
  "icu_locale_core",
@@ -1775,7 +1775,7 @@ version = "0.1.0"
 
 [[package]]
 name = "kumi-types"
-version = "1.24.64"
+version = "1.24.65"
 dependencies = [
  "async-trait",
  "fancy-regex",
@@ -2568,7 +2568,7 @@ dependencies = [
 
 [[package]]
 name = "reaper-kumi"
-version = "0.1.11"
+version = "0.1.12"
 dependencies = [
  "base64 0.22.1",
  "cc",
@@ -3123,7 +3123,7 @@ dependencies = [
 
 [[package]]
 name = "soundcraft-kumi"
-version = "1.24.64"
+version = "1.24.65"
 dependencies = [
  "daw-bridge",
  "daw-mcp-server",

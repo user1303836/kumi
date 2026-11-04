@@ -3,6 +3,57 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.65 — 2026-11-04
+
+Ships with bridge 1.0.104, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+Ships with REAPER extension 0.1.12 and Renoise tool 1.0.19, which REAPER and Renoise load when they
+restart; `kumi update` puts them in.
+
+- Kumi learns your library about a fifth faster, using less CPU.
+- A big sound library takes about a fifth less memory while Kumi runs.
+- A big sound library's log takes less memory while Kumi runs.
+- On Windows, setting up REAPER or Renoise, updating their bridges and `kumi doctor` finish sooner:
+  Kumi sets and checks its files' permissions without starting PowerShell.
+- When Live has AbletonMcpBridge as a Control Surface but couldn't start it, Kumi now says why (its
+  port held by another program, say) and what fixes it, instead of asking you to choose it again.
+- With the bridge already up to date, kumi bridge now puts back what keeps Live from starting it: its
+  files' permissions, and its Remote Script's files.
+- Kumi starts a little faster on macOS and Linux: it finds the open DAW without running ps.
+- Kumi reconnects to Live sooner: at once when its link to Live drops, within a quarter second as Live
+  comes back from opening another Set, and as soon as Live answers when it's still opening as Kumi
+  starts.
+- `kumi update` and `kumi update --check` find the newest release a little sooner.
+- Kumi can now change a Max for Live device that's already there, its own or anyone's, into a new
+  device beside it, without touching the original.
+- A control written into a Max for Live device's patch is no longer made as a stray box off the face:
+  Kumi asks for it as a control, which it places on the face and names.
+- Undoing a clear of part of a clip works after Kumi's undo has brought back the rest of that clip,
+  deleted since.
+- The input box, the side pane and what opens over the conversation sit in rounded frames, with titles
+  and the keys that apply in the frame's top edge; the frame with the keyboard is brighter, and a
+  one-line message takes two rows instead of three.
+- Each command has an icon in the `/` menu and the help, coloured by what it's about.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.104
+
+- On macOS, with Kumi open, Live's UI no longer stalls briefly while you click through tracks.
+- Kumi's Live bridge costs Live a little less while it waits, Kumi open or not.
+- When AbletonMcpBridge can't start, it now says why in Live's status bar, and what it found wrong
+  with Kumi's bridge files.
+- Undoing a clip Kumi copied into the Arrangement works after a clip was added or removed before it on
+  its track.
+
+### Renoise tool 1.0.19
+
+- In a big song, FOCUS's pattern costs Renoise much less to keep fresh, and in a dense song it shows
+  the whole stretch around your cursor.
+- FOCUS shows a Renoise song sooner at start: it no longer waits for Kumi's catch-up to finish reading
+  the song.
+
 ## 1.24.64 — 2026-11-03
 
 Ships with bridge 1.0.103, as 1.24.63 did. Ships with REAPER extension 0.1.11, which REAPER loads when
