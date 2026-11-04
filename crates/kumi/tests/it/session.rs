@@ -1056,8 +1056,15 @@ local_test!(a_daw_kumi_only_reads_hears_nothing_of_making_changes, {
     let asked = h.record.calls.borrow().last().cloned().unwrap();
     assert!(!asked.contains("judged rounds"), "{asked}");
     let calls = h.record.calls.borrow().len();
-    h.session.submit("/loop master this to -9 LUFS", None).await.unwrap();
-    assert!(h.notice("Kumi can't change SoundCraft yet, so a loop of changes can't run there."));
+    let loop_refused = || {
+        let refusal = "Kumi can't change SoundCraft yet, so a loop of changes can't run there.";
+        h.events.borrow().iter().filter(|e| matches!(e, SessionEvent::Notice { message } if message == refusal)).count()
+    };
+    for (line, times) in [("/loop", 1), ("/loop master this to -9 LUFS", 2)] {
+        h.session.submit(line, None).await.unwrap();
+        assert_eq!(loop_refused(), times, "{line}");
+    }
+    assert!(!h.notice("Nothing to pick up here"), "a bare /loop invites none where none can run");
     h.session.goal(Some("make the chorus lift")).await.unwrap();
     assert!(h.notice("Kumi can't change SoundCraft yet, so it can't work toward a goal there."));
     assert_eq!(h.record.calls.borrow().len(), calls, "neither reached the model");

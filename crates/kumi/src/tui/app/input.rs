@@ -903,6 +903,11 @@ impl TuiApp {
                 self.notice(&super::not_kept(), NoticeTone::Info);
                 return Ok(());
             }
+            Effect::Refused(Why::ReadsOnly { verb }) => {
+                self.clear_editor();
+                self.notice(&super::reads_only(&verb), NoticeTone::Info);
+                return Ok(());
+            }
             Effect::Resume { word } => {
                 self.clear_editor();
                 let found = if word.is_empty() { None } else { Some(session.op(op::FindConversation { word: word.to_string() }).await?) };

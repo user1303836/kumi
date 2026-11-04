@@ -522,6 +522,8 @@ pub enum Why {
     NotKept,
     /// Kumi is working: `verb` runs once it's done.
     Busy { verb: String },
+    /// The DAW is one Kumi only reads, and `verb` changes it (a recipe is changes).
+    ReadsOnly { verb: String },
 }
 
 /// What a line asks for, which the front end carries out. A command's words, where the front end reads them itself,
@@ -649,6 +651,10 @@ pub fn run(line: &str, now: &Now) -> Effect {
         if let Some(name) = argument(line, "/fork") {
             return Effect::Fork { name };
         }
+    }
+    // A DAW Kumi only reads keeps and runs no recipes, busy or not: they're changes.
+    if can.reads_only && (with_words("/recipes") || with_words("/recipe")) {
+        return Effect::Refused(Why::ReadsOnly { verb: verb.to_string() });
     }
     if with_words("/recipe") && can.run_recipe {
         return Effect::Recipe;

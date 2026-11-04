@@ -1436,6 +1436,10 @@ pub(crate) fn conversation_line(now: &ConversationNow, clean: impl Fn(&str) -> S
 pub(crate) fn not_kept() -> String {
     format!("A chat without {} keeps no conversations; {k} -c or {k} -r carries on a kept one.", crate::daw::words().app, k = *KUMI_START)
 }
+/// What a command that changes the DAW says where Kumi only reads it (a recipe's: they're changes).
+pub(crate) fn reads_only(verb: &str) -> String {
+    format!("Kumi can't change {} yet, so {verb} isn't here.", crate::daw::words().app)
+}
 /// The line that brings this run's conversation back: when it's kept, and this run made a request in it or took it up.
 pub(crate) fn continue_hint(now: Option<ConversationNow>) -> Option<String> {
     now.filter(|now| now.kept && now.touched).map(|now| format!("Continue this conversation: {} -r {}", *KUMI_START, now.id))

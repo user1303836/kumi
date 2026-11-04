@@ -172,6 +172,12 @@ impl Session {
         let searching = self.0.state.borrow().integration.as_ref().is_some_and(|i| i.has_goal());
         if let Some(request) = text.strip_prefix("/loop").filter(|rest| rest.is_empty() || rest.starts_with(char::is_whitespace)).map(trim)
         {
+            // A DAW Kumi only reads has no loop, bare or with words: its rounds change the DAW between judgings.
+            if self.reads_only() {
+                let app = self.0.options.profile.words.app;
+                self.notice(&format!("Kumi can't change {app} yet, so a loop of changes can't run there."));
+                return Ok(None);
+            }
             let word = command_word(request);
             if request.is_empty() || matches!(word.as_str(), "resume" | "carry on" | "continue") {
                 if searching && self.goal_paused_here().await {
@@ -186,12 +192,6 @@ impl Session {
                     return Ok(None);
                 }
                 self.notice(if word == "pause" { "There's no loop running to pause." } else { "There's no loop to stop." });
-                return Ok(None);
-            }
-            // A DAW Kumi only reads has no loop: its rounds change the DAW between judgings.
-            if self.reads_only() {
-                let app = self.0.options.profile.words.app;
-                self.notice(&format!("Kumi can't change {app} yet, so a loop of changes can't run there."));
                 return Ok(None);
             }
             // A request the judge measures (mastering, the mix) runs in judged rounds, even with a reference in it.
