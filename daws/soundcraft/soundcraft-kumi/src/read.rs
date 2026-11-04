@@ -12,7 +12,7 @@
 //! at the limit asked for (50, at most 200) or at the bytes an answer may take. Its cursor names the object it starts at,
 //! so a list that changed between pages says so rather than skipping or repeating rows.
 use crate::control::{Control, Error};
-use crate::refs::{fingerprints, Id, Kind, Lives, Missing, Ref, Slot};
+use crate::refs::{fingerprints, lane, Id, Kind, Lives, Missing, Ref, Slot};
 use daw_bridge::wire::code;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -292,7 +292,13 @@ impl Reads {
             Ref::Point { track, param, .. } => {
                 let lane = lane_of(self.track(session, track)?, param).ok_or_else(missing)?;
                 let key = named.to_string();
-                point_rows(session, *track, param, lane).into_iter().find(|(at, _)| *at == key).map(|(_, row)| row).ok_or_else(missing)
+                let (_, row) = point_rows(session, *track, param, lane).into_iter().find(|(at, _)| *at == key).ok_or_else(missing)?;
+                match row.get("tie") {
+                    Some(count) => {
+                        Err((code::FAILED, format!("{count} points of that lane are at that sample: read its points, which mark the tie")))
+                    }
+                    None => Ok(row),
+                }
             }
             Ref::Playlist { .. } => unreachable!("refused before the app is asked"),
         }
@@ -787,38 +793,48 @@ fn param_rows(track: Id, slot: Slot, insert: &Value, plugins: &[Value]) -> Vec<(
                 Some((key, row))
             })
             .collect(),
-        None => values
-            .into_iter()
-            .flatten()
-            .map(|(id, value)| {
-                let key = param_ref(id);
-                (key.clone(), json!({"ref": key, "insertRef": insert_ref, "id": id, "value": value}))
-            })
-            .collect(),
+        None => {
+            let mut rows: Vec<(String, Value)> = values
+                .into_iter()
+                .flatten()
+                .map(|(id, value)| {
+                    let key = param_ref(id);
+                    (key.clone(), json!({"ref": key, "insertRef": insert_ref, "id": id, "value": value}))
+                })
+                .collect();
+            // (SoundCraft keeps them by their text, 0, 1, 10, 11 …: by number, as the plug-in numbers them)
+            let number = |row: &Value| row["id"].as_str().and_then(|id| id.parse::<u32>().ok());
+            if rows.iter().all(|(_, row)| number(row).is_some()) {
+                rows.sort_by_key(|(_, row)| number(row));
+            }
+            rows
+        }
     }
 }
 
 /// SoundCraft's automation id for the lane inspect labels `label`, as its UI writes it and its automation commands take
 /// it: `insert A hpf_freq` is `plugin:a:hpf_freq`, `send B level` is `send_b_level`, `pan 2` is `pan2`, and the trim lane,
-/// `insert Z trim` (its slot is past the letters), is `plugin:255:trim`.
+/// `insert Z trim` (its slot is past the letters), is `plugin:255:trim`. A lane no ref can spell has none: a command can
+/// make a plug-in lane of any text (`plugin:a:hpf freq`), which SoundCraft's UI never writes.
 fn lane_id(label: &str) -> Option<String> {
-    let slot = |letter: &str| matches!(letter.as_bytes(), [b'A'..=b'J']).then(|| letter.to_ascii_lowercase());
+    spelled_lane(label).filter(|id| lane(id))
+}
+
+/// How inspect's label spells SoundCraft's id, before [`lane_id`] keeps only what a ref takes (the slots, the send
+/// words and the parameter's characters are the ref grammar's to judge).
+fn spelled_lane(label: &str) -> Option<String> {
     if label == "insert Z trim" {
         return Some("plugin:255:trim".into());
     }
     if let Some(rest) = label.strip_prefix("insert ") {
         let (letter, param) = rest.split_once(' ')?;
-        return Some(format!("plugin:{}:{param}", slot(letter)?));
+        return Some(format!("plugin:{}:{param}", letter.to_ascii_lowercase()));
     }
     if let Some(rest) = label.strip_prefix("send ") {
-        let (letter, what) = rest.split_once(' ').filter(|(_, what)| matches!(*what, "level" | "pan" | "mute"))?;
-        return Some(format!("send_{}_{what}", slot(letter)?));
+        let (letter, what) = rest.split_once(' ')?;
+        return Some(format!("send_{}_{what}", letter.to_ascii_lowercase()));
     }
-    match label {
-        "volume" | "pan" | "mute" => Some(label.into()),
-        "pan 2" => Some("pan2".into()),
-        _ => None,
-    }
+    Some(if label == "pan 2" { "pan2".into() } else { label.into() })
 }
 
 /// The lane on a track that moves `id` (an automation id).
@@ -841,16 +857,25 @@ fn lane_row(track: &Value, lane: &Value, lives: &Lives) -> Option<(String, Value
     Some((key, row))
 }
 
-/// A lane's points: one at a sample, as SoundCraft keeps them (`set_point` replaces the point there).
+/// A lane's points. SoundCraft's own writes keep one at a sample (`set_point` replaces the point there), but a session it
+/// loads can hold two: those are marked `tie`, as notes alike are, since one ref can't tell them apart.
 fn point_rows(session: &Value, track: Id, id: &str, lane: &Value) -> Vec<(String, Value)> {
     let lane_ref = Ref::Lane { track, param: id.into() }.to_string();
-    list(lane, "points")
+    let points = list(lane, "points");
+    let mut at_sample: HashMap<i64, usize> = HashMap::with_capacity(points.len());
+    for at in points.iter().filter_map(|point| point["at"].as_i64()) {
+        *at_sample.entry(at).or_default() += 1;
+    }
+    points
         .iter()
         .filter_map(|point| {
             let at = point["at"].as_i64()?;
             let key = Ref::Point { track, param: id.into(), sample: at }.to_string();
-            let row =
+            let mut row =
                 json!({"ref": key, "laneRef": lane_ref, "at": at, "seconds": seconds(session, &point["at"]), "value": point["value"]});
+            if let Some(count) = at_sample.get(&at).filter(|count| **count > 1) {
+                row["tie"] = (*count).into();
+            }
             Some((key, row))
         })
         .collect()

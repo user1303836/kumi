@@ -400,11 +400,11 @@ async fn a_look_between_two_reads_serves_the_next_read_its_rows_and_lives_from_o
 #[tokio::test]
 async fn an_inserts_parameters_read_with_the_names_ranges_and_choices_soundcraft_describes_and_their_values_now() {
     let mut app = App::new(json!([])).await;
-    // (Kick's slot c gets a hosted plug-in, whose parameters SoundCraft knows only by number)
+    // (Kick's slot c gets a hosted plug-in, whose parameters SoundCraft knows only by number, and keeps by their text)
     app.session.lock().unwrap()["tracks"][0]["inserts"]
         .as_array_mut()
         .unwrap()
-        .push(json!({"slot": 2, "plugin": "au:aufx:bpas:appl", "bypass": false, "params": {"0": 5000.0, "1": 600.0}}));
+        .push(json!({"slot": 2, "plugin": "au:aufx:bpas:appl", "bypass": false, "params": {"0": 5000.0, "1": 600.0, "10": 1.0, "2": 0.5}}));
     let answer = app.read(json!({"kind": "param", "parent": "s:insert:3:a", "limit": 200})).await.unwrap();
     assert_eq!(misplaced(&answer), Vec::<String>::new(), "{answer}");
     let rows = answer["items"].as_array().unwrap();
@@ -425,7 +425,10 @@ async fn an_inserts_parameters_read_with_the_names_ranges_and_choices_soundcraft
         json!([
             {"ref": "s:param:3:c:0", "insertRef": "s:insert:3:c", "id": "0", "value": 5000.0},
             {"ref": "s:param:3:c:1", "insertRef": "s:insert:3:c", "id": "1", "value": 600.0},
-        ])
+            {"ref": "s:param:3:c:2", "insertRef": "s:insert:3:c", "id": "2", "value": 0.5},
+            {"ref": "s:param:3:c:10", "insertRef": "s:insert:3:c", "id": "10", "value": 1.0},
+        ]),
+        "by number, as the plug-in numbers them"
     );
     assert_eq!(app.asked("engine.execute", Some("engine.plugins")), 1, "the descriptions come with the app's version: asked once");
     for (params, code) in
@@ -440,24 +443,42 @@ async fn automation_reads_as_lanes_named_as_soundcrafts_automation_commands_name
     let mut app = App::new(json!([])).await;
     let point = |at: i64, value: f64| json!({"at": at, "value": value});
     // (inspect labels lanes for people: `insert A hpf_freq` is what automation.set_point calls `plugin:a:hpf_freq`, and
-    // the trim lane, `insert Z trim`, is `plugin:255:trim`)
+    // the trim lane, `insert Z trim`, is `plugin:255:trim`; slots past J, and a parameter a command named with a space,
+    // have no id a ref can spell, so no row)
     app.session.lock().unwrap()["tracks"][0]["automation"] = json!([
         {"param": "volume", "points": [point(48000, -6.0)]},
         {"param": "insert A hpf_freq", "points": [point(96000, 120.0), point(144000, 200.0)]},
         {"param": "send B level", "points": [point(0, -3.0)]},
         {"param": "pan 2", "points": [point(0, 0.5)]},
         {"param": "insert Z trim", "points": [point(0, -2.0)]},
+        {"param": "pan", "points": [point(0, -0.5)]},
+        {"param": "mute", "points": [point(0, 1.0)]},
+        {"param": "send C pan", "points": [point(0, 0.25)]},
+        {"param": "send C mute", "points": [point(0, 0.0)]},
+        {"param": "insert B HighGain", "points": [point(0, 2.0)]},
+        {"param": "insert K x", "points": [point(0, 1.0)]},
+        {"param": "send K level", "points": [point(0, 1.0)]},
+        {"param": "insert A hpf freq", "points": [point(0, 1.0)]},
     ]);
     let lanes = app.read(json!({"kind": "env", "parent": "s:track:3"})).await.unwrap();
     assert_eq!(misplaced(&lanes), Vec::<String>::new(), "{lanes}");
-    assert_eq!(
-        refs(&lanes),
-        ["s:env:3:volume", "s:env:3:plugin:a:hpf_freq", "s:env:3:send_b_level", "s:env:3:pan2", "s:env:3:plugin:255:trim"]
-    );
     let rows = lanes["items"].as_array().unwrap();
     assert_eq!(
-        rows.iter().map(|row| (row["label"].as_str().unwrap(), row["points"].as_u64().unwrap())).collect::<Vec<_>>(),
-        [("volume", 1), ("insert A hpf_freq", 2), ("send B level", 1), ("pan 2", 1), ("insert Z trim", 1)]
+        rows.iter()
+            .map(|row| (row["ref"].as_str().unwrap(), row["label"].as_str().unwrap(), row["points"].as_u64().unwrap()))
+            .collect::<Vec<_>>(),
+        [
+            ("s:env:3:volume", "volume", 1),
+            ("s:env:3:plugin:a:hpf_freq", "insert A hpf_freq", 2),
+            ("s:env:3:send_b_level", "send B level", 1),
+            ("s:env:3:pan2", "pan 2", 1),
+            ("s:env:3:plugin:255:trim", "insert Z trim", 1),
+            ("s:env:3:pan", "pan", 1),
+            ("s:env:3:mute", "mute", 1),
+            ("s:env:3:send_c_pan", "send C pan", 1),
+            ("s:env:3:send_c_mute", "send C mute", 1),
+            ("s:env:3:plugin:b:HighGain", "insert B HighGain", 1),
+        ]
     );
     assert_eq!(rows[1]["trackRef"], "s:track:3");
     let every = refs(&app.read(json!({"kind": "env"})).await.unwrap());
@@ -484,8 +505,23 @@ async fn automation_reads_as_lanes_named_as_soundcrafts_automation_commands_name
     );
     assert_eq!(app.read(json!({"ref": "s:env:3:send_b_level"})).await.unwrap()["items"][0], rows[2]);
     assert_eq!(app.read(json!({"ref": "s:point:3:plugin:a:hpf_freq:144000"})).await.unwrap()["items"][0], points["items"][1]);
-    for (params, code) in [(json!({"kind": "point", "parent": "s:env:3:mute"}), "failed"), (json!({"ref": "s:point:3:volume:1"}), "failed")]
+    for (params, code) in
+        [(json!({"kind": "point", "parent": "s:env:3:send_d_level"}), "failed"), (json!({"ref": "s:point:3:volume:1"}), "failed")]
     {
         assert_eq!(app.read(params.clone()).await.unwrap_err().0, code, "{params}");
     }
+}
+
+#[tokio::test]
+async fn two_points_at_one_sample_from_a_loaded_session_are_a_tie_and_never_a_guess() {
+    let mut app = App::new(json!([])).await;
+    let point = |at: i64, value: f64| json!({"at": at, "value": value});
+    // (SoundCraft's own writes keep one point at a sample; a session file it loaded can hold two)
+    app.session.lock().unwrap()["tracks"][0]["automation"] =
+        json!([{"param": "volume", "points": [point(0, -6.0), point(0, 0.0), point(48000, -3.0)]}]);
+    let points = app.read(json!({"kind": "point", "parent": "s:env:3:volume"})).await.unwrap();
+    let ties: Vec<&Value> = points["items"].as_array().unwrap().iter().map(|row| &row["tie"]).collect();
+    assert_eq!(ties, [&json!(2), &json!(2), &Value::Null]);
+    assert_eq!(app.read(json!({"ref": "s:point:3:volume:0"})).await.unwrap_err().0, "failed", "which of the two isn't known");
+    assert_eq!(app.read(json!({"ref": "s:point:3:volume:48000"})).await.unwrap()["items"][0]["value"], -3.0);
 }
