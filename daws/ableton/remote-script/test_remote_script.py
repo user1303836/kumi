@@ -298,6 +298,19 @@ class RemoteScriptTests(unittest.TestCase):
         self.assertEqual(seen["args"][0], os.path.join(r"D:\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe"))
         self.assertEqual(seen["kwargs"]["creationflags"], getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
+    def test_the_acl_batch_opens_no_pipes_so_a_late_call_still_sees_an_answer_in_time(self):
+        # On Windows each pipe has a reader thread, which Live's Python can starve past the timeout after PowerShell has
+        # answered: the start would then fail for the whole session. Only the exit code is read, so there are none.
+        package = __import__("AbletonMcpBridge"); seen = []
+        def run(args, **kwargs):
+            seen.append(kwargs)
+            return types.SimpleNamespace(returncode=package._ACL_ANSWERED)
+        with patch("AbletonMcpBridge.subprocess.run", run):
+            self.assertEqual(package._windows_acl_owner_only_all([Path("C:/Kumi/bridge-reference.json")]), [True])
+        self.assertEqual(len(seen), 1)
+        pinned = {name: seen[0].get(name) for name in ("capture_output", "stdin", "stdout", "stderr", "timeout")}
+        self.assertEqual(pinned, {"capture_output": None, "stdin": None, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "timeout": 10})
+
     def test_the_control_surfaces_owner_checks_take_one_powershell_run(self):
         # Live's own Python on Windows has no ctypes: each owner check is a PowerShell run on Live's main thread.
         package = __import__("AbletonMcpBridge"); runs = []

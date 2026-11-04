@@ -317,10 +317,13 @@ def _windows_acl_owner_only_all(paths: list[Path]) -> list[bool]:
         environment["ABLETON_MCP_ACL_PATHS"] = encoded
         # By its full path: a bare name is looked for in Live's own folder and the working folder first.
         powershell = os.path.join(os.environ.get("SYSTEMROOT") or r"C:\Windows", "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
-        # Live has no console of its own: without this flag each check would open a console window.
+        # Live has no console of its own: without this flag each check would open a console window. Only the exit code is
+        # read, so no pipes: on Windows each pipe has a reader thread, which Live's Python can starve past the timeout even
+        # once PowerShell has answered. Without them, a call that gets its turn late still sees an exit that came in time.
         result = subprocess.run(
             [powershell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
-            capture_output=True, timeout=10, env=environment, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=10, env=environment,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         code = result.returncode
         if not isinstance(code, int) or code & ~((1 << len(paths)) - 1) != _ACL_ANSWERED:
