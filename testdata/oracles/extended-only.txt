@@ -2,7 +2,6 @@
 # leaves them out. Written by: python3 scripts/dev.py worktree extended-only --write <lists>, from CI's nextest-list-ci-*
 # artifacts (the `ci` and `ci-os` sets). A test that starts reading one of these in those sets fails in lean worktrees
 # only, naming the file.
-ableton-mcp-server/benchmark-oracle.json
 ableton-mcp-server/host-audio-clip-oracle.json
 ableton-mcp-server/host-audition-oracle.json
 ableton-mcp-server/host-browser-load-oracle.json

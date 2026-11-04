@@ -7,7 +7,6 @@ mod form;
 mod goal;
 mod listener;
 mod music;
-mod music_scale;
 mod music_scan;
 mod music_taste;
 mod musical;

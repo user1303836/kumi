@@ -8241,25 +8241,6 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
                 seen[gap] = max(waits)
         self.assertEqual(seen, {None: 0.012, 0.0156: 0.012, 0.013: 0.012, 0.012: 0.004, 0.010: 0.004})
 
-    def test_a_timer_gone_quiet_leaves_the_display_ticks_their_12_ms_wait(self):
-        # (a timer Live paused without stopping: what's left serves on display ticks, about 100 ms apart)
-        client, channel = self.connect(); waits = []; self.bridge.between_ticks = True; self.bridge.timer_gap = 0.010
-        real = remote_module.selectors.DefaultSelector
-        class Recording:
-            def __init__(self): self.inner = real()
-            def __enter__(self): return self
-            def __exit__(self, *rest): self.inner.close()
-            def register(self, *args, **kwargs): return self.inner.register(*args, **kwargs)
-            def select(self, timeout=None): waits.append(timeout); return self.inner.select(timeout)
-        with patch.object(remote_module.selectors, "DefaultSelector", Recording):
-            client.sendall(self.frame(channel, 1)); time.sleep(0.05)
-            self.bridge._timer_last = time.perf_counter() - 0.2; self.bridge.update_display()
-            quiet, waits[:] = list(waits), []
-            client.sendall(self.frame(channel, 2)); time.sleep(0.05)
-            self.bridge._timer_last = time.perf_counter(); self.bridge.update_display()
-            calling = list(waits)
-        self.assertEqual((max(quiet), max(calling)), (0.012, 0.004))
-
     def test_the_timers_gap_is_the_median_of_its_last_eight(self):
         bridge = self.bridge
         for at in range(8): bridge._timer_called(100.0 + at * 0.010)

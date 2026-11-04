@@ -1,26 +1,26 @@
-# nextest runs many test binaries at once. Tests that hold work to a time bound run alone, so the
-# tests beside them can't make them late.
+# nextest runs many test binaries at once. A few correctness tests still give a peer a real deadline, so they run
+# alone, and the tests beside them can't make them late. No test asserts how fast something is (AGENTS.md, "Minimal
+# CI"): a speed is measured on purpose, never in the suite.
 [[profile.default.overrides]]
 # The Remote Script adapter's tests give each local connection 500 ms. Two of kept conversations' tests look at a file
 # within 2 s and 3 s of writing it, as another Kumi would. SoundCraft's control client's tests count connections around
 # deadlines and answers a few hundred milliseconds apart, its launch's tests start a copy of the test program as the app
 # and wait for it within bounds, and its bridge's tests look at a fake app every 100 ms.
 filter = '''
-test(/bounded_latency|reads_in_a_moment|looks_at_each_byte_once|read_in_linear_time|analyzed_quickly_part_by_part|keeps_the_runtime_responsive|returns_promptly|maximum_duplicate_ambiguity/) | (binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/))
+(binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/))
   | (binary_id(kumi-agent::it) & test(/^conversations::(where_the_file_system_cant_lock_the_lock_file_names_the_kumi_that_has_it|two_changes_in_the_second_the_file_system_keeps_are_both_seen)$/))
   | (binary_id(soundcraft-kumi::it) & test(/^(control|launch|server)::/))
 '''
 threads-required = "num-cpus"
 
-# CI's three sets (.github/workflows/ci.yml and extended.yml). A pull request and each push to main run `ci` on Linux and
-# `ci-os` on macOS and Windows; the Extended workflow runs `extended`, every test, by hand, on the `full-tests` label and
-# each week. What `ci` leaves out, and why:
+# CI's three sets (.github/workflows/ci.yml and extended.yml). A pull request runs `ci` on Linux; main, after a merge, runs
+# `ci` on Linux and `ci-os` on macOS and Windows; the Extended workflow runs `extended`, every test, each week and by
+# hand. What `ci` leaves out, and why:
 # - the recorded-source oracles (a host workflow replayed against what the TypeScript host did, `…_match_source` and the
 #   like): long replays of behaviour the port froze, which the unit tests beside them check in pieces;
-# - the long listening, form and rendering simulations (whole songs analysed), the video tests (ffmpeg) and the
-#   benchmarks, among them the music scan's at a big library's size (music_scale: 300,000 songs), and the music scans
-#   that hear half-minute songs through (music_scan's, taste's keep): a scan over songs too short to hear, and the tests
-#   that stop one inside a song, stay;
+# - the long listening, form and rendering simulations (whole songs analysed), the video tests (ffmpeg), and the music
+#   scans that hear half-minute songs through (music_scan's, taste's keep): a scan over songs too short to hear, and the
+#   tests that stop one inside a song, stay;
 # - the interoperability tests run beside the official MCP and model SDKs (npm), and the migration from the published
 #   1.7.5 (downloaded);
 # - the long sample-by-sample sweeps of the timing building blocks (kit::clock), each in every way Live and Max can differ:
@@ -45,12 +45,11 @@ not (
   | (binary_id(kumi-daw-ableton::it) & test(/^listening::/))
   | (binary_id(kumi-listening::it) & test(/^(effects|sound)::/))
   | (binary_id(kumi-listening::it) & test(/^style_references::/))
-  | (binary_id(kumi-listening::it) & test(/^music_scale::/))
   | (binary_id(kumi-listening::it) & test(/^music_scan::(the_scan_hears|a_stopped_scan|another_style_model|the_app_sees|a_song_away|songs_moved|while_hearing|a_pause)/))
   | (binary_id(kumi-listening::it) & test(/^music_taste::keep_hears/))
   | (binary_id(kumi-ai::it) & test(/^ai_sdk::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^(benchmark|lifecycle_migration)::/))
-  | ((binary_id(kumi-agent::it) & test(/^mcp::/)) & not test(/read_buffer_looks_at_each_byte/))
+  | (binary_id(ableton-mcp-server::it) & test(/^lifecycle_migration::/))
+  | ((binary_id(kumi-agent::it) & test(/^mcp::/)) & not test(/the_bridges_read_buffer/))
   | ((binary_id(kumi-daw-ableton::it) & test(/^media_foundations::/)) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
   | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
       & not ((binary_id(kumi-daw-ableton::it) & test(/^changes::/)) | (binary_id(kumi::it) & test(/^pin_first_request::/))))
@@ -115,8 +114,8 @@ default-filter = '''
   | (binary_id(kumi-listening::it) & test(/^(effects|sound)::/))
   | (binary_id(kumi-listening::it) & test(/^style_references::/))
   | (binary_id(kumi-ai::it) & test(/^ai_sdk::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^(benchmark|lifecycle_migration)::/))
-  | ((binary_id(kumi-agent::it) & test(/^mcp::/)) & not test(/read_buffer_looks_at_each_byte/))
+  | (binary_id(ableton-mcp-server::it) & test(/^lifecycle_migration::/))
+  | ((binary_id(kumi-agent::it) & test(/^mcp::/)) & not test(/the_bridges_read_buffer/))
   | ((binary_id(kumi-daw-ableton::it) & test(/^media_foundations::/)) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
   | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
       & not ((binary_id(kumi-daw-ableton::it) & test(/^changes::/)) | (binary_id(kumi::it) & test(/^pin_first_request::/))))
@@ -133,10 +132,3 @@ fail-fast = false
 default-filter = 'all()'
 slow-timeout = { period = "60s", terminate-after = 4 }
 fail-fast = false
-
-# The benchmark at a big library's size (music_scale: 300,000 songs) holds work to a time bound, so it runs alone, ended
-# at its own bound of ten minutes rather than the four that mean a hang elsewhere (it takes 10 to 17 s on CI's runners).
-[[profile.extended.overrides]]
-filter = 'binary_id(kumi-listening::it) & test(/^music_scale::/)'
-threads-required = "num-cpus"
-slow-timeout = { period = "60s", terminate-after = 10 }

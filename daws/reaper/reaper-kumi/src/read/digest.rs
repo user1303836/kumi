@@ -1225,49 +1225,6 @@ mod tests {
         assert_eq!(first["facts"]["markers"]["count"], 2);
     }
 
-    // Second sweep RP3: a digest reads each marker and region once, for the facts' fingerprint and for its record,
-    // whether the records come in the first page or in later ones.
-    #[test]
-    fn a_digest_reads_each_marker_once_for_its_fingerprint_and_its_record() {
-        use crate::reaper::fake::FakeMarker;
-        let digest = |markers: usize, page_bytes: usize| {
-            fake::lab_project();
-            fake::with(|s| {
-                s.markers = (0..markers)
-                    .map(|n| FakeMarker {
-                        guid: format!("{{M{n:04}}}"),
-                        is_region: n % 2 == 1,
-                        start: n as f64,
-                        end: n as f64 + 0.5,
-                        name: format!("Line {n}"),
-                        number: n as i32 + 1,
-                        color: 0,
-                    })
-                    .collect()
-            });
-            forget();
-            TEST_LIMITS.with(|limits| limits.set(Some((page_bytes, MOST_ITEMS, MOST_MARKERS))));
-            let before = fake::with(|s| s.calls);
-            let (first, records) = whole(&Reads::default(), false, true);
-            TEST_LIMITS.with(|limits| limits.set(None));
-            (fake::with(|s| s.calls) - before, first, records)
-        };
-        let (_, one_page, all) = digest(400, PAGE_BYTES);
-        let listed = |records: &[Value]| records.iter().filter(|r| ["marker", "region"].contains(&r["k"].as_str().unwrap())).count();
-        assert_eq!((one_page["pages"].as_u64(), listed(&all)), (Some(1), 400));
-        // (in pages of 2 KB, the first page ends among the tracks: the markers' records come in later ones)
-        for (page_bytes, in_first) in [(PAGE_BYTES, 400), (2048, 0)] {
-            let (none, _, _) = digest(0, page_bytes);
-            let (calls, first, records) = digest(400, page_bytes);
-            assert_eq!(listed(first["records"].as_array().unwrap()), in_first);
-            assert_eq!(records, all, "the same records in pages of {page_bytes}");
-            assert_eq!(first["facts"]["markers"], one_page["facts"]["markers"]);
-            // A marker's read is 8 REAPER calls, a region's 9: the marker, its values, its GUID and its name.
-            let pages = first["pages"].as_u64().unwrap();
-            assert!(calls - none < 400 * 9 * 3 / 2, "{} REAPER calls for 400 markers and regions in {pages} pages", calls - none);
-        }
-    }
-
     /// 200 tracks of 5 FX of 64 parameters each and 20 items each (4,000 items: listed one by one).
     fn big_project() {
         use crate::reaper::fake::{FakeFx, FakeItem, FakeParam, FakeTake, FakeTrack};

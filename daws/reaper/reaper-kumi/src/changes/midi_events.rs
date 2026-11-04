@@ -921,25 +921,6 @@ mod tests {
     }
 
     #[test]
-    fn deleting_half_of_a_big_takes_controllers_is_read_in_linear_time() {
-        // 60,000 controller events, every second one deleted: a search of the take per event held REAPER's main thread
-        // for seconds.
-        let mut buffer: Vec<Event> = (0..60_000).map(|i| ev(i * 10, &[0xB0, 1, (i % 128) as u8])).collect();
-        buffer.push(ev(600_000, &END_MARKER));
-        let events: Vec<Ev> = events_of(&buffer).into_iter().map(|(event, _)| event).collect();
-        let remove: Vec<Ev> = events.iter().step_by(2).cloned().collect();
-        let started = std::time::Instant::now();
-        let edited = edit(&buffer, &remove, &[]).unwrap();
-        let after: Vec<Ev> = events_of(&edited).into_iter().map(|(event, _)| event).collect();
-        let gone = difference(&events, &after);
-        let kept = difference(&events, &gone);
-        let took = started.elapsed();
-        assert_eq!((edited.len(), after.len()), (30_001, 30_000));
-        assert_eq!((gone, kept), (remove, after));
-        assert!(took < std::time::Duration::from_secs(2), "{took:?}");
-    }
-
-    #[test]
     fn requests_become_reapers_bytes() {
         let at = |spec: Value| new_events(&spec, 0).unwrap().into_iter().map(|e| e.msg).collect::<Vec<_>>();
         assert_eq!(

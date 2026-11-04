@@ -14,19 +14,8 @@ fn a_page_becomes_text_with_structure_code_formulas_links_and_no_furniture() {
     }
 }
 #[test]
-fn a_big_page_reads_in_a_moment() {
-    let block="<div><p>Words with <a href=\"/x\">a link</a>, <code>code</code> and x<sup>2</sup>.</p><script>var a = \"<p>\";</script><ul><li>one</li><li>two</li></ul></div>\n";
-    let start = std::time::Instant::now();
-    let page = read_html(&format!("<html><body>{}</body></html>", block.repeat(25_000)), "https://example.com/");
-    assert!(page.text.len() > 1_000_000);
-    // A debug build on a busy runner is slower; its budget still catches quadratic work.
-    let budget = if cfg!(debug_assertions) { 10_000 } else { 4_000 };
-    assert!(start.elapsed().as_millis() < budget, "4 MB of HTML took {} ms", start.elapsed().as_millis());
-}
-#[test]
-fn a_page_built_to_blow_up_the_reader_reads_small_and_quick() {
+fn a_page_built_to_blow_up_the_reader_reads_small() {
     let base = "https://example.com/";
-    let start = std::time::Instant::now();
     // Lists, quotes, links and superscripts 20,000 deep: 32 levels count, and deeper ones read as plain text.
     let lists = html_to_text(&"<ul><li>x".repeat(20_000), base);
     assert!(lists.len() < 2_000_000, "{} bytes", lists.len());
@@ -40,8 +29,6 @@ fn a_page_built_to_blow_up_the_reader_reads_small_and_quick() {
     // A "<" that opens no tag is text: matching it stops at the next "<", not at the end of the page.
     let unopened = "<a b<a b".repeat(25_000);
     assert_eq!(html_to_text(&unopened, base), unopened);
-    let budget = if cfg!(debug_assertions) { 10_000 } else { 4_000 };
-    assert!(start.elapsed().as_millis() < budget, "took {} ms", start.elapsed().as_millis());
 }
 #[test]
 fn tags_closed_out_of_order_never_cut_the_text_inside_a_character() {
