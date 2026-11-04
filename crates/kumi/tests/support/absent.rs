@@ -85,6 +85,7 @@ pub fn answer(op: Op) -> Result<Reply, RuntimeError> {
         | Op::Slots(_)
         | Op::AudioStatus(_)
         | Op::ConfigureAudio(_)
+        | Op::AcknowledgeMirelo(_)
         | Op::SaveMireloKey(_)
         | Op::RemoveMireloKey(_)
         | Op::SaveLocalAudioKey(_)

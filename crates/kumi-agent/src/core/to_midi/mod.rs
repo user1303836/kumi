@@ -93,7 +93,7 @@ pub fn pitched(heard: &[Heard], per_second: f64, beats: f64, melody: bool) -> Ve
 
 /// Provider notes have measured seconds and MIDI velocities, not Basic Pitch confidence.
 /// Clip to the rendered stretch before applying the existing melody/overlap policy.
-fn provider_notes(result: &serde_json::Value, per_second: f64, beats: f64, melody: bool) -> Result<Vec<MidiNote>, String> {
+fn provider_notes(result: &serde_json::Value, per_second: f64, beats: f64, what: &str) -> Result<Vec<MidiNote>, String> {
     if !per_second.is_finite() || per_second <= 0. || !beats.is_finite() || beats <= 0. {
         return Err("The rendered stretch has no valid seconds-to-beats mapping".into());
     }
@@ -103,10 +103,14 @@ fn provider_notes(result: &serde_json::Value, per_second: f64, beats: f64, melod
         .ok_or("The audio model returned no seconds-based notes; its MIDI file is retained, but no notes were inserted")?;
     let mut notes = Vec::with_capacity(heard.len());
     for note in heard {
+        let is_drum = note.get("instrument").and_then(serde_json::Value::as_str) == Some("drums");
+        if is_drum != (what == "drums") {
+            continue;
+        }
         let pitch = note
             .get("pitch")
-            .and_then(serde_json::Value::as_u64)
-            .filter(|v| *v <= 127)
+            .and_then(serde_json::Value::as_f64)
+            .filter(|v| v.is_finite() && *v >= 0. && *v <= 127. && v.fract() == 0.)
             .ok_or("The audio model returned an invalid MIDI pitch")?;
         let velocity = note
             .get("velocity")
@@ -130,7 +134,7 @@ fn provider_notes(result: &serde_json::Value, per_second: f64, beats: f64, melod
         }
     }
     notes.sort_by(|a, b| a.start.total_cmp(&b.start).then(b.pitch.cmp(&a.pitch)));
-    if melody {
+    if what == "melody" {
         notes = skyline(notes);
     }
     Ok(apart(notes))

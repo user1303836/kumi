@@ -49,7 +49,7 @@ Next time, open a terminal and type `kumi`, then open your DAW (Live, REAPER or 
 - **Build a sound from a tutorial.** Paste a YouTube link: Kumi watches it and builds what it shows on a new track.
 - **Fix the mix.** Ask “is the bass muddy?” and Kumi listens, finds what's clashing and fixes it, listening again after each change.
 - **Match a reference.** Give it a track you love: Kumi tries a few takes, scores each against it and refines the best.
-- **Generate sounds and turn audio into MIDI.** Connect [Mirelo](docs/en/KUMI_GUIDE.md#mirelo-and-self-hosted-audio-models) in `/audio` for text/video SFX, extension, inpainting and transcription. Each task has its own automatic-use switch and self-hosted alternative; MuScriptor supports MIDI.
+- **Generate sounds and turn audio into MIDI.** Onboard [Mirelo](docs/en/KUMI_GUIDE.md#mirelo-and-self-hosted-audio-models) in `/audio` for text/video SFX, extension, inpainting and transcription. Each task has its own permission: **Off** blocks even explicit Mirelo requests. Self-hosted alternatives are supported; MuScriptor handles MIDI.
 - **Create plug-in presets and master a track.** Kumi uses its built-in VST3 formats, including FabFilter's current and legacy products, and checks suitable installed processors before native devices. Kumi can build presets in the background while you keep working. See [supported formats and limits](plugin-formats/README.md).
 - **Make a device.** Describe a Max for Live effect or instrument and Kumi builds it and puts it on your track.
 - **Find your sounds.** “A dusty snare like this one”, “my usual vocal chain”: Kumi knows your samples, presets and projects.
@@ -93,14 +93,14 @@ Kumi is free and open source (MIT). You choose the model:
 - **ChatGPT plan:** sign in with your account; Kumi works within your plan's usage limits.
 - **API key:** Anthropic, OpenAI, Google Gemini, OpenRouter and [20 more](docs/en/KUMI_GUIDE.md#sign-in-and-choose-a-model), billed by the provider.
 - **Local:** Ollama, LM Studio or any OpenAI-compatible server such as llama.cpp or vLLM, on hardware that can run a tool-calling model with a long context (Kumi asks for about 57k tokens).
-- **Audio models:** optional Mirelo requests use your own Mirelo credits, separately from chat. Self-hosted models have their own hardware costs and licenses.
+- **Audio models:** each Mirelo create spends your Mirelo credits, separately from chat, with a per-job credit notice. An API key alone never enables paid use. Self-hosted models have their own hardware costs and licenses.
 
 </details>
 
 <details>
 <summary><b>Does my audio leave my computer?</b></summary>
 
-Audio analysis runs locally; the model gets the measurements. Your library and music collection are indexed locally too. With a Gemini or OpenAI API key, a listening model also hears mono excerpts (10 seconds at most) of the changes it judges; `/slots listening off` turns it off. Requested generation, editing and MIDI conversion send selected media to the provider configured in `/audio`; choose a server on your computer to keep it local. [Privacy](docs/en/KUMI_GUIDE.md#privacy-what-leaves-your-computer) covers the rest.
+Audio analysis runs locally; the model gets the measurements. Your library and music collection are indexed locally too. With a Gemini or OpenAI API key, a listening model also hears mono excerpts (10 seconds at most) of the changes it judges; `/slots listening off` turns it off. Requested generation, editing and MIDI conversion use the provider in `/audio`. Mirelo requires onboarding and permission for that task; switch it **Off** and choose a server on your computer to keep media local. [Privacy](docs/en/KUMI_GUIDE.md#privacy-what-leaves-your-computer) covers the rest.
 
 </details>
 

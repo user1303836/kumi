@@ -198,6 +198,11 @@ async fn mirelo_status_and_removal_keep_chat_signins_and_keys_private() {
     let mut f = Fixture::new(200);
     f.env.insert("KUMI_HOME".into(), f._dir.path().to_string_lossy().into_owned());
     f.env.insert("MIRELO_API_KEY".into(), "private-mirelo-env-key".into());
+    write_settings(
+        &f.env["KUMI_SETTINGS_FILE"],
+        &json!({"audioModels": {"acknowledged": true, "tasks": {"audio-to-midi": {"autoMirelo": false}}}}),
+    )
+    .unwrap();
     let store = open_credential_store(&f.env["KUMI_AUTH_FILE"]);
     for (name, key) in [("mirelo", "private-mirelo-saved-key"), ("anthropic", "private-chat-key")] {
         store.update(name, Box::new(move |_| async move { Ok(Some(Credential::ApiKey { key: key.into() })) }.boxed_local())).await.unwrap();
@@ -208,11 +213,36 @@ async fn mirelo_status_and_removal_keep_chat_signins_and_keys_private() {
     login(&f.config(&["logout", "mirelo"]), f.io(None)).await.unwrap();
     assert!(store.get("mirelo").await.unwrap().is_none());
     assert!(store.get("anthropic").await.unwrap().is_some());
+    let audio = kumi::config::read_settings(&f.env["KUMI_SETTINGS_FILE"]).audio_models;
+    assert!(!audio.acknowledged);
+    assert!(!audio.task(kumi_ai::audio::Task::AudioToMidi).auto_mirelo);
+    let service = audio_service(&f.env["KUMI_AUTH_FILE"], &f.env["KUMI_SETTINGS_FILE"], &f.env);
+    for task in kumi_ai::audio::Task::ALL {
+        assert_eq!(service.preferred(task).await.unwrap(), None, "logout must revoke consent even with an environment key");
+    }
     f.out.0.borrow_mut().clear();
     auth_status(&f.config(&["auth"]), f.auth()).await.unwrap();
     assert!(f.out.0.borrow().contains("MIRELO_API_KEY"));
     assert!(!f.out.0.borrow().contains("private-mirelo"));
     assert!(!f.out.0.borrow().contains("private-chat"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn cancelled_mirelo_onboarding_discloses_paid_use_without_enabling_an_environment_key() {
+    let mut f = Fixture::new(200);
+    f.env.insert("KUMI_HOME".into(), f._dir.path().to_string_lossy().into_owned());
+    f.env.insert("MIRELO_API_KEY".into(), "private-mirelo-env-key".into());
+    let input = Input::new(true, vec![b"\x03".to_vec()], false);
+    let error = login(&f.config(&["login", "mirelo"]), f.io(Some(input))).await.unwrap_err();
+    assert!(error.message().contains("Cancelled"));
+    let output = f.out.0.borrow();
+    assert!(output.contains("Each audio create spends Mirelo credits"));
+    assert!(output.contains("Off tasks never use Mirelo"));
+    assert!(output.contains("Enter confirms enabling the existing key"));
+    assert!(!output.contains("private-mirelo-env-key"));
+    assert!(!std::path::Path::new(&f.env["KUMI_AUTH_FILE"]).exists());
+    assert!(!std::path::Path::new(&f.env["KUMI_SETTINGS_FILE"]).exists());
+    assert!(!kumi::config::read_settings(&f.env["KUMI_SETTINGS_FILE"]).audio_models.acknowledged);
 }
 #[tokio::test(flavor = "current_thread")]
 async fn api_key_login_checks_before_saving_and_reports_unreachable_or_refused() {

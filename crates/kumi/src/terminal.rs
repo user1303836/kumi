@@ -2162,7 +2162,7 @@ mod registry_tests {
         declined.sort();
         assert_eq!(
             declined,
-            ["/copy", "/map", "/palette", "/recipe", "/takeback", "/voice"],
+            ["/audio", "/copy", "/map", "/palette", "/recipe", "/takeback", "/voice"],
             "what plain mode leaves to the full-screen app"
         );
     }

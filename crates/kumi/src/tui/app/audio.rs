@@ -11,19 +11,32 @@ impl TuiApp {
     pub(super) async fn open_audio(&self) -> Result<(), RuntimeError> {
         let status = self.session().op(op::AudioStatus {}).await?;
         let mut items = vec![
-            inert("Powered by Mirelo · audio models, not conversation models"),
-            inert("Paid requests use Mirelo credits and upload supplied media."),
-            inert("Training follows Mirelo account settings: https://mirelo.ai/studio/settings/profile"),
+            inert("Powered by Mirelo · separate from conversation models"),
+            inert("Each create spends credits and uploads supplied media."),
+            inert("Off blocks Mirelo, even for explicit requests."),
+            inert("Training: your Mirelo account settings (see the guide)."),
             item(
                 if status.mirelo_configured { "Replace Mirelo API key" } else { "Connect an existing Mirelo account" },
                 "key",
                 format!(
-                    "{} · hidden input, validated with /v3/me, saved owner-only",
+                    "{} · submitting a key acknowledges paid use for On tasks",
                     status.key_source.as_deref().unwrap_or("Not connected")
                 ),
             ),
-            item("Remove saved Mirelo key", "remove", "MIRELO_API_KEY still applies if set; conversation sign-ins stay unchanged"),
+            item("Remove saved Mirelo key", "remove", "Also revokes onboarding; an environment key alone does not enable Mirelo"),
         ];
+        items.push(inert(if status.config.acknowledged {
+            "Mirelo onboarding acknowledged. Only tasks switched On may use Mirelo."
+        } else {
+            "Mirelo is not enabled: a saved or environment key alone is not consent."
+        }));
+        if status.mirelo_configured && !status.config.acknowledged {
+            items.push(item(
+                "Enable existing Mirelo key…",
+                "enable-existing",
+                "Review the upload and paid-use notice, then explicitly confirm",
+            ));
+        }
         if let Err(error) = status.config.validate() {
             items.push(inert(format!("Configuration needs attention: {}", self.clean(&error.message(), 300))));
         }
@@ -33,8 +46,8 @@ impl TuiApp {
                 task.label(),
                 task.as_str(),
                 format!(
-                    "Use Mirelo automatically: {} · alternative: {} · fallback: {}",
-                    config.auto_mirelo,
+                    "Allow Mirelo: {} · alternative: {} · fallback: {}",
+                    if config.auto_mirelo { "On" } else { "Off" },
                     config.local.as_ref().map(|e| e.url.as_str()).unwrap_or("not configured"),
                     config.fallback,
                 ),
@@ -43,9 +56,10 @@ impl TuiApp {
         self.pick(Picker::new("Audio models", items), |app, picked| async move {
             match picked.value.as_deref() {
                 Some("key") => app.open_audio_field(AudioField::MireloKey, String::new()),
+                Some("enable-existing") => app.confirm_mirelo_onboarding(),
                 Some("remove") => {
                     app.session().op(op::RemoveMireloKey {}).await?;
-                    app.notice("Saved Mirelo key removed. MIRELO_API_KEY, if set, still applies.", NoticeTone::Info);
+                    app.notice("Saved key removed; Mirelo disabled until onboarding again. Task switches are unchanged.", NoticeTone::Info);
                     app.close_panel();
                     app.open_audio().await?;
                 }
@@ -61,14 +75,39 @@ impl TuiApp {
         Ok(())
     }
 
+    fn confirm_mirelo_onboarding(&self) {
+        let items = vec![
+            inert("Each create spends Mirelo credits."),
+            inert("Supplied media is uploaded to Mirelo."),
+            inert("On tasks may use Mirelo automatically."),
+            inert("Off blocks Mirelo, even for explicit requests."),
+            inert("Free accounts cannot opt out of training."),
+            inert("Paid accounts: opt out in Mirelo account settings."),
+            item("Cancel", "cancel", "Leave Mirelo disabled"),
+            item("Enable Mirelo for On tasks", "confirm", "Validate the existing key; environment keys are not copied into auth.json"),
+        ];
+        self.pick(Picker::new("Enable paid Mirelo use?", items), |app, picked| async move {
+            if picked.value.as_deref() == Some("confirm") {
+                app.session().op(op::AcknowledgeMirelo {}).await?;
+                app.notice("Mirelo onboarding acknowledged. Off tasks remain off.", NoticeTone::Info);
+                app.close_panel();
+                app.close_panel();
+                app.open_audio().await?;
+            } else {
+                app.close_panel();
+            }
+            Ok(())
+        });
+    }
+
     async fn open_audio_task(&self, task: Task) -> Result<(), RuntimeError> {
         let config = self.session().op(op::AudioStatus {}).await?.config.task(task);
         let endpoint = config.local.as_ref();
         let mut items = vec![
             item(
-                format!("Use Mirelo automatically: {}", config.auto_mirelo),
+                format!("Allow Mirelo: {}", if config.auto_mirelo { "On" } else { "Off" }),
                 "auto",
-                "true uses your Mirelo key; false uses the configured alternative",
+                "On allows Mirelo after onboarding; Off never uses Mirelo, even when explicitly requested",
             ),
             item(
                 format!("Use alternative as fallback: {}", config.fallback),
@@ -96,7 +135,7 @@ impl TuiApp {
             ),
             item("Set alternative API key", "key", "Optional; hidden, owner-only, never written to settings.json"),
             item("Remove alternative API key", "remove-key", "Removes this task's saved authentication only"),
-            item("Remove alternative endpoint", "remove-endpoint", "Also turns fallback off; does not change your Mirelo automatic switch"),
+            item("Remove alternative endpoint", "remove-endpoint", "Also turns fallback off; does not change your Mirelo permission"),
         ];
         if task == Task::AudioToMidi {
             items.push(inert("MuScriptor: run uvx muscriptor serve; paste the server URL above."));
@@ -338,7 +377,7 @@ impl Overlay<TuiApp> for AudioFieldPanel {
         let mut lines = vec![Line::new(self.field.title(), st::TITLE)];
         let help = match self.field {
             AudioField::MireloKey => {
-                "Existing Mirelo account: https://mirelo.ai/studio/api-keys. Checked with /v3/me, then saved owner-only. Powered by Mirelo."
+                "Powered by Mirelo. Submitting this key acknowledges paid use for On tasks: each create spends credits and uploads supplied media. Training follows https://mirelo.ai/studio/settings/profile. Off tasks remain off. Key checked with /v3/me, then saved owner-only. Get a key: https://mirelo.ai/studio/api-keys."
             }
             AudioField::LocalKey(_) => "Optional authentication, saved owner-only outside settings. The key stays hidden.",
             AudioField::Url(_) => {

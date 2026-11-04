@@ -371,6 +371,8 @@ requests! {
     AudioStatus {} -> kumi_ai::audio::Status;
     ConfigureAudio { config: kumi_ai::audio::Config } -> ();
     SaveMireloKey { key: Secret } -> serde_json::Value;
+    /// Confirms the disclosed paid use with an existing key; opening settings alone does not acknowledge it.
+    AcknowledgeMirelo {} -> serde_json::Value;
     RemoveMireloKey {} -> ();
     SaveLocalAudioKey { task: kumi_ai::audio::Task, key: Secret } -> ();
     /// The providers Kumi can sign in to, and how each is signed in now.
@@ -711,6 +713,7 @@ impl Session {
                         .audio_service()
                         .ok_or_else(|| RuntimeError::plain("Audio models aren't available in this session."))?
                         .configure(config)
+                        .await
                 })
                 .await
             }
@@ -720,6 +723,16 @@ impl Session {
                         .audio_service()
                         .ok_or_else(|| RuntimeError::plain("Audio models aren't available in this session."))?
                         .save_mirelo_key(&key.0, &kumi_common::abort::timeout(20_000))
+                        .await
+                })
+                .await
+            }
+            Op::AcknowledgeMirelo(request) => {
+                answered(request, |op::AcknowledgeMirelo {}| async move {
+                    session
+                        .audio_service()
+                        .ok_or_else(|| RuntimeError::plain("Audio models aren't available in this session."))?
+                        .acknowledge_mirelo(&kumi_common::abort::timeout(20_000))
                         .await
                 })
                 .await

@@ -1757,6 +1757,30 @@ pub(crate) fn requests() -> Vec<Op> {
         op::MapKey {}.into(),
         op::Slots { id: 3, words: "listening off".into() }.into(),
         op::StopSlots { id: 3 }.into(),
+        op::AudioStatus {}.into(),
+        op::ConfigureAudio {
+            config: kumi_ai::audio::Config {
+                acknowledged: true,
+                tasks: [(
+                    kumi_ai::audio::Task::AudioToMidi,
+                    kumi_ai::audio::TaskConfig {
+                        auto_mirelo: false,
+                        local: Some(kumi_ai::audio::Endpoint {
+                            url: "http://127.0.0.1:8222".into(),
+                            protocol: kumi_ai::audio::LocalProtocol::Muscriptor,
+                            model: None,
+                        }),
+                        fallback: true,
+                    },
+                )]
+                .into(),
+            },
+        }
+        .into(),
+        op::AcknowledgeMirelo {}.into(),
+        op::SaveMireloKey { key: Secret("test-mirelo-key".into()) }.into(),
+        op::RemoveMireloKey {}.into(),
+        op::SaveLocalAudioKey { task: kumi_ai::audio::Task::AudioToMidi, key: Secret("test-local-audio-key".into()) }.into(),
         op::Providers {}.into(),
         op::LocalModels {}.into(),
         op::ChooseDefault {}.into(),

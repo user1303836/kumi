@@ -393,6 +393,41 @@
     "id": 3
   },
   {
+    "type": "audio-status"
+  },
+  {
+    "type": "configure-audio",
+    "config": {
+      "tasks": {
+        "audio-to-midi": {
+          "autoMirelo": false,
+          "local": {
+            "url": "http://127.0.0.1:8222",
+            "protocol": "muscriptor",
+            "model": null
+          },
+          "fallback": true
+        }
+      },
+      "acknowledged": true
+    }
+  },
+  {
+    "type": "acknowledge-mirelo"
+  },
+  {
+    "type": "save-mirelo-key",
+    "key": "test-mirelo-key"
+  },
+  {
+    "type": "remove-mirelo-key"
+  },
+  {
+    "type": "save-local-audio-key",
+    "task": "audio-to-midi",
+    "key": "test-local-audio-key"
+  },
+  {
     "type": "providers"
   },
   {

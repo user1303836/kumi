@@ -57,12 +57,9 @@ pub fn audio_service(auth_file: &str, settings_file: &str, env: &Env) -> Rc<kumi
         store: Rc::new(open_credential_store(auth_file)),
         env: env.clone(),
         read_config: Rc::new(move || read_settings(&read_file).audio_models),
-        write_config: Rc::new(move |config| {
-            let mut next = serde_json::to_value(read_settings(&write_file)).map_err(|e| RuntimeError::plain(e.to_string()))?;
-            next["audioModels"] = serde_json::to_value(config).map_err(|e| RuntimeError::plain(e.to_string()))?;
-            crate::config::write_settings(&write_file, &next)
-        }),
+        write_config: Rc::new(move |config| crate::config::write_audio_settings(&write_file, config)),
         output_dir: std::path::PathBuf::from(crate::config::kumi_dir(env)).join("audio"),
+        mirelo_base: None,
     })
 }
 
@@ -71,17 +68,28 @@ pub async fn login(config: &AppConfig, io: LoginIo) -> Result<(), RuntimeError> 
         let service = audio_service(auth_file, settings_file, &io.env);
         if *remove {
             service.remove_mirelo_key().await?;
-            io.out.write("Removed the saved Mirelo key. MIRELO_API_KEY, if set, still applies. Conversation sign-ins are unchanged.\n");
+            io.out.write("Removed the saved Mirelo key and disabled Mirelo use until onboarding again. MIRELO_API_KEY is not consent; conversation sign-ins are unchanged.\n");
             return Ok(());
         }
-        io.out.write("Powered by Mirelo. Use an existing account's API key: https://mirelo.ai/studio/api-keys\nAudio requests may spend your Mirelo credits and upload media. Training follows your account settings: https://mirelo.ai/studio/settings/profile. /audio configures each task separately.\n");
+        io.out.write("Powered by Mirelo. Use an existing account's API key: https://mirelo.ai/studio/api-keys\nEach audio create spends Mirelo credits and uploads supplied media. Training follows your account settings: https://mirelo.ai/studio/settings/profile. Continuing enables Mirelo for tasks switched On; Off tasks never use Mirelo, even when explicitly requested. /audio configures each task separately.\n");
         let input = io.input.clone().ok_or_else(|| RuntimeError::plain("Kumi needs a terminal to ask for the key."))?;
-        let key = trim(&read_hidden(input, io.out.clone(), "Mirelo API key (hidden): ", io.signal.clone()).await?).to_string();
-        service
-            .save_mirelo_key(&key, &abort::any([io.signal.clone(), abort::timeout(20_000)]))
-            .await
-            .map_err(|e| RuntimeError::plain(crate::config::safe_error_message(Some(&e.message()), &[key])))?;
-        io.out.write("Mirelo account checked; key saved owner-only. /audio changes audio routing immediately; your conversation model is unchanged.\n");
+        let existing = service.status().await?.mirelo_configured;
+        let prompt = if existing {
+            "Mirelo API key (hidden; Enter confirms enabling the existing key for On tasks, Ctrl-C cancels): "
+        } else {
+            "Mirelo API key (hidden; submitting enables On tasks, Ctrl-C cancels): "
+        };
+        let key = trim(&read_hidden(input, io.out.clone(), prompt, io.signal.clone()).await?).to_string();
+        let signal = abort::any([io.signal.clone(), abort::timeout(20_000)]);
+        if key.is_empty() && existing {
+            service.acknowledge_mirelo(&signal).await?;
+        } else {
+            service
+                .save_mirelo_key(&key, &signal)
+                .await
+                .map_err(|e| RuntimeError::plain(crate::config::safe_error_message(Some(&e.message()), &[key])))?;
+        }
+        io.out.write("Mirelo account checked; onboarding acknowledged. New keys are saved owner-only; environment keys stay in the environment. /audio changes task permissions immediately; your conversation model is unchanged.\n");
         return Ok(());
     }
     let AppConfig::Login { provider, method, auth_file, pi_auth_file, settings_file } = config else {

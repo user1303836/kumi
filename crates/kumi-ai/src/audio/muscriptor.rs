@@ -4,10 +4,13 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use kumi_common::abort::Signal;
 use reqwest::{multipart, Method};
 use serde_json::{json, Value};
-use std::{collections::BTreeMap, path::Path};
+use std::{collections::BTreeMap, path::Path, time::Duration};
 
 pub(super) async fn execute(client: &Client, input: &Value, output: &Path, signal: &Signal) -> Result<Value, Failure> {
     let media = wire::media_file(wire::required_string(input, "audio")?, false).await?;
+    if !matches!(media.mime, "audio/wav" | "audio/flac" | "audio/mpeg" | "audio/ogg") {
+        return Err(Failure::new("MuScriptor supports WAV, FLAC, MP3 and Ogg audio; M4A and AAC are not supported"));
+    }
     if let Some(duration) = input.get("duration_ms") {
         if !duration.as_u64().is_some_and(|duration| duration > 0 && duration <= 900_000) {
             return Err(Failure::new("MuScriptor duration_ms must be positive and at most 15 minutes"));
@@ -34,7 +37,11 @@ pub(super) async fn execute(client: &Client, input: &Value, output: &Path, signa
         .file_name(media.name)
         .mime_str(media.mime)
         .map_err(|_| Failure::new("Invalid media MIME type"))?;
-    let request = client.api(Method::POST, "/transcribe")?.header("Accept", "text/event-stream").multipart(form.part("file", part));
+    let request = client
+        .api(Method::POST, "/transcribe")?
+        .timeout(Duration::from_secs(3600))
+        .header("Accept", "text/event-stream")
+        .multipart(form.part("file", part));
     let mut response = client.send(request, signal).await?;
     if !response
         .headers()
@@ -60,8 +67,23 @@ pub(super) async fn execute(client: &Client, input: &Value, output: &Path, signa
         if bytes > 64 * 1024 * 1024 {
             return Err(Failure::new("MuScriptor event stream exceeds 64 MiB"));
         }
-        for event in parser.push(&chunk) {
-            let event: Value = serde_json::from_str(&event.data).map_err(|_| Failure::new("Invalid JSON in MuScriptor event stream"))?;
+        for frame in parser.push(&chunk) {
+            let parsed = serde_json::from_str::<Value>(&frame.data);
+            // Native error frames need not have a JSON `type` field.
+            if frame.event.as_deref() == Some("error") {
+                let detail = parsed.as_ref().map(|event| client.diagnostic(event)).unwrap_or_else(|_| "invalid error payload".into());
+                return Err(Failure::new(format!("MuScriptor reported a transcription error: {detail}")));
+            }
+            let event = parsed.map_err(|_| Failure::new("Invalid JSON in MuScriptor event stream"))?;
+            if event["type"] == "error" {
+                return Err(Failure::new(format!("MuScriptor reported a transcription error: {}", client.diagnostic(&event))));
+            }
+            if !event.is_object()
+                || event.get("type").is_some_and(|kind| !kind.is_string())
+                || (event.get("type").is_none() && frame.event.is_none())
+            {
+                return Err(Failure::new("Invalid MuScriptor event envelope"));
+            }
             match event["type"].as_str() {
                 Some("start") => {
                     let index = event["index"].as_u64().ok_or_else(|| Failure::new("MuScriptor start event omitted its index"))?;
@@ -81,9 +103,6 @@ pub(super) async fn execute(client: &Client, input: &Value, output: &Path, signa
                     let mut note = open.remove(&index).ok_or_else(|| Failure::new("MuScriptor end event has no matching start"))?;
                     let end = seconds(&event, "end_time")?;
                     let start = note["start"].as_f64().unwrap_or_default();
-                    if end < start {
-                        return Err(Failure::new("MuScriptor note ends before it starts"));
-                    }
                     note["end"] = json!(end.max(start + 0.01));
                     notes.push(note);
                 }
@@ -135,9 +154,9 @@ pub(super) async fn execute(client: &Client, input: &Value, output: &Path, signa
                         "notes_path":notes_path,"beat_grid":event["beat_grid"],"credits":0}),
                     );
                 }
-                Some("progress") => {}
-                Some("error") => return Err(Failure::new("MuScriptor reported a transcription error")),
-                _ => return Err(Failure::new("Unknown MuScriptor event type; no complete result saved")),
+                // Progress and future non-error extensions do not change the note stream.
+                // Only transcription_complete above can commit a successful result.
+                _ => {}
             }
         }
     }

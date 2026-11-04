@@ -47,6 +47,8 @@ impl Task {
 pub struct Config {
     #[serde(default)]
     pub tasks: BTreeMap<Task, TaskConfig>,
+    #[serde(default)]
+    pub acknowledged: bool,
 }
 impl Config {
     pub fn task(&self, task: Task) -> TaskConfig {
@@ -113,6 +115,8 @@ pub struct ServiceOptions {
     pub read_config: Rc<dyn Fn() -> Config>,
     pub write_config: Rc<dyn Fn(&Config) -> Result<(), RuntimeError>>,
     pub output_dir: PathBuf,
+    /// Internal injection for protocol fixtures, never read from user/model settings.
+    pub mirelo_base: Option<String>,
 }
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -131,9 +135,33 @@ impl Service {
     pub fn config(&self) -> Config {
         (self.options.read_config)()
     }
-    pub fn configure(&self, config: Config) -> Result<(), RuntimeError> {
+    pub fn output_dir(&self) -> &std::path::Path {
+        &self.options.output_dir
+    }
+    pub async fn configure(&self, config: Config) -> Result<(), RuntimeError> {
         config.validate()?;
-        (self.options.write_config)(&config)
+        let previous = self.config();
+        (self.options.write_config)(&config)?;
+        let mut failed = false;
+        for task in Task::ALL {
+            if let Some(old) = previous.task(task).local {
+                let old_name = local_credential(task, &old).map_err(wire::Failure::runtime)?;
+                let next_name = config
+                    .task(task)
+                    .local
+                    .as_ref()
+                    .map(|next| local_credential(task, next))
+                    .transpose()
+                    .map_err(wire::Failure::runtime)?;
+                if next_name.as_ref() != Some(&old_name) && self.set_key(&old_name, None).await.is_err() {
+                    failed = true;
+                }
+            }
+        }
+        if failed {
+            return Err(RuntimeError::plain("Audio settings were saved, but an obsolete local credential could not be removed"));
+        }
+        Ok(())
     }
     async fn mirelo_key(&self) -> Result<Option<(String, String)>, RuntimeError> {
         if let Some(Credential::ApiKey { key }) = self.options.store.get("mirelo").await? {
@@ -150,8 +178,9 @@ impl Service {
     pub async fn preferred(&self, task: Task) -> Result<Option<Selection>, RuntimeError> {
         let config = self.config();
         config.validate()?;
+        let acknowledged = config.acknowledged;
         let config = config.task(task);
-        if config.auto_mirelo && self.mirelo_key().await?.is_some() {
+        if acknowledged && config.auto_mirelo && self.mirelo_key().await?.is_some() {
             Ok(Some(Selection::Mirelo))
         } else if config.local.is_some() {
             Ok(Some(Selection::Local))
@@ -161,12 +190,28 @@ impl Service {
     }
     pub async fn save_mirelo_key(&self, key: &str, signal: &Signal) -> Result<Value, RuntimeError> {
         let key = valid_key(key)?;
-        let client = wire::Client::new("https://api.mirelo.ai", Some(&key), false).map_err(wire::Failure::runtime)?;
+        let summary = self.validate_mirelo_key(&key, signal).await?;
+        self.set_key("mirelo", Some(key)).await?;
+        let mut config = self.config();
+        config.acknowledged = true;
+        self.configure(config).await?;
+        Ok(summary)
+    }
+    pub async fn acknowledge_mirelo(&self, signal: &Signal) -> Result<Value, RuntimeError> {
+        let key = self.mirelo_key().await?.ok_or_else(|| RuntimeError::plain("No Mirelo key is configured"))?.0;
+        let summary = self.validate_mirelo_key(&key, signal).await?;
+        let mut config = self.config();
+        config.acknowledged = true;
+        self.configure(config).await?;
+        Ok(summary)
+    }
+    async fn validate_mirelo_key(&self, key: &str, signal: &Signal) -> Result<Value, RuntimeError> {
+        let client = wire::Client::new(self.options.mirelo_base.as_deref().unwrap_or("https://api.mirelo.ai"), Some(key), false)
+            .map_err(wire::Failure::runtime)?;
         let account = client.json(reqwest::Method::GET, "/v3/me", None, signal).await.map_err(wire::Failure::runtime)?;
         if signal.is_cancelled() {
             return Err(RuntimeError::plain("Operation cancelled"));
         }
-        self.set_key("mirelo", Some(key)).await?;
         // Never return arbitrary account fields (or an accidentally echoed credential).
         let mut summary = json!({"configured":true});
         for field in ["credits_available", "spend_capacity", "billing_mode", "provisioning_state"] {
@@ -182,6 +227,9 @@ impl Service {
         Ok(summary)
     }
     pub async fn remove_mirelo_key(&self) -> Result<(), RuntimeError> {
+        let mut config = self.config();
+        config.acknowledged = false;
+        self.configure(config).await?;
         self.set_key("mirelo", None).await
     }
     pub async fn save_local_key(&self, task: Task, key: &str) -> Result<(), RuntimeError> {
@@ -195,20 +243,29 @@ impl Service {
         self.options.store.update(name, Box::new(move |_| Box::pin(async move { Ok(key.map(|key| Credential::ApiKey { key })) }))).await?;
         Ok(())
     }
-    pub async fn execute(&self, task: Task, input: Value, selection: Selection, signal: &Signal) -> Result<Value, RuntimeError> {
+    pub async fn execute(
+        &self,
+        task: Task,
+        input: Value,
+        selection: Selection,
+        signal: &Signal,
+        notice: &dyn Fn(String),
+    ) -> Result<Value, RuntimeError> {
         if signal.is_cancelled() {
             return Err(RuntimeError::plain("Operation cancelled"));
         }
         let config = self.config();
         config.validate()?;
+        let permitted = config.acknowledged && config.task(task).auto_mirelo;
+        if selection == Selection::Mirelo && !permitted {
+            return Err(RuntimeError::plain(
+                "Mirelo is disabled for this task or onboarding has not been acknowledged; enable it in /audio first",
+            ));
+        }
         let config = config.task(task);
-        let key = if selection == Selection::Mirelo || (selection == Selection::Auto && config.auto_mirelo) {
-            self.mirelo_key().await?
-        } else {
-            None
-        };
+        let key = if permitted && selection != Selection::Local { self.mirelo_key().await? } else { None };
         let selected = if selection == Selection::Auto {
-            if config.auto_mirelo && key.is_some() {
+            if permitted && key.is_some() {
                 Selection::Mirelo
             } else if config.local.is_some() {
                 Selection::Local
@@ -222,11 +279,13 @@ impl Service {
             return self.local(task, &input, &config, signal).await.map_err(wire::Failure::runtime);
         }
         let key = key.ok_or_else(|| RuntimeError::plain("Mirelo is not configured; save a key or set MIRELO_API_KEY"))?.0;
-        let client = wire::Client::new("https://api.mirelo.ai", Some(&key), false).map_err(wire::Failure::runtime)?;
-        match client.execute(task, &input, None, &self.options.output_dir, signal).await {
+        let client = wire::Client::new(self.options.mirelo_base.as_deref().unwrap_or("https://api.mirelo.ai"), Some(&key), false)
+            .map_err(wire::Failure::runtime)?;
+        match client.execute(task, &input, None, &self.options.output_dir, signal, notice).await {
             Ok(result) => Ok(result),
             Err(error)
                 if selection == Selection::Auto
+                    && input.get("job_id").is_none()
                     && config.fallback
                     && config.local.is_some()
                     && error.availability
@@ -254,7 +313,9 @@ impl Service {
         let client = wire::Client::new(&endpoint.url, key, true)?;
         match endpoint.protocol {
             LocalProtocol::Muscriptor => muscriptor::execute(&client, input, &self.options.output_dir, signal).await,
-            LocalProtocol::Mirelo => client.execute(task, input, endpoint.model.as_deref(), &self.options.output_dir, signal).await,
+            LocalProtocol::Mirelo => {
+                client.execute(task, input, endpoint.model.as_deref(), &self.options.output_dir, signal, &|_| {}).await
+            }
         }
     }
 }

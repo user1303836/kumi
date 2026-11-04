@@ -74,7 +74,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `kumi login` | 登录：询问使用 ChatGPT 还是 API 密钥 |
 | `kumi login <provider>` | 登录 `openai-codex`（ChatGPT；没有浏览器时加 `--device`，通过 SSH 时默认如此；要用浏览器则加 `--browser`），或用 API 密钥登录 `anthropic`、`openai`、`opencode` 或 `opencode-go` |
 | `kumi logout <provider>` | 移除 Kumi 在该提供方的登录 |
-| `kumi login mirelo`、`kumi logout mirelo` | 隐藏输入 API 密钥以连接现有 Mirelo 账户，或删除已保存密钥；仅用于音频，不改变对话模型 |
+| `kumi login mirelo`、`kumi logout mirelo` | 通过隐藏密钥输入明确同意 Mirelo 付费使用，或删除已保存密钥并撤回同意。环境变量中已有密钥也仍需确认。仅用于音频，不改变对话模型 |
 | `kumi model [<provider>/<model>]` | 显示或选择模型，也可以是你电脑上的模型（`ollama/<model>`） |
 | `kumi auth` | 哪些提供方可用、当前模型以及登录文件（从不显示机密信息） |
 | `kumi bridge [--yes] [--allow-dirty]` | 在 Live 关闭时：把桥接装入 Live，或将其更新到最新。`--yes` 确认 Live 已关闭（没有终端时，不加它就什么都不改）；`--allow-dirty` 允许带有未提交修改的检出副本安装其桥接 |
@@ -112,7 +112,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 | `/loop <what to reach>` | 按判定的轮次工作：一次修改，听修改前后，只有目标项变好、其他方面没变差才保留，然后下一个目标。所有项目达成、修改不再有帮助，或到 16 轮或 45 分钟时停止；按 Esc 或 `/loop stop` 也会停止。要匹配某个声音（“让我的 pad 听起来像 ~/ref.wav”）时改为旋钮搜索：单独输入 `/loop` 继续已暂停的搜索，`/loop stop` 结束它 |
 | `/goal <what to reach>` | 跨多个回合坚持一个目标，每个回合后检查（测量过时看判定的数值），直到达成、受阻、停滞（连续三个回合没有更接近）或用完预算。`/goal` 显示它；`/goal resume`（用完的部分换上新的预算）、`/goal edit <words>`、`/goal new: <words>`（替换未完成的目标）、`/goal pause`（或 Esc）、`/goal clear`（没有未完成的目标时，结束暂停中的声音匹配搜索） |
 | `/slots` | 显示每项聆听工作（分轨、扒谱、聆听、嵌入）由哪个模型负责，并用平常的话替换：`/slots listening gemini`、`/slots listening off`、`/slots listening <base URL>#<model>`、`/slots embeddings <.onnx 文件或 https 链接>`。新模型会先测试；`/slots back <job>` 撤回替换 |
-| `/audio` | 连接 Mirelo，分别开关文字/视频音效、延长、区域替换、音频转 MIDI 的自动使用；配置自托管替代服务与可选故障回退。无需 DAW 或对话模型登录 |
+| `/audio` | 确认接入 Mirelo，独立设置文字/视频音效、延长、区域替换、MIDI 的 **Allow Mirelo: On/Off**。Off 也拒绝明确指定 Mirelo 的请求。配置自托管替代服务和可选回退。仅有密钥不代表同意；无需 DAW 或对话模型登录 |
 | `/music` | 你自己的音乐，Kumi 在这台电脑上从中学习你的口味：文件夹、已听过的歌曲和进度。`/music add <folder>`、`/music remove <folder>`、`/music pause`、`/music resume`，以及 `/music forget`（经你确认后删除 Kumi 学到的内容）。Kumi 使用你的口味时，歌名和艺人名会发送给模型 |
 | `/map` | 以两张全屏地图显示你的声音和歌曲（Tab 切换）：声音按类型着色，歌曲按风格着色。方向键移到该方向最近的点，Shift 加方向键平移，+ 和 − 缩放，点击选中一个点，`/` 按类型、文件夹、音色包或流派标签筛选，Space 播放该点，鼠标一移到某个点上就会播放（最多两秒；`h` 开关此功能，Kumi 会记住）。拖出一个框、按住 Ctrl 点击、`x`、`a`（筛选保留的全部）或 `g`（各点最近的点）可以选取多个点，Enter 把它们（或当前选中的点）放进你的调色板（palette）；Esc 会先放开已选取的点。地图会旋转，让长边横跨屏幕。大型素材库缩小时，越密集的地方越亮；放大后点会变大（典型的声音稍大一些），点聚集的地方会微微发光，并显示名称。在盲文点阵中，缩放和移动会平滑过渡。能显示图像的终端（kitty、Ghostty）用图像，其他终端用盲文点阵，基础控制台则显示列表。Esc 关闭 |
 | `/map open` | 在浏览器中显示地图：指针移到点上显示名称，滚轮缩放，按住 Shift 拖动（或用 Lasso）选取多个点，筛选保留含有所输入文字的点，可显示或隐藏分组，点击播放一个点。它的操作会把文字放进输入框，Add to palette 把选取的点放进调色板。只从这台电脑提供，链接带随机密钥；通过 SSH 使用时，Kumi 会告诉你要转发哪个端口。`/map close` 关闭它，退出 Kumi 时也会关闭 |

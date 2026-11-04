@@ -125,7 +125,11 @@ async fn configured_provider_notes_keep_velocity_and_map_render_seconds_to_beats
     let provider = Rc::new(Provider {
         result: Ok(Some(json!({
             "provider":"mirelo", "attribution":"Powered by Mirelo", "midi_path":"/output/transcription.mid",
-            "notes":[{"pitch":60,"start":0.3,"end":0.6,"velocity":17},{"pitch":72,"start":1.2,"end":2.,"velocity":109}]
+            "notes":[
+                {"pitch":60.0,"start":0.3,"end":0.6,"velocity":17.0,"instrument":"piano"},
+                {"pitch":72,"start":1.2,"end":2.,"velocity":109,"instrument":"guitar"},
+                {"pitch":42,"start":0.1,"end":0.2,"velocity":120,"instrument":"drums"}
+            ]
         }))),
         calls: RefCell::default(),
     });
@@ -151,7 +155,7 @@ async fn quote_and_provider_failure_never_insert_or_silently_fall_back() {
         (Ok(Some(json!({"quote":true,"credits":2}))), true, false),
         (Err("provider unavailable".to_string()), false, true),
         (Ok(Some(json!({"midi_path":"/retained.mid"}))), false, true),
-        (Ok(Some(json!({"notes":[{"pitch":140,"start":0.,"end":1.,"velocity":100}]}))), false, true),
+        (Ok(Some(json!({"notes":[{"pitch":140,"start":0.,"end":1.,"velocity":100,"instrument":"drums"}]}))), false, true),
     ] {
         let fake = Rc::new(Fake { dir: tempfile::tempdir().unwrap(), written: RefCell::default() });
         let provider = Rc::new(Provider { result, calls: RefCell::default() });
@@ -174,5 +178,46 @@ async fn disabled_provider_and_explicit_builtin_preserve_original_detector() {
         assert!(result["heard"].as_str().unwrap().contains("kicks"));
         assert_eq!(provider.calls.borrow().len(), usize::from(!builtin));
         assert!(!fake.written.borrow()[0].1.is_empty());
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn mixed_provider_instruments_are_partitioned_for_drums_melody_and_harmony() {
+    for what in ["drums", "melody", "harmony"] {
+        let fake = Rc::new(Fake { dir: tempfile::tempdir().unwrap(), written: RefCell::default() });
+        let provider = Rc::new(Provider {
+            result: Ok(Some(json!({"notes":[
+                {"pitch":36.0,"start":0.3,"end":0.4,"velocity":31.0,"instrument":"drums"},
+                {"pitch":60.0,"start":0.3,"end":0.6,"velocity":17.0,"instrument":"piano"},
+                {"pitch":72,"start":0.9,"end":1.2,"velocity":109,"instrument":"guitar"},
+                {"pitch":42,"start":0.9,"end":1.0,"velocity":94,"instrument":"drums"}
+            ]}))),
+            calls: RefCell::default(),
+        });
+        let tool = ToMidi::new(fake.clone()).tool().with_audio_transcriber(provider.clone()).unwrap();
+        run(&tool, json!({"track":"t1","as":what,"fromBeat":16,"beats":4,"instruments":["piano"]})).await.unwrap();
+        let calls = provider.calls.borrow();
+        assert_eq!(calls[0]["instruments"], if what == "drums" { json!(["drums"]) } else { json!(["piano"]) });
+        let written = fake.written.borrow();
+        let notes = &written[0].1;
+        let expected = if what == "drums" { [(36, 31, 0.1), (42, 94, 0.1)] } else { [(60, 17, 0.3), (72, 109, 0.3)] };
+        assert_eq!(notes.len(), expected.len());
+        for (i, (note, (pitch, velocity, seconds))) in notes.iter().zip(expected).enumerate() {
+            assert_eq!(note.pitch, pitch);
+            assert_eq!(note.velocity, velocity);
+            assert!((note.start - [0.3, 0.9][i] * 170. / 60.).abs() < 1e-9);
+            assert!((note.length - seconds * 170. / 60.).abs() < 1e-9);
+        }
+    }
+}
+
+#[test]
+fn provider_numeric_notes_accept_whole_pitches_and_reject_fractional_or_out_of_range_values() {
+    let notes = json!({"notes":[{"pitch":60.0,"start":0.25,"end":0.75,"velocity":17.4,"instrument":"piano"}]});
+    assert_eq!(super::provider_notes(&notes, 2., 4., "harmony").unwrap(), [MidiNote { pitch: 60, start: 0.5, length: 1., velocity: 17 }]);
+    for (field, value) in [("pitch", json!(60.5)), ("pitch", json!(-1)), ("pitch", json!(128)), ("velocity", json!(128))] {
+        let mut invalid = notes.clone();
+        invalid["notes"][0][field] = value;
+        assert!(super::provider_notes(&invalid, 2., 4., "harmony").is_err(), "{invalid}");
     }
 }

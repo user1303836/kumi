@@ -2,26 +2,43 @@
 use std::rc::Rc;
 
 use async_trait::async_trait;
-use kumi_ai::audio::{Selection, Service, Task};
+use kumi_ai::audio::{LocalProtocol, Selection, Service, Task};
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
 };
 use kumi_types::{
-    contracts::{AudioTranscriber, JsonObject, KernelTool, Reach, ToolResult, ToolRole},
+    contracts::{AudioTranscriber, JsonObject, KernelTool, Reach, ToolResult},
     errors::RuntimeError,
 };
 use serde_json::{json, Value};
 
 pub const TOOL: &str = "audio_models";
-pub const GUIDANCE: &str = "Audio generation/transcription: use audio_models for text-to-sfx, video-to-sfx, extend, inpaint and file audio-to-midi. It works without a DAW. /audio governs these providers, not /model or /slots. Only run generation/edit/transcription for the producer's request, not speculative background work. Configuration is not permission to upload library/project audio for background analysis or groove listening. provider:auto follows each task's settings: configured automatic Mirelo first, otherwise configured local; an explicitly requested provider wins. MuScriptor is transcription only. quote:true is preflight only (MIDI is an estimate): it may upload the input, but never creates/bills a generation job. Keep returned files: use the current DAW's file-import tool schema to place audio, never invent paths or cross-DAW commands. For track transcription use audio_to_midi where offered (it renders and inserts provider notes). Otherwise render the source audio track with render {track,from_beat,beats}, then audio_models task:audio-to-midi with the returned file. For processed audio/instruments, bounce or resample first; render's raw source excludes effects. Write returned notes using the current DAW's note-writing tools; seconds are not beats: at constant tempo beats=seconds*BPM/60, plus the destination position only once. With tempo changes, map seconds through the project's tempo map; never treat average-tempo placement as exact. Preserve provider metadata and say Powered by Mirelo for Mirelo results. Do not silently substitute a built-in converter when a preferred provider fails; provider:builtin on the native conversion tool is only for an explicit request to use the built-in converter.";
+pub const GUIDANCE: &str = "Audio generation/transcription: use audio_models for text-to-sfx, video-to-sfx, extend, inpaint and file audio-to-midi. It works without a DAW. /audio governs these providers, not /model or /slots. Only run generation/edit/transcription for the producer's request, not speculative background work. Configuration is not permission to upload library/project audio for background analysis or groove listening; listen, including transcribe:true note analysis, stays local. provider:auto follows each task's settings: automatic Mirelo only after onboarding and with that task on, otherwise configured local; explicit mirelo cannot bypass a task being off. An environment key alone is not consent. MuScriptor is transcription only. Each Mirelo create spends the producer's credits: quote first and confirm the cost with the producer for anything beyond a single small request. Show each job's returned credits, or say when accounting is unavailable; never invent a cost. quote:true is preflight only (MIDI is an estimate): it may upload the input, but never creates/bills a generation job. job_id with the original task/provider only resumes polling/downloads, never creates or uploads; reuse it to recover an existing job instead of resubmitting. This is a file-output tool, not a DAW render or insertion tool. Return the saved output paths and provider metadata to the producer. MIDI note timings are seconds, not beats. Say Powered by Mirelo for Mirelo results. Do not silently substitute a built-in converter when a preferred provider fails; a built-in converter is only for an explicit request to use it.";
 
-pub fn tool(service: Rc<Service>) -> Rc<dyn KernelTool> {
-    Rc::new(AudioTool { service })
+pub fn tool(service: Rc<Service>, notice: Rc<dyn Fn(String)>) -> Rc<dyn KernelTool> {
+    Rc::new(AudioTool { service, notice })
+}
+
+/// A service exists even before onboarding; only configured providers need prompt guidance.
+pub(super) async fn guidance(service: Option<&Service>) -> &'static str {
+    let Some(service) = service else { return "" };
+    match service.status().await {
+        Ok(status)
+            if status.config.tasks.values().any(|task| task.local.is_some())
+                || (status.mirelo_configured
+                    && status.config.acknowledged
+                    && Task::ALL.into_iter().any(|task| status.config.task(task).auto_mirelo)) =>
+        {
+            GUIDANCE
+        }
+        _ => "",
+    }
 }
 
 struct AudioTool {
     service: Rc<Service>,
+    notice: Rc<dyn Fn(String)>,
 }
 
 fn selection(input: &mut JsonObject) -> Result<Selection, RuntimeError> {
@@ -35,7 +52,7 @@ impl KernelTool for AudioTool {
         TOOL
     }
     fn description(&self) -> &str {
-        "Generate sound effects from text/video, extend or inpaint audio, or transcribe an audio file to MIDI. Native Mirelo (Powered by Mirelo) or configured self-hosted models; no DAW required. Returns saved local output files, provider/model/job/credit metadata and a bounded preview of MIDI notes in seconds. Only for user-requested work. Auto routing follows independent task settings; explicit mirelo/local overrides them. quote:true may upload input but never creates/bills a generation job. Import output files with the DAW's existing import tools. For more notes, repeat task:audio-to-midi with notes_file:<returned notes_path>, offset and limit; this only reads the saved notes and never retranscribes."
+        "Generate sound effects from text/video, extend or inpaint audio, or transcribe an audio file to MIDI. Native Mirelo (Powered by Mirelo) or configured self-hosted models; no DAW required. Returns saved local output files, provider/model/job/credit metadata and a bounded preview of MIDI notes in seconds. This tool does not render from or insert into a DAW. Only for user-requested work. Automatic Mirelo requires onboarding and the task on; explicit mirelo cannot bypass Off. Each Mirelo create spends the producer's credits: quote first and confirm the cost for anything beyond a single small request. Show each job's returned credits. quote:true may upload input but never creates/bills a generation job. job_id with the original task/provider only resumes GET polling/downloads without creating or uploading. Return saved output paths to the producer. For more notes, repeat task:audio-to-midi with notes_file:<returned notes_path>, offset and limit; this only reads saved notes inside the audio output folder and never retranscribes."
     }
     fn input_schema(&self) -> JsonObject {
         json!({"type":"object","additionalProperties":false,"required":["task"],"properties":{
@@ -44,14 +61,15 @@ impl KernelTool for AudioTool {
             "prompt":{"type":"string","description":"The requested sound or edit"},
             "audio":{"type":"string","description":"Absolute local audio path or public URL; required for extend/inpaint/audio-to-midi"},
             "video":{"type":"string","description":"Absolute local video path or public URL for video-to-sfx"},
-            "duration_ms":{"type":"integer","exclusiveMinimum":0,"description":"Requested generation duration; audio-to-midi estimate (local files are measured when omitted)"},
+            "duration_ms":{"type":"integer","exclusiveMinimum":0,"description":"Requested generation duration for SFX; for audio-to-midi only a public URL's duration estimate. Local MIDI input is always measured for Mirelo/compatible providers; any supplied estimate is replaced. Native MuScriptor needs no duration."},
             "append_duration_ms":{"type":"integer","exclusiveMinimum":0},
             "region_start_ms":{"type":"integer","minimum":0},
             "region_end_ms":{"type":"integer","exclusiveMinimum":0},
             "model":{"type":"string","description":"Explicit supported model release, not a chat model"},
             "instruments":{"type":"array","items":{"type":"string"}},
             "quote":{"type":"boolean","default":false},
-            "notes_file":{"type":"string","description":"Read a page of a previously returned notes_path instead of transcribing; audio-to-midi only"},
+            "job_id":{"type":"string","description":"Resume an existing job with GET-only polling/downloads; use the original task and provider. Do not include generation inputs, quote or notes_file. Never creates or uploads. Native MuScriptor does not support resume."},
+            "notes_file":{"type":"string","description":"Read a page of a previously returned notes_path inside Kumi's audio output folder; audio-to-midi only. Paths or symlinks escaping that folder are refused."},
             "offset":{"type":"integer","minimum":0,"default":0},
             "limit":{"type":"integer","minimum":1,"maximum":128,"default":64}
         }}).as_object().unwrap().clone()
@@ -62,20 +80,23 @@ impl KernelTool for AudioTool {
                 .remove("task")
                 .and_then(|v| v.as_str().and_then(Task::parse))
                 .ok_or_else(|| RuntimeError::plain("task must be text-to-sfx, video-to-sfx, extend, inpaint or audio-to-midi"))?;
+            if input.contains_key("job_id") && input.keys().any(|key| !matches!(key.as_str(), "job_id" | "provider")) {
+                return Err(RuntimeError::plain("job_id resumes only; do not mix it with generation inputs, quote or notes_file"));
+            }
             if input.contains_key("notes_file") {
                 if task != Task::AudioToMidi {
                     return Err(RuntimeError::plain("notes_file is only for audio-to-midi results"));
                 }
-                return read_notes(&input, &signal).await;
+                return read_notes(&input, self.service.output_dir(), &signal).await;
             }
             if input.contains_key("offset") || input.contains_key("limit") {
                 return Err(RuntimeError::plain("offset and limit require notes_file"));
             }
             let provider = selection(&mut input)?;
-            if task == Task::AudioToMidi && !input.contains_key("duration_ms") {
-                measure_duration(&mut input, &signal).await?;
+            if task == Task::AudioToMidi {
+                prepare_midi_input(&self.service, provider, &mut input, &signal).await?;
             }
-            self.service.execute(task, Value::Object(input), provider, &signal).await.map(compact)
+            self.service.execute(task, Value::Object(input), provider, &signal, self.notice.as_ref()).await.map(compact)
         }
         .await;
         Ok(match result {
@@ -108,12 +129,17 @@ pub(super) fn compact(mut result: Value) -> Value {
     result
 }
 
-async fn read_notes(input: &JsonObject, signal: &Signal) -> Result<Value, RuntimeError> {
+async fn read_notes(input: &JsonObject, output_dir: &std::path::Path, signal: &Signal) -> Result<Value, RuntimeError> {
     signal.check()?;
     let path =
         input.get("notes_file").and_then(Value::as_str).ok_or_else(|| RuntimeError::plain("notes_file must be a local notes_path"))?;
     let path = std::path::Path::new(path);
     crate::core::plugin_tools::local_path(path).map_err(RuntimeError::plain)?;
+    let root = tokio::fs::canonicalize(output_dir).await.map_err(|e| RuntimeError::plain(format!("Saved MIDI output folder: {e}")))?;
+    let path = tokio::fs::canonicalize(path).await.map_err(|e| RuntimeError::plain(format!("Saved MIDI notes: {e}")))?;
+    if path == root || !path.starts_with(&root) {
+        return Err(RuntimeError::plain("notes_file must be inside the audio output folder; symlink escapes are not allowed"));
+    }
     let integer = |name: &str, default: u64| -> Result<u64, RuntimeError> {
         input
             .get(name)
@@ -124,7 +150,7 @@ async fn read_notes(input: &JsonObject, signal: &Signal) -> Result<Value, Runtim
     if !(1..=128).contains(&limit) {
         return Err(RuntimeError::plain("limit must be 1..128"));
     }
-    let file = tokio::fs::File::open(path).await.map_err(|e| RuntimeError::plain(format!("Saved MIDI notes: {e}")))?;
+    let file = tokio::fs::File::open(&path).await.map_err(|e| RuntimeError::plain(format!("Saved MIDI notes: {e}")))?;
     use tokio::io::AsyncReadExt;
     let mut bytes = Vec::new();
     file.take(64 * 1024 * 1024 + 1).read_to_end(&mut bytes).await.map_err(|e| RuntimeError::plain(format!("Saved MIDI notes: {e}")))?;
@@ -143,6 +169,19 @@ async fn read_notes(input: &JsonObject, signal: &Signal) -> Result<Value, Runtim
     )
 }
 
+async fn prepare_midi_input(service: &Service, provider: Selection, input: &mut JsonObject, signal: &Signal) -> Result<(), RuntimeError> {
+    if input.contains_key("job_id") {
+        return Ok(());
+    }
+    let selected = if provider == Selection::Auto { service.preferred(Task::AudioToMidi).await? } else { Some(provider) };
+    let native = selected == Some(Selection::Local)
+        && service.config().task(Task::AudioToMidi).local.is_some_and(|endpoint| endpoint.protocol == LocalProtocol::Muscriptor);
+    if selected.is_some() && !native {
+        measure_duration(input, signal).await?;
+    }
+    Ok(())
+}
+
 async fn measure_duration(input: &mut JsonObject, signal: &Signal) -> Result<(), RuntimeError> {
     let Some(audio) = input.get("audio").and_then(Value::as_str) else {
         return Ok(());
@@ -151,36 +190,52 @@ async fn measure_duration(input: &mut JsonObject, signal: &Signal) -> Result<(),
         return Ok(());
     }
     crate::core::plugin_tools::local_path(std::path::Path::new(audio)).map_err(RuntimeError::plain)?;
-    let ffmpeg = kumi_media::programs::find_ffmpeg(kumi_media::programs::FfmpegOptions {
-        signal: Some(signal.clone()),
-        installed_only: true,
-        ..Default::default()
-    })
-    .await
-    .map_err(|e| RuntimeError::plain(e.to_string()))?
-    .ok_or_else(|| RuntimeError::plain("No installed audio metadata probe; supply duration_ms (an estimate for the quote)"))?;
-    let seconds = kumi_media::frames::duration_of(&ffmpeg, audio, Some(signal.clone())).await;
+    // Use the same native file metadata reader as local listening before trying an installed probe.
+    // This is measured from the file, never the model's duration_ms.
+    let path = std::path::PathBuf::from(audio);
     signal.check()?;
-    let seconds = seconds
-        .filter(|n| n.is_finite() && *n > 0.)
-        .ok_or_else(|| RuntimeError::plain("Could not measure the input duration; supply duration_ms"))?;
+    let seconds = tokio::task::spawn_blocking(move || kumi_listening::music::tags::read(&path, path.parent().unwrap_or(&path)).seconds)
+        .await
+        .map_err(|e| RuntimeError::plain(format!("Could not read audio metadata: {e}")))?;
+    signal.check()?;
+    let seconds = match seconds.filter(|seconds| seconds.is_finite() && *seconds > 0.) {
+        Some(seconds) => seconds,
+        None => {
+            let ffmpeg = kumi_media::programs::find_ffmpeg(kumi_media::programs::FfmpegOptions {
+                signal: Some(signal.clone()),
+                installed_only: true,
+                ..Default::default()
+            })
+            .await
+            .map_err(|e| RuntimeError::plain(e.to_string()))?
+            .ok_or_else(|| RuntimeError::plain("Could not measure local audio: no installed metadata probe. Install ffmpeg/ffprobe; a supplied duration cannot replace measurement."))?;
+            let seconds = kumi_media::frames::duration_of(&ffmpeg, audio, Some(signal.clone())).await;
+            signal.check()?;
+            seconds
+                .filter(|n| n.is_finite() && *n > 0.)
+                .ok_or_else(|| RuntimeError::plain("Could not measure the local input duration; no quote or submission was made"))?
+        }
+    };
     input.insert("duration_ms".into(), json!((seconds * 1000.).ceil() as u64));
     Ok(())
 }
 
-struct Transcriber(Rc<Service>);
+struct Transcriber {
+    service: Rc<Service>,
+    notice: Rc<dyn Fn(String)>,
+}
 
 #[async_trait(?Send)]
 impl AudioTranscriber for Transcriber {
     async fn preferred(&self) -> Result<bool, RuntimeError> {
-        Ok(self.0.preferred(Task::AudioToMidi).await?.is_some())
+        Ok(self.service.preferred(Task::AudioToMidi).await?.is_some())
     }
     async fn transcribe(&self, mut input: JsonObject, signal: Signal) -> Result<Option<Value>, RuntimeError> {
         if input.get("provider").and_then(Value::as_str) == Some("builtin") {
             return Ok(None);
         }
         let provider = selection(&mut input)?;
-        if matches!(provider, Selection::Auto) && self.0.preferred(Task::AudioToMidi).await?.is_none() {
+        if matches!(provider, Selection::Auto) && self.service.preferred(Task::AudioToMidi).await?.is_none() {
             return Ok(None);
         }
         let start = input.remove("audio_start_seconds").and_then(|v| v.as_f64()).unwrap_or(0.);
@@ -193,7 +248,7 @@ impl AudioTranscriber for Transcriber {
         let (folder, duration_ms) = rendered_audio(audio, start, seconds, &signal).await?;
         input.insert("audio".into(), json!(folder.path().join("transcription.wav")));
         input.insert("duration_ms".into(), json!(duration_ms));
-        self.0.execute(Task::AudioToMidi, Value::Object(input), provider, &signal).await.map(Some)
+        self.service.execute(Task::AudioToMidi, Value::Object(input), provider, &signal, self.notice.as_ref()).await.map(Some)
     }
 }
 
@@ -262,88 +317,20 @@ async fn rendered_audio(audio: &str, start: f64, seconds: f64, signal: &Signal) 
     Ok((folder, duration_ms))
 }
 
-/// Bind only native converters; unrelated tools retain identity, streaming and metadata unchanged.
-pub fn route(inner: Rc<dyn KernelTool>, service: Rc<Service>) -> Rc<dyn KernelTool> {
-    if let Some(tool) = inner.with_audio_transcriber(Rc::new(Transcriber(service.clone()))) {
-        return tool;
-    }
-    if inner.name() == "listen" {
-        let description = format!("{} Preferred audio-to-MIDI provider routing is enforced. For an explicitly requested built-in conversion only, set provider:builtin; otherwise use audio_models with rendered audio when redirected.", inner.description());
-        Rc::new(ConversionGuard { inner, service, description })
-    } else {
-        inner
-    }
-}
-
-struct ConversionGuard {
-    inner: Rc<dyn KernelTool>,
-    service: Rc<Service>,
-    description: String,
-}
-
-#[async_trait(?Send)]
-impl KernelTool for ConversionGuard {
-    fn name(&self) -> &str {
-        self.inner.name()
-    }
-    fn description(&self) -> &str {
-        &self.description
-    }
-    fn input_schema(&self) -> JsonObject {
-        let mut schema = self.inner.input_schema();
-        if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
-            properties.insert("provider".into(), json!({"type":"string","enum":["auto","mirelo","local","builtin"],"description":"Only builtin explicitly bypasses configured audio-to-MIDI routing"}));
-        }
-        schema
-    }
-    async fn execute(&self, mut input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
-        let is_conversion = input.get("transcribe") == Some(&Value::Bool(true));
-        let provider = input.remove("provider").unwrap_or_else(|| json!("auto"));
-        if !matches!(provider.as_str(), Some("auto" | "mirelo" | "local" | "builtin")) {
-            return Ok(ToolResult { text: "provider must be auto, mirelo, local or builtin".into(), is_error: true, ..Default::default() });
-        }
-        if is_conversion && provider != "builtin" {
-            let preferred = self.service.preferred(Task::AudioToMidi).await?;
-            if provider != "auto" || preferred.is_some() {
-                return Ok(ToolResult {
-                    text: stringify(&json!({
-                        "error":"Use the selected audio-to-MIDI provider, not the built-in converter. No conversion was performed.",
-                        "provider":if provider == "auto" { serde_json::to_value(preferred).unwrap_or(Value::Null) } else { provider },
-                        "next":"Use render {track,from_beat,beats} for the source audio (bounce/resample instruments or effects first), then audio_models {task:'audio-to-midi',audio:<returned file>,provider:<selected provider>}. For a file, pass its path directly. Insert returned seconds-based notes with the DAW's discovered note-writing schema, converting seconds with the project tempo map. Do not invent an import-MIDI API."
-                    })),
-                    is_error: true,
-                    ..Default::default()
-                });
-            }
-        }
-        self.inner.execute(input, signal).await
-    }
-    fn reach(&self) -> Reach {
-        self.inner.reach()
-    }
-    fn deferred(&self) -> bool {
-        self.inner.deferred()
-    }
-    fn listed_by(&self) -> Option<&str> {
-        self.inner.listed_by()
-    }
-    fn role(&self) -> Option<ToolRole> {
-        self.inner.role()
-    }
-    fn concurrent(&self) -> bool {
-        self.inner.concurrent()
-    }
+/// Bind native converters only. Listening, including note analysis, stays local and unchanged.
+pub fn route(inner: Rc<dyn KernelTool>, service: Rc<Service>, notice: Rc<dyn Fn(String)>) -> Rc<dyn KernelTool> {
+    inner.with_audio_transcriber(Rc::new(Transcriber { service, notice })).unwrap_or(inner)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kumi_ai::audio::{Config, ServiceOptions, TaskConfig};
+    use kumi_ai::audio::{Config, Endpoint, ServiceOptions, TaskConfig};
     use std::cell::{Cell, RefCell};
 
     fn service(key: bool) -> (tempfile::TempDir, Rc<Service>, Rc<RefCell<Config>>) {
         let dir = tempfile::tempdir().unwrap();
-        let config = Rc::new(RefCell::new(Config::default()));
+        let config = Rc::new(RefCell::new(Config { acknowledged: key, ..Default::default() }));
         let read = config.clone();
         let service = Service::new(ServiceOptions {
             store: Rc::new(kumi_ai::auth::store::open_credential_store(dir.path().join("auth.json"))),
@@ -351,6 +338,7 @@ mod tests {
             read_config: Rc::new(move || read.borrow().clone()),
             write_config: Rc::new(|_| Ok(())),
             output_dir: dir.path().join("output"),
+            mirelo_base: None,
         });
         (dir, service, config)
     }
@@ -378,25 +366,108 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn listening_routes_only_transcription_and_observes_live_task_settings() {
+    async fn listening_and_note_analysis_stay_local_with_a_cloud_provider_configured() {
         let (_dir, service, config) = service(true);
-        let inner = Rc::new(Listen(Cell::new(0)));
-        let tool = route(inner.clone(), service);
+        let inner: Rc<dyn KernelTool> = Rc::new(Listen(Cell::new(0)));
+        let tool = route(inner.clone(), service, Rc::new(|_| panic!("Local analysis must not produce a billing notice")));
+        assert!(Rc::ptr_eq(&inner, &tool), "analysis must keep its original tool, schema and streaming behavior");
         let run = |input: Value| tool.execute(input.as_object().unwrap().clone(), Signal::new());
         assert!(!run(json!({"file":"/not-opened.wav"})).await.unwrap().is_error);
-        assert!(run(json!({"transcribe":true})).await.unwrap().is_error);
-        assert_eq!(inner.0.get(), 1, "cloud default must not run builtin");
-        assert!(!run(json!({"transcribe":true,"provider":"builtin"})).await.unwrap().is_error);
+        assert!(!run(json!({"transcribe":true})).await.unwrap().is_error);
         config.borrow_mut().tasks.insert(Task::AudioToMidi, TaskConfig { auto_mirelo: false, ..Default::default() });
         assert!(!run(json!({"transcribe":true})).await.unwrap().is_error);
-        assert!(run(json!({"transcribe":true,"provider":"local"})).await.unwrap().is_error);
-        assert_eq!(inner.0.get(), 3, "explicit provider must not silently run builtin");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn guidance_requires_a_configured_provider_not_just_a_service() {
+        assert!(guidance(None).await.is_empty());
+        let (_dir, service, config) = service(false);
+        assert!(guidance(Some(&service)).await.is_empty());
+        config.borrow_mut().tasks.insert(
+            Task::AudioToMidi,
+            TaskConfig {
+                auto_mirelo: false,
+                local: Some(Endpoint { url: "http://127.0.0.1:1".into(), protocol: LocalProtocol::Muscriptor, model: None }),
+                fallback: false,
+            },
+        );
+        assert_eq!(guidance(Some(&service)).await, GUIDANCE);
+        config.borrow_mut().tasks.clear();
+        assert!(guidance(Some(&service)).await.is_empty());
+        let (_cloud_dir, cloud, cloud_config) = self::service(true);
+        assert_eq!(guidance(Some(&cloud)).await, GUIDANCE);
+        cloud_config.borrow_mut().acknowledged = false;
+        assert!(guidance(Some(&cloud)).await.is_empty(), "an environment key is not consent");
+        cloud_config.borrow_mut().acknowledged = true;
+        for task in Task::ALL {
+            cloud_config.borrow_mut().tasks.insert(task, TaskConfig { auto_mirelo: false, ..Default::default() });
+        }
+        assert!(guidance(Some(&cloud)).await.is_empty(), "all tasks Off is not an operational cloud provider");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn local_midi_duration_is_measured_even_when_the_model_supplies_a_short_quote() {
+        let (dir, service, _) = service(true);
+        let path = dir.path().join("two-seconds.wav");
+        kumi_media::audio::decode::write_test_wav(&path, &vec![0.; 2000], 1000);
+        for provider in [Selection::Auto, Selection::Mirelo] {
+            for duration in [None, Some(1), Some(10_000)] {
+                let mut input = json!({"audio":path,"quote":true}).as_object().unwrap().clone();
+                if let Some(duration) = duration {
+                    input.insert("duration_ms".into(), json!(duration));
+                }
+                prepare_midi_input(&service, provider, &mut input, &Signal::new()).await.unwrap();
+                assert_eq!(input["duration_ms"], 2000);
+            }
+        }
+        let mut remote = json!({"audio":"https://example.com/input.wav","duration_ms":1234}).as_object().unwrap().clone();
+        prepare_midi_input(&service, Selection::Mirelo, &mut remote, &Signal::new()).await.unwrap();
+        assert_eq!(remote["duration_ms"], 1234, "remote URL estimates cannot be measured locally");
+        let mut unsafe_path = json!({"audio":"relative.wav","duration_ms":1}).as_object().unwrap().clone();
+        assert!(prepare_midi_input(&service, Selection::Mirelo, &mut unsafe_path, &Signal::new()).await.is_err());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn native_muscriptor_and_resume_do_not_require_a_generation_probe() {
+        let (_dir, service, config) = service(false);
+        config.borrow_mut().tasks.insert(
+            Task::AudioToMidi,
+            TaskConfig {
+                auto_mirelo: false,
+                local: Some(Endpoint { url: "http://127.0.0.1:1".into(), protocol: LocalProtocol::Muscriptor, model: None }),
+                fallback: false,
+            },
+        );
+        for provider in [Selection::Auto, Selection::Local] {
+            let mut input = json!({"audio":"not-opened-by-a-probe.wav"}).as_object().unwrap().clone();
+            prepare_midi_input(&service, provider, &mut input, &Signal::new()).await.unwrap();
+            assert!(!input.contains_key("duration_ms"));
+        }
+        // The backend validates resume: preparation must never perform generation probing.
+        let mut resume = json!({"job_id":"existing-job"}).as_object().unwrap().clone();
+        prepare_midi_input(&service, Selection::Mirelo, &mut resume, &Signal::new()).await.unwrap();
+        assert_eq!(resume, json!({"job_id":"existing-job"}).as_object().unwrap().clone());
+        let tool = tool(service, Rc::new(|_| panic!("Rejected resume inputs must not bill")));
+        assert!(tool.input_schema()["properties"]["job_id"].is_object());
+        for extra in [
+            json!({"audio":"not-opened.wav"}),
+            json!({"duration_ms":1}),
+            json!({"quote":true}),
+            json!({"notes_file":"not-opened.json"}),
+            json!({"prompt":"new sound"}),
+        ] {
+            let mut input = json!({"task":"audio-to-midi","job_id":"existing-job"}).as_object().unwrap().clone();
+            input.extend(extra.as_object().unwrap().clone());
+            let done = tool.execute(input, Signal::new()).await.unwrap();
+            assert!(done.is_error);
+            assert!(done.text.contains("job_id resumes only"), "{}", done.text);
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
     async fn unset_transcriber_falls_back_without_opening_or_uploading_input() {
         let (_dir, service, _) = service(false);
-        let transcriber = Transcriber(service);
+        let transcriber = Transcriber { service, notice: Rc::new(|_| panic!("Local fallback must not bill")) };
         assert!(!transcriber.preferred().await.unwrap());
         assert!(transcriber
             .transcribe(json!({"audio":"/never-open-this"}).as_object().unwrap().clone(), Signal::new())
@@ -406,9 +477,23 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn unacknowledged_key_and_task_off_preserve_local_conversion_without_reading_input() {
+        let (_dir, service, config) = service(true);
+        let transcriber = Transcriber { service, notice: Rc::new(|_| panic!("Disabled cloud routing must not bill")) };
+        assert!(transcriber.preferred().await.unwrap());
+        for acknowledged in [false, true] {
+            config.borrow_mut().acknowledged = acknowledged;
+            config.borrow_mut().tasks.insert(Task::AudioToMidi, TaskConfig { auto_mirelo: !acknowledged, ..Default::default() });
+            assert!(!transcriber.preferred().await.unwrap());
+            let input = json!({"audio":"not-opened.wav","provider":"auto"}).as_object().unwrap().clone();
+            assert!(transcriber.transcribe(input, Signal::new()).await.unwrap().is_none());
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn provider_tool_rejects_unknown_task_or_selection_before_dispatch() {
         let (_dir, service, _) = service(false);
-        let tool = tool(service);
+        let tool = tool(service, Rc::new(|_| panic!("Invalid inputs must not bill")));
         for args in [json!({"task":"other"}), json!({"task":"text-to-sfx","provider":"builtin"})] {
             assert!(tool.execute(args.as_object().unwrap().clone(), Signal::new()).await.unwrap().is_error);
         }
@@ -416,9 +501,10 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn notes_are_bounded_and_paged_without_another_generation() {
-        let (dir, service, _) = service(false);
+        let (_dir, service, _) = service(false);
         let notes: Vec<Value> = (0..150).map(|i| json!({"pitch":60,"start":i,"end":i+1,"velocity":80})).collect();
-        let path = dir.path().join("notes.json");
+        std::fs::create_dir_all(service.output_dir()).unwrap();
+        let path = service.output_dir().join("notes.json");
         std::fs::write(&path, serde_json::to_vec(&notes).unwrap()).unwrap();
         let shown = compact(json!({"provider":"mirelo","notes":notes,"notes_path":path,"midi_path":"/saved.mid","credits":3}));
         assert_eq!(shown["notes"].as_array().unwrap().len(), 64);
@@ -426,7 +512,7 @@ mod tests {
         assert_eq!(shown["next_offset"], 64);
         assert_eq!(shown["midi_path"], "/saved.mid");
         assert_eq!(shown["credits"], 3);
-        let tool = tool(service);
+        let tool = tool(service.clone(), Rc::new(|_| panic!("Reading saved notes must not bill")));
         let done = tool
             .execute(json!({"task":"audio-to-midi","notes_file":path,"offset":128,"limit":128}).as_object().unwrap().clone(), Signal::new())
             .await
@@ -438,7 +524,40 @@ mod tests {
         assert!(page["next_offset"].is_null());
         for input in [json!({"notes_file":"relative.json"}), json!({"notes_file":path,"limit":129}), json!({"notes_file":path,"offset":-1})]
         {
-            assert!(read_notes(input.as_object().unwrap(), &Signal::new()).await.is_err());
+            assert!(read_notes(input.as_object().unwrap(), service.output_dir(), &Signal::new()).await.is_err());
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn notes_file_rejects_outside_files_and_parent_traversal() {
+        let (dir, service, _) = service(false);
+        std::fs::create_dir_all(service.output_dir()).unwrap();
+        let outside = dir.path().join("private.json");
+        std::fs::write(&outside, br#"[{"private":"do not disclose"}]"#).unwrap();
+        for path in [outside, service.output_dir().join("../private.json")] {
+            let input = json!({"notes_file":path});
+            let error = read_notes(input.as_object().unwrap(), service.output_dir(), &Signal::new()).await.unwrap_err();
+            assert!(error.to_string().contains("inside the audio output folder"));
+            assert!(!error.to_string().contains("do not disclose"));
+        }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test(flavor = "current_thread")]
+    async fn notes_file_rejects_file_and_directory_symlink_escapes() {
+        let (dir, service, _) = service(false);
+        std::fs::create_dir_all(service.output_dir()).unwrap();
+        let private = dir.path().join("private");
+        std::fs::create_dir(&private).unwrap();
+        std::fs::write(private.join("notes.json"), b"[]").unwrap();
+        let file_link = service.output_dir().join("file.json");
+        let directory_link = service.output_dir().join("folder");
+        std::os::unix::fs::symlink(private.join("notes.json"), &file_link).unwrap();
+        std::os::unix::fs::symlink(&private, &directory_link).unwrap();
+        for path in [file_link, directory_link.join("notes.json")] {
+            let input = json!({"notes_file":path});
+            let error = read_notes(input.as_object().unwrap(), service.output_dir(), &Signal::new()).await.unwrap_err();
+            assert!(error.to_string().contains("symlink escapes"));
         }
     }
 

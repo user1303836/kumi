@@ -68,6 +68,9 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
                     request.insert(key.into(), value.clone());
                 }
             }
+            if what == "drums" {
+                request.insert("instruments".into(), json!(["drums"]));
+            }
             transcriber.transcribe(request, signal.clone()).await.map_err(|error| error.to_string())?
         } else {
             None
@@ -78,7 +81,7 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
                 .ok_or_else(|| "The built-in converter has no paid quote; no MIDI was written".into());
         }
         let notes = if let Some(result) = &provided {
-            match super::provider_notes(result, per_second, beats, what == "melody") {
+            match super::provider_notes(result, per_second, beats, what) {
                 Ok(notes) => notes,
                 Err(error) => {
                     return Err(stringify(&json!({
@@ -130,7 +133,7 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
 
 fn description(words: &super::backend::Words) -> String {
     format!(
-        "Turn a track's audio in {app} into MIDI: track (an audio track), as drums, melody (highest notes) or harmony (every note), over fromBeat and beats (at most 128). Uses the configured preferred audio model when available; otherwise Kumi's hit detector for drums or Basic Pitch for pitched parts. provider auto follows task settings; mirelo/local explicitly selects that service, builtin is only for an explicit request for the original converter. Provider note velocities are preserved. quote:true obtains only a provider quote and writes nothing. The notes go on {written}. options: {options}. Kumi renders the requested stretch, so nothing plays meanwhile. Tempo changes within it use average-tempo mapping and are reported.",
+        "Turn a track's audio in {app} into MIDI: track (an audio track), as drums, melody (highest notes) or harmony (every note), over fromBeat and beats (at most 128). Uses the configured preferred audio model when available; otherwise Kumi's local hit detector for drums or Basic Pitch for pitched parts. Automatic Mirelo requires onboarding and the task on; explicit mirelo cannot bypass Off. provider auto follows task settings; mirelo/local selects an allowed service, builtin explicitly uses the original converter. Each Mirelo create spends the producer's credits: quote first and confirm the cost for anything beyond a single small request, and show each job's returned credits. Drums requests and keeps only drums; pitched conversions exclude drums. Provider note velocities and timing are preserved. quote:true obtains only a provider quote and writes nothing. The notes go on {written}. options: {options}. Kumi renders the requested stretch, so nothing plays meanwhile. Tempo changes within it use average-tempo mapping and are reported.",
         app = words.app,
         written = words.written,
         options = words.options

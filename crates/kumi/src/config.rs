@@ -397,7 +397,7 @@ pub struct Settings {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub model_servers: Vec<ServerSetting>,
     /// Audio generation/transcription providers, separate from the conversation model.
-    #[serde(default, skip_serializing_if = "audio_models_empty")]
+    #[serde(default, skip_serializing)]
     pub audio_models: kumi_ai::audio::Config,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice: Option<VoiceSettings>,
@@ -454,12 +454,38 @@ pub struct Settings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub full_repaint: Option<bool>,
 }
-fn audio_models_empty(config: &kumi_ai::audio::Config) -> bool {
-    config.tasks.is_empty()
-}
 fn disabled_audio_models() -> kumi_ai::audio::Config {
     use kumi_ai::audio::{Config, Task, TaskConfig};
-    Config { tasks: Task::ALL.into_iter().map(|task| (task, TaskConfig { auto_mirelo: false, ..TaskConfig::default() })).collect() }
+    Config {
+        tasks: Task::ALL.into_iter().map(|task| (task, TaskConfig { auto_mirelo: false, ..TaskConfig::default() })).collect(),
+        ..Config::default()
+    }
+}
+fn audio_model_settings(value: &Value) -> kumi_ai::audio::Config {
+    use kumi_ai::audio::{Config, Task, TaskConfig};
+    let Some(object) = value.as_object() else {
+        return disabled_audio_models();
+    };
+    let mut config = Config { acknowledged: object.get("acknowledged") == Some(&Value::Bool(true)), ..Config::default() };
+    let Some(tasks) = object.get("tasks") else {
+        return config;
+    };
+    let Some(tasks) = tasks.as_object() else {
+        return disabled_audio_models();
+    };
+    for task in Task::ALL {
+        let Some(value) = tasks.get(task.as_str()) else { continue };
+        // Parse and validate separately: a future protocol or malformed task must not disable its valid neighbours.
+        let mut entry = Config::default();
+        if let Ok(parsed) = serde_json::from_value::<TaskConfig>(value.clone()) {
+            entry.tasks.insert(task, parsed);
+        }
+        if entry.tasks.is_empty() || entry.validate().is_err() {
+            entry.tasks.insert(task, TaskConfig { auto_mirelo: false, ..TaskConfig::default() });
+        }
+        config.tasks.extend(entry.tasks);
+    }
+    config
 }
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -528,16 +554,9 @@ pub fn read_keys(file: &str) -> Option<Result<Value, String>> {
     Some(serde_json::from_str(&text).map_err(|error| format!("keys.json isn't JSON Kumi can read ({error}), so Kumi keeps its own keys")))
 }
 pub fn read_settings(file: &str) -> Settings {
-    let value = match read_json(file) {
-        Some(value) if value.is_object() => value,
-        _ => {
-            // Missing settings use onboarding defaults. Unreadable or corrupt settings must not re-enable paid uploads.
-            return Settings {
-                audio_models: if matches!(Path::new(file).try_exists(), Ok(false)) { Default::default() } else { disabled_audio_models() },
-                ..Settings::default()
-            };
-        }
-    };
+    let raw = read_json(file);
+    let unreadable = raw.as_ref().is_none_or(|value| !value.is_object()) && !matches!(Path::new(file).try_exists(), Ok(false));
+    let value = raw.filter(Value::is_object).unwrap_or_else(|| json!({}));
     // The producer's answer about their music: settings.json's, or the copy beside it when an older Kumi rewrote
     // settings.json without the keys it doesn't know.
     let kept_beside;
@@ -577,9 +596,11 @@ pub fn read_settings(file: &str) -> Settings {
         music_offered: (music["musicOffered"] == true).then_some(true),
         model_catalog: (value["modelCatalog"] == false).then_some(false),
         model_servers,
+        // Missing settings keep onboarding defaults; corrupt settings never re-enable paid uploads.
         audio_models: match value.get("audioModels") {
+            Some(value) => audio_model_settings(value),
+            None if unreadable => disabled_audio_models(),
             None => Default::default(),
-            Some(value) => serde_json::from_value(value.clone()).unwrap_or_else(|_| disabled_audio_models()),
         },
         mouse: (value["mouse"] == "off").then(|| "off".to_string()),
         copy_on_select: (value["copyOnSelect"] == false).then_some(false),
@@ -661,6 +682,42 @@ pub fn music_offered(file: &str) -> bool {
 pub const MUSIC_ANSWER_FILE: &str = "music-answer.json";
 fn music_answer_file(settings: &str) -> String {
     Path::new(settings).with_file_name(MUSIC_ANSWER_FILE).to_string_lossy().into_owned()
+}
+/// Only the audio editor writes typed audio changes; untouched future tasks, protocols and options stay raw.
+pub(crate) fn write_audio_settings(file: &str, config: &kumi_ai::audio::Config) -> Result<(), RuntimeError> {
+    let settings = read_settings(file);
+    let before = serde_json::to_value(&settings.audio_models).map_err(|error| RuntimeError::plain(error.to_string()))?;
+    let after = serde_json::to_value(config).map_err(|error| RuntimeError::plain(error.to_string()))?;
+    let mut audio = read_json(file)
+        .and_then(|value| value.get("audioModels").cloned())
+        .filter(|value| value.is_object() && value.get("tasks").is_none_or(Value::is_object))
+        .unwrap_or_else(|| before.clone());
+    patch_audio_settings(&mut audio, &before, &after);
+    let mut next = serde_json::to_value(settings).map_err(|error| RuntimeError::plain(error.to_string()))?;
+    next["audioModels"] = audio;
+    write_settings(file, &next)
+}
+fn patch_audio_settings(raw: &mut Value, before: &Value, after: &Value) {
+    if before == after {
+        return;
+    }
+    if let (Some(before), Some(after)) = (before.as_object(), after.as_object()) {
+        if !raw.is_object() {
+            *raw = Value::Object(Map::new());
+        }
+        let raw = raw.as_object_mut().unwrap();
+        for (key, value) in after {
+            if before.get(key) == Some(value) {
+                continue;
+            }
+            patch_audio_settings(raw.entry(key.clone()).or_insert(Value::Null), before.get(key).unwrap_or(&Value::Null), value);
+        }
+        for key in before.keys().filter(|key| !after.contains_key(*key)) {
+            raw.remove(key);
+        }
+    } else {
+        *raw = after.clone();
+    }
 }
 /// A JSON object preserves the difference between omitting a setting and explicitly clearing it.
 pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {

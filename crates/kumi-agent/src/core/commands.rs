@@ -165,7 +165,7 @@ pub const COMMANDS: &[Command] = {
         ),
         command(
             "/audio",
-            "♫",
+            "≋",
             Conversation,
             "Audio models: Mirelo, self-hosted alternatives and fallback",
             &["mirelo", "muscriptor", "sfx", "midi"],

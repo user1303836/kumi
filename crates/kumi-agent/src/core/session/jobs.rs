@@ -310,7 +310,7 @@ impl Session {
         // works away from the DAW; preparing, loading and auditioning it stay in the foreground.
         tools.push(self.0.plugins.clone());
         if let Some(service) = self.audio_service() {
-            tools.push(crate::core::audio_tools::tool(service));
+            tools.push(crate::core::audio_tools::tool(service, self.audio_notice()));
         }
         tools.extend(self.0.recall.clone());
         if let Some(dirs) = &options.watch {
@@ -375,9 +375,10 @@ impl Session {
             let s = self.0.state.borrow();
             (s.set_name.clone().filter(|name| !name.is_empty()), s.conversation_id.clone())
         };
+        let audio_guidance = crate::core::audio_tools::guidance(self.0.options.audio.as_deref()).await;
         let kernel = factory(KernelOptions {
-            instructions: if self.0.options.audio.is_some() {
-                format!("{WORKER_INSTRUCTIONS}\n\n{}", crate::core::audio_tools::GUIDANCE)
+            instructions: if !audio_guidance.is_empty() {
+                format!("{WORKER_INSTRUCTIONS}\n\n{audio_guidance}")
             } else {
                 WORKER_INSTRUCTIONS.into()
             },

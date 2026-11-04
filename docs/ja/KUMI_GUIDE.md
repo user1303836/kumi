@@ -99,13 +99,13 @@ Kumi はカタログの写しを持っていて、新しいものを多くても
 
 ## Mirelo と自分で動かすオーディオモデル
 
-- **アカウントを接続する：** [Mirelo の API キーページ](https://mirelo.ai/studio/api-keys)でキーを取得し、`kumi login mirelo` を実行するか、`/audio` の **Connect an existing Mirelo account** を選びます。入力は隠され、Mirelo で確認してから、所有者だけが読めるサインインファイルに保存します。`kumi auth` で接続状況を確認し、`kumi logout mirelo` で保存したキーを削除します。保存したキーがなければ `MIRELO_API_KEY` も使います。完全に切断するには、この環境変数も解除してください。
-- **五つの独立した設定：** `/audio` で、テキストから効果音、ビデオから効果音、音声の延長、指定区間の置き換え、オーディオから MIDI のそれぞれに **Use Mirelo automatically: true/false** を設定できます。初期値はすべて `true`。キーがあれば、別のプロバイダーを明示しない限り Mirelo を使います。変更はすぐに効き、保存されます。会話モデルの `/model` やリスニングの `/slots` とは別です。
-- **ふつうの言葉で頼む：** 「2 秒のドアが閉まる音を作って」「このビデオに効果音を」「この録音を 5 秒延ばして」「2〜4 秒を置き換えて」「この音声を MIDI にして」。元のファイルか公開メディア URL を渡します。結果は期限付きリンクのままにせず、`~/.kumi/audio`（設定時は `KUMI_HOME/audio`）に保存します。DAW に入れるときは既存のツールを使い、ファイル生成だけなら DAW は不要です。
-- **費用とプライバシー：** Mirelo のクレジットを使い、プロンプトと選んだ音声・ビデオを送信します。利用する権利のある素材だけを渡してください。先に見積もりを頼めます。有料ジョブは始めませんが、入力のアップロードは行う場合があります。MIDI の見積もりは指定した長さによる概算で、最終請求はサーバーが測った長さで決まります。支出上限ではありません。学習への利用は [Mirelo のアカウント設定](https://mirelo.ai/studio/settings/profile)に従い、Kumi 側に学習拒否のスイッチはありません。有料アカウントはそこでオプトアウトでき、無料アカウントはできません。Powered by Mirelo。
-- **自分のサーバーを代わりに使う：** 各タスクの `/audio` に URL、プロトコル、必要なら認証キーを設定します。Mirelo 互換の効果音にはモデルのリリース名も指定します。**Use Mirelo automatically** をオフにすると代替サーバーを優先します。Mirelo をオンのまま **Use alternative as fallback** を有効にすると、送信前の接続・レート制限・サーバーの障害だけで切り替えます。フォールバックの初期値はオフです。課金された可能性のあるジョブを自動でやり直しません。キャンセルは待機を止めるだけで、Mirelo 上の実行中のジョブは止まりません。リモートには HTTPS、ローカルや SSH トンネルのループバックには HTTP が使えます。
-- **MuScriptor はオーディオから MIDI だけ**に対応し、効果音生成はしません。[Hugging Face のモデルライセンス](https://huggingface.co/MuScriptor)に自分で同意してください（重みは非商用の **CC-BY-NC-4.0**、サーバーのコードは MIT）。`uvx hf auth login` で認証し、`uvx muscriptor serve --model small` を起動します。`/audio` → **Audio to MIDI** で **MuScriptor** と `http://127.0.0.1:8222`、またはリモートサーバーの HTTPS アドレスを設定します。Mirelo のアカウントは不要です。Kumi はモデルをダウンロードしたりホストしたりしません。MuScriptor の入力は最大 15 分、Mirelo MIDI は最大 30 分・100 MiB です。
-- **ほかのオーディオモデル**には [Mirelo API](https://mirelo.ai/api-docs) を実装したサーバーが必要で、**Mirelo-compatible** を選びます。一般の OpenAI・Hugging Face・Gradio エンドポイントとは互換ではありません。Mirelo のテキスト・ビデオは既定で `sfx-2.0`、延長・区間置換は編集に対応する `sfx-1.6` を使います。
+- **アカウントを接続する：** [Mirelo の API キーページ](https://mirelo.ai/studio/api-keys)でキーを取得し、`kumi login mirelo` または `/audio` の **Connect an existing Mirelo account** を使います。入力は隠され、確認したキーは所有者だけが読めるサインインファイルに保存します。保存済みキーがなければ `MIRELO_API_KEY` も使えますが、**キーがあるだけでは有効になりません**。`kumi login mirelo` または `/audio` の **Enable existing Mirelo key…** で、アップロードと有料利用に明示的に同意します。キャンセルすると無効のままです。`kumi auth` で状態を確認し、`kumi logout mirelo` で保存キーを削除して同意も取り消します。
+- **五つの独立した設定：** `/audio` の **Allow Mirelo: On/Off** で、テキストから効果音、ビデオから効果音、音声の延長、指定区間の置き換え、オーディオから MIDI を個別に設定します。初期値は **On** ですが、オンボーディング後にだけ有効になり、別のプロバイダーを頼まない限り Mirelo を使います。**Off は明示的な Mirelo の指定も拒否します**。変更はすぐに効き、保存されます。会話の `/model` やリスニングの `/slots` とは別です。無料のローカル MIDI 変換は、このタスクを有効にしない限りローカルのままで、`listen` の採譜解析もローカルのままです。
+- **ふつうの言葉で頼む：** 「2 秒のドアが閉まる音を作って」「このビデオに効果音を」「この録音を 5 秒延ばして」「2〜4 秒を置き換えて」「この音声を MIDI にして」。元のファイルか公開メディア URL を渡します。結果は期限付きリンクのままにせず、`~/.kumi/audio`（設定時は `KUMI_HOME/audio`）に保存します。変更できる DAW セッションでは既存のツールで挿入でき、ファイル生成は DAW なしや読み取り専用でも使えます。ダウンロードはジョブごとに最大 32 ファイル・合計 512 MiB。自動削除はしないため、不要な結果は自分で削除してください。
+- **費用とプライバシー：** Mirelo でジョブを作るたびにクレジットを使い、プロンプトと渡した素材を送信します。利用する権利のある素材だけを渡してください。各ジョブのクレジット情報を通知します。一つの小さなジョブを超える依頼では、エージェントに見積もりと確認を求める指示がありますが、強制的な支出上限ではありません。どの依頼でも先に見積もりを頼めます。見積もりは有料ジョブを作りませんが、入力をアップロードする場合があります。MIDI はローカルファイルの長さを測定し、公開 URL では指定した概算を使います。最終請求はサーバーの測定に基づきます。学習は [Mirelo のアカウント設定](https://mirelo.ai/studio/settings/profile)に従います。Kumi に学習拒否の設定はなく、有料アカウントは Mirelo でオプトアウトでき、無料アカウントはできません。Powered by Mirelo。
+- **自分のサーバーを代わりに使う：** 各タスクの `/audio` に URL、プロトコル、任意の認証キーを設定します。Mirelo 互換の効果音にはモデルのリリース名も指定します。**Allow Mirelo: Off** で代替サーバーを使い、Mirelo をオンにしたまま **Use alternative as fallback** を有効にすると送信前の接続・レート制限・サーバー障害だけで切り替えます。フォールバックは初期状態でオフです。課金された可能性のあるジョブを自動で作り直しません。ジョブ ID で再開を頼むと、新しいジョブを作らず状況確認とダウンロードを再開できます。キャンセルは待機だけを止め、Mirelo の実行中ジョブは止めません。リモートには HTTPS、ローカルや SSH トンネルのループバックには HTTP が使えます。
+- **MuScriptor はオーディオから MIDI だけ**に対応します。[Hugging Face の重み](https://huggingface.co/MuScriptor)は非商用の **CC-BY-NC-4.0**、サーバーコードは MIT です。商用制作では重みの非商用制限に注意し、商用利用前に必要な許可やライセンスを取得してください。自分でライセンスに同意し、`uvx hf auth login` で認証して `uvx muscriptor serve --model small` を起動します。`/audio` → **Audio to MIDI** で **MuScriptor** と `http://127.0.0.1:8222` またはサーバーの HTTPS アドレスを設定します。Mirelo アカウントは不要で、Kumi はモデルを取得・ホストしません。ネイティブ MuScriptor は WAV・FLAC・MP3・Ogg に対応し、長さの測定は必須ではありません。明示した MuScriptor の長さには Kumi 側の 15 分制限がありますが、サーバーの制限ではありません。Mirelo MIDI は AAC にも対応し（M4A は不可）、最大 30 分・100 MiB です。
+- **ほかのオーディオモデル**には [Mirelo API](https://mirelo.ai/api-docs) を実装したサーバーが必要で、**Mirelo-compatible** を選びます。一般の OpenAI・Hugging Face・Gradio エンドポイントとは互換ではありません。Mirelo のテキスト・ビデオは既定で `sfx-2.0`、延長・区間置換は `sfx-1.6`。ビデオの効果音は既定で `preserve_speech: false` とし、元の声を無断で残しません。
 
 ## Live につなぐ
 
@@ -563,7 +563,7 @@ REAPER や Renoise を使ったことがあれば、`doctor` はそれも DAW �
 - **ダウンロード**は、GitHub（Kumi のリリースと更新確認、yt-dlp、ffmpeg、whisper.cpp、ONNX Runtime と Kumi 自身のモデル）、Hugging Face（音声モデル）、スロットのモデルにあなたが指定した https のアドレス、あなたが指定したビデオサイトから行います。
 - **リファレンス**を言葉で指定すると、名前で MusicBrainz と ListenBrainz を調べ、Spotify のリンクは Spotify の公開ページ（アーティストのリンクは MusicBrainz）から読み、音声は YouTube の検索で取得して、測り終えたら削除します。
 - **オーディオ**はあなたのコンピューター上で解析され、モデルに送られるのは数値だけです。リスニングモデルがあれば、判定する変更の短い抜粋（それぞれ最長 10 秒、モノラル）が送られます：Gemini の API キーなら Gemini へ、OpenAI の API キーなら OpenAI へ、または `KUMI_LISTENER` かリスニングのスロット（`/slots`）のモデルへ（`KUMI_LISTENER_KEY` を設定していればそれも一緒に）。`KUMI_LISTENER=off` か `/slots listening off` で止められます。新しいリスニングモデルを試すときに送るのは、既知のテスト用の音だけです。
-- **依頼した音声生成・編集・MIDI 変換**では、指定した素材とプロンプトを `/audio` で選んだプロバイダーへ送ります。自分のコンピューター上のサーバーなら素材はローカルに留まり、リモートならそこへ届きます。`/slots listening off` ではこれらの依頼を止めません。
+- **依頼した音声生成・編集・MIDI 変換**では、素材とプロンプトを `/audio` のプロバイダーへ送ります。Mirelo は明示的なオンボーディングとタスクの **Allow Mirelo: On** が必要で、**Off** は明示的な依頼も拒否します。自分のコンピューター上のサーバーならローカルに留まり、リモートならそこへ届きます。`/slots listening off` ではこれらの依頼を止めません。`listen` の採譜解析はローカルのままです。
 - **あなたの声**はあなたのコンピューター上で書き起こされ、録音はすぐに削除されます。外に出るのは、送ったときの言葉だけです。
 - **あなたのライブラリー**はあなたのコンピューター上で学習されます。ウェブから来るのはマニュアルのページだけです。
 - **あなたの音楽**はあなたのコンピューター上で学習されます。Kumi があなたの好みを使うときは、選んだ曲の名前（アーティスト、タイトル、アルバム）と、それらがどう聞こえるかを述べた 1 文がモデルのプロバイダーに届きます。ファイルそのものは届きません。
@@ -602,7 +602,7 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | `instantPhrases` | `false` で、決まったフレーズ（"tempo 124"、"mute drums"）もほかのメッセージと同じくモデルに送る（[即時フレーズ](KUMI_TUI.md#即時フレーズ)） |
 | `contextMeter` | ヘッダーの、モデルのコンテキストがどれだけ埋まったかのメーター：`"auto"`（既定）は半分を超えてから、`"always"` は常に、`"off"` は表示しない |
 | `modelServers` | 名前を付けたモデルサーバー：`[{ "name", "baseURL", "apiKey", "format" }]`（[このコンピューター上のモデル](#このコンピューター上のモデル)） |
-| `audioModels` | `/audio` の設定。`tasks` のキーは `text-to-sfx`、`video-to-sfx`、`extend`、`inpaint`、`audio-to-midi`。各項目に `autoMirelo`（既定 `true`）、`fallback`（既定 `false`）、任意の `local: {url, protocol, model}`。認証キーはサインインファイルに保存 |
+| `audioModels` | `/audio` の設定。`acknowledged`（既定 `false`）が Mirelo の明示的なオンボーディングを記録。`tasks` のキーは `text-to-sfx`、`video-to-sfx`、`extend`、`inpaint`、`audio-to-midi`。各項目に `autoMirelo`（既定 `true`、同意後だけ有効）、`fallback`（既定 `false`）、任意の `local: {url, protocol, model}`。キーはサインインファイルに保存 |
 | `libraryFolders` | Kumi がサウンド、プリセット、Set を学習する追加のフォルダー |
 | `musicFolders` | Kumi があなたの好みを学ぶ、あなた自身の音楽のフォルダー（`/music add`）。同意するまではありません |
 | `musicOffered` | あなたの音楽を学ぶかどうかを Kumi が尋ねたら `true`。尋ねるのは一度だけです |
@@ -626,7 +626,7 @@ Kumi はすべてを `~/.kumi` に保存します。`~/.kumi/settings.json` に�
 | --- | --- |
 | `KUMI_MODEL` | この実行での `<provider>/<model>`。選んだモデルより優先 |
 | `KUMI_AUTH_FILE`、`KUMI_SETTINGS_FILE` | サインインの保存先と設定ファイル |
-| `MIRELO_API_KEY` | 保存した Mirelo キーがない場合に使うオーディオ API キー。会話モデルとは別 |
+| `MIRELO_API_KEY` | 保存したキーがない場合の Mirelo オーディオ API キー。アップロードや有料利用への同意ではなく、先に `kumi login mirelo` または `/audio` でオンボーディングが必要。会話モデルとは別 |
 | `KUMI_MEMORY_FILE`、`KUMI_TECHNIQUES_FILE`、`KUMI_PLAYBOOK_FILE` | あなたについてのメモ、テクニック、レッスン |
 | `KUMI_RECIPES_DIR`、`KUMI_PROJECTS_DIR`、`KUMI_GOALS_DIR` | レシピ。各 Set の会話、メモ、最後の状態。進行中のゴールと探索、Kumi の終了で中断したバックグラウンドジョブ |
 | `KUMI_REFERENCES_DIR` | 測ったリファレンス |
