@@ -55,6 +55,7 @@ fn kumi(daw: Daw, home: &Path, seen: Rc<Seen>) -> Rc<dyn Integration> {
     match daw {
         Daw::Reaper => create_reaper_integration(options),
         Daw::Renoise => create_renoise_integration(options),
+        Daw::SoundCraft => unreachable!("these catch-up tests run REAPER's and Renoise's integrations"),
     }
 }
 

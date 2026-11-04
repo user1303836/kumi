@@ -218,3 +218,23 @@ async fn the_bridges_events_reach_the_client_as_notifications() {
     simulator.stop();
     session.finish().await;
 }
+
+#[tokio::test]
+async fn soundcrafts_host_lists_only_what_its_bridge_serves_and_starts_nothing_while_soundcraft_is_closed() {
+    let home = tempfile::tempdir().unwrap();
+    let mut session = Session::start(Daw::SoundCraft, home.path());
+    session.call(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"kumi","version":"test"}}})).await;
+    session.call(json!({"jsonrpc":"2.0","method":"notifications/initialized"})).await;
+    let listed = session.call(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await;
+    let tools = listed["result"]["tools"].as_array().unwrap();
+    assert_eq!(tools.iter().filter_map(|tool| tool["name"].as_str()).collect::<Vec<_>>(), ["status", "discover"]);
+    let said = tools[0]["description"].as_str().unwrap();
+    assert!(said.starts_with("Whether Kumi's bridge beside SoundCraft is connected") && said.contains("the open session"), "{said}");
+    let read =
+        session.call(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"read","arguments":{"kind":"track"}}})).await;
+    assert_eq!(read["error"]["message"], "Unknown tool: read", "the other DAWs' tools aren't SoundCraft's yet");
+    // (the isolated runner's process listing shows no SoundCraft running: no bridge is started for it)
+    let status = session.tool(4, "status", json!({})).await;
+    assert_eq!((&status["connected"], &status["reason"]), (&json!(false), &json!("no SoundCraft is running: open SoundCraft")), "{status}");
+    session.finish().await;
+}

@@ -917,6 +917,8 @@ pub fn process_is(daw: Daw, name: &str) -> bool {
     match daw {
         Daw::Reaper => matches!(base, "REAPER" | "REAPER64" | "reaper"),
         Daw::Renoise => base == "Renoise" || base == "renoise" || base.starts_with("Renoise ") || base.starts_with("renoise-"),
+        // (macOS's bundle runs `SoundCraft`, Windows `soundcraft.exe`, Linux `soundcraft`; never its `soundcraft-cli`)
+        Daw::SoundCraft => base.eq_ignore_ascii_case("soundcraft"),
     }
 }
 
@@ -1358,5 +1360,21 @@ mod tests {
         let windows = parse_processes("\"reaper.exe\",\"4242\",\"Console\",\"1\",\"300,000 K\"\r\n", true);
         assert_eq!(windows, [(4242, "reaper.exe".to_string())]);
         assert!(process_is(Daw::Reaper, "reaper.exe"));
+    }
+
+    #[test]
+    fn soundcrafts_app_is_told_from_its_command_line_tool() {
+        for name in [
+            "/Applications/SoundCraft.app/Contents/MacOS/SoundCraft",
+            r"C:\Users\p\AppData\Local\Programs\ArtCraft\SoundCraft\soundcraft.exe",
+            "/usr/bin/soundcraft",
+        ] {
+            assert!(process_is(Daw::SoundCraft, name), "{name}");
+        }
+        for name in
+            ["soundcraft-cli", "/usr/local/bin/soundcraft-cli", "SoundCraftHelper", "/Applications/REAPER.app/Contents/MacOS/REAPER"]
+        {
+            assert!(!process_is(Daw::SoundCraft, name), "{name}");
+        }
     }
 }
