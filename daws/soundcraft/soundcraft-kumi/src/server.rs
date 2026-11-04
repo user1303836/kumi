@@ -322,14 +322,15 @@ async fn look(
             let busy = match control.call("ui.inspect", json!({}), every).await {
                 Ok(ui) => {
                     misses = 0;
-                    // A plug-in window opened or closed, or a take may have started: the session is looked at soon, for the
-                    // plug-in FOCUS shows and whether it records.
-                    let now_playing = ui["playing"] == true;
-                    if ui["ui"]["plugin_windows"] != windows || (now_playing && !playing) {
+                    // A plug-in window opened or closed, a take may have started, or a dialog closed (a save's, which
+                    // names the session after its file: seen before the next edit, it's the same session): the session is
+                    // looked at soon, for the plug-in FOCUS shows, whether it records, and what the dialog did.
+                    let (now_playing, busy) = (ui["playing"] == true, dialog(&ui));
+                    let closed = busy.is_none() && lock(seen).busy.is_some();
+                    if ui["ui"]["plugin_windows"] != windows || (now_playing && !playing) || closed {
                         schedule.soon(asked);
                     }
                     (windows, playing) = (ui["ui"]["plugin_windows"].clone(), now_playing);
-                    let busy = dialog(&ui);
                     lock(seen).ui = Some((ui, Instant::now()));
                     busy
                 }
