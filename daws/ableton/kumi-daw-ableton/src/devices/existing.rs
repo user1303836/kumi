@@ -26,8 +26,7 @@ use super::patch::standard::{standard, Level};
 use super::patch::{embedded_patcher, keeps_patcher_in_data, Cord, Files, MaxBox, NoFiles, Patcher};
 use super::spec::Control;
 use super::tool::kind_folder;
-use kumi_agent::core::plugin_tools::local_path;
-use kumi_common::path::reserved_device;
+use kumi_common::path::{local_path, reserved_device};
 
 /// The most a device file Kumi opens can weigh: one with samples frozen in is big, and it's read whole.
 const MOST_BYTES: u64 = 256 * 1024 * 1024;
@@ -355,21 +354,23 @@ fn only(patcher: &Patcher, classes: &[&str]) -> Option<String> {
     found.next().is_none().then(|| first.id().to_string())
 }
 
+/// Kumi's own output stage: the gen~ it names obj-out in a sound device it made, whose safety net is the device's only
+/// way out. A device made anywhere else has none.
+fn output_stage(patcher: &Patcher) -> Option<&MaxBox> {
+    patcher.find("obj-out").filter(|item| item.class() == "gen~")
+}
+
 /// What a change calls each of the device's boxes, its way in and out, and its controls.
 pub fn names(patcher: &Patcher, kind: DeviceType) -> Names {
-    // Kumi's own sound devices go out through its output stage, a gen~ it names obj-out; any other device, through the
-    // one object that sends its kind out.
+    // Kumi's own sound devices go out through its output stage; any other device, through the one object that sends its
+    // kind out.
     let way_in = match kind {
         DeviceType::AudioEffect => only(patcher, &["plugin~", "mc.plugin~"]),
         _ => only(patcher, &["midiin"]),
     };
     let way_out = match kind {
         DeviceType::MidiEffect => only(patcher, &["midiout"]),
-        _ => patcher
-            .find("obj-out")
-            .filter(|item| item.class() == "gen~")
-            .map(|item| item.id().to_string())
-            .or_else(|| only(patcher, &["plugout~", "mc.plugout~"])),
+        _ => output_stage(patcher).map(|item| item.id().to_string()).or_else(|| only(patcher, &["plugout~", "mc.plugout~"])),
     };
     let mut controls = BTreeMap::new();
     for item in &patcher.boxes {
@@ -786,11 +787,18 @@ fn cord_end(text: &str) -> (&str, usize) {
     }
 }
 
+/// The widest a face is looked across for room for new controls, in pixels: past any real device's.
+const WIDEST_FACE: f64 = 4096.0;
+/// The most things shown on a face that room is looked for between: a face with more takes new controls at its right.
+const MOST_SHOWN: usize = 1_000;
+
 /// The free spot on the face for a block of new controls `size` big (width, height): the first, from the left and the
-/// top, that no control, comment or picture already shown covers; None when there's none.
+/// top, that no control, comment or picture already shown covers; None when there's none. A face is looked across only
+/// as far as [`WIDEST_FACE`], and between at most [`MOST_SHOWN`] things.
 fn free_spot(shown: &[Rect], width: f64, size: (f64, f64)) -> Option<(f64, f64)> {
     let (w, h) = size;
-    if w > width || h > look::HEIGHT {
+    let width = width.min(WIDEST_FACE);
+    if w > width || h > look::HEIGHT || shown.len() > MOST_SHOWN {
         return None;
     }
     let mut x = 0.0;
@@ -1021,7 +1029,8 @@ pub fn change(original: &Original, asked: &Asked, reference: Option<&Reference>)
         boxes: outside_boxes,
         controls: controls.iter().map(|(name, id)| (name.clone(), own(id))).collect(),
         reference,
-        output_stage: original.kind != DeviceType::MidiEffect && names.way_out.is_some(),
+        // A device Kumi didn't make has no output stage: what its patch sends out goes as the device sends it.
+        output_stage: original.kind != DeviceType::MidiEffect && output_stage(&base).is_some(),
     };
     let expanded = expand(&notation, &outside);
     found.append(expanded.found);
@@ -1375,5 +1384,11 @@ mod tests {
         assert_eq!(free_spot(&shown, 200.0, (44.0, 60.0)), Some((0.0, 60.0)), "under what's there, 4 pixels clear");
         assert_eq!(free_spot(&shown, 120.0, (44.0, 169.0)), None, "a full-height block in a full face");
         assert_eq!(free_spot(&[], 40.0, (44.0, 60.0)), None, "wider than the face");
+        // A face a trillion pixels wide, covered whole, is looked across only as far as a real device's: at once.
+        assert_eq!(free_spot(&[Rect::new(0.0, 0.0, 1e12, 169.0)], 1e12, (44.0, 60.0)), None);
+        assert_eq!(free_spot(&[], 1e12, (44.0, 60.0)), Some((0.0, 0.0)));
+        // A face with more things shown than are looked between takes them at its right.
+        let crowded: Vec<Rect> = (0..=MOST_SHOWN).map(|n| Rect::new(n as f64 * 10.0, 160.0, 4.0, 4.0)).collect();
+        assert_eq!(free_spot(&crowded, 200.0, (44.0, 60.0)), None);
     }
 }

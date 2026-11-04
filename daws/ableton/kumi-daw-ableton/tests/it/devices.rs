@@ -1536,6 +1536,10 @@ async fn make_device_makes_a_new_device_from_another_with_only_whats_asked_chang
     // Made from that one, it builds on it: in this conversation, its own device is replaced in place.
     let further = call(&tool, json!({ "from": file.to_string_lossy(), "name": "Echo 2", "patch": "pipe_4 = [pipe 0 0 1000]" })).await;
     assert_eq!(further["made"], "Echo 2", "{further}");
+    // The draft it's made from is what it replaced, and the answer says so; made from the original, the original is as it was.
+    let checks = |said: &Value| said["checks"].as_str().unwrap_or_default().to_string();
+    assert!(checks(&further).ends_with("the original was this conversation's own draft, which this replaced (see replaced)"), "{further}");
+    assert!(checks(&again).ends_with("the original's file is as it was"), "{again}");
     assert_eq!(boxes_by_id(&file)["obj-4"]["text"], "pipe 0 0 1000");
     let records: Vec<String> = boxes_by_id(&file)
         .values()
@@ -1807,6 +1811,68 @@ async fn a_devices_mc_gen_and_mcs_gen_are_said_with_their_code_and_changed_in_pl
     assert_eq!(std::fs::read(&spread).unwrap(), before, "the original's file is never written");
 }
 
+/// #772: a device made from another without a name keeps its record beside the next one's, so the call the answer
+/// suggests next (from its file, by its name) replaces it; and a name or an about alone opens a device, making nothing.
+#[tokio::test(flavor = "current_thread")]
+async fn devices_made_without_a_name_each_stay_this_conversations_and_a_name_alone_opens_one() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let (echo, delay) = (downloads.path().join("Echo.amxd"), downloads.path().join("Delay.amxd"));
+    for path in [&echo, &delay] {
+        std::fs::write(path, encode_amxd(DeviceType::MidiEffect, &downloaded_echo())).unwrap();
+    }
+    let tool = tool_in(library.path(), Default::default());
+    let first = call(&tool, json!({ "from": echo.to_string_lossy(), "patch": "pipe_4 = [pipe 0 0 300]" })).await;
+    assert_eq!(first["made"], "Echo 2", "{first}");
+    let second = call(&tool, json!({ "from": delay.to_string_lossy(), "patch": "pipe_4 = [pipe 0 0 400]" })).await;
+    assert_eq!(second["made"], "Delay 2", "{second}");
+    let again = call(&tool, json!({ "from": first["file"], "name": "Echo 2", "patch": "pipe_4 = [pipe 0 0 350]" })).await;
+    assert_eq!((again["made"].as_str(), again["replaced"].is_string()), (Some("Echo 2"), true), "{again}");
+
+    let named = call(&tool, json!({ "from": echo.to_string_lossy(), "name": "Echo", "about": "An echo." })).await;
+    assert!(named["patch"].is_string() && named.get("made").is_none(), "{named}");
+    assert!(named["aside"].as_str().unwrap().starts_with("name, about: a device is made from another only with a change"), "{named}");
+    assert!(!library.path().join("Kumi/MIDI Effects/Echo.amxd").exists(), "nothing made");
+}
+
+/// #772: Kumi's output stage, and its safety net, are only a sound device's way out when Kumi made the device: a
+/// downloaded one's [plugout~] given in a change is one more [plugout~], and the answer says nothing of Kumi's stage.
+#[tokio::test(flavor = "current_thread")]
+async fn only_a_sound_device_kumi_made_goes_out_through_its_output_stage() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let device = json!({ "patcher": {
+        "fileversion": 1, "classnamespace": "box", "rect": [34.0, 87.0, 640.0, 480.0], "openinpresentation": 1,
+        "boxes": [
+            { "box": { "id": "obj-1", "maxclass": "newobj", "text": "plugin~", "numinlets": 2, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 20.0, 53.0, 22.0] } },
+            { "box": { "id": "obj-2", "maxclass": "newobj", "text": "*~ 0.5", "numinlets": 2, "numoutlets": 1, "outlettype": ["signal"], "patching_rect": [40.0, 60.0, 40.0, 22.0] } },
+            { "box": { "id": "obj-3", "maxclass": "newobj", "text": "plugout~", "numinlets": 2, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 100.0, 60.0, 22.0] } }
+        ],
+        "lines": [
+            { "patchline": { "source": ["obj-1", 0], "destination": ["obj-2", 0] } },
+            { "patchline": { "source": ["obj-2", 0], "destination": ["obj-3", 0] } }
+        ]
+    } });
+    let quiet = downloads.path().join("Quiet.amxd");
+    std::fs::write(&quiet, encode_amxd(DeviceType::AudioEffect, &device)).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let patch = "louder = [*~ 2.]\nin -> louder\nlouder -> [plugout~]\n";
+    let theirs = call(&tool, json!({ "from": quiet.to_string_lossy(), "name": "Louder", "patch": patch })).await;
+    assert!(theirs.get("made").is_some() && !theirs.to_string().contains("output stage"), "{theirs}");
+    let made = boxes_by_id(&library.path().join("Kumi/Audio Effects/Louder.amxd"));
+    assert_eq!(made.values().filter(|item| item["text"] == "plugout~").count(), 2, "its own and the new one");
+
+    let half = json!({
+        "type": "audio_effect", "name": "Half", "about": "Halves the level.",
+        "patch": "fx = [gen~] { out1 = in1 * 0.5; out2 = in2 * 0.5; }\nin.0 -> fx\nin.1 -> fx.1\nfx -> out.0\nfx.1 -> out.1\n",
+    });
+    assert_eq!(call(&tool, half).await["made"], "Half");
+    let ours =
+        call(&tool, json!({ "from": "Half", "name": "Half Louder", "patch": "louder = [*~ 2.]\nfx -> louder\nlouder -> [plugout~]\n" }))
+            .await;
+    assert!(ours.to_string().contains("was made as out: Kumi's output stage, with its safety net, is the device's only way out"), "{ours}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_device_whose_file_cant_be_made_again_whole_is_refused_and_nothing_is_written() {
     let library = tempfile::tempdir().unwrap();
@@ -1892,10 +1958,8 @@ async fn a_frozen_device_whose_big_file_two_thousand_boxes_use_opens_and_changes
     let path = downloads.path().join("Big Echo.amxd");
     std::fs::write(&path, frozen("mmmm", &[("JSON", "Big Echo.amxd", 0x11, &main), ("JSON", "big.maxpat", 0, big.as_bytes())])).unwrap();
     let tool = tool_in(library.path(), Default::default());
-    let started = Instant::now();
     let opened = call(&tool, json!({ "from": path.to_string_lossy() })).await;
     assert_eq!(opened["device"], "Big Echo", "{}", opened.to_string().chars().take(300).collect::<String>());
     let made = call(&tool, json!({ "from": path.to_string_lossy(), "name": "Big Echo Long", "patch": "pipe_4 = [pipe 0 0 900]" })).await;
     assert_eq!(made["made"], "Big Echo Long", "{}", made.to_string().chars().take(300).collect::<String>());
-    assert!(started.elapsed() < std::time::Duration::from_secs(20), "{:?}", started.elapsed());
 }

@@ -24,10 +24,11 @@ use kumi_types::{errors::RuntimeError, system::windows_device_name};
 use serde_json::{json, Value};
 use std::{
     cell::RefCell,
+    future::Future,
     hash::{DefaultHasher, Hash, Hasher},
     path::{Path, PathBuf},
     rc::Rc,
-    sync::LazyLock,
+    sync::{Arc, LazyLock},
     time::Duration,
 };
 use tokio::io::AsyncWriteExt;
@@ -123,9 +124,12 @@ impl Made {
     }
 
     /// A device made: it takes the place of the record of its own kind that had its file or its asked name. Each kind has
-    /// a folder of its own, so a device of another kind with the same file is another device.
+    /// a folder of its own, so a device of another kind with the same file is another device; and no name asked for is
+    /// no device's name, so two devices made without one keep their records.
     fn made(&mut self, device: MadeDevice) {
-        self.devices.retain(|kept| kept.kind != device.kind || (kept.file != device.file && kept.asked != device.asked));
+        self.devices.retain(|kept| {
+            kept.kind != device.kind || (kept.file != device.file && (device.asked.is_empty() || kept.asked != device.asked))
+        });
         self.devices.push(device);
     }
 }
@@ -302,16 +306,27 @@ fn same_file(a: &Path, b: &Path) -> bool {
     }
 }
 
+/// Work as long as the device it reads is big, done beside the app's thread: a stop doesn't wait for it, and what it found
+/// is dropped. None when the work itself failed.
+async fn beside<T: Send + 'static>(signal: &Signal, work: impl FnOnce() -> T + Send + 'static) -> Result<Option<T>, RuntimeError> {
+    let task = tokio::task::spawn_blocking(work);
+    tokio::select! {
+        biased;
+        () = signal.cancelled() => Err(RuntimeError::Aborted),
+        done = task => Ok(done.ok()),
+    }
+}
+
 impl DeviceTool {
     /// Writes a device of `kind` to Kumi's folder in the User Library under its name (`make` makes its file for the name
     /// it's given, and says what it found, or why it can't), records it for this conversation, and waits for Live's
     /// Browser to list it. Err is the answer when it can't be made or written: nothing is written then. A device that
     /// isn't this conversation's to replace is put in place without replacing any file there.
-    async fn save(
+    async fn save<Making: Future<Output = Result<(Vec<u8>, Findings), String>>>(
         &self,
         kind: DeviceType,
         naming: Naming,
-        make: impl FnOnce(&str) -> Result<(Vec<u8>, Findings), String>,
+        make: impl FnOnce(&str) -> Making,
         found: &mut Findings,
         signal: &Signal,
     ) -> Result<Result<Saved, ToolResult>, RuntimeError> {
@@ -357,7 +372,9 @@ impl DeviceTool {
                 never.to_string_lossy()
             ))));
         }
-        let (bytes, more) = match make(&name) {
+        let made = make(&name).await;
+        signal.check()?;
+        let (bytes, more) = match made {
             Ok(made) => made,
             Err(why) => return Ok(Err(ToolResult::error(why))),
         };
@@ -432,17 +449,34 @@ impl DeviceTool {
                 .await
                 .unwrap_or_else(|_| Err("Kumi couldn't open the device.".into()));
         let original = match opened {
-            Ok(original) => original,
+            Ok(original) => Arc::new(original),
             Err(why) => return Ok(ToolResult::error(why)),
         };
-        if !["patch", "controls", "remove", "name", "about"].iter().any(|key| given(key)) {
-            let mut said = existing::describe(&original);
-            let aside: Vec<&str> = ["code", "tests", "objects", "guide"].into_iter().filter(|key| given(key)).collect();
-            if !aside.is_empty() {
-                said["aside"] = json!(format!(
+        // A new device is made from it only with a change: a name or an about alone opens it.
+        if !["patch", "controls", "remove"].iter().any(|key| given(key)) {
+            // Saying what's in it takes as long as it's big: beside the app's thread.
+            let opened = Arc::clone(&original);
+            let Some(mut said) = beside(&signal, move || existing::describe(&opened)).await? else {
+                return Ok(ToolResult::error("Kumi couldn't read the device.".to_string()));
+            };
+            let mut aside = Vec::new();
+            let other: Vec<&str> = ["code", "tests", "objects", "guide"].into_iter().filter(|key| given(key)).collect();
+            if !other.is_empty() {
+                aside.push(format!(
                     "{}: opening a device answers with the device alone; ask for these in a call of their own.",
-                    aside.join(", ")
+                    other.join(", ")
                 ));
+            }
+            let naming: Vec<&str> = ["name", "about"].into_iter().filter(|key| given(key)).collect();
+            if !naming.is_empty() {
+                aside.push(format!(
+                    "{}: a device is made from another only with a change (patch, controls or remove), so this one was opened and nothing was made: give {} with the change.",
+                    naming.join(", "),
+                    if naming.len() == 1 { "it" } else { "them" }
+                ));
+            }
+            if !aside.is_empty() {
+                said["aside"] = json!(aside.join(" "));
             }
             return Ok(ToolResult::text(stringify(&said)));
         }
@@ -496,19 +530,34 @@ impl DeviceTool {
             reserved: if asked_name.is_empty() { vec![original.name.clone()] } else { Vec::new() },
             never: Some(original.path.clone()),
         };
-        let mut made = None;
+        let made: RefCell<Option<existing::Changed>> = RefCell::new(None);
         let make = |name: &str| {
-            let changed = existing::change(&original, &existing::Asked { name: name.to_string(), ..asked.clone() }, reference);
-            let bytes = existing::device_bytes(&original, &changed.document)?;
-            let said = changed.found.clone();
-            made = Some(changed);
-            Ok((bytes, said))
+            let (original, asked) = (Arc::clone(&original), existing::Asked { name: name.to_string(), ..asked.clone() });
+            let (made, signal) = (&made, signal.clone());
+            async move {
+                // Changing the device and making its file again take as long as it's big: beside the app's thread.
+                let done = beside(&signal, move || {
+                    let changed = existing::change(&original, &asked, reference);
+                    existing::device_bytes(&original, &changed.document).map(|bytes| (changed, bytes))
+                })
+                .await;
+                match done {
+                    Ok(Some(Ok((changed, bytes)))) => {
+                        let said = changed.found.clone();
+                        *made.borrow_mut() = Some(changed);
+                        Ok((bytes, said))
+                    }
+                    Ok(Some(Err(why))) => Err(why),
+                    // Stopped, which save says, or the work failed.
+                    Ok(None) | Err(_) => Err("Kumi couldn't make the device.".to_string()),
+                }
+            }
         };
         let Saved { name, file, item_id, ours, kept, seen } = match self.save(kind, naming, make, &mut found, &signal).await? {
             Ok(saved) => saved,
             Err(refused) => return Ok(refused),
         };
-        let Some(made) = made else { return Ok(ToolResult::error("Kumi couldn't make the device.".to_string())) };
+        let Some(made) = made.into_inner() else { return Ok(ToolResult::error("Kumi couldn't make the device.".to_string())) };
         let mut result = json!({
             "made": name, "type": kind_name(kind), "itemId": item_id, "file": file.to_string_lossy(),
             "from": original.path.to_string_lossy(), "controls": made.controls,
@@ -521,9 +570,18 @@ impl DeviceTool {
                 json!(format!("the {} this conversation made as {}{kept}", kind_name(device.kind), device.file)),
             );
         }
+        // Made again by its own name from this conversation's own draft, the draft is what it replaced.
+        let draft = ours.is_some() && same_file(&file, &original.path);
         fields.insert(
             "checks".into(),
-            json!("Kumi checked what the change brought (its objects, cords and their order, its controls, its timing) and kept everything else as it was; the original's file is as it was"),
+            json!(format!(
+                "Kumi checked what the change brought (its objects, cords and their order, its controls, its timing) and kept everything else as it was; {}",
+                if draft {
+                    "the original was this conversation's own draft, which this replaced (see replaced)"
+                } else {
+                    "the original's file is as it was"
+                }
+            )),
         );
         for (key, said) in [("wrong", &found.wrong), ("changed", &found.changed), ("notes", &found.notes)] {
             if !said.is_empty() {
@@ -679,28 +737,30 @@ impl KernelTool for DeviceTool {
             reserved: Vec::new(),
             never: None,
         };
-        let make = |name: &str| match &spec {
-            DeviceSpec::MidiEffect(s) => {
-                let mut s = s.clone();
-                s.name = name.to_string();
-                Ok((encode_amxd(DeviceType::MidiEffect, &midi_device_patcher(&s)), Findings::default()))
-            }
-            DeviceSpec::AudioEffect(s) => {
-                let mut s = GenSpec::from(s);
-                s.name = name.to_string();
-                Ok((encode_amxd(DeviceType::AudioEffect, &audio_effect_patcher(&s)), Findings::default()))
-            }
-            DeviceSpec::Instrument(s) => {
-                let mut s = GenSpec::from(s);
-                s.name = name.to_string();
-                Ok((encode_amxd(DeviceType::Instrument, &instrument_patcher(&s)), Findings::default()))
-            }
-            DeviceSpec::Patch(s) => {
-                let mut s = s.clone();
-                s.name = name.to_string();
-                let (patcher, patched) = patched_device(&s, reference);
-                Ok((encode_amxd(s.kind, &patcher), patched))
-            }
+        let make = |name: &str| {
+            std::future::ready(match &spec {
+                DeviceSpec::MidiEffect(s) => {
+                    let mut s = s.clone();
+                    s.name = name.to_string();
+                    Ok((encode_amxd(DeviceType::MidiEffect, &midi_device_patcher(&s)), Findings::default()))
+                }
+                DeviceSpec::AudioEffect(s) => {
+                    let mut s = GenSpec::from(s);
+                    s.name = name.to_string();
+                    Ok((encode_amxd(DeviceType::AudioEffect, &audio_effect_patcher(&s)), Findings::default()))
+                }
+                DeviceSpec::Instrument(s) => {
+                    let mut s = GenSpec::from(s);
+                    s.name = name.to_string();
+                    Ok((encode_amxd(DeviceType::Instrument, &instrument_patcher(&s)), Findings::default()))
+                }
+                DeviceSpec::Patch(s) => {
+                    let mut s = s.clone();
+                    s.name = name.to_string();
+                    let (patcher, patched) = patched_device(&s, reference);
+                    Ok((encode_amxd(s.kind, &patcher), patched))
+                }
+            })
         };
         let Saved { name, file, item_id, ours, kept, seen } = match self.save(spec.kind(), naming, make, &mut found, &signal).await? {
             Ok(saved) => saved,
