@@ -237,9 +237,15 @@ async fn soundcrafts_host_lists_what_its_bridge_serves_and_starts_nothing_while_
     let read = &tools[2]["inputSchema"]["properties"];
     assert_eq!(
         read["kind"]["enum"],
-        json!(["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"])
+        json!(["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point", "call"])
     );
     assert!(read["epoch"].is_object() && read["grid"].is_null(), "its refs carry an epoch, and it reads no parameter texts: {read}");
+    // A call goes by SoundCraft's command and its parameters by name, not REAPER's function and arguments.
+    assert_eq!(
+        (&read["command"]["type"], &read["params"]["type"], &read["fn"], &read["args"]),
+        (&json!("string"), &json!("object"), &Value::Null, &Value::Null),
+        "{read}"
+    );
     let snapshot = tools[3]["description"].as_str().unwrap();
     assert!(snapshot.starts_with("The open SoundCraft session on one screen"), "{snapshot}");
     // Its views, in its words: no routing view (SoundCraft has no track's routing window).
@@ -290,6 +296,10 @@ async fn soundcrafts_read_goes_to_its_bridge_as_asked_and_comes_back_as_it_answe
         "{read}"
     );
     assert_eq!(*asked.lock().unwrap(), [json!({"kind": "track", "limit": 1, "epoch": "1a-1"})], "the request as asked, and no more");
+    // A call goes the same way: SoundCraft's command and its parameters by name, as asked.
+    let call = json!({"kind": "call", "command": "track.inspect", "params": {"track": "s:track:3"}, "epoch": "1a-1"});
+    session.tool(3, "read", call.clone()).await;
+    assert_eq!(asked.lock().unwrap().last(), Some(&call), "the call as asked");
     bridge.stop();
     session.finish().await;
 }
