@@ -66,6 +66,8 @@ pub(super) struct Client {
     base: Url,
     key: Option<String>,
     local: bool,
+    #[cfg(test)]
+    downloaded_bytes: Option<tokio::sync::watch::Sender<u64>>,
 }
 impl Client {
     pub fn new(base: &str, key: Option<&str>, local: bool) -> Result<Self, Failure> {
@@ -82,7 +84,15 @@ impl Client {
             .connect_timeout(Duration::from_secs(20))
             .build()
             .map_err(|_| Failure::new("Could not construct guarded media client"))?;
-        Ok(Self { http, transfers, base, key: key.map(str::to_owned), local })
+        Ok(Self {
+            http,
+            transfers,
+            base,
+            key: key.map(str::to_owned),
+            local,
+            #[cfg(test)]
+            downloaded_bytes: None,
+        })
     }
     pub fn api(&self, method: Method, path: &str) -> Result<RequestBuilder, Failure> {
         let url = if path.starts_with("https://") || path.starts_with("http://") {
@@ -608,6 +618,10 @@ impl Client {
                     header.extend_from_slice(&chunk[..chunk.len().min(4 - header.len())]);
                 }
                 file.write_all(&chunk).await.map_err(|_| Failure::new("Could not write audio output"))?;
+                #[cfg(test)]
+                if let Some(written) = &self.downloaded_bytes {
+                    written.send_replace(size);
+                }
             }
             if size == 0 || (extension == "mid" && header != b"MThd") {
                 return Err(Failure::new("Audio server returned an empty or invalid output file"));
@@ -1028,8 +1042,12 @@ mod tests {
 
     #[tokio::test]
     async fn download_timeout_is_per_chunk_not_total_and_partial_files_are_removed() {
-        // Keep paused time from auto-advancing while socket/filesystem work is pending.
-        // Only explicit advances below exercise the timer; no wall-clock delay is used.
+        async fn advance_clock(seconds: u64) {
+            tokio::time::pause();
+            tokio::time::advance(Duration::from_secs(seconds)).await;
+            tokio::time::resume();
+        }
+
         for stalls in [false, true] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let base = format!("http://{}", listener.local_addr().unwrap());
@@ -1046,52 +1064,47 @@ mod tests {
                     }
                 }
             });
-            let client = Client::new(&base, None, true).ok().unwrap();
+            let (written, mut progress) = tokio::sync::watch::channel(0u64);
+            let mut client = Client::new(&base, None, true).ok().unwrap();
+            client.downloaded_bytes = Some(written);
             let directory = tempfile::tempdir().unwrap();
             let output = directory.path().join("output");
-            let signal = Signal::new();
-            let url = format!("{base}/file");
-            let mut remaining_bytes = MAX_FILE;
-            let download = client.download(&url, "wav", &output, &signal, &mut remaining_bytes);
-            tokio::pin!(download);
-            tokio::time::pause();
-            let spinner = tokio::spawn(async {
-                loop {
-                    tokio::task::yield_now().await;
-                }
+            let download_output = output.clone();
+            let download = tokio::spawn(async move {
+                let signal = Signal::new();
+                let url = format!("{base}/file");
+                let mut remaining_bytes = MAX_FILE;
+                client.download(&url, "wav", &download_output, &signal, &mut remaining_bytes).await
             });
-            let drive = async {
-                // Wait until the first chunk was persisted and the next chunk timer is active.
-                loop {
-                    if let Ok(mut entries) = tokio::fs::read_dir(&output).await {
-                        if let Some(entry) = entries.next_entry().await.unwrap() {
-                            if entry.metadata().await.unwrap().len() == 4 {
-                                break;
-                            }
-                        }
-                    }
-                    tokio::task::yield_now().await;
-                }
-                if stalls {
-                    tokio::time::advance(Duration::from_secs(301)).await;
-                } else {
-                    tokio::time::advance(Duration::from_secs(200)).await;
-                    send.send(false).await.unwrap();
-                    loop {
-                        let mut entries = tokio::fs::read_dir(&output).await.unwrap();
-                        let entry = entries.next_entry().await.unwrap().unwrap();
-                        if entry.metadata().await.unwrap().len() == 8 {
-                            break;
-                        }
-                        tokio::task::yield_now().await;
-                    }
-                    tokio::time::advance(Duration::from_secs(200)).await;
-                    send.send(true).await.unwrap();
-                }
-            };
-            let (result, ()) = tokio::join!(download, drive);
-            spinner.abort();
-            tokio::time::resume();
+
+            // Observe completed writes, not OS-dependent visibility of a buffered file's length.
+            // Keep time running during real I/O; pause only for the explicit timeout advances.
+            assert_eq!(
+                *tokio::time::timeout(Duration::from_secs(10), progress.wait_for(|&bytes| bytes >= 4))
+                    .await
+                    .expect("first chunk was not written")
+                    .expect("download ended before the first chunk"),
+                4
+            );
+            if stalls {
+                advance_clock(301).await;
+            } else {
+                advance_clock(200).await;
+                send.send(false).await.unwrap();
+                assert_eq!(
+                    *tokio::time::timeout(Duration::from_secs(10), progress.wait_for(|&bytes| bytes >= 8))
+                        .await
+                        .expect("second chunk was not written")
+                        .expect("download ended before the second chunk"),
+                    8
+                );
+                advance_clock(200).await;
+                send.send(true).await.unwrap();
+            }
+            let result = tokio::time::timeout(Duration::from_secs(10), download)
+                .await
+                .expect("download did not finish after driving the chunks")
+                .unwrap();
             writer.abort();
             if stalls {
                 assert!(result.err().unwrap().message.contains("without data"));
