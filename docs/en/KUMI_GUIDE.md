@@ -171,6 +171,66 @@ again.
   Kumi says so once and names one on the same server that can. `kumi doctor`
   lists the servers it finds.
 
+## Mirelo and self-hosted audio models
+
+- **Connect your account:** get a key from [Mirelo's API-key page](https://mirelo.ai/studio/api-keys),
+  then run `kumi login mirelo`, or open `/audio` and choose **Connect an existing Mirelo account**.
+  The hidden key is checked with Mirelo and saved in Kumi's owner-only sign-in store.
+  `kumi auth` shows its status; `kumi logout mirelo` removes the saved key and revokes onboarding.
+  `MIRELO_API_KEY` supplies a key when none is saved, but **a key alone never enables Mirelo**.
+  Run `kumi login mirelo` or choose **Enable existing Mirelo key…** in `/audio` to explicitly
+  acknowledge uploads and paid use. Cancelling leaves Mirelo disabled.
+- **Five independent choices:** `/audio` has **Allow Mirelo: On/Off** for
+  text-to-SFX, video-to-SFX, extending audio, inpainting a region and audio-to-MIDI.
+  Each starts **On**, but only becomes active after onboarding. An enabled task uses Mirelo
+  by default unless you request another provider. **Off forbids Mirelo for that task**,
+  even when explicitly requested. Changes apply immediately and persist.
+  These settings are separate from conversation models (`/model`) and listening slots (`/slots`).
+  Free local MIDI conversion stays local unless audio-to-MIDI is enabled; `listen` transcription
+  remains local analysis.
+- **Ask in normal words:** “make a two-second door slam”, “add sound effects to this video”,
+  “extend this recording by five seconds”, “replace seconds 2–4”, or “turn this audio into MIDI”.
+  Give Kumi the source file or a public media URL. Results are retained under
+  `~/.kumi/audio` (`KUMI_HOME/audio` when set), not left on expiring provider links.
+  Kumi can insert them with the DAW's existing tools when that session allows changes;
+  file generation also works without a DAW or in a read-only session.
+  Downloads are limited to 32 files and 512 MiB combined per job. Results do not expire
+  automatically; remove unneeded files yourself.
+- **Cost and privacy:** every Mirelo create spends credits and sends the prompt and supplied
+  audio/video to Mirelo. Only supply media you may use. Kumi shows each job's credit accounting
+  as a notice. The agent is instructed to quote and ask before more than one small job;
+  this is not a hard spending cap. You can ask for a quote for any request.
+  Preflight does not create a paid job, but may upload the input.
+  Local MIDI files are measured before quoting; public URLs use your duration estimate.
+  Final MIDI billing uses the server-measured duration.
+  Training follows your [Mirelo account settings](https://mirelo.ai/studio/settings/profile);
+  Kumi has no training opt-out switch. Paid accounts can manage their opt-out there;
+  free accounts cannot. Powered by Mirelo.
+- **A self-hosted alternative:** in a task's `/audio` panel, enter its endpoint URL,
+  protocol, optional authentication and, for Mirelo-compatible SFX, explicit model release.
+  Set **Allow Mirelo: Off** to use it instead, or leave Mirelo on and enable
+  **Use alternative as fallback**. Fallback is off by default and only handles connection,
+  rate-limit or server failures before submission. Kumi never repeats a possibly billed create
+  automatically. Ask to resume an existing job by its ID to poll and download without creating
+  another job. Cancelling stops waiting, not a job already running on Mirelo.
+  Remote endpoints require HTTPS; loopback HTTP works for a local server or an SSH tunnel.
+- **MuScriptor is audio-to-MIDI only**, not an SFX model. Its gated
+  [Hugging Face weights](https://huggingface.co/MuScriptor) use **CC-BY-NC-4.0**;
+  the server code is MIT. The weights' noncommercial restriction matters for commercial
+  production: obtain suitable permission or a license before commercial use.
+  Accept the license yourself, authenticate with `uvx hf auth login`, then run
+  `uvx muscriptor serve --model small`. In `/audio` → **Audio to MIDI**, use protocol
+  **MuScriptor** and `http://127.0.0.1:8222`, or your server's HTTPS address.
+  No Mirelo account is needed; Kumi does not download or host the model.
+  Native MuScriptor accepts WAV, FLAC, MP3 and Ogg, without a mandatory duration probe.
+  Kumi limits an explicitly supplied MuScriptor duration to 15 minutes; this is not a server
+  limit. Mirelo MIDI also accepts AAC (not M4A), up to 30 minutes and 100 MiB.
+- **Other audio models** need a server implementing the
+  [Mirelo API](https://mirelo.ai/api-docs), selected as **Mirelo-compatible**.
+  A generic OpenAI, Hugging Face or Gradio endpoint is not interchangeable.
+  Text/video default to `sfx-2.0` on Mirelo; extend/inpaint use `sfx-1.6`, which supports editing.
+  Video sound effects default to `preserve_speech: false`; they do not silently preserve source speech.
+
 ## Connect to Live
 
 Kumi reaches Live through its bridge: a Remote Script that runs inside Live and
@@ -652,6 +712,7 @@ trusting them:
   stops them. Stems and transcription can't take model files yet. A
   `slots.json` Kumi can't read leaves listening off. `KUMI_LISTENER` wins over
   the listening slot while it's set, but `/slots listening off` still stops it.
+  User-requested audio-to-MIDI and audio generation have separate provider controls in `/audio`.
 - **Style and effects, heard by models.** With a reference, Kumi's style model
   (LAION-CLAP) hears it and each listen of the run, and a change that moves the
   sound further from the reference's style is taken back. For a sound goal, its
@@ -1401,13 +1462,18 @@ says which need which.
 - **References** in words are looked up by name on MusicBrainz and ListenBrainz,
   a Spotify link on Spotify's public page (an artist's on MusicBrainz), and
   their audio comes from a YouTube search and is deleted once it's measured.
-- **Audio** is analysed on your computer; only the numbers go to the model. A
+- **Audio analysis** runs on your computer; only the numbers go to the model. A
   listening model, when there is one, gets short excerpts (at most 10 seconds
   each, mono) of the changes it weighs: Gemini with a Gemini API key, OpenAI
   with an OpenAI API key, or the model in `KUMI_LISTENER` or the listening slot
   (`/slots`), with `KUMI_LISTENER_KEY` when it's set. `KUMI_LISTENER=off` or
   `/slots listening off` stops that; trying a new listening model sends it only
   a known test tone.
+- **Requested audio generation, editing and MIDI conversion** send supplied media and prompts
+  to the provider chosen in `/audio`. Mirelo requires explicit onboarding and that task's
+  **Allow Mirelo: On** permission; **Off** blocks even an explicit Mirelo request.
+  A server on your computer keeps media local; a remote server receives it.
+  `/slots listening off` does not disable these requests; `listen` transcription stays local.
 - **Your voice** is written down on your computer, and the recording deleted as
   soon as it is; only the words leave, when you send them.
 - **Your library** is learned on your computer; only the manual's pages come from
@@ -1476,6 +1542,7 @@ Kumi keeps everything in `~/.kumi`. `~/.kumi/settings.json` holds:
 | `instantPhrases` | `false`: fixed phrases ("tempo 124", "mute drums") go to the model like any other message ([instant phrases](KUMI_TUI.md#instant-phrases)) |
 | `contextMeter` | The header's meter of how full the model's context is: `"auto"` (the default) from half full, `"always"`, or `"off"` |
 | `modelServers` | Model servers you name: `[{ "name", "baseURL", "apiKey", "format" }]` ([models on your computer](#models-on-your-computer)) |
+| `audioModels` | `/audio` settings: `acknowledged` (default `false`) records explicit Mirelo onboarding. `tasks` is keyed by `text-to-sfx`, `video-to-sfx`, `extend`, `inpaint`, `audio-to-midi`; each has `autoMirelo` (default `true`, permission only after onboarding), `fallback` (default `false`) and optional `local: {url, protocol, model}`. Keys stay in the sign-in store |
 | `libraryFolders` | More folders for Kumi to learn sounds, presets and Sets from |
 | `musicFolders` | The folders of your own music Kumi learns your taste from (`/music add`); absent until you agree |
 | `musicOffered` | `true` once Kumi has asked whether to learn your music: it asks once |
@@ -1507,6 +1574,7 @@ Environment variables (paths must be absolute):
 | --- | --- |
 | `KUMI_MODEL` | `<provider>/<model>` for this run, overriding the chosen model |
 | `KUMI_AUTH_FILE`, `KUMI_SETTINGS_FILE` | The sign-in store and the settings file |
+| `MIRELO_API_KEY` | Mirelo audio API key when no saved key exists; not consent to uploads or paid use. Complete `kumi login mirelo` or `/audio` onboarding first; independent of the conversation model |
 | `KUMI_MEMORY_FILE`, `KUMI_TECHNIQUES_FILE`, `KUMI_PLAYBOOK_FILE` | Notes about you, techniques and lessons |
 | `KUMI_RECIPES_DIR`, `KUMI_PROJECTS_DIR`, `KUMI_GOALS_DIR` | Recipes; each Set's conversations, notes and last state; goals and searches in progress, and background jobs Kumi closed on |
 | `KUMI_REFERENCES_DIR` | Measured references |

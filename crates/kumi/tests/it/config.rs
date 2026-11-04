@@ -19,6 +19,235 @@ fn value(args_: &[&str], env: &Env) -> Value {
 fn fixture() -> Value {
     serde_json::from_str(include_str!("../support/config/reference.json")).unwrap()
 }
+
+#[test]
+fn mirelo_login_is_not_a_conversation_provider_and_never_accepts_a_key_argument() {
+    let env = env();
+    assert!(matches!(load_config(&args(&["login", "mirelo"]), &env).unwrap(), AppConfig::Mirelo { remove: false, .. }));
+    assert!(matches!(load_config(&args(&["logout", "mirelo"]), &env).unwrap(), AppConfig::Mirelo { remove: true, .. }));
+    assert!(load_config(&args(&["login", "mirelo", "private-key"]), &env).is_err());
+    assert!(kumi_ai::providers::ProviderId::parse("mirelo").is_none());
+    assert!(!valid_model(Some("mirelo/audio-model"), &[]));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn audio_switches_survive_other_settings_writes_and_a_new_service() {
+    use kumi_ai::audio::{Endpoint, LocalProtocol, Task};
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json");
+    let auth = folder.path().join("auth.json");
+    let file = file.to_str().unwrap();
+    let auth = auth.to_str().unwrap();
+    let mut env = env();
+    env.insert("KUMI_HOME".into(), folder.path().to_string_lossy().into_owned());
+    std::fs::write(file, json!({"model":"anthropic/claude-sonnet-5", "futureSetting": {"keep":true}}).to_string()).unwrap();
+    let service = kumi::login::audio_service(auth, file, &env);
+    assert!(Task::ALL.into_iter().all(|task| service.config().task(task).auto_mirelo));
+    let mut config = service.config();
+    for (index, task) in Task::ALL.into_iter().enumerate() {
+        let mut next = config.task(task);
+        next.auto_mirelo = index % 2 == 0;
+        config.tasks.insert(task, next);
+    }
+    let midi = config.tasks.get_mut(&Task::AudioToMidi).unwrap();
+    midi.local = Some(Endpoint { url: "http://127.0.0.1:8222".into(), protocol: LocalProtocol::Muscriptor, model: None });
+    midi.fallback = true;
+    service.configure(config.clone()).await.unwrap();
+    assert_eq!(read_settings(file).model.as_deref(), Some("anthropic/claude-sonnet-5"));
+    write_settings(file, &json!({"model":"openai-codex/gpt-6-astra", "mapHover":false})).unwrap();
+    assert_eq!(service.config(), config);
+    let restarted = kumi::login::audio_service(auth, file, &env);
+    assert_eq!(restarted.config(), config);
+    let raw: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    assert_eq!(raw["futureSetting"]["keep"], true);
+    assert_eq!(raw["audioModels"]["tasks"]["video-to-sfx"]["autoMirelo"], false);
+    assert_eq!(raw["model"], "openai-codex/gpt-6-astra");
+    assert!(!std::path::Path::new(auth).exists());
+    let mut invalid = config.clone();
+    invalid.tasks.get_mut(&Task::AudioToMidi).unwrap().local.as_mut().unwrap().url = "not a URL".into();
+    assert!(restarted.configure(invalid).await.is_err());
+    assert_eq!(restarted.config(), config, "invalid endpoint must not replace saved configuration");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn corrupt_audio_settings_never_reenable_paid_routing_even_after_an_unrelated_write() {
+    use kumi_ai::audio::Task;
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json");
+    let auth = folder.path().join("auth.json");
+    let mut env = env();
+    env.insert("KUMI_HOME".into(), folder.path().to_string_lossy().into_owned());
+    env.insert("MIRELO_API_KEY".into(), "test-only-account-key".into());
+    let service = kumi::login::audio_service(auth.to_str().unwrap(), file.to_str().unwrap(), &env);
+    for corrupt in ["{", "null", "[]", r#"{"audioModels":null}"#, r#"{"audioModels":{"tasks":[]}}"#] {
+        std::fs::write(&file, corrupt).unwrap();
+        for task in Task::ALL {
+            assert!(service.preferred(task).await.unwrap().is_none(), "{task:?} re-enabled by {corrupt}");
+        }
+        write_settings(file.to_str().unwrap(), &json!({"mapHover":false})).unwrap();
+        for task in Task::ALL {
+            assert!(service.preferred(task).await.unwrap().is_none(), "{task:?} re-enabled by settings repair");
+        }
+        let mut config = service.config();
+        config.tasks.get_mut(&Task::AudioToMidi).unwrap().fallback = true;
+        service.configure(config).await.unwrap();
+        for task in Task::ALL {
+            assert!(service.preferred(task).await.unwrap().is_none(), "{task:?} re-enabled by an unrelated audio task edit");
+        }
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn future_audio_settings_survive_typed_writes_and_independent_task_edits() {
+    use kumi_ai::audio::{Selection, Task};
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json");
+    let auth = folder.path().join("auth.json");
+    let file = file.to_str().unwrap();
+    let mut env = env();
+    env.insert("KUMI_HOME".into(), folder.path().to_string_lossy().into_owned());
+    env.insert("MIRELO_API_KEY".into(), "test-only-account-key".into());
+    let audio = json!({
+        "acknowledged": true,
+        "futureOption": {"keep": [1, 2]},
+        "tasks": {
+            "future-task": {"autoMirelo": false, "local": {"protocol": "future", "url": "https://example.com"}},
+            "text-to-sfx": {"autoMirelo": true, "local": {"protocol": "future", "url": "https://example.com"}, "future": true},
+            "extend": {"autoMirelo": "false"},
+            "inpaint": {"autoMirelo": true, "local": {"protocol": "mirelo", "url": "not a URL"}},
+            "audio-to-midi": {
+                "autoMirelo": false,
+                "local": {"protocol": "muscriptor", "url": "http://127.0.0.1:8222", "futureOption": [3, 4]},
+                "futureOption": {"keep": true}
+            }
+        }
+    });
+    std::fs::write(file, json!({"model": "anthropic/claude-sonnet-5", "audioModels": audio}).to_string()).unwrap();
+    let service = kumi::login::audio_service(auth.to_str().unwrap(), file, &env);
+    for task in [Task::TextToSfx, Task::Extend, Task::Inpaint] {
+        assert_eq!(service.preferred(task).await.unwrap(), None, "{task:?} must fail closed independently");
+        assert!(!service.config().task(task).auto_mirelo);
+    }
+    assert_eq!(service.preferred(Task::AudioToMidi).await.unwrap(), Some(Selection::Local));
+    assert!(service.config().task(Task::VideoToSfx).auto_mirelo, "an absent task retains the existing default");
+    assert_eq!(service.config().tasks.len(), 4, "future tasks are not interpreted");
+    let mut settings = serde_json::to_value(read_settings(file)).unwrap();
+    assert!(settings.get("audioModels").is_none(), "typed round trips must not write the lossy audio view");
+    settings["voice"] = json!({"language": "ja", "send": true});
+    settings["fallbackModel"] = json!("openai/gpt-6-luna");
+    write_settings(file, &settings).unwrap();
+    let saved = || serde_json::from_str::<Value>(&std::fs::read_to_string(file).unwrap()).unwrap();
+    assert_eq!(saved()["audioModels"], audio);
+    assert_eq!(saved()["voice"]["language"], "ja");
+    assert_eq!(saved()["fallbackModel"], "openai/gpt-6-luna");
+
+    let mut config = service.config();
+    config.tasks.get_mut(&Task::AudioToMidi).unwrap().fallback = true;
+    service.configure(config).await.unwrap();
+    let mut expected = audio;
+    expected["tasks"]["audio-to-midi"]["fallback"] = json!(true);
+    assert_eq!(saved()["audioModels"], expected, "editing MIDI must preserve unknown tasks, protocols and options");
+    let mut config = service.config();
+    config.tasks.get_mut(&Task::AudioToMidi).unwrap().local.as_mut().unwrap().model = Some("release-1".into());
+    service.configure(config).await.unwrap();
+    expected["tasks"]["audio-to-midi"]["local"]["model"] = json!("release-1");
+    assert_eq!(saved()["audioModels"], expected, "editing a known endpoint field must preserve its unknown options");
+    let restarted = kumi::login::audio_service(auth.to_str().unwrap(), file, &env);
+    assert_eq!(restarted.preferred(Task::TextToSfx).await.unwrap(), None);
+    assert_eq!(restarted.preferred(Task::AudioToMidi).await.unwrap(), Some(Selection::Local));
+    assert_eq!(read_settings(file).model.as_deref(), Some("anthropic/claude-sonnet-5"));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn writes_repair_nonobject_settings_without_losing_preferences_or_enabling_paid_audio() {
+    use kumi_ai::audio::Task;
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json");
+    let auth = folder.path().join("auth.json");
+    let file = file.to_str().unwrap();
+    let mut env = env();
+    env.insert("KUMI_HOME".into(), folder.path().to_string_lossy().into_owned());
+    env.insert("MIRELO_API_KEY".into(), "test-only-account-key".into());
+    let service = kumi::login::audio_service(auth.to_str().unwrap(), file, &env);
+    for corrupt in ["{", "null", "[]"] {
+        for next in [
+            json!({"model": "anthropic/claude-sonnet-5", "effort": "low"}),
+            json!({"model": "openai/gpt-6-luna", "modelServers": null}),
+            json!({"model": "anthropic/claude-sonnet-5", "voice": {"language": "ja", "send": true, "microphone": "Studio"}}),
+        ] {
+            std::fs::write(file, corrupt).unwrap();
+            let settings = read_settings(file);
+            assert!(settings.model.is_none() && settings.effort.is_none() && settings.voice.is_none());
+            assert!(settings.model_servers.is_empty());
+            write_settings(file, &next).unwrap();
+            let mut round_trip = serde_json::to_value(read_settings(file)).unwrap();
+            round_trip["mapHover"] = json!(false);
+            write_settings(file, &round_trip).unwrap();
+            let saved: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+            for (key, value) in next.as_object().unwrap() {
+                assert_eq!(saved.get(key), Some(value), "{corrupt}: {key} must survive repair and a typed round trip");
+            }
+            for task in Task::ALL {
+                assert_eq!(service.preferred(task).await.unwrap(), None, "{corrupt}: {task:?} must remain disabled");
+            }
+        }
+    }
+}
+
+#[test]
+fn malformed_settings_still_read_the_separate_music_answer() {
+    use kumi_ai::audio::Task;
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json");
+    let file = file.to_str().unwrap();
+    std::fs::write(folder.path().join(MUSIC_ANSWER_FILE), json!({"musicFolders": ["/music/own"], "musicOffered": true}).to_string())
+        .unwrap();
+    for corrupt in ["{", "null", "[]"] {
+        std::fs::write(file, corrupt).unwrap();
+        let settings = read_settings(file);
+        assert_eq!(settings.music_folders, Some(vec!["/music/own".to_string()]));
+        assert_eq!(settings.music_offered, Some(true));
+        assert!(Task::ALL.into_iter().all(|task| !settings.audio_models.task(task).auto_mirelo));
+        write_settings(file, &json!({"mapHover": false})).unwrap();
+        let repaired = read_settings(file);
+        assert_eq!(repaired.music_folders, settings.music_folders);
+        assert_eq!(repaired.music_offered, settings.music_offered);
+        assert!(Task::ALL.into_iter().all(|task| !repaired.audio_models.task(task).auto_mirelo));
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn audio_acknowledgement_requires_a_saved_boolean_and_survives_unrelated_edits() {
+    use kumi_ai::audio::{Selection, Task};
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json");
+    let auth = folder.path().join("auth.json");
+    let file = file.to_str().unwrap();
+    let mut env = env();
+    env.insert("KUMI_HOME".into(), folder.path().to_string_lossy().into_owned());
+    env.insert("MIRELO_API_KEY".into(), "test-only-account-key".into());
+    let service = kumi::login::audio_service(auth.to_str().unwrap(), file, &env);
+    for acknowledged in [None, Some(json!(null)), Some(json!("true")), Some(json!(1)), Some(json!(false)), Some(json!(true))] {
+        let mut audio = json!({"tasks": {"audio-to-midi": {"autoMirelo": false}}, "futureOption": [1]});
+        if let Some(value) = &acknowledged {
+            audio["acknowledged"] = value.clone();
+        }
+        std::fs::write(file, json!({"audioModels": audio}).to_string()).unwrap();
+        let expected = acknowledged == Some(json!(true));
+        assert_eq!(service.config().acknowledged, expected);
+        assert_eq!(service.preferred(Task::TextToSfx).await.unwrap(), expected.then_some(Selection::Mirelo));
+        assert_eq!(service.preferred(Task::AudioToMidi).await.unwrap(), None);
+        write_settings(file, &serde_json::to_value(read_settings(file)).unwrap()).unwrap();
+        let mut config = service.config();
+        config.tasks.get_mut(&Task::AudioToMidi).unwrap().fallback = true;
+        service.configure(config).await.unwrap();
+        audio["tasks"]["audio-to-midi"]["fallback"] = json!(true);
+        let saved: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+        assert_eq!(saved["audioModels"], audio, "untouched acknowledgements must stay raw without granting consent");
+        assert_eq!(service.config().acknowledged, expected);
+    }
+}
+
 #[test]
 fn models_are_provider_qualified_or_unset_and_need_no_gateway_key() {
     let env = env();

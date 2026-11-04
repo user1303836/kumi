@@ -39,7 +39,7 @@ use std::{
     time::Duration,
 };
 
-mod conversions;
+pub(crate) mod conversions;
 
 pub type CommandAction = Rc<dyn Fn(String, JsonObject, Signal) -> LocalBoxFuture<'static, Result<ToolResult, RuntimeError>>>;
 /// How long a Set Kumi asked for may take to open (Live drops Kumi while it loads).

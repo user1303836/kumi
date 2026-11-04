@@ -163,6 +163,14 @@ pub const COMMANDS: &[Command] = {
             &["microphone", "speak"],
             front(Front::Voice),
         ),
+        command(
+            "/audio",
+            "≋",
+            Conversation,
+            "Audio models: Mirelo, self-hosted alternatives and fallback",
+            &["mirelo", "muscriptor", "sfx", "midi"],
+            can(|c| c.audio_models),
+        ),
         Command {
             args: &[to_end("conversation", 1, &[], Completes::Conversations)],
             ..command(
@@ -542,6 +550,7 @@ pub enum Effect {
     Changelog,
     Jobs,
     Voice,
+    Audio,
     Fast,
     Effort,
     /// The model picker (no words), or the model the words name, by its id.
@@ -634,6 +643,7 @@ pub fn run(line: &str, now: &Now) -> Effect {
         "/changelog" => return Effect::Changelog,
         "/jobs" if can.jobs => return Effect::Jobs,
         "/voice" if fronts.voice => return Effect::Voice,
+        "/audio" if can.audio_models => return Effect::Audio,
         "/fast" if can.models => return Effect::Fast,
         "/effort" if can.models => return Effect::Effort,
         "/login" if can.models => return Effect::Login,

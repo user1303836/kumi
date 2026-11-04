@@ -91,6 +91,55 @@ pub fn pitched(heard: &[Heard], per_second: f64, beats: f64, melody: bool) -> Ve
     apart(notes)
 }
 
+/// Provider notes have measured seconds and MIDI velocities, not Basic Pitch confidence.
+/// Clip to the rendered stretch before applying the existing melody/overlap policy.
+fn provider_notes(result: &serde_json::Value, per_second: f64, beats: f64, what: &str) -> Result<Vec<MidiNote>, String> {
+    if !per_second.is_finite() || per_second <= 0. || !beats.is_finite() || beats <= 0. {
+        return Err("The rendered stretch has no valid seconds-to-beats mapping".into());
+    }
+    let heard = result
+        .get("notes")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("The audio model returned no seconds-based notes; its MIDI file is retained, but no notes were inserted")?;
+    let mut notes = Vec::with_capacity(heard.len());
+    for note in heard {
+        let is_drum = note.get("instrument").and_then(serde_json::Value::as_str) == Some("drums");
+        if is_drum != (what == "drums") {
+            continue;
+        }
+        let pitch = note
+            .get("pitch")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|v| v.is_finite() && *v >= 0. && *v <= 127. && v.fract() == 0.)
+            .ok_or("The audio model returned an invalid MIDI pitch")?;
+        let velocity = note
+            .get("velocity")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|v| v.is_finite() && *v >= 0. && *v <= 127.)
+            .ok_or("The audio model returned an invalid MIDI velocity")?;
+        let start = note
+            .get("start")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|v| v.is_finite() && *v >= 0.)
+            .ok_or("The audio model returned an invalid note start")?;
+        let end = note
+            .get("end")
+            .and_then(serde_json::Value::as_f64)
+            .filter(|v| v.is_finite() && *v > start)
+            .ok_or("The audio model returned an invalid note end")?;
+        let start = start * per_second;
+        let end = (end * per_second).min(beats);
+        if start < end && velocity > 0. {
+            notes.push(MidiNote { pitch: pitch as u8, start, length: end - start, velocity: velocity.round().clamp(1., 127.) as u8 });
+        }
+    }
+    notes.sort_by(|a, b| a.start.total_cmp(&b.start).then(b.pitch.cmp(&a.pitch)));
+    if what == "melody" {
+        notes = skyline(notes);
+    }
+    Ok(apart(notes))
+}
+
 /// The highest note sounding at each moment: a note starting under a higher one starts where that one ends (or goes, when it
 /// ends first or what's left is shorter than a 16th of a beat), and one a higher one starts over is cut there.
 fn skyline(notes: Vec<MidiNote>) -> Vec<MidiNote> {

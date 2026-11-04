@@ -148,6 +148,8 @@ pub struct SessionOptions {
     pub map_key: Option<kumi_library::map::MapKey>,
     /// The models to talk to and the sign-ins, which /model, /effort, /fast, /login and /logout ask the session about.
     pub models: Option<Rc<dyn kumi_ai::control::ModelController>>,
+    /// Native audio generation and transcription, separate from conversation models.
+    pub audio: Option<Rc<kumi_ai::audio::Service>>,
     pub matching: bool,
     pub match_budget: Option<MatchBudget>,
     pub playbook: Option<Rc<dyn PlaybookStore>>,
@@ -202,6 +204,7 @@ impl SessionOptions {
             map: None,
             map_key: None,
             models: None,
+            audio: None,
             matching: true,
             match_budget: None,
             playbook: None,
@@ -1762,12 +1765,12 @@ impl Session {
                 .tools
                 .iter()
                 .filter(|tool| self.0.shelf.is_empty() || tool.role() != Some(ToolRole::FindSounds))
-                .map(|tool| self.with_background(self.with_loop(self.with_taste(self.with_technique(tool.clone())))))
+                .map(|tool| self.with_background(self.with_loop(self.with_taste(self.with_technique(self.with_audio(tool.clone()))))))
                 .collect();
             if let Some(notes) = &self.0.notes {
                 tools.extend(notes.tools.clone());
             }
-            tools.extend(self.0.listening.clone());
+            tools.extend(self.0.listening.iter().map(|tool| self.with_audio(tool.clone())));
             tools.extend(self.0.music_tools.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.watching.iter().map(|tool| self.with_background(tool.clone())));
             tools.extend(self.0.browsing.iter().map(|tool| self.with_background(tool.clone())));
@@ -1775,6 +1778,9 @@ impl Session {
             tools.extend(self.0.recipes.clone());
             tools.extend(self.0.palette_tool.clone());
             tools.push(self.with_background(self.0.plugins.clone()));
+            if let Some(service) = self.audio_service() {
+                tools.push(self.with_background(crate::core::audio_tools::tool(service, self.audio_notice())));
+            }
             tools.extend(self.0.recall.iter().map(|tool| self.with_background(tool.clone())));
             if let Some(learned) = &self.0.learned {
                 tools.extend(learned.tools.clone());
@@ -1853,6 +1859,7 @@ impl Session {
                 .unwrap_or_default(),
             habits,
             crate::core::plugin_tools::GUIDANCE.into(),
+            crate::core::audio_tools::guidance(self.0.options.audio.as_deref()).await.into(),
             music,
             // A DAW Kumi only reads gets nothing about making changes (its recipe and technique tools aren't made): its
             // recipes go unsaid, a gap is the producer's to make, and a job's report changes nothing.
@@ -2800,6 +2807,26 @@ impl StreamingCall for TechniqueStream {
 /// What the session does: its handle ([`InProcess`](crate::core::protocol::InProcess)) asks it for each request, and the
 /// app that built it reaches it directly (its own callbacks, the DAW's watch).
 impl Session {
+    pub fn audio_service(&self) -> Option<Rc<kumi_ai::audio::Service>> {
+        self.0.options.audio.clone()
+    }
+
+    fn audio_notice(&self) -> Rc<dyn Fn(String)> {
+        let weak = Rc::downgrade(&self.0);
+        Rc::new(move |message| {
+            if let Some(inner) = weak.upgrade() {
+                Session(inner).notice(message);
+            }
+        })
+    }
+
+    fn with_audio(&self, tool: Rc<dyn KernelTool>) -> Rc<dyn KernelTool> {
+        match self.audio_service() {
+            Some(service) => crate::core::audio_tools::route(tool, service, self.audio_notice()),
+            None => tool,
+        }
+    }
+
     /// What this session can do, which a front end reads once as it starts: what its menus and keys offer.
     pub fn capabilities(&self) -> Capabilities {
         Capabilities {
@@ -2844,6 +2871,7 @@ impl Session {
             map: self.map_loader().is_some(),
             slots: self.slots_context().is_some(),
             models: self.model_controls().is_some(),
+            audio_models: self.audio_service().is_some(),
             take_back: self.0.options.log.is_some() && self.0.options.conversations.is_some(),
         }
     }
@@ -4147,5 +4175,27 @@ impl Session {
             max_turns: self.0.options.max_turns,
             observation: s.observation.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod audio_notice_tests {
+    use super::*;
+
+    #[test]
+    fn audio_notice_callbacks_do_not_retain_the_session() {
+        let session = create_session(SessionOptions::new(
+            Rc::new(|_| panic!("A billing notice must not start a model")),
+            Box::new(|_| panic!("A billing notice must not connect a DAW")),
+            Rc::new(|_| panic!("A callback surviving its session must not dispatch an event")),
+        ))
+        .unwrap();
+        let weak = Rc::downgrade(&session.0);
+        let foreground = session.audio_notice();
+        let worker = session.audio_notice();
+        drop(session);
+        assert!(weak.upgrade().is_none(), "tool notice callbacks must not create a Session Rc cycle");
+        foreground("Late foreground billing notice".into());
+        worker("Late worker billing notice".into());
     }
 }

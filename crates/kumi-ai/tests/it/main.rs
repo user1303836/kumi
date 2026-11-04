@@ -2,6 +2,8 @@
 
 mod ai_sdk;
 mod ai_transport;
+mod audio;
+mod audio_muscriptor;
 mod auth;
 mod catalog;
 mod local;

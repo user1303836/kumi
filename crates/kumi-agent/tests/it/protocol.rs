@@ -11,6 +11,22 @@ use kumi_agent::core::{
 use kumi_types::errors::RuntimeError;
 use std::{cell::RefCell, rc::Rc};
 
+#[test]
+fn audio_credentials_never_appear_in_protocol_debug() {
+    use kumi_agent::core::protocol::{op, Op, Secret};
+    let secret = "private-audio-key-123";
+    for request in [
+        Op::from(op::SaveMireloKey { key: Secret(secret.into()) }),
+        Op::from(op::SaveLocalAudioKey { task: kumi_ai::audio::Task::AudioToMidi, key: Secret(secret.into()) }),
+    ] {
+        assert!(!format!("{request:?}").contains(secret));
+        let encoded = serde_json::to_value(&request).unwrap();
+        let decoded: Op = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded, request);
+        assert!(!format!("{decoded:?}").contains(secret));
+    }
+}
+
 /// What `side` says between replies, kept.
 fn heard(side: &HandleSide) -> Rc<RefCell<Vec<SessionEvent>>> {
     let heard = Rc::new(RefCell::new(vec![]));

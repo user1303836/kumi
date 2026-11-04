@@ -4,9 +4,15 @@
 //! Live forward when it hangs back (a fallback: 12.4.15b5 converted in the background every time it was probed).
 use super::{args, delay, CommandError, CommandTools};
 use crate::views::ViewHost;
+use async_trait::async_trait;
 use kumi_common::{abort::Signal, js::json::stringify};
 use kumi_types::contracts::{ChangeRecord, JsonObject, ToolResult};
+use kumi_types::{
+    contracts::{AudioTranscriber, KernelTool, Reach, ToolRole},
+    errors::RuntimeError,
+};
 use serde_json::{json, Value};
+use std::rc::Rc;
 use std::time::Duration;
 // Tokio's clock, which a test can pause and run ahead.
 use tokio::time::Instant;
@@ -32,6 +38,69 @@ const ASKED: &str = "kumi: asked Live to convert";
 /// The conversion a `live_command` command names, if it's one: its API type and its name.
 pub(super) fn conversion(command: &str) -> Option<(&'static str, &'static str)> {
     CONVERSIONS.iter().find(|(name, _, _)| *name == command).map(|(_, kind, title)| (*kind, *title))
+}
+
+/// Keep Live's native conversion available, but do not let it silently bypass /audio's preferred transcriber.
+/// File rendering and note writing use Live's real tools; no fictional MIDI-import command.
+pub(crate) fn with_transcriber(inner: Rc<dyn KernelTool>, transcriber: Rc<dyn AudioTranscriber>) -> Rc<dyn KernelTool> {
+    let description = format!("{} Audio-to-MIDI conversions follow /audio preferences: when configured, render the source and use audio_models instead. Only an explicit request for Live's built-in conversion should use provider:builtin.", inner.description());
+    Rc::new(PreferredConversion { inner, transcriber, description })
+}
+
+struct PreferredConversion {
+    inner: Rc<dyn KernelTool>,
+    transcriber: Rc<dyn AudioTranscriber>,
+    description: String,
+}
+
+#[async_trait(?Send)]
+impl KernelTool for PreferredConversion {
+    fn name(&self) -> &str {
+        self.inner.name()
+    }
+    fn description(&self) -> &str {
+        &self.description
+    }
+    fn input_schema(&self) -> JsonObject {
+        let mut schema = self.inner.input_schema();
+        if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+            properties.insert("provider".into(), json!({"type":"string","enum":["auto","mirelo","local","builtin"],"description":"For MIDI conversions: auto follows /audio; builtin only when the producer explicitly requests Live's native converter"}));
+        }
+        schema
+    }
+    async fn execute(&self, mut input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
+        let provider = input.remove("provider").unwrap_or_else(|| json!("auto"));
+        if !matches!(provider.as_str(), Some("auto" | "mirelo" | "local" | "builtin")) {
+            return Ok(ToolResult { text: "provider must be auto, mirelo, local or builtin".into(), is_error: true, ..Default::default() });
+        }
+        if input.get("command").and_then(Value::as_str).and_then(conversion).is_some()
+            && provider != "builtin"
+            && (provider != "auto" || self.transcriber.preferred().await?)
+        {
+            return Ok(ToolResult {
+                text: stringify(&json!({
+                    "error":"Use the configured/requested audio-to-MIDI provider; Live's native conversion has not run.",
+                    "provider":provider,
+                    "next":"Read the source clip's track and beat range; render {track,from_beat,beats} returns raw audio. Bounce/resample first if effects or instruments are wanted. Then audio_models {task:'audio-to-midi',audio:<rendered file>,provider:<requested provider or auto>}. Retain its MIDI/notes_path. Use write_arrangement_clip to write returned notes on a MIDI track: note start and duration are clip-relative beats (constant BPM: seconds*BPM/60); clip start is the destination position. For tempo changes use the Set's tempo map. Read further pages with audio_models task:audio-to-midi, notes_file:notes_path, offset:next_offset. For long results, run_python can read the saved notes JSON and append via clip.add_new_notes with Live.Clip.MidiNoteSpecification(pitch,start_time,duration,velocity); discover and retain the exact destination clip reference, convert seconds correctly, and do not duplicate the first page. change_notes only edits existing notes, not insertion. Do not silently call the native conversion after a provider failure."
+                })),
+                is_error: true,
+                ..Default::default()
+            });
+        }
+        self.inner.execute(input, signal).await
+    }
+    fn reach(&self) -> Reach {
+        self.inner.reach()
+    }
+    fn deferred(&self) -> bool {
+        self.inner.deferred()
+    }
+    fn listed_by(&self) -> Option<&str> {
+        self.inner.listed_by()
+    }
+    fn role(&self) -> Option<ToolRole> {
+        self.inner.role()
+    }
 }
 
 /// The Python Kumi runs in Live: the clip (`obj`, or the one selected in Live), checked, then converted.
@@ -265,4 +334,73 @@ async fn bring_live_forward() -> bool {
         return false;
     };
     tokio::process::Command::new("open").args(["-a", app]).status().await.is_ok_and(|status| status.success())
+}
+
+#[cfg(test)]
+mod provider_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    struct Native(Cell<usize>);
+    #[async_trait(?Send)]
+    impl KernelTool for Native {
+        fn name(&self) -> &str {
+            "live_command"
+        }
+        fn description(&self) -> &str {
+            "Live commands"
+        }
+        fn input_schema(&self) -> JsonObject {
+            json!({"type":"object","properties":{}}).as_object().unwrap().clone()
+        }
+        async fn execute(&self, input: JsonObject, _: Signal) -> Result<ToolResult, RuntimeError> {
+            assert!(!input.contains_key("provider"));
+            self.0.set(self.0.get() + 1);
+            Ok(ToolResult::text("native"))
+        }
+    }
+    struct Preferred(Cell<bool>);
+    #[async_trait(?Send)]
+    impl AudioTranscriber for Preferred {
+        async fn preferred(&self) -> Result<bool, RuntimeError> {
+            Ok(self.0.get())
+        }
+        async fn transcribe(&self, _: JsonObject, _: Signal) -> Result<Option<Value>, RuntimeError> {
+            panic!("Live guard must never transcribe unrendered audio")
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn all_native_conversions_respect_provider_default_without_changing_unrelated_commands() {
+        let inner = Rc::new(Native(Cell::new(0)));
+        let preferred = Rc::new(Preferred(Cell::new(true)));
+        let tool = with_transcriber(inner.clone(), preferred.clone());
+        for (command, _, _) in CONVERSIONS {
+            let result = tool.execute(json!({"command":command}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(result.is_error);
+            assert!(result.text.contains("audio_models"));
+        }
+        assert_eq!(inner.0.get(), 0);
+        for command in ["save", "bounce_to_new_track"] {
+            assert!(!tool.execute(json!({"command":command}).as_object().unwrap().clone(), Signal::new()).await.unwrap().is_error);
+        }
+        assert!(
+            !tool
+                .execute(json!({"command":"convert_drums_to_midi","provider":"builtin"}).as_object().unwrap().clone(), Signal::new())
+                .await
+                .unwrap()
+                .is_error
+        );
+        preferred.0.set(false);
+        assert!(
+            !tool.execute(json!({"command":"convert_drums_to_midi"}).as_object().unwrap().clone(), Signal::new()).await.unwrap().is_error
+        );
+        assert!(
+            tool.execute(json!({"command":"convert_drums_to_midi","provider":"local"}).as_object().unwrap().clone(), Signal::new())
+                .await
+                .unwrap()
+                .is_error
+        );
+        assert_eq!(inner.0.get(), 4);
+    }
 }

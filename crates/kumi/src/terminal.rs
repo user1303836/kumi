@@ -141,7 +141,10 @@ fn plain_about(name: &str) -> Option<String> {
 }
 /// What the full-screen app shows and plain mode can't: /help names them, and a line asking for one is told so.
 fn full_screen_only(effect: &Effect) -> bool {
-    matches!(effect, Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe | Effect::TakeBack { .. })
+    matches!(
+        effect,
+        Effect::Audio | Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe | Effect::TakeBack { .. }
+    )
 }
 /// A command in the table that only the full-screen app runs, whatever this session has or is doing.
 fn the_apps_own(name: &str) -> bool {
@@ -977,7 +980,7 @@ impl PlainTerminal {
             Effect::Slots => self.slots(&words).await,
             Effect::Music => self.music(&words).await,
             // (the effects `full_screen_only` names)
-            Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe | Effect::TakeBack { .. } => {
+            Effect::Audio | Effect::Voice | Effect::Map | Effect::Palette | Effect::Copy | Effect::Recipe | Effect::TakeBack { .. } => {
                 self.notice(&format!("[plain] {verb} isn't available in plain mode: the full-screen app has it."))
             }
             Effect::Refused(Why::NotKept) => self.notice(&format!("[conversations] {}", crate::tui::app::not_kept())),
@@ -2159,7 +2162,7 @@ mod registry_tests {
         declined.sort();
         assert_eq!(
             declined,
-            ["/copy", "/map", "/palette", "/recipe", "/takeback", "/voice"],
+            ["/audio", "/copy", "/map", "/palette", "/recipe", "/takeback", "/voice"],
             "what plain mode leaves to the full-screen app"
         );
     }

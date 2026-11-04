@@ -862,14 +862,6 @@
   ],
   "settings": [
     {
-      "raw": null,
-      "expected": {}
-    },
-    {
-      "raw": [],
-      "expected": {}
-    },
-    {
       "raw": {},
       "expected": {}
     },
@@ -1029,92 +1021,6 @@
     }
   ],
   "writes": [
-    {
-      "raw": null,
-      "next": {
-        "model": "openai/gpt-6-luna"
-      },
-      "expected": {
-        "model": "openai/gpt-6-luna"
-      }
-    },
-    {
-      "raw": null,
-      "next": {
-        "model": "anthropic/claude-sonnet-5",
-        "effort": "high",
-        "panelTab": null,
-        "voice": null,
-        "modelServers": null,
-        "libraryFolders": [],
-        "updateCheck": null
-      },
-      "expected": {
-        "model": "anthropic/claude-sonnet-5",
-        "effort": "high",
-        "modelServers": null
-      }
-    },
-    {
-      "raw": null,
-      "next": {
-        "voice": {
-          "send": true,
-          "language": "en",
-          "microphone": "Built-in"
-        }
-      },
-      "expected": {
-        "voice": {
-          "send": true,
-          "language": "en",
-          "microphone": "Built-in"
-        }
-      }
-    },
-    {
-      "raw": [],
-      "next": {
-        "model": "openai/gpt-6-luna"
-      },
-      "expected": {
-        "model": "openai/gpt-6-luna"
-      }
-    },
-    {
-      "raw": [],
-      "next": {
-        "model": "anthropic/claude-sonnet-5",
-        "effort": "high",
-        "panelTab": null,
-        "voice": null,
-        "modelServers": null,
-        "libraryFolders": [],
-        "updateCheck": null
-      },
-      "expected": {
-        "model": "anthropic/claude-sonnet-5",
-        "effort": "high",
-        "modelServers": null
-      }
-    },
-    {
-      "raw": [],
-      "next": {
-        "voice": {
-          "send": true,
-          "language": "en",
-          "microphone": "Built-in"
-        }
-      },
-      "expected": {
-        "voice": {
-          "send": true,
-          "language": "en",
-          "microphone": "Built-in"
-        }
-      }
-    },
     {
       "raw": {},
       "next": {

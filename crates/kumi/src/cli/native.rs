@@ -107,6 +107,10 @@ pub fn help(installed: bool) -> String {
     let mut more=vec![("-c, --continue","Continue the conversation you had last, in any project"),("-r, --resume [id or name]","Continue a kept conversation by its id, the start of one, or its name;\nalone, choose one (both work with --inference-only too)"),("export [id or name]","Save a kept conversation as Markdown (--md, the default; --html a web page;\n--json a file another Kumi imports); your latest without an id or with --last.\n--full adds each step's input and result, -o <path> chooses where, --raw leaves\nkeys and paths in"),("import <file>","Keep a conversation saved with export --json, to carry on with -r"),("-p, --print <request>","Run one request, print its answer and end, for scripts; --json prints each\nevent Kumi sends as a JSON line instead. Exit code: 0 answered, 1 failed,\n3 stopped at its step limit, 130 stopped with ctrl+c"),("--inference-only","Chat without a DAW"),("--bridge-config <path>","Use this bridge configuration (an absolute path)"),("login","Sign in: asks whether with ChatGPT or an API key"),("login <provider>","Sign in to one provider: openai-codex with a ChatGPT plan (--device\nwithout a browser); anthropic, openai, opencode and the others auth lists with an\nAPI key (asked for)"),("logout <provider>","Remove Kumi's sign-in for that provider"),("model [<provider>/<model>]","Show or choose the model; ollama/<model> or lmstudio/<model> for one on this computer"),("auth","Show which providers are usable (no secrets)"),("doctor","Check the installation, sign-in, your DAWs and Kumi's bridges in them, and the terminal"),("library","What Kumi knows of your sounds, presets and projects (it learns them in the\nbackground); --rebuild learns them all again"),("update","Bring Kumi up to date, and its bridges in your DAWs when they're older"),("update --check","Say whether there's a newer Kumi, without installing it")];
     let doctor = more.iter().position(|(s, _)| *s == "doctor").map_or(more.len(), |at| at + 1);
     more.insert(doctor, ("doctor --json", "The doctor's checks as JSON, without keys, to share"));
+    more.extend([
+        ("login mirelo", "Connect an existing Mirelo account with a hidden API-key prompt; audio only,\nnot a conversation model. /audio configures each task and self-hosted alternatives"),
+        ("logout mirelo", "Remove the saved Mirelo API key (MIRELO_API_KEY, if set, still applies)"),
+    ]);
     if installed {
         more.extend([
             ("update --rollback", "Go back to the Kumi you had before the last update"),
@@ -426,7 +430,7 @@ async fn dispatch(io: &CliIo, answers: Answers, secrets: &mut Vec<String>) -> Re
                 Ok(1)
             }
         }
-        AppConfig::Login { .. } => {
+        AppConfig::Login { .. } | AppConfig::Mirelo { .. } => {
             login_with(&config, io).await?;
             Ok(0)
         }

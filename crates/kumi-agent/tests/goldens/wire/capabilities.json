@@ -38,6 +38,7 @@
   "map": true,
   "slots": false,
   "models": true,
+  "audioModels": false,
   "takeBack": true,
   "readsOnly": false
 }

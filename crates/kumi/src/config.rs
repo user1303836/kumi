@@ -56,6 +56,11 @@ pub enum AppConfig {
         pi_auth_file: String,
         settings_file: String,
     },
+    Mirelo {
+        remove: bool,
+        auth_file: String,
+        settings_file: String,
+    },
     Logout {
         provider: ProviderId,
         auth_file: String,
@@ -391,6 +396,9 @@ pub struct Settings {
     pub library_folders: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub model_servers: Vec<ServerSetting>,
+    /// Audio generation/transcription providers, separate from the conversation model.
+    #[serde(default, skip_serializing)]
+    pub audio_models: kumi_ai::audio::Config,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice: Option<VoiceSettings>,
     /// "off": no desktop notification (or bell) while Kumi's window isn't the one in front; "auto" otherwise.
@@ -445,6 +453,39 @@ pub struct Settings {
     /// Whether every frame is drawn whole; the terminal decides when none is set (Windows Terminal draws whole).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub full_repaint: Option<bool>,
+}
+fn disabled_audio_models() -> kumi_ai::audio::Config {
+    use kumi_ai::audio::{Config, Task, TaskConfig};
+    Config {
+        tasks: Task::ALL.into_iter().map(|task| (task, TaskConfig { auto_mirelo: false, ..TaskConfig::default() })).collect(),
+        ..Config::default()
+    }
+}
+fn audio_model_settings(value: &Value) -> kumi_ai::audio::Config {
+    use kumi_ai::audio::{Config, Task, TaskConfig};
+    let Some(object) = value.as_object() else {
+        return disabled_audio_models();
+    };
+    let mut config = Config { acknowledged: object.get("acknowledged") == Some(&Value::Bool(true)), ..Config::default() };
+    let Some(tasks) = object.get("tasks") else {
+        return config;
+    };
+    let Some(tasks) = tasks.as_object() else {
+        return disabled_audio_models();
+    };
+    for task in Task::ALL {
+        let Some(value) = tasks.get(task.as_str()) else { continue };
+        // Parse and validate separately: a future protocol or malformed task must not disable its valid neighbours.
+        let mut entry = Config::default();
+        if let Ok(parsed) = serde_json::from_value::<TaskConfig>(value.clone()) {
+            entry.tasks.insert(task, parsed);
+        }
+        if entry.tasks.is_empty() || entry.validate().is_err() {
+            entry.tasks.insert(task, TaskConfig { auto_mirelo: false, ..TaskConfig::default() });
+        }
+        config.tasks.extend(entry.tasks);
+    }
+    config
 }
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -513,7 +554,9 @@ pub fn read_keys(file: &str) -> Option<Result<Value, String>> {
     Some(serde_json::from_str(&text).map_err(|error| format!("keys.json isn't JSON Kumi can read ({error}), so Kumi keeps its own keys")))
 }
 pub fn read_settings(file: &str) -> Settings {
-    let Some(value) = read_json(file) else { return Settings::default() };
+    let raw = read_json(file);
+    let unreadable = raw.as_ref().is_none_or(|value| !value.is_object()) && !matches!(Path::new(file).try_exists(), Ok(false));
+    let value = raw.filter(Value::is_object).unwrap_or_else(|| json!({}));
     // The producer's answer about their music: settings.json's, or the copy beside it when an older Kumi rewrote
     // settings.json without the keys it doesn't know.
     let kept_beside;
@@ -553,6 +596,12 @@ pub fn read_settings(file: &str) -> Settings {
         music_offered: (music["musicOffered"] == true).then_some(true),
         model_catalog: (value["modelCatalog"] == false).then_some(false),
         model_servers,
+        // Missing settings keep onboarding defaults; corrupt settings never re-enable paid uploads.
+        audio_models: match value.get("audioModels") {
+            Some(value) => audio_model_settings(value),
+            None if unreadable => disabled_audio_models(),
+            None => Default::default(),
+        },
         mouse: (value["mouse"] == "off").then(|| "off".to_string()),
         copy_on_select: (value["copyOnSelect"] == false).then_some(false),
         transcript_on_quit: (value["transcriptOnQuit"] == false).then_some(false),
@@ -573,6 +622,7 @@ const KNOWN_SETTINGS: &[&str] = &[
     "instantPhrases",
     "libraryFolders",
     "modelServers",
+    "audioModels",
     "voice",
     "notifications",
     "liveStatusBar",
@@ -633,6 +683,42 @@ pub const MUSIC_ANSWER_FILE: &str = "music-answer.json";
 fn music_answer_file(settings: &str) -> String {
     Path::new(settings).with_file_name(MUSIC_ANSWER_FILE).to_string_lossy().into_owned()
 }
+/// Only the audio editor writes typed audio changes; untouched future tasks, protocols and options stay raw.
+pub(crate) fn write_audio_settings(file: &str, config: &kumi_ai::audio::Config) -> Result<(), RuntimeError> {
+    let settings = read_settings(file);
+    let before = serde_json::to_value(&settings.audio_models).map_err(|error| RuntimeError::plain(error.to_string()))?;
+    let after = serde_json::to_value(config).map_err(|error| RuntimeError::plain(error.to_string()))?;
+    let mut audio = read_json(file)
+        .and_then(|value| value.get("audioModels").cloned())
+        .filter(|value| value.is_object() && value.get("tasks").is_none_or(Value::is_object))
+        .unwrap_or_else(|| before.clone());
+    patch_audio_settings(&mut audio, &before, &after);
+    let mut next = serde_json::to_value(settings).map_err(|error| RuntimeError::plain(error.to_string()))?;
+    next["audioModels"] = audio;
+    write_settings(file, &next)
+}
+fn patch_audio_settings(raw: &mut Value, before: &Value, after: &Value) {
+    if before == after {
+        return;
+    }
+    if let (Some(before), Some(after)) = (before.as_object(), after.as_object()) {
+        if !raw.is_object() {
+            *raw = Value::Object(Map::new());
+        }
+        let raw = raw.as_object_mut().unwrap();
+        for (key, value) in after {
+            if before.get(key) == Some(value) {
+                continue;
+            }
+            patch_audio_settings(raw.entry(key.clone()).or_insert(Value::Null), before.get(key).unwrap_or(&Value::Null), value);
+        }
+        for key in before.keys().filter(|key| !after.contains_key(*key)) {
+            raw.remove(key);
+        }
+    } else {
+        *raw = after.clone();
+    }
+}
 /// A JSON object preserves the difference between omitting a setting and explicitly clearing it.
 pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     let before = serde_json::to_value(read_settings(file)).unwrap();
@@ -664,6 +750,12 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     }
     if let Some(value) = next.get("modelServers").or_else(|| raw.as_ref().and_then(|r| r.get("modelServers"))) {
         settings.insert("modelServers".into(), value.clone());
+    }
+    // Preserve the raw audio configuration on unrelated writes, including explicit false switches.
+    if let Some(value) = next.get("audioModels").or_else(|| raw.as_ref().and_then(|r| r.get("audioModels"))) {
+        settings.insert("audioModels".into(), value.clone());
+    } else if !matches!(Path::new(file).try_exists(), Ok(false)) && raw.as_ref().is_none_or(|value| !value.is_object()) {
+        settings.insert("audioModels".into(), serde_json::to_value(disabled_audio_models()).unwrap());
     }
     if let Some(value) = kept("voice").and_then(voice_settings) {
         settings.insert("voice".into(), serde_json::to_value(value).unwrap());
@@ -991,6 +1083,16 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
         return Ok(AppConfig::LoginChoose { auth_file: load_auth_file(env)?, pi_auth_file: pi(), settings_file: load_settings_file(env)? });
     }
     if first == Some("login") || first == Some("logout") {
+        if at(1) == Some("mirelo") {
+            if args.len() != 2 {
+                return Err(RuntimeError::plain("Use: login mirelo or logout mirelo. Kumi asks for the key privately."));
+            }
+            return Ok(AppConfig::Mirelo {
+                remove: first == Some("logout"),
+                auth_file: load_auth_file(env)?,
+                settings_file: load_settings_file(env)?,
+            });
+        }
         if matches!(at(1), Some("ollama" | "lmstudio")) {
             return Err(RuntimeError::plain(format!(
                 "{} needs no sign-in: while it's open, its models are in /model, or choose one with: {} model {}/<model>",

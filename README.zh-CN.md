@@ -49,6 +49,7 @@ irm https://github.com/user1303836/kumi/releases/latest/download/install.ps1 | i
 - **照着教程做出声音。** 粘贴一个 YouTube 链接：Kumi 会观看视频，并在新轨道上搭建出其中展示的内容。
 - **修正混音。** 问一句“贝斯是不是太浑？”，Kumi 会聆听、找出打架的部分并修正，每次修改后都重新聆听。
 - **匹配参考曲。** 给它一首你喜欢的曲子：Kumi 会尝试几个版本，逐一与它对比打分，再精修最好的那个。
+- **生成声音并把音频转成 MIDI。** 在 `/audio` 确认接入 [Mirelo](docs/zh-CN/KUMI_GUIDE.md#mirelo-与自托管音频模型)，使用文字/视频音效、延长、区域替换和扒谱。各任务独立授权，**Off** 也拒绝明确指定 Mirelo 的请求。支持自托管替代服务；MuScriptor 支持 MIDI。
 - **创建插件预设并进行母带处理。** Kumi 使用内置 VST3 格式，包括 FabFilter 的现售和旧版产品，并在原生设备之前检查合适的已安装插件。Kumi 可以在后台创建预设，让你继续手头的工作。[支持的格式与限制](plugin-formats/README.md)。
 - **制作设备。** 描述一个 Max for Live 效果器或乐器，Kumi 就会把它做出来并放到你的轨道上。
 - **找到你的声音。** “像这个一样带点颗粒感的军鼓”“我常用的人声效果链”：Kumi 了解你的采样、预设和工程。
@@ -92,13 +93,14 @@ Kumi 是免费的开源软件（MIT）。模型由你选择：
 - **ChatGPT 套餐：** 用你的账户登录；Kumi 在你套餐的用量限制内工作。
 - **API 密钥：** Anthropic、OpenAI、Google Gemini、OpenRouter 以及[另外 20 家提供方](docs/zh-CN/KUMI_GUIDE.md#登录并选择模型)，由提供方计费。
 - **本地：** Ollama、LM Studio，或 llama.cpp、vLLM 等兼容 OpenAI 的服务器；所用硬件要能以较长的上下文（Kumi 会请求约 57k token）运行支持工具调用的模型。
+- **音频模型：** 每次创建 Mirelo 任务都会消耗你自己的积分，与聊天费用分开，并逐项显示积分通知。仅有 API 密钥不会启用付费使用。自托管模型有各自的硬件成本和许可。
 
 </details>
 
 <details>
 <summary><b>我的音频会离开我的电脑吗？</b></summary>
 
-音频在本地分析，模型拿到的是测量结果。你的素材库和音乐收藏也在本地学习。有 Gemini 或 OpenAI 的 API 密钥时，聆听模型还会听到它所判定修改的单声道片段（最长 10 秒）；`/slots listening off` 可以关闭它。其余内容见[隐私](docs/zh-CN/KUMI_GUIDE.md#隐私哪些内容会离开你的电脑)。
+音频分析在本地进行，模型拿到的是测量结果。素材库和音乐收藏也在本地学习。有 Gemini 或 OpenAI 的 API 密钥时，聆听模型还会收到所判定修改的单声道片段（最长 10 秒）；`/slots listening off` 可以关闭。请求的生成、编辑和 MIDI 转换使用 `/audio` 的提供方。Mirelo 须先确认接入，并获得对应任务的许可；要让媒体留在本地，请把 Mirelo 设为 **Off** 并选择本机服务器。其余见[隐私](docs/zh-CN/KUMI_GUIDE.md#隐私哪些内容会离开你的电脑)。
 
 </details>
 

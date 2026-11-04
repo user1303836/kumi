@@ -5449,6 +5449,7 @@ local_test!(what_a_session_can_do_says_which_of_its_parts_it_has, {
         cannot(&bare),
         [
             "answerTechnique",
+            "audioModels",
             "conversations",
             "forgetTaste",
             "jobs",
@@ -5502,6 +5503,8 @@ local_test!(what_a_session_can_do_says_which_of_its_parts_it_has, {
         o.map = Some(no_map);
         o.slots = Some(Rc::new(slots));
         o.models = Some(models::FakeModels::catalog());
+        o.audio =
+            Some(kumi::login::audio_service(at("auth.json").to_str().unwrap(), at("settings.json").to_str().unwrap(), &Default::default()));
     });
     assert_eq!(cannot(&whole), Vec::<String>::new());
     whole.session.close().await.unwrap();

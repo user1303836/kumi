@@ -67,6 +67,17 @@ fn redaction_removes_keys_tokens_long_values_paths_and_account_names() {
     }
 }
 #[tokio::test(flavor = "current_thread")]
+async fn mirelo_environment_key_is_removed_even_without_a_recognized_key_shape() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = "private.mirelo.value";
+    let env = Env::from([("KUMI_HOME".into(), dir.path().display().to_string()), ("MIRELO_API_KEY".into(), key.into())]);
+    let redact = redaction(&env).await;
+    let output = redact(&format!("Provider echoed {key}; the request failed."));
+    assert!(!output.contains(key));
+    assert!(output.contains("the request failed."));
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn report_contains_versions_doctor_latest_conversation_gaps_live_log_without_secrets() {
     let dir = tempfile::tempdir().unwrap();
     let home = dir.path().display().to_string();

@@ -357,6 +357,7 @@ impl Ableton {
     }
 }
 
+#[derive(Clone)]
 struct LiveTool {
     owner: Rc<Ableton>,
     name: String,
@@ -389,6 +390,9 @@ impl KernelTool for LiveTool {
     }
     fn input_schema(&self) -> JsonObject {
         self.schema.clone()
+    }
+    fn with_audio_transcriber(&self, transcriber: Rc<dyn kumi_types::contracts::AudioTranscriber>) -> Option<Rc<dyn KernelTool>> {
+        (self.name == "live_command").then(|| crate::command_tools::conversions::with_transcriber(Rc::new(self.clone()), transcriber))
     }
     fn stream(&self, signal: Signal, on_start: Rc<dyn Fn()>) -> Option<Box<dyn StreamingCall>> {
         // While a stopped answer's call is still putting Live back, changes wait for it in execute: none stream.
