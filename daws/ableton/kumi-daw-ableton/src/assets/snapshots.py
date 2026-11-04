@@ -424,7 +424,8 @@ def same(key, now, kept):
         for p, q in zip(x[1], y[1])) for x, y in zip(a, b))
 
 def missing(clip, kept, notes_to_come, failed):
-    """What of a made clip isn't as it was kept, in words (its notes only once all of them are in)."""
+    """What of a made clip isn't as it was kept, in words (its notes only once all of them are in), and the clip as it is
+    now (its leaf, read once)."""
     now, out = leaf(clip), list(kept.get("partial", []))
     out += [key for key in failed if key not in out]
     for key in kept:
@@ -432,7 +433,7 @@ def missing(clip, kept, notes_to_come, failed):
             continue
         if not same(key, now.get(key), kept[key]):
             out.append(key)
-    return [WORDS.get(key, key) for key in out]
+    return [WORDS.get(key, key) for key in out], now
 
 def restore(args):
     track = find_track(args)
@@ -461,10 +462,10 @@ def restore(args):
             clip = put_in_place(track, stands.pop(index), item["where"], kept) if index in stands else create(track, item["where"], kept)
             done["made"].append({"identity": identity(clip), "where": place(clip), "name": kept["name"]})
             settle(clip, kept)
-            gaps = missing(clip, kept, item.get("notesToCome", False), put_back(clip, track, kept))
+            gaps, now = missing(clip, kept, item.get("notesToCome", False), put_back(clip, track, kept))
             if gaps:
                 done["partial"].append({"name": kept["name"], "missing": gaps})
-            done["made"][-1]["hash"] = digest(leaf(clip))
+            done["made"][-1]["hash"] = digest(now)
     except Exception as error:
         for stand in stands.values():
             attempt(lambda stand=stand: track.delete_clip(stand))
@@ -478,8 +479,9 @@ def more_notes(args):
             add_notes(clip, args["notes"])
             out = {"added": len(args["notes"])}
             if args.get("notesHash"):
-                out["exact"] = digest(sorted(note_row(note) for note in clip.get_all_notes_extended())) == args["notesHash"]
-                out["hash"] = digest(leaf(clip))
+                now = leaf(clip)
+                out["exact"] = digest(now["notes"]) == args["notesHash"]
+                out["hash"] = digest(now)
             return out
     raise ValueError("the clip Kumi made again isn't there any more")
 
