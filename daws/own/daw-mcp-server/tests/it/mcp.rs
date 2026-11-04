@@ -230,7 +230,7 @@ async fn soundcrafts_host_lists_what_its_bridge_serves_and_starts_nothing_while_
     let tools = listed["result"]["tools"].as_array().unwrap();
     assert_eq!(
         tools.iter().filter_map(|tool| tool["name"].as_str()).collect::<Vec<_>>(),
-        ["status", "discover", "read", "snapshot", "focus"]
+        ["status", "discover", "read", "snapshot", "focus", "focus_body"]
     );
     let said = tools[0]["description"].as_str().unwrap();
     assert!(said.starts_with("Whether Kumi's bridge beside SoundCraft is connected") && said.contains("the open session"), "{said}");
@@ -242,35 +242,45 @@ async fn soundcrafts_host_lists_what_its_bridge_serves_and_starts_nothing_while_
     assert!(read["epoch"].is_object() && read["grid"].is_null(), "its refs carry an epoch, and it reads no parameter texts: {read}");
     let snapshot = tools[3]["description"].as_str().unwrap();
     assert!(snapshot.starts_with("The open SoundCraft session on one screen"), "{snapshot}");
-    let view = session
-        .call(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"focus_body","arguments":{"kind": "mixer"}}}))
-        .await;
-    assert_eq!(view["error"]["message"], "Unknown tool: focus_body", "the other DAWs' views aren't SoundCraft's yet");
+    // Its views, in its words: no routing view (SoundCraft has no track's routing window).
+    let views = &tools[5];
+    assert_eq!(views["inputSchema"]["properties"]["kind"]["enum"], json!(["edit", "midi", "fx", "mixer"]));
+    let (said, around) = (views["description"].as_str().unwrap(), &views["inputSchema"]["properties"]["around"]["description"]);
+    assert!(said.contains("ref (the clip or track it is about)"), "{said}");
+    assert!(around.as_str().unwrap().contains("(the Edit window or the mixer)"), "{around}");
+    // A view's refs need their epoch, as a read's do.
+    assert_eq!(views["inputSchema"]["properties"]["epoch"]["type"], "string", "{views}");
     // (the isolated runner's process listing shows no SoundCraft running: no bridge is started for it)
     let status = session.tool(4, "status", json!({})).await;
     assert_eq!((&status["connected"], &status["reason"]), (&json!(false), &json!("no SoundCraft is running: open SoundCraft")), "{status}");
     session.finish().await;
 }
 
-#[tokio::test]
-async fn soundcrafts_read_goes_to_its_bridge_as_asked_and_comes_back_as_it_answered() {
-    let home = tempfile::tempdir().unwrap();
-    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
+/// A bridge beside SoundCraft that answers `method` with `answer`, and what it was asked.
+async fn soundcraft_bridge(home: &Path, method: &'static str, answer: Value) -> (Simulator, Arc<Mutex<Vec<Value>>>) {
+    let paths = BridgePaths::new(home, Daw::SoundCraft);
     let secret = ensure_secret(&paths.secret()).unwrap();
     let asked = Arc::new(Mutex::new(Vec::<Value>::new()));
     let heard = asked.clone();
     let mut config = SimulatorConfig::reaper(secret, "/lab/SoundCraft").with_methods(
-        &["read"],
-        Arc::new(move |method: &str, params: &Value| {
+        &[method],
+        Arc::new(move |called: &str, params: &Value| {
             heard.lock().unwrap().push(params.clone());
-            (method == "read").then(|| Ok(json!({"items": [{"ref": "s:track:3", "name": "Kick"}], "epoch": "1a-1", "total": 9, "nextCursor": "c1.1a-1.1~s:track:3"})))
+            (called == method).then(|| Ok(answer.clone()))
         }),
     );
     config.identity.daw = Daw::SoundCraft.id().into();
     config.identity.daw_version = "0.17.0".into();
     config.identity.project = Some(Project { name: Some("Midnight Groove".into()), ..Project::default() });
     config.discovery_dir = Some(paths.discovery());
-    let bridge = Simulator::start(config).await.unwrap();
+    (Simulator::start(config).await.unwrap(), asked)
+}
+
+#[tokio::test]
+async fn soundcrafts_read_goes_to_its_bridge_as_asked_and_comes_back_as_it_answered() {
+    let home = tempfile::tempdir().unwrap();
+    let answer = json!({"items": [{"ref": "s:track:3", "name": "Kick"}], "epoch": "1a-1", "total": 9, "nextCursor": "c1.1a-1.1~s:track:3"});
+    let (bridge, asked) = soundcraft_bridge(home.path(), "read", answer).await;
     let mut session = Session::start(Daw::SoundCraft, home.path());
     session.call(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"kumi","version":"test"}}})).await;
     let read = session.tool(2, "read", json!({"kind": "track", "limit": 1, "epoch": "1a-1"})).await;
@@ -280,6 +290,34 @@ async fn soundcrafts_read_goes_to_its_bridge_as_asked_and_comes_back_as_it_answe
         "{read}"
     );
     assert_eq!(*asked.lock().unwrap(), [json!({"kind": "track", "limit": 1, "epoch": "1a-1"})], "the request as asked, and no more");
+    bridge.stop();
+    session.finish().await;
+}
+
+#[tokio::test]
+async fn soundcrafts_views_go_to_its_bridge_as_asked_and_come_back_as_it_answered() {
+    let home = tempfile::tempdir().unwrap();
+    let answer = json!({
+        "kind": "mixer", "epoch": "1a-1", "levels": false, "trackCount": 9, "from": 2, "nextCursor": "c1.1a-1.3",
+        "strips": [{"ref": "s:track:3", "name": "Kick", "type": "audio", "volumeDb": -6.0, "pan": 0.0}],
+    });
+    let (bridge, asked) = soundcraft_bridge(home.path(), "focus_body", answer).await;
+    let mut session = Session::start(Daw::SoundCraft, home.path());
+    session.call(json!({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"kumi","version":"test"}}})).await;
+    let mixer = session.tool(2, "focus_body", json!({"kind": "mixer", "around": "s:track:3", "limit": 1})).await;
+    assert_eq!(
+        (&mixer["strips"][0]["ref"], &mixer["levels"], &mixer["nextCursor"]),
+        (&json!("s:track:3"), &json!(false), &json!("c1.1a-1.3")),
+        "{mixer}"
+    );
+    let window = json!({"from": 8.0, "to": 40.0});
+    let edit = session.tool(3, "focus_body", json!({"kind": "edit", "window": window, "cursor": "c1.1a-1.3"})).await;
+    assert_eq!(edit["epoch"], "1a-1", "{edit}");
+    assert_eq!(
+        *asked.lock().unwrap(),
+        [json!({"kind": "mixer", "around": "s:track:3", "limit": 1}), json!({"kind": "edit", "window": window, "cursor": "c1.1a-1.3"})],
+        "each request as asked, and no more"
+    );
     bridge.stop();
     session.finish().await;
 }

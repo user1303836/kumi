@@ -29,10 +29,11 @@ fn tool_list(daw: Daw) -> Value {
         "pid": {"type": "integer", "minimum": 1, "description": format!("The {daw} process to use, from discover, when several run.")},
         "resource": {"type": "string", "description": format!("The {daw} resource or preferences folder to use, from discover, when several run.")},
     });
-    // (SoundCraft's bridge serves ping, status, read, snapshot and focus so far: its change and listening tools come as it
-    // learns them)
+    // (SoundCraft's bridge serves ping, status, read, snapshot, focus and focus_body so far: its change and listening tools
+    // come as it learns them)
     if daw == Daw::SoundCraft {
         let [status, discover] = finding(daw, "session", &pick);
+        let kinds = kinds(daw);
         let epoch = json!({"epoch": {
             "type": "string",
             "description": "The epoch of the answer the ref or parent came from, needed with ref or parent: SoundCraft gives ids out again, so a ref means nothing without its epoch. If another session is open now, or the bridge started again, the call is refused as stale instead of reading something else.",
@@ -44,11 +45,17 @@ fn tool_list(daw: Daw) -> Value {
                 "a track's clips, inserts, sends or automation lanes, a clip's notes, an insert's parameters or a lane's points",
                 "The ref of what the rows are in: a track for its clips, inserts, sends or lanes (env), a clip for its notes, an insert for its parameters, a lane for its points.",
             ),
-            &kinds(daw),
+            &kinds,
             &pick,
             epoch,
         );
-        return json!([status, discover, read, snapshot_tool(daw, "session", &pick), focus_tool(daw, &pick)]);
+        let mut views = focus_body_tool(daw, ("the clip or track it is about", "the Edit window or the mixer"), kinds.bodies, &pick);
+        // (a view's ref or around means nothing without its epoch either; without one, the bridge takes its last look's)
+        views["inputSchema"]["properties"]["epoch"] = json!({
+            "type": "string",
+            "description": "The epoch of the answer the ref or around came from. If another session is open now, or the bridge started again, the view is refused as stale instead of drawing something else.",
+        });
+        return json!([status, discover, read, snapshot_tool(daw, "session", &pick), focus_tool(daw, &pick), views]);
     }
     let kinds = kinds(daw);
     // Each DAW's own words: what it opens, what a read's parent holds, what a view is about.
@@ -87,20 +94,7 @@ fn tool_list(daw: Daw) -> Value {
         read,
         snapshot_tool(daw, place, &pick),
         focus_tool(daw, &pick),
-        {
-            "name": "focus_body",
-            "title": format!("{daw} view"),
-            "description": format!("What {daw} shows in one of its views, ready to draw: pass kind, and ref ({about}) or window (the range to show) where the kind takes them. Long ones come in pages: pass the nextCursor as cursor."),
-            "inputSchema": {"type": "object", "properties": merged(&pick, json!({
-                "kind": {"type": "string", "enum": kinds.bodies, "description": "Which view."},
-                "ref": {"type": "string", "description": "The ref of what the view is about."},
-                "around": {"type": "string", "description": "The ref of a track to centre the first page of tracks on (the arrange view): the page starts half a page above it, and says where in `from`."},
-                "window": {"type": "object", "properties": {"from": {"type": "number"}, "to": {"type": "number"}}, "required": ["from", "to"], "additionalProperties": false, "description": "The range to show, in the view's own units."},
-                "cursor": {"type": "string", "description": "The nextCursor an earlier page gave, unchanged."},
-                "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": "Rows in a page."},
-            })), "required": ["kind"], "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
-        },
+        focus_body_tool(daw, (about, "the arrange view"), kinds.bodies, &pick),
         {
             "name": "change_preview",
             "title": format!("Preview a {daw} change"),
@@ -474,6 +468,25 @@ fn focus_tool(daw: Daw, pick: &Value) -> Value {
         "description": format!("What the producer is looking at in {daw}: {{epoch, view, selection, transport, changed}}. Cheap enough to poll about every 150 ms; read again only when changed moves."),
         "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
         "annotations": {"readOnlyHint": true, "idempotentHint": false, "openWorldHint": false},
+    })
+}
+
+/// The `focus_body` tool: one of the DAW's views, ready to draw. `about` says, in the DAW's words, what a view's ref names
+/// and which views page their tracks around `around`.
+fn focus_body_tool(daw: Daw, (about, tracks): (&str, &str), bodies: &[&str], pick: &Value) -> Value {
+    json!({
+        "name": "focus_body",
+        "title": format!("{daw} view"),
+        "description": format!("What {daw} shows in one of its views, ready to draw: pass kind, and ref ({about}) or window (the range to show) where the kind takes them. Long ones come in pages: pass the nextCursor as cursor."),
+        "inputSchema": {"type": "object", "properties": merged(pick, json!({
+            "kind": {"type": "string", "enum": bodies, "description": "Which view."},
+            "ref": {"type": "string", "description": "The ref of what the view is about."},
+            "around": {"type": "string", "description": format!("The ref of a track to centre the first page of tracks on ({tracks}): the page starts half a page above it, and says where in `from`.")},
+            "window": {"type": "object", "properties": {"from": {"type": "number"}, "to": {"type": "number"}}, "required": ["from", "to"], "additionalProperties": false, "description": "The range to show, in the view's own units."},
+            "cursor": {"type": "string", "description": "The nextCursor an earlier page gave, unchanged."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": "Rows in a page."},
+        })), "required": ["kind"], "additionalProperties": false},
+        "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
     })
 }
 
