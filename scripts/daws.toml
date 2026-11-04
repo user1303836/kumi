@@ -3,8 +3,9 @@
 # build-migration-release.py (one commit's versions on every target). Live's bridge is the release's own, so it isn't
 # here. In the order the CHANGELOG, the notes and a bundle's manifests name them.
 #
-# - id: the DAW's id: `kumi --daw <id>`, "Changelog (<id>):" lines, release.py's --<id> and --no-<id>, the bundle's
-#   daws/<id> folder and the manifests' key for its bridge's version (a library's or a tool's: a program has none).
+# - id: the DAW's id: `kumi --daw <id>`. For a library or a tool, also its "Changelog (<id>):" lines, release.py's --<id>
+#   and --no-<id>, the bundle's daws/<id> folder and the manifests' key for its bridge's version; a program has none
+#   of these, and release.py refuses a "Changelog (<id>):" line for it.
 # - name and bridge: the DAW's name and what its bridge is ("REAPER extension", "REAPER's extension"); words: what the
 #   docs call the bridge in their other languages.
 # - integration: Kumi's code for the DAW, which ships in Kumi.
@@ -14,8 +15,8 @@
 #   version is its crate's.
 # - tool: a Renoise tool, its `folder` (named for the tool's id) shipped as it is. Its manifest names the id and the
 #   `api` the tool declares; its version is payload/version.lua's, and the manifest's Version is that as a number.
-# - program: a program, `binary`, from the workspace's `crate`, which Kumi's host starts from beside its own binary
-#   (daw-mcp-server's spawn.rs). It ships at the bundle's root beside kumi and daw-mcp-server, not in daws/<id>, and
+# - program: a program, `binary`, from the workspace's `crate`, which Kumi's host (daw-mcp-server) starts from beside its
+#   own binary. It ships at the bundle's root beside kumi and daw-mcp-server, not in daws/<id>, and
 #   takes Kumi's version (release.py's CRATES): no version, flags, changelog heading or manifest key of its own, and no
 #   `loads`, since the DAW loads nothing of it.
 

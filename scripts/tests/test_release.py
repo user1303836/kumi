@@ -373,8 +373,14 @@ class DawPrograms(unittest.TestCase):
     def test_a_programs_changes_and_lines_are_kumis(self):
         paths = [f"{self.SOUNDCRAFT}/src/server.rs"]
         self.assertEqual(release.classify(1, "Changelog: SoundCraft does X.", paths).lines, [("kumi", "SoundCraft does X.")])
-        # No heading of its own: such a line isn't a Changelog line at all.
-        self.assertEqual(release.classify(2, "Changelog (soundcraft): SoundCraft does X.", paths).lines, [])
+        # No heading of its own: a line written under one would be lost, so it's refused, saying how to write it.
+        said = (r"#2 has a \"Changelog \((?i:soundcraft)\):\" line, but SoundCraft's program takes Kumi's version and has no "
+                r"heading: write it as \"Changelog:\"")
+        for body in ("Changelog: A thing.\nChangelog (soundcraft): SoundCraft does X.", "Changelog (SoundCraft) : SoundCraft does X."):
+            with self.subTest(body=body), self.assertRaisesRegex(release.Refused, said):
+                release.classify(2, body, paths)
+        # Other headings are read as they were.
+        self.assertEqual(release.classify(3, "Changelog (reaper): R.", paths).lines, [("reaper", "R.")])
         plan = DawPlans.plan(DawPlans(), [("Changelog: SoundCraft does X.", paths), DawPlans.REAPER])
         self.assertEqual(plan.kumi, ["SoundCraft does X."])
         self.assertNotIn("soundcraft", plan.daws)

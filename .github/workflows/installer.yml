@@ -417,6 +417,9 @@ jobs:
           before="$(bridge)"; before_extension="$(extension)"
           kumi update | tee update.txt
           test "$(kumi --version)" = "Kumi $version"
+          # SoundCraft's program came with this build, beside kumi.
+          test -x "$home/.kumi/app/soundcraft-kumi"
+          "$home/.kumi/app/soundcraft-kumi" --version
           # The update ran in the earlier Kumi, whose bridge step (since 1.23.2) unpacks this build's bridge package from
           # the lifecycle's tarball the bundle carries, whether or not the bridge in Live needed updating; doctor then
           # starts the bridge from there, where a session looks for it.
@@ -455,6 +458,8 @@ jobs:
           fi
           kumi update --rollback
           test "$(kumi --version)" = "Kumi $version"
+          test -x "$home/.kumi/app/soundcraft-kumi"
+          "$home/.kumi/app/soundcraft-kumi" --version
           if [[ "$before" == "$after" ]]; then test "$(bridge)" = "$after"; else test "$(bridge | cut -d' ' -f1)" = "${after%% *}"; fi
           test "$(extension)" = "$after_extension"
           test "$(placed app | cut -d' ' -f1-4)" = "$(cut -d' ' -f1-4 daws.txt)"
@@ -699,6 +704,11 @@ jobs:
           $env:KUMI_RELEASES = $releases
           $update = Kumi update | Out-String; Write-Host $update
           if ((& $kumi --version) -ne "Kumi $version") { throw "the update didn't give $version" }
+          # SoundCraft's program came with this build, beside kumi.
+          $program = Join-Path $env:KUMI_HOME 'app\soundcraft-kumi.exe'
+          if (-not (Test-Path -LiteralPath $program)) { throw "the update didn't put soundcraft-kumi beside kumi" }
+          & $program --version
+          if ($LASTEXITCODE -ne 0) { throw 'soundcraft-kumi did not start after the update' }
           # The update ran in the earlier Kumi, whose bridge step (since 1.23.2) unpacks this build's bridge package from
           # the lifecycle's tarball the bundle carries, whether or not the bridge in Live needed updating; doctor then
           # starts the bridge from there, where a session looks for it.
@@ -738,6 +748,10 @@ jobs:
           }
           Kumi update --rollback
           if ((& $kumi --version) -ne "Kumi $version") { throw "the second rollback didn't give $version" }
+          $program = Join-Path $env:KUMI_HOME 'app\soundcraft-kumi.exe'
+          if (-not (Test-Path -LiteralPath $program)) { throw "the second rollback didn't put soundcraft-kumi beside kumi" }
+          & $program --version
+          if ($LASTEXITCODE -ne 0) { throw 'soundcraft-kumi did not start after the second rollback' }
           $bridge = Bridge
           if ($(if ($before -eq $after) { $bridge -ne $after } else { $bridge.Split(' ')[0] -ne $after.Split(' ')[0] })) { throw "the second rollback left bridge $bridge, not $after" }
           if ((Extension) -ne $afterExtension) { throw "the second rollback left extension $(Extension), not $afterExtension" }

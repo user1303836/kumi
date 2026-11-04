@@ -22,7 +22,8 @@ What ships is read from main since the last release tag:
   same way, when a pull request changes what that DAW loads (its `loads` there). --<id> gives one a new version
   whatever changed (--reaper, say); --no-<id> keeps it. A pull request that changes one of them and nothing else that
   ships has its lines under that one's heading, as do lines written "Changelog (<id>):". --no-bridge is only Live's.
-  A DAW's program (SoundCraft's soundcraft-kumi) takes Kumi's version, and its changes are Kumi's.
+  A DAW's program (SoundCraft's soundcraft-kumi) takes Kumi's version, and its changes are Kumi's: its lines are plain
+  "Changelog:" lines, and one written "Changelog (<id>):" is refused.
 - A pull request's files count where they are now: one from before a move (scripts/moves.toml) by their new places,
   and an older release's versions are read where it had them.
 The version goes up by a patch, by a minor with --minor, or is given with --version.
@@ -81,6 +82,9 @@ TIMEZONE = "America/New_York"
 WIDTH = 102
 LINE = re.compile(rf"^Changelog(?:\s*\((?P<where>kumi|bridge|{'|'.join(map(re.escape, DAWS))})\))?:\s*(?P<text>.+?)\s*$",
                   re.M | re.I)
+# A heading for a DAW whose bridge is a program (SoundCraft's), which has none: its lines are Kumi's, written "Changelog:".
+PROGRAM_IDS = [daw_id for daw_id in native.DAW_BRIDGES if daw_id not in DAWS]
+PROGRAM_LINE = re.compile(rf"^Changelog\s*\((?P<where>{'|'.join(map(re.escape, PROGRAM_IDS)) or '(?!)'})\)\s*:", re.M | re.I)
 # The notes end with this, unrendered: the tag build publishes only a draft whose notes carry it.
 MARKER = "<!-- kumi:release-notes -->"
 NUMBER = r"\d+\.\d+(?:\.\d+)?"  # the oldest ships-with entries say "1.5"
@@ -231,6 +235,10 @@ def version_file(daw: dict) -> tuple[str, str]:
 
 def classify(number: int, body: str, paths: list[str]) -> Change:
     rows = (body or "").replace("\r\n", "\n").split("\n")
+    if heading := PROGRAM_LINE.search(body or ""):
+        daw = native.DAW_BRIDGES[heading["where"].lower()]
+        raise Refused(f"#{number} has a \"Changelog ({heading['where']}):\" line, but {daw['name']}'s {daw['bridge']} takes "
+                      f"Kumi's version and has no heading: write it as \"Changelog:\" in the pull request's body")
     found = [(i, m) for i, row in enumerate(rows) if (m := LINE.match(row))]
     kumis = any(path.startswith(KUMI) for path in paths)
     bridge = any(map(ships_bridge, paths))

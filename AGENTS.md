@@ -54,7 +54,7 @@ Why it's shaped this way (keep it so):
 - **One DAW, one folder.** DAW-specific code lives in `daws/<daw>/` so a DAW's work doesn't spread across the repo. Nothing in `crates/` uses `daws/` but the app (it wires the DAWs in) and tests (`daws/own/` only). A DAW's crates use no other DAW's, only `daws/own/`.
 - **Dependencies point down** (`LAYERS` in `scripts/dev.py`, checked by Required CI). Small acyclic crates mean a change rebuilds and tests only what depends on it; `dev.py affected` reads the graph and CI picks its jobs from it.
 - **The app reaches a DAW only through `kumi-daw`**, which each `kumi-daw-<daw>` implements; `crates/kumi/src/daw/registry.rs` is the table of DAWs. Outside its folder, a new DAW adds only its `DawId`, profile and place names in `kumi-types`, one table entry, and (own-bridge DAWs) its entry in `daw-bridge`'s DAW list, its module in `daw-mcp-server` and its entry in `scripts/daws.toml`, the list the release and packaging scripts read.
-- **Bridges are separate programs.** They run in or beside a DAW, work without Kumi (other MCP clients use them), use nothing of Kumi's but `kumi-common`, and have their own versions. Updating one means restarting the DAW.
+- **Bridges are separate programs.** They run in or beside a DAW, work without Kumi (other MCP clients use them), use nothing of Kumi's but `kumi-common`, and have their own versions. Updating one means restarting the DAW. The exception is a `program` in `scripts/daws.toml` (SoundCraft's `soundcraft-kumi`): it runs beside the DAW, which loads nothing of it, and takes Kumi's version (section 5).
 - **Frozen:** what an installed app is read by (`kumi` at the app's root, `package.json`, `bridge/prepared.json` and the package it names) and the wire protocols. Installed copies update, roll back and talk across versions through them.
 
 Where new code goes:
@@ -111,7 +111,7 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
 - Kumi has one version, `X.Y.Z`. Live's bridge, REAPER's extension and Renoise's tool have their own, bumped when what that DAW loads changes (tests and Markdown aside):
   - Live: `daws/ableton/` (bridge, Remote Script, protocol, Live extension), `crates/kumi-common`, `vendor/willington`.
   - REAPER and Renoise: what `scripts/daws.toml` says each loads: REAPER's extension (`daws/reaper/reaper-kumi`) and the parts of `daws/own/daw-bridge` it links; Renoise's tool (`daws/renoise/com.kumi.Bridge.xrnx`).
-- SoundCraft's program (`soundcraft-kumi`, beside `kumi` in the bundle) has no version of its own: it takes Kumi's, like `daw-mcp-server`.
+- SoundCraft's program (`soundcraft-kumi`, beside `kumi` in the bundle) has no version of its own: it takes Kumi's, like `daw-mcp-server`. Its lines are plain `Changelog:` lines; `release.py` refuses `Changelog (soundcraft):`.
 - **In a PR, never bump a version or edit CHANGELOG.md.** Write `Changelog:` lines: they become the release notes and the app's What's new, so each is one thing a producer will notice, most important first. `Changelog: none` for internal work; `Changelog (bridge):`, `Changelog (reaper):` or `Changelog (renoise):` files a line under that heading.
 - Releasing is for the owner, or an agent asked to (`gh` signed in as a repository admin), right after a merge:
   - `python3 scripts/release.py`: the dry run (version, CHANGELOG entry, notes, checks).
