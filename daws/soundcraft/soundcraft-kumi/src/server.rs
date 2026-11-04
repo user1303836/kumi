@@ -106,8 +106,11 @@ struct Seen {
 struct Glance {
     epoch: String,
     selection: Value,
-    /// The plug-in window it named the plug-in of (`[track, slot]`, the last opened then), with its `fxRef` and `fxName`.
+    /// The plug-in window it named the plug-in of (`[track, slot]`, the last opened then), with its `fxRef`, `fxName`,
+    /// `fxTrackRef` and `fxTrackName`.
     plugin: Option<(Value, Value)>,
+    /// The ref of the clip the MIDI Editor shows ([`Reads::midi_editor_clip`]).
+    midi_clip: Option<String>,
     /// The summary itself: the rate and the tempo and meter maps the playhead is read through, and whether it records.
     session: Arc<Value>,
 }
@@ -159,7 +162,7 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     let (events, _) = broadcast::channel::<(String, Value)>(64);
     let (ending, ended) = watch::channel(None::<&'static str>);
     let offer = Offer {
-        methods: vec!["ping".into(), "status".into(), "focus".into(), "read".into(), "snapshot".into()],
+        methods: vec!["ping".into(), "status".into(), "focus".into(), "read".into(), "snapshot".into(), "focus_body".into()],
         events: vec![event::PROJECT.into()],
         heartbeat_ms: config.heartbeat_ms,
         credit_bytes: None,
@@ -218,7 +221,9 @@ async fn look_at_session(
                 Some(window) => reads.plugin_window(&session, &window, Instant::now() + naming).await.map(|named| (window, named)),
                 None => None,
             };
-            Some(Glance { epoch: reads.epoch().into(), selection: reads.selection(&session), plugin, session: Arc::new(session) })
+            let midi_clip = reads.midi_editor_clip(&session);
+            let (epoch, selection) = (reads.epoch().into(), reads.selection(&session));
+            Some(Glance { epoch, selection, plugin, midi_clip, session: Arc::new(session) })
         }
         Err(_) => None,
     };
@@ -503,7 +508,7 @@ async fn connection(
                             counts.waiting.fetch_sub(1, Ordering::SeqCst);
                             counts.authenticated.fetch_add(1, Ordering::SeqCst);
                         }
-                        ServerAction::Request(request) if matches!(request.method.as_str(), "read" | "snapshot") => {
+                        ServerAction::Request(request) if matches!(request.method.as_str(), "read" | "snapshot" | "focus_body") => {
                             out.extend(read_request(request, serving, answers.clone()).unwrap_or_default());
                         }
                         ServerAction::Request(request) => out.extend(answer(&request, seen).encode()),
@@ -549,8 +554,9 @@ async fn connection(
     authenticated
 }
 
-/// A `read` or a `snapshot`: answered when the app has, in a task of its own (one read at a time), so the connection goes
-/// on meanwhile. While the app is busy it's refused at once, nothing read, and one whose deadline has passed isn't started.
+/// A `read`, a `snapshot` or a `focus_body`: answered when the app has, in a task of its own (one read at a time), so the
+/// connection goes on meanwhile. While the app is busy it's refused at once, nothing read, and one whose deadline has
+/// passed isn't started. A body is drawn with the app's windows as the last look saw them.
 fn read_request(request: Request, serving: &Serving, answers: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> Option<Vec<u8>> {
     if let Some((_, reason)) = &lock(&serving.seen).busy {
         return Some(Frame::error(request.id, code::BUSY, format!("{reason}; nothing was read")).encode());
@@ -558,11 +564,13 @@ fn read_request(request: Request, serving: &Serving, answers: tokio::sync::mpsc:
     let Some(until) = deadline(request.deadline_ms) else {
         return Some(Frame::error(request.id, code::DEADLINE, "the request's deadline passed before the read started").encode());
     };
+    let ui = (request.method == "focus_body").then(|| lock(&serving.seen).ui.as_ref().map(|(ui, _)| ui.clone())).flatten();
     let reads = serving.reads.clone();
     tokio::spawn(async move {
         let mut reads = reads.lock().await;
         let read = match request.method.as_str() {
             "snapshot" => reads.snapshot(until).await,
+            "focus_body" => reads.focus_body(&request.params, ui.as_ref(), until).await,
             _ => reads.read(&request.params, until).await,
         };
         let frame = match read {
@@ -602,7 +610,8 @@ fn answer(request: &Request, seen: &Mutex<Seen>) -> Frame {
 
 /// FOCUS as the last looks saw it:
 /// - `view`, from the app's windows;
-/// - `selection`, in the refs of the epoch the last look at the session saw, and in a plug-in's window that plug-in;
+/// - `selection`, in the refs of the epoch the last look at the session saw; in a plug-in's window that plug-in, and in
+///   the MIDI Editor the clip it shows (`midiClipRef`);
 /// - `transport` where the playhead is now: while the app plays, it's moved on by the time since the look;
 /// - `changed`, which moves when the session changes (the module's doc says how the looks see it), and `ageMs`, how old
 ///   the look is;
@@ -615,8 +624,12 @@ fn focus(id: u64, seen: &Seen) -> Frame {
     let mut selection = glance.selection.clone();
     let window = ui["ui"]["plugin_windows"].as_array().and_then(|open| open.last());
     if let Some((_, named)) = glance.plugin.as_ref().filter(|(seen, _)| view == "fx" && Some(seen) == window) {
-        selection["fxRef"] = named["fxRef"].clone();
-        selection["fxName"] = named["fxName"].clone();
+        for key in ["fxRef", "fxName", "fxTrackRef", "fxTrackName"] {
+            selection[key] = named[key].clone();
+        }
+    }
+    if let Some(clip) = glance.midi_clip.as_ref().filter(|_| view == "midi") {
+        selection["midiClipRef"] = clip.as_str().into();
     }
     let playing = ui["playing"] == true;
     let mut position = ui["position"].clone();
