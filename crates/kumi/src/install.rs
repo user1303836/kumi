@@ -8,6 +8,7 @@ use crate::{
     spinner::{step, Terminal},
     tui::tty::TtyOutput,
 };
+use daw_bridge::paths::BridgePaths;
 use futures::{future::LocalBoxFuture, StreamExt};
 use kumi_agent::core::store_import::write_back;
 use kumi_ai::{
@@ -1498,13 +1499,14 @@ pub const BRIDGES_OWN: [&str; 11] = [
     "bridge.secret",
     "lifecycle.lock",
     "lifecycle-journal.json",
-    "launched.json",
-    "launch.lock",
-    "runs",
+    BridgePaths::LAUNCH_RECORD,
+    BridgePaths::LAUNCH_LOCK,
+    BridgePaths::RUNS,
 ];
 /// What only Kumi's bridge lifecycle (or its bridge program's launch) writes in a DAW's folder in `bridges`: in a folder
 /// the producer also uses, a DAW's folder is Kumi's only when it holds one of these.
-const BRIDGES_MARKS: [&str; 5] = ["install-receipt.json", "bridge.secret", "lifecycle.lock", "lifecycle-journal.json", "launched.json"];
+const BRIDGES_MARKS: [&str; 5] =
+    ["install-receipt.json", "bridge.secret", "lifecycle.lock", "lifecycle-journal.json", BridgePaths::LAUNCH_RECORD];
 /// The data in a DAW's folder in `bridges`, and the copies kept for the producer there.
 const BRIDGES_DATA: &str = "snapshots";
 const BRIDGES_CHANGED: &str = "changed";
@@ -1915,7 +1917,7 @@ fn bridges_parts(bridges: &str, all: bool, parts: &mut Parts) {
     };
     let kumis = |name: &str| {
         BRIDGES_OWN.contains(&name)
-            || name.strip_prefix("serving-").and_then(|rest| rest.strip_suffix(".lock")).is_some_and(|pid| pid.parse::<u32>().is_ok())
+            || BridgePaths::serving_lock_pid(name).is_some()
             || name.strip_prefix('.').and_then(|rest| rest.split_once(".tmp-")).is_some_and(|(of, _)| BRIDGES_OWN.contains(&of))
     };
     let (mut whole, mut gone) = (true, vec![]);

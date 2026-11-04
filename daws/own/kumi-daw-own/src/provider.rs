@@ -212,18 +212,10 @@ struct Put {
     kept: Option<String>,
 }
 
-fn home(env: &Env) -> PathBuf {
-    env.get("HOME")
-        .or_else(|| env.get("USERPROFILE"))
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
-        .unwrap_or_else(|| home::home_dir().unwrap_or_default())
-}
-
 /// What daw-bridge's detection reads, from the app's environment.
 pub fn detected<T>(env: &Env, read: impl FnOnce(&detect::Env) -> T) -> T {
     let var = |name: &str| env.get(name).cloned();
-    read(&detect::Env { os: Os::current(), home: home(env), var: &var, root: None })
+    read(&detect::Env::current(&var))
 }
 
 impl Own {
@@ -491,7 +483,7 @@ impl DawProvider for Own {
                 let var = |name: &str| env.get(name).cloned();
                 let home_dir = kumi_home(&env);
                 let inputs = doctor::Inputs {
-                    env: detect::Env { os: Os::current(), home: home(&env), var: &var, root: None },
+                    env: detect::Env::current(&var),
                     kumi_home: &home_dir,
                     bundled,
                     running: &detect::running,
@@ -843,9 +835,13 @@ impl OwnSetup {
     }
 }
 
-/// Whether the DAW runs now, from a listing made now (KUMI_PROCESSES in the session's environment stands in for it).
+/// Whether the DAW runs now, from a listing made now (KUMI_PROCESSES in the session's environment stands in for it): under
+/// its usual names, or as the app its variable names ([`detect::named_app`]).
 pub(crate) fn open_now(daw: Daw, env: &Env) -> bool {
-    detected(env, |found| detect::list_processes(found.var)).iter().any(|(_, name)| detect::process_is(daw, name))
+    detected(env, |found| {
+        let app = detect::named_app(daw, found.var);
+        detect::list_processes(found.var).iter().any(|(_, name)| detect::process_is_app(daw, name, app.as_deref()))
+    })
 }
 
 /// The app of the DAW running now, from where it runs (a portable REAPER on another drive, a Renoise outside the app
@@ -853,8 +849,8 @@ pub(crate) fn open_now(daw: Daw, env: &Env) -> bool {
 pub(crate) async fn running_app(daw: Daw, env: &Env) -> Option<Option<PathBuf>> {
     let env = env.clone();
     tokio::task::spawn_blocking(move || {
-        let listing = detected(&env, |found| detect::list_processes(found.var));
-        let open = listing.iter().any(|(_, name)| detect::process_is(daw, name));
+        let (listing, app) = detected(&env, |found| (detect::list_processes(found.var), detect::named_app(daw, found.var)));
+        let open = listing.iter().any(|(_, name)| detect::process_is_app(daw, name, app.as_deref()));
         open.then(|| detect::programs(daw, &listing).first().map(|program| detect::app_of(Os::current(), program)))
     })
     .await

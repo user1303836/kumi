@@ -5,11 +5,13 @@
 //! bridge and ends with its stdin.
 use super::fake::{ok, refused, Answer, Fake};
 use daw_bridge::auth::Secret;
-use daw_bridge::files::ensure_secret;
+use daw_bridge::daw::Daw;
+use daw_bridge::files::{ensure_secret, Launched};
 use daw_bridge::handshake::{ClientHandshake, ClientStep};
+use daw_bridge::loopback::BIND_ADDRESS;
+use daw_bridge::paths::BridgePaths;
 use daw_mcp_server::client::{BridgeClient, RequestError};
 use serde_json::{json, Value};
-use soundcraft_kumi::launch::{Launched, LAUNCHED};
 use soundcraft_kumi::server::{self, Config, End, Schedule};
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -23,6 +25,12 @@ const TOKEN: &str = "t0ken";
 
 fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
+}
+
+/// A listener on any free loopback port, where the bridge's own [`server::bind`] takes one in SoundCraft's range: tests
+/// running at once would use the range up.
+fn any_port() -> std::net::TcpListener {
+    std::net::TcpListener::bind((BIND_ADDRESS, 0)).unwrap()
 }
 
 /// A child process, killed and waited for when the test ends, however it ends.
@@ -132,8 +140,8 @@ impl Lab {
         Self { home, fake, shown, secret }
     }
 
-    fn folder(&self) -> PathBuf {
-        self.home.path().join("bridges").join("soundcraft")
+    fn paths(&self) -> BridgePaths {
+        BridgePaths::new(self.home.path(), Daw::SoundCraft)
     }
 
     fn launched(&self, pid: u32) -> Launched {
@@ -149,7 +157,7 @@ impl Lab {
 
     /// The record a start leaves, owner-only as a start writes it.
     fn record(&self, launched: &Launched) {
-        daw_bridge::owner::write_owner_only(&self.folder().join(LAUNCHED), &serde_json::to_vec(launched).unwrap()).unwrap();
+        daw_bridge::owner::write_owner_only(&self.paths().launch_record(), &serde_json::to_vec(launched).unwrap()).unwrap();
     }
 
     /// Looks and heartbeats each 100 ms, for a copy whose process is `pid`.
@@ -157,12 +165,12 @@ impl Lab {
         Config {
             look: ms(100),
             heartbeat_ms: 100,
-            ..Config::new(self.folder().join("bridge.secret"), self.folder().join("discovery"), self.launched(pid), "/lab/profile".into())
+            ..Config::new(self.paths().secret(), self.paths().discovery(), self.launched(pid), "/lab/profile".into())
         }
     }
 
     fn discovery_files(&self) -> Vec<PathBuf> {
-        let Ok(entries) = std::fs::read_dir(self.folder().join("discovery")) else { return vec![] };
+        let Ok(entries) = std::fs::read_dir(self.paths().discovery()) else { return vec![] };
         entries.flatten().map(|entry| entry.path()).filter(|path| path.extension().is_some_and(|ext| ext == "json")).collect()
     }
 
@@ -202,7 +210,8 @@ impl Lab {
         use std::io::BufRead;
         let program = self.home.path().join(if cfg!(windows) { "soundcraft.exe" } else { "soundcraft" });
         let this = std::env::current_exe().unwrap();
-        if !program.exists() && std::fs::hard_link(&this, &program).is_err() {
+        // (a copy on macOS, which names a hard-linked program's process by whichever of its names it looked up last)
+        if !program.exists() && (cfg!(target_os = "macos") || std::fs::hard_link(&this, &program).is_err()) {
             std::fs::copy(&this, &program).unwrap();
         }
         let mut app = Reaped(
@@ -247,7 +256,7 @@ async fn looked(lab: &Lab, what: &str) {
 async fn the_host_connects_through_the_discovery_file_and_status_answers_from_the_last_look() {
     let lab = Lab::new().await;
     let (stop, stopped) = tokio::sync::oneshot::channel::<()>();
-    let serving = tokio::spawn(server::serve(lab.config(std::process::id()), async move {
+    let serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), async move {
         let _ = stopped.await;
     }));
     let discovery = lab.discovery_until(|discovery| discovery["project"]["name"] == "Midnight Groove").await;
@@ -298,7 +307,7 @@ async fn authenticated(port: u16, secret: &Secret) -> tokio::io::BufStream<tokio
 #[tokio::test]
 async fn a_connection_closed_for_a_bad_line_after_its_handshake_leaves_room_for_the_next() {
     let lab = Lab::new().await;
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let port = lab.port().await;
     for _ in 0..3 {
         let mut stream = authenticated(port, &lab.secret).await;
@@ -314,7 +323,7 @@ async fn a_connection_closed_for_a_bad_line_after_its_handshake_leaves_room_for_
 #[tokio::test]
 async fn the_host_reads_through_the_bridge_and_a_read_while_the_app_is_busy_is_refused_at_once() {
     let lab = Lab::new().await;
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     assert!(client.welcome().methods.iter().any(|method| method == "read"), "{:?}", client.welcome().methods);
     // (the lab's SoundCraft shows a session with no tracks)
@@ -341,7 +350,7 @@ async fn the_host_reads_through_the_bridge_and_a_read_while_the_app_is_busy_is_r
 #[tokio::test]
 async fn the_host_calls_a_read_only_command_through_the_bridge_and_a_call_while_the_app_is_busy_is_refused_at_once() {
     let lab = Lab::new().await;
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     let history = client.request("read", json!({"kind": "call", "command": "engine.history"}), WAIT).await.unwrap();
     assert_eq!((&history["command"], &history["result"]), (&json!("engine.history"), &json!({"undo": [], "can_redo": false})));
@@ -377,7 +386,7 @@ async fn focus_answers_with_the_window_the_selection_and_the_playhead() {
         // (two seconds in at 120 bpm: four beats, the first of bar 2)
         shown.position = 96000;
     }
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     let focus = asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
     let status = client.request("status", json!({}), WAIT).await.unwrap();
@@ -436,7 +445,7 @@ async fn a_bodys_ref_from_before_another_session_opened_is_stale_though_the_body
     lab.shown.lock().unwrap().tracks = kick_and_keys();
     // Looks four seconds apart: a body's own look at the session sees the switch before the look loop does.
     let config = Config { look: ms(4000), ..lab.config(std::process::id()) };
-    let _serving = tokio::spawn(server::serve(config, std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), config, std::future::pending()));
     let client = lab.connect().await;
     let focus = asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
     // FOCUS sends a body's refs with no epoch: they're read in the last look's.
@@ -469,7 +478,7 @@ async fn in_the_midi_editor_focus_names_the_clip_it_shows() {
         shown.tracks[1]["clips"] = json!([{"id": 7, "name": "Keys", "start": 0, "length": 96000, "notes": 4, "muted": false}]);
         shown.selection = json!({"tracks": [5], "clips": [], "start": 0, "end": 0});
     }
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     let edit = asked_until(&client, "focus", |focus| focus["view"] == "edit" && focus["selection"]["trackRef"] == "s:track:5").await;
     assert!(edit["selection"].get("midiClipRef").is_none(), "only in the MIDI Editor: {edit}");
@@ -490,7 +499,7 @@ async fn changed_moves_with_each_edit_undo_and_redo_and_nothing_else() {
         shown.tracks = kick_and_keys();
         shown.history = json!({"undo": ["New Track"], "can_redo": false});
     }
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     // A selection isn't an edit.
     lab.shown.lock().unwrap().selection = json!({"tracks": [5], "clips": [], "start": 0, "end": 0});
@@ -512,7 +521,7 @@ async fn changed_moves_with_each_edit_undo_and_redo_and_nothing_else() {
 #[tokio::test]
 async fn while_soundcraft_plays_its_playhead_is_looked_at_four_times_as_often_and_focus_moves_it_on() {
     let lab = Lab::new().await;
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
     let looks_in_a_second = || async {
@@ -535,7 +544,7 @@ async fn while_soundcraft_plays_its_playhead_is_looked_at_four_times_as_often_an
 #[tokio::test]
 async fn a_take_shows_as_recording_and_a_stopped_one_as_stopped() {
     let lab = Lab::new().await;
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
     let records = |recording: bool| {
@@ -558,7 +567,7 @@ async fn changed_also_moves_when_the_session_changes_though_its_history_reads_th
         let mut shown = lab.shown.lock().unwrap();
         (shown.tracks, shown.history) = (fader(0.0), json!({"undo": ["Volume"], "can_redo": false}));
     }
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
     // The playhead moving, or the selection, isn't a change.
@@ -576,7 +585,7 @@ async fn changed_also_moves_when_the_session_changes_though_its_history_reads_th
 #[tokio::test]
 async fn a_soundcraft_that_answers_nothing_is_asked_only_ui_inspect_and_is_stalled_after_three_looks() {
     let lab = Lab::new().await;
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
     let hung = Instant::now();
@@ -641,7 +650,7 @@ fn a_look_at_the_session_may_take_ten_times_its_last_cost_from_a_look_to_five() 
 #[tokio::test]
 async fn while_a_dialog_is_open_soundcraft_is_asked_only_ui_inspect() {
     let lab = Lab::new().await;
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
     lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
@@ -656,7 +665,7 @@ async fn while_a_dialog_is_open_soundcraft_is_asked_only_ui_inspect() {
 #[tokio::test]
 async fn a_dialog_or_an_app_that_does_not_answer_makes_the_bridge_busy_until_it_clears() {
     let lab = Lab::new().await;
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
     let modal = asked_until(&client, "status", |status| status["busy"] == "modal").await;
@@ -680,7 +689,7 @@ async fn a_new_session_is_told_as_a_project_event_and_the_discovery_file_follows
     let track =
         |name: &str| json!([{"id": 1, "kind": "audio", "format": "Mono", "name": name, "instrument": null, "inserts": [], "clips": []}]);
     lab.shown.lock().unwrap().tracks = track("Kick");
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     let before = client.request("status", json!({}), WAIT).await.unwrap()["project"]["epoch"].clone();
     let mut events = client.events();
@@ -713,7 +722,7 @@ async fn another_session_under_the_same_name_is_told_as_a_project_event_with_a_n
         let mut shown = lab.shown.lock().unwrap();
         (shown.name, shown.tracks, shown.undo) = ("Untitled".into(), audio.clone(), json!("New Track"));
     }
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     let before = client.request("status", json!({}), WAIT).await.unwrap()["project"]["epoch"].clone();
     let mut events = client.events();
@@ -741,7 +750,7 @@ async fn quiet(lab: &Lab, events: &mut tokio::sync::broadcast::Receiver<daw_brid
 /// A bridge serving the lab's SoundCraft, a client of it listening for events, and a look at the session since it
 /// started (the first look tells nothing).
 async fn listening(lab: &Lab) -> (BridgeClient, tokio::sync::broadcast::Receiver<daw_bridge::wire::Event>) {
-    tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     let mut events = client.events();
     asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
@@ -858,7 +867,7 @@ async fn another_session_on_the_same_ids_tells_its_tracks_and_selection_again() 
 async fn a_new_session_is_told_while_a_read_holds_the_reads() {
     let lab = Lab::new().await;
     lab.shown.lock().unwrap().slow_reads = true;
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     let mut events = client.events();
     // A read the app takes two seconds over holds the reads, and the session switches meanwhile.
@@ -883,7 +892,7 @@ async fn the_lives_learn_from_the_look_loop_so_a_track_undone_and_made_again_bet
     let lab = Lab::new().await;
     let bass = |clips: Value| json!([{"id": 30, "kind": "audio", "format": "Mono", "name": "Bass DI", "instrument": null, "inserts": [], "clips": clips}]);
     lab.shown.lock().unwrap().tracks = bass(json!([{"id": 31, "name": "Bass DI", "start": 0, "length": 48000, "offset": 0, "source": 32}]));
-    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let _serving = tokio::spawn(server::serve(any_port(), lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     let read = client.request("read", json!({"kind": "track"}), WAIT).await.unwrap();
     assert_eq!(read["items"][0]["ref"], "s:track:30");
@@ -907,7 +916,7 @@ async fn when_soundcraft_quits_the_bridge_ends_and_takes_its_discovery_file() {
             .spawn()
             .unwrap(),
     );
-    let serving = tokio::spawn(server::serve(lab.config(app.id()), std::future::pending()));
+    let serving = tokio::spawn(server::serve(any_port(), lab.config(app.id()), std::future::pending()));
     lab.discovery().await;
     lab.fake.quit();
     app.kill().unwrap();

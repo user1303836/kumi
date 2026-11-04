@@ -99,7 +99,8 @@ impl Spawn {
         let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
         let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|folder| folder.join(&file)));
         let start = program(beside.unwrap_or_else(|| PathBuf::from(file)), vec!["--kumi-home".into(), kumi_home.into()]);
-        Some(Self::new(move || daw_running(daw), start))
+        let paths = BridgePaths::new(kumi_home, daw);
+        Some(Self::new(move || daw_running(daw, &paths), start))
     }
 
     /// Starts bridges with `start`, for a DAW that runs while `running` says so.
@@ -218,9 +219,15 @@ async fn start(state: Arc<tokio::sync::Mutex<State>>, start: Start, secret: Path
     };
 }
 
-/// Whether one of the DAW's programs runs now, by the process listing (KUMI_PROCESSES stands in for it).
-fn daw_running(daw: Daw) -> bool {
-    daw_bridge::detect::processes(&|name| std::env::var(name).ok()).iter().any(|(_, name)| daw_bridge::detect::process_is(daw, name))
+/// Whether one of the DAW's programs runs now, by the process listing (KUMI_PROCESSES stands in for it): under its usual
+/// names, or as the app its bridge program started (its launch record), else the app its variable names
+/// (KUMI_SOUNDCRAFT_APP), under whatever name that has.
+fn daw_running(daw: Daw, paths: &BridgePaths) -> bool {
+    use daw_bridge::detect;
+    let var = |name: &str| std::env::var(name).ok();
+    let app =
+        daw_bridge::files::Launched::read(&paths.launch_record()).map(|launched| launched.app).or_else(|| detect::named_app(daw, &var));
+    detect::processes(&var).iter().any(|(_, name)| detect::process_is_app(daw, name, app.as_deref()))
 }
 
 /// Asks a bridge to end, and kills it if it hasn't within `wait`.

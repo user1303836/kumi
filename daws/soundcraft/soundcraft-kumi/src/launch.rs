@@ -12,26 +12,20 @@
 //! channel that won't take its token) is closed, so it never stands in the next start's way. One look-then-start runs at a
 //! time ([`lock`]).
 use crate::control::{Control, Error};
+use daw_bridge::daw::Daw;
+use daw_bridge::detect::{self, SoundCraftApp};
+use daw_bridge::files::Launched;
 use daw_bridge::owner;
-use serde::{Deserialize, Serialize};
+use daw_bridge::paths::BridgePaths;
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-/// The file in the bridge's folder that names the copy of SoundCraft Kumi started last.
-pub const LAUNCHED: &str = "launched.json";
-/// The bridge folder's lock, held from a look for the copy through a start's record of it.
-pub const LOCK: &str = "launch.lock";
-/// The variable that names SoundCraft's program (its `.app` on macOS), in place of the usual places. It names the program
-/// itself, not a wrapper that starts it: Kumi finds its copy again by the program the copy's process runs.
-pub const APP_VARIABLE: &str = "KUMI_SOUNDCRAFT_APP";
 /// What the app prints once its channel listens.
 const PORT_LINE: &str = "SOUNDCRAFT_CONTROL_PORT=";
 /// How many starts' output folders are kept, to say why one failed.
 const RUNS_KEPT: usize = 5;
-/// The biggest `launched.json` read.
-const MAX_LAUNCHED: u64 = 64 * 1024;
 /// How long after `open` returns the app's process gets to show up, holding its stdout's file.
 const HOLDER_WAIT: Duration = Duration::from_secs(2);
 
@@ -48,151 +42,22 @@ impl Waits {
     pub const USUAL: Waits = Waits { port: Duration::from_secs(30), answer: Duration::from_secs(5) };
 }
 
-/// A SoundCraft installed here: its program (the `.app` on macOS), and its version when it says one.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct App {
-    pub path: PathBuf,
-    pub version: Option<String>,
-}
-
-/// Where SoundCraft is installed: the program `KUMI_SOUNDCRAFT_APP` names, else the system's usual places.
-pub fn find(var: &dyn Fn(&str) -> Option<String>) -> Option<App> {
-    let path = match var(APP_VARIABLE).filter(|named| !named.is_empty()) {
-        Some(named) => Some(PathBuf::from(named)).filter(|path| path.exists())?,
-        None => installed(var)?,
-    };
-    Some(App { version: version_of(&path), path })
-}
-
-/// macOS: /Applications, ~/Applications, else wherever Spotlight knows the app's bundle id to be.
-#[cfg(target_os = "macos")]
-fn installed(var: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let home = var("HOME").map(|home| PathBuf::from(home).join("Applications/SoundCraft.app"));
-    if let Some(usual) = [Some(PathBuf::from("/Applications/SoundCraft.app")), home].into_iter().flatten().find(|path| path.exists()) {
-        return Some(usual);
+/// Where SoundCraft is installed, as Kumi's detection finds it: the program [`detect::SOUNDCRAFT_APP`] names (the
+/// program itself, not a wrapper that starts it: Kumi finds its copy again by the program the copy's process runs), else
+/// the system's usual places. Its version is its bundle's on macOS; elsewhere what its `--version` prints
+/// (`soundcraft 0.17.0 (…)`), which detection, launching nothing, leaves out.
+pub fn find(var: &dyn Fn(&str) -> Option<String>) -> Option<SoundCraftApp> {
+    let mut app = detect::detect_soundcraft(&detect::Env::current(var))?;
+    if app.version.is_none() && !cfg!(target_os = "macos") {
+        app.version = version_said(&app.path);
     }
-    let found = Command::new("mdfind").arg("kMDItemCFBundleIdentifier == 'ai.storyteller.soundcraft'").output().ok()?;
-    String::from_utf8_lossy(&found.stdout)
-        .lines()
-        .map(PathBuf::from)
-        .find(|path| path.extension().is_some_and(|ext| ext == "app") && path.exists())
+    Some(app)
 }
 
-/// Windows: the folder SoundCraft's installer recorded (for one user, or for everyone), else its two default folders.
-#[cfg(windows)]
-fn installed(var: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    let recorded = [registry::CURRENT_USER, registry::LOCAL_MACHINE]
-        .into_iter()
-        .find_map(|root| registry::text(root, r"Software\SoundCraft", "InstallDir"))
-        .map(|folder| PathBuf::from(folder).join("soundcraft.exe"));
-    let defaults = [
-        var("LOCALAPPDATA").map(|data| PathBuf::from(data).join(r"Programs\ArtCraft\SoundCraft\soundcraft.exe")),
-        var("ProgramFiles").map(|files| PathBuf::from(files).join(r"ArtCraft\SoundCraft\soundcraft.exe")),
-    ];
-    recorded.into_iter().chain(defaults.into_iter().flatten()).find(|path| path.exists())
-}
-
-/// Text values in Windows' registry, read in UTF-16: `reg.exe` writes in the console's code page, which loses what it
-/// can't show, such as an install folder's name in another script.
-#[cfg(windows)]
-mod registry {
-    use std::ffi::OsString;
-    use std::os::windows::ffi::OsStringExt;
-
-    pub const CURRENT_USER: isize = 0x8000_0001_u32 as i32 as isize;
-    pub const LOCAL_MACHINE: isize = 0x8000_0002_u32 as i32 as isize;
-
-    #[link(name = "advapi32")]
-    unsafe extern "system" {
-        fn RegGetValueW(
-            key: isize,
-            subkey: *const u16,
-            value: *const u16,
-            flags: u32,
-            kind: *mut u32,
-            data: *mut std::ffi::c_void,
-            size: *mut u32,
-        ) -> i32;
-    }
-
-    /// The value `name` of `key` under `root`, when it's text (REG_SZ) and not empty.
-    pub fn text(root: isize, key: &str, name: &str) -> Option<OsString> {
-        const RRF_RT_REG_SZ: u32 = 0x2;
-        let wide = |text: &str| text.encode_utf16().chain(std::iter::once(0)).collect::<Vec<u16>>();
-        let (key, name) = (wide(key), wide(name));
-        let mut size = 0u32;
-        // SAFETY: both names end in NUL; without a buffer, the call only says the size the value needs, in bytes.
-        let status = unsafe {
-            RegGetValueW(root, key.as_ptr(), name.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), std::ptr::null_mut(), &mut size)
-        };
-        if status != 0 {
-            return None;
-        }
-        let mut buffer = vec![0u16; size as usize / 2 + 1];
-        size = (buffer.len() * 2) as u32;
-        // SAFETY: the buffer has the `size` bytes of room it's said to have.
-        let status = unsafe {
-            RegGetValueW(root, key.as_ptr(), name.as_ptr(), RRF_RT_REG_SZ, std::ptr::null_mut(), buffer.as_mut_ptr().cast(), &mut size)
-        };
-        if status != 0 {
-            return None;
-        }
-        let end = buffer.iter().position(|&unit| unit == 0).unwrap_or(buffer.len());
-        Some(OsString::from_wide(&buffer[..end])).filter(|text| !text.is_empty())
-    }
-}
-
-/// Linux and the rest: `soundcraft` on PATH.
-#[cfg(all(not(target_os = "macos"), not(windows)))]
-fn installed(var: &dyn Fn(&str) -> Option<String>) -> Option<PathBuf> {
-    std::env::split_paths(&var("PATH")?).map(|folder| folder.join("soundcraft")).find(|path| path.is_file())
-}
-
-/// The app's version: its bundle's on macOS, else what its `--version` prints (`soundcraft 0.17.0 (…)`).
-fn version_of(path: &Path) -> Option<String> {
-    let version = if path.extension().is_some_and(|ext| ext == "app") {
-        let said = Command::new("plutil")
-            .args(["-extract", "CFBundleShortVersionString", "raw"])
-            .arg(path.join("Contents/Info.plist"))
-            .output()
-            .ok()?;
-        String::from_utf8_lossy(&said.stdout).trim().to_string()
-    } else {
-        let said = Command::new(path).arg("--version").stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-        String::from_utf8_lossy(&said.stdout).split_whitespace().nth(1)?.to_string()
-    };
-    Some(version).filter(|version| !version.is_empty())
-}
-
-/// SoundCraft's settings folder, where it keeps its autosaves, as the app at `app` finds it (config.rs there):
-/// SOUNDCRAFT_CONFIG_DIR when it's set (set empty: no folder at all, and no autosave), else `SoundCraftData` beside the
-/// program of a portable copy (one with `portable.txt` beside it), else the system's place for it. (A portable copy that
-/// can't write beside itself uses the system's place; that's left out.)
-pub fn settings_folder(var: &dyn Fn(&str) -> Option<String>, app: Option<&Path>) -> Option<PathBuf> {
-    if let Some(named) = var("SOUNDCRAFT_CONFIG_DIR") {
-        let named = PathBuf::from(named);
-        return (!named.as_os_str().is_empty()).then(|| std::path::absolute(&named).unwrap_or(named));
-    }
-    if let Some(beside) = app.map(program_folder).filter(|folder| folder.join("portable.txt").is_file()) {
-        return Some(beside.join("SoundCraftData"));
-    }
-    if cfg!(target_os = "macos") {
-        var("HOME").map(|home| PathBuf::from(home).join("Library/Application Support/SoundCraft"))
-    } else if cfg!(windows) {
-        var("APPDATA").map(|data| PathBuf::from(data).join("SoundCraft"))
-    } else {
-        let config = var("XDG_CONFIG_HOME").filter(|config| !config.is_empty()).map(PathBuf::from);
-        config.or_else(|| var("HOME").map(|home| PathBuf::from(home).join(".config"))).map(|config| config.join("soundcraft"))
-    }
-}
-
-/// The folder SoundCraft's program is in: inside the bundle on macOS.
-fn program_folder(app: &Path) -> PathBuf {
-    if app.extension().is_some_and(|ext| ext == "app") {
-        app.join("Contents/MacOS")
-    } else {
-        app.parent().map(Path::to_path_buf).unwrap_or_default()
-    }
+/// The version a program's `--version` prints, its second word.
+fn version_said(program: &Path) -> Option<String> {
+    let said = Command::new(program).arg("--version").stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
+    Some(String::from_utf8_lossy(&said.stdout).split_whitespace().nth(1)?.to_string()).filter(|version| !version.is_empty())
 }
 
 /// The sessions SoundCraft will offer to recover when it next starts, by its own rule (autosave.rs's `leftovers`): an
@@ -225,37 +90,9 @@ pub fn recovery_waiting(settings: &Path) -> Vec<String> {
     sessions
 }
 
-/// A copy of SoundCraft Kumi started. (Its Debug leaves the token out.)
-#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Launched {
-    /// The app's process.
-    pub pid: u32,
-    pub started_ms: u64,
-    /// Its control channel's port, and the token its requests carry.
-    pub port: u16,
-    pub token: String,
-    pub app: PathBuf,
-    pub version: Option<String>,
-}
-
-impl Launched {
-    /// A client of its control channel.
-    pub fn control(&self) -> Control {
-        Control::new(self.port, Some(self.token.clone()))
-    }
-}
-
-impl std::fmt::Debug for Launched {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Launched")
-            .field("pid", &self.pid)
-            .field("started_ms", &self.started_ms)
-            .field("port", &self.port)
-            .field("app", &self.app)
-            .field("version", &self.version)
-            .finish_non_exhaustive()
-    }
+/// A client of the control channel of the copy Kumi started.
+pub fn control(launched: &Launched) -> Control {
+    Control::new(launched.port, Some(launched.token.clone()))
 }
 
 /// The copy Kumi started, as a look finds it.
@@ -270,36 +107,18 @@ pub struct Found {
 /// Waits for any other look-then-start in the bridge's folder (this process's or another's) to finish, then holds the
 /// folder's launch lock until the returned file is dropped: a second Kumi finds the first one's copy instead of starting
 /// another beside it, or calling it one opened another way.
-pub fn lock(folder: &Path) -> Result<std::fs::File, String> {
-    let failed = |error: std::io::Error| format!("Kumi's SoundCraft folder {} can't be locked: {error}", folder.display());
-    owner::create_owner_only_dir(folder).map_err(failed)?;
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true).write(true).create(true).truncate(false);
-    #[cfg(unix)]
-    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
-    // (opened in place, never replaced: a lock is on the file itself)
-    let file = options.open(folder.join(LOCK)).map_err(failed)?;
+pub fn lock(paths: &BridgePaths) -> Result<std::fs::File, String> {
+    let failed = |error: std::io::Error| format!("Kumi's SoundCraft folder {} can't be locked: {error}", paths.root.display());
+    owner::create_owner_only_dir(&paths.root).map_err(failed)?;
+    let file = daw_bridge::lifecycle::lock_file(&paths.launch_lock()).map_err(failed)?;
     file.lock().map_err(failed)?;
     Ok(file)
 }
 
-/// What `launched.json` says, when it's a plain file of this user's alone in a folder of this user's alone (on unix; on
-/// Windows that check is a PowerShell run, and the folder Kumi made owner-only stands for it, as for the bridge's secret):
-/// another account that can write the folder can't plant a port and a token.
-pub fn recorded(folder: &Path) -> Option<Launched> {
-    let path = folder.join(LAUNCHED);
-    let meta = std::fs::symlink_metadata(&path).ok()?;
-    let owned = !cfg!(unix) || (owner::is_owner_only(folder) && owner::is_owner_only(&path));
-    if !meta.is_file() || meta.len() > MAX_LAUNCHED || !owned {
-        return None;
-    }
-    serde_json::from_slice(&std::fs::read(&path).ok()?).ok()
-}
-
 /// The copy an earlier start left, if it's still there: its process runs SoundCraft's program, listens on its port, and
 /// its channel takes its token within `answer` (or is busy).
-pub async fn attach(folder: &Path, answer: Duration) -> Option<Found> {
-    let launched = recorded(folder)?;
+pub async fn attach(paths: &BridgePaths, answer: Duration) -> Option<Found> {
+    let launched = Launched::read(&paths.launch_record())?;
     let there = daw_bridge::files::process_alive(launched.pid)
         && runs_soundcraft(launched.pid, &launched.app)
         && listens(launched.port, launched.pid);
@@ -310,21 +129,10 @@ pub async fn attach(folder: &Path, answer: Duration) -> Option<Found> {
     Some(Found { launched, answering })
 }
 
-/// Whether `pid`'s program is SoundCraft's (or `app`'s own, under whatever name), where the system says (Linux's /proc,
-/// Windows' image name): a pid another program got since isn't the copy. macOS doesn't say, and there the listener check
-/// names the pid.
+/// Whether `pid`'s program is SoundCraft's (or `app`'s own, under whatever name), where the system says: a pid another
+/// program got since isn't the copy. Where it won't say, the listener check names the pid.
 fn runs_soundcraft(pid: u32, app: &Path) -> bool {
-    daw_bridge::detect::program_of(pid).is_none_or(|program| program_is(&program.to_string_lossy(), app))
-}
-
-/// Whether a process's program (as the system names it) is SoundCraft's, or the program at `app` (one
-/// `KUMI_SOUNDCRAFT_APP` names under another name). Linux names a program whose file was replaced since it started (a
-/// package upgrade) `<path> (deleted)`: still that program.
-pub fn program_is(program: &str, app: &Path) -> bool {
-    let program = program.strip_suffix(" (deleted)").unwrap_or(program);
-    let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
-    let app_name = app.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-    is_soundcraft(program) || (!app_name.is_empty() && name.eq_ignore_ascii_case(&app_name))
+    detect::program_of(pid).is_none_or(|program| detect::process_is_app(Daw::SoundCraft, &program.to_string_lossy(), Some(app)))
 }
 
 /// Whether `pid` listens on `port`: on macOS by the socket's owner (`lsof`). Elsewhere only whether something accepts a
@@ -333,8 +141,7 @@ fn listens(port: u16, pid: u32) -> bool {
     if cfg!(target_os = "macos") {
         return listener(port) == Some(pid);
     }
-    let address = std::net::SocketAddr::from(([127, 0, 0, 1], port));
-    std::net::TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_ok()
+    daw_bridge::probe::listening(port, Duration::from_millis(500))
 }
 
 /// macOS's own `lsof`, never another one on PATH.
@@ -351,7 +158,7 @@ fn listener(port: u16) -> Option<u32> {
 /// are full), an error when it isn't the copy's channel (nothing listens, the token is refused, or what answers isn't
 /// SoundCraft's).
 async fn probe(launched: &Launched, answer: Duration) -> Result<bool, Error> {
-    match launched.control().call("ui.inspect", json!({}), answer).await {
+    match control(launched).call("ui.inspect", json!({}), answer).await {
         Ok(_) | Err(Error::Refused(_) | Error::Broken(_) | Error::Protocol(_)) => Ok(true),
         Err(Error::Deadline | Error::Stalled | Error::Busy | Error::Crowded) => Ok(false),
         Err(error) => Err(error),
@@ -361,7 +168,7 @@ async fn probe(launched: &Launched, answer: Duration) -> Result<bool, Error> {
 /// What a start is given: the app, the session to open (an absolute path), the token, and the files its stdout and
 /// stderr go to.
 pub struct Start<'a> {
-    pub app: &'a App,
+    pub app: &'a SoundCraftApp,
     pub session: Option<&'a Path>,
     pub token: &'a str,
     pub out: &'a Path,
@@ -371,27 +178,27 @@ pub struct Start<'a> {
 }
 
 /// Starts SoundCraft with its channel on, opening `session` if one is named, and waits for its port. The copy is kept in
-/// `launched.json` in `folder`, the bridge's, before Kumi's first request to it, which says whether it answers yet.
-pub async fn launch(app: &App, session: Option<&Path>, folder: &Path, background: bool) -> Result<Found, String> {
-    launch_with(app, session, folder, background, Waits::USUAL, start_app).await
+/// the bridge's launch record before Kumi's first request to it, which says whether it answers yet.
+pub async fn launch(app: &SoundCraftApp, session: Option<&Path>, paths: &BridgePaths, background: bool) -> Result<Found, String> {
+    launch_with(app, session, paths, background, Waits::USUAL, start_app).await
 }
 
 /// [`launch`], with the app started by `start` (a test's stand-in). The start gives back the app's process when it has it
 /// (a copy Kumi can't use is closed through it, never by a pid another program may have by then), or None (macOS's
 /// `open`): then the app is the process holding its stdout's file, and its port's listener once there is one.
 pub async fn launch_with(
-    app: &App,
+    app: &SoundCraftApp,
     session: Option<&Path>,
-    folder: &Path,
+    paths: &BridgePaths,
     background: bool,
     waits: Waits,
     start: impl FnOnce(&Start) -> Result<Option<Child>, String>,
 ) -> Result<Found, String> {
     let token = daw_bridge::auth::Secret::generate();
     let started_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64);
-    let made = |error: std::io::Error| format!("Kumi's SoundCraft folder {} can't be written: {error}", folder.display());
-    owner::create_owner_only_dir(folder).map_err(made)?;
-    let runs = folder.join("runs");
+    let made = |error: std::io::Error| format!("Kumi's SoundCraft folder {} can't be written: {error}", paths.root.display());
+    owner::create_owner_only_dir(&paths.root).map_err(made)?;
+    let runs = paths.runs();
     let run = new_run(&runs, started_ms).map_err(made)?;
     prune_runs(&runs);
     let (out, err) = (run.join("launch.out"), run.join("launch.err"));
@@ -444,7 +251,7 @@ pub async fn launch_with(
     // Kept before the first request: the window takes none while it opens the session, which can outlast any wait here,
     // and a running copy no record names would look like one opened from the Dock.
     let written = serde_json::to_vec_pretty(&launched).expect("launched.json is JSON");
-    if let Err(error) = owner::write_owner_only(&folder.join(LAUNCHED), &written) {
+    if let Err(error) = owner::write_owner_only(&paths.launch_record(), &written) {
         copy.stop(Some(pid));
         return Err(format!("{}, so Kumi closed the copy it started", made(error)));
     }
@@ -455,7 +262,7 @@ pub async fn launch_with(
         }
         Err(error) => {
             copy.stop(Some(pid));
-            let _ = std::fs::remove_file(folder.join(LAUNCHED));
+            let _ = std::fs::remove_file(paths.launch_record());
             Err(format!("SoundCraft opened its channel on port {port}, but it didn't take Kumi's request ({error}), so Kumi closed the copy it started"))
         }
     }
@@ -537,19 +344,19 @@ fn holders(file: &Path) -> Vec<u32> {
     said.map(|said| String::from_utf8_lossy(&said.stdout).lines().filter_map(|line| line.trim().parse().ok()).collect()).unwrap_or_default()
 }
 
-/// The program of a process, as macOS's `ps` names it (a path).
-fn program_of_pid(pid: u32) -> Option<String> {
-    let said = Command::new("/bin/ps").args(["-o", "comm=", "-p", &pid.to_string()]).stderr(Stdio::null()).output().ok()?;
-    Some(String::from_utf8_lossy(&said.stdout).trim().to_string()).filter(|program| !program.is_empty())
-}
-
 /// The app's process when the start can't say it (macOS's `open`): the one holding its stdout's file whose program is
 /// SoundCraft's (or `app`'s own), its first if several (a helper it starts later holds the file too, with a later pid).
 /// None once none holds it.
 async fn holder(out: &Path, app: &Path) -> Option<u32> {
     let deadline = Instant::now() + HOLDER_WAIT;
     loop {
-        let held = holders(out).into_iter().filter(|pid| program_of_pid(*pid).is_some_and(|program| program_is(&program, app))).min();
+        let held = holders(out)
+            .into_iter()
+            .filter(|pid| {
+                detect::program_of(*pid)
+                    .is_some_and(|program| detect::process_is_app(Daw::SoundCraft, &program.to_string_lossy(), Some(app)))
+            })
+            .min();
         if held.is_some() || Instant::now() >= deadline {
             return held;
         }
@@ -661,51 +468,13 @@ fn start_app(start: &Start) -> Result<Option<Child>, String> {
     child.map(Some).map_err(|error| format!("{app} couldn't start: {error}"))
 }
 
-/// Whether a process's program (a path, or an image name) is SoundCraft's app: `SoundCraft` in macOS's bundle,
-/// `soundcraft.exe`, `soundcraft`. Its command-line tool, `soundcraft-cli`, isn't.
-pub fn is_soundcraft(program: &str) -> bool {
-    let base = program.rsplit(['/', '\\']).next().unwrap_or(program);
-    let base = base.strip_suffix(".exe").or_else(|| base.strip_suffix(".EXE")).unwrap_or(base);
-    base.eq_ignore_ascii_case("soundcraft")
-}
-
 /// The pids of this user's copies of SoundCraft running now, by the process listing (KUMI_PROCESSES stands in for it):
 /// SoundCraft's program, or `app`'s own under another name. Another account's copy (fast user switching, another remote
 /// session) isn't this user's to quit, so it's left out.
 pub fn running(var: &dyn Fn(&str) -> Option<String>, app: Option<&Path>) -> Vec<u32> {
-    daw_bridge::detect::processes(var)
+    detect::processes(var)
         .iter()
-        .filter(|(pid, program)| {
-            app.map_or(is_soundcraft(program), |app| program_is(program, app)) && daw_bridge::files::process_alive(*pid)
-        })
+        .filter(|(pid, program)| detect::process_is_app(Daw::SoundCraft, program, app) && daw_bridge::files::process_alive(*pid))
         .map(|(pid, _)| *pid)
         .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn soundcrafts_app_is_told_from_its_command_line_tool() {
-        for program in
-            ["/Applications/SoundCraft.app/Contents/MacOS/SoundCraft", "SoundCraft", r"C:\ArtCraft\SoundCraft\soundcraft.exe", "soundcraft"]
-        {
-            assert!(is_soundcraft(program), "{program}");
-        }
-        for program in ["soundcraft-cli", "/usr/bin/soundcraft-cli", "SoundCraftHelper", "Renoise"] {
-            assert!(!is_soundcraft(program), "{program}");
-        }
-    }
-
-    #[test]
-    fn kumis_copy_is_known_by_its_program_after_an_upgrade_or_under_another_name() {
-        let app = Path::new("/usr/bin/soundcraft");
-        assert!(program_is("/usr/bin/soundcraft (deleted)", app), "Linux's name for a program replaced since it started");
-        let renamed = Path::new("/opt/studio/SoundCraft-0.17.0");
-        assert!(program_is("/opt/studio/SoundCraft-0.17.0", renamed), "the program KUMI_SOUNDCRAFT_APP names");
-        assert!(program_is(r"C:\ArtCraft\SoundCraft\SOUNDCRAFT.EXE", Path::new(r"C:\ArtCraft\SoundCraft\soundcraft.exe")));
-        assert!(!program_is("/usr/bin/bwrap", renamed));
-        assert!(!program_is("/usr/local/bin/soundcraft-cli", app));
-    }
 }

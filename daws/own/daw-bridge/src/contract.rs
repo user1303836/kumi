@@ -37,6 +37,29 @@ const REF_KINDS: [&str; 26] = [
     "source",
 ];
 
+/// The SoundCraft commands a `read {kind: "call"}` runs, each one SoundCraft 0.17's source proves is a query that changes
+/// nothing: soundcraft-kumi runs these (its `READ_ONLY`, with the parameters each takes) and refuses every other, and Kumi's
+/// call words name them. One list, so neither drifts; a change here is a change to what Kumi may run in SoundCraft.
+pub const SOUNDCRAFT_CALLS: [&str; 17] = [
+    "clip.inspect",
+    "engine.commands",
+    "engine.history",
+    "engine.parity",
+    "engine.plugins",
+    "event.midi_ops_window",
+    "event.tempo_ops_window",
+    "event.time_ops_window",
+    "file.get_info",
+    "midi.notes",
+    "session.audio_health",
+    "session.format_time",
+    "session.inspect",
+    "setup.keyboard_shortcuts",
+    "track.inspect",
+    "video.list",
+    "view.flags",
+];
+
 /// What an item's or a take's row says of a MIDI source (`source`): REAPER's extension writes it, Kumi's REAPER side reads it.
 pub const MIDI_SOURCE: &str = "mid";
 

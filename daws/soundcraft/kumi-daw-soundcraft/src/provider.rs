@@ -23,7 +23,6 @@ pub static PROVIDER: Beside = Beside {
     program: "soundcraft-kumi",
     app_variable: detect::SOUNDCRAFT_APP,
     bridge_folder: "bridges/soundcraft",
-    launch_record: "launched.json",
     create: crate::create_soundcraft_integration,
     instructions: "SoundCraft isn't connected, so Kumi can't see your session: answer from what you know, and say so.",
     not_found: "SoundCraft isn't where Kumi looks (set KUMI_SOUNDCRAFT_APP to the app)",

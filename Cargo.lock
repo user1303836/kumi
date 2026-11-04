@@ -1558,7 +1558,6 @@ dependencies = [
  "daw-bridge",
  "daw-mcp-server",
  "futures",
- "home",
  "indexmap",
  "kumi-agent",
  "kumi-common",

@@ -298,9 +298,9 @@ fn copy_tree(from: &Path, to: &Path, top: bool, keeping: bool) -> std::io::Resul
     Ok(())
 }
 
-/// The lifecycle's lock file, opened to lock (made, owner-only on unix, when it isn't there). Opened in place, never
-/// replaced: a lock is on the file itself, and a replaced one is another file.
-fn lock_file(path: &Path) -> std::io::Result<std::fs::File> {
+/// A lock file (the lifecycle's, a bridge program's launch and serving locks), opened to lock (made, owner-only on unix,
+/// when it isn't there). Opened in place, never replaced: a lock is on the file itself, and a replaced one is another file.
+pub fn lock_file(path: &Path) -> std::io::Result<std::fs::File> {
     let mut options = std::fs::OpenOptions::new();
     options.read(true).write(true).create(true).truncate(false);
     #[cfg(unix)]
