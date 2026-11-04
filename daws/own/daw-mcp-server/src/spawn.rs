@@ -3,7 +3,7 @@
 //! own (the secret made off the async threads, then the program), and a call waits for a starting bridge no longer than
 //! its own deadline: the bridge goes on starting while the calls go on. Its stdin is the host's pipe. Closing it is how
 //! the host stops it, and a host that dies (killed, or crashed) closes it too, so the bridge ends by itself and removes its
-//! discovery file either way. Which DAWs have such a bridge: [`bridge_program`] (none yet).
+//! discovery file either way. Which DAWs have such a bridge: [`bridge_program`] (SoundCraft's, `soundcraft-kumi`).
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
 use std::ffi::OsString;
@@ -19,6 +19,7 @@ use std::time::{Duration, Instant};
 pub fn bridge_program(daw: Daw) -> Option<&'static str> {
     match daw {
         Daw::Reaper | Daw::Renoise => None,
+        Daw::SoundCraft => Some("soundcraft-kumi"),
     }
 }
 
