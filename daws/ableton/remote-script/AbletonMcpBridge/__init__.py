@@ -750,7 +750,8 @@ class AbletonMcpBridge(_ControlSurface):
         self._willington = None
         self._timer = None
         # The bridge starts on Live's thread, at its timer's or a display tick's first call once its files are checked.
-        self._made_at = time.monotonic()
+        # (perf_counter for the gates below: before 3.13, monotonic on Windows moves in 15.6 ms steps)
+        self._made_at = time.perf_counter()
         self._checked = _FilesChecked(_files_check())
         self._start_timer()
 
@@ -765,7 +766,7 @@ class AbletonMcpBridge(_ControlSurface):
         if checked is None:
             return False
         if not checked.done():
-            now = time.monotonic()
+            now = time.perf_counter()
             if not display_tick or now - getattr(self, "_made_at", 0.0) < _CHECK_ON_ITS_OWN_SECONDS:
                 return False
             if now - getattr(self, "_waited_at", 0.0) < _CHECK_WAIT_EVERY_SECONDS:

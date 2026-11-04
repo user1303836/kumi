@@ -644,14 +644,29 @@ class RemoteScriptTests(unittest.TestCase):
             surface.update_display()
             self.assertIsNone(surface._bridge, "within the bound: not waited for")
             time.sleep(0.06)
-            longest, deadline = 0.0, time.monotonic() + 3
-            while surface._bridge is None and time.monotonic() < deadline:
-                began = time.monotonic()
+            longest, deadline = 0.0, time.perf_counter() + 3
+            while surface._bridge is None and time.perf_counter() < deadline:
+                began = time.perf_counter()
                 surface.update_display()
-                longest = max(longest, time.monotonic() - began)
+                longest = max(longest, time.perf_counter() - began)
                 time.sleep(0.02)
         self.assertEqual(surface._bridge.served, 1, "started, and served, at the first tick after the check")
         self.assertLess(longest, 0.08, f"no tick held long: {longest:.3f} s")
+
+    def test_the_bound_and_the_100_ms_between_moments_are_timed_by_perf_counter(self):
+        """Before 3.13, monotonic() on Windows moves in 15.6 ms steps: display ticks about 100 ms apart would read 93.75
+        ms apart, and skip their moment. The surface's start times them by perf_counter()."""
+        package = __import__("AbletonMcpBridge"); release, waits, at = threading.Event(), [], [100.0]
+        clock = types.SimpleNamespace(monotonic=lambda: 0.0, perf_counter=lambda: at[0], time=time.time)
+        with patch.object(package, "time", clock), patch.dict(sys.modules, {"Live": None}), patch.object(package, "_files_check", return_value=lambda: release.wait(5)), \
+                patch.object(package, "_CHECK_WAIT_SECONDS", 0.0), patch.object(package, "_read_config", return_value={}):
+            surface = package.AbletonMcpBridge(FakeInstance())
+            checked = surface._checked; given = checked.wait
+            checked.wait = lambda seconds: (waits.append(at[0]), given(seconds))[1]
+            for tick in (100.4, 100.6, 100.65, 100.75, 100.8):
+                at[0] = tick; surface.update_display()
+            release.set(); self.wait_for_the_check(checked)
+        self.assertEqual(waits, [100.6, 100.75], "past 0.5 s, a moment at most every 100 ms, by perf_counter")
 
     def test_the_timers_calls_never_wait_for_the_check_and_the_first_after_it_starts_the_bridge(self):
         """Live's timer calls back about every 10 ms: past the bound, while the check runs, each call returns at once.
