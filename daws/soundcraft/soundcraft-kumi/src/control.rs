@@ -7,9 +7,10 @@
 //! The app reads a connection's next line only once the request before it has its answer (or its 90 s are up), and takes
 //! at most 16 connections from everyone. So a request that outlives its deadline here keeps its connection: the
 //! connection waits for the answer the app owes it and throws it away before it takes another request, and meanwhile the
-//! next request goes on another connection, up to [`CONNECTIONS`]. Nothing is ever sent twice. A request the app may still
-//! run (its deadline passed, the app's own 90 s passed, or the connection went with it out) is uncertain, for the caller
-//! to read back.
+//! next request goes on another connection, up to [`CONNECTIONS`]. A caller that stops waiting (its future dropped) is the
+//! same as a deadline once the request is sent; before that, nothing was sent and the connection is closed. Nothing is
+//! ever sent twice. A request the app may still run (its deadline passed, the app's own 90 s passed, the connection went
+//! with it out, or its answer came garbled) is uncertain, for the caller to read back.
 use serde_json::{json, Value};
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -28,13 +29,20 @@ pub const CONNECT: Duration = Duration::from_millis(800);
 pub const OWED: Duration = Duration::from_secs(95);
 /// The longest answer read. A screenshot's is the biggest.
 const MAX_ANSWER: usize = 128 << 20;
+/// The longest request line the app reads (control_server.rs's `MAX_LINE`: a 64 MiB plug-in state in base64, and 1 MiB
+/// around it). It closes the connection on a longer one, without reading the rest.
+const MAX_REQUEST: usize = (64usize << 20).div_ceil(3) * 4 + (1 << 20);
+/// How long a new connection waits before its first request, for a refusal the app sends at once (it has as many
+/// connections as it takes). On Windows the reset that follows a refusal throws away what wasn't read yet.
+const REFUSAL_WAIT: Duration = Duration::from_millis(10);
 
 /// Why a request has no result.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     /// Nothing answers on the port: the app isn't running, or runs without its channel.
     Unreachable(String),
-    /// The app has as many connections as it takes (16), other programs' among them. Nothing ran.
+    /// The app has as many connections as it takes (16), other programs' among them. Nothing ran. (Read before the request
+    /// goes: a refusal that comes later than [`REFUSAL_WAIT`] may arrive on Windows as [`Error::Closed`].)
     Crowded,
     /// Nothing ran: the app's queue is full (16 requests wait for its window), or each connection Kumi may open waits
     /// for an answer the app owes it.
@@ -47,19 +55,24 @@ pub enum Error {
     Closed,
     /// The app wants a token this client hasn't got, or not this one (`unauthorized: …`), and closed the connection.
     Unauthorized(String),
-    /// The app said no, and nothing ran: the command refused, or failed and the app put the document back. Its words.
+    /// The app's engine said no: the command refused, or failed and the engine put the document back. Nothing ran. Its
+    /// words.
     Refused(String),
-    /// The request reached a part of the app that failed (its handler panicked): whether it ran is unknown.
+    /// The request reached a part of the app that failed part way: its handler panicked, or a gesture (`ui.click`,
+    /// `ui.drag`…) was cut off after some of its events. Whether, or how much, it ran is unknown.
     Broken(String),
-    /// Kumi's fault, or a port that isn't SoundCraft's channel: an answer out of step or not JSON, a method the app hasn't
-    /// got, or a line it couldn't read.
+    /// The request was sent and its answer was garbled: out of step (another request's id), not JSON, or too long. The
+    /// app has the request and will run it.
+    Garbled(String),
+    /// Kumi's fault, proved by the app's own words or before sending: a method the app hasn't got, a line it couldn't read,
+    /// a request longer than it reads. Nothing ran.
     Protocol(String),
 }
 
 impl Error {
     /// Whether the request may have run: a write that must never be sent again, and whose effect is read back.
     pub fn uncertain(&self) -> bool {
-        matches!(self, Error::Deadline | Error::Stalled | Error::Closed | Error::Broken(_))
+        matches!(self, Error::Deadline | Error::Stalled | Error::Closed | Error::Broken(_) | Error::Garbled(_))
     }
 
     /// The command an `unknown command` refusal names: one this app hasn't got (or no longer has).
@@ -78,7 +91,9 @@ impl std::fmt::Display for Error {
             Error::Deadline => f.write_str("SoundCraft didn't answer in time"),
             Error::Stalled => f.write_str("SoundCraft's window didn't take the request within 90 s"),
             Error::Closed => f.write_str("SoundCraft closed the connection with a request out"),
-            Error::Unauthorized(said) | Error::Refused(said) | Error::Broken(said) | Error::Protocol(said) => f.write_str(said),
+            Error::Unauthorized(said) | Error::Refused(said) | Error::Broken(said) | Error::Garbled(said) | Error::Protocol(said) => {
+                f.write_str(said)
+            }
         }
     }
 }
@@ -93,6 +108,7 @@ fn refusal(said: &str) -> Error {
         "control queue full" => Error::Busy,
         "too many control connections" => Error::Crowded,
         "control request failed" => Error::Broken(said.into()),
+        _ if said.starts_with("synthetic input was not delivered") => Error::Broken(said.into()),
         _ if said.starts_with("unauthorized") => Error::Unauthorized(said.into()),
         _ if ["unknown method `", "bad JSON", "request line longer than"].iter().any(|start| said.starts_with(start)) => {
             Error::Protocol(said.into())
@@ -111,9 +127,19 @@ struct Pool {
     connections: usize,
     owed: Duration,
     idle: Mutex<Vec<Channel>>,
-    /// Connections open: idle, in use, or waiting for an answer the app owes.
+    /// Connections open: idle, in use, or waiting for an answer the app owes. Each holds a [`Slot`] of it.
     open: AtomicUsize,
     ids: AtomicU64,
+}
+
+/// One of the connections Kumi may open, held by a connection and given back when the connection closes, however the
+/// connection goes.
+struct Slot(Arc<Pool>);
+
+impl Drop for Slot {
+    fn drop(&mut self) {
+        self.0.open.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Control {
@@ -155,66 +181,59 @@ impl Control {
     /// One request and the app's whole answer to it, less its id, as the app wrote it: a refusal (`"ok": false`) too.
     pub async fn exchange(&self, method: &str, params: Value, deadline: Duration) -> Result<Value, Error> {
         let until = Instant::now() + deadline;
-        let mut channel = self.channel(until).await?;
         let id = self.0.ids.fetch_add(1, Ordering::Relaxed) + 1;
         let mut request = json!({"id": id, "method": method, "params": params});
         if let Some(token) = &self.0.token {
             request["token"] = token.as_str().into();
         }
-        match tokio::time::timeout(until.saturating_duration_since(Instant::now()), channel.send(&request)).await {
-            Ok(Ok(())) => {}
-            Ok(Err(_)) => {
-                self.close(channel);
-                return Err(Error::Closed);
-            }
-            // (part of the line went: the connection can't take another, and the app may yet read it whole)
-            Err(_) => {
-                self.close(channel);
-                return Err(Error::Deadline);
-            }
+        let mut line = serde_json::to_vec(&request).expect("a request is JSON");
+        line.push(b'\n');
+        if line.len() > MAX_REQUEST {
+            return Err(Error::Protocol(format!("a request of {} MiB is longer than SoundCraft reads", line.len() >> 20)));
         }
-        let line = match tokio::time::timeout(until.saturating_duration_since(Instant::now()), channel.read_line()).await {
-            Err(_) => {
-                self.owe(channel, id);
-                return Err(Error::Deadline);
-            }
+        // (dropped before its request is sent whole, a connection closes and gives its slot back: the app runs nothing)
+        let mut channel = self.channel(until).await?;
+        match tokio::time::timeout(until.saturating_duration_since(Instant::now()), channel.writer.write_all(&line)).await {
+            Ok(Ok(())) => {}
+            Ok(Err(_)) => return Err(Error::Closed),
+            // (part of the line went: the connection can't take another, and the app may yet read it whole)
+            Err(_) => return Err(Error::Deadline),
+        }
+        // Sent: from here a connection dropped before its answer (a missed deadline, a caller that stopped waiting) waits
+        // for the answer the app owes it.
+        let mut flight = InFlight { control: self.clone(), channel: Some(channel), id };
+        let reading = flight.channel.as_mut().expect("in flight").read_line();
+        let line = match tokio::time::timeout(until.saturating_duration_since(Instant::now()), reading).await {
+            Err(_) => return Err(Error::Deadline),
             Ok(Ok(Some(line))) => line,
             Ok(Ok(None)) => {
-                self.close(channel);
+                flight.channel = None;
                 return Err(Error::Closed);
             }
             Ok(Err(error)) => {
-                self.close(channel);
+                flight.channel = None;
                 return Err(error);
             }
         };
+        let channel = flight.channel.take().expect("in flight");
         let Ok(Value::Object(mut answer)) = serde_json::from_slice::<Value>(&line) else {
-            self.close(channel);
-            return Err(Error::Protocol(format!("an answer that isn't a JSON object: {}", String::from_utf8_lossy(&line))));
+            return Err(Error::Garbled(format!("an answer that isn't a JSON object: {}", String::from_utf8_lossy(&line))));
         };
         match answer.remove("id") {
             Some(said) if said == json!(id) => {
                 // (the app closes a connection whose request had no token, or the wrong one)
-                if answer.get("error").and_then(Value::as_str).is_some_and(|said| said.starts_with("unauthorized")) {
-                    self.close(channel);
-                } else {
+                if !answer.get("error").and_then(Value::as_str).is_some_and(|said| said.starts_with("unauthorized")) {
                     self.give_back(channel);
                 }
                 Ok(Value::Object(answer))
             }
-            // A line the app answers without an id is one it couldn't take as a request: too many connections (it closes
-            // this one), or a line it couldn't read (Kumi's fault).
-            None | Some(Value::Null) => {
-                self.close(channel);
-                let said = answer.get("error").and_then(Value::as_str);
-                Err(said
-                    .map(refusal)
-                    .unwrap_or_else(|| Error::Protocol(format!("an answer with no id: {}", Value::Object(answer.clone())))))
-            }
-            Some(other) => {
-                self.close(channel);
-                Err(Error::Protocol(format!("an answer out of step: request {id} was answered as {other}")))
-            }
+            // A line the app answers without an id is one it couldn't take as a request: a line it couldn't read (Kumi's
+            // fault). Anything else without an id is garbled.
+            None | Some(Value::Null) => match answer.get("error").and_then(Value::as_str).map(refusal) {
+                Some(error @ (Error::Protocol(_) | Error::Crowded)) => Err(error),
+                _ => Err(Error::Garbled(format!("an answer with no id: {}", Value::Object(answer)))),
+            },
+            Some(other) => Err(Error::Garbled(format!("an answer out of step: request {id} was answered as {other}"))),
         }
     }
 
@@ -224,7 +243,7 @@ impl Control {
             let idle = self.0.idle.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).pop();
             match idle {
                 Some(channel) if channel.sound() => return Ok(channel),
-                Some(gone) => self.close(gone),
+                Some(_) => {}
                 None => break,
             }
         }
@@ -232,56 +251,74 @@ impl Control {
             self.0.open.fetch_sub(1, Ordering::SeqCst);
             return Err(Error::Busy);
         }
-        let within = CONNECT.min(until.saturating_duration_since(Instant::now()));
-        Channel::open(self.0.address, within).await.inspect_err(|_| {
-            self.0.open.fetch_sub(1, Ordering::SeqCst);
-        })
+        // (from here a connect that fails, or is dropped, gives the slot back)
+        let slot = Slot(self.0.clone());
+        Channel::open(self.0.address, CONNECT.min(until.saturating_duration_since(Instant::now())), slot).await
     }
 
     fn give_back(&self, channel: Channel) {
         self.0.idle.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).push(channel);
     }
 
-    fn close(&self, channel: Channel) {
-        drop(channel);
-        self.0.open.fetch_sub(1, Ordering::SeqCst);
-    }
-
-    /// A connection whose request outlived its deadline waits for the answer the app owes it, throws it away, and goes
-    /// back to work. One whose answer doesn't come within the owed wait, or comes out of step, is closed.
+    /// A connection whose request outlived its caller's wait waits for the answer the app owes it, throws it away, and
+    /// goes back to work. One whose answer doesn't come within the owed wait, or comes out of step, is closed.
     fn owe(&self, mut channel: Channel, id: u64) {
         let control = self.clone();
         tokio::spawn(async move {
             let owed = tokio::time::timeout(control.0.owed, channel.read_line()).await;
             let answered = |line: &[u8]| serde_json::from_slice::<Value>(line).is_ok_and(|answer| answer.get("id") == Some(&json!(id)));
-            match owed {
-                Ok(Ok(Some(line))) if answered(&line) => control.give_back(channel),
-                _ => control.close(channel),
+            if let Ok(Ok(Some(line))) = owed {
+                if answered(&line) {
+                    control.give_back(channel);
+                }
             }
         });
     }
 }
 
-/// An answer's result, or why it has none.
-fn result_of(answer: Value) -> Result<Value, Error> {
-    let Value::Object(mut answer) = answer else { return Err(Error::Protocol(format!("an answer that isn't an object: {answer}"))) };
-    match answer.get("ok").and_then(Value::as_bool) {
-        Some(true) => Ok(answer.remove("result").unwrap_or(Value::Null)),
-        Some(false) => Err(refusal(answer.get("error").and_then(Value::as_str).unwrap_or("an error with no words"))),
-        None => Err(Error::Protocol(format!("an answer with no `ok`: {}", Value::Object(answer)))),
+/// A connection whose request has been sent and not answered yet. Dropped before its answer (a missed deadline, a caller
+/// that stopped waiting), it waits for the answer the app owes it ([`Control::owe`]); taken out once answered.
+struct InFlight {
+    control: Control,
+    channel: Option<Channel>,
+    id: u64,
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        if let Some(channel) = self.channel.take() {
+            // (with no runtime left to wait in, the connection just closes)
+            if tokio::runtime::Handle::try_current().is_ok() {
+                self.control.owe(channel, self.id);
+            }
+        }
     }
 }
 
-/// One connection to the app.
+/// An answer's result, or why it has none.
+fn result_of(answer: Value) -> Result<Value, Error> {
+    let Value::Object(mut answer) = answer else { return Err(Error::Garbled(format!("an answer that isn't an object: {answer}"))) };
+    match answer.get("ok").and_then(Value::as_bool) {
+        Some(true) => Ok(answer.remove("result").unwrap_or(Value::Null)),
+        Some(false) => Err(refusal(answer.get("error").and_then(Value::as_str).unwrap_or("an error with no words"))),
+        None => Err(Error::Garbled(format!("an answer with no `ok`: {}", Value::Object(answer)))),
+    }
+}
+
+/// One connection to the app, holding its slot.
 struct Channel {
     reader: BufReader<OwnedReadHalf>,
     writer: OwnedWriteHalf,
     /// An answer's line as far as it has come: a read a deadline cut short goes on from here.
     line: Vec<u8>,
+    _slot: Slot,
 }
 
 impl Channel {
-    async fn open(address: SocketAddr, within: Duration) -> Result<Self, Error> {
+    /// A new connection. An app that has as many connections as it takes refuses it at once and closes it without reading
+    /// it, so the refusal is read before any request is sent: on Windows, the reset that closing sends would throw it
+    /// away.
+    async fn open(address: SocketAddr, within: Duration, slot: Slot) -> Result<Self, Error> {
         let stream = match tokio::time::timeout(within, TcpStream::connect(address)).await {
             Ok(Ok(stream)) => stream,
             Ok(Err(error)) => return Err(Error::Unreachable(format!("nothing answers on {address}: {error}"))),
@@ -289,7 +326,18 @@ impl Channel {
         };
         let _ = stream.set_nodelay(true);
         let (read, write) = stream.into_split();
-        Ok(Self { reader: BufReader::new(read), writer: write, line: Vec::new() })
+        let mut channel = Self { reader: BufReader::new(read), writer: write, line: Vec::new(), _slot: slot };
+        if let Ok(Ok(())) = tokio::time::timeout(REFUSAL_WAIT, channel.reader.get_ref().readable()).await {
+            // (before any request, what comes is a refusal, or the connection closing)
+            let said = tokio::time::timeout(REFUSAL_WAIT, channel.read_line()).await;
+            let refused = |line: &[u8]| serde_json::from_slice::<Value>(line).ok()?.get("error")?.as_str().map(refusal);
+            return Err(match said {
+                Ok(Ok(Some(line))) => refused(&line)
+                    .unwrap_or_else(|| Error::Garbled(format!("a line before any request: {}", String::from_utf8_lossy(&line)))),
+                _ => Error::Unreachable(format!("{address} closed the connection at once")),
+            });
+        }
+        Ok(channel)
     }
 
     /// Whether an idle connection can take a request: nothing has come on it since its last answer, and the app hasn't
@@ -300,12 +348,6 @@ impl Channel {
         }
         let mut byte = [0u8; 1];
         matches!(self.reader.get_ref().try_read(&mut byte), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock)
-    }
-
-    async fn send(&mut self, request: &Value) -> std::io::Result<()> {
-        let mut line = serde_json::to_vec(request).expect("a request is JSON");
-        line.push(b'\n');
-        self.writer.write_all(&line).await
     }
 
     /// The next answer's line, without its newline; None once the app has closed the connection. Cut short (a deadline),
@@ -323,7 +365,7 @@ impl Channel {
                 return Ok(Some(line));
             }
             if self.line.len() > MAX_ANSWER {
-                return Err(Error::Protocol(format!("an answer longer than {} MiB", MAX_ANSWER >> 20)));
+                return Err(Error::Garbled(format!("an answer longer than {} MiB", MAX_ANSWER >> 20)));
             }
             if read == 0 {
                 return Ok(None);
@@ -343,6 +385,11 @@ mod tests {
             ("control queue full", Error::Busy, false),
             ("too many control connections", Error::Crowded, false),
             ("control request failed", Error::Broken("control request failed".into()), true),
+            (
+                "synthetic input was not delivered: no UI pass within 15 s",
+                Error::Broken("synthetic input was not delivered: no UI pass within 15 s".into()),
+                true,
+            ),
             ("unauthorized: wrong token", Error::Unauthorized("unauthorized: wrong token".into()), false),
             ("unknown method `mix.volume`", Error::Protocol("unknown method `mix.volume`".into()), false),
             ("bad JSON: EOF while parsing", Error::Protocol("bad JSON: EOF while parsing".into()), false),

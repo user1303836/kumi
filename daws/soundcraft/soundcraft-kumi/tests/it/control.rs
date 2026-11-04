@@ -35,7 +35,7 @@ async fn every_command_goes_inside_engine_execute_and_every_request_carries_the_
 }
 
 #[tokio::test]
-async fn an_answer_out_of_step_closes_its_connection() {
+async fn an_answer_out_of_step_closes_its_connection_and_leaves_the_request_uncertain() {
     let fake = Fake::start(16, |request| match command(request) {
         "first" => Answer::OutOfStep(ok(json!(1))),
         _ => Answer::Now(ok(json!(2))),
@@ -43,7 +43,8 @@ async fn an_answer_out_of_step_closes_its_connection() {
     .await;
     let control = Control::new(fake.port(), None);
     let error = control.execute("first", json!({}), SECOND).await.unwrap_err();
-    assert!(matches!(&error, Error::Protocol(said) if said.contains("out of step")), "{error:?}");
+    assert!(matches!(&error, Error::Garbled(said) if said.contains("out of step")), "{error:?}");
+    assert!(error.uncertain(), "the app has the request, and runs it");
     assert_eq!(control.open(), 0);
     assert_eq!(control.execute("second", json!({}), SECOND).await, Ok(json!(2)), "a fresh connection answers in step");
     assert_eq!(fake.connections(), 2);
@@ -52,7 +53,7 @@ async fn an_answer_out_of_step_closes_its_connection() {
 #[tokio::test]
 async fn a_missed_deadline_keeps_its_connection_until_the_owed_answer_comes_and_nothing_is_sent_twice() {
     let fake = Fake::start(16, |request| match command(request) {
-        "slow" => Answer::After(ms(300), ok(json!("slow"))),
+        "slow" => Answer::After(ms(100), ok(json!("slow"))),
         _ => Answer::Now(ok(json!("quick"))),
     })
     .await;
@@ -63,11 +64,33 @@ async fn a_missed_deadline_keeps_its_connection_until_the_owed_answer_comes_and_
     assert_eq!(control.execute("quick", json!({}), SECOND).await, Ok(json!("quick")), "on another connection");
     assert_eq!(fake.connections(), 2);
     // Once the owed answer has come (and been thrown away), its connection takes requests again.
-    tokio::time::sleep(ms(400)).await;
+    tokio::time::sleep(SECOND).await;
     let (a, b) = tokio::join!(control.execute("quick", json!({}), SECOND), control.execute("quick", json!({}), SECOND));
     assert_eq!((a, b), (Ok(json!("quick")), Ok(json!("quick"))));
     assert_eq!(fake.connections(), 2, "both connections at work again, none opened");
     assert_eq!(fake.requests().iter().filter(|request| command(request) == "slow").count(), 1, "sent once");
+}
+
+#[tokio::test]
+async fn a_request_whose_caller_stops_waiting_gives_its_connection_back_and_nothing_stays_busy() {
+    let fake = Fake::start(16, |request| match command(request) {
+        "stuck" => Answer::Never,
+        _ => Answer::Now(ok(json!("quick"))),
+    })
+    .await;
+    let control = Control::with_limits(fake.port(), None, 2, ms(200));
+    // (each caller gives up first, as an outer timeout or a stop does: the request's future is dropped mid-flight)
+    for _ in 0..3 {
+        let _ = tokio::time::timeout(ms(10), control.execute("stuck", json!({}), SECOND)).await;
+    }
+    for _ in 0..40 {
+        if control.open() == 0 {
+            break;
+        }
+        tokio::time::sleep(ms(25)).await;
+    }
+    assert_eq!(control.open(), 0, "each connection waited its owed while, then closed");
+    assert_eq!(control.execute("quick", json!({}), SECOND).await, Ok(json!("quick")), "and the slots came back");
 }
 
 #[tokio::test]
