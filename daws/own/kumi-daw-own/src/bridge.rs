@@ -115,6 +115,8 @@ pub struct OwnDaw {
     pub read_tool: &'static str,
     pub read_description: &'static str,
     pub read_kinds: &'static [&'static str],
+    /// A read of one call by name (kind `call`), in the DAW's words; None where the DAW reads no calls.
+    pub call: Option<CallWords>,
     /// The project row's word in the read tool ("project", "song").
     pub project_kind: &'static str,
     /// What the producer is looking at, from the host's `focus` (contract §4).
@@ -582,10 +584,20 @@ const PAGE_TEXT_BYTES: usize = 60 * 1024;
 /// The most pages a fixed phrase reads of a list (tracks, the sequence, patterns) before it leaves the request to the
 /// model.
 const PHRASE_PAGES: usize = 40;
+/// A read of one call by name, in the DAW's words: the field that names the call (REAPER's API function, SoundCraft's
+/// command) and the one that carries its arguments, with the JSON types they come in.
+pub struct CallWords {
+    pub name: &'static str,
+    pub name_about: &'static str,
+    pub args: &'static str,
+    pub args_types: &'static [&'static str],
+    pub args_about: &'static str,
+}
+
 /// A turn's short ref (`track:3`): the shape of a name this turn gave.
 pub static SHORT_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+:[0-9]+$").unwrap());
 
-/// A call's arguments (`args`, in order or by name) with this turn's short refs anywhere in them made long: they sit under no
+/// A call's arguments (in order or by name) with this turn's short refs anywhere in them made long: they sit under no
 /// ref-named field, so the book's own walk passes them by.
 pub fn lengthen_anywhere<S: RefScheme>(book: &Book<S>, value: &Value) -> Value {
     match value {
@@ -603,6 +615,20 @@ pub fn shorten_anywhere<S: RefScheme>(book: &mut Book<S>, value: &Value) -> Valu
         Value::Array(items) => Value::Array(items.iter().map(|item| shorten_anywhere(book, item)).collect()),
         Value::Object(fields) => Value::Object(fields.iter().map(|(key, item)| (key.clone(), shorten_anywhere(book, item))).collect()),
         other => other.clone(),
+    }
+}
+
+/// The short refs (`track:3`) anywhere in a call's arguments, in order: before lengthening, those the model named; after,
+/// those this turn doesn't know. Only kinds this turn named count: `slot:3`, with no `slot` named, is a word (an
+/// extension's key), not a ref.
+fn short_refs_in<S: RefScheme>(book: &Book<S>, value: &Value) -> Vec<String> {
+    match value {
+        Value::String(text) if SHORT_REF.is_match(text) && text.split(':').next().is_some_and(|kind| book.names_kind(kind)) => {
+            vec![text.clone()]
+        }
+        Value::Array(items) => items.iter().flat_map(|item| short_refs_in(book, item)).collect(),
+        Value::Object(fields) => fields.values().flat_map(|item| short_refs_in(book, item)).collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -2324,10 +2350,11 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
                 "limit": {"type": "integer", "minimum": 1, "maximum": MOST_ROWS, "description": "How many rows (50 by default)"},
             },
         });
-        // A REAPER API function that only reads, by name, with its arguments.
-        if self.daw.read_kinds.contains(&"call") {
-            schema["properties"]["fn"] = json!({"type": "string", "description": "For kind call: a REAPER API function that only reads (GetMediaTrackInfo_Value, TrackFX_GetParamName…)"});
-            schema["properties"]["args"] = json!({"type": ["array", "object"], "description": "For kind call: its arguments, in order or by the SDK's names; tracks, items, takes and envelopes as refs"});
+        // One call by name with its arguments, in the DAW's words (REAPER's API function, SoundCraft's command).
+        if let Some(call) = &self.daw.call {
+            schema["properties"][call.name] = json!({"type": "string", "description": call.name_about});
+            let types = if let [one] = call.args_types { json!(one) } else { json!(call.args_types) };
+            schema["properties"][call.args] = json!({"type": types, "description": call.args_about});
         }
         // A tracker's lines are read one track at a time.
         if self.daw.read_kinds.contains(&"line") {
@@ -2343,20 +2370,22 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
         };
         let args = self.book.borrow().lengthen(&Value::Object(input.clone()));
         let mut args = args.as_object().cloned().unwrap_or_default();
-        if let Some(call_args) = args.get("args").cloned() {
-            args.insert("args".into(), lengthen_anywhere(&self.book.borrow(), &call_args));
+        // (a call's arguments hold refs under no ref-named field)
+        if let Some((key, call_args)) = self.daw.call.as_ref().and_then(|call| Some((call.args, args.get(call.args).cloned()?))) {
+            args.insert(key.into(), lengthen_anywhere(&self.book.borrow(), &call_args));
         }
-        // A short ref this turn doesn't know (an earlier song's, or made up) is refused in Kumi's words, not the DAW's.
-        for key in ["ref", "parent", "trackRef"] {
-            let (Some(asked), Some(sent)) = (input.get(key).and_then(Value::as_str), args.get(key).and_then(Value::as_str)) else {
-                continue;
-            };
-            if asked == sent && SHORT_REF.is_match(asked) {
-                let place = self.daw.profile.words.place;
-                return Ok(ToolResult::error(format!(
-                    "{asked} isn't one of this turn's refs (it may be from before the {place} changed): read again for a current one"
-                )));
-            }
+        // A short ref this turn doesn't know (an earlier song's, or made up) is refused in Kumi's words, not the DAW's: by
+        // name, or anywhere in a call's arguments (the ones lengthening left short).
+        let named = ["ref", "parent", "trackRef"].into_iter().find_map(|key| {
+            let (asked, sent) = (input.get(key)?.as_str()?, args.get(key)?.as_str()?);
+            (asked == sent && SHORT_REF.is_match(asked)).then(|| asked.to_owned())
+        });
+        let unknown = named.or_else(|| short_refs_in(&self.book.borrow(), args.get(self.daw.call.as_ref()?.args)?).into_iter().next());
+        if let Some(asked) = unknown {
+            let place = self.daw.profile.words.place;
+            return Ok(ToolResult::error(format!(
+                "{asked} isn't one of this turn's refs (it may be from before the {place} changed): read again for a current one"
+            )));
         }
         // The host's name for the track whose lines are read.
         if let Some(track) = args.remove("trackRef") {
@@ -2367,9 +2396,27 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
             args.insert("layout".into(), layout.into());
         }
         // Refs that hold across projects are read only in the project they came from: the DAW refuses another (`stale`).
-        let primary = args.get("ref").or_else(|| args.get("parent")).and_then(Value::as_str).map(str::to_owned);
-        let epoch = primary.and_then(|reference| self.seen_in.borrow().get(&reference).cloned());
-        if let Some(epoch) = epoch.filter(|_| !self.book.borrow().scheme.positional()) {
+        // A call's refs sit in its arguments, and the DAW checks one epoch for all of them, so they must agree.
+        let mut refs: Vec<String> =
+            args.get("ref").or_else(|| args.get("parent")).and_then(Value::as_str).map(str::to_owned).into_iter().collect();
+        if let Some(call_args) = self.daw.call.as_ref().and_then(|call| args.get(call.args)) {
+            refs.extend(self.book.borrow().scheme.refs_in(&call_args.to_string()).into_iter().map(str::to_owned));
+        }
+        let epochs: Vec<(String, String)> = {
+            let seen_in = self.seen_in.borrow();
+            refs.into_iter().filter_map(|reference| Some((seen_in.get(&reference)?.clone(), reference))).collect()
+        };
+        if let Some((epoch, first)) = epochs.first() {
+            if let Some((_, other)) = epochs.iter().find(|(seen, _)| seen != epoch) {
+                let (first, other) = {
+                    let mut book = self.book.borrow_mut();
+                    (book.short_ref(first), book.short_ref(other))
+                };
+                let place = self.daw.profile.words.place;
+                return Ok(ToolResult::error(format!("{first} and {other} were read in different {place}s: read again for current refs")));
+            }
+        }
+        if let Some((epoch, _)) = epochs.into_iter().next().filter(|_| !self.book.borrow().scheme.positional()) {
             args.insert("epoch".into(), epoch.into());
         }
         // A page the model can take whole: past the kernel's cut its nextCursor would be lost, so fewer rows are asked for
@@ -2410,7 +2457,14 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
                 // A ref from another project, or a list that moved between pages: what to do, in Kumi's words.
                 Err(Refused { code: Some(code), .. }) if code == "stale" || code == "changed" => {
                     let words = self.daw.profile.words;
-                    let what = input.get("ref").or_else(|| input.get("parent")).and_then(Value::as_str).unwrap_or("That ref");
+                    // (a call names its refs in its arguments: the first the model gave)
+                    let named = input
+                        .get("ref")
+                        .or_else(|| input.get("parent"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .or_else(|| short_refs_in(&self.book.borrow(), input.get(self.daw.call.as_ref()?.args)?).into_iter().next());
+                    let what = named.as_deref().unwrap_or("That ref");
                     let positional = self.book.borrow().scheme.positional();
                     return Ok(ToolResult::error(match code.as_str() {
                         "stale" if positional => {
