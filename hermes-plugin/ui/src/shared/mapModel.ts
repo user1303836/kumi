@@ -1,5 +1,5 @@
 // The sound map as plain data the canvas draws: points with their group colours, a grid for finding the point under
-// the pointer, the view (zoom and pan) and the search. No DOM here: tested in tests/ui.
+// the pointer, the view (zoom and pan) and the search. No DOM here: tested in ui/tests.
 import { clean } from './format.ts'
 import type { MapSound, SoundMap } from './types.ts'
 

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { test } from 'node:test'
 
-import { load, root, sdkStub } from './load.mjs'
+import { load, plugin, sdkStub } from './load.mjs'
 
 const SESSION = '20261105_101500_k7d2a1'
 const ROUTES = {
@@ -166,7 +166,7 @@ test('a kumi_sounds result opens the map on what it found; other tools only refr
 })
 
 test('the built Desktop file uses only the SDK and React, and none of the doors rule 8 closes', () => {
-  const bundle = readFileSync(`${root}desktop/plugin.js`, 'utf8')
+  const bundle = readFileSync(`${plugin}desktop/plugin.js`, 'utf8')
   const imports = [...bundle.matchAll(/^import\b[^;]*?from\s*["']([^"']+)["']/gm)].map(match => match[1])
   assert.deepEqual([...new Set(imports)].sort(), ['@hermes/plugin-sdk', 'react', 'react/jsx-runtime'])
   for (const [pattern, why] of [

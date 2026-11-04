@@ -1,7 +1,9 @@
-// Builds Kumi's two UI bundles from src/: the Desktop half (desktop/plugin.js, an ES module that imports only the SDK
-// and React, which Hermes Desktop supplies) and the web dashboard's tab (dashboard/dist/index.js, a classic script
-// that takes React and the SDK from `window.__HERMES_PLUGIN_SDK__`). Both are committed; `--check` rebuilds them in
-// memory and fails when either differs from the committed file, so what's reviewed is what runs.
+// Builds Kumi's two UI bundles from src/ into the plugin's folder: the Desktop half (desktop/plugin.js, an ES module
+// that imports only the SDK and React, which Hermes Desktop supplies) and the web dashboard's tab
+// (dashboard/dist/index.js, a classic script that takes React and the SDK from `window.__HERMES_PLUGIN_SDK__`). Both
+// are committed; `--check` rebuilds them in memory and fails when either differs from the committed file, so what's
+// reviewed is what runs. This build lives in ui/, never the plugin's root: a package.json there would make Hermes
+// install it as the plugin's Node dependencies.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -9,8 +11,9 @@ import { fileURLToPath } from 'node:url'
 import { build } from 'esbuild'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
+const plugin = join(root, '..')
 const check = process.argv.includes('--check')
-const banner = '// Built from hermes-plugin/src/ by `npm run build`. Edit src/, not this file.'
+const banner = '// Built from hermes-plugin/ui/src/ by `npm run build` in hermes-plugin/ui/. Edit ui/src/, not this file.'
 
 const shared = {
   bundle: true,
@@ -55,7 +58,7 @@ let stale = 0
 for (const { out, options } of bundles) {
   const result = await build(options)
   const text = result.outputFiles[0].text
-  const file = join(root, out)
+  const file = join(plugin, out)
   if (check) {
     let committed = ''
     try {
@@ -63,7 +66,7 @@ for (const { out, options } of bundles) {
     } catch {}
     if (committed !== text) {
       stale += 1
-      console.error(`${out} is not what src/ builds: run \`npm run build\` in hermes-plugin/ and commit it.`)
+      console.error(`${out} is not what ui/src/ builds: run \`npm run build\` in hermes-plugin/ui/ and commit it.`)
     }
   } else {
     mkdirSync(dirname(file), { recursive: true })

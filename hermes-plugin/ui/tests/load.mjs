@@ -5,7 +5,9 @@ import { fileURLToPath } from 'node:url'
 
 import { build } from 'esbuild'
 
-export const root = fileURLToPath(new URL('../..', import.meta.url))
+// The UI build's folder (hermes-plugin/ui/), and the plugin's folder that holds the built bundles.
+export const root = fileURLToPath(new URL('..', import.meta.url))
+export const plugin = fileURLToPath(new URL('../..', import.meta.url))
 
 let loads = 0
 

@@ -1,4 +1,4 @@
-// Built from hermes-plugin/src/ by `npm run build`. Edit src/, not this file.
+// Built from hermes-plugin/ui/src/ by `npm run build` in hermes-plugin/ui/. Edit ui/src/, not this file.
 
 // src/desktop/plugin.tsx
 import * as sdk from "@hermes/plugin-sdk";

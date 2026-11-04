@@ -1,4 +1,4 @@
-// Words and numbers the UI shows, and the requests it puts in the chat. Pure functions, tested in tests/ui.
+// Words and numbers the UI shows, and the requests it puts in the chat. Pure functions, tested in ui/tests.
 import type { HistoryItem, Named, Status } from './types.ts'
 
 const DAWS: Record<string, string> = { ableton: 'Live', live: 'Live', reaper: 'REAPER', renoise: 'Renoise', soundcraft: 'SoundCraft' }
