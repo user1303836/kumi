@@ -269,11 +269,7 @@ async fn soundcrafts_read_goes_to_its_bridge_as_asked_and_comes_back_as_it_answe
         (&json!("s:track:3"), &json!(9), &json!("c1.1a-1.1~s:track:3")),
         "{read}"
     );
-    let asked = asked.lock().unwrap().clone();
-    assert_eq!(
-        asked.iter().map(|params| json!({"kind": params["kind"], "limit": params["limit"], "epoch": params["epoch"]})).collect::<Vec<_>>(),
-        [json!({"kind": "track", "limit": 1, "epoch": "1a-1"})]
-    );
+    assert_eq!(*asked.lock().unwrap(), [json!({"kind": "track", "limit": 1, "epoch": "1a-1"})], "the request as asked, and no more");
     bridge.stop();
     session.finish().await;
 }
