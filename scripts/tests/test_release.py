@@ -84,7 +84,8 @@ class Moves(unittest.TestCase):
     def test_this_checkouts_moves_lead_to_paths_it_has(self):
         for old, new in release.MOVES:
             here = release.now(new)
-            self.assertTrue((ROOT / here).exists(), f"{old} moved to {new}, now {here}, which isn't here")
+            self.assertTrue((ROOT / here).exists(), f"{old} moved to {new}, now {here}, which isn't here (a worktree made lean "
+                                                    "before the lean option went leaves oracles out: `git sparse-checkout disable`)")
 
 
 class Sorting(unittest.TestCase):
