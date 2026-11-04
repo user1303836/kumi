@@ -112,15 +112,29 @@ fn add_once(paths: &mut Vec<PathBuf>, path: PathBuf) {
     }
 }
 
-/// The environment the runtime and the DAW code it drives read: this process's, with the Kumi home it was given and
-/// the update check off (the host moves versions; a runtime never updates itself).
+/// The environment the runtime and the DAW code it drives read: this process's, with the Kumi home it was given, the
+/// update check off (the host moves versions; a runtime never updates itself), and no model key (the host's model
+/// plans; the runtime calls none).
 pub fn environment(args: &Args, mut env: Env) -> Env {
     env.insert("KUMI_HOME".into(), args.kumi_home.display().to_string());
     env.insert("KUMI_NO_UPDATE_CHECK".into(), "1".into());
+    for name in crate::report::KEY_VARIABLES {
+        env.remove(name);
+    }
     env
 }
 
-/// `kumi serve` with the arguments after `serve`: serves until stdin ends; the exit code.
+/// [`environment`] made the process's own, for the parts of Kumi that read it (and the programs it starts). Called
+/// before any thread starts.
+fn set_process_environment(args: &Args) {
+    std::env::set_var("KUMI_HOME", &args.kumi_home);
+    std::env::set_var("KUMI_NO_UPDATE_CHECK", "1");
+    for name in crate::report::KEY_VARIABLES {
+        std::env::remove_var(name);
+    }
+}
+
+/// `kumi serve` with the arguments after `serve`: serves until stdin ends or it's told to stop; the exit code.
 pub fn main(args: &[String]) -> i32 {
     let args = match parse(args) {
         Ok(args) => args,
@@ -129,6 +143,8 @@ pub fn main(args: &[String]) -> i32 {
             return 2;
         }
     };
+    // While this is the process's only thread: the runtime's blocking threads start with it.
+    set_process_environment(&args);
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
         Ok(runtime) => runtime,
         Err(error) => {
@@ -223,12 +239,20 @@ mod tests {
     }
 
     #[test]
-    fn the_runtime_reads_its_own_kumi_home_and_never_checks_for_updates() {
+    fn the_runtime_reads_its_own_kumi_home_never_checks_for_updates_and_holds_no_model_key() {
         let parsed =
             parse(&args(&["--stdio", "--state-dir", &(home() + "/state"), "--kumi-home", &(home() + "/home"), "--daw", "ableton"]))
                 .unwrap();
-        let env = environment(&parsed, Env::from([("KUMI_HOME".into(), "/elsewhere".into())]));
+        let given = Env::from([
+            ("KUMI_HOME".into(), "/elsewhere".into()),
+            ("OPENAI_API_KEY".into(), "sk-test".into()),
+            ("ANTHROPIC_API_KEY".into(), "sk-test".into()),
+            ("PATH".into(), "/bin".into()),
+        ]);
+        let env = environment(&parsed, given);
         assert_eq!(env.get("KUMI_HOME"), Some(&(home() + "/home")));
         assert_eq!(env.get("KUMI_NO_UPDATE_CHECK").map(String::as_str), Some("1"));
+        assert!(!env.contains_key("OPENAI_API_KEY") && !env.contains_key("ANTHROPIC_API_KEY"));
+        assert_eq!(env.get("PATH").map(String::as_str), Some("/bin"), "the rest is as given");
     }
 }

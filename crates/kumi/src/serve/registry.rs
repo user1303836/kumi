@@ -6,27 +6,16 @@ use super::ctx::Operation;
 
 pub static OPERATIONS: &[&Operation] = &[&core::STATUS];
 
-/// The operation by its tool name.
-pub fn find(name: &str) -> Option<&'static Operation> {
-    OPERATIONS.iter().copied().find(|operation| operation.name == name)
-}
-
-/// The tool names offered, for `status`'s `capabilities`.
-pub fn names() -> Vec<&'static str> {
-    OPERATIONS.iter().map(|operation| operation.name).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
     fn each_operation_has_its_own_name_and_a_schema_for_an_object() {
-        let names = names();
-        let mut unique = names.clone();
-        unique.sort_unstable();
-        unique.dedup();
-        assert_eq!(unique.len(), names.len(), "{names:?}");
+        let mut names: Vec<&str> = OPERATIONS.iter().map(|operation| operation.name).collect();
+        names.sort_unstable();
+        names.dedup();
+        assert_eq!(names.len(), OPERATIONS.len(), "{names:?}");
         for operation in OPERATIONS {
             assert!(!operation.name.starts_with("kumi_"), "{}: the host adds the prefix", operation.name);
             let schema = (operation.schema)();

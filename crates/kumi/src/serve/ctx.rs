@@ -10,9 +10,10 @@ use kumi_types::daw::DawId;
 use kumi_types::system::Env;
 use serde::Serialize;
 use serde_json::{json, Map, Value};
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use tokio::sync::mpsc::UnboundedSender;
 
 pub type JsonObject = Map<String, Value>;
@@ -24,8 +25,9 @@ pub struct Operation {
     pub description: &'static str,
     /// The arguments' JSON schema (C1's, without `_host`): a call that doesn't fit is refused before `run`.
     pub schema: fn() -> Value,
-    /// What a call with these arguments does: `listen` reads a file but plays the Set for a track. The runtime takes
-    /// the write lease before running a call that writes, plays or imports.
+    /// What a call with these arguments does: `listen` reads a file but plays the Set for a track. A call that writes,
+    /// plays or imports runs only under the DAW endpoint's write lease; until the runtime has the lease, the adapter
+    /// refuses such a call (`no_lease`).
     pub effect: fn(&JsonObject) -> Effect,
     pub run: for<'a> fn(&'a Ctx, Call) -> OpFuture<'a>,
 }
@@ -66,8 +68,8 @@ pub fn reads(_: &JsonObject) -> Effect {
     Effect::Read
 }
 
-/// Who asked, as the host says it (`_host` in the arguments): the profile, its session, the tool call and the request.
-/// Identity for deduplication, ownership and the snapshots' envelope; never permission.
+/// Who asked, as the host says it (`_host` in the arguments, CC-5): the profile, its session, the turn's task, the
+/// tool call and the request. Identity for deduplication, ownership and the snapshots' envelope; never permission.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
 pub struct Host {
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -75,13 +77,16 @@ pub struct Host {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
 }
 
 impl Host {
-    /// `_host` as the host sends it: an object of these four strings, any of them left out.
+    /// `_host` as the host sends it: an object of these five strings, any of them left out. A blank one (`""`, spaces)
+    /// is left out too: a host that has no id for a call sends no identity, never one shared by every such call.
     pub fn from_value(value: &Value) -> Result<Host, String> {
         let Value::Object(fields) = value else { return Err("_host is an object".into()) };
         let mut host = Host::default();
@@ -91,12 +96,14 @@ impl Host {
                 "session_id" => &mut host.session_id,
                 "tool_call_id" => &mut host.tool_call_id,
                 "request_id" => &mut host.request_id,
+                "task_id" => &mut host.task_id,
                 other => return Err(format!("_host has no \"{other}\"")),
             };
             match field {
+                Value::String(text) if text.trim().is_empty() => {}
                 Value::String(text) if text.len() <= 256 => *slot = Some(text.clone()),
                 Value::Null => {}
-                _ => return Err(format!("_host.{key} is a string of at most 256 characters")),
+                _ => return Err(format!("_host.{key} is a string of at most 256 bytes")),
             }
         }
         Ok(host)
@@ -114,25 +121,29 @@ pub enum Out {
 pub type Outbox = UnboundedSender<Out>;
 
 /// A call's progress, for long work: `notifications/progress` when the host asked for it (a `progressToken`), nothing
-/// otherwise.
+/// otherwise, and nothing once the call has answered or been cancelled (MCP's rule), whoever still holds a copy.
 #[derive(Debug, Clone)]
 pub struct Progress {
     to: Option<(Value, Outbox)>,
+    ended: Rc<Cell<bool>>,
 }
 
 impl Progress {
     pub fn new(token: Option<Value>, outbox: Outbox) -> Progress {
-        Progress { to: token.map(|token| (token, outbox)) }
+        Progress { to: token.map(|token| (token, outbox)), ended: Rc::new(Cell::new(false)) }
     }
 
     /// Progress no one asked for: reported nowhere.
     pub fn none() -> Progress {
-        Progress { to: None }
+        Progress { to: None, ended: Rc::new(Cell::new(true)) }
     }
 
     /// `done` of `total` (when known), and what's under way.
     pub fn report(&self, done: f64, total: Option<f64>, message: Option<&str>) {
         let Some((token, outbox)) = &self.to else { return };
+        if self.ended.get() {
+            return;
+        }
         let mut params = json!({"progressToken": token, "progress": done});
         if let Some(total) = total {
             params["total"] = json!(total);
@@ -141,6 +152,11 @@ impl Progress {
             params["message"] = json!(message);
         }
         let _ = outbox.send(Out::Message(json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": params})));
+    }
+
+    /// The call answered or was cancelled: no more progress from it, or from any copy of it.
+    pub(crate) fn end(&self) {
+        self.ended.set(true);
     }
 }
 
@@ -224,6 +240,29 @@ impl Media {
     }
 }
 
+/// A folder of one call's own for its temporary files, removed with all that's in it when this drops. A file that must
+/// outlast the call is moved out first (the artifact store promotes it).
+#[derive(Debug)]
+pub struct Scratch {
+    path: PathBuf,
+}
+
+impl Scratch {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for Scratch {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::remove_dir_all(&self.path) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                super::say(&format!("kumi serve: scratch {} not removed: {error}", self.path.display()));
+            }
+        }
+    }
+}
+
 /// The runtime every operation runs in. One per process, shared by its calls (on one thread).
 pub struct Ctx {
     daw: DawId,
@@ -234,21 +273,32 @@ pub struct Ctx {
     media: Media,
     snapshots: Snapshots,
     shutdown: Signal,
+    /// The operations the runtime offers (`status`'s capabilities).
+    offered: Cell<&'static [&'static Operation]>,
+    scratches: Cell<u64>,
+    /// When the runtime started (ms).
+    started: i64,
 }
 
 impl Ctx {
-    /// The runtime for these arguments: its state folder made, owner-only, when it isn't there.
+    /// The runtime for these arguments: its state folder made when it isn't there and the owner's alone either way,
+    /// and resolved on disk, so every path under it (scratch included) compares as the library's roots do.
     pub fn new(args: Args, env: Env) -> Result<Ctx, String> {
-        make_private_dir(&args.state_dir).map_err(|error| format!("can't make {}: {error}", args.state_dir.display()))?;
+        let unmade = |error: std::io::Error| format!("can't make {}: {error}", args.state_dir.display());
+        make_private_dir(&args.state_dir).map_err(unmade)?;
+        let state_dir = std::fs::canonicalize(&args.state_dir).map_err(unmade)?;
         let ctx = Ctx {
             daw: args.daw,
-            snapshots: Snapshots::new(args.state_dir.clone()),
-            paths: Paths { state_dir: args.state_dir, kumi_home: args.kumi_home },
+            snapshots: Snapshots::new(state_dir.clone()),
+            paths: Paths { state_dir, kumi_home: args.kumi_home },
             env,
             library_roots: RefCell::new(granted("library", args.library_roots)),
             media_roots: granted("media", args.media_roots),
             media: Media { tools: args.tools },
             shutdown: Signal::new(),
+            offered: Cell::new(super::registry::OPERATIONS),
+            scratches: Cell::new(0),
+            started: kumi_common::time::now_ms(),
         };
         ctx.project_library_roots();
         Ok(ctx)
@@ -310,7 +360,36 @@ impl Ctx {
         &self.snapshots
     }
 
-    /// Fires when the host's input ends: every call in flight stops and settles, then the runtime exits.
+    /// A scratch folder for one call of `op`: `<state>/scratch/<op>/<id>/`, the id the runtime's own (never anything
+    /// the host sent), made the owner's alone; removed when the returned [`Scratch`] drops.
+    pub fn scratch(&self, op: &str) -> Result<Scratch, OpError> {
+        let named = !op.is_empty() && op.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_');
+        if !named {
+            return Err(OpError::Failed { reason: format!("no scratch for \"{op}\"") });
+        }
+        let n = self.scratches.get() + 1;
+        self.scratches.set(n);
+        let path = self.paths.state_dir.join("scratch").join(op).join(format!("{}-{n}", kumi_common::time::now_ms()));
+        make_private_dir(&path).map_err(|error| OpError::Failed { reason: format!("no scratch folder: {error}") })?;
+        Ok(Scratch { path })
+    }
+
+    /// When the runtime started (ms since the epoch).
+    pub fn started(&self) -> i64 {
+        self.started
+    }
+
+    /// The operations the runtime offers.
+    pub fn offered(&self) -> &'static [&'static Operation] {
+        self.offered.get()
+    }
+
+    pub(crate) fn offer(&self, operations: &'static [&'static Operation]) {
+        self.offered.set(operations);
+    }
+
+    /// Fires when the host's input ends or the runtime is told to stop: every call in flight stops and settles, then
+    /// the runtime exits.
     pub fn shutdown(&self) -> &Signal {
         &self.shutdown
     }
@@ -340,15 +419,15 @@ fn granted(kind: &str, roots: Vec<PathBuf>) -> Vec<PathBuf> {
     granted
 }
 
-/// A folder only its owner can open, made with its parents when it isn't there.
+/// A folder only its owner can open: made with its parents when it isn't there, and made the owner's alone when it is.
 pub(crate) fn make_private_dir(path: &Path) -> std::io::Result<()> {
-    if path.is_dir() {
-        return Ok(());
-    }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::DirBuilderExt;
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+        if !path.is_dir() {
+            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)?;
+        }
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
     }
     #[cfg(not(unix))]
     {
@@ -362,12 +441,16 @@ mod tests {
 
     #[test]
     fn the_host_says_who_asked_and_nothing_else() {
-        let host =
-            Host::from_value(&json!({"profile_id": "default", "session_id": "s1", "tool_call_id": "t1", "request_id": null})).unwrap();
+        let host = Host::from_value(
+            &json!({"profile_id": "default", "session_id": "s1", "tool_call_id": "t1", "request_id": null, "task_id": " "}),
+        )
+        .unwrap();
         assert_eq!(
             (host.profile_id.as_deref(), host.session_id.as_deref(), host.tool_call_id.as_deref()),
             (Some("default"), Some("s1"), Some("t1"))
         );
+        assert_eq!(host.task_id, None, "a blank id is no id");
+        assert_eq!(Host::from_value(&json!({"tool_call_id": ""})).unwrap(), Host::default());
         assert_eq!(host.request_id, None);
         assert!(Host::from_value(&json!({"profile_id": "default", "approved": true})).unwrap_err().contains("approved"));
         assert!(Host::from_value(&json!({"session_id": 7})).unwrap_err().contains("string"));
@@ -401,13 +484,42 @@ mod tests {
     }
 
     #[test]
-    fn progress_goes_out_only_when_asked_for() {
+    fn progress_goes_out_only_when_asked_for_and_until_the_call_ends() {
         let (outbox, mut sent) = tokio::sync::mpsc::unbounded_channel();
-        Progress::new(Some(json!("p1")), outbox.clone()).report(2.0, Some(5.0), Some("scanning"));
+        let progress = Progress::new(Some(json!("p1")), outbox.clone());
+        let kept = progress.clone();
+        progress.report(2.0, Some(5.0), Some("scanning"));
         Progress::new(None, outbox).report(1.0, None, None);
         let Ok(Out::Message(message)) = sent.try_recv() else { panic!("progress") };
         assert_eq!(message["params"], json!({"progressToken": "p1", "progress": 2.0, "total": 5.0, "message": "scanning"}));
         assert!(sent.try_recv().is_err(), "nothing for a call that didn't ask");
+        progress.end();
+        kept.report(3.0, Some(5.0), None);
+        assert!(sent.try_recv().is_err(), "nothing after the call ended, from a copy kept elsewhere either");
+    }
+
+    #[test]
+    fn a_calls_scratch_is_its_own_named_by_the_runtime_and_goes_with_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let args = Args {
+            state_dir: dir.path().join("state"),
+            kumi_home: dir.path().join("home"),
+            daw: DawId::Reaper,
+            library_roots: vec![],
+            media_roots: vec![],
+            tools: BTreeMap::new(),
+        };
+        let ctx = Ctx::new(args, Env::new()).unwrap();
+        let (one, two) = (ctx.scratch("listen").unwrap(), ctx.scratch("listen").unwrap());
+        assert_ne!(one.path(), two.path());
+        let under = std::fs::canonicalize(dir.path()).unwrap().join("state/scratch/listen");
+        assert!(one.path().starts_with(&under) && one.path().is_dir(), "{}", one.path().display());
+        std::fs::create_dir(one.path().join("takes")).unwrap();
+        std::fs::write(one.path().join("takes/take.wav"), b"RIFF").unwrap();
+        let gone = one.path().to_path_buf();
+        drop(one);
+        assert!(!gone.exists() && two.path().is_dir(), "only its own folder goes");
+        assert!(ctx.scratch("../status").is_err());
     }
 
     #[test]
@@ -434,6 +546,7 @@ mod tests {
         assert!(ctx.add_library_root(&dir.path().join("Gone")).is_err());
         assert!(ctx.add_library_root(&dir.path().join("kick.wav")).is_err());
         assert_eq!(ctx.library_roots(), [resolved("Samples"), resolved("Drums")]);
+        ctx.snapshots().flush();
         let shown: Value = serde_json::from_slice(&std::fs::read(dir.path().join("state/library-roots.json")).unwrap()).unwrap();
         assert_eq!(shown["roots"].as_array().map(Vec::len), Some(2));
         assert!(ctx.media().installed_only() && ctx.media().tool("ffmpeg").is_none());

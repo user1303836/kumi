@@ -2,7 +2,7 @@
 //! looks, reads, changes, undo, HISTORY and setup join it.
 
 use super::ctx::{reads, Call, Ctx, OpFuture, Operation};
-use super::{registry, PROTOCOL};
+use super::PROTOCOL;
 use serde_json::{json, Value};
 
 pub static STATUS: Operation = Operation {
@@ -34,8 +34,39 @@ pub async fn publish_status(ctx: &Ctx, stale: bool) -> Value {
     status
 }
 
-/// What `status` answers (C1): `runtime`, `daw`, `setup`, `connected`, `project`, `owner` and `capabilities` (the
-/// operations offered, by name).
+/// The runtime is stopping: `status.json` and `owner.json` say so, unless another runtime of the profile wrote them
+/// since (they're that one's to say); then every snapshot is on disk.
+pub async fn publish_stopped(ctx: &Ctx) {
+    if ctx.snapshots().is_mine("status") {
+        publish_status(ctx, true).await;
+    }
+    if ctx.snapshots().is_mine("owner") {
+        publish_owner(ctx, false);
+    }
+    ctx.snapshots().flush();
+}
+
+/// `owner.json` (C3): who runs the runtime (its profile, session and process), since when, its heartbeat (ms; a
+/// reader takes one older than 10 s for a runtime gone), whether it's running, and the DAW's write lease as it
+/// stands for it (`free` until the runtime takes the lease).
+pub fn publish_owner(ctx: &Ctx, running: bool) {
+    let owner = ctx.snapshots().owner();
+    let body = json!({
+        "profile": owner.profile_id,
+        "session_id": owner.session_id,
+        "pid": std::process::id(),
+        "since": ctx.started(),
+        "heartbeat": kumi_common::time::now_ms(),
+        "running": running,
+        "lease": "free",
+    });
+    if let Err(error) = ctx.snapshots().write("owner", &body) {
+        super::say(&format!("kumi serve: owner.json not written: {error}"));
+    }
+}
+
+/// What `status` answers (C1): `runtime` (its version, protocol and Kumi home), `daw`, `setup`, `connected`,
+/// `project`, `owner` and `capabilities` (the operations offered, by name).
 pub async fn status(ctx: &Ctx) -> Value {
     let (installed, version, bundled, daw_open) = match crate::daw::provider(ctx.daw()) {
         Some(provider) => {
@@ -45,13 +76,16 @@ pub async fn status(ctx: &Ctx) -> Value {
         }
         None => (false, None, None, false),
     };
+    // The process's own, which every part of Kumi reads: `main` set it before anything else ran.
+    let home = std::env::var_os("KUMI_HOME").map(|home| home.to_string_lossy().into_owned());
+    let capabilities: Vec<&str> = ctx.offered().iter().map(|operation| operation.name).collect();
     json!({
-        "runtime": {"version": env!("CARGO_PKG_VERSION"), "protocol": PROTOCOL},
+        "runtime": {"version": env!("CARGO_PKG_VERSION"), "protocol": PROTOCOL, "home": home},
         "daw": ctx.daw().as_str(),
         "setup": {"component": {"installed": installed, "version": version, "bundled": bundled}, "daw_open": daw_open},
         "connected": false,
         "project": null,
         "owner": null,
-        "capabilities": registry::names(),
+        "capabilities": capabilities,
     })
 }
