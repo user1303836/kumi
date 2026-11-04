@@ -48,9 +48,11 @@ impl std::ops::DerefMut for Reaped {
     }
 }
 
-/// What the fake app shows: its session's name, an open dialog, and whether it answers late.
+/// What the fake app shows: its session's name, tracks and undo history, an open dialog, and whether it answers late.
 struct Shown {
     name: String,
+    tracks: Value,
+    undo: Value,
     dialog: Option<String>,
     late: bool,
 }
@@ -65,12 +67,15 @@ struct Lab {
 
 impl Lab {
     async fn new() -> Self {
-        let shown = Arc::new(Mutex::new(Shown { name: "Midnight Groove".into(), dialog: None, late: false }));
+        let shown =
+            Arc::new(Mutex::new(Shown { name: "Midnight Groove".into(), tracks: json!([]), undo: Value::Null, dialog: None, late: false }));
         let answering = shown.clone();
         let fake = Fake::start(16, move |request| {
             let shown = answering.lock().unwrap();
             match request["method"].as_str() {
-                Some("session.inspect") => Answer::Now(ok(json!({"name": shown.name, "path": null}))),
+                Some("session.inspect") => {
+                    Answer::Now(ok(json!({"name": shown.name, "path": null, "tracks": shown.tracks, "undo": shown.undo, "redo": null})))
+                }
                 Some("ui.inspect") if shown.late => Answer::After(ms(400), ok(json!({"dialog": null}))),
                 Some("ui.inspect") => Answer::Now(ok(json!({"dialog": shown.dialog}))),
                 _ => Answer::Now(refused("unknown method")),
@@ -182,6 +187,15 @@ async fn status_until(client: &BridgeClient, until: impl Fn(&Value) -> bool) -> 
     }
 }
 
+/// Waits for the look loop to look at the session twice more, so once after anything shown before now.
+async fn session_looked(lab: &Lab) {
+    let looks = || lab.fake.requests().iter().filter(|request| request["method"] == "session.inspect").count();
+    let (before, deadline) = (looks(), Instant::now() + WAIT);
+    while looks() < before + 2 && Instant::now() < deadline {
+        tokio::time::sleep(ms(20)).await;
+    }
+}
+
 #[tokio::test]
 async fn the_host_connects_through_the_discovery_file_and_status_answers_from_the_last_look() {
     let lab = Lab::new().await;
@@ -288,11 +302,51 @@ async fn a_new_session_is_told_as_a_project_event_and_the_discovery_file_follows
     let lab = Lab::new().await;
     let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
+    let before = client.request("status", json!({}), WAIT).await.unwrap()["project"]["epoch"].clone();
     let mut events = client.events();
     lab.shown.lock().unwrap().name = "Next Song".into();
     let told = tokio::time::timeout(WAIT, events.recv()).await.unwrap().unwrap();
-    assert_eq!((told.name.as_str(), &told.data), ("project", &json!({"name": "Next Song"})));
+    assert_eq!((told.name.as_str(), &told.data["name"]), ("project", &json!("Next Song")));
+    assert!(told.data["epoch"].is_string() && told.data["epoch"] != before, "a new epoch for its refs: {:?} after {before}", told.data);
     assert_eq!(lab.discovery().await["project"]["name"], "Next Song");
+}
+
+#[tokio::test]
+async fn another_session_under_the_same_name_is_told_as_a_project_event_with_a_new_epoch() {
+    let lab = Lab::new().await;
+    let audio = json!([{"id": 1, "kind": "audio", "format": "Mono", "name": "Audio 1", "instrument": null, "inserts": [], "clips": []}]);
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        (shown.name, shown.tracks, shown.undo) = ("Untitled".into(), audio.clone(), json!("New Track"));
+    }
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    let before = client.request("status", json!({}), WAIT).await.unwrap()["project"]["epoch"].clone();
+    let mut events = client.events();
+    // File > New: another Untitled, unsaved, with nothing to undo, whose first track is "Audio 1" on id 1 again.
+    lab.shown.lock().unwrap().undo = Value::Null;
+    let told = tokio::time::timeout(WAIT, events.recv()).await.unwrap().unwrap();
+    assert_eq!((told.name.as_str(), &told.data["name"]), ("project", &json!("Untitled")));
+    assert!(told.data["epoch"].is_string() && told.data["epoch"] != before, "{:?} after {before}", told.data);
+}
+
+#[tokio::test]
+async fn the_lives_learn_from_the_look_loop_so_a_track_undone_and_made_again_between_two_reads_is_a_new_life() {
+    let lab = Lab::new().await;
+    let bass = |clips: Value| json!([{"id": 30, "kind": "audio", "format": "Mono", "name": "Bass DI", "instrument": null, "inserts": [], "clips": clips}]);
+    lab.shown.lock().unwrap().tracks = bass(json!([{"id": 31, "name": "Bass DI", "start": 0, "length": 48000, "offset": 0, "source": 32}]));
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    let read = client.request("read", json!({"kind": "track"}), WAIT).await.unwrap();
+    assert_eq!(read["items"][0]["ref"], "s:track:30");
+    // Undone, which a look sees; then another Bass DI, with nothing in it, takes the id: no read between.
+    lab.shown.lock().unwrap().tracks = json!([]);
+    session_looked(&lab).await;
+    lab.shown.lock().unwrap().tracks = bass(json!([]));
+    session_looked(&lab).await;
+    let refused = client.request("read", json!({"ref": "s:track:30", "epoch": read["epoch"]}), WAIT).await.unwrap_err();
+    let RequestError::Bridge { code, .. } = refused else { panic!("{refused:?}") };
+    assert_eq!(code, "stale");
 }
 
 #[tokio::test]

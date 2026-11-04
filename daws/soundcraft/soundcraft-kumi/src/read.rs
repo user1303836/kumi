@@ -1,22 +1,27 @@
 //! `read`: SoundCraft's session as rows, a page at a time, each object named by its ref ([`crate::refs`]).
 //!
 //! The session's objects come from `session.inspect {"detail":"full"}`, asked again at most once a second and shared by the
-//! reads in between, and a clip's notes from `midi.notes`. Every answer carries the epoch of the table of lives its refs
-//! are from: a new one starts when another session is open (its name or path changes) and when the bridge starts again.
-//! SoundCraft gives ids out again, so a ref or parent comes with the epoch it came from, and one from another epoch is
-//! stale. A page ends at the limit asked for (50, at most 200) or at the bytes an answer may take. Its cursor names the
-//! position and the object there, so a list that changed between pages says so rather than skipping or repeating rows.
+//! reads in between, and a clip's notes from `midi.notes`. The lives of the objects learn from every look at the session:
+//! a read's, and the look loop's every few seconds. Every answer carries the epoch of the table of lives its refs are
+//! from. A new one starts when the bridge starts again, and when a look sees another session open: by its name or path,
+//! by an undo history emptied with nothing to redo (only a session opened, made or closed does that), or by none of the
+//! objects it saw before. SoundCraft gives ids out again, so a ref or parent comes with the epoch it came from, and one
+//! from another epoch is stale. What a read can be refused for without the app is refused before it's asked. A page ends
+//! at the limit asked for (50, at most 200) or at the bytes an answer may take. Its cursor names the object it starts at,
+//! so a list that changed between pages says so rather than skipping or repeating rows.
 use crate::control::{Control, Error};
-use crate::refs::{note_index, Id, Kind, Lives, Missing, NoteMissing, Ref, Slot};
+use crate::refs::{fingerprints, Id, Kind, Lives, Missing, Ref, Slot};
 use daw_bridge::wire::code;
 use serde_json::{json, Map, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub const DEFAULT_LIMIT: usize = 50;
 pub const MAX_LIMIT: usize = 200;
 /// What `read` takes as a kind (`note` with a clip as its parent).
 pub const KINDS: [&str; 10] = ["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note"];
-/// The bytes a page's rows may take: a frame's bound is 256 KiB, and the rest is the envelope.
+/// The bytes a page's rows may take: the host takes answers of up to 256 KiB, and the rest is the envelope.
 const ANSWER_BYTES: usize = 224 * 1024;
 /// How long one inspection serves the reads after it.
 const FRESH: Duration = Duration::from_secs(1);
@@ -26,23 +31,59 @@ const READ_WAIT: Duration = Duration::from_secs(5);
 /// Why a read has no answer: its kumi-daw/1 code, and the words.
 pub type Refusal = (&'static str, String);
 
-/// The bridge's reads of one copy of SoundCraft: the lives of its objects (and their epoch), and the last inspection.
+/// What a look saw of the session, to tell another session from it: its name and path, the tops of its undo and redo
+/// histories, and who its objects were.
+struct Look {
+    named: (Value, Value),
+    history: (Value, Value),
+    who: HashSet<(Kind, u64, u64)>,
+}
+
+/// The bridge's reads of one copy of SoundCraft: the lives of its objects (and their epoch), the last look, and the last
+/// full inspection.
 pub struct Reads {
     control: Control,
     lives: Lives,
-    /// The session the lives are for: its name and path.
-    session: Option<(Value, Value)>,
-    inspected: Option<(Instant, Value)>,
+    looked: Option<Look>,
+    inspected: Option<(Instant, Arc<Value>)>,
 }
 
 impl Reads {
     pub fn new(control: Control) -> Self {
-        Self { control, lives: Lives::new(), session: None, inspected: None }
+        Self { control, lives: Lives::new(), looked: None, inspected: None }
     }
 
     /// The epoch now: its table's.
     pub fn epoch(&self) -> &str {
         self.lives.epoch()
+    }
+
+    /// What a look saw of the session (`session.inspect`, in full or not): the lives learn from it, and another session
+    /// starts a new epoch, with new lives. The last full inspection serves no more reads, so their rows and the lives come
+    /// from one look.
+    pub fn saw(&mut self, session: &Value) {
+        let prints = fingerprints(session);
+        let now = Look {
+            named: (session["name"].clone(), session["path"].clone()),
+            history: (session["undo"].clone(), session["redo"].clone()),
+            who: prints.iter().flat_map(|(kind, objects)| objects.iter().map(|(id, print)| (*kind, *id, print.who))).collect(),
+        };
+        let emptied = |history: &(Value, Value)| history.0.is_null() && history.1.is_null();
+        let another = self.looked.as_ref().is_some_and(|before| {
+            before.named != now.named
+                // (an undo leaves something to redo, and a redo or a step something to undo: only another session empties
+                // a history)
+                || (!emptied(&before.history) && emptied(&now.history))
+                || (!before.who.is_empty() && before.who.is_disjoint(&now.who))
+        });
+        if another {
+            self.lives = Lives::new();
+        }
+        for (kind, objects) in prints {
+            self.lives.saw(kind, objects);
+        }
+        self.looked = Some(now);
+        self.inspected = None;
     }
 
     /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, or `{ref}` for one object, with the `epoch` the ref or
@@ -51,12 +92,17 @@ impl Reads {
         let (kind, one, parent, cursor, epoch) =
             (text(params, "kind")?, text(params, "ref")?, text(params, "parent")?, text(params, "cursor")?, text(params, "epoch")?);
         let limit = limit(params)?;
-        if kind.is_none() && one.is_none() {
-            return Err(bad(format!("kind: what to read, one of {} (or ref: one object)", KINDS.join(", "))));
-        }
+        let one = one.map(|one| one.parse::<Ref>().map_err(bad)).transpose()?;
+        let parent = parent.map(|parent| parent.parse::<Ref>().map_err(bad)).transpose()?;
+        let cursor = cursor.as_deref().map(Cursor::parse).transpose()?;
         if (one.is_some() || parent.is_some()) && epoch.is_none() {
             return Err(bad("epoch: the epoch of the answer the ref or parent came from (SoundCraft gives ids out again)".into()));
         }
+        let listing = match (&one, kind) {
+            (Some(_), _) => None,
+            (None, Some(kind)) => Some(Listing::of(&kind, parent)?),
+            (None, None) => return Err(bad(format!("kind: what to read, one of {} (or ref: one object)", KINDS.join(", ")))),
+        };
         let session = self.inspect(until).await?;
         if let Some(epoch) = epoch.filter(|epoch| epoch != self.epoch()) {
             return Err((
@@ -67,79 +113,65 @@ impl Reads {
                 ),
             ));
         }
-        if let Some(one) = one {
-            let row = self.one(&session, &one.parse::<Ref>().map_err(bad)?, until).await?;
+        let Some(listing) = listing else {
+            let row = self.one(&session, &one.expect("a ref, without a kind"), until).await?;
             return Ok(json!({"items": [row], "epoch": self.epoch()}));
-        }
-        let kind = kind.expect("a kind or a ref");
-        let parent = parent.map(|parent| parent.parse::<Ref>().map_err(bad)).transpose()?;
-        // (each row with its ref, which a cursor names it by)
-        let rows: Vec<(String, Value)> = match kind.as_str() {
-            "session" => vec![("session".to_string(), session_row(&session, &self.lives))],
-            "track" => {
-                tracks(&session).iter().enumerate().filter_map(|(index, track)| track_row(&session, track, index, &self.lives)).collect()
-            }
-            "clip" => self.under(&session, parent.as_ref(), "clips", |track, clip, lives| clip_row(&session, track, clip, lives))?,
-            "insert" => self.under(&session, parent.as_ref(), "inserts", insert_row)?,
-            "send" => self.under(&session, parent.as_ref(), "sends", send_row)?,
-            "bus" => list(&session, "busses")
-                .iter()
-                .filter_map(|bus| object_row(Kind::Bus, bus, &self.lives, |bus| json!({"name": bus["name"], "format": bus["format"]})))
-                .collect(),
-            "marker" => list(&session, "markers").iter().filter_map(|marker| marker_row(&session, marker, &self.lives)).collect(),
-            "group" => list(&session, "groups").iter().filter_map(|group| group_row(group, &self.lives)).collect(),
-            "source" => list(&session, "sources").iter().filter_map(|source| source_row(&session, source, &self.lives)).collect(),
-            "note" => {
-                let Some(Ref::Object(clip)) = parent.filter(|parent| matches!(parent, Ref::Object(Id { kind: Kind::Clip, .. }))) else {
-                    return Err(bad("parent: the clip whose notes to read (s:clip:…)".into()));
-                };
-                self.notes(&clip, until).await?
-            }
-            other => return Err(bad(format!("kind: one of {}, not {other}", KINDS.join(", ")))),
         };
-        self.page(rows, cursor.as_deref(), limit)
+        // (each row with its ref, which a cursor names it by)
+        let rows: Vec<(String, Value)> = match listing {
+            Listing::Notes(clip) => self.notes(&session, &clip, until).await?,
+            listing => self.rows(&session, listing)?,
+        };
+        self.page(&rows, cursor.as_ref(), limit)
     }
 
-    /// The session as the app shows it now, from the last inspection when it's fresh enough. A new session starts a new
-    /// epoch, and the lives of its objects start again.
-    async fn inspect(&mut self, until: Instant) -> Result<Value, Refusal> {
+    /// The session as the app shows it now, from the last inspection when it's fresh enough.
+    async fn inspect(&mut self, until: Instant) -> Result<Arc<Value>, Refusal> {
         if let Some((at, session)) = &self.inspected {
             if at.elapsed() < FRESH {
-                return Ok(session.clone());
+                return Ok(Arc::clone(session));
             }
         }
-        let wait = READ_WAIT.min(until.saturating_duration_since(Instant::now()));
-        if wait.is_zero() {
-            return Err((code::DEADLINE, "the read's deadline passed before it started: nothing was read".into()));
-        }
-        let session = self.control.call("session.inspect", json!({"detail": "full"}), wait).await.map_err(asked)?;
-        let named = (session["name"].clone(), session["path"].clone());
-        if self.session.as_ref().is_some_and(|before| *before != named) {
-            self.lives = Lives::new();
-        }
-        self.session = Some(named);
-        self.lives.saw_session(&session);
-        self.inspected = Some((Instant::now(), session.clone()));
+        let session = self.control.call("session.inspect", json!({"detail": "full"}), wait_within(until)?).await.map_err(asked)?;
+        self.saw(&session);
+        let session = Arc::new(session);
+        self.inspected = Some((Instant::now(), Arc::clone(&session)));
         Ok(session)
     }
 
-    /// The rows of one kind of a track's things (clips, inserts, sends): one track's, as `parent` names, else every track's.
-    fn under(
-        &self,
-        session: &Value,
-        parent: Option<&Ref>,
-        key: &str,
-        row: impl Fn(&Value, &Value, &Lives) -> Option<(String, Value)>,
-    ) -> Result<Vec<(String, Value)>, Refusal> {
-        let from: Vec<&Value> = match parent {
+    /// The rows of a listing the session alone answers: every listing but a clip's notes, which come from the app.
+    fn rows(&self, session: &Value, listing: Listing) -> Result<Vec<(String, Value)>, Refusal> {
+        let lives = &self.lives;
+        Ok(match listing {
+            Listing::Session => vec![("session".to_string(), session_row(session, lives))],
+            Listing::Tracks => {
+                tracks(session).iter().enumerate().filter_map(|(index, track)| track_row(session, track, index, lives)).collect()
+            }
+            Listing::Clips(of) => self
+                .tracks_of(session, of)?
+                .into_iter()
+                .flat_map(|track| list(track, "clips").iter().filter_map(move |clip| clip_row(session, track, clip, lives)))
+                .collect(),
+            Listing::Inserts(of) => self.tracks_of(session, of)?.into_iter().flat_map(|track| insert_rows(track, lives)).collect(),
+            Listing::Sends(of) => self
+                .tracks_of(session, of)?
+                .into_iter()
+                .flat_map(|track| list(track, "sends").iter().filter_map(move |send| send_row(track, send, lives)))
+                .collect(),
+            Listing::Busses => list(session, "busses").iter().filter_map(|bus| bus_row(bus, lives)).collect(),
+            Listing::Markers => list(session, "markers").iter().filter_map(|marker| marker_row(session, marker, lives)).collect(),
+            Listing::Groups => list(session, "groups").iter().filter_map(|group| group_row(group, lives)).collect(),
+            Listing::Sources => list(session, "sources").iter().filter_map(|source| source_row(session, source, lives)).collect(),
+            Listing::Notes(_) => unreachable!("a clip's notes are read from the app"),
+        })
+    }
+
+    /// The tracks whose things a read lists: the one `of` names, else every track.
+    fn tracks_of<'a>(&self, session: &'a Value, of: Option<Id>) -> Result<Vec<&'a Value>, Refusal> {
+        Ok(match of {
             None => tracks(session).iter().collect(),
-            Some(Ref::Object(id @ Id { kind: Kind::Track, .. })) => vec![self.track(session, id)?],
-            Some(other) => return Err(bad(format!("parent: a track (s:track:…), not {other}"))),
-        };
-        Ok(from
-            .into_iter()
-            .flat_map(|track| list(track, key).iter().filter_map(|item| row(track, item, &self.lives)).collect::<Vec<_>>())
-            .collect())
+            Some(id) => vec![self.track(session, &id)?],
+        })
     }
 
     /// The track a ref names, if it's the one there now.
@@ -177,7 +209,7 @@ impl Reads {
                     list(session, key).iter().enumerate().find(|(_, item)| item["id"].as_u64() == Some(found)).ok_or_else(missing)?;
                 match id.kind {
                     Kind::Track => track_row(session, item, index, &self.lives),
-                    Kind::Bus => object_row(Kind::Bus, item, &self.lives, |bus| json!({"name": bus["name"], "format": bus["format"]})),
+                    Kind::Bus => bus_row(item, &self.lives),
                     Kind::Group => group_row(item, &self.lives),
                     Kind::Marker => marker_row(session, item, &self.lives),
                     Kind::Source => source_row(session, item, &self.lives),
@@ -188,26 +220,31 @@ impl Reads {
             }
             Ref::Insert { track, slot } => {
                 let track = self.track(session, track)?;
-                let insert = list(track, "inserts").iter().find(|insert| slot_of(insert) == Some(*slot)).ok_or_else(missing)?;
-                insert_row(track, insert, &self.lives).map(|(_, row)| row).ok_or_else(missing)
+                match slot {
+                    Slot::Instrument => instrument_row(track, &self.lives),
+                    Slot::Insert(_) => list(track, "inserts")
+                        .iter()
+                        .find(|insert| slot_of(insert) == Some(*slot))
+                        .and_then(|insert| insert_row(track, insert, &self.lives)),
+                }
+                .map(|(_, row)| row)
+                .ok_or_else(missing)
             }
             Ref::Send { track, slot } => {
                 let track = self.track(session, track)?;
                 let send = list(track, "sends").iter().find(|send| send["slot"].as_u64() == Some((*slot).into())).ok_or_else(missing)?;
                 send_row(track, send, &self.lives).map(|(_, row)| row).ok_or_else(missing)
             }
-            Ref::Note { clip, start, pitch, channel } => {
-                let notes = self.notes(clip, until).await?;
-                let at = note_index(&notes.iter().map(|(_, row)| row.clone()).collect::<Vec<_>>(), *start, *pitch, *channel).map_err(
-                    |missing| match missing {
-                        NoteMissing::Gone => gone(Missing::Gone, named),
-                        NoteMissing::Tie(count) => (
-                            code::FAILED,
-                            format!("{count} notes of that clip have that start, pitch and channel: read its notes, which mark the tie"),
-                        ),
-                    },
-                )?;
-                Ok(notes[at].1.clone())
+            Ref::Note { clip, .. } => {
+                let key = named.to_string();
+                let (_, row) = self.notes(session, clip, until).await?.into_iter().find(|(at, _)| *at == key).ok_or_else(missing)?;
+                match row.get("tie") {
+                    Some(count) => Err((
+                        code::FAILED,
+                        format!("{count} notes of that clip have that start, pitch and channel: read its notes, which mark the tie"),
+                    )),
+                    None => Ok(row),
+                }
             }
             Ref::Param { .. } | Ref::Lane { .. } | Ref::Point { .. } | Ref::Playlist { .. } => {
                 Err(bad(format!("{named}: SoundCraft's bridge doesn't read parameters, automation or playlists yet")))
@@ -215,29 +252,40 @@ impl Reads {
         }
     }
 
-    /// A clip's notes as rows (`midi.notes`), in SoundCraft's order: start, pitch, length. Notes alike (the same start,
-    /// pitch and channel, which SoundCraft keeps both of) are marked `tie`: one ref can't tell them apart.
-    async fn notes(&mut self, clip: &Id, until: Instant) -> Result<Vec<(String, Value)>, Refusal> {
+    /// A MIDI clip's notes as rows (`midi.notes`), in the clip's order (edits keep it by start, pitch, channel, length and
+    /// velocity). Notes alike (the same start, pitch and channel, which SoundCraft keeps both of) are marked `tie`: one ref
+    /// can't tell them apart. A clip that isn't MIDI is refused before the app is asked, which would say so in its status
+    /// line.
+    async fn notes(&mut self, session: &Value, clip: &Id, until: Instant) -> Result<Vec<(String, Value)>, Refusal> {
         let named = Ref::Object(*clip);
         let id = self.lives.resolve(clip).map_err(|missing| gone(missing, &named))?;
-        let wait = READ_WAIT.min(until.saturating_duration_since(Instant::now()));
-        if wait.is_zero() {
-            return Err((code::DEADLINE, "the read's deadline passed before it started: nothing was read".into()));
+        let shown = tracks(session)
+            .iter()
+            .flat_map(|track| list(track, "clips"))
+            .find(|shown| shown["id"].as_u64() == Some(id))
+            .ok_or_else(|| gone(Missing::Gone, &named))?;
+        if shown.get("notes").is_none() {
+            return Err(bad(format!("parent: {named} isn't a MIDI clip, so it has no notes")));
         }
-        let answer = self.control.execute("midi.notes", json!({"clip": id}), wait).await.map_err(|error| match error {
-            Error::Refused(said) => (code::FAILED, format!("{named}: {said}")),
-            other => asked(other),
-        })?;
-        let notes = answer["notes"].as_array().cloned().unwrap_or_default();
+        let mut answer =
+            self.control.execute("midi.notes", json!({"clip": id}), wait_within(until)?).await.map_err(|error| match error {
+                Error::Refused(said) => (code::FAILED, format!("{named}: {said}")),
+                other => asked(other),
+            })?;
+        let notes = match answer.get_mut("notes").map(Value::take) {
+            Some(Value::Array(notes)) => notes,
+            _ => Vec::new(),
+        };
         let field = |note: &Value, key: &str| note.get(key).and_then(Value::as_i64).unwrap_or_default();
+        let place = |note: &Value| (field(note, "start"), field(note, "pitch"), field(note, "channel"));
+        let mut alike: HashMap<(i64, i64, i64), usize> = HashMap::with_capacity(notes.len());
+        for note in &notes {
+            *alike.entry(place(note)).or_default() += 1;
+        }
         Ok(notes
             .iter()
             .map(|note| {
-                let (start, pitch, channel) = (field(note, "start"), field(note, "pitch"), field(note, "channel"));
-                let alike = notes
-                    .iter()
-                    .filter(|other| field(other, "start") == start && field(other, "pitch") == pitch && field(other, "channel") == channel)
-                    .count();
+                let (start, pitch, channel) = place(note);
                 let key = Ref::Note { clip: *clip, start, pitch: pitch as u8, channel: channel as u8 }.to_string();
                 let mut row = json!({
                     "ref": key,
@@ -248,25 +296,25 @@ impl Reads {
                     "releaseVelocity": field(note, "release_velocity"),
                     "channel": channel,
                 });
-                if alike > 1 {
-                    row["tie"] = alike.into();
+                if let Some(count) = alike.get(&(start, pitch, channel)).filter(|count| **count > 1) {
+                    row["tie"] = (*count).into();
                 }
                 (key, row)
             })
             .collect())
     }
 
-    /// A page of rows from the cursor's place: up to `limit`, and no more bytes than an answer may take.
-    fn page(&self, rows: Vec<(String, Value)>, cursor: Option<&str>, limit: usize) -> Result<Value, Refusal> {
+    /// A page of rows from the cursor's row: up to `limit`, and no more bytes than an answer may take.
+    fn page(&self, rows: &[(String, Value)], cursor: Option<&Cursor>, limit: usize) -> Result<Value, Refusal> {
         let from = match cursor {
             None => 0,
-            Some(cursor) => self.resume(cursor, &rows)?,
+            Some(cursor) => self.resume(cursor, rows)?,
         };
         let (mut items, mut bytes, mut next) = (vec![], 0, None);
-        for (position, (key, row)) in rows.iter().enumerate().skip(from) {
+        for (position, (_, row)) in rows.iter().enumerate().skip(from) {
             let size = serde_json::to_string(row).map_or(0, |text| text.len() + 1);
             if items.len() == limit || (!items.is_empty() && bytes + size > ANSWER_BYTES) {
-                next = Some(format!("c1.{}.{position}~{key}", self.epoch()));
+                next = Some(Cursor::at(self.epoch(), rows, position).to_string());
                 break;
             }
             bytes += size;
@@ -279,21 +327,111 @@ impl Reads {
         Ok(answer)
     }
 
-    /// Where a cursor's page starts: at the object it names, wherever that is now.
-    fn resume(&self, cursor: &str, rows: &[(String, Value)]) -> Result<usize, Refusal> {
-        let unknown = || bad("cursor: pass the nextCursor an earlier read gave, unchanged".into());
-        let (epoch, rest) = cursor.strip_prefix("c1.").and_then(|rest| rest.split_once('.')).ok_or_else(unknown)?;
-        let (position, key) = rest.split_once('~').ok_or_else(unknown)?;
-        let position: usize = position.parse().map_err(|_| unknown())?;
-        if epoch != self.epoch() {
-            return Err((code::STALE, "that cursor is from an earlier epoch: read again from the start".into()));
-        }
-        if rows.get(position).is_some_and(|(at, _)| at == key) {
-            return Ok(position);
+    /// Where a cursor's page starts: at the row it names, wherever that is now.
+    fn resume(&self, cursor: &Cursor, rows: &[(String, Value)]) -> Result<usize, Refusal> {
+        if cursor.epoch != self.epoch() {
+            return Err((code::STALE, "that cursor is from another epoch: read again from the start".into()));
         }
         rows.iter()
-            .position(|(at, _)| at == key)
+            .enumerate()
+            .filter(|(_, (key, _))| *key == cursor.key)
+            .nth(cursor.alike - 1)
+            .map(|(position, _)| position)
             .ok_or((code::CHANGED, "the list changed since that cursor: read it again from the start".into()))
+    }
+}
+
+/// What a read lists, by kind, and what its rows are under: checked before the app is asked.
+enum Listing {
+    Session,
+    Tracks,
+    /// A track's clips, inserts or sends: one track's, or every track's.
+    Clips(Option<Id>),
+    Inserts(Option<Id>),
+    Sends(Option<Id>),
+    Busses,
+    Markers,
+    Groups,
+    Sources,
+    /// A MIDI clip's notes.
+    Notes(Id),
+}
+
+impl Listing {
+    fn of(kind: &str, parent: Option<Ref>) -> Result<Listing, Refusal> {
+        let track = |parent: Option<Ref>| match parent {
+            None => Ok(None),
+            Some(Ref::Object(id @ Id { kind: Kind::Track, .. })) => Ok(Some(id)),
+            Some(other) => Err(bad(format!("parent: a track (s:track:…), not {other}"))),
+        };
+        let listing = match kind {
+            "clip" => return Ok(Listing::Clips(track(parent)?)),
+            "insert" => return Ok(Listing::Inserts(track(parent)?)),
+            "send" => return Ok(Listing::Sends(track(parent)?)),
+            "note" => {
+                return match parent {
+                    Some(Ref::Object(clip @ Id { kind: Kind::Clip, .. })) => Ok(Listing::Notes(clip)),
+                    _ => Err(bad("parent: the clip whose notes to read (s:clip:…)".into())),
+                }
+            }
+            "session" => Listing::Session,
+            "track" => Listing::Tracks,
+            "bus" => Listing::Busses,
+            "marker" => Listing::Markers,
+            "group" => Listing::Groups,
+            "source" => Listing::Sources,
+            other => return Err(bad(format!("kind: one of {}, not {other}", KINDS.join(", ")))),
+        };
+        match parent {
+            None => Ok(listing),
+            Some(parent) => Err(bad(format!("parent: {kind} rows aren't read under anything, so not under {parent}"))),
+        }
+    }
+}
+
+/// Where a page starts: `c1.<epoch>~<ref>` names the row with that ref, and `c1.<epoch>~<ref>#<n>` the nth of the rows
+/// with it (notes alike share a ref).
+struct Cursor {
+    epoch: String,
+    key: String,
+    alike: usize,
+}
+
+impl Cursor {
+    fn parse(text: &str) -> Result<Cursor, Refusal> {
+        let unknown = || bad("cursor: pass the nextCursor an earlier read gave, unchanged".into());
+        let (epoch, rest) = text.strip_prefix("c1.").and_then(|rest| rest.split_once('~')).ok_or_else(unknown)?;
+        let (key, alike) = match rest.rsplit_once('#') {
+            Some((key, alike)) => (key, alike.parse().ok().filter(|alike: &usize| *alike > 1).ok_or_else(unknown)?),
+            None => (rest, 1),
+        };
+        (!epoch.is_empty() && !key.is_empty()).then_some(()).ok_or_else(unknown)?;
+        Ok(Cursor { epoch: epoch.into(), key: key.into(), alike })
+    }
+
+    /// The cursor naming the row at `position`.
+    fn at(epoch: &str, rows: &[(String, Value)], position: usize) -> Cursor {
+        let key = &rows[position].0;
+        let alike = rows[..=position].iter().filter(|(at, _)| at == key).count();
+        Cursor { epoch: epoch.into(), key: key.clone(), alike }
+    }
+}
+
+impl std::fmt::Display for Cursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "c1.{}~{}", self.epoch, self.key)?;
+        if self.alike > 1 {
+            write!(f, "#{}", self.alike)?;
+        }
+        Ok(())
+    }
+}
+
+/// How long the app may take to answer, within the read's deadline.
+fn wait_within(until: Instant) -> Result<Duration, Refusal> {
+    match READ_WAIT.min(until.saturating_duration_since(Instant::now())) {
+        wait if wait.is_zero() => Err((code::DEADLINE, "the read's deadline passed before it started: nothing was read".into())),
+        wait => Ok(wait),
     }
 }
 
@@ -458,13 +596,36 @@ fn clip_row(session: &Value, track: &Value, clip: &Value, lives: &Lives) -> Opti
         "fadeOut": clip["fade_out"],
         "selected": selected,
     });
-    match clip.get("source").and_then(Value::as_u64).and_then(|source| lives.now(Kind::Source, source)) {
-        Some(source) => {
+    // (what it plays: a source's audio, its notes, or a video)
+    if let Some(source) = clip["source"].as_u64() {
+        if let Some(source) = lives.now(Kind::Source, source) {
             row["sourceRef"] = Ref::Object(source).to_string().into();
-            row["offset"] = clip["offset"].clone();
         }
-        None => row["notes"] = clip["notes"].clone(),
+        row["offset"] = clip["offset"].clone();
+    } else if clip.get("notes").is_some() {
+        row["notes"] = clip["notes"].clone();
+    } else if clip.get("video").is_some() {
+        row["video"] = clip["video"].clone();
+        row["offset"] = clip["offset"].clone();
     }
+    Some((key, row))
+}
+
+/// A track's inserts: its instrument first, when it has one, then its slots a to j.
+fn insert_rows(track: &Value, lives: &Lives) -> Vec<(String, Value)> {
+    instrument_row(track, lives)
+        .into_iter()
+        .chain(list(track, "inserts").iter().filter_map(|insert| insert_row(track, insert, lives)))
+        .collect()
+}
+
+/// An instrument track's instrument, as the insert `s:insert:<track>:instrument`: its plug-in (its parameters are only in
+/// the session file).
+fn instrument_row(track: &Value, lives: &Lives) -> Option<(String, Value)> {
+    let plugin = track.get("instrument").filter(|plugin| !plugin.is_null())?;
+    let track_id = now(lives, Kind::Track, track)?;
+    let key = Ref::Insert { track: track_id, slot: Slot::Instrument }.to_string();
+    let row = json!({"ref": key, "trackRef": Ref::Object(track_id).to_string(), "slot": "instrument", "plugin": plugin});
     Some((key, row))
 }
 
@@ -482,6 +643,10 @@ fn insert_row(track: &Value, insert: &Value, lives: &Lives) -> Option<(String, V
         "paramCount": params,
     });
     Some((key, row))
+}
+
+fn bus_row(bus: &Value, lives: &Lives) -> Option<(String, Value)> {
+    object_row(Kind::Bus, bus, lives, |bus| json!({"name": bus["name"], "format": bus["format"]}))
 }
 
 fn send_row(track: &Value, send: &Value, lives: &Lives) -> Option<(String, Value)> {

@@ -1,8 +1,9 @@
 //! The bridge's loopback server: `kumi-daw/1` to Kumi's host, with daw-bridge's handshake and framing.
 //!
 //! `ping` and `status` are answered from what the bridge last saw of SoundCraft, so they answer at once even while the
-//! app is busy. The look loop asks the app for `ui.inspect` each second, and for the session's name and path every few
-//! seconds. A dialog open in the app, or three looks in a row that miss their second, make the bridge busy, and a busy
+//! app is busy. The look loop asks the app for `ui.inspect` each second, and for the session every few seconds: what's
+//! open, which the reads' lives learn from too, so a project event goes out for another session even under the same name.
+//! A dialog open in the app, or three looks in a row that miss their second, make the bridge busy, and a busy
 //! bridge sends no heartbeats, as the other bridges don't. The discovery file names the app's pid and settings folder. It
 //! goes when the bridge ends: when the host that started it goes (its stdin ends), or when SoundCraft quits.
 use crate::control::{Control, Error};
@@ -13,7 +14,7 @@ use daw_bridge::files::{process_alive, read_secret, write_discovery, Discovery, 
 use daw_bridge::handshake::{refuse_connection, Offer, ServerAction, ServerConnection};
 use daw_bridge::loopback::peer_allowed;
 use daw_bridge::wire::{code, event, Frame, Identity, Project, Request, HEARTBEAT_MS, MAX_AUTHENTICATED, MAX_UNAUTHENTICATED, PROTOCOL};
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -89,6 +90,7 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     let control = config.launched.control();
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|error| format!("the bridge can't listen on loopback: {error}"))?;
     let port = listener.local_addr().map_err(|error| error.to_string())?.port();
+    let reads = Arc::new(tokio::sync::Mutex::new(Reads::new(control.clone())));
     let identity = Identity {
         preset_files: vec![],
         daw: DAW.into(),
@@ -96,7 +98,7 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
         daw_version: config.launched.version.clone().unwrap_or_default(),
         pid: config.launched.pid,
         resource: config.resource.clone(),
-        project: project(&control, config.look).await,
+        project: look_at_session(&control, &reads, config.look).await,
     };
     let started_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64);
     let notice = move |identity: &Identity| Discovery {
@@ -124,14 +126,14 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
         heartbeat_ms: config.heartbeat_ms,
         credit_bytes: None,
     };
-    let serving = Serving { seen: seen.clone(), offer, reads: Arc::new(tokio::sync::Mutex::new(Reads::new(control.clone()))) };
+    let serving = Serving { seen: seen.clone(), offer, reads: reads.clone() };
     let accepting = tokio::spawn(accept(listener, config.secret_file.clone(), serving, events.clone(), ended));
     let rewrite = |identity: &Identity| {
         let _ = write_discovery(&config.discovery_dir, &notice(identity));
     };
     let end = tokio::select! {
         () = stop => End::Stopped,
-        end = look(&control, &seen, &events, &rewrite, config.look) => end,
+        end = look(&control, &seen, &reads, &events, &rewrite, config.look) => end,
     };
     // The file and the lock go and the listener closes first, so no host finds a bridge that's ending, and the next one
     // finds the copy free; then the connections say bye.
@@ -146,17 +148,23 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     Ok(end)
 }
 
-/// The session open in the app, by `session.inspect`: its name, and its path once it's saved.
-async fn project(control: &Control, deadline: Duration) -> Option<Project> {
+/// A look at the session (`session.inspect`, its summary), which the reads' lives learn from: what's open now, with the
+/// epoch of its objects' refs. Nothing while the app doesn't answer, or while a read holds the reads (it looks itself).
+async fn look_at_session(control: &Control, reads: &tokio::sync::Mutex<Reads>, deadline: Duration) -> Option<Project> {
     let session = control.call("session.inspect", json!({}), deadline).await.ok()?;
+    let mut reads = reads.try_lock().ok()?;
+    reads.saw(&session);
     let text = |key: &str| session.get(key).and_then(Value::as_str).map(str::to_string);
-    Some(Project { name: text("name"), path: text("path"), ..Project::default() })
+    let mut extra = Map::new();
+    extra.insert("epoch".into(), reads.epoch().into());
+    Some(Project { name: text("name"), path: text("path"), extra, ..Project::default() })
 }
 
 /// Looks at the app each `every`, keeping what was seen and telling the connections what changed, until the app quits.
 async fn look(
     control: &Control,
     seen: &Mutex<Seen>,
+    reads: &tokio::sync::Mutex<Reads>,
     events: &broadcast::Sender<(String, Value)>,
     rewrite: &(dyn Fn(&Identity) + Sync),
     every: Duration,
@@ -190,7 +198,7 @@ async fn look(
         if looks % LOOKS_PER_SESSION != 0 || lock(seen).busy.is_some() {
             continue;
         }
-        let Some(now) = project(control, every).await else { continue };
+        let Some(now) = look_at_session(control, reads, every).await else { continue };
         let mut guard = lock(seen);
         if guard.identity.project.as_ref() == Some(&now) {
             continue;
