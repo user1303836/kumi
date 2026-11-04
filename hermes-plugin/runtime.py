@@ -22,7 +22,7 @@ import queue
 import subprocess
 import threading
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
 from .setup import host_target
 
@@ -126,9 +126,14 @@ def launch_environment(environ: Mapping[str, str], windows: bool = os.name == "n
     return kept
 
 
-def serve_argv(install: Install, state_dir: Path, daw: str) -> list[str]:
-    return [str(install.kumi), "serve", "--stdio", "--state-dir", str(state_dir), "--kumi-home", str(install.kumi_home),
+def serve_argv(install: Install, state_dir: Path, daw: str, library_roots: Iterable[str] = ()) -> list[str]:
+    """`kumi serve`'s arguments (C2; W1-REGISTRY): its state folder, Kumi's transport home, the DAW, and each sample
+    folder the producer approved (`--library-root`, the runtime's only grant to read them)."""
+    argv = [str(install.kumi), "serve", "--stdio", "--state-dir", str(state_dir), "--kumi-home", str(install.kumi_home),
             "--daw", daw]
+    for root in library_roots:
+        argv += ["--library-root", root]
+    return argv
 
 
 def _thread(target: Callable[..., Any], name: str, *args: Any) -> threading.Thread:
@@ -535,7 +540,8 @@ class Runtimes:
             runtime = self._running.get(data_dir.resolve())
         return runtime if runtime is not None and runtime.client.running and not runtime.closing else None
 
-    def start(self, data_dir: Path, install: Install, daw: str, session_id: str | None) -> Runtime:
+    def start(self, data_dir: Path, install: Install, daw: str, session_id: str | None, *,
+              library_roots: Iterable[str] = ()) -> Runtime:
         """The profile's runtime, started for `session_id` when none runs: this process takes the profile's state
         lock (CC-6), then the runtime is initialized, checked to be the pinned runtime (its name, version and protocol,
         before anything else is asked of it) and subscribed to its snapshots. A runtime that isn't the pinned one is
@@ -559,7 +565,7 @@ class Runtimes:
             try:
                 install.kumi_home.mkdir(parents=True, exist_ok=True)
                 holder: dict[str, Runtime] = {}
-                client = self._spawn(serve_argv(install, state, daw), launch_environment(self._environ()),
+                client = self._spawn(serve_argv(install, state, daw, library_roots), launch_environment(self._environ()),
                                      cwd=str(data_dir), keep_fds=lock.keep(),
                                      on_notification=lambda method, params: self._notified(holder, method, params),
                                      on_exit=lambda reason: self._exited(holder))

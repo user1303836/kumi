@@ -5,14 +5,39 @@ registered every time (catalog rule 6); a tool that can't work yet says why when
 """
 from __future__ import annotations
 
-from . import runtime, tools
+from pathlib import Path
+
+from . import commands, policy, runtime, tools
+
+SKILLS = Path(__file__).resolve().parent / "skills"
+# What every chat's system prompt says of Kumi (cache-safe: the same each turn). Kumi's tools may be behind tool
+# search, so this names them and the skills.
+PROMPT = (
+    "Kumi (plugin): the kumi_* tools work in the producer's DAW (Ableton Live, REAPER or Renoise) on this computer. "
+    "Start with kumi_status. Before reading or changing a project, load skill kumi:daw; for samples and the sound map, "
+    "kumi:sounds; for audio measurements, kumi:listening. Every change goes through kumi_change, which the producer "
+    "approves, and is undone only with kumi_undo and a HISTORY id. Kumi measures audio; nobody hears it."
+)
 
 
 def register(ctx) -> None:
     runtimes = runtime.Runtimes(events=tools.broadcast)
     host = tools.Host(ctx, runtimes)
+    shown = tools.installed_check(host)
     for name, schema, function, emoji in tools.TOOLS:
         ctx.register_tool(name=name, toolset=tools.TOOLSET, schema=schema, handler=tools.handler(function, host),
-                          emoji=emoji)
+                          check_fn=None if name in tools.ALWAYS_SHOWN else shown, emoji=emoji)
+
+    def approval(**kwargs):
+        return policy.pre_tool_call(host, **kwargs)
+
+    def kumi_command(raw_args: str = "", **kwargs):
+        return commands.kumi(host, raw_args, **kwargs)
+
+    ctx.register_hook("pre_tool_call", approval)
     ctx.register_hook("on_session_finalize", host.on_session_finalize)
+    ctx.register_command("kumi", kumi_command, description=commands.DESCRIPTION)
+    for skill in ("daw", "sounds", "listening"):
+        ctx.register_skill(skill, SKILLS / skill / "SKILL.md")
+    ctx.register_system_prompt_section("kumi", PROMPT)
     ctx.on_unload(runtimes.stop_all)

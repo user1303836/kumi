@@ -42,6 +42,9 @@ class Context:
         self.tools: dict[str, dict] = {}
         self.hooks: dict[str, list] = {}
         self.unloads: list = []
+        self.commands: dict[str, Any] = {}
+        self.skills: dict[str, Path] = {}
+        self.prompt: dict[str, str] = {}
         self.settings = dict(settings or {})
         self.profile_name = profile_name
 
@@ -55,8 +58,24 @@ class Context:
     def on_unload(self, callback):
         self.unloads.append(callback)
 
+    def register_command(self, name, handler, description="", args_hint="", argument_mode=None):
+        self.commands[name] = handler
+
+    def register_skill(self, name, path, description="", frontmatter=None):
+        if not Path(path).is_file():
+            raise FileNotFoundError(f"SKILL.md not found at {path}")
+        self.skills[name] = Path(path)
+
+    def register_system_prompt_section(self, id, content, *, position="after_memory", max_chars=4000):
+        if len(content) > max_chars:
+            raise ValueError(f"system prompt section {id} is over {max_chars} characters")
+        self.prompt[id] = content
+
     def get_config(self, key: str, default: Any = None) -> Any:
         return self.settings.get(key, default)
+
+    def set_config(self, key: str, value: Any) -> None:
+        self.settings[key] = value
 
     def __getattr__(self, name: str):
         raise AttributeError(f"the plugin used ctx.{name}, which register() and the tools never need")
@@ -86,3 +105,25 @@ def requests(state_dir: Path) -> list[dict]:
     """Every message the fixture runtime received, in order."""
     path = state_dir / "fixture-requests.jsonl"
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
+
+
+def host(test, settings: dict | None = None, *fixture_args: str, installed: bool = True):
+    """A plugin host as the tools see it, on a fresh plugin-data folder with the fixture runtime set up (unless
+    `installed` is false). Returns (host, context, data folder); everything is cleaned up after `test`."""
+    import tempfile
+    folder = tempfile.TemporaryDirectory()
+    test.addCleanup(folder.cleanup)
+    data = Path(folder.name)
+    if installed:
+        install(data, *fixture_args)
+    ctx = Context(settings if settings is not None else {"daw": "ableton"})
+    runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10)
+    test.addCleanup(runtimes.stop_all)
+    return module("tools").Host(ctx, runtimes, data_dir=lambda: data, pinned=lambda: VERSION), ctx, data
+
+
+def call(host, name: str, args=None, **context) -> dict:
+    """A tool called as Hermes calls it, its JSON answer read back."""
+    tools = module("tools")
+    function = next(function for tool, _, function, _ in tools.TOOLS if tool == name)
+    return json.loads(tools.handler(function, host)(args, **context))

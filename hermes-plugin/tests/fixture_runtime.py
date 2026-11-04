@@ -1,10 +1,11 @@
 """A stand-in for `kumi serve --stdio` (RESEARCH.md C2, C3), for the plugin's tests and for building UIs without Kumi.
 
 It takes the runtime's arguments, answers MCP over stdin and stdout as the runtime does, and holds a made-up Live Set
-("Night Drive") in memory: connect, observe, read, a typed change with HISTORY, undo, and the C3 snapshot files in
+("Night Drive") in memory: connect, observe, read, a typed change with HISTORY and its preview (CC-3), undo, a small
+sample library (two snares on map revision r1) with search, measuring and a scan job, and the C3 snapshot files in
 `--state-dir`, with a resource update after each. Standard library only.
 
-    python fixture_runtime.py serve --stdio --state-dir DIR --kumi-home DIR --daw ableton
+    python fixture_runtime.py serve --stdio --state-dir DIR --kumi-home DIR --daw ableton [--library-root DIR]...
         [--server-version V] [--protocol P] [--exit-on TOOL] [--slow TOOL=SECONDS] [--leased-by SESSION]
         [--refuse-subscribe URI] [--stderr-flood BYTES] [--close-stdout] [--ignore-eof]
 
@@ -208,42 +209,83 @@ def read(fixture: Fixture, args: dict, host: dict) -> dict:
     return {"rows": copy.deepcopy(fixture.set["tracks"]), "cursor": None, "epoch": fixture.epoch}
 
 
-def change(fixture: Fixture, args: dict, host: dict) -> dict:
-    if fixture.options.leased_by:
-        owner = {"profile": "default", "session_id": fixture.options.leased_by, "pid": 4242, "since": now()}
-        return {"error": {"code": "leased", "reason": "Another chat holds the DAW for changes.", "owner": owner}}
-    refused = {"state": "refused", "history_ids": [], "steps": [], "summary": "Nothing changed.", "undo_available": False}
+def plan_refusal(fixture: Fixture, args: dict) -> str | None:
+    """Why a change plan can't run (CC-3's refusals), or None."""
+    if not fixture.connected:
+        return "Kumi isn't connected to the DAW: connect first."
     if (args.get("expected_project_key"), str(args.get("expected_epoch"))) != (fixture.set["key"], fixture.epoch):
-        return {**refused, "reason": "stale: the project or its epoch changed since it was read; read it again"}
+        return "stale: the project or its epoch changed since it was read; read it again"
     steps = args.get("steps") or []
     unknown = [step.get("tool") for step in steps if step.get("tool") not in STEPS]
     if not steps or len(steps) > 20 or unknown:
-        return {**refused, "reason": f"Kumi doesn't take these steps here: {unknown or 'none given'}"}
-    before = copy.deepcopy(fixture.set)
-    done = []
+        return f"Kumi doesn't take these steps here: {unknown or 'none given'}"
     for step in steps:
         target = step.get("input") or {}
-        track = fixture.track(target.get("track_ref", ""))
-        if track is None:
-            fixture.set = before
-            return {**refused, "reason": f"no track {target.get('track_ref')!r} in the project"}
+        if fixture.track(target.get("track_ref", "")) is None:
+            return f"no track {target.get('track_ref')!r} in the project"
+        if step["tool"] == "set_track_volume" and not isinstance(target.get("volume_db"), (int, float)):
+            return "set_track_volume needs volume_db, a number"
+        if step["tool"] == "replace_sample" and not isinstance(target.get("sample"), str):
+            return "replace_sample needs sample, a file name"
+    return None
+
+
+def describe(fixture: Fixture, step: dict) -> dict:
+    """A step's preview (CC-3): one sentence naming the targets by their current names, values as read just now."""
+    target = step["input"]
+    track = fixture.track(target["track_ref"])
+    if step["tool"] == "set_track_volume":
+        text = f"Set {track['name']} volume from {track['volume_db']:g} dB to {float(target['volume_db']):g} dB"
+        return {"tool": step["tool"], "family": "mixer", "effect": "write", "text": text}
+    pad = track["devices"][0]["pads"][0]
+    text = (f"Replace the sample in the {pad['device']} on {track['name']} > {track['devices'][0]['name']} pad "
+            f"{pad['pad']} ({pad['sample']}) with {target['sample']}")
+    return {"tool": step["tool"], "family": "sample", "effect": "write", "text": text}
+
+
+def change(fixture: Fixture, args: dict, host: dict) -> dict:
+    if fixture.options.leased_by and not args.get("preview"):
+        owner = {"profile": "default", "session_id": fixture.options.leased_by, "pid": 4242, "since": now()}
+        return {"error": {"code": "leased", "reason": "Another chat holds the DAW for changes.", "owner": owner}}
+    refusal = plan_refusal(fixture, args)
+    if args.get("preview"):
+        if refusal is not None:
+            return {"state": "refused", "code": "refused", "reason": refusal}
+        return {"state": "preview", "title": args.get("title"),
+                "project": {"key": fixture.set["key"], "epoch": fixture.epoch},
+                "steps": [describe(fixture, step) for step in args["steps"]]}
+    if refusal is not None:
+        return {"state": "refused", "history_ids": [], "steps": [], "summary": "Nothing changed.",
+                "undo_available": False, "reason": refusal}
+    steps = args["steps"]
+    before = copy.deepcopy(fixture.set)
+    for step in steps:
+        target = step["input"]
+        track = fixture.track(target["track_ref"])
         if step["tool"] == "set_track_volume":
             track["volume_db"] = float(target["volume_db"])
         else:
             track["devices"][0]["pads"][0]["sample"] = target["sample"]
-        done.append({"tool": step["tool"], "state": "applied"})
     ident = f"h-{fixture.set['key']}-g1-c{len(fixture.history) + 1}"
+    track = fixture.track(steps[0]["input"]["track_ref"])
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
                             "runtime_generation": "g1", "title": args.get("title") or "Kumi change",
-                            "family": steps[0]["tool"], "at": now(), "state": "applied", "undo_available": True,
-                            "track": steps[0]["input"].get("track_ref"), "before": before})
+                            "family": describe(fixture, steps[0])["family"], "at": now(), "state": "applied",
+                            "undo_available": True, "track": track["name"], "before": before})
     fixture.publish("history", "focus")
-    return {"state": "applied", "history_ids": [ident], "steps": done, "summary": args.get("title") or "Applied.",
+    applied = [{"tool": step["tool"], "state": "applied"} for step in steps]
+    return {"state": "applied", "history_ids": [ident], "steps": applied, "summary": args.get("title") or "Applied.",
             "undo_available": True}
 
 
 def undo(fixture: Fixture, args: dict, host: dict) -> dict:
     row = next((row for row in fixture.history if row["id"] == args.get("history_id")), None)
+    if args.get("preview"):
+        if row is None:
+            return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
+        preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}",
+                   "undo_available": row["undo_available"]}
+        return preview if row["undo_available"] else {**preview, "reason": "expired"}
     if row is None:
         return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
     if not row["undo_available"]:
@@ -258,8 +300,44 @@ def history(fixture: Fixture, args: dict, host: dict) -> dict:
     return {"items": fixture.history_snapshot()["items"][:int(args.get("limit") or 20)]}
 
 
+# Each with the file's path, which a map has (CC-4) and the plugin must never pass to the model.
+SOUNDS = [{"sound_id": "s-r1-1", "name": "Dusty Snare 04.wav", "kind": "snare", "class": "drum", "folder": "Drums",
+           "duration": 0.42, "path": "/Samples/Drums/Dusty Snare 04.wav"},
+          {"sound_id": "s-r1-2", "name": "Bright Snare 11.wav", "kind": "snare", "class": "drum", "folder": "Drums",
+           "duration": 0.38, "path": "/Samples/Drums/Bright Snare 11.wav"}]
+
+
+def library(fixture: Fixture, args: dict, host: dict) -> dict:
+    if args.get("action") == "add_folder":
+        fixture.options.library_root.append(args["folder"])
+    if args.get("action") == "scan":
+        return {"job_id": "j-scan-1"}
+    return {"folders": list(fixture.options.library_root), "sounds": len(SOUNDS), "map_revision": "r1"}
+
+
+def sounds(fixture: Fixture, args: dict, host: dict) -> dict:
+    words = str(args.get("query") or "").lower().split()
+    found = [sound for sound in SOUNDS if all(word in sound["name"].lower() for word in words)]
+    return {"map_revision": "r1", "items": found[:int(args.get("limit") or 20)]}
+
+
+def listen(fixture: Fixture, args: dict, host: dict) -> dict:
+    source = args.get("source") or {}
+    if source.get("sound_id") not in {sound["sound_id"] for sound in SOUNDS}:
+        return error("not_found", "Kumi can only measure a sound of the current map in the fixture.")
+    return {"metrics": {"lufsIntegrated": -14.2, "truePeakDb": -1.3, "centroidHz": 1840.0}, "artifact_id": "a-1",
+            "verdict_text": "Measured: -14.2 LUFS, true peak -1.3 dBTP, centroid 1840 Hz.",
+            "media_tag": "MEDIA:/fixture/Dusty Snare 04.wav"}
+
+
+def job(fixture: Fixture, args: dict, host: dict) -> dict:
+    if args.get("job_id") != "j-scan-1":
+        return error("not_found", f"no job {args.get('job_id')!r}")
+    return {"state": "done", "progress": 1.0, "result": {"sounds": len(SOUNDS), "map_revision": "r1"}}
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
-         "history": history}
+         "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job}
 
 
 def main() -> None:
@@ -278,6 +356,7 @@ def main() -> None:
     parser.add_argument("--stderr-flood", type=int, default=0, help="bytes written to stderr on start")
     parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
+    parser.add_argument("--library-root", action="append", default=[])
     Fixture(parser.parse_args()).serve()
 
 
