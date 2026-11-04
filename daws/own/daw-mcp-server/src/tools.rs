@@ -77,7 +77,9 @@ pub fn kinds(daw: Daw) -> Kinds {
         // (what soundcraft-kumi's read and focus_body take: no changes yet. No routing view: SoundCraft has no track's
         // routing window, only I/O Setup's busses and outputs and the Mix window's sections)
         Daw::SoundCraft => Kinds {
-            read: &["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"],
+            read: &[
+                "session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point", "call",
+            ],
             bodies: &["edit", "midi", "fx", "mixer"],
             outside_undo: &[],
         },
@@ -179,18 +181,28 @@ fn grid_arg(arguments: &Value, params: &mut Map<String, Value>) -> Result<(), St
     }
 }
 
-/// REAPER's read of an API function by name (`kind: call`): the function and its arguments, in order or by name.
+/// A read of one call by name (`kind: call`): REAPER's API function and its arguments, in order or by name (`fn`,
+/// `args`), or SoundCraft's engine command and its parameters by name (`command`, `params`).
 fn call_args(arguments: &Value, params: &mut Map<String, Value>) -> Result<(), String> {
-    if let Some(name) = text_arg(arguments, "fn")? {
-        params.insert("fn".into(), name.into());
+    for name in ["fn", "command"] {
+        if let Some(text) = text_arg(arguments, name)? {
+            params.insert(name.into(), text.into());
+        }
     }
     match arguments.get("args") {
-        None | Some(Value::Null) => Ok(()),
+        None | Some(Value::Null) => {}
         Some(args @ (Value::Array(_) | Value::Object(_))) => {
             params.insert("args".into(), args.clone());
+        }
+        Some(_) => return Err("args must be the function's arguments: a list in order, or an object by their names".into()),
+    }
+    match arguments.get("params") {
+        None | Some(Value::Null) => Ok(()),
+        Some(by_name @ Value::Object(_)) => {
+            params.insert("params".into(), by_name.clone());
             Ok(())
         }
-        Some(_) => Err("args must be the function's arguments: a list in order, or an object by their names".into()),
+        Some(_) => Err("params must be the command's parameters: an object by their names".into()),
     }
 }
 
@@ -440,6 +452,24 @@ mod tests {
         for bad in
             [json!({"kind": "call", "fn": ""}), json!({"kind": "call", "fn": 3}), json!({"kind": "call", "fn": "CountTracks", "args": "0"})]
         {
+            assert!(read_params(&bad).is_err(), "{bad}");
+        }
+    }
+
+    #[test]
+    fn soundcrafts_call_read_forwards_its_command_and_parameters_by_name() {
+        let call = json!({"kind": "call", "command": "track.inspect", "params": {"track": "s:track:3.2"}, "epoch": "1a-1"});
+        assert_eq!(read_params(&call).unwrap(), call);
+        assert_eq!(
+            read_params(&json!({"kind": "call", "command": "engine.plugins"})).unwrap(),
+            json!({"kind": "call", "command": "engine.plugins"})
+        );
+        // Its parameters go by name only: SoundCraft's commands take an object.
+        for bad in [
+            json!({"kind": "call", "command": ""}),
+            json!({"kind": "call", "command": "track.inspect", "params": ["s:track:3.2"]}),
+            json!({"kind": "call", "command": "track.inspect", "params": "s:track:3.2"}),
+        ] {
             assert!(read_params(&bad).is_err(), "{bad}");
         }
     }

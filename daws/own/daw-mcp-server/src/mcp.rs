@@ -34,10 +34,14 @@ fn tool_list(daw: Daw) -> Value {
     if daw == Daw::SoundCraft {
         let [status, discover] = finding(daw, "session", &pick);
         let kinds = kinds(daw);
-        let epoch = json!({"epoch": {
-            "type": "string",
-            "description": "The epoch of the answer the ref or parent came from, needed with ref or parent: SoundCraft gives ids out again, so a ref means nothing without its epoch. If another session is open now, or the bridge started again, the call is refused as stale instead of reading something else.",
-        }});
+        let more = json!({
+            "epoch": {
+                "type": "string",
+                "description": "The epoch of the answer the ref or parent came from, needed with ref or parent: SoundCraft gives ids out again, so a ref means nothing without its epoch. If another session is open now, or the bridge started again, the call is refused as stale instead of reading something else.",
+            },
+            "command": {"type": "string", "description": "For kind call: the SoundCraft command to run, by its id in engine.commands. Only commands that read run: Kumi can't change SoundCraft yet."},
+            "params": {"type": "object", "description": "For kind call: the command's parameters by name, with a ref from read (and its epoch) wherever it takes a track, clip or other object."},
+        });
         let read = read_tool(
             daw,
             (
@@ -47,7 +51,7 @@ fn tool_list(daw: Daw) -> Value {
             ),
             &kinds,
             &pick,
-            epoch,
+            more,
         );
         let mut views = focus_body_tool(daw, ("the clip or track it is about", "the Edit window or the mixer"), kinds.bodies, &pick);
         // (a view's ref or around means nothing without its epoch either; without one, the bridge takes its last look's)
