@@ -263,6 +263,8 @@ mod tests {
     #[test]
     fn kumi_reads_soundcraft_and_has_the_producer_make_a_fix() {
         assert!(DAW.changes.changes_nothing());
+        // The provider says so before any integration is made: the session builds nothing from its start.
+        assert!(kumi_daw::provider::DawProvider::reads_only(&PROVIDER));
         let instructions = kumi_daw_own::bridge::instructions_of(&DAW);
         assert!(instructions.contains("can't change them yet"), "{instructions}");
         assert!(instructions.contains("how to make that fix in SoundCraft"), "{instructions}");

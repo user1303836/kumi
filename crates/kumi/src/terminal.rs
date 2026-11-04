@@ -866,6 +866,12 @@ impl PlainTerminal {
                 if self.busy() {
                     let _ = session.op(op::Cancel {}).await;
                 }
+                // A DAW Kumi can't stop says so (its own key stops it), not that a stop failed just now.
+                if !crate::daw::profile().caps.stop_transport {
+                    let app = crate::daw::words().app;
+                    self.notice(&format!("[stop] Kumi can't stop {app} yet; press space in {app}."));
+                    return Ok(());
+                }
                 if !session.op(op::StopDaw {}).await? {
                     self.notice(&format!("[stop] Kumi couldn't stop {0} just now; press space in {0}.", crate::daw::words().app));
                 }

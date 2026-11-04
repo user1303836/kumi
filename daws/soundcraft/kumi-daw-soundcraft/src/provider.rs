@@ -18,6 +18,8 @@ pub static PROVIDER: Beside = Beside {
     library: &crate::library::LIBRARY,
     site: "github.com/storytold/soundcraft",
     experimental: true,
+    // (as its change set says: `tests::kumi_reads_soundcraft_and_has_the_producer_make_a_fix`)
+    reads_only: true,
     program: "soundcraft-kumi",
     app_variable: detect::SOUNDCRAFT_APP,
     bridge_folder: "bridges/soundcraft",

@@ -200,6 +200,11 @@ pub trait DawProvider {
     fn experimental(&self) -> bool {
         false
     }
+    /// Whether Kumi only reads the DAW (its integration has no change kinds yet): its sessions build nothing, and offer
+    /// and say nothing that changes it.
+    fn reads_only(&self) -> bool {
+        false
+    }
     fn watch_words(&self) -> WatchWords;
     /// Why the open DAW couldn't start Kumi's bridge the last time it tried, and what fixes it, in words, from what the
     /// DAW keeps (Live: its log, when AbletonMcpBridge is chosen but failed to start). Said in place of

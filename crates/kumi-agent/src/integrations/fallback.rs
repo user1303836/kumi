@@ -84,10 +84,6 @@ impl Integration for FallbackIntegration {
     fn worker_tools(&self) -> Vec<Rc<dyn KernelTool>> {
         self.current().worker_tools()
     }
-    /// The primary's DAW, whichever answers now: one Kumi only reads stays so while Kumi chats without it.
-    fn changes_nothing(&self) -> bool {
-        self.primary.changes_nothing()
-    }
     fn has_undo(&self) -> bool {
         true
     }

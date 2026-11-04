@@ -46,6 +46,13 @@ kumi_types::daw_text!(
     pub JOB_GUIDANCE, job_guidance:
     "For work that takes more than about 30 seconds and doesn't change the ", place, " (research on the web, a tutorial video", (if manual: ", the manual"), ", digging the producer's library or earlier conversations", (if max_for_live_devices: ", writing a device's file"), "), start_job and keep working with the producer: say what's running in one line, then carry on or end your answer. Independent jobs run together. Never start one for an ordinary edit or for anything that reads or changes the ", place, ": a worker can't see the DAW, so put every fact it needs in its task. A job's report reaches you at the next turn (at once when the request needs it, with when_done continue): act on it only as far as the producer's request asks, and make any change to the ", place, " yourself."
 );
+/// [`job_guidance`] for a DAW Kumi only reads: the producer makes any change a report calls for, so its last words, that
+/// the model makes them, go.
+pub fn job_guidance_read_only(profile: &kumi_types::daw::DawProfile) -> String {
+    let full = job_guidance(profile);
+    let yourself = format!(", and make any change to the {} yourself.", profile.words.place);
+    full.strip_suffix(&yourself).map(|kept| format!("{kept}.")).unwrap_or_else(|| full.clone())
+}
 /// How many steps a job's detail keeps, the latest.
 const STEPS_KEPT: usize = 80;
 /// How many ended jobs are kept, the latest.

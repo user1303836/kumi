@@ -759,6 +759,8 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
     let mut options = SessionOptions::new(kernel_factory, integration_factory, emit.clone());
     // The session speaks the words of the DAW it works with (Live's for Live).
     options.profile = *provider.profile();
+    // A DAW Kumi only reads: the session builds nothing, and offers and says nothing that changes it.
+    options.reads_only = provider.reads_only();
     options.conversations = conversations.map(|store| store as Rc<dyn ConversationStore>);
     options.log = log;
     options.resume = taken_up;

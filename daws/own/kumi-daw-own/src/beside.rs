@@ -60,6 +60,8 @@ pub struct Beside {
     pub site: &'static str,
     /// Whether the DAW is still experimental: only `--daw`, `KUMI_DAW` and `/daw` reach it.
     pub experimental: bool,
+    /// Whether Kumi only reads the DAW: its integration has no change kinds yet.
+    pub reads_only: bool,
     /// The program, by its name beside Kumi's executable: "soundcraft-kumi".
     pub program: &'static str,
     /// The variable the program takes for the app to open ("KUMI_SOUNDCRAFT_APP"): Kumi sets it to the app it found, so
@@ -337,6 +339,9 @@ impl DawProvider for Beside {
     }
     fn experimental(&self) -> bool {
         self.experimental
+    }
+    fn reads_only(&self) -> bool {
+        self.reads_only
     }
     fn running_now(&self, processes: &[(u32, String)]) -> bool {
         processes.iter().any(|(_, name)| detect::process_is(self.daw, name))
@@ -730,6 +735,7 @@ mod tests {
         library: &NO_LIBRARY,
         site: "renoise.com",
         experimental: false,
+        reads_only: false,
         program: "program",
         app_variable: "TEST_APP",
         bridge_folder: "bridges/renoise",

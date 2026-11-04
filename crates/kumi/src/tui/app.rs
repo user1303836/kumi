@@ -965,7 +965,7 @@ impl TuiApp {
             let can = options.session.capabilities();
             let mut tabs: Vec<Rc<dyn Tab>> =
                 vec![Rc::new(AppTab { app: weak.clone(), id: "history", title: "HISTORY", empty: "Nothing changed yet" })];
-            if can.goal {
+            if can.goal && !can.reads_only {
                 tabs.push(Rc::new(AppTab { app: weak.clone(), id: "goal", title: "GOAL", empty: "No goal yet: /goal and what to reach" }));
             }
             if can.jobs {

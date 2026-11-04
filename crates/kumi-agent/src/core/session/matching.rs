@@ -188,6 +188,12 @@ impl Session {
                 self.notice(if word == "pause" { "There's no loop running to pause." } else { "There's no loop to stop." });
                 return Ok(None);
             }
+            // A DAW Kumi only reads has no loop: its rounds change the DAW between judgings.
+            if self.reads_only() {
+                let app = self.0.options.profile.words.app;
+                self.notice(&format!("Kumi can't change {app} yet, so a loop of changes can't run there."));
+                return Ok(None);
+            }
             // A request the judge measures (mastering, the mix) runs in judged rounds, even with a reference in it.
             if searching && starts_match(request) && !wants_loop(request) {
                 return self.run_goal(op, Some(request.to_owned())).await;

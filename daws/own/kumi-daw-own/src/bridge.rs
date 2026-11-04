@@ -1763,10 +1763,6 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
     fn has_stop_live(&self) -> bool {
         self.daw.profile.caps.stop_transport
     }
-    /// A DAW with no change kinds is only read.
-    fn changes_nothing(&self) -> bool {
-        self.daw.changes.changes_nothing()
-    }
     async fn stop_live(&self, signal: Signal) -> Result<bool, RuntimeError> {
         // What Kumi plays out loud stops too (a preview isn't the DAW's playback).
         if self.listening.renderer.flags().known {
@@ -2230,8 +2226,10 @@ pub fn own_rules(daw: &OwnDaw) -> String {
             "The look's setup is how this producer set {app} up: follow it rather than {app}'s factory defaults. When the producer reports a problem: {mistake} ({mechanical}) gets that fix as one change, said with what you did and how to take it back (Kumi's undo or {app}'s own); {choice} Never change {app}'s preferences, key bindings, mouse modifiers or theme. Describe each change in words, naming what it touched and where. Offer alternatives as separate takes, each undoable, and never make a whole song or part unasked."
         )
     };
-    // (#401, R35) after time away, what's new first
-    rules.push_str(" After a catch-up, start from what changed since last time: say what's new, and propose or change only that, never what came before.");
+    // (#401, R35) after time away, what's new first: for a DAW Kumi catches up on
+    if daw.profile.caps.catch_up {
+        rules.push_str(" After a catch-up, start from what changed since last time: say what's new, and propose or change only that, never what came before.");
+    }
     // (#401) a chore kept as a script: once it ran, and only once the producer said yes
     if daw.profile.caps.scripts {
         rules.push_str(" A chore the producer repeats can be kept as a script (scripts): list what's kept first; a new one runs once with run_lua, and is kept only once they said yes.");

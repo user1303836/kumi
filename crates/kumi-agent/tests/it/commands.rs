@@ -49,6 +49,7 @@ fn everything() -> Now {
         slots: true,
         models: true,
         take_back: true,
+        reads_only: false,
     };
     let fronts = Fronts { voice: true, updates: true, switch_daw: true, willington: true };
     Now { busy: false, goal_running: false, can, fronts }
