@@ -1,11 +1,22 @@
 //! The bridge's loopback server: `kumi-daw/1` to Kumi's host, with daw-bridge's handshake and framing.
 //!
-//! `ping` and `status` are answered from what the bridge last saw of SoundCraft, so they answer at once even while the
-//! app is busy. The look loop asks the app for `ui.inspect` each second, and for the session every few seconds: what's
-//! open, which the reads' lives learn from too, so a project event goes out for another session even under the same name.
-//! A dialog open in the app, or three looks in a row that miss their second, make the bridge busy, and a busy
-//! bridge sends no heartbeats, as the other bridges don't. The discovery file names the app's pid and settings folder. It
-//! goes when the bridge ends: when the host that started it goes (its stdin ends), or when SoundCraft quits.
+//! `ping`, `status` and `focus` are answered from what the bridge last saw of SoundCraft, so they answer at once even
+//! while the app is busy. The look loop asks the app, on its [`Schedule`]:
+//! - for `ui.inspect` each second, four times a second while it plays: its windows, the playhead, a dialog;
+//! - for `engine.history` each second: an edit, an undo or a redo moves it, and another session empties it;
+//! - for the session (`session.inspect`'s summary) at ten times what its last look cost, from half a second to five, and
+//!   sooner, as far as that cost allows, when the history moves, a plug-in window opens or closes, or the app starts
+//!   playing: what's open and selected, and whether it records. The reads' lives learn from it too, so a project event
+//!   goes out for another session even under the same name.
+//!
+//! FOCUS's `changed` moves with the history, and with the session's content when that changed with no move of the
+//! history between two looks to tell it: a gesture SoundCraft merges into its last step (a fader's, an automation pass),
+//! or an edit whose history reads as it did. A plug-in's parameters, which no summary shows, move neither.
+//!
+//! A dialog open in the app, or three looks in a row that miss their second, make the bridge busy; from the first miss
+//! it asks only `ui.inspect`. A busy bridge sends no heartbeats, as the other bridges don't. The discovery file names
+//! the app's pid and settings folder. It goes when the bridge ends: when the host that started it goes (its stdin ends),
+//! or when SoundCraft quits.
 use crate::control::{Control, Error};
 use crate::launch::Launched;
 use crate::read::Reads;
@@ -32,9 +43,13 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const LOOK: Duration = Duration::from_secs(1);
 /// Looks in a row that miss their second before the app counts as stalled.
 const MISSES_BEFORE_STALLED: u32 = 3;
-/// Looks between two reads of the session's name and path: each is a `session.inspect`, which costs the app a few frames
-/// on a big session.
-const LOOKS_PER_SESSION: u32 = 5;
+/// `ui.inspect`s to a look while the app plays: the playhead FOCUS's beat light follows.
+const UI_LOOKS_WHILE_PLAYING: u32 = 4;
+/// A look at the session waits ten times what the last one cost (on a big session a `session.inspect` costs the app
+/// frames), from half a look to five; something it would show changing brings it forward as far as that cost allows.
+const SESSION_WAIT_PER_COST: u32 = 10;
+/// Looks a look at the session may take, so a summary slower than a look is still seen.
+const SESSION_LOOKS: u32 = 5;
 /// How long the connections get to say bye when the bridge ends.
 const BYE_GRACE: Duration = Duration::from_millis(300);
 /// How long the listener rests after an accept fails (a connection reset before it was taken, descriptors run out).
@@ -78,6 +93,23 @@ struct Seen {
     identity: Identity,
     /// Why the app can't take work now: a short code (`modal`, `stalled`) and the words for it.
     busy: Option<(&'static str, String)>,
+    /// The last `ui.inspect`, and when its answer came: the windows and the playhead.
+    ui: Option<(Value, Instant)>,
+    /// What the last look at the session saw for FOCUS.
+    glance: Option<Glance>,
+    /// How many times the session changed since the bridge started, as the looks saw it: each move of the undo history,
+    /// and each change of the session's content that no move told between two looks.
+    changed: u64,
+}
+
+/// What a look at the session saw for FOCUS, in the refs of its epoch.
+struct Glance {
+    epoch: String,
+    selection: Value,
+    /// The plug-in window it named the plug-in of (`[track, slot]`, the last opened then), with its `fxRef` and `fxName`.
+    plugin: Option<(Value, Value)>,
+    /// The summary itself: the rate and the tempo and meter maps the playhead is read through, and whether it records.
+    session: Arc<Value>,
 }
 
 fn lock(seen: &Mutex<Seen>) -> MutexGuard<'_, Seen> {
@@ -93,6 +125,10 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     let reads = Reads::new(control.clone());
     let epochs = reads.epochs();
     let reads = Arc::new(tokio::sync::Mutex::new(reads));
+    let (project, glance) = match look_at_session(&control, &reads, &epochs, None, config.look * SESSION_LOOKS, config.look).await {
+        Some(looked) => (Some(looked.project), looked.glance),
+        None => (None, None),
+    };
     let identity = Identity {
         preset_files: vec![],
         daw: DAW.into(),
@@ -100,7 +136,7 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
         daw_version: config.launched.version.clone().unwrap_or_default(),
         pid: config.launched.pid,
         resource: config.resource.clone(),
-        project: look_at_session(&control, &reads, &epochs, config.look).await,
+        project,
     };
     let started_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64);
     let notice = move |identity: &Identity| Discovery {
@@ -119,11 +155,11 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     let discovery = notice(&identity);
     let file = config.discovery_dir.join(discovery.file_name());
     write_discovery(&config.discovery_dir, &discovery).map_err(|error| format!("the bridge can't write its discovery file: {error}"))?;
-    let seen = Arc::new(Mutex::new(Seen { identity, busy: None }));
+    let seen = Arc::new(Mutex::new(Seen { identity, busy: None, ui: None, glance, changed: 0 }));
     let (events, _) = broadcast::channel::<(String, Value)>(64);
     let (ending, ended) = watch::channel(None::<&'static str>);
     let offer = Offer {
-        methods: vec!["ping".into(), "status".into(), "read".into(), "snapshot".into()],
+        methods: vec!["ping".into(), "status".into(), "focus".into(), "read".into(), "snapshot".into()],
         events: vec![event::PROJECT.into()],
         heartbeat_ms: config.heartbeat_ms,
         credit_bytes: None,
@@ -150,26 +186,120 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     Ok(end)
 }
 
-/// A look at the session (`session.inspect`, its summary): what's open now, with the epoch of its objects' refs. The reads'
-/// lives learn from it, unless a read holds them (that read looks itself), and the epoch is told either way. Nothing while
-/// the app doesn't answer.
+/// What a look at the session saw.
+struct Looked {
+    project: Project,
+    /// What FOCUS shows of it, unless a read held the reads (that read looks itself, and FOCUS keeps what it saw).
+    glance: Option<Glance>,
+    /// Its content ([`crate::read::content`]), for `changed`.
+    content: u64,
+}
+
+/// A look at the session (`session.inspect`, its summary, within `deadline`): what's open now, with the epoch of its
+/// objects' refs, its content, and what FOCUS shows of it, the plug-in in `window` among it (named within `naming`). The
+/// reads' lives learn from it, unless a read holds them; the epoch is told either way. Nothing while the app doesn't
+/// answer.
 async fn look_at_session(
     control: &Control,
     reads: &tokio::sync::Mutex<Reads>,
     epochs: &watch::Receiver<String>,
+    window: Option<Value>,
     deadline: Duration,
-) -> Option<Project> {
+    naming: Duration,
+) -> Option<Looked> {
     let session = control.call("session.inspect", json!({}), deadline).await.ok()?;
-    if let Ok(mut reads) = reads.try_lock() {
-        reads.saw(&session);
-    }
+    let content = crate::read::content(&session);
     let text = |key: &str| session.get(key).and_then(Value::as_str).map(str::to_string);
+    let (name, path) = (text("name"), text("path"));
+    let glance = match reads.try_lock() {
+        Ok(mut reads) => {
+            reads.looked(&session, content);
+            let plugin = match window {
+                Some(window) => reads.plugin_window(&session, &window, Instant::now() + naming).await.map(|named| (window, named)),
+                None => None,
+            };
+            Some(Glance { epoch: reads.epoch().into(), selection: reads.selection(&session), plugin, session: Arc::new(session) })
+        }
+        Err(_) => None,
+    };
     let mut extra = Map::new();
     extra.insert("epoch".into(), epochs.borrow().as_str().into());
-    Some(Project { name: text("name"), path: text("path"), extra, ..Project::default() })
+    Some(Looked { project: Project { name, path, extra, ..Project::default() }, glance, content })
 }
 
-/// Looks at the app each `every`, keeping what was seen and telling the connections what changed, until the app quits.
+/// When the look loop next asks the app for each thing: `ui.inspect` each look (each quarter of one while the app plays),
+/// `engine.history` each look, and the session ten times what its last look cost after it, from half a look to five, or
+/// sooner, as far as that cost allows, when something it would show changed. Its clock is the caller's.
+#[derive(Debug, Clone)]
+pub struct Schedule {
+    every: Duration,
+    ui: Instant,
+    history: Instant,
+    session: Instant,
+    /// The last look at the session: when it was asked, and what it cost.
+    last: Option<(Instant, Duration)>,
+}
+
+impl Schedule {
+    /// Each look `every` apart, all of them due at `now`.
+    pub fn new(every: Duration, now: Instant) -> Self {
+        Self { every, ui: now, history: now, session: now, last: None }
+    }
+
+    /// How often the loop wakes: a quarter of a look, the playhead's pace while the app plays.
+    pub fn tick(&self) -> Duration {
+        self.every / UI_LOOKS_WHILE_PLAYING
+    }
+
+    pub fn ui_due(&self, now: Instant) -> bool {
+        now >= self.ui
+    }
+
+    pub fn history_due(&self, now: Instant) -> bool {
+        now >= self.history
+    }
+
+    pub fn session_due(&self, now: Instant) -> bool {
+        now >= self.session
+    }
+
+    /// A `ui.inspect` asked at `asked`: the next a look on, or a quarter of one while the app plays.
+    pub fn looked_at_ui(&mut self, asked: Instant, playing: bool) {
+        self.ui = asked + if playing { self.tick() } else { self.every };
+    }
+
+    /// An `engine.history` asked at `asked`: the next a look on.
+    pub fn looked_at_history(&mut self, asked: Instant) {
+        self.history = asked + self.every;
+    }
+
+    /// A look at the session asked at `asked` and over (answered or given up) at `ended`: the next ten times its cost on,
+    /// from half a look to five.
+    pub fn looked_at_session(&mut self, asked: Instant, ended: Instant) {
+        let cost = ended.saturating_duration_since(asked);
+        self.last = Some((asked, cost));
+        self.session = ended + (cost * SESSION_WAIT_PER_COST).clamp(self.every / 2, self.every * SESSION_LOOKS);
+    }
+
+    /// Something a look at the session would show changed at `now` (the history moved, a plug-in window opened or
+    /// closed, the app started playing): the next look as soon as its cost allows, ten times the last one's cost after it
+    /// was asked, with no half-look's floor.
+    pub fn soon(&mut self, now: Instant) {
+        let allowed = self.last.map_or(now, |(asked, cost)| now.max(asked + cost * SESSION_WAIT_PER_COST));
+        self.session = self.session.min(allowed);
+    }
+
+    /// How long a look at the session may take: ten times what the last one cost, from a look to five (five before any
+    /// cost is known). So a stall a look at the session meets first is given up on within a look, as a `ui.inspect` is,
+    /// and a summary slower than a look is still seen from its second try.
+    pub fn session_deadline(&self) -> Duration {
+        let wait = |cost: Duration| (cost * SESSION_WAIT_PER_COST).clamp(self.every, self.every * SESSION_LOOKS);
+        self.last.map_or(self.every * SESSION_LOOKS, |(_, cost)| wait(cost))
+    }
+}
+
+/// Looks at the app on its [`Schedule`] until it quits, keeping what was seen and telling the connections what changed.
+/// From a missed `ui.inspect` or while the app is busy, it asks nothing else.
 async fn look(
     control: &Control,
     seen: &Mutex<Seen>,
@@ -180,45 +310,95 @@ async fn look(
     every: Duration,
 ) -> End {
     let pid = lock(seen).identity.pid;
-    let (mut misses, mut looks) = (0u32, 0u32);
-    let mut tick = tokio::time::interval(every);
+    let mut schedule = Schedule::new(every, Instant::now());
+    let mut tick = tokio::time::interval(schedule.tick());
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // (a look is due at its tick, though the tick comes a little early)
+    let at_tick = |schedule: &Schedule| Instant::now() + schedule.tick() / 2;
+    let (mut misses, mut playing, mut windows) = (0u32, false, Value::Null);
+    // (the history the last poll saw; the content the last look at the session saw, and whether a move was counted since)
+    let (mut history, mut content, mut moved) = (None::<Value>, None::<u64>, false);
     loop {
         tick.tick().await;
-        looks += 1;
-        let busy = match control.call("ui.inspect", json!({}), every).await {
-            Ok(ui) => {
-                misses = 0;
-                ui.get("dialog").filter(|dialog| !dialog.is_null()).map(|dialog| {
-                    let named = dialog.as_str().map(str::to_string).unwrap_or_else(|| dialog.to_string());
-                    ("modal", format!("a dialog is open in SoundCraft ({named})"))
-                })
-            }
-            Err(Error::Unreachable(_) | Error::Closed) if !process_alive(pid) => return End::AppQuit,
-            Err(_) => {
-                misses += 1;
-                if misses >= MISSES_BEFORE_STALLED {
-                    Some(("stalled", "SoundCraft isn't answering".to_string()))
-                } else {
-                    lock(seen).busy.clone()
+        if schedule.ui_due(at_tick(&schedule)) {
+            let asked = Instant::now();
+            let busy = match control.call("ui.inspect", json!({}), every).await {
+                Ok(ui) => {
+                    misses = 0;
+                    // A plug-in window opened or closed, a take may have started, or a dialog closed (a save's, which
+                    // names the session after its file: seen before the next edit, it's the same session): the session is
+                    // looked at soon, for the plug-in FOCUS shows, whether it records, and what the dialog did.
+                    let (now_playing, busy) = (ui["playing"] == true, dialog(&ui));
+                    let closed = busy.is_none() && lock(seen).busy.is_some();
+                    if ui["ui"]["plugin_windows"] != windows || (now_playing && !playing) || closed {
+                        schedule.soon(asked);
+                    }
+                    (windows, playing) = (ui["ui"]["plugin_windows"].clone(), now_playing);
+                    lock(seen).ui = Some((ui, Instant::now()));
+                    busy
                 }
+                Err(Error::Unreachable(_) | Error::Closed) if !process_alive(pid) => return End::AppQuit,
+                Err(_) => {
+                    misses += 1;
+                    playing = false;
+                    match misses >= MISSES_BEFORE_STALLED {
+                        true => Some(("stalled", "SoundCraft isn't answering".to_string())),
+                        false => lock(seen).busy.clone(),
+                    }
+                }
+            };
+            lock(seen).busy = busy;
+            schedule.looked_at_ui(asked, playing);
+        }
+        if misses > 0 || lock(seen).busy.is_some() {
+            continue;
+        }
+        if schedule.history_due(at_tick(&schedule)) {
+            schedule.looked_at_history(Instant::now());
+            if let Ok(now) = control.execute("engine.history", json!({}), every).await {
+                if history.as_ref().is_some_and(|before| *before != now) {
+                    lock(seen).changed += 1;
+                    moved = true;
+                    schedule.soon(Instant::now());
+                }
+                history = Some(now);
             }
-        };
-        lock(seen).busy = busy;
-        if looks % LOOKS_PER_SESSION != 0 || lock(seen).busy.is_some() {
+        }
+        if !schedule.session_due(at_tick(&schedule)) {
             continue;
         }
-        let Some(now) = look_at_session(control, reads, epochs, every).await else { continue };
+        let asked = Instant::now();
+        let window = windows.as_array().and_then(|open| open.last()).cloned();
+        let looked = look_at_session(control, reads, epochs, window, schedule.session_deadline(), every).await;
+        schedule.looked_at_session(asked, Instant::now());
+        let Some(looked) = looked else { continue };
         let mut guard = lock(seen);
-        if guard.identity.project.as_ref() == Some(&now) {
+        // (the session changed with no move of the history to tell it: a merged gesture, or an edit whose history reads
+        // as it did)
+        if content.is_some_and(|before| before != looked.content) && !moved {
+            guard.changed += 1;
+        }
+        (content, moved) = (Some(looked.content), false);
+        if looked.glance.is_some() {
+            guard.glance = looked.glance;
+        }
+        if guard.identity.project.as_ref() == Some(&looked.project) {
             continue;
         }
-        guard.identity.project = Some(now.clone());
+        guard.identity.project = Some(looked.project.clone());
         let identity = guard.identity.clone();
         drop(guard);
         rewrite(&identity);
-        let _ = events.send((event::PROJECT.into(), serde_json::to_value(&now).unwrap_or(Value::Null)));
+        let _ = events.send((event::PROJECT.into(), serde_json::to_value(&looked.project).unwrap_or(Value::Null)));
     }
+}
+
+/// A dialog open in the app, as the bridge's reason to be busy.
+fn dialog(ui: &Value) -> Option<(&'static str, String)> {
+    ui.get("dialog").filter(|dialog| !dialog.is_null()).map(|dialog| {
+        let named = dialog.as_str().map(str::to_string).unwrap_or_else(|| dialog.to_string());
+        ("modal", format!("a dialog is open in SoundCraft ({named})"))
+    })
 }
 
 /// Connections waiting to authenticate, and authenticated ones.
@@ -402,7 +582,7 @@ fn deadline(deadline_ms: Option<u64>) -> Option<Instant> {
     (deadline_ms > now_ms).then(|| Instant::now() + Duration::from_millis(deadline_ms - now_ms))
 }
 
-/// A request's answer: `ping` and `status` from what the bridge last saw; nothing else yet.
+/// A request's answer: `ping`, `status` and `focus` from what the bridge last saw; nothing else yet.
 fn answer(request: &Request, seen: &Mutex<Seen>) -> Frame {
     match request.method.as_str() {
         "ping" => Frame::ok(request.id, json!({})),
@@ -415,6 +595,63 @@ fn answer(request: &Request, seen: &Mutex<Seen>) -> Frame {
             }
             Frame::ok(request.id, status)
         }
+        "focus" => focus(request.id, &lock(seen)),
         other => Frame::error(request.id, code::UNKNOWN_METHOD, format!("no method {other}")),
+    }
+}
+
+/// FOCUS as the last looks saw it:
+/// - `view`, from the app's windows;
+/// - `selection`, in the refs of the epoch the last look at the session saw, and in a plug-in's window that plug-in;
+/// - `transport` where the playhead is now: while the app plays, it's moved on by the time since the look;
+/// - `changed`, which moves when the session changes (the module's doc says how the looks see it), and `ageMs`, how old
+///   the look is;
+/// - `busy` only while the app is (Kumi takes any `busy` there for busy).
+fn focus(id: u64, seen: &Seen) -> Frame {
+    let (Some((ui, at)), Some(glance)) = (&seen.ui, &seen.glance) else {
+        return Frame::error(id, code::BUSY, "the bridge hasn't seen SoundCraft yet");
+    };
+    let view = view(ui);
+    let mut selection = glance.selection.clone();
+    let window = ui["ui"]["plugin_windows"].as_array().and_then(|open| open.last());
+    if let Some((_, named)) = glance.plugin.as_ref().filter(|(seen, _)| view == "fx" && Some(seen) == window) {
+        selection["fxRef"] = named["fxRef"].clone();
+        selection["fxName"] = named["fxName"].clone();
+    }
+    let playing = ui["playing"] == true;
+    let mut position = ui["position"].clone();
+    if let (true, Some(samples), Some(rate)) = (playing, position.as_f64(), glance.session["sample_rate"].as_f64()) {
+        position = (samples + at.elapsed().as_secs_f64() * rate).round().into();
+    }
+    // (the session's look says whether it records, the UI's whether it plays: a recording that has stopped doesn't)
+    let recording = playing && glance.session["transport"]["recording"] == true;
+    let mut answer = json!({
+        "epoch": glance.epoch,
+        "view": view,
+        "selection": selection,
+        "transport": crate::read::transport(&glance.session, &position, &playing.into(), &recording.into()),
+        "changed": seen.changed,
+        "ageMs": at.elapsed().as_millis() as u64,
+    });
+    if let Some((code, _)) = &seen.busy {
+        answer["busy"] = (*code).into();
+    }
+    Frame::ok(id, answer)
+}
+
+/// What the producer looks at, from `ui.inspect`: a plug-in's window (`fx`); the MIDI Editor (`midi`), a panel of the
+/// Edit window, so only while the main window draws Edit (it always does once Mix has a window of its own); else the
+/// Mix window (`mixer`) or the Edit window (`edit`).
+fn view(ui: &Value) -> &'static str {
+    let shown = &ui["ui"];
+    let mix_in_main = shown["window"] == "Mix" && shown["mix_separate"] != true;
+    if shown["plugin_windows"].as_array().is_some_and(|open| !open.is_empty()) {
+        "fx"
+    } else if !mix_in_main && shown["show_midi_editor"] == true {
+        "midi"
+    } else if shown["window"] == "Mix" {
+        "mixer"
+    } else {
+        "edit"
     }
 }

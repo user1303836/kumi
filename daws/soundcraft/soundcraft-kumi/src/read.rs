@@ -60,7 +60,8 @@ pub struct Reads {
     control: Control,
     lives: Lives,
     looked: Option<Look>,
-    inspected: Option<(Instant, Arc<Value>)>,
+    /// The last full inspection, when it came, and its content ([`content`]).
+    inspected: Option<(Instant, Arc<Value>, u64)>,
     /// The epoch as it changes, for whoever can't wait for a read to end.
     told: watch::Sender<String>,
     /// The built-in plug-ins as `engine.plugins` describes them, asked once: they come with the app's version.
@@ -82,6 +83,29 @@ impl Reads {
     /// The epoch now: its table's.
     pub fn epoch(&self) -> &str {
         self.lives.epoch()
+    }
+
+    /// What the producer has selected, in the refs of the epoch now ([`Reads::saw`] the session first).
+    pub fn selection(&self, session: &Value) -> Value {
+        selection_row(session, &self.lives)
+    }
+
+    /// The plug-in a window of SoundCraft's shows, which it names `[track, slot]` (the instrument's slot is the largest
+    /// number there is): its insert's `fxRef`, and its `fxName`, a built-in's as `engine.plugins` names it. Nothing for a
+    /// track or slot the session doesn't have.
+    pub async fn plugin_window(&mut self, session: &Value, window: &Value, until: Instant) -> Option<Value> {
+        let (track, slot) = (window[0].as_u64()?, window[1].as_u64()?);
+        let track = tracks(session).iter().find(|row| row["id"].as_u64() == Some(track))?;
+        let (key, row) = if slot == u64::MAX {
+            instrument_row(track, &self.lives)?
+        } else {
+            let insert = list(track, "inserts").iter().find(|insert| insert["slot"].as_u64() == Some(slot))?;
+            insert_row(track, insert, &self.lives)?
+        };
+        // (a plug-in's name only fills in its id: one the app won't describe stays the id)
+        let _ = self.know_plugins(until).await;
+        let known = self.plugins.as_deref().unwrap_or_default().iter().find(|known| known["id"] == row["plugin"]);
+        Some(json!({"fxRef": key, "fxName": known.map_or(&row["plugin"], |known| &known["name"])}))
     }
 
     /// What a look saw of the session (`session.inspect`, in full or not): the lives learn from it, and another session
@@ -124,6 +148,16 @@ impl Reads {
         }
         self.looked = Some(now);
         self.inspected = None;
+    }
+
+    /// A look at the session's summary, whose content the look took ([`content`]): the lives learn from it as from any
+    /// look ([`Reads::saw`]), and the reads' last full inspection goes on serving them while it shows that content still,
+    /// in the same epoch.
+    pub fn looked(&mut self, summary: &Value, content: u64) {
+        let (kept, epoch) = (self.inspected.take(), self.lives.epoch().to_string());
+        self.saw(summary);
+        let same = self.lives.epoch() == epoch;
+        self.inspected = kept.filter(|(_, _, held)| same && *held == content);
     }
 
     /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, or `{ref}` for one object, with the `epoch` the ref or
@@ -178,7 +212,7 @@ impl Reads {
     pub async fn snapshot(&mut self, until: Instant) -> Result<Value, Refusal> {
         let session = self.inspect(until).await?;
         let (session, lives, epoch) = (&*session, &self.lives, self.lives.epoch());
-        let transport = &session["transport"];
+        let playhead = &session["transport"];
         let tracks: Vec<(String, Value)> =
             tracks(session).iter().enumerate().filter_map(|(index, track)| track_row(session, track, index, lives)).collect();
         let markers: Vec<(String, Value)> =
@@ -192,7 +226,7 @@ impl Reads {
         let mut answer = json!({
             "epoch": epoch,
             "project": project_row(session, epoch),
-            "transport": transport_row(session, &transport["position"], &transport["playing"], &transport["recording"]),
+            "transport": transport(session, &playhead["position"], &playhead["playing"], &playhead["recording"]),
             "tracks": rows(&shown[0]),
             "selection": selection_row(session, lives),
             "markers": rows(&shown[1]),
@@ -212,15 +246,16 @@ impl Reads {
 
     /// The session as the app shows it now, from the last inspection when it's fresh enough.
     async fn inspect(&mut self, until: Instant) -> Result<Arc<Value>, Refusal> {
-        if let Some((at, session)) = &self.inspected {
+        if let Some((at, session, _)) = &self.inspected {
             if at.elapsed() < FRESH {
                 return Ok(Arc::clone(session));
             }
         }
         let session = self.control.call("session.inspect", json!({"detail": "full"}), wait_within(until)?).await.map_err(asked)?;
         self.saw(&session);
+        let held = content(&session);
         let session = Arc::new(session);
-        self.inspected = Some((Instant::now(), Arc::clone(&session)));
+        self.inspected = Some((Instant::now(), Arc::clone(&session), held));
         Ok(session)
     }
 
@@ -716,8 +751,41 @@ fn place_id(path: &str) -> Option<String> {
     Some(sha256_hex(named.as_bytes())[..32].to_string())
 }
 
+/// A fingerprint of what an edit changes in the session (`session.inspect`), the same from its summary as from its full
+/// inspection: all of it but what moves without an edit (the selection, the transport, zoom, the tool, whether it's
+/// saved, the undo history's labels, which sources have loaded into memory) and what only the full inspection holds
+/// (plug-ins' parameters; automation points, which count instead). For this run of the bridge only.
+pub fn content(session: &Value) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut seen = session.clone();
+    if let Some(fields) = seen.as_object_mut() {
+        for moving in ["selection", "transport", "zoom", "tool", "dirty", "undo", "redo"] {
+            fields.remove(moving);
+        }
+    }
+    let each = |seen: &mut Value, key: &str| seen.get_mut(key).and_then(Value::as_array_mut).map(std::mem::take).unwrap_or_default();
+    let mut sources = each(&mut seen, "sources");
+    for source in sources.iter_mut().filter_map(Value::as_object_mut) {
+        source.remove("loaded");
+    }
+    let mut tracks = each(&mut seen, "tracks");
+    for track in &mut tracks {
+        for insert in track.get_mut("inserts").and_then(Value::as_array_mut).into_iter().flatten().filter_map(Value::as_object_mut) {
+            insert.remove("params");
+        }
+        for lane in track.get_mut("automation").and_then(Value::as_array_mut).into_iter().flatten() {
+            if let Some(points) = lane["points"].as_array().map(Vec::len) {
+                lane["points"] = points.into();
+            }
+        }
+    }
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    (seen.to_string(), Value::Array(sources).to_string(), Value::Array(tracks).to_string()).hash(&mut hasher);
+    hasher.finish()
+}
+
 fn session_row(session: &Value, lives: &Lives, epoch: &str) -> Value {
-    let transport = &session["transport"];
+    let playhead = &session["transport"];
     let mut row = project_row(session, epoch);
     row["bitDepth"] = session["bit_depth"].clone();
     row["mainFormat"] = session["main_format"].clone();
@@ -727,14 +795,14 @@ fn session_row(session: &Value, lives: &Lives, epoch: &str) -> Value {
     row["trackCount"] = tracks(session).len().into();
     row["markerCount"] = list(session, "markers").len().into();
     row["selection"] = selection_row(session, lives);
-    row["transport"] = transport_row(session, &transport["position"], &transport["playing"], &transport["recording"]);
+    row["transport"] = transport(session, &playhead["position"], &playhead["playing"], &playhead["recording"]);
     row
 }
 
 /// The transport at `position` samples: whether it plays or records, seconds, and through the tempo map (when SoundCraft's
 /// maps are steps) quarter notes from the start, the bar (from 1) and the quarter notes into it (from 1, with their
 /// fraction, as kumi-daw/1 counts them in any meter), the tempo and the meter there.
-fn transport_row(session: &Value, position: &Value, playing: &Value, recording: &Value) -> Value {
+pub fn transport(session: &Value, position: &Value, playing: &Value, recording: &Value) -> Value {
     let state = match (recording.as_bool(), playing.as_bool()) {
         (Some(true), _) => "recording",
         (_, Some(true)) => "playing",
