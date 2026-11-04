@@ -2,18 +2,18 @@
 //! Every snapshot carries the envelope its readers check: `schema`, `seq`, `at` (ms) and `owner` (the profile and
 //! session of the latest call, and this process).
 //!
-//! The runtime's thread never waits on the disk: writes go, in order, to a writer thread of their own. There each file
-//! is written whole to an owner-only temporary file beside its place, flushed to disk, renamed over it, and its folder
-//! flushed (Unix): a reader never sees half of one, and a crash never leaves an empty one. When a reader holds the file
-//! open (Windows refuses the rename then), the writer tries again a few times; a newer write of the same file waiting
-//! behind it supersedes it.
+//! The runtime's thread never waits on the disk, or serializes: writes go, in order, to a writer thread of their own.
+//! There each file is serialized and written whole to an owner-only temporary file beside its place, flushed to disk,
+//! renamed over it, and its folder flushed (Unix): a reader never sees half of one, and a crash never leaves an empty
+//! one. When a reader holds the file open (Windows refuses the rename then), the writer tries again a few times; a
+//! newer write of the same file waiting behind it supersedes it.
 //!
 //! `seq` grows with every write, starting past every snapshot found at start and past the clock (microseconds), so a
 //! reader can order the snapshots of one runtime, and of a restarted one, even across a clock step.
 
 use super::ctx::Host;
 use super::say;
-use serde_json::{json, Value};
+use serde_json::{json, Map, Value};
 use std::cell::{Cell, RefCell};
 use std::io::Write as _;
 use std::path::{Path, PathBuf};
@@ -30,7 +30,7 @@ const FLUSH: Duration = Duration::from_secs(5);
 enum Write {
     File {
         path: PathBuf,
-        bytes: Vec<u8>,
+        snapshot: Value,
     },
     /// Told once every write sent before it is done.
     Flush(Sender<()>),
@@ -75,34 +75,36 @@ impl Snapshots {
     }
 
     /// Writes snapshot `name` (`status`, `map/r7`): `body`'s fields in the envelope; its `seq`. The file is written
-    /// on the writer thread (see [`Snapshots::flush`]); only a name that isn't one is an error here.
+    /// on the writer thread (see [`Snapshots::flush`]); only a name that isn't one is an error here. For a large one
+    /// (a map), [`Snapshots::write_owned`] spares the copy.
     pub fn write(&self, name: &str, body: &Value) -> std::io::Result<u64> {
+        self.write_owned(name, body.clone())
+    }
+
+    /// [`Snapshots::write`] taking `body` itself: the envelope goes into it here, and it's serialized and written on the
+    /// writer thread, in order with every other write, so the runtime's thread neither copies nor serializes it.
+    pub fn write_owned(&self, name: &str, body: Value) -> std::io::Result<u64> {
         let path = self.path(name)?;
         let seq = (self.seq.get() + 1).max(now_us());
         self.seq.set(seq);
+        let mut snapshot = match body {
+            Value::Object(fields) => fields,
+            _ => Map::new(),
+        };
         let owner = self.owner.borrow();
-        let mut snapshot = json!({
-            "schema": SCHEMA,
-            "seq": seq,
-            "at": kumi_common::time::now_ms(),
-            "owner": {"profile": owner.profile_id, "session_id": owner.session_id, "pid": std::process::id()},
-        });
-        if let (Value::Object(snapshot), Value::Object(fields)) = (&mut snapshot, body) {
-            for (key, value) in fields {
-                if !matches!(key.as_str(), "schema" | "seq" | "at" | "owner") {
-                    snapshot.insert(key.clone(), value.clone());
-                }
-            }
-        }
-        let mut bytes = serde_json::to_vec_pretty(&snapshot).map_err(std::io::Error::other)?;
-        bytes.push(b'\n');
+        snapshot.insert("schema".into(), json!(SCHEMA));
+        snapshot.insert("seq".into(), json!(seq));
+        snapshot.insert("at".into(), json!(kumi_common::time::now_ms()));
+        snapshot.insert("owner".into(), json!({"profile": owner.profile_id, "session_id": owner.session_id, "pid": std::process::id()}));
+        drop(owner);
+        let write = Write::File { path, snapshot: Value::Object(snapshot) };
         // Written in place only when there's no writer thread to take it.
         let unsent = match &self.writer {
-            Some(writer) => writer.send(Write::File { path, bytes }).err().map(|failed| failed.0),
-            None => Some(Write::File { path, bytes }),
+            Some(writer) => writer.send(write).err().map(|failed| failed.0),
+            None => Some(write),
         };
-        if let Some(Write::File { path, bytes }) = unsent {
-            replace(&path, &bytes)?;
+        if let Some(Write::File { path, snapshot }) = unsent {
+            replace(&path, &serialized(&snapshot)?)?;
         }
         Ok(seq)
     }
@@ -167,19 +169,19 @@ fn write_files(writes: Receiver<Write>) {
         while let Ok(more) = writes.try_recv() {
             waiting.push(more);
         }
-        let mut files: Vec<(PathBuf, Vec<u8>)> = Vec::new();
+        let mut files: Vec<(PathBuf, Value)> = Vec::new();
         let mut flushed = Vec::new();
         for write in waiting {
             match write {
-                Write::File { path, bytes } => match files.iter_mut().find(|(waiting, _)| *waiting == path) {
-                    Some(newer) => newer.1 = bytes,
-                    None => files.push((path, bytes)),
+                Write::File { path, snapshot } => match files.iter_mut().find(|(waiting, _)| *waiting == path) {
+                    Some(newer) => newer.1 = snapshot,
+                    None => files.push((path, snapshot)),
                 },
                 Write::Flush(done) => flushed.push(done),
             }
         }
-        for (path, bytes) in files {
-            if let Err(error) = replace(&path, &bytes) {
+        for (path, snapshot) in files {
+            if let Err(error) = serialized(&snapshot).and_then(|bytes| replace(&path, &bytes)) {
                 say(&format!("kumi serve: {} not written: {error}", path.display()));
             }
         }
@@ -187,6 +189,13 @@ fn write_files(writes: Receiver<Write>) {
             let _ = done.send(());
         }
     }
+}
+
+/// A snapshot as its file holds it: pretty JSON and a newline.
+fn serialized(snapshot: &Value) -> std::io::Result<Vec<u8>> {
+    let mut bytes = serde_json::to_vec_pretty(snapshot).map_err(std::io::Error::other)?;
+    bytes.push(b'\n');
+    Ok(bytes)
 }
 
 /// `path` replaced by `bytes` at once: an owner-only file written beside it and flushed, renamed over it, its folder
