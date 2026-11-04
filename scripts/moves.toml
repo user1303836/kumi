@@ -197,10 +197,6 @@ from = "crates/kumi-runtime/tests/support/actions-oracle.json"
 to = "testdata/oracles/kumi-runtime/actions-oracle.json"
 
 [[move]]
-from = "crates/kumi-runtime/tests/support/arrange-oracle.json"
-to = "testdata/oracles/kumi-runtime/arrange-oracle.json"
-
-[[move]]
 from = "crates/kumi-runtime/tests/support/audition-menu-oracle.json"
 to = "testdata/oracles/kumi-runtime/audition-menu-oracle.json"
 
@@ -257,14 +253,6 @@ from = "crates/kumi-runtime/tests/support/library-search-oracle.json"
 to = "testdata/oracles/kumi-runtime/library-search-oracle.json"
 
 [[move]]
-from = "crates/kumi-runtime/tests/support/library-taste-oracle.json"
-to = "testdata/oracles/kumi-runtime/library-taste-oracle.json"
-
-[[move]]
-from = "crates/kumi-runtime/tests/support/library-tools-oracle.json"
-to = "testdata/oracles/kumi-runtime/library-tools-oracle.json"
-
-[[move]]
 from = "crates/kumi-runtime/tests/support/mutations-oracle.json"
 to = "testdata/oracles/kumi-runtime/mutations-oracle.json"
 
@@ -283,14 +271,6 @@ to = "testdata/oracles/kumi-runtime/project-oracle.json"
 [[move]]
 from = "crates/kumi-runtime/tests/support/public-tools-oracle.json"
 to = "testdata/oracles/kumi-runtime/public-tools-oracle.json"
-
-[[move]]
-from = "crates/kumi-runtime/tests/support/references-oracle.json"
-to = "testdata/oracles/kumi-runtime/references-oracle.json"
-
-[[move]]
-from = "crates/kumi-runtime/tests/support/remember-oracle.json"
-to = "testdata/oracles/kumi-runtime/remember-oracle.json"
 
 [[move]]
 from = "crates/kumi-runtime/tests/support/rendering-oracle.json"
@@ -349,10 +329,6 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-arrangement-oracle.j
 to = "testdata/oracles/ableton-mcp-server/host-arrangement-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-audio-clip-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-audio-clip-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-audio-import-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-audio-import-oracle.json"
 
@@ -361,16 +337,8 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-audio-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-audio-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-audition-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-audition-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-automation-oracle.json.gz"
 to = "testdata/oracles/ableton-mcp-server/host-automation-oracle.json.gz"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-browser-load-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-browser-load-oracle.json"
 
 [[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-browser-render-oracle.json"
@@ -381,20 +349,8 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-capture-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-capture-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-catalog-routes-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-catalog-routes-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-clip-action-oracle.json.gz"
-to = "testdata/oracles/ableton-mcp-server/host-clip-action-oracle.json.gz"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-clip-duplicate-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-clip-duplicate-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-clip-launch-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-clip-launch-oracle.json"
 
 [[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-clip-move-oracle.json"
@@ -413,28 +369,8 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-deletion-oracle.json
 to = "testdata/oracles/ableton-mcp-server/host-deletion-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-device-basic-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-device-basic-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-device-copy-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-device-copy-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-device-edit-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-device-edit-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-device-state-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-device-state-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-dialog-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-dialog-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-dispatch-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-dispatch-oracle.json"
 
 [[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-drum-pad-oracle.json.gz"
@@ -445,14 +381,6 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-extended-mixer-oracl
 to = "testdata/oracles/ableton-mcp-server/host-extended-mixer-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-fire-button-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-fire-button-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-follow-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-follow-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-groove-oracle.json.gz"
 to = "testdata/oracles/ableton-mcp-server/host-groove-oracle.json.gz"
 
@@ -461,20 +389,8 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-helpers-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-helpers-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-looper-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-looper-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-managed-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-managed-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-midi-transform-oracle.json.gz"
 to = "testdata/oracles/ableton-mcp-server/host-midi-transform-oracle.json.gz"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-mixer-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-mixer-oracle.json"
 
 [[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-mutations-oracle.json"
@@ -489,14 +405,6 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-note-target-oracle.j
 to = "testdata/oracles/ableton-mcp-server/host-note-target-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-object-view-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-object-view-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-parameter-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-parameter-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-protocol-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-protocol-oracle.json"
 
@@ -505,28 +413,12 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-racks-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-racks-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-reads-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-reads-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-recording-realtime-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-recording-realtime-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-recovery-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-recovery-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-rename-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-rename-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-routing-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-routing-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-scene-oracle.json.gz"
-to = "testdata/oracles/ableton-mcp-server/host-scene-oracle.json.gz"
 
 [[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-selection-oracle.json"
@@ -541,36 +433,12 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-simpler-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-simpler-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-song-settings-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-song-settings-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-specialized-devices-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-specialized-devices-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-structure-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-structure-oracle.json"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-tempo-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-tempo-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-track-properties-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-track-properties-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-track-structure-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/host-track-structure-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-track-view-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-track-view-oracle.json"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-transport-action-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-transport-action-oracle.json"
 
 [[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-transport-oracle.json"
@@ -581,16 +449,8 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-tuning-oracle.json.g
 to = "testdata/oracles/ableton-mcp-server/host-tuning-oracle.json.gz"
 
 [[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-ui-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-ui-oracle.json"
-
-[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-warp-oracle.json.gz"
 to = "testdata/oracles/ableton-mcp-server/host-warp-oracle.json.gz"
-
-[[move]]
-from = "daws/ableton/ableton-mcp-server/tests/fixtures/host-willington-oracle.json"
-to = "testdata/oracles/ableton-mcp-server/host-willington-oracle.json"
 
 [[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/journeys-oracle.json"
@@ -1746,10 +1606,6 @@ from = "crates/kumi-runtime/tests/it/library_files.rs"
 to = "crates/kumi-library/tests/it/library_files.rs"
 
 [[move]]
-from = "crates/kumi-runtime/tests/it/library_taste.rs"
-to = "crates/kumi-library/tests/it/library_taste.rs"
-
-[[move]]
 from = "crates/kumi-runtime/tests/it/plugin_adapters.rs"
 to = "crates/kumi-library/tests/it/plugin_adapters.rs"
 
@@ -1768,10 +1624,6 @@ to = "crates/kumi-library/tests/it/plugins.rs"
 [[move]]
 from = "testdata/oracles/kumi-runtime/library-files-oracle.json"
 to = "testdata/oracles/kumi-library/library-files-oracle.json"
-
-[[move]]
-from = "testdata/oracles/kumi-runtime/library-taste-oracle.json"
-to = "testdata/oracles/kumi-library/library-taste-oracle.json"
 
 [[rust]]
 from = "kumi_runtime::library::manual"
@@ -3050,10 +2902,6 @@ from = "crates/kumi-runtime/tests/it/agent.rs"
 to = "daws/ableton/kumi-daw-ableton/tests/it/agent.rs"
 
 [[move]]
-from = "crates/kumi-runtime/tests/it/arrange.rs"
-to = "daws/ableton/kumi-daw-ableton/tests/it/arrange.rs"
-
-[[move]]
 from = "crates/kumi-runtime/tests/it/audition_menu.rs"
 to = "daws/ableton/kumi-daw-ableton/tests/it/audition_menu.rs"
 
@@ -3146,10 +2994,6 @@ from = "crates/kumi-runtime/tests/it/library_stop.rs"
 to = "crates/kumi/tests/it/library_stop.rs"
 
 [[move]]
-from = "crates/kumi-runtime/tests/it/library_tools.rs"
-to = "crates/kumi/tests/it/library_tools.rs"
-
-[[move]]
 from = "crates/kumi-runtime/tests/it/listening.rs"
 to = "daws/ableton/kumi-daw-ableton/tests/it/listening.rs"
 
@@ -3188,10 +3032,6 @@ to = "daws/ableton/kumi-daw-ableton/tests/it/live_observation.rs"
 [[move]]
 from = "crates/kumi-runtime/tests/it/live_parameters.rs"
 to = "daws/ableton/kumi-daw-ableton/tests/it/live_parameters.rs"
-
-[[move]]
-from = "crates/kumi-runtime/tests/it/live_remember.rs"
-to = "daws/ableton/kumi-daw-ableton/tests/it/live_remember.rs"
 
 [[move]]
 from = "crates/kumi-runtime/tests/it/live_rendering.rs"
@@ -3334,10 +3174,6 @@ from = "testdata/oracles/kumi-runtime/actions-oracle.json"
 to = "testdata/oracles/kumi-daw-ableton/actions-oracle.json"
 
 [[move]]
-from = "testdata/oracles/kumi-runtime/arrange-oracle.json"
-to = "testdata/oracles/kumi-daw-ableton/arrange-oracle.json"
-
-[[move]]
 from = "testdata/oracles/kumi-runtime/audition-menu-oracle.json"
 to = "testdata/oracles/kumi-daw-ableton/audition-menu-oracle.json"
 
@@ -3386,10 +3222,6 @@ from = "testdata/oracles/kumi-runtime/library-search-oracle.json"
 to = "testdata/oracles/kumi/library-search-oracle.json"
 
 [[move]]
-from = "testdata/oracles/kumi-runtime/library-tools-oracle.json"
-to = "testdata/oracles/kumi/library-tools-oracle.json"
-
-[[move]]
 from = "testdata/oracles/kumi-runtime/mutations-oracle.json"
 to = "testdata/oracles/kumi-daw-ableton/mutations-oracle.json"
 
@@ -3408,14 +3240,6 @@ to = "testdata/oracles/kumi-daw-ableton/project-oracle.json"
 [[move]]
 from = "testdata/oracles/kumi-runtime/public-tools-oracle.json"
 to = "testdata/oracles/kumi-daw-ableton/public-tools-oracle.json"
-
-[[move]]
-from = "testdata/oracles/kumi-runtime/references-oracle.json"
-to = "testdata/oracles/kumi-daw-ableton/references-oracle.json"
-
-[[move]]
-from = "testdata/oracles/kumi-runtime/remember-oracle.json"
-to = "testdata/oracles/kumi-daw-ableton/remember-oracle.json"
 
 [[move]]
 from = "testdata/oracles/kumi-runtime/rendering-oracle.json"

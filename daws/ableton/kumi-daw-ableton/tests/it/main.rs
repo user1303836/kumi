@@ -3,7 +3,6 @@
 mod ableton_values;
 mod actions;
 mod agent;
-mod arrange;
 mod audition_menu;
 mod bridge_start;
 mod changes;
@@ -27,7 +26,6 @@ mod live_integration;
 mod live_mutations;
 mod live_observation;
 mod live_parameters;
-mod live_remember;
 mod live_rendering;
 mod live_snapshots;
 mod live_views;

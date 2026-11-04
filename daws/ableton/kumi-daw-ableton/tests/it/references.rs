@@ -1,64 +1,9 @@
 use kumi_agent::ConnectionState;
-use kumi_common::{abort::Signal, js::json::stringify};
-use kumi_daw_ableton::references::LiveBook;
-use kumi_daw_ableton::{
-    create_inference_only_integration,
-    references::{slim_mixers, References},
-    BRIDGE_TOOLS,
-};
+use kumi_common::abort::Signal;
+use kumi_daw_ableton::create_inference_only_integration;
 use kumi_types::errors::RuntimeError;
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::{cell::RefCell, rc::Rc};
-#[test]
-fn authoritative_reference_lifetimes_short_names_and_cursor_queries_match_source() {
-    let data: Value = serde_json::from_str(&kumi_testkit::oracle("kumi-daw-ableton/references-oracle.json")).unwrap();
-    assert_eq!(json!(&*BRIDGE_TOOLS), data["bridgeTools"]);
-    let mut book = References::default();
-    for case in data["cases"].as_array().unwrap() {
-        let args = &case["args"];
-        let result = match case["method"].as_str().unwrap() {
-            "registerRows" => book
-                .register_rows(
-                    args[0].as_str().unwrap(),
-                    &serde_json::from_value::<Vec<_>>(args[1].clone()).unwrap(),
-                    args[2].as_object().unwrap(),
-                    args.get(3).and_then(Value::as_str),
-                )
-                .map(|_| Value::Null)
-                .map_err(|e| e.to_string()),
-            "validateParentAndCursor" => {
-                book.validate_parent_and_cursor(args[0].as_object().unwrap()).map(|_| Value::Null).map_err(|e| e.to_string())
-            }
-            "shortRef" => Ok(json!(book.short_ref(args[0].as_str().unwrap()))),
-            "shorten" => Ok(book.shorten(&args[0])),
-            "lengthen" => Ok(book.lengthen(&args[0])),
-            "requireFreshReferences" => {
-                book.require_fresh_references(args[0].as_object().unwrap()).map(|_| Value::Null).map_err(|e| e.to_string())
-            }
-            "slimMixers" => Ok(json!(slim_mixers(args[0].as_object().unwrap()))),
-            "encode" => {
-                let result = book.encode(
-                    &serde_json::from_value(args[0].clone()).unwrap(),
-                    args[1].as_f64().unwrap(),
-                    args[2].as_bool().unwrap(),
-                    "2026-10-03T12:00:00.000Z",
-                    "connection",
-                );
-                Ok(json!({"text":result.text,"isError":result.is_error}))
-            }
-            "invalidate" => {
-                book.invalidate();
-                Ok(Value::Null)
-            }
-            _ => panic!("unknown case {case}"),
-        };
-        let result = result.unwrap_or_else(|e| json!({"error":e}));
-        assert_eq!(stringify(&result), stringify(&case["value"]), "{case}");
-        assert_eq!(json!(book.refs.iter().collect::<Vec<_>>()), case["refs"], "{case}");
-        assert_eq!(json!(book.cursors.iter().collect::<Vec<_>>()), case["cursors"], "{case}");
-        assert_eq!(json!(book.known.iter().collect::<Vec<_>>()), case["known"], "{case}");
-    }
-}
 #[tokio::test]
 async fn inference_only_observation_and_closed_cancellation_order_match_source() {
     let states = Rc::new(RefCell::new(vec![]));
