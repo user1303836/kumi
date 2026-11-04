@@ -25,11 +25,11 @@
       Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
                                                                                 │                                      │
                                                                                 │                                      │
-╭─ Choose a model ──────────────────────────────────────────── filter: luna ─╮  │                                      │
-│                                                                            │  │                                      │
-│  ChatGPT                                                        signed in  │  │                                      │
-│    GPT-6 Luna  Fast and light                                              │  │                                      │
-╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+╭─ Choose a model ───────────────────────────────────────────── filter: luna ─╮ │                                      │
+│                                                                             │ │                                      │
+│  ChatGPT                                                         signed in  │ │                                      │
+│    GPT-6 Luna  Fast and light                                               │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭──── ↑↓ to move · enter to choose · ctrl+f sets the fallback · esc to close ─╮ │                                      │
 ╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯

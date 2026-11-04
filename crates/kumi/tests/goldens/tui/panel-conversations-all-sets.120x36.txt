@@ -23,13 +23,13 @@
                        “Why might my low end sound muddy?”                      │                                      │
                                                                                 │                                      │
       Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
-╭─ Conversations   This Set · All Sets ───────────────────── type to filter ─╮  │                                      │
-│                                                                            │  │                                      │
-│    add a hi-hat groove  Night Drive · now001        this one · 2 requests  │  │                                      │
-│    make the bass wider  Night Drive · old001     2 hours ago · 5 requests  │  │                                      │
-│    Bass ideas           Morning Run ·…  pinned · 3 hours ago · 4 requests  │  │                                      │
-│    sketch some chords   A Set not saved yet · far…  1 day ago · 1 request  │  │                                      │
-╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+╭─ Conversations   This Set · All Sets ────────────────────── type to filter ─╮ │                                      │
+│                                                                             │ │                                      │
+│    add a hi-hat groove  Night Drive · now001         this one · 2 requests  │ │                                      │
+│    make the bass wider  Night Drive · old001      2 hours ago · 5 requests  │ │                                      │
+│    Bass ideas           Morning Run · …  pinned · 3 hours ago · 4 requests  │ │                                      │
+│    sketch some chords   A Set not saved yet · far0…  1 day ago · 1 request  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭─────────────────────────────────────────────────────────────────────────────╮ │                                      │
 ╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯

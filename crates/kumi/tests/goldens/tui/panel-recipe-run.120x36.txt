@@ -24,12 +24,12 @@
                                                                                 │                                      │
       Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
                                                                                 │                                      │
-╭─ “Resample twice” · 6 steps ───────────────────────────────────────────────╮  │                                      │
-│                                                                            │  │                                      │
-│    Run it on…  Kumi needs: the track to resample                           │  │                                      │
-│    Forget it                                                               │  │                                      │
-│    Keep it                                                                 │  │                                      │
-╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+╭─ “Resample twice” · 6 steps ────────────────────────────────────────────────╮ │                                      │
+│                                                                             │ │                                      │
+│    Run it on…  Kumi needs: the track to resample                            │ │                                      │
+│    Forget it                                                                │ │                                      │
+│    Keep it                                                                  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭─────────────────────────────── ↑↓ to move · enter to choose · esc to close ─╮ │                                      │
 ╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯

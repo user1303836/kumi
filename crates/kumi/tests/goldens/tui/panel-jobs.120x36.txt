@@ -24,12 +24,12 @@
                                                                                 │                                      │
                                                                                 │                                      │
                                                                                 │                                      │
-╭─ Background jobs · enter opens one: x stops it there, r runs it again ─────╮  │                                      │
-│                                                                            │  │                                      │
-│    Job 1 · Tape loop tutorial   watching a video             running 1:05  │  │                                      │
-│    Job 3 · Manual: Grain Delay  The manual couldn't be reached.    failed  │  │                                      │
-│    Job 2 · Burial vocal chops   Burial pitches vocal snippets up a…  done  │  │                                      │
-╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+╭─ Background jobs · enter opens one: x stops it there, r runs it again ──────╮ │                                      │
+│                                                                             │ │                                      │
+│    Job 1 · Tape loop tutorial   watching a video              running 1:05  │ │                                      │
+│    Job 3 · Manual: Grain Delay  The manual couldn't be reached.     failed  │ │                                      │
+│    Job 2 · Burial vocal chops   Burial pitches vocal snippets up an…  done  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭─────────────────────────────── ↑↓ to move · enter to choose · esc to close ─╮ │                                      │
 ╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯

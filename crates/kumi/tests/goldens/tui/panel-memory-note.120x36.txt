@@ -23,13 +23,13 @@
                        “Why might my low end sound muddy?”                      │                                      │
                                                                                 │                                      │
       Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
-╭─ “Mixes at -14 LUFS” ──────────────────────────────────────────────────────╮  │                                      │
-│                                                                            │  │                                      │
-│    Change the words  In the box below; press enter to keep them            │  │                                      │
-│    Unpin it          A full memory can make room by dropping it again      │  │                                      │
-│    Forget it                                                               │  │                                      │
-│    Keep it                                                                 │  │                                      │
-╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+╭─ “Mixes at -14 LUFS” ───────────────────────────────────────────────────────╮ │                                      │
+│                                                                             │ │                                      │
+│    Change the words  In the box below; press enter to keep them             │ │                                      │
+│    Unpin it          A full memory can make room by dropping it again       │ │                                      │
+│    Forget it                                                                │ │                                      │
+│    Keep it                                                                  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭─────────────────────────────── ↑↓ to move · enter to choose · esc to close ─╮ │                                      │
 ╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯

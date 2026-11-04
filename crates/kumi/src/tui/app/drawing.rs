@@ -833,7 +833,7 @@ impl TuiApp {
         let words = matches!(menu, Menu::Words { .. } | Menu::References { .. });
         let marks = if rows.iter().any(|(icon, ..)| icon.is_some()) { 2 } else { 0 };
         // Wider by the icons, where there's room: what a command does keeps its room beside them.
-        let width = (70 + marks).min(left - 2);
+        let width = super::draw_panel::panel_width(70 + marks, left);
         let longest = match menu {
             Menu::Commands(_) => kumi_agent::core::commands::COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(0) as i32,
             Menu::Words { .. } | Menu::References { .. } => rows.iter().map(|(_, label, _)| text_width(label)).max().unwrap_or(0).min(28),

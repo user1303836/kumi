@@ -23,13 +23,13 @@
                        “Why might my low end sound muddy?”                      │                                      │
                                                                                 │                                      │
       Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
-╭─ Job 1 · Burial vocal chops ────────────────────────────── running · 1:05 ─╮  │                                      │
-│                                                                            │  │                                      │
-│  Asked: Find how Burial chops vocals                                       │  │                                      │
-│  ✓ searched “Burial vocal chops”                                           │  │                                      │
-│  ✗ read a page                                                             │  │                                      │
-│  ⠁ searching the web                                                       │  │                                      │
-╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+╭─ Job 1 · Burial vocal chops ─────────────────────────────── running · 1:05 ─╮ │                                      │
+│                                                                             │ │                                      │
+│  Asked: Find how Burial chops vocals                                        │ │                                      │
+│  ✓ searched “Burial vocal chops”                                            │ │                                      │
+│  ✗ read a page                                                              │ │                                      │
+│  ⠁ searching the web                                                        │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭───── ↑↓ to scroll · x stops it · r runs it again · c copies · esc to close ─╮ │                                      │
 ╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯

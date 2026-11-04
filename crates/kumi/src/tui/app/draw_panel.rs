@@ -32,11 +32,24 @@ pub(super) fn say(lines: &mut Vec<Line>, text: &str, style: Style, width: i32) {
         lines.push(Line::new(string::trim_end(&text), style));
     }
 }
+/// How many columns there are inside the frame of what opens over the conversation, in a conversation `left` columns
+/// wide (the input box's): `most` at most. Where the box is only a little wider, it takes the box's width, so their
+/// frames' sides line up rather than miss by a column or two.
+pub(super) fn panel_width(most: i32, left: i32) -> i32 {
+    /// How much narrower than the box a panel can be before it's drawn as wide as the box.
+    const SNAP: i32 = 8;
+    let boxed = left - 2;
+    if boxed - most <= SNAP {
+        boxed
+    } else {
+        most
+    }
+}
 impl TuiApp {
     /// A list to choose from, in its box: its title (with its tabs, or what's typed to filter it), then the rows that
     /// fit around the one chosen.
     pub(super) fn draw_pick(&self, screen: &mut Screen, area: Area, picker: &Picker) -> Option<Cursor> {
-        let width = 76.min(area.left - 2);
+        let width = panel_width(76, area.left);
         let space = area.box_top - 5;
         let mut lines: Vec<Line> = vec![];
         let visible = picker.visible();

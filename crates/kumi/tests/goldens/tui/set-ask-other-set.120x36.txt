@@ -24,12 +24,12 @@
                                                                                 │                                      │
       Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
                                                                                 │                                      │
-╭─ “Bass ideas” is about “Morning Run”; Live has “Night Drive” open ─────────╮  │                                      │
-│                                                                            │  │                                      │
-│    Open “Morning Run” in Live   Live may ask whether to sav…  recommended  │  │                                      │
-│    Carry it on here, as a copy  The original stays with “Morning Run”      │  │                                      │
-│    Cancel                       Stay with “Night Drive”'s own conversati…  │  │                                      │
-╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+╭─ “Bass ideas” is about “Morning Run”; Live has “Night Drive” open ──────────╮ │                                      │
+│                                                                             │ │                                      │
+│    Open “Morning Run” in Live   Live may ask whether to save…  recommended  │ │                                      │
+│    Carry it on here, as a copy  The original stays with “Morning Run”       │ │                                      │
+│    Cancel                       Stay with “Night Drive”'s own conversation  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭─────────────────────────────── ↑↓ to move · enter to choose · esc to close ─╮ │                                      │
 ╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯

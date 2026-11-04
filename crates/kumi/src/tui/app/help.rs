@@ -394,7 +394,7 @@ impl Overlay<TuiApp> for HelpPanel {
     /// the title, so no row loses its end to it. It's read rather than chosen from, so it takes more of a wide window
     /// than other panels, and less of it wraps.
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
-        let width = 100.min(area.left - 2);
+        let width = super::draw_panel::panel_width(100, area.left);
         let rows = help_rows(&app.help_sections(), width - 4, app.0.icons);
         let room = (area.box_top - 5 - 2).max(3);
         (self.shown, self.most) = (room.min(rows.len() as i32), (rows.len() as i32 - room).max(0));

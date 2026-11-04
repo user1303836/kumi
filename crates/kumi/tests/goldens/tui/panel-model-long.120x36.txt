@@ -13,23 +13,23 @@
                          ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
                                                                                 │                                      │
-╭─ Choose a model ────────────────────────────────────────── type to filter ─╮  │                                      │
-│                                                                            │  │                                      │
-│  ChatGPT                                                        signed in  │  │                                      │
-│    It lists no models for this sign-in.                                    │  │                                      │
-│  Anthropic                                                  not signed in  │  ├─ HISTORY ────────────────────────────┤
-│    Sign in to Anthropic   with an API key                         sign in  │  │ Nothing changed yet                  │
-│  OpenAI API                                                 not signed in  │  │                                      │
-│    Sign in to OpenAI API  with an API key                         sign in  │  │                                      │
-│  OpenCode Zen                                                   signed in  │  │                                      │
-│    Model 01               chat only                                        │  │                                      │
-│    Model 02               unverified                                       │  │                                      │
-│    Model 03               private                                          │  │                                      │
-│    Model 04               deprecated                                       │  │                                      │
-│    Model 05               A model the list describes                       │  │                                      │
-│    Model 06               chat only                                        │  │                                      │
-│    Model 07               unverified                            ↓ 39 more  │  │                                      │
-╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+╭─ Choose a model ─────────────────────────────────────────── type to filter ─╮ │                                      │
+│                                                                             │ │                                      │
+│  ChatGPT                                                         signed in  │ │                                      │
+│    It lists no models for this sign-in.                                     │ │                                      │
+│  Anthropic                                                   not signed in  │ ├─ HISTORY ────────────────────────────┤
+│    Sign in to Anthropic   with an API key                          sign in  │ │ Nothing changed yet                  │
+│  OpenAI API                                                  not signed in  │ │                                      │
+│    Sign in to OpenAI API  with an API key                          sign in  │ │                                      │
+│  OpenCode Zen                                                    signed in  │ │                                      │
+│    Model 01               chat only                                         │ │                                      │
+│    Model 02               unverified                                        │ │                                      │
+│    Model 03               private                                           │ │                                      │
+│    Model 04               deprecated                                        │ │                                      │
+│    Model 05               A model the list describes                        │ │                                      │
+│    Model 06               chat only                                         │ │                                      │
+│    Model 07               unverified                             ↓ 39 more  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭──── ↑↓ to move · enter to choose · ctrl+f sets the fallback · esc to close ─╮ │                                      │
 ╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯

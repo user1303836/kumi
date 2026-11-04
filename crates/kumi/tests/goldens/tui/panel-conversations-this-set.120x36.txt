@@ -25,11 +25,11 @@
       Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
                                                                                 │                                      │
                                                                                 │                                      │
-╭─ Conversations   This Set · All Sets ───────────────────── type to filter ─╮  │                                      │
-│                                                                            │  │                                      │
-│    add a hi-hat groove  now001                      this one · 2 requests  │  │                                      │
-│    make the bass wider  old001                   2 hours ago · 5 requests  │  │                                      │
-╰────────────────────────────────────────────────────────────────────────────╯  │                                      │
+╭─ Conversations   This Set · All Sets ────────────────────── type to filter ─╮ │                                      │
+│                                                                             │ │                                      │
+│    add a hi-hat groove  now001                       this one · 2 requests  │ │                                      │
+│    make the bass wider  old001                    2 hours ago · 5 requests  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭─────────────────────────────────────────────────────────────────────────────╮ │                                      │
 ╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯

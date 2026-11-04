@@ -25,11 +25,11 @@
       Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
                                                                                 │                                      │
                                                                                 │                                      │
-╭──────────────────────────────────────────────────────────────────────╮        │                                      │
-│  make the bass wider and glu…  2 hours ago · Night Drive             │        │                                      │
-│  Drum pass                     1 day ago · Night Drive               │        │                                      │
-│  write a pad under the chorus  26 days ago · Glass Rooms             │        │                                      │
-╰──────────────────────────────────────────────────────────────────────╯        │                                      │
+╭─────────────────────────────────────────────────────────────────────────────╮ │                                      │
+│  make the bass wider and glu…  2 hours ago · Night Drive                    │ │                                      │
+│  Drum pass                     1 day ago · Night Drive                      │ │                                      │
+│  write a pad under the chorus  26 days ago · Glass Rooms                    │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
                                                                                 │                                      │
 ╭──────────────────────────────────────────── enter to choose · esc to close ─╮ │                                      │
 ╰─ /resume                                                                   ─╯ ╰──────────────────────────────────────╯
