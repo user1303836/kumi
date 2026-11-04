@@ -17,7 +17,9 @@ refuses if anything changed since that approval, then does that one step. `<data
 """
 from __future__ import annotations
 
+import contextlib
 import hashlib
+import http.client
 import json
 import os
 from pathlib import Path
@@ -28,7 +30,7 @@ import shutil
 import sys
 import tarfile
 import time
-from typing import Any, Callable, Mapping
+from typing import Any, Callable, Iterator, Mapping
 import urllib.error
 import urllib.request
 
@@ -40,6 +42,8 @@ SHA256 = re.compile(r"[0-9a-f]{64}")
 DAWS = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
 # A plan is approved for this long; after that, setup asks again.
 PLAN_TTL_MS = 10 * 60 * 1000
+# A setup step holds `<data>/setup/lock`; one this old was left by a setup that died.
+LOCK_STALE_MS = 15 * 60 * 1000
 DOWNLOAD_TIMEOUT_S = 60
 _ARCH = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64", "amd64": "x86_64"}
 _OS = {"darwin": "apple-darwin", "windows": "pc-windows-msvc", "linux": "unknown-linux-gnu"}
@@ -347,8 +351,8 @@ def _ask_runtime(setup_daw: Callable[[dict], Any], args: dict, doing: str) -> di
         raise SetupError(code if isinstance(code, str) and code else "daw_step_failed", f"{doing}: {reason}") from None
 
 
-def _cached_plan(daw: str, data_dir: Path, now: int | None = None) -> dict | None:
-    cached = _read_json(data_dir / "setup" / "plan.json")
+def _cached_plan(daw: str, data_dir: Path, now: int | None = None, path: Path | None = None) -> dict | None:
+    cached = _read_json(path or data_dir / "setup" / "plan.json")
     if not cached or cached.get("daw") != daw or not isinstance(cached.get("made_at"), int):
         return None
     if (now or _now_ms()) - cached["made_at"] > PLAN_TTL_MS or cached.get("digest") != _digest(cached):
@@ -356,23 +360,83 @@ def _cached_plan(daw: str, data_dir: Path, now: int | None = None) -> dict | Non
     return cached
 
 
-def approval(daw: str, *, action: str = "install", data_dir: Path | None = None, now: int | None = None) -> str | None:
-    """The approval text for `kumi_setup` `install` or `adopt`, from the recorded plan only (no network, no
-    subprocess), or None when there is no fresh plan for `daw` that this action can carry out: the hook then blocks
-    with "Run kumi_setup plan first"."""
+def approval(daw: str, *, action: str = "install", data_dir: Path | None = None, now: int | None = None) -> dict | None:
+    """What the producer approves for `kumi_setup` `install` or `adopt`: `{"message", "digest"}`, from the recorded
+    plan only (no network, no subprocess), or None when there is no fresh plan for `daw` that this action carries out
+    (the hook then blocks: "run kumi_setup plan first"). `install()` and `adopt()` carry out only the plan with that
+    digest (their `expected_digest`), so what runs is what was approved, even if another chat plans meanwhile."""
     cached = _cached_plan(daw, data_dir or default_data_dir(), now)
-    if not cached:
-        return None
+    message = _approval_text(cached, daw, action) if cached else None
+    return {"message": message, "digest": cached["digest"]} if message else None
+
+
+def _approval_text(plan: Mapping[str, Any], daw: str, action: str) -> str | None:
     if action == "adopt":
-        home = _owner_home(cached)
-        if cached.get("step") != "owned_elsewhere" or home is None:
+        home = _owner_home(plan)
+        if plan.get("step") != "owned_elsewhere" or home is None:
             return None
-        return (f"Kumi will use the existing Kumi installation at {home} for its connection to {DAWS[daw]}: "
-                "Kumi's runtime will read that installation's DAW connection files, never its sign-in, and the "
-                f"{cached['component'].get('component') or 'DAW component'} it installed stays as it is.")
-    if action != "install" or cached.get("step") not in ("runtime", "daw_component"):
+        return (f"Kumi will use the existing Kumi installation at {home} for its connection to {DAWS[daw]}. Kumi's "
+                "runtime will read that installation's DAW connection files and write its own connection state "
+                "there (never its sign-in, settings or account), and the "
+                f"{plan['component'].get('component') or 'DAW component'} it installed stays as it is.")
+    if action != "install" or plan.get("step") not in ("runtime", "daw_component"):
         return None
-    return "Kumi setup will: " + "; ".join(cached["effects"]) + "."
+    return "Kumi setup will: " + "; ".join(plan["effects"]) + "."
+
+
+def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -> dict:
+    """Take the approved plan, so one approval carries out one step: plan.json is renamed away (atomically: a
+    second install finds nothing to take), and it must be the fresh plan whose digest the producer approved."""
+    if not isinstance(expected_digest, str) or not expected_digest:
+        raise SetupError("not_approved", "Setup carries out only a plan the producer approved; plan and approve it.")
+    source = data_dir / "setup" / "plan.json"
+    taken = source.with_name(f".plan-{secrets.token_hex(4)}.json")
+    try:
+        os.replace(source, taken)
+    except FileNotFoundError:
+        raise SetupError("no_plan", "There's no setup plan to carry out (it ran or was replaced); plan again.") from None
+    try:
+        claimed = _cached_plan(daw, data_dir, path=taken)
+    finally:
+        taken.unlink(missing_ok=True)
+    if claimed is None or claimed.get("digest") != expected_digest:
+        raise SetupError("plan_changed", "The setup plan changed after it was approved; plan again and approve that.")
+    if _approval_text(claimed, daw, action) is None:
+        if action == "install" and claimed.get("step") == "owned_elsewhere":
+            raise SetupError("owned_elsewhere", "Another Kumi installation owns this DAW's component; adopt it "
+                                                "explicitly (kumi_setup action adopt) or keep them separate.")
+        raise SetupError("no_plan", f"The approved plan isn't one {action} carries out; plan again.")
+    return claimed
+
+
+@contextlib.contextmanager
+def _setup_lock(data_dir: Path) -> Iterator[None]:
+    """One setup step at a time in this profile (two chats, or a chat and `hermes kumi setup`). A lock older than
+    LOCK_STALE_MS was left by a setup that died, and is taken over."""
+    lock = data_dir / "setup" / "lock"
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        lock.mkdir()
+    except FileExistsError:
+        try:
+            stale = _now_ms() - int(lock.stat().st_mtime * 1000) > LOCK_STALE_MS
+        except FileNotFoundError:
+            stale = True
+        if not stale:
+            raise SetupError("busy", "Another Kumi setup step is running in this profile; try again when it ends.") from None
+        shutil.rmtree(lock, ignore_errors=True)
+        try:
+            lock.mkdir()
+        except FileExistsError:
+            raise SetupError("busy", "Another Kumi setup step is running in this profile; try again when it ends.") from None
+    try:
+        yield
+    finally:
+        shutil.rmtree(lock, ignore_errors=True)
+
+
+def _unstamped(plan: Mapping[str, Any]) -> dict:
+    return {key: value for key, value in plan.items() if key not in ("digest", "made_at")}
 
 
 def _owner_home(plan: Mapping[str, Any]) -> str | None:
@@ -381,39 +445,26 @@ def _owner_home(plan: Mapping[str, Any]) -> str | None:
     return home if isinstance(home, str) and Path(home).is_absolute() else None
 
 
-def adopt(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir: Path | None = None,
-          plugin_dir: Path | None = None, target: str | None = None) -> dict:
+def adopt(daw: str, *, expected_digest: str | None, setup_daw: Callable[[dict], Any] | None = None,
+          data_dir: Path | None = None, plugin_dir: Path | None = None, target: str | None = None) -> dict:
     """Adopt the Kumi installation that owns this DAW's component, after the user approved `approval(daw,
-    action="adopt")`: from now on the runtime runs with `--kumi-home <that folder>`, so it uses the bridge that is
-    already installed instead of replacing it. Re-plans first and refuses if anything changed. Never reads that
-    installation's files, account or settings: it records the folder in `current.json` and the receipt. A runtime
-    already running keeps its old home until W2 restarts it. Returns `{"ok": ...}` like `install()`; never raises."""
+    action="adopt")` (`expected_digest` is that approval's digest): from now on the runtime runs with `--kumi-home
+    <that folder>`, so it uses the bridge that is already installed instead of replacing it. Re-plans first and
+    refuses if anything changed. Setup itself never reads that installation's files, account or settings: it records
+    the folder in `current.json` and the receipt. A runtime already running keeps its old home until W2 restarts it.
+    Returns `{"ok": ...}` like `install()`; never raises."""
     data_dir = data_dir or default_data_dir()
     target = target or host_target()
     try:
-        approved = _cached_plan(daw, data_dir)
-        if approved is None or approved.get("step") != "owned_elsewhere" or _owner_home(approved) is None:
-            raise SetupError("no_plan", "There is no Kumi installation to adopt for this DAW; run kumi_setup plan first.")
-        current = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target)
-        if _digest(current) != _digest({key: value for key, value in approved.items() if key not in ("digest", "made_at")}):
-            raise SetupError("plan_changed", "What setup found changed since it was approved; plan again.")
-        home = _owner_home(approved)
-        if not Path(home).is_dir():
-            raise SetupError("not_found", f"{home} isn't a folder any more; plan again.")
-        (data_dir / "setup" / "plan.json").unlink(missing_ok=True)
-        record = _read_json(data_dir / "runtime" / "current.json")
-        if not record:
-            raise SetupError("needs_runtime", "Install Kumi's runtime before adopting an installation.")
-        _write_json(data_dir / "runtime" / "current.json", {**record, "kumi_home": home})
-        receipt = _read_json(data_dir / "setup" / "receipt.json") or {"schema": SCHEMA}
-        component = approved["component"]
-        receipt["adopted"] = {"kumi_home": home, "daw": daw, "at": _now_ms()}
-        components = receipt.get("daw_components") if isinstance(receipt.get("daw_components"), dict) else {}
-        components[daw] = {"component": component.get("component"), "version": component.get("version"),
-                           "paths": component.get("paths") or [], "after": None, "adopted": True,
-                           "installed_at": None}
-        receipt["daw_components"] = components
-        _write_json(data_dir / "setup" / "receipt.json", receipt)
+        with _setup_lock(data_dir):
+            approved = _claim(daw, data_dir, expected_digest, "adopt")
+            current = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target)
+            if _digest(current) != _digest(_unstamped(approved)):
+                raise SetupError("plan_changed", "What setup found changed since it was approved; plan again.")
+            home = _owner_home(approved)
+            if not Path(home).is_dir():
+                raise SetupError("not_found", f"{home} isn't a folder any more; plan again.")
+            _adopt(approved, daw, home, data_dir)
         return {"ok": True, "step": "adopt",
                 "message": f"Kumi now uses the Kumi installation at {home} for {DAWS[daw]}.",
                 "status": status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)}
@@ -424,33 +475,43 @@ def adopt(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir:
         return {"ok": False, "error": {"code": failure.code, "message": failure.message}}
 
 
+def _adopt(approved: Mapping[str, Any], daw: str, home: str, data_dir: Path) -> None:
+    """Record the adopted Kumi home: in `current.json`, which runtime.py starts the runtime with, and the receipt."""
+    record = _read_json(data_dir / "runtime" / "current.json")
+    if not record:
+        raise SetupError("needs_runtime", "Install Kumi's runtime before adopting an installation.")
+    _write_json(data_dir / "runtime" / "current.json", {**record, "kumi_home": home})
+    receipt = _read_json(data_dir / "setup" / "receipt.json") or {"schema": SCHEMA}
+    component = approved["component"]
+    receipt["adopted"] = {"kumi_home": home, "daw": daw, "at": _now_ms()}
+    components = receipt.get("daw_components") if isinstance(receipt.get("daw_components"), dict) else {}
+    components[daw] = {"component": component.get("component"), "version": component.get("version"),
+                       "paths": component.get("paths") or [], "after": None, "adopted": True, "installed_at": None}
+    receipt["daw_components"] = components
+    _write_json(data_dir / "setup" / "receipt.json", receipt)
+
+
 # ---- install ---------------------------------------------------------------------------------------------------------
 
-def install(daw: str, *, setup_daw: Callable[[dict], Any] | None = None,
+def install(daw: str, *, expected_digest: str | None, setup_daw: Callable[[dict], Any] | None = None,
             progress: Callable[[int, int], None] | None = None, data_dir: Path | None = None,
             plugin_dir: Path | None = None, target: str | None = None,
             opener: Callable[..., Any] | None = None) -> dict:
-    """Do the step the user approved: re-plan, refuse if anything changed since `plan()`, then install it. Returns
+    """Do the step the user approved, and only that: the plan whose digest `approval()` gave (`expected_digest`),
+    taken so it runs once, re-planned and refused if anything changed since, one setup step at a time. Returns
     `{"ok": True, "step", "status", "message"}` or `{"ok": False, "error": {"code", "message"}}`; never raises."""
     data_dir = data_dir or default_data_dir()
     target = target or host_target()
     try:
-        approved = _cached_plan(daw, data_dir)
-        if approved is None:
-            raise SetupError("no_plan", "Run kumi_setup with action plan first, and approve that plan.")
-        current = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target)
-        if _digest(current) != _digest({key: value for key, value in approved.items() if key not in ("digest", "made_at")}):
-            raise SetupError("plan_changed", "What setup would do changed since it was approved; plan again.")
-        (data_dir / "setup" / "plan.json").unlink(missing_ok=True)  # one approval, one install
-        if approved["step"] == "runtime":
-            message = _install_runtime(approved, data_dir, target, progress, opener or _open_url)
-        elif approved["step"] == "daw_component":
-            message = _install_component(approved, setup_daw, data_dir)
-        elif approved["step"] == "owned_elsewhere":
-            raise SetupError("owned_elsewhere", "Another Kumi installation owns this DAW's component; adopt it "
-                                                "explicitly (kumi_setup action adopt) or keep them separate.")
-        else:
-            message = f"Kumi's part in {DAWS[daw]} is already installed."
+        with _setup_lock(data_dir):
+            approved = _claim(daw, data_dir, expected_digest, "install")
+            current = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target)
+            if _digest(current) != _digest(_unstamped(approved)):
+                raise SetupError("plan_changed", "What setup would do changed since it was approved; plan again.")
+            if approved["step"] == "runtime":
+                message = _install_runtime(approved, data_dir, target, progress, opener or _open_url)
+            else:
+                message = _install_component(approved, setup_daw, data_dir)
         return {"ok": True, "step": approved["step"], "message": message,
                 "status": status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)}
     except SetupError as error:
@@ -478,7 +539,7 @@ def _download(url: str, expect_size: int, expect_sha256: str, into: Path,
                 out.write(chunk)
                 if progress:
                     progress(done, expect_size)
-    except (urllib.error.URLError, OSError, TimeoutError) as error:
+    except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError) as error:
         raise SetupError("download_failed", f"Downloading Kumi failed: {error}") from None
     if done != expect_size or digest.hexdigest() != expect_sha256:
         raise SetupError("checksum_mismatch", "The downloaded bundle doesn't match the SHA-256 this plugin pins; "
@@ -588,20 +649,31 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
         if step["step"] == "none":
             print(status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)["message"], file=stdout)
             return 0
-        if step["step"] == "owned_elsewhere":
-            print("Another Kumi installation owns this DAW's component:", *step["effects"], sep="\n  ", file=stdout)
-            return 1
-        print("Kumi setup will:", *step["effects"], sep="\n  ", file=stdout)
+        adopting = step["step"] == "owned_elsewhere"
+        if adopting:
+            text = _approval_text(step, daw, "adopt")
+            if text is None:
+                print("Another Kumi installation owns this DAW's component:", *step["effects"], sep="\n  ", file=stdout)
+                return 1
+            print(text, file=stdout)
+        else:
+            print("Kumi setup will:", *step["effects"], sep="\n  ", file=stdout)
         print("Go ahead? [y/N] ", end="", file=stdout, flush=True)
         if stdin.readline().strip().lower() not in ("y", "yes"):
             print("Nothing was changed.", file=stdout)
             return 1
-        result = install(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target,
-                         opener=opener)
+        if adopting:
+            result = adopt(daw, expected_digest=step["digest"], setup_daw=setup_daw, data_dir=data_dir,
+                           plugin_dir=plugin_dir, target=target)
+        else:
+            result = install(daw, expected_digest=step["digest"], setup_daw=setup_daw, data_dir=data_dir,
+                             plugin_dir=plugin_dir, target=target, opener=opener)
         if not result["ok"]:
             print(result["error"]["message"], file=stdout)
             return 1
         print(result["message"], file=stdout)
+        if adopting:
+            return 0
         if step["step"] == "runtime" and setup_daw is None:
             return 0
     return 0

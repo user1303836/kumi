@@ -4,6 +4,7 @@ No network, no Hermes, no Kumi: the release is a local .tar.xz served by a fake 
 a function that answers the way W1's does (W1-REGISTRY.md, comments).
 """
 import hashlib
+import http.client
 import importlib.util
 import io
 import json
@@ -11,6 +12,7 @@ import os
 from pathlib import Path
 import tarfile
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -53,16 +55,16 @@ class Served:
 class Runtime:
     """The runtime's setup_daw as W1 answers it: a dry run names the paths; a real install does exactly that."""
 
-    def __init__(self, state: str = "missing", owner: str | None = None) -> None:
-        self.state, self.owner, self.calls = state, owner, []
+    def __init__(self, state: str = "missing", owner: str | None = None, library: str = "/Users/x/Music/Ableton/User Library") -> None:
+        self.state, self.owner, self.library, self.calls = state, owner, library, []
 
     def __call__(self, args: dict) -> dict:
         self.calls.append(args)
         reply = {"daw": args["daw"], "component": "Live Remote Script", "version": "1.0.105",
-                 "paths": ["/Users/x/Music/Ableton/User Library/Remote Scripts/AbletonMcpBridge"],
+                 "paths": [f"{self.library}/Remote Scripts/AbletonMcpBridge"],
                  "state": self.state, "owner": {"kumi_home": self.owner} if self.owner else None,
                  "after": "choose_control_surface",
-                 "effects": ["Copy the AbletonMcpBridge Remote Script into /Users/x/Music/Ableton/User Library/Remote Scripts"]}
+                 "effects": [f"Copy the AbletonMcpBridge Remote Script into {self.library}/Remote Scripts"]}
         if not args["dry_run"]:
             reply.update(state="same", installed_at=1730764800000)
         return reply
@@ -91,10 +93,16 @@ class SetupTest(unittest.TestCase):
             {"schema": 1, "kumi": VERSION, "repository": "user1303836/kumi", "tag": f"v{VERSION}", "targets": {TARGET: record}}))
 
     def plan(self, **kw) -> dict:
-        return setup.plan("ableton", data_dir=self.data, plugin_dir=self.plugin, target=TARGET, **kw)
+        self.planned = setup.plan("ableton", data_dir=self.data, plugin_dir=self.plugin, target=TARGET, **kw)
+        return self.planned
 
-    def install(self, served: Served, **kw) -> dict:
-        return setup.install("ableton", data_dir=self.data, plugin_dir=self.plugin, target=TARGET, opener=served, **kw)
+    def approved(self) -> str | None:
+        """The digest of the plan this test last made, as the approval hook passes it on."""
+        return self.planned["digest"] if getattr(self, "planned", None) else None
+
+    def install(self, opener, **kw) -> dict:
+        kw.setdefault("expected_digest", self.approved())
+        return setup.install("ableton", data_dir=self.data, plugin_dir=self.plugin, target=TARGET, opener=opener, **kw)
 
     def status(self) -> dict:
         return setup.status(daw="ableton", data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
@@ -104,7 +112,8 @@ class SetupTest(unittest.TestCase):
         self.assertTrue(self.install(Served(BUNDLE))["ok"])
 
     def adopt(self, runtime) -> dict:
-        return setup.adopt("ableton", setup_daw=runtime, data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
+        return setup.adopt("ableton", expected_digest=self.approved(), setup_daw=runtime, data_dir=self.data,
+                           plugin_dir=self.plugin, target=TARGET)
 
     def test_host_target_names_kumis_bundles_and_nothing_else(self) -> None:
         self.assertEqual(setup.host_target("Darwin", "arm64"), "aarch64-apple-darwin")
@@ -133,8 +142,9 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(plan["download"]["url"], URL)
         self.assertIn(URL, plan["effects"][0])
         self.assertEqual(plan["paths"], [str(self.data / "runtime" / VERSION)])
-        text = setup.approval("ableton", data_dir=self.data)
-        self.assertIn(URL, text)
+        asked = setup.approval("ableton", data_dir=self.data)
+        self.assertIn(URL, asked["message"])
+        self.assertEqual(asked["digest"], plan["digest"])
         self.assertIsNone(setup.approval("reaper", data_dir=self.data), "a plan for Live doesn't approve REAPER")
         later = plan["made_at"] + setup.PLAN_TTL_MS + 1
         self.assertIsNone(setup.approval("ableton", data_dir=self.data, now=later), "a stale plan approves nothing")
@@ -155,11 +165,53 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(sorted(p.name for p in (self.data / "runtime").iterdir()), ["1.24.67", "current.json"],
                          "no download, staging or old folders are left behind")
 
-    def test_an_install_needs_a_fresh_plan_and_one_plan_installs_once(self) -> None:
-        self.assertEqual(self.install(Served(BUNDLE))["error"]["code"], "no_plan")
+    def test_an_install_needs_an_approved_fresh_plan_and_one_plan_installs_once(self) -> None:
+        self.assertEqual(self.install(Served(BUNDLE))["error"]["code"], "not_approved")
         self.plan()
+        self.assertEqual(self.install(Served(BUNDLE), expected_digest=None)["error"]["code"], "not_approved")
         self.assertTrue(self.install(Served(BUNDLE))["ok"])
         self.assertEqual(self.install(Served(BUNDLE))["error"]["code"], "no_plan")
+
+    def test_an_install_carries_out_only_the_plan_whose_digest_was_approved(self) -> None:
+        approved = self.plan()
+        with mock.patch.object(setup, "_now_ms", return_value=approved["made_at"] + 5):
+            self.assertEqual(self.plan()["digest"], approved["digest"], "the digest is the plan's content, not its time")
+        other = setup.plan("reaper", data_dir=self.data, plugin_dir=self.plugin, target=TARGET)  # another chat
+        self.assertNotEqual(other["digest"], approved["digest"])
+        served = Served(BUNDLE)
+        self.assertEqual(self.install(served)["error"]["code"], "plan_changed")
+        self.assertEqual(served.asked, [], "nothing is downloaded for a plan that wasn't approved")
+        self.assertEqual(setup.install("reaper", expected_digest=other["digest"], data_dir=self.data,
+                                       plugin_dir=self.plugin, target=TARGET, opener=served)["error"]["code"], "no_plan",
+                         "the refused install used up the other plan: whoever approved it plans again")
+
+    def test_a_daw_step_another_chat_planned_differently_isnt_installed_under_this_approval(self) -> None:
+        self.install_runtime()
+        self.plan(setup_daw=Runtime())
+        elsewhere = Runtime(library="/Users/x/Other Library")
+        setup.plan("ableton", setup_daw=elsewhere, data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
+        self.assertEqual(self.install(Served(b""), setup_daw=elsewhere)["error"]["code"], "plan_changed")
+        self.assertNotIn({"daw": "ableton", "dry_run": False}, elsewhere.calls, "nothing approved was installed")
+
+    def test_one_setup_step_runs_at_a_time_and_a_dead_ones_lock_is_taken_over(self) -> None:
+        self.plan()
+        lock = self.data / "setup" / "lock"
+        lock.mkdir()
+        self.assertEqual(self.install(Served(BUNDLE))["error"]["code"], "busy")
+        long_ago = time.time() - setup.LOCK_STALE_MS / 1000 - 60
+        os.utime(lock, (long_ago, long_ago))
+        self.assertTrue(self.install(Served(BUNDLE))["ok"], "a busy refusal leaves the approved plan in place")
+        self.assertFalse(lock.exists())
+
+    def test_a_connection_that_breaks_mid_download_installs_nothing(self) -> None:
+        self.plan()
+
+        def breaks(url: str):
+            raise http.client.IncompleteRead(b"partial")
+
+        result = self.install(breaks)
+        self.assertEqual(result["error"]["code"], "download_failed")
+        self.assertFalse((self.data / "runtime" / "current.json").exists())
 
     def test_a_plan_that_changed_since_approval_installs_nothing(self) -> None:
         self.plan()
@@ -215,7 +267,7 @@ class SetupTest(unittest.TestCase):
         plan = self.plan(setup_daw=runtime)
         self.assertEqual(plan["step"], "daw_component")
         self.assertEqual(runtime.calls, [{"daw": "ableton", "dry_run": True}])
-        self.assertIn("Remote Scripts", setup.approval("ableton", data_dir=self.data))
+        self.assertIn("Remote Scripts", setup.approval("ableton", data_dir=self.data)["message"])
         result = self.install(Served(b""), setup_daw=runtime)
         self.assertTrue(result["ok"], result)
         self.assertEqual(runtime.calls[-1], {"daw": "ableton", "dry_run": False})
@@ -272,9 +324,10 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(self.adopt(runtime)["error"]["code"], "no_plan")
         self.plan(setup_daw=runtime)
         self.assertIsNone(setup.approval("ableton", data_dir=self.data), "install never approves an adoption")
-        text = setup.approval("ableton", action="adopt", data_dir=self.data)
-        self.assertIn(str(standalone), text)
-        self.assertIn("never its sign-in", text)
+        asked = setup.approval("ableton", action="adopt", data_dir=self.data)
+        self.assertIn(str(standalone), asked["message"])
+        self.assertIn("never its sign-in", asked["message"])
+        self.assertIn("write its own connection state there", asked["message"])
         result = self.adopt(runtime)
         self.assertTrue(result["ok"], result)
         current = json.loads((self.data / "runtime" / "current.json").read_text())
@@ -314,11 +367,11 @@ class SetupTest(unittest.TestCase):
             def isatty(self) -> bool:
                 return True
 
-        def cli(answers: str, stdin_is_tty: bool = True) -> tuple[int, str]:
+        def cli(answers: str, stdin_is_tty: bool = True, setup_daw=None) -> tuple[int, str]:
             out = Tty()
             stdin = Tty(answers) if stdin_is_tty else io.StringIO(answers)
-            code = setup.cli_main("ableton", data_dir=self.data, plugin_dir=self.plugin, target=TARGET,
-                                  opener=Served(BUNDLE), stdin=stdin, stdout=out)
+            code = setup.cli_main("ableton", setup_daw=setup_daw, data_dir=self.data, plugin_dir=self.plugin,
+                                  target=TARGET, opener=Served(BUNDLE), stdin=stdin, stdout=out)
             return code, out.getvalue()
 
         code, said = cli("y\n", stdin_is_tty=False)
@@ -332,6 +385,13 @@ class SetupTest(unittest.TestCase):
         code, said = cli("y\n")
         self.assertEqual(code, 0, said)
         self.assertEqual(setup.runtime_state(self.data, VERSION, TARGET)[0], "ready")
+        standalone = self.data.parent / "standalone-kumi"
+        standalone.mkdir()
+        code, said = cli("y\n", setup_daw=Runtime("other_owner", owner=str(standalone)))
+        self.assertEqual(code, 0, said)
+        self.assertIn("write its own connection state there", said, "the CLI asks with the adoption's own words")
+        current = json.loads((self.data / "runtime" / "current.json").read_text())
+        self.assertEqual(current["kumi_home"], str(standalone))
 
 
 if __name__ == "__main__":
