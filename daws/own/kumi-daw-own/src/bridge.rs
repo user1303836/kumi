@@ -618,6 +618,17 @@ pub fn shorten_anywhere<S: RefScheme>(book: &mut Book<S>, value: &Value) -> Valu
     }
 }
 
+/// The short refs (`track:3`) anywhere in a call's arguments, in order: before lengthening, those the model named; after,
+/// those this turn doesn't know.
+fn short_refs_in(value: &Value) -> Vec<String> {
+    match value {
+        Value::String(text) if SHORT_REF.is_match(text) => vec![text.clone()],
+        Value::Array(items) => items.iter().flat_map(short_refs_in).collect(),
+        Value::Object(fields) => fields.values().flat_map(short_refs_in).collect(),
+        _ => Vec::new(),
+    }
+}
+
 /// Why a host tool answered an error: its words, and whether the DAW is there at all (it quit, or its bridge did).
 pub struct Refused {
     pub why: String,
@@ -2360,17 +2371,18 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
         if let Some((key, call_args)) = self.daw.call.as_ref().and_then(|call| Some((call.args, args.get(call.args).cloned()?))) {
             args.insert(key.into(), lengthen_anywhere(&self.book.borrow(), &call_args));
         }
-        // A short ref this turn doesn't know (an earlier song's, or made up) is refused in Kumi's words, not the DAW's.
-        for key in ["ref", "parent", "trackRef"] {
-            let (Some(asked), Some(sent)) = (input.get(key).and_then(Value::as_str), args.get(key).and_then(Value::as_str)) else {
-                continue;
-            };
-            if asked == sent && SHORT_REF.is_match(asked) {
-                let place = self.daw.profile.words.place;
-                return Ok(ToolResult::error(format!(
-                    "{asked} isn't one of this turn's refs (it may be from before the {place} changed): read again for a current one"
-                )));
-            }
+        // A short ref this turn doesn't know (an earlier song's, or made up) is refused in Kumi's words, not the DAW's: by
+        // name, or anywhere in a call's arguments (the ones lengthening left short).
+        let named = ["ref", "parent", "trackRef"].into_iter().find_map(|key| {
+            let (asked, sent) = (input.get(key)?.as_str()?, args.get(key)?.as_str()?);
+            (asked == sent && SHORT_REF.is_match(asked)).then(|| asked.to_owned())
+        });
+        let unknown = named.or_else(|| short_refs_in(args.get(self.daw.call.as_ref()?.args)?).into_iter().next());
+        if let Some(asked) = unknown {
+            let place = self.daw.profile.words.place;
+            return Ok(ToolResult::error(format!(
+                "{asked} isn't one of this turn's refs (it may be from before the {place} changed): read again for a current one"
+            )));
         }
         // The host's name for the track whose lines are read.
         if let Some(track) = args.remove("trackRef") {
@@ -2381,14 +2393,27 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
             args.insert("layout".into(), layout.into());
         }
         // Refs that hold across projects are read only in the project they came from: the DAW refuses another (`stale`).
-        let primary = args.get("ref").or_else(|| args.get("parent")).and_then(Value::as_str).map(str::to_owned);
-        let epoch = primary.and_then(|reference| self.seen_in.borrow().get(&reference).cloned()).or_else(|| {
-            // (a call's refs sit in its arguments: the first this turn read names the project they're from)
-            let text = args.get(self.daw.call.as_ref()?.args)?.to_string();
+        // A call's refs sit in its arguments, and the DAW checks one epoch for all of them, so they must agree.
+        let mut refs: Vec<String> =
+            args.get("ref").or_else(|| args.get("parent")).and_then(Value::as_str).map(str::to_owned).into_iter().collect();
+        if let Some(call_args) = self.daw.call.as_ref().and_then(|call| args.get(call.args)) {
+            refs.extend(self.book.borrow().scheme.refs_in(&call_args.to_string()).into_iter().map(str::to_owned));
+        }
+        let epochs: Vec<(String, String)> = {
             let seen_in = self.seen_in.borrow();
-            self.book.borrow().scheme.refs_in(&text).into_iter().find_map(|reference| seen_in.get(reference).cloned())
-        });
-        if let Some(epoch) = epoch.filter(|_| !self.book.borrow().scheme.positional()) {
+            refs.into_iter().filter_map(|reference| Some((seen_in.get(&reference)?.clone(), reference))).collect()
+        };
+        if let Some((epoch, first)) = epochs.first() {
+            if let Some((_, other)) = epochs.iter().find(|(seen, _)| seen != epoch) {
+                let (first, other) = {
+                    let mut book = self.book.borrow_mut();
+                    (book.short_ref(first), book.short_ref(other))
+                };
+                let place = self.daw.profile.words.place;
+                return Ok(ToolResult::error(format!("{first} and {other} were read in different {place}s: read again for current refs")));
+            }
+        }
+        if let Some((epoch, _)) = epochs.into_iter().next().filter(|_| !self.book.borrow().scheme.positional()) {
             args.insert("epoch".into(), epoch.into());
         }
         // A page the model can take whole: past the kernel's cut its nextCursor would be lost, so fewer rows are asked for
@@ -2429,7 +2454,14 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
                 // A ref from another project, or a list that moved between pages: what to do, in Kumi's words.
                 Err(Refused { code: Some(code), .. }) if code == "stale" || code == "changed" => {
                     let words = self.daw.profile.words;
-                    let what = input.get("ref").or_else(|| input.get("parent")).and_then(Value::as_str).unwrap_or("That ref");
+                    // (a call names its refs in its arguments: the first the model gave)
+                    let named = input
+                        .get("ref")
+                        .or_else(|| input.get("parent"))
+                        .and_then(Value::as_str)
+                        .map(str::to_owned)
+                        .or_else(|| short_refs_in(input.get(self.daw.call.as_ref()?.args)?).into_iter().next());
+                    let what = named.as_deref().unwrap_or("That ref");
                     let positional = self.book.borrow().scheme.positional();
                     return Ok(ToolResult::error(match code.as_str() {
                         "stale" if positional => {

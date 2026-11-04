@@ -163,7 +163,8 @@ async fn reapers_observation_is_its_project_in_short_refs_at_its_place() {
 }
 
 /// (M2) SoundCraft's read of one command: the short refs in its params go long with the epoch they were read in, the refs
-/// in its result come back short, and the read tool takes SoundCraft's words for it (command, params), not REAPER's.
+/// in its result come back short, and the read tool takes SoundCraft's words for it (command, params), not REAPER's. A
+/// ref this turn doesn't know, or refs read in two sessions, are refused before the bridge is asked; a stale one is named.
 #[tokio::test(flavor = "current_thread")]
 async fn soundcrafts_call_takes_short_refs_in_its_params_and_answers_in_short_ones() {
     const KICK: &str = "s:track:3.2";
@@ -204,6 +205,70 @@ async fn soundcrafts_call_takes_short_refs_in_its_params_and_answers_in_short_on
             let answered: Value = serde_json::from_str(&answered.text).unwrap();
             assert_eq!(answered["result"]["track"]["ref"], "track:1");
             assert_eq!(answered["result"]["track"]["inserts"][0]["ref"], "insert:1");
+
+            // A ref this turn doesn't know, in the params: refused in Kumi's words, never sent.
+            let asked = host.asked.borrow().len();
+            let unknown = json!({"kind": "call", "command": "track.inspect", "params": {"track": "track:9"}});
+            let refused = read.execute(unknown.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(refused.is_error && refused.text.starts_with("track:9 isn't one of this turn's refs"), "{}", refused.text);
+            // Refs read in two sessions: the bridge checks one epoch, so they're refused before it's asked.
+            host.answers.borrow_mut().push(("read", json!({"items": [{"ref": "s:track:5", "name": "Pad"}], "epoch": "e2"}), false));
+            read.execute(json!({"kind": "track"}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            let asked = asked + 1;
+            let mixed = json!({"kind": "call", "command": "track.inspect", "params": {"track": "track:1", "other": "track:2"}});
+            let refused = read.execute(mixed.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(refused.is_error && refused.text.starts_with("track:1 and track:2 were read in different sessions"), "{}", refused.text);
+            assert_eq!(host.asked.borrow().len(), asked, "neither refused call reached the host");
+            // Stale: told in Kumi's words, naming the ref the call gave.
+            host.answers.borrow_mut().push(("read", json!({"error": "s:track:3.2: another session", "code": "stale"}), true));
+            let refused = read.execute(call.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(refused.is_error && refused.text.starts_with("track:1 was read in another session"), "{}", refused.text);
+        })
+        .await;
+}
+
+/// (#929) REAPER's read of an API function, through the same read tool: its call words are REAPER's own, a ref in its
+/// args goes long with the epoch it was read in, a function given no ref carries no epoch, a stale answer names the ref,
+/// and a ref this turn doesn't know is never sent.
+#[tokio::test(flavor = "current_thread")]
+async fn reapers_call_takes_its_args_refs_with_their_epoch() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![("status", json!({"connected": true}), false), ("snapshot", reaper_snapshot(), false)]),
+                asked: RefCell::default(),
+            });
+            let reaper = create_reaper_integration(options(host.clone(), Rc::default()));
+            reaper.start(Signal::new()).await.unwrap();
+            let seen = reaper.observe(Signal::new(), None).await.unwrap();
+            let read = seen.tools.iter().find(|tool| tool.name() == "reaper_read").unwrap().clone();
+            let properties = Value::Object(read.input_schema())["properties"].clone();
+            assert_eq!(
+                (&properties["fn"], &properties["args"]),
+                (
+                    &json!({"type": "string", "description": "For kind call: a REAPER API function that only reads (GetMediaTrackInfo_Value, TrackFX_GetParamName…)"}),
+                    &json!({"type": ["array", "object"], "description": "For kind call: its arguments, in order or by the SDK's names; tracks, items, takes and envelopes as refs"})
+                )
+            );
+            host.answers.borrow_mut().push(("read", json!({"epoch": "1", "fn": "GetMediaTrackInfo_Value", "result": 0.5, "out": []}), false));
+            let volume = json!({"kind": "call", "fn": "GetMediaTrackInfo_Value", "args": ["track:2", "D_VOL"]});
+            let answered = read.execute(volume.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(!answered.is_error, "{}", answered.text);
+            assert_eq!(
+                host.asked.borrow().last().unwrap().1,
+                json!({"kind": "call", "fn": "GetMediaTrackInfo_Value", "args": [BASS, "D_VOL"], "epoch": "1"})
+            );
+            let count = json!({"kind": "call", "fn": "CountTracks", "args": {"proj": 0}});
+            read.execute(count.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert_eq!(host.asked.borrow().last().unwrap().1, count, "no ref, no epoch");
+            host.answers.borrow_mut().push(("read", json!({"error": "those refs are from an earlier epoch", "code": "stale"}), true));
+            let stale = read.execute(volume.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(stale.is_error && stale.text.starts_with("track:2 was read in another project"), "{}", stale.text);
+            let asked = host.asked.borrow().len();
+            let unknown = json!({"kind": "call", "fn": "GetMediaTrackInfo_Value", "args": ["track:9", "D_VOL"]});
+            let refused = read.execute(unknown.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(refused.is_error && refused.text.starts_with("track:9 isn't one of this turn's refs"), "{}", refused.text);
+            assert_eq!(host.asked.borrow().len(), asked, "never sent");
         })
         .await;
 }
