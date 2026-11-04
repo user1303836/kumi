@@ -109,7 +109,9 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
     WAV for every map sound, `some` for the snares and the measured files, `none` for none. Returns the state folder."""
     now = _now_ms() if now_ms is None else now_ms
     state = plugin_data / "state"
-    owner = {**_envelope(41, now), "heartbeat": now, "endpoint": {"daw": "ableton", "host": "127.0.0.1"}, "runtime_generation": 2}
+    # As `kumi serve` writes it (W1, #945): from its start, its heartbeat every 3 s, `running: false` at its exit.
+    owner = {**_envelope(41, now), "profile": OWNER["profile"], "session_id": OWNER["session_id"], "pid": OWNER["pid"],
+             "since": now - 25 * 60_000, "heartbeat": now, "running": True, "lease": "free"}
     _write_json(state / "owner.json", owner)
     _write_json(
         state / "status.json",

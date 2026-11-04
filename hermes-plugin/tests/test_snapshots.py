@@ -67,6 +67,14 @@ class Liveness(StateTest):
     def test_a_heartbeat_from_the_future_is_stale_too(self) -> None:
         self.assertTrue(snapshots.owner(self.state, now_ms=NOW - 60_000)["stale"])
 
+    def test_a_runtime_that_says_it_stopped_is_stale_at_once(self) -> None:
+        path = self.state / "owner.json"
+        last = json.loads(path.read_text(encoding="utf-8"))
+        path.write_text(json.dumps({**last, "running": False}), encoding="utf-8")
+        status = snapshots.status(self.state, now_ms=NOW + 1_000)
+        self.assertEqual((status["connected"], status["stale"]), (False, True))
+        self.assertTrue(all(item["undo_available"] is False for item in snapshots.history(self.state, now_ms=NOW + 1_000)["items"]))
+
     def test_no_state_folder_reads_as_disconnected_never_as_an_error(self) -> None:
         empty = Path(self.tmp.name) / "nothing" / "state"
         status = snapshots.status(empty, now_ms=NOW)

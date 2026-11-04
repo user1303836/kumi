@@ -70,16 +70,17 @@ def _public(data: dict | None) -> dict:
 
 
 def owner(state: Path, now_ms: int | None = None) -> dict:
-    """The runtime's lease as last published, with how old its heartbeat is. Stale when missing or quiet for more
-    than `STALE_AFTER_S`; a stale lease only means the UI shows last-known state, never that anyone may take over."""
+    """The runtime's lease as last published, with how old its heartbeat is. Stale when missing, stopped (its last
+    write says `running: false`) or quiet for more than `STALE_AFTER_S`; a stale lease only means the UI shows
+    last-known state, never that anyone may take over."""
     data = read(state, "owner")
     if data is None:
         return {"stale": True, "age_ms": None}
     beat = data.get("heartbeat", data.get("at"))
     now = _now_ms() if now_ms is None else now_ms
     age = now - int(beat) if isinstance(beat, (int, float)) and not isinstance(beat, bool) else None
-    stale = age is None or not -STALE_AFTER_S * 1000 <= age <= STALE_AFTER_S * 1000
-    return {**_public(data), "stale": stale, "age_ms": age}
+    quiet = age is None or not -STALE_AFTER_S * 1000 <= age <= STALE_AFTER_S * 1000
+    return {**_public(data), "stale": quiet or data.get("running") is False, "age_ms": age}
 
 
 def _liveness(state: Path, now_ms: int | None) -> dict:
