@@ -13,6 +13,7 @@ pub mod reaper;
 pub mod renoise;
 pub mod semantic;
 pub mod simulator;
+pub mod spawn;
 pub mod stdio;
 pub mod tools;
 

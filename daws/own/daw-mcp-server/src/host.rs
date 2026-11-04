@@ -1,5 +1,7 @@
-//! What the tools do: find the running bridges of one DAW through their discovery files, connect, and report.
+//! What the tools do: find the running bridges of one DAW through their discovery files, connect, and report. A DAW
+//! nothing of Kumi's can be loaded into has a bridge program of Kumi's own beside it, which the host starts (spawn.rs).
 use crate::client::{BridgeClient, ConnectError, RequestError};
+use crate::spawn::Spawn;
 use daw_bridge::files::{read_secret, scan_discovery, Discovery, FileError};
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
@@ -77,6 +79,8 @@ pub struct Host {
     catchup: crate::catchup::Catchup,
     /// The listening jobs started through this host (M5).
     jobs: crate::listening::Jobs,
+    /// How the host starts the DAW's bridge, for a DAW whose bridge runs beside it; None for one that loads its bridge.
+    spawn: Option<Spawn>,
 }
 
 /// Which running instance a tool means, when several run.
@@ -108,6 +112,13 @@ impl Pick {
             && self.resource.as_ref().is_none_or(|resource| *resource == discovery.resource)
             && self.started.is_none_or(|started| started == discovery.started_ms)
     }
+}
+
+/// Why [`Host::ensure_connected`] made no connection.
+enum Unconnected {
+    /// The discovery file named was a gone bridge's, and was removed just now.
+    Gone,
+    Why(String),
 }
 
 fn connect_error(daw: Daw, error: &ConnectError) -> String {
@@ -152,11 +163,18 @@ impl Host {
             journal: std::sync::Arc::new(crate::changes::Journal::for_daw(daw)),
             catchup: crate::catchup::Catchup::new(BridgePaths::new(kumi_home, daw).snapshots()),
             jobs: crate::listening::Jobs::default(),
+            spawn: Spawn::of(daw, kumi_home),
         };
         if daw == Daw::Renoise {
             crate::renoise::instruments::sweep_work(&host.paths.root.join("work"), std::time::SystemTime::now());
         }
         host
+    }
+
+    /// Starts the DAW's bridge with `spawn` (a test's), as for a DAW whose bridge runs beside it.
+    pub fn with_spawn(mut self, spawn: Spawn) -> Self {
+        self.spawn = Some(spawn);
+        self
     }
 
     pub(crate) fn catchup(&self) -> &crate::catchup::Catchup {
@@ -218,13 +236,14 @@ impl Host {
         })
     }
 
-    /// Connects to the instance a discovery file names. A file without a pid (Renoise on Windows) whose port nobody
-    /// answers is stale: it's removed, and the result is None.
+    /// Connects to the instance a discovery file names. A file whose port nobody answers is stale when it names no pid
+    /// (Renoise on Windows), or when its bridge is one the host starts (it ended while its DAW runs on): it's removed,
+    /// and the result is None.
     async fn connect(&self, discovery: &Discovery, secret: &daw_bridge::auth::Secret) -> Option<Result<BridgeClient, String>> {
         let address = SocketAddr::from(([127, 0, 0, 1], discovery.port));
         let client = match BridgeClient::connect_within(address, secret.clone(), CLIENT_NAME, CONNECT_TIMEOUT).await {
             Ok(client) => client,
-            Err(ConnectError::Io(error)) if discovery.pid == 0 && no_listener(&error) => {
+            Err(ConnectError::Io(error)) if (discovery.pid == 0 || self.spawn.is_some()) && no_listener(&error) => {
                 let _ = std::fs::remove_file(self.paths.discovery().join(discovery.file_name()));
                 return None;
             }
@@ -239,8 +258,13 @@ impl Host {
         Some(Ok(client))
     }
 
-    /// `discover`: every running instance's bridge, connected and asked for its status.
+    /// `discover`: every running instance's bridge, connected and asked for its status. A bridge the host starts is
+    /// started first, if its DAW runs.
     pub async fn discover(&self) -> Value {
+        let starting = match &self.spawn {
+            Some(spawn) => spawn.bring_up(self.daw, &self.paths, || !self.instances().0.is_empty()).await.err(),
+            None => None,
+        };
         let (alive, mut stale, invalid) = self.instances();
         let secret = self.secret();
         let mut instances = vec![];
@@ -296,9 +320,10 @@ impl Host {
             result["invalid"] = invalid.into();
         }
         if instances.is_empty() {
-            result["hint"] = match &secret {
-                Err(why) => why.clone(),
-                Ok(_) => format!(
+            result["hint"] = match (starting, &secret) {
+                (Some(why), _) => why,
+                (None, Err(why)) => why.clone(),
+                (None, Ok(_)) => format!(
                     "no {} with Kumi's bridge is running: open {}, or restart it if it was open before Kumi set up its bridge",
                     self.daw, self.daw
                 ),
@@ -308,9 +333,28 @@ impl Host {
         result
     }
 
+    /// The chosen instance's connection, made if there isn't one, and how many instances run. A DAW whose bridge the host
+    /// starts has it started first, if the DAW runs, without the lock on the connection held: other calls go on.
+    async fn connected(&self, pick: &Pick) -> Result<(tokio::sync::MutexGuard<'_, Option<Current>>, usize), String> {
+        let mut gone = false;
+        loop {
+            if let Some(spawn) = &self.spawn {
+                spawn.bring_up(self.daw, &self.paths, || !self.instances().0.is_empty()).await?;
+            }
+            let mut current = self.current.lock().await;
+            match self.ensure_connected(&mut current, pick).await {
+                Ok(alive) => return Ok((current, alive)),
+                // (its bridge ended while its DAW runs on: one the host starts is started again, once)
+                Err(Unconnected::Gone) if self.spawn.is_some() && !gone => gone = true,
+                Err(Unconnected::Gone) => return Err(format!("no {} with Kumi's bridge is running", self.daw)),
+                Err(Unconnected::Why(why)) => return Err(why),
+            }
+        }
+    }
+
     /// Makes `current` the chosen instance's connection: the one already connected if it fits the pick, else the only
     /// running one, the one the pick names, or the newest. Returns how many instances run, or why none can be used.
-    async fn ensure_connected(&self, current: &mut Option<Current>, pick: &Pick) -> Result<usize, String> {
+    async fn ensure_connected(&self, current: &mut Option<Current>, pick: &Pick) -> Result<usize, Unconnected> {
         let reusable = current.as_ref().is_some_and(|open| {
             !open.client.is_closed()
                 && pick.pid.is_none_or(|pid| pid == open.pid)
@@ -319,14 +363,14 @@ impl Host {
         });
         let (alive, _, _) = self.instances();
         if !reusable {
-            let secret = self.secret()?;
+            let secret = self.secret().map_err(Unconnected::Why)?;
             // (a pick that matches nothing leaves the connection there is: the calls without a pick go on using it)
             let Some(discovery) = alive.iter().find(|discovery| pick.matches(discovery)) else {
-                return Err(if alive.is_empty() {
+                return Err(Unconnected::Why(if alive.is_empty() {
                     format!("no {} with Kumi's bridge is running", self.daw)
                 } else {
                     format!("no running {} matches that pid or folder", self.daw)
-                });
+                }));
             };
             if let Some(open) = current.take() {
                 open.client.close().await;
@@ -342,8 +386,8 @@ impl Host {
                         client,
                     });
                 }
-                Some(Err(why)) => return Err(why),
-                None => return Err(format!("no {} with Kumi's bridge is running", self.daw)),
+                Some(Err(why)) => return Err(Unconnected::Why(why)),
+                None => return Err(Unconnected::Gone),
             }
         }
         Ok(alive.len())
@@ -390,9 +434,8 @@ impl Host {
 
     /// `status`: the chosen instance's bridge (the one already connected, else the only one or the newest).
     pub async fn status(&self, pick: &Pick) -> Value {
-        let mut current = self.current.lock().await;
-        let alive = match self.ensure_connected(&mut current, pick).await {
-            Ok(alive) => alive,
+        let (mut current, alive) = match self.connected(pick).await {
+            Ok(connected) => connected,
             Err(why) => return self.not_connected(why),
         };
         let open = current.as_ref().expect("connected above");
@@ -433,8 +476,7 @@ impl Host {
     /// in, so its apply and undo go there and never to another one. One that can't say its pid (0) is pinned by when its
     /// bridge started too, so the DAW opened again in the same folder isn't taken for it (#399, N-S10).
     pub(crate) async fn pin(&self, pick: &Pick) -> Result<Pick, CallError> {
-        let mut current = self.current.lock().await;
-        self.ensure_connected(&mut current, pick).await.map_err(CallError::NotConnected)?;
+        let (current, _) = self.connected(pick).await.map_err(CallError::NotConnected)?;
         let open = current.as_ref().expect("connected above");
         Ok(Pick { pid: Some(open.pid), resource: Some(open.resource.clone()), started: (open.pid == 0).then_some(open.started_ms) })
     }
@@ -461,8 +503,7 @@ impl Host {
     /// connection is made if there isn't one, and isn't held while the bridge thinks: other calls go ahead beside it.
     pub async fn call(&self, method: &str, params: Value, pick: &Pick, timeout: Duration) -> Result<Value, CallError> {
         let (client, pid, resource) = {
-            let mut current = self.current.lock().await;
-            self.ensure_connected(&mut current, pick).await.map_err(CallError::NotConnected)?;
+            let (current, _) = self.connected(pick).await.map_err(CallError::NotConnected)?;
             let open = current.as_ref().expect("connected above");
             (open.client.clone(), open.pid, open.resource.clone())
         };
@@ -531,11 +572,15 @@ impl Host {
         json!({"connected": false, "daw": self.daw.id(), "reason": reason})
     }
 
+    /// Closes the connection, and stops the bridge the host started, if it started one.
     pub async fn close(&self) {
         // A render or a capture still running is stopped, and what it changed put back, before the connection goes.
         self.cancel_running_jobs().await;
         if let Some(open) = self.current.lock().await.take() {
             open.client.close().await;
+        }
+        if let Some(spawn) = &self.spawn {
+            spawn.stop().await;
         }
     }
 }
