@@ -100,13 +100,14 @@ Other rules every change follows:
 - Three exceptions follow the contents. A Session MIDI clip made by
   `live_midi_clip_apply` is removed only while its name, length and notes are
   as the change left them. An Arrangement MIDI clip written through Kumi's Live
-  extension stays once its notes, name or extent changed. And an Arrangement
-  clip a change made that moved to another reference, because a clip before it
-  on its track was added or removed, is removed where it is now only while it's
-  as it was made: its settings unchanged, and a MIDI clip's notes too, which
-  only a copy keeps, so a new MIDI clip that moved stays. One that didn't move
-  is removed by its identity, as above. Delete such a clip yourself if it should
-  go.
+  extension is found by its identity, at whatever reference it has now, and
+  stays once its notes, name or extent changed. And any other Arrangement clip a
+  change made that moved to another reference, because a clip before it on its
+  track was added or removed, is removed where it is now only while it's as it
+  was made: its settings unchanged, and a copied MIDI clip's notes too. An empty
+  MIDI clip made by `add_arrangement_clip` has no notes kept to compare, so once
+  it moved it stays. One that didn't move is removed by its identity, as above.
+  Delete such a clip yourself if it should go.
 - An undo refused by its checks before it touched Live leaves the change
   applied, and the next undo checks again.
 - Deletions and momentary actions (those in

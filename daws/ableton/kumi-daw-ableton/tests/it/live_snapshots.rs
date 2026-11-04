@@ -387,13 +387,23 @@ async fn a_cleared_range_puts_back_what_it_cut_after_the_pieces_live_left() {
 }
 
 /// The track's Arrangement clips as Live holds them, each by its identity and the hash of what it is: a check refuses
-/// as Kumi's script does in Live when a piece isn't there as the change left it, and a restore takes the pieces away
-/// and makes each clip again with an identity of its own, as Live gives one.
+/// as Kumi's script does in Live when a piece isn't there as the change left it, or, past the pieces, when the track is
+/// frozen; and a restore takes the pieces away and makes each clip again with an identity of its own, as Live gives one.
 struct Track {
     clips: RefCell<Vec<(String, String)>>,
     next: Cell<u32>,
+    frozen: Cell<bool>,
 }
 impl Track {
+    /// "Verse" whole, before the clear.
+    fn verse() -> Rc<Track> {
+        Rc::new(Track {
+            clips: RefCell::new(vec![("live:501".into(), "verse-hash".into())]),
+            next: Cell::new(700),
+            frozen: Cell::new(false),
+        })
+    }
+
     fn edit(&self, identity: &str) {
         self.clips.borrow_mut().iter_mut().filter(|(clip, _)| clip == identity).for_each(|(_, hash)| *hash = "edited".into());
     }
@@ -420,6 +430,9 @@ async fn clear_then_delete(track: &Rc<Track>) -> Live {
                             json!({"raise":format!("\u{201c}{}\u{201d} changed in Live since", remnant["name"].as_str().unwrap())}),
                         );
                     }
+                }
+                if track.frozen.get() {
+                    return Some(json!({"raise":"\u{201c}Keys\u{201d} is frozen"}));
                 }
                 if args["check"] == true {
                     return Some(json!({"checked":true}));
@@ -469,7 +482,7 @@ async fn clear_then_delete(track: &Rc<Track>) -> Live {
 async fn a_piece_a_clear_left_that_kumis_undo_made_again_is_found_by_the_clear_s_undo() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let track = Rc::new(Track { clips: RefCell::new(vec![("live:501".into(), "verse-hash".into())]), next: Cell::new(700) });
+            let track = Track::verse();
             let live = clear_then_delete(&track).await;
             // The deletion's undo makes the piece again: Live gives it an identity of its own.
             let (text, is_error) = live.undo().await;
@@ -495,7 +508,7 @@ async fn a_piece_a_clear_left_that_kumis_undo_made_again_is_found_by_the_clear_s
 async fn a_piece_kumis_undo_made_again_and_the_producer_edited_since_stays() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let track = Rc::new(Track { clips: RefCell::new(vec![("live:501".into(), "verse-hash".into())]), next: Cell::new(700) });
+            let track = Track::verse();
             let live = clear_then_delete(&track).await;
             live.undo().await;
             // The producer edits the piece Kumi made again: the clear's undo leaves it, and the change, as they are.
@@ -514,7 +527,7 @@ async fn a_piece_kumis_undo_made_again_and_the_producer_edited_since_stays() {
 async fn a_piece_lives_own_undo_brought_back_as_it_was_is_used_as_the_change_left_it() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let track = Rc::new(Track { clips: RefCell::new(vec![("live:501".into(), "verse-hash".into())]), next: Cell::new(700) });
+            let track = Track::verse();
             let live = clear_then_delete(&track).await;
             let (text, is_error) = live.undo().await;
             assert!(!is_error, "{text}");
@@ -530,6 +543,34 @@ async fn a_piece_lives_own_undo_brought_back_as_it_was_is_used_as_the_change_lef
                 json!([{"identity":"live:501","hash":"left-hash","name":"Verse"},{"identity":"live:502","hash":"right-hash","name":"Verse"}])
             );
             assert_eq!(*track.clips.borrow(), [("live:701".into(), "live:701 as made again".into())]);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_clears_undo_refused_for_what_isnt_a_piece_stays_applied_with_its_fix_and_follows_nothing() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let track = Track::verse();
+            let live = clear_then_delete(&track).await;
+            let (text, is_error) = live.undo().await;
+            assert!(!is_error, "{text}");
+            // The pieces are back as the clear left them (Cmd-Z in Live, twice), and the track was frozen since.
+            *track.clips.borrow_mut() = vec![("live:501".into(), "left-hash".into()), ("live:502".into(), "right-hash".into())];
+            track.frozen.set(true);
+            let earlier = live.python("restore").len();
+            let (text, is_error) = live.undo().await;
+            assert!(is_error);
+            assert!(
+                text.contains("\u{201c}Keys\u{201d} is frozen. Unfreeze \u{201c}Keys\u{201d}, then undo again."),
+                "the track's refusal, with its fix: {text}"
+            );
+            // Only the pieces as the clear kept them were checked: the one Kumi made again isn't followed.
+            let checks = live.python("restore")[earlier..].to_vec();
+            assert_eq!(checks.len(), 1, "{checks:?}");
+            assert_eq!(checks[0]["remnants"][0]["identity"], "live:501", "{checks:?}");
+            let clear = live.integration.history.entries.borrow().values().next().unwrap().borrow().record.clone();
+            assert_eq!(clear.state, ChangeState::Applied, "{text}");
         })
         .await;
 }

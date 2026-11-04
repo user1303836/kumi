@@ -387,10 +387,11 @@ impl LiveHistory for History {
         }
         let bound = || abort::any([self.connection.lifetime.clone(), abort::timeout(RESTORE_MS)]);
         // A piece Live left that a later change deleted, and Kumi's undo of that one made again, is that clip now. The
-        // pieces as the change left them come first: Live's own undo may have brought one back as it was.
+        // pieces as the change left them come first: Live's own undo may have brought one back as it was. And only a
+        // piece's refusal is followed: one for the track or what's in the way stands, with its fix.
         let material = match snapshots::check(self, &material, &leaves, &bound).await {
             Ok(()) => material,
-            Err(why) => {
+            Err(why) if why.contains(snapshots::PIECE_CHANGED) => {
                 let followed = material.clone().followed(&self.remade);
                 if followed.remnants == material.remnants {
                     return Ok(self.refused(entry, &material, &names, &why));
@@ -400,6 +401,7 @@ impl LiveHistory for History {
                 }
                 followed
             }
+            Err(why) => return Ok(self.refused(entry, &material, &names, &why)),
         };
         // What the track holds before: a rollback is only ever made back to it.
         let before = snapshots::state(self, &material, bound()).await;

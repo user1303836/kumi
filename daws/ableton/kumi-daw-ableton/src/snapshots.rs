@@ -42,9 +42,12 @@ const MARGIN: usize = 1024;
 const KEPT_BYTES: usize = if cfg!(test) { 1024 * 1024 } else { 64 * 1024 * 1024 };
 /// The most an unsaved Set's kept clips wait in memory to be written once it's saved.
 const PENDING_BYTES: usize = if cfg!(test) { 1024 * 1024 } else { 64 * 1024 * 1024 };
+/// What the check says of a piece Live left of a cut clip that isn't as the change left it: the one refusal a piece Kumi
+/// made again may answer.
+pub const PIECE_CHANGED: &str = "changed in Live since";
 /// Live's own refusals that Kumi passes on: they say what's in the way.
 const CHECKS: &[&str] = &[
-    "changed in Live since",
+    PIECE_CHANGED,
     "place now",
     "slot now",
     "isn't there any more",
