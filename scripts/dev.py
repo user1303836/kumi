@@ -7,6 +7,7 @@
     python3 scripts/dev.py affected                       # no base: everything (a push to main)
     python3 scripts/dev.py affected --check               # every tracked file belongs to a package or an area
     python3 scripts/dev.py areas [--in AREA] PATH...      # the areas each path belongs to
+    python3 scripts/dev.py areas --write-workflows        # the Installer's and Network's paths: from scripts/areas.toml
     python3 scripts/dev.py check [--base origin/main]     # Required CI's checks for what this branch changes
     python3 scripts/dev.py deps [--check]                 # each crate's layer and what it uses; --check: the layer rules
     python3 scripts/dev.py select [--tested-by PROFILE] "PACKAGES" [-p NAME | --exclude NAME]...   # a CI part's, as -p options
@@ -21,13 +22,15 @@ dependent once, for its tests). A change that would run Rust's jobs but that no 
 workflow, a script, git's settings) affects every package: nothing says which it doesn't. The jobs are CI's
 (.github/workflows/ci.yml), which each read this on a pull request (its merge commit against main, `--base HEAD^1`):
 
-- rust_linux, rust_lint, rust_platforms: any change but to docs, or to the Renoise tool beyond what Kumi reads of it;
+- rust_lint: any change but to docs, or to the Renoise tool beyond what Kumi reads of it (the Rust parts, and the other
+  systems' jobs, pick their packages from `packages`);
 - remote_script, live_extension: any change but to docs;
 - reaper_extension: REAPER's extension, a package it builds with, or CI's workflow;
 - renoise_tool: the Renoise tool, or CI's workflow.
 
 The Installer and Network workflows run for their own areas (`install`, `network`) by their `paths:`, which repeat those
-areas' globs (an `except` as a `!` glob): scripts/tests/test_dev.py holds them to it.
+areas' globs (an `except` as a `!` glob): `areas --write-workflows` writes them, and scripts/tests/test_dev.py fails when
+they differ.
 
 `check` runs, in CI's order and for what the branch changes since `--base` (origin/main): the change's whitespace and
 the areas' check; then, when it affects Rust packages, `cargo fmt --all --check`, the gating Clippy lint and the `ci`
@@ -82,7 +85,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AREAS = ROOT / "scripts/areas.toml"
 # REAPER's extension, which CI builds as it ships and loads on each system.
 REAPER_EXTENSION = "reaper-kumi"
-JOBS = ("rust_linux", "rust_lint", "rust_platforms", "remote_script", "live_extension", "reaper_extension", "renoise_tool")
+JOBS = ("rust_lint", "remote_script", "live_extension", "reaper_extension", "renoise_tool")
 # The workflows that run for an area's paths alone (their `paths:` filters repeat the area): workflow, area.
 PATH_FILTERED = ((".github/workflows/installer.yml", "install"), (".github/workflows/network.yml", "network"))
 # Where the repository's paths moved, oldest first: `rebase-moves` reads it from the branch it rebases onto.
@@ -288,8 +291,8 @@ def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, 
     packages = set(workspace.folders) if unfed else named
     # The extension's own jobs follow what it builds with, never the everything above.
     reaper |= REAPER_EXTENSION in named
-    jobs = {"rust_linux": rust, "rust_lint": rust, "rust_platforms": rust, "remote_script": code, "live_extension": code,
-            "reaper_extension": reaper, "renoise_tool": renoise}
+    jobs = {"rust_lint": rust, "remote_script": code, "live_extension": code, "reaper_extension": reaper,
+            "renoise_tool": renoise}
     return Affected(files, sorted(packages), sorted(hit), jobs)
 
 
@@ -318,6 +321,27 @@ def area_filter(area: str, path: Path = AREAS) -> list[str]:
     """An area's globs as a workflow's `paths:` filter: its paths, then each `except` as a `!` glob."""
     table = tomllib.loads(path.read_text(encoding="utf-8"))[area]
     return list(table["paths"]) + [f"!{glob}" for glob in table.get("except", [])]
+
+
+def with_area_paths(text: str, globs: list[str]) -> str:
+    """`text`, a workflow, with each `paths:` list in its `on:` block (a trigger's) written as `globs`, one a line."""
+    out: list[str] = []
+    inside, trigger, replacing = False, None, False
+    for line in text.splitlines(keepends=True):
+        if replacing and re.match(r"^      - ", line):
+            continue
+        replacing = False
+        if re.match(r"^\S", line):
+            inside, trigger = line.startswith("on:"), None
+        elif inside and (match := re.match(r"^  ([a-z_]+):", line)):
+            trigger = match[1]
+        elif inside and trigger and re.match(r"^    paths:\s*$", line):
+            out.append(line)
+            out.extend(f'      - "{glob}"\n' for glob in globs)
+            replacing = True
+            continue
+        out.append(line)
+    return "".join(out)
 
 
 def role(name: str, folder: str) -> str:
@@ -541,6 +565,17 @@ def command_select(args: argparse.Namespace) -> int:
 
 
 def command_areas(args: argparse.Namespace) -> int:
+    if args.write_workflows:
+        for workflow, area in PATH_FILTERED:
+            path = ROOT / workflow
+            text = path.read_text(encoding="utf-8")
+            written = with_area_paths(text, area_filter(area))
+            if written != text:
+                path.write_text(written, encoding="utf-8")
+                print(f"{workflow}: its paths are scripts/areas.toml's [{area}] again")
+        return 0
+    if not args.paths:
+        raise Refused("areas: name the paths, or --write-workflows")
     areas = load_areas()
     if args.within and args.within not in {area.name for area in areas}:
         raise Refused(f"there's no area {args.within} in scripts/areas.toml")
@@ -823,9 +858,11 @@ def main(argv: list[str] | None = None) -> int:
     what.add_argument("--github-output", action="store_true", help="write each job, and the packages and areas, to $GITHUB_OUTPUT")
     what.add_argument("--check", action="store_true", help="fail, naming them, on tracked files no package or area holds")
     what.set_defaults(run=command_affected)
-    where = commands.add_parser("areas", help="the areas each path belongs to")
+    where = commands.add_parser("areas", help="the areas each path belongs to; --write-workflows: the paths filters")
     where.add_argument("--in", dest="within", metavar="AREA", help="fail, naming them, on paths outside AREA")
-    where.add_argument("paths", nargs="+")
+    where.add_argument("--write-workflows", action="store_true",
+                       help="write the path-filtered workflows' paths: (Installer, Network) from scripts/areas.toml")
+    where.add_argument("paths", nargs="*")
     where.set_defaults(run=command_areas)
     check = commands.add_parser("check", help="Required CI's checks for what this branch changes")
     check.add_argument("--base", default="origin/main", help="the ref the branch is measured from (default origin/main)")

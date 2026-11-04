@@ -16,7 +16,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # A run by hand replaces one still under way on its branch; the weekly run keeps its own, so neither cancels the other.
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && github.run_id || github.ref }}
   cancel-in-progress: true
 
 env:
@@ -42,3 +43,19 @@ jobs:
       cache: ${{ matrix.cache }}
       linker: ${{ matrix.linker || '' }}
       parts: ${{ matrix.parts }}
+
+  eval-runner:
+    # The eval runner's own tests (its lab guard, which refuses a producer's real project or ~/.kumi, and that its
+    # Live-words and names checks can fail): an example's tests, which no test binary holds, so nextest never runs them.
+    name: Extended / eval runner tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
+      # CI's, as the tests'.
+      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
+        with:
+          shared-key: kumi-rust-linux
+          save-if: false
+      - run: cargo test -p kumi --locked --example eval_daws

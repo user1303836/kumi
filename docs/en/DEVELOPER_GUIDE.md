@@ -293,7 +293,9 @@ extension changed, rebuild and commit its bundle. Work goes on a branch and
 reaches `main` by pull request.
 
 **A Kumi release** is one command, from any checkout, with `gh` signed in as a
-repository admin. Run it right after a pull request merges:
+repository admin. Run it once `main`'s CI on the commit to release is green on
+Linux, macOS and Windows: pull requests test on Linux alone, so `main`'s run is
+the first on the other two, and `--go` refuses until it's green:
 
 ```sh
 python3 scripts/release.py          # dry run: the version, the CHANGELOG entry, the notes and the checks
@@ -341,9 +343,10 @@ python3 scripts/release.py --go     # the release
   READMEs; the ships-with line under "Bridge versions" in the three
   `KUMI_CHANGES.md`; and a `## X.Y.Z — date` entry in `CHANGELOG.md`. It opens
   the pull request "Kumi X.Y.Z", merges it with the admin bypass as
-  "Kumi X.Y.Z (#PR)" without waiting for its CI, tags the merge commit
-  `vX.Y.Z`, pushes the tag and creates the draft release with its notes
-  (`--summary` opens them with a sentence).
+  "Kumi X.Y.Z (#PR)" without waiting for its CI (it changes only versions and
+  notes, and `main`'s CI runs on it too), tags the merge commit `vX.Y.Z`,
+  pushes the tag and creates the draft release with its notes (`--summary`
+  opens them with a sentence).
 - **The tag's Installer run** builds native bundles for Intel and ARM on macOS,
   Linux and Windows, tests installs and migration, attaches the per-target
   bundles (each as `.tar.gz` and `.tar.xz`) and manifests plus the compatibility `kumi.tar.gz`, `kumi-release.json`,

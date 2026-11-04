@@ -72,7 +72,7 @@ def jobs(result: "dev.Affected") -> set[str]:
     return {job for job, runs in result.jobs.items() if runs}
 
 
-RUST = {"rust_linux", "rust_lint", "rust_platforms"}
+RUST = {"rust_lint"}
 CODE = {"remote_script", "live_extension"}
 
 
@@ -154,7 +154,18 @@ class Affected(unittest.TestCase):
             triggers = dev.workflow_paths((ROOT / workflow).read_text(encoding="utf-8"))
             self.assertEqual(sorted(triggers), ["pull_request", "push"], workflow)
             for trigger, paths in triggers.items():
-                self.assertEqual(paths, dev.area_filter(area), f"{workflow} {trigger}: scripts/areas.toml's [{area}]")
+                self.assertEqual(paths, dev.area_filter(area),
+                                 f"{workflow} {trigger}: scripts/areas.toml's [{area}] (python3 scripts/dev.py areas --write-workflows)")
+
+    def test_writing_an_areas_paths_replaces_each_triggers_list_and_nothing_else(self):
+        workflow = ('name: W\non:\n  push:\n    branches: [main]\n    paths:\n      - "a"\n      - "b"\n'
+                    '  pull_request:\n    paths:\n      - "c"\n  workflow_dispatch:\n'
+                    'jobs:\n  build:\n    steps:\n      - "not a path"\n')
+        written = dev.with_area_paths(workflow, ["x", "y", "!z"])
+        self.assertEqual(dev.workflow_paths(written), {"push": ["x", "y", "!z"], "pull_request": ["x", "y", "!z"]})
+        self.assertEqual(written.replace('      - "x"\n      - "y"\n      - "!z"\n', ""),
+                         workflow.replace('      - "a"\n      - "b"\n', "").replace('      - "c"\n', ""))
+        self.assertEqual(dev.with_area_paths(written, ["x", "y", "!z"]), written)
 
     def test_a_rename_counts_both_its_paths(self):
         result = run("R090\tcrates/extension/src/old.rs\tcrates/app/src/old.rs")

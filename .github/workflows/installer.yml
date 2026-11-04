@@ -169,7 +169,8 @@ jobs:
           # bundle carries, the tar and PowerShell Kumi runs, how it downloads (its HTTP client and network settings) and
           # builds paths, how Kumi's extension goes into Live, how REAPER's and Renoise's bridges are built and go in, and
           # this workflow; not their tests. Tags and a run by hand build all six platforms, install each, update to it from
-          # the release before it and check the update from the JavaScript release; the nightly run only builds them.
+          # the release before it and check the update from the JavaScript release; the nightly run builds all six and
+          # installs on one machine of each system.
           checks=true
           # A change to any of these runs the installs above before it merges: main broke once when the Mac helper's
           # didn't. Each has to be there and count as installing, so a renamed one can't drop out of the paths unnoticed.
@@ -190,24 +191,30 @@ jobs:
             test -e "$path" || { echo "::error::$path, which the installs depend on, isn't there: point this check at its new name"; exit 1; }
             python3 scripts/dev.py areas --in install "$path" > /dev/null || { echo "::error::$path must count as installing (scripts/areas.toml)"; exit 1; }
           done
-          # The nightly run only builds, to keep the release profile's cache warm. A run started by hand also installs.
+          # The nightly run builds all six with the release profile, to keep its cache warm for the next tag, and installs
+          # and checks on one machine of each system, so a change outside the install surface that breaks installing shows
+          # the next morning, not on a tag. A run started by hand does all a tag does.
           extended=false
+          nightly=false
           case "${{ github.event_name }}" in
             workflow_dispatch) extended=true ;;
-            schedule) extended=true; checks=false ;;
+            schedule) nightly=true ;;
             push) [[ "${{ github.ref }}" == refs/tags/v* ]] && extended=true ;;
           esac
           echo "full=$extended" >> "$GITHUB_OUTPUT"
           echo "checks=$checks" >> "$GITHUB_OUTPUT"
-          if $extended; then
+          if $extended || $nightly; then
             # The Intel Mac bundle is built on an Apple Silicon Mac, a cross build: the Intel runners take about twice
             # as long. The Intel Mac install below still runs on Intel.
             echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"macos-15","target":"x86_64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"},{"os":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
+          fi
+          if $extended; then
             # One install on each system (update) also updates to this bundle from the release before it, from GitHub.
             echo 'installs=[{"os":"macos-15","label":"macOS-arm64","update":true},{"os":"macos-15-intel","label":"macOS-x64"},{"os":"ubuntu-22.04","label":"Linux-x64","update":true},{"os":"ubuntu-22.04-arm","label":"Linux-arm64"},{"os":"windows-2025","label":"Windows-x64","update":true},{"os":"windows-11-arm","label":"Windows-arm64"}]' >> "$GITHUB_OUTPUT"
             echo 'migrations=["macos-15","ubuntu-24.04","windows-2025"]' >> "$GITHUB_OUTPUT"
           else
-            echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
             echo 'installs=[{"os":"macos-15","label":"macOS-arm64"},{"os":"ubuntu-22.04","label":"Linux-x64"},{"os":"windows-2025","label":"Windows-x64"}]' >> "$GITHUB_OUTPUT"
             echo 'migrations=[]' >> "$GITHUB_OUTPUT"
           fi
@@ -1023,10 +1030,11 @@ jobs:
 
   nightly-failed:
     # The nightly run is the only one before a tag that builds all six bundles with the release profile, REAPER's
-    # extension in each (the cross builds, lipo, strip and codesign). A break there stops the next release, Live's
-    # fixes too, so it opens an issue (or comments on the open one) to be seen the next morning.
+    # extension in each (the cross builds, lipo, strip and codesign), and the only install of main's bundle for a change
+    # outside the install surface. A break there stops the next release, Live's fixes too, so it opens an issue (or
+    # comments on the open one) to be seen the next morning.
     name: The nightly build failed
-    needs: [plan, native]
+    needs: [plan, native, bundle, install]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -1040,7 +1048,7 @@ jobs:
         run: |
           set -euo pipefail
           title="The nightly Installer build failed"
-          body="The nightly release-profile build of main failed: $RUN. Every release builds the same six bundles, with REAPER's extension in each, so a tag fails the same way until this is fixed."
+          body="The nightly run of main failed, building or installing: $RUN. Every release builds and installs the same bundles, with REAPER's extension in each, so a tag fails the same way until this is fixed."
           open="$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
           if [ -n "$open" ]; then
             gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"
