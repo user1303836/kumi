@@ -38,6 +38,8 @@ struct World {
     running: AtomicBool,
     how: How,
     starts: AtomicUsize,
+    /// When the host last started a bridge.
+    started: Mutex<Option<Instant>>,
     /// Bridges the host asked to end.
     stopped: AtomicUsize,
     serving: Mutex<Vec<Arc<Bridge>>>,
@@ -50,6 +52,11 @@ impl World {
 
     fn stopped(&self) -> usize {
         self.stopped.load(Ordering::SeqCst)
+    }
+
+    /// How long ago the host last started a bridge.
+    fn since_start(&self) -> Duration {
+        self.started.lock().unwrap().expect("a bridge started").elapsed()
     }
 
     /// The DAW quits: its bridges end, taking their discovery files with them.
@@ -102,7 +109,14 @@ struct Lab {
 
 impl Lab {
     fn new(how: How) -> Self {
-        let world = World { running: AtomicBool::new(true), how, starts: 0.into(), stopped: 0.into(), serving: Mutex::default() };
+        let world = World {
+            running: AtomicBool::new(true),
+            how,
+            starts: 0.into(),
+            started: Mutex::default(),
+            stopped: 0.into(),
+            serving: Mutex::default(),
+        };
         Self { home: tempfile::tempdir().unwrap(), world: Arc::new(world) }
     }
 
@@ -119,6 +133,7 @@ impl Lab {
                 let (world, paths) = (world.clone(), paths.clone());
                 Box::pin(async move {
                     world.starts.fetch_add(1, Ordering::SeqCst);
+                    *world.started.lock().unwrap() = Some(Instant::now());
                     let bridge = Arc::new(Bridge::default());
                     match world.how {
                         How::End(why) => bridge.end(why),
@@ -212,13 +227,14 @@ async fn a_bridge_slow_to_serve_holds_a_call_only_a_moment_and_is_stopped_after_
     let times = Times { call: ms(300), serve: ms(1500), retry: ms(1000), stop: ms(200) };
     let lab = Lab::new(How::Never);
     let host = lab.host(times);
-    let began = Instant::now();
     let first = host.status(&anyone()).await;
     assert_eq!(reason(&first), STARTING);
-    assert!(began.elapsed() < ms(1200), "a call waits a moment, not the bridge's whole start: {:?}", began.elapsed());
+    let waited = lab.world.since_start();
+    assert!(waited < ms(1200), "a call waits a moment for a starting bridge, not its whole start: {waited:?}");
     assert_eq!(reason(&host.status(&anyone()).await), STARTING);
     assert_eq!(lab.world.starts(), 1, "a starting bridge is waited for, not started again");
-    tokio::time::sleep(times.serve.saturating_sub(began.elapsed()) + ms(100)).await;
+    // (timed from the bridge's start: making the secret first takes a while on Windows)
+    tokio::time::sleep(times.serve.saturating_sub(lab.world.since_start()) + ms(150)).await;
     let failed = host.status(&anyone()).await;
     assert_eq!(reason(&failed), "Kumi's Renoise bridge didn't start serving within 1.5 s");
     assert_eq!(lab.world.stopped(), 1);
