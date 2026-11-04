@@ -139,18 +139,22 @@ impl Patcher {
     /// A patcher from Max's JSON, `{ "patcher": {...} }` or the patcher itself, with the files it names read through
     /// `files`.
     pub fn read(value: &Value, files: &dyn Files) -> Patcher {
-        Patcher::read_within(value, files, &mut Reading::new(MOST_FILE_BOXES, MOST_FILE_BYTES, MOST_NAMES, MOST_ASKED))
+        Patcher::read_within(value.clone(), files, &mut Reading::bounded())
     }
 
     /// A patcher with every file it names read, however many: for surveying patchers Kumi trusts (Max's own), never for a
     /// device it's given.
     pub fn read_all(value: &Value, files: &dyn Files) -> Patcher {
-        Patcher::read_within(value, files, &mut Reading::new(usize::MAX, usize::MAX, usize::MAX, usize::MAX))
+        Patcher::read_within(value.clone(), files, &mut Reading::new(usize::MAX, usize::MAX, usize::MAX, usize::MAX))
     }
 
-    fn read_within(value: &Value, files: &dyn Files, reading: &mut Reading) -> Patcher {
-        let object = value.get("patcher").filter(|inner| inner.is_object()).unwrap_or(value);
-        let mut fields = object.as_object().cloned().unwrap_or_default();
+    /// A patcher read from its JSON, taken apart as it's read: what it holds, at any depth, is moved, never copied.
+    fn read_within(mut value: Value, files: &dyn Files, reading: &mut Reading) -> Patcher {
+        let inner = value.get_mut("patcher").filter(|inner| inner.is_object()).map(Value::take);
+        let mut fields = match inner.unwrap_or(value) {
+            Value::Object(fields) => fields,
+            _ => Map::new(),
+        };
         let boxes = match fields.get_mut("boxes").map(Value::take) {
             Some(Value::Array(boxes)) => boxes,
             _ => Vec::new(),
@@ -194,6 +198,11 @@ impl Patcher {
 }
 
 impl Reading {
+    /// What reading a device's patcher, or one box's code, may use.
+    fn bounded() -> Reading {
+        Reading::new(MOST_FILE_BOXES, MOST_FILE_BYTES, MOST_NAMES, MOST_ASKED)
+    }
+
     fn new(boxes: usize, bytes: usize, names: usize, asked: usize) -> Reading {
         Reading {
             open: Vec::new(),
@@ -257,7 +266,7 @@ impl Reading {
                 let before = self.left;
                 self.left -= count;
                 self.open.push(place.at.clone());
-                let read = Arc::new(Patcher::read_within(&value, files, self));
+                let read = Arc::new(Patcher::read_within(value, files, self));
                 self.open.pop();
                 self.patchers.insert(place.at, Some((Arc::clone(&read), before - self.left)));
                 Some((name, read))
@@ -327,9 +336,8 @@ impl MaxBox {
             _ => return None,
         };
         // An mc.gen~'s wrapper keeps its patcher in its data, which keeps its place as a null too.
-        let patcher = embedded_patcher(&mut fields)
-            .filter(|inner| inner.is_object())
-            .map(|inner| Patcher::read_within(&inner.take(), files, reading));
+        let patcher =
+            embedded_patcher(&mut fields).filter(|inner| inner.is_object()).map(|inner| Patcher::read_within(inner.take(), files, reading));
         let mut item = MaxBox { fields, patcher, file: None, code: None };
         item.code = reading.code(files, &item);
         if item.patcher.is_none() && reading.open.len() < MAX_DEPTH && reading.left > 0 {

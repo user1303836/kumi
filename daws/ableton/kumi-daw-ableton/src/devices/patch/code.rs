@@ -3,15 +3,17 @@
 //! starts a Task that sends later, goes no further than the box.
 //!
 //! A device's code can be anyone's, so what reading it takes is bounded: each file is read for its functions once,
-//! however many boxes run it, its functions' bodies kept as places in it; a file bigger than [`MOST_SOURCE`] isn't read
-//! at all; and the questions asked of one patcher's code read at most [`MOST_ASKED`] of its bodies in all. Past either,
-//! what the code does is unknown, as it is for code that can't be read.
+//! however many boxes run it and however many names reach it, its functions' bodies kept as places in it; a file bigger
+//! than [`MOST_SOURCE`] isn't read at all; and the questions asked of one patcher's code do at most [`MOST_ASKED`] in all,
+//! each reading a function once and looking up a name once, however many call it. Past either, what the code does is
+//! unknown, as it is for code that can't be read.
 
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, Mutex};
 
+use kumi_common::js::string::utf16_len;
 use regex::Regex;
 use serde_json::Value;
 
@@ -19,11 +21,12 @@ use super::{Files, MaxBox};
 
 /// How deep includes and requires are followed.
 const MAX_DEPTH: usize = 8;
-/// The most JavaScript in one file (or held in one box) that's read for its functions, in bytes: Kumi's own devices hold
-/// well under it.
+/// The most JavaScript in one file (or held in one box) that's read for its functions, in characters (UTF-16 units, as
+/// Max and Kumi's caps count them): Kumi's own devices' code, at most the spec's `MAX_CODE` of them, is well under it.
 const MOST_SOURCE: usize = 256 * 1024;
-/// The most of its functions' bodies the questions asked of one patcher's code read in all, in bytes: code made so that a
-/// question reads it over and over (functions nested in each other, each calling the next) is unknown past it.
+/// What the questions asked of one patcher's code may do in all: each byte of a function's body read, each look for a
+/// name in a script, and each function a name finds count one. Code made so that a question reads it over and over
+/// (functions nested in each other, each calling the next), or finds thousands of functions by a name, is unknown past it.
 pub(crate) const MOST_ASKED: usize = 16 * 1024 * 1024;
 
 /// The JavaScript a code box runs: the scripts of its own code and of what that includes and requires.
@@ -129,42 +132,44 @@ impl Code {
     }
 
     /// The code a box runs (a [v8.codebox]'s own, a [v8ui]'s or a [js]'s file, or what it embeds) with what it
-    /// includes and requires, read through `files`; None for a box that runs none, or whose file can't be read. A
-    /// patcher's boxes read theirs through [`Code::of`], each file once for all of them.
+    /// includes and requires, read through `files` as a patcher's boxes read theirs: each file once, by its place. None
+    /// for a box that runs none, or whose file can't be read.
     pub fn read(item: &MaxBox, files: &dyn Files) -> Option<Code> {
-        let own = match Code::own(item)? {
-            Own::Held(text) => Script::read(text),
-            Own::File(name) => Script::read(&script(files, name)?),
-        };
-        let mut by_name = |name: &str| script(files, name).map(|text| Arc::new(Script::read(&text)));
-        Some(Code::of(Arc::new(own), &mut by_name, Arc::new(AtomicUsize::new(MOST_ASKED))))
+        super::Reading::bounded().code(files, item).map(Arc::unwrap_or_clone)
     }
 
     /// The code that runs `own`, with what it includes and requires, each found by `script` (by its name, with or without
-    /// `.js`); questions asked of it read from what `left` says is left.
+    /// `.js`, one file's the same script by any name that reaches it); questions asked of it take from what `left` says is
+    /// left.
     pub(crate) fn of(own: Arc<Script>, script: &mut dyn FnMut(&str) -> Option<Arc<Script>>, left: Arc<AtomicUsize>) -> Code {
         let mut code = Code { scripts: Vec::new(), partial: false, asked: Asked { left, found: Mutex::default() } };
-        code.add(own, true, script, &mut HashSet::new(), 0);
+        code.add(own, true, script, &mut HashSet::new(), &mut HashSet::new(), 0);
         code
     }
 
+    /// Adds `own`, and what it includes and requires: each name looked up once, and each script added once, however many
+    /// names reach it.
     fn add(
         &mut self,
         own: Arc<Script>,
         top: bool,
         script: &mut dyn FnMut(&str) -> Option<Arc<Script>>,
-        read: &mut HashSet<String>,
+        names: &mut HashSet<String>,
+        added: &mut HashSet<*const Script>,
         depth: usize,
     ) {
+        if !added.insert(Arc::as_ptr(&own)) {
+            return;
+        }
         self.partial |= own.unread;
         self.scripts.push((Arc::clone(&own), top));
         for (include, name) in &own.uses {
-            if depth >= MAX_DEPTH || !read.insert(name.clone()) {
+            if depth >= MAX_DEPTH || !names.insert(name.clone()) {
                 continue;
             }
             match script(name) {
                 // An include runs in the box's own scope; a required module keeps its own.
-                Some(used) => self.add(used, top && *include, script, read, depth + 1),
+                Some(used) => self.add(used, top && *include, script, names, added, depth + 1),
                 None => self.partial = true,
             }
         }
@@ -197,19 +202,16 @@ impl Code {
     }
 
     /// Whether the function at `start` (its script, and it in that), or any it calls, reaches an outlet at once; None past
-    /// what's left to read.
+    /// what's left. Each function is read once, and each name called looked up once, however many functions it names and
+    /// however many call it.
     fn follow(&self, start: (usize, usize)) -> Option<bool> {
-        let mut visited = HashSet::new();
+        let mut queued = HashSet::from([start]);
+        let mut looked: HashSet<&str> = HashSet::new();
         let mut stack = vec![start];
         while let Some((at, index)) = stack.pop() {
-            if !visited.insert((at, index)) {
-                continue;
-            }
             let script = &self.scripts[at].0;
             let body = script.functions[index].body.clone();
-            if self.asked.left.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(body.len())).is_err() {
-                return None;
-            }
+            self.take(body.len())?;
             // What the body hands a Task runs later: it doesn't count.
             let later = script.tasks_in(&body);
             let now = |found: usize| {
@@ -222,21 +224,33 @@ impl Code {
                 return Some(true);
             }
             for call in CALL.captures_iter(text).filter(|call| call.get(0).is_some_and(|whole| now(whole.start()))) {
+                let Some(name) = call.get(1).map(|name| name.as_str()) else { continue };
+                if !looked.insert(name) {
+                    continue;
+                }
+                // A look in each script, and each function the name finds there, count as a byte read does.
+                self.take(self.scripts.len())?;
                 for (other, (script, _)) in self.scripts.iter().enumerate() {
-                    if let Some(functions) = script.named.get(&call[1]) {
-                        stack.extend(functions.iter().map(|&function| (other, function)));
-                    }
+                    let Some(functions) = script.named.get(name) else { continue };
+                    self.take(functions.len())?;
+                    stack.extend(functions.iter().map(|&function| (other, function)).filter(|&found| queued.insert(found)));
                 }
             }
         }
         Some(false)
+    }
+
+    /// Takes `cost` from what's left to the questions of this code; None when less is left.
+    fn take(&self, cost: usize) -> Option<()> {
+        self.asked.left.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(cost)).ok().map(drop)
     }
 }
 
 impl Script {
     /// A script read for its functions, in one pass over its code; one bigger than [`MOST_SOURCE`] isn't read.
     pub(crate) fn read(source: &str) -> Script {
-        if source.len() > MOST_SOURCE {
+        // A character is one to three bytes for each of its UTF-16 units: they're counted only when its bytes don't say.
+        if source.len() > MOST_SOURCE && (source.len() > 3 * MOST_SOURCE || utf16_len(source) > MOST_SOURCE) {
             return Script { unread: true, ..Script::default() };
         }
         let clean = clean(source);
@@ -348,14 +362,6 @@ pub fn syntax_problem(source: &str) -> Option<(usize, String)> {
         })
     })();
     checked.unwrap_or(None)
-}
-
-/// A script file's text, by its name with or without `.js`.
-fn script(files: &dyn Files, name: &str) -> Option<String> {
-    if name.is_empty() || name == "none" {
-        return None;
-    }
-    files.text(name).or_else(|| if name.contains('.') { None } else { files.text(&format!("{name}.js")) })
 }
 
 /// Code without comments, and with each string's text blanked (its quotes kept), so braces and words in them don't
@@ -578,5 +584,57 @@ mod tests {
         .unwrap();
         assert_eq!(tasked.sends_at_once("later"), Some(false));
         assert_eq!(tasked.sends_at_once("now"), Some(true));
+    }
+
+    /// #772: a name thousands of functions share is looked up once a question, and each function it finds read once, both
+    /// counting against what the questions may do; a file many names reach is read for its functions once; and what's
+    /// read of a file is counted in characters, as Kumi's own caps count them.
+    #[test]
+    fn a_name_many_functions_share_and_a_file_many_names_reach_are_taken_once() {
+        let held = |code: String| code_box(json!({ "maxclass": "v8.codebox", "code": code }));
+        let none = Scripts(HashMap::new());
+        let shared = |many: usize| format!("function bang() {{ a(); }}\n{}", "a=()=>a()\n".repeat(many));
+        let taken = |code: &Code| MOST_ASKED - code.asked.left.load(Ordering::Relaxed);
+
+        // What a name finds counts as well as what's read: with only the functions' bodies' worth left, it can't be known.
+        let script = Arc::new(Script::read(&shared(2_000)));
+        let bodies: usize = script.functions.iter().map(|function| function.body.len()).sum();
+        let short = Code::of(script, &mut |_: &str| None, Arc::new(AtomicUsize::new(bodies)));
+        assert_eq!(short.sends_at_once("bang"), None);
+
+        // Twenty thousand functions of one name, each calling it: each is read once, and the name looked up once.
+        let many = Code::read(&held(shared(20_000)), &none).unwrap();
+        assert!(!many.partial);
+        assert_eq!(many.sends_at_once("bang"), Some(false));
+        assert!(taken(&many) < 10 * 20_000, "{} taken", taken(&many));
+
+        // A file a hundred names reach is one script: a question of it takes what it takes through one name.
+        struct Lib;
+        impl Files for Lib {
+            fn place(&self, name: &str) -> Option<super::super::Place> {
+                name.starts_with("lib").then(|| super::super::Place { at: "lib.js".into(), bytes: 64 })
+            }
+
+            fn patcher(&self, _name: &str) -> Option<Value> {
+                None
+            }
+
+            fn text(&self, name: &str) -> Option<String> {
+                name.starts_with("lib").then(|| "function tell(x) { post(x); }".to_string())
+            }
+        }
+        let including = |names: usize| {
+            let includes: String = (0..names).map(|at| format!("include('lib{at}');\n")).collect();
+            let code = Code::read(&held(format!("{includes}function bang() {{ tell(1); }}")), &Lib).unwrap();
+            assert_eq!(code.sends_at_once("bang"), Some(false));
+            taken(&code)
+        };
+        assert_eq!(including(100), including(1));
+
+        // A hundred thousand characters, the most Kumi writes of a code box, are read whatever script they're in: here
+        // three bytes each.
+        let wide = Code::read(&held(format!("// {}\nfunction bang() {{ outlet(0, 1); }}", "音".repeat(100_000))), &none).unwrap();
+        assert!(!wide.partial);
+        assert_eq!(wide.sends_at_once("bang"), Some(true));
     }
 }

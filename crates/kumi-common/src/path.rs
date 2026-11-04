@@ -1,16 +1,5 @@
 //! Paths a model or a file names, judged before anything opens them.
 
-use std::path::Path;
-
-/// Whether a path a model gives is one Kumi opens: absolute, on this computer, and no device's or another machine's.
-pub fn local_path(path: &Path) -> Result<(), String> {
-    let text = path.to_string_lossy();
-    if text.chars().any(char::is_control) || network_or_device(&text) || reserved_device(&text) || !path.is_absolute() {
-        return Err("Use an absolute local path; network and device paths are not supported".into());
-    }
-    Ok(())
-}
-
 /// Whether `path` names another machine or a device the way Windows reads it: two separators in any mix at its start
 /// (`\\host\share`, `//host/share`, `/\host\share`, `\/host\share`, and so `\\?\UNC\…` and `\\.\…` too), or the NT
 /// object prefix `\??\` (which reaches `\??\UNC\host\share`). Opening one makes Windows connect to that host, offering

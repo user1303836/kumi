@@ -11,7 +11,7 @@ use async_trait::async_trait;
 use kumi_common::{
     abort::{Signal, SignalExt},
     js::json::stringify,
-    path::local_path,
+    path::{network_or_device, reserved_device},
 };
 use kumi_library::plugins::{
     formats::{structure, MAX_DECODED_BYTES},
@@ -275,6 +275,14 @@ fn inventory_query(plugin: &inventory::InstalledPlugin, query: &str) -> bool {
     format!("{} {} {}", plugin.vendor.as_deref().unwrap_or_default(), plugin.name, plugin.plugin.as_deref().unwrap_or_default())
         .to_lowercase()
         .contains(&query)
+}
+
+fn local_path(path: &Path) -> Result<(), String> {
+    let text = path.to_string_lossy();
+    if text.chars().any(char::is_control) || network_or_device(&text) || reserved_device(&text) || !path.is_absolute() {
+        return Err("Use an absolute local path; network and device paths are not supported".into());
+    }
+    Ok(())
 }
 
 fn read_file(path: &Path, plugin: &str) -> Result<Vec<u8>, String> {
