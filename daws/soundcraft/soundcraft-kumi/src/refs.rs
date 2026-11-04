@@ -12,7 +12,9 @@
 //! `s:track:1.2`: a ref from an earlier life is stale. A Kumi change's object that an undo crossed is retired at once.
 //!
 //! What no look can tell: between two looks, an undo and then a step that makes an object like the undone one (a track
-//! of the same kind, format, name and instrument) on the same id. Refs to the undone one find the new one. SoundCraft
+//! of the same kind, format, name and instrument) on the same id. Refs to the undone one find the new one. For an audio
+//! clip, alike is wide: while it's there, it's known by its name and what it plays, which every copy of it shares, so a
+//! paste undone and a paste elsewhere between two looks is the same clip to the bridge, at its new place. SoundCraft
 //! would have to count its undos where a look sees them, or never give an id out again, for the bridge to tell.
 use serde_json::{json, Value};
 use std::collections::HashMap;
