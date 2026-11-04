@@ -10,10 +10,11 @@ pub enum DawId {
     Ableton,
     Reaper,
     Renoise,
+    SoundCraft,
 }
 
 impl DawId {
-    pub const ALL: [DawId; 3] = [DawId::Ableton, DawId::Reaper, DawId::Renoise];
+    pub const ALL: [DawId; 4] = [DawId::Ableton, DawId::Reaper, DawId::Renoise, DawId::SoundCraft];
 
     /// Its profile.
     pub fn profile(self) -> &'static DawProfile {
@@ -21,6 +22,7 @@ impl DawId {
             DawId::Ableton => &DawProfile::ABLETON,
             DawId::Reaper => &DawProfile::REAPER,
             DawId::Renoise => &DawProfile::RENOISE,
+            DawId::SoundCraft => &DawProfile::SOUNDCRAFT,
         }
     }
 
@@ -30,6 +32,7 @@ impl DawId {
             DawId::Ableton => "ableton",
             DawId::Reaper => "reaper",
             DawId::Renoise => "renoise",
+            DawId::SoundCraft => "soundcraft",
         }
     }
 
@@ -1079,6 +1082,74 @@ impl DawProfile {
         },
     };
 
+    /// SoundCraft, through Kumi's bridge beside it (`soundcraft-kumi`, which Kumi's host starts): its words and
+    /// vocabulary. It can't do anything through Kumi yet, so its capabilities come with its milestones; its words are
+    /// SoundCraft's own (a session, the Edit window, inserts A to J, its built-in plug-ins).
+    pub const SOUNDCRAFT: DawProfile = DawProfile {
+        id: Some(DawId::SoundCraft),
+        words: DawWords { app: "SoundCraft", place: "session", places: "sessions", master: "the master track", timeline: "Edit window" },
+        caps: Capabilities::NONE,
+        vocab: PromptVocab {
+            plan_tool: "make_changes",
+            ref_example: "track:3",
+            recipe_step_example: "a parameter set by its name on a plug-in an earlier step inserted",
+            missing_example: "naming a hosted plug-in's parameters",
+            goal_instruments: "the Subtractive Synth, the Drum Synth or a Sampler instrument",
+            serial_parallel: "serial inserts against sends to parallel aux tracks",
+            build_chains: "send to aux tracks, insert plug-ins on them",
+            keep_candidates: "don't undo them: the producer may want to A/B them",
+            layers: "instrument tracks layered together",
+            cant_reach: "Kumi can't reach SoundCraft. Is it open, with its control channel on? Kumi opens it that way (kumi --daw soundcraft); a copy opened from the Dock can't be reached, so save, quit it and let Kumi open it again.",
+            crash_note: "If it crashed, SoundCraft offers your session from its autosave when it opens again.",
+            goal_needs: "Goals need SoundCraft connected, and Kumi doesn't listen in SoundCraft yet.",
+            render_leftovers: "Kumi couldn't remove its scratch copies; delete the “Kumi · try” tracks from the session by hand.",
+            safety_limiter: "a Maximizer",
+            listen_method: "Kumi doesn't listen in SoundCraft yet.",
+            write_notes_tool: "the tool that writes notes",
+            eq: "EQ 7-Band",
+            middle_c_octave: 3,
+            tracker_notes: false,
+            structure_moves: UNKNOWN_STRUCTURE_MOVES,
+            library_places: "folders they named, Splice and their sample folders in other DAWs",
+            preset_sources: "their plug-ins' presets",
+            preset_examples: "(\"Compressor/Limiter\", \"Serum\", \"Pro-Q 3\")",
+            preset_device_hint: "The plug-in it's for: \"Compressor/Limiter\", \"Serum\"",
+            voice_project: "SoundCraft session",
+            voice_devices: "EQ 7-Band, Compressor/Limiter, Expander/Gate, Channel Strip, Maximizer, Room Reverb, Plate Reverb, Mod Delay, Saturator, Subtractive Synth, Drum Synth and Sampler",
+            tutorial_words: "SoundCraft tutorial: Edit window, Mix window, clips, playlists, inserts, sends, aux tracks, automation, Slip, Grid, Shuffle, Spot, EQ 7-Band, Compressor/Limiter, Channel Strip, Maximizer, Room Reverb, Plate Reverb, Mod Delay, sidechain, Subtractive Synth, Sampler.",
+            own_undo: if cfg!(target_os = "macos") { "SoundCraft's own undo (Cmd-Z in SoundCraft)" } else { "SoundCraft's own undo (Ctrl-Z in SoundCraft)" },
+            refs_retired: "SoundCraft may have given the ids Kumi named to other objects, so Kumi's references are retired: read them again before using any.",
+            structure: "tracks",
+            gain_stage: "the track's last Maximizer, else a Gain it adds",
+            eq_name: "EQ 7-Band",
+            multiband: "",
+            bass_mono: "",
+            drum_kit: "a Drum Synth or a Sampler",
+            drum_stem_steps: "separate its stems, convert the drum stem to MIDI",
+            launcher_clip: "a clip",
+            clip: "clip",
+            clips: "clips",
+            clip_ref: "ref",
+            audio_clip: "an audio clip",
+            midi_clip: "a MIDI clip",
+            clip_field: "clip",
+            eq_fit_settings: "",
+            part_ref: "a MIDI clip's ref",
+            reference_part: "the reference's MIDI clip (its ref)",
+            stem_audio: "an audio clip's ref",
+            stem_as_audio: "the drum stem's clip",
+            note_tools: "the tools that write notes",
+            move_notes_tool: "the tool that writes notes",
+            swing_tool: "the tool that writes notes",
+            midi_file_import: "import it into SoundCraft and give the clip it lands on as reference",
+            project_parts: "every track with its inserts in order, its sends and output, and its clips",
+            sample_tools: "the sample tools",
+            preset_loading: "",
+            preset_kinds: &[],
+            preset_formats: &[],
+        },
+    };
+
     /// The same DAW with nothing it can do now: its words stay (the producer still calls it by its name).
     pub const fn without_caps(self) -> DawProfile {
         DawProfile { caps: Capabilities::NONE, ..self }
@@ -1245,10 +1316,11 @@ mod tests {
 
     #[test]
     fn each_daw_names_notes_as_it_writes_them() {
-        // (review U10) Renoise writes a natural with a dash, C-5 for MIDI 60.
+        // (review U10) Renoise writes a natural with a dash, C-5 for MIDI 60; SoundCraft names middle C as Pro Tools does.
         let names = |profile: &DawProfile| [60, 61, 0, 119].map(|midi| profile.note_name(midi));
         assert_eq!(names(&DawProfile::RENOISE), ["C-5", "C#5", "C-0", "B-9"]);
         assert_eq!(names(&DawProfile::REAPER), ["C4", "C#4", "C-1", "B8"]);
+        assert_eq!(names(&DawProfile::SOUNDCRAFT), ["C3", "C#3", "C-2", "B7"]);
     }
 
     crate::daw_text!(
@@ -1264,33 +1336,34 @@ mod tests {
     }
 
     #[test]
-    fn reaper_and_renoise_speak_their_own_words_never_lives() {
+    fn every_other_daw_speaks_its_own_words_never_lives() {
         let live = regex::Regex::new(
             r"\b(Live|Set|Sets|Ableton|Session|Arrangement|Remote Script|Control Surface|Main|Drum Rack|Operator|Simpler|EQ Eight|Utility|[Rr]acks?|[Cc]lip slots?|[Ss]cenes?)\b",
         )
         .unwrap();
-        for profile in [DawProfile::REAPER, DawProfile::RENOISE] {
+        for profile in [DawProfile::REAPER, DawProfile::RENOISE, DawProfile::SOUNDCRAFT] {
             let said = format!("{:?}", profile);
             let found: Vec<&str> = live.find_iter(&said).map(|m| m.as_str()).collect();
             assert!(found.is_empty(), "{:?}: {found:?}", profile.id);
         }
         assert_eq!(DawProfile::REAPER.word_pair(), ("REAPER", "project"));
         assert_eq!(DawProfile::RENOISE.word_pair(), ("Renoise", "song"));
+        assert_eq!(DawProfile::SOUNDCRAFT.word_pair(), ("SoundCraft", "session"));
     }
 
     /// HISTORY names the key this computer undoes with in REAPER and Renoise: Cmd-Z on macOS, Ctrl-Z on Windows and Linux
     /// (review U14). Live's words are as they always were.
     #[test]
-    fn reaper_and_renoise_name_this_computers_undo_key() {
+    fn every_other_daw_names_this_computers_undo_key() {
         let key = if cfg!(target_os = "macos") { "Cmd-Z" } else { "Ctrl-Z" };
         assert_eq!(DawProfile::REAPER.vocab.own_undo, format!("REAPER's own undo ({key} in REAPER)"));
         assert_eq!(DawProfile::RENOISE.vocab.own_undo, format!("Renoise's own undo ({key} in Renoise)"));
-        assert_eq!(DawProfile::ABLETON.vocab.own_undo, "Live's own undo (Cmd-Z in Live)");
+        assert_eq!(DawProfile::SOUNDCRAFT.vocab.own_undo, format!("SoundCraft's own undo ({key} in SoundCraft)"));
     }
 
     #[test]
     fn every_profile_has_a_structural_change_for_every_gap() {
-        for profile in [DawProfile::ABLETON, DawProfile::UNKNOWN, DawProfile::REAPER, DawProfile::RENOISE] {
+        for profile in [DawProfile::ABLETON, DawProfile::UNKNOWN, DawProfile::REAPER, DawProfile::RENOISE, DawProfile::SOUNDCRAFT] {
             for (kind, _) in STRUCTURE_MOVES {
                 assert!(profile.vocab.structure_moves.iter().any(|(k, _)| k == kind), "{kind:?}");
             }
@@ -1323,7 +1396,12 @@ mod tests {
 
     #[test]
     fn daw_ids_keep_their_names() {
-        assert_eq!(serde_json::to_string(&[DawId::Ableton, DawId::Reaper, DawId::Renoise]).unwrap(), r#"["ableton","reaper","renoise"]"#);
+        assert_eq!(
+            serde_json::to_string(&DawId::ALL).unwrap(),
+            r#"["ableton","reaper","renoise","soundcraft"]"#,
+            "what files and settings keep"
+        );
+        assert!(DawId::ALL.iter().all(|daw| DawId::parse(daw.as_str()) == Some(*daw)), "and --daw reads back");
     }
 }
 
