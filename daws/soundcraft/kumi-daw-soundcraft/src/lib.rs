@@ -375,6 +375,15 @@ mod tests {
     }
 
     #[test]
+    fn the_call_words_name_the_commands_the_bridge_runs() {
+        // The model is told the same commands the bridge runs, daw-bridge's one list: no more, no fewer.
+        let words = DAW.call.as_ref().expect("SoundCraft reads calls").name_about;
+        let named: std::collections::BTreeSet<&str> =
+            regex::Regex::new(r"[a-z_]+\.[a-z_]+").unwrap().find_iter(words).map(|found| found.as_str()).collect();
+        assert_eq!(named, daw_bridge::contract::SOUNDCRAFT_CALLS.into_iter().collect());
+    }
+
+    #[test]
     fn kumi_reads_soundcraft_and_has_the_producer_make_a_fix() {
         assert!(DAW.changes.changes_nothing());
         // The provider says so before any integration is made: the session builds nothing from its start.

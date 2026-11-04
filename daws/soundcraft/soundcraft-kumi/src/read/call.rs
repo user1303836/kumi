@@ -648,29 +648,8 @@ mod tests {
         assert_eq!(known.len(), 551);
         let mut ids: Vec<&str> = READ_ONLY.iter().map(|command| command.id).collect();
         ids.sort_unstable();
-        assert_eq!(
-            ids,
-            [
-                "clip.inspect",
-                "engine.commands",
-                "engine.history",
-                "engine.parity",
-                "engine.plugins",
-                "event.midi_ops_window",
-                "event.tempo_ops_window",
-                "event.time_ops_window",
-                "file.get_info",
-                "midi.notes",
-                "session.audio_health",
-                "session.format_time",
-                "session.inspect",
-                "setup.keyboard_shortcuts",
-                "track.inspect",
-                "video.list",
-                "view.flags",
-            ],
-            "the commands call runs: a change here is a change to what Kumi may run in SoundCraft"
-        );
+        // (the one list, which Kumi's call words name too: a change there is a change to what Kumi may run in SoundCraft)
+        assert_eq!(ids, daw_bridge::contract::SOUNDCRAFT_CALLS, "the commands call runs are the contract's, in its order");
         for command in &READ_ONLY {
             assert!(known.iter().any(|id| id == command.id), "{} isn't a command of SoundCraft 0.17.0's", command.id);
             assert!(!command.why.is_empty());
