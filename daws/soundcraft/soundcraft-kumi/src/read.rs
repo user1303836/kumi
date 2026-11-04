@@ -13,6 +13,8 @@
 //! so a list that changed between pages says so rather than skipping or repeating rows.
 use crate::control::{Control, Error};
 use crate::refs::{fingerprints, lane, Id, Kind, Lives, Missing, Ref, Slot};
+use crate::timebase::Timebase;
+use daw_bridge::auth::sha256_hex;
 use daw_bridge::wire::code;
 use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
@@ -31,6 +33,10 @@ const ANSWER_BYTES: usize = 224 * 1024;
 const FRESH: Duration = Duration::from_secs(1);
 /// The longest a read waits for the app.
 const READ_WAIT: Duration = Duration::from_secs(5);
+/// What a snapshot shows of the tracks and markers, from the first: so many rows in so many bytes. `read` pages on.
+const SNAPSHOT_TRACKS: usize = 200;
+const SNAPSHOT_TRACK_BYTES: usize = 150 * 1024;
+const SNAPSHOT_MARKERS: usize = 100;
 
 /// Why a read has no answer: its kumi-daw/1 code, and the words.
 pub type Refusal = (&'static str, String);
@@ -148,6 +154,44 @@ impl Reads {
         self.page(&rows, cursor.as_ref(), limit)
     }
 
+    /// The session on one screen, kumi-daw/1's `snapshot`: the project, the transport, the selection, and the first
+    /// tracks (200, in 150 KiB) and markers (100). What's left out is named under `truncated`, with the cursor `read`
+    /// goes on from. Not started after `until`.
+    pub async fn snapshot(&mut self, until: Instant) -> Result<Value, Refusal> {
+        let session = self.inspect(until).await?;
+        let (session, lives, epoch) = (&*session, &self.lives, self.lives.epoch());
+        let transport = &session["transport"];
+        let tracks: Vec<(String, Value)> =
+            tracks(session).iter().enumerate().filter_map(|(index, track)| track_row(session, track, index, lives)).collect();
+        let markers: Vec<(String, Value)> =
+            list(session, "markers").iter().filter_map(|marker| marker_row(session, marker, lives)).collect();
+        let shown = [
+            ("tracks", &tracks, first(&tracks, SNAPSHOT_TRACKS, SNAPSHOT_TRACK_BYTES)),
+            ("markers", &markers, first(&markers, SNAPSHOT_MARKERS, ANSWER_BYTES - SNAPSHOT_TRACK_BYTES - 16 * 1024)),
+        ];
+        let rows =
+            |(_, rows, shown): &(&str, &Vec<(String, Value)>, usize)| rows[..*shown].iter().map(|(_, row)| row.clone()).collect::<Vec<_>>();
+        let mut answer = json!({
+            "epoch": epoch,
+            "project": project_row(session, epoch),
+            "transport": transport_row(session, &transport["position"], &transport["playing"], &transport["recording"]),
+            "tracks": rows(&shown[0]),
+            "selection": selection_row(session, lives),
+            "markers": rows(&shown[1]),
+        });
+        let truncated: Map<String, Value> = shown
+            .iter()
+            .filter(|(_, rows, shown)| *shown < rows.len())
+            .map(|(key, rows, shown)| {
+                (key.to_string(), json!({"total": rows.len(), "nextCursor": Cursor::at(epoch, rows, *shown).to_string()}))
+            })
+            .collect();
+        if !truncated.is_empty() {
+            answer["truncated"] = truncated.into();
+        }
+        Ok(answer)
+    }
+
     /// The session as the app shows it now, from the last inspection when it's fresh enough.
     async fn inspect(&mut self, until: Instant) -> Result<Arc<Value>, Refusal> {
         if let Some((at, session)) = &self.inspected {
@@ -167,7 +211,7 @@ impl Reads {
     fn rows(&self, session: &Value, listing: Listing) -> Result<Vec<(String, Value)>, Refusal> {
         let lives = &self.lives;
         Ok(match listing {
-            Listing::Session => vec![("session".to_string(), session_row(session, lives))],
+            Listing::Session => vec![("session".to_string(), session_row(session, lives, self.epoch()))],
             Listing::Tracks => {
                 tracks(session).iter().enumerate().filter_map(|(index, track)| track_row(session, track, index, lives)).collect()
             }
@@ -620,49 +664,119 @@ fn slot_of(insert: &Value) -> Option<Slot> {
     insert["slot"].as_u64().filter(|slot| *slot < 10).map(|slot| Slot::Insert(slot as u8))
 }
 
-fn session_row(session: &Value, lives: &Lives) -> Value {
+/// The session as kumi-daw/1 names a project: its name and path; its id, which SoundCraft keeps none of, as a saved
+/// session's path hashed to the 32 hex digits a place takes, so its conversations stay with it; and its identity, which
+/// is its path, or for an unsaved session its epoch (a table is one session's).
+fn project_row(session: &Value, epoch: &str) -> Value {
+    let path = session["path"].as_str().filter(|path| !path.is_empty());
+    json!({
+        "id": path.map(|path| sha256_hex(path.as_bytes())[..32].to_string()),
+        "identity": path.map_or_else(|| format!("unsaved:{epoch}"), |path| format!("saved:{path}")),
+        "name": session["name"],
+        "path": path,
+        "saved": path.is_some(),
+        "dirty": session["dirty"],
+        "sampleRate": session["sample_rate"],
+        "lengthSeconds": seconds(session, &session["length_samples"]),
+        "editMode": session["edit_mode"],
+        "grid": session["grid"],
+    })
+}
+
+fn session_row(session: &Value, lives: &Lives, epoch: &str) -> Value {
+    let transport = &session["transport"];
+    let mut row = project_row(session, epoch);
+    row["bitDepth"] = session["bit_depth"].clone();
+    row["mainFormat"] = session["main_format"].clone();
+    row["tempo"] = list(session, "tempo").first().map_or(Value::Null, |tempo| tempo["bpm"].clone());
+    row["meter"] =
+        list(session, "meter").first().map_or(Value::Null, |meter| format!("{}/{}", meter["numerator"], meter["denominator"]).into());
+    row["trackCount"] = tracks(session).len().into();
+    row["markerCount"] = list(session, "markers").len().into();
+    row["selection"] = selection_row(session, lives);
+    row["transport"] = transport_row(session, &transport["position"], &transport["playing"], &transport["recording"]);
+    row
+}
+
+/// The transport at `position` samples: whether it plays or records, seconds, and through the tempo map (when SoundCraft's
+/// maps are steps) quarter notes from the start, the bar and the beat in it (from 1), the tempo and the meter there.
+fn transport_row(session: &Value, position: &Value, playing: &Value, recording: &Value) -> Value {
+    let state = match (recording.as_bool(), playing.as_bool()) {
+        (Some(true), _) => "recording",
+        (_, Some(true)) => "playing",
+        _ => "stopped",
+    };
+    let mut row = json!({"playing": playing, "recording": recording, "state": state, "seconds": seconds(session, position)});
+    if let (Some(timebase), Some(samples)) = (Timebase::of(session), position.as_f64()) {
+        let beats = timebase.beats(samples);
+        let at = timebase.bar_beat(beats);
+        let (numerator, denominator) = timebase.time_signature(beats);
+        row["beat"] = json!((beats * 1000.0).round() / 1000.0);
+        row["bar"] = at.bar.into();
+        row["beatInBar"] = at.beat.into();
+        row["tempo"] = timebase.tempo(beats).into();
+        row["timeSignature"] = json!([numerator, denominator]);
+        row["beatsPerBar"] = timebase.beats_a_bar(beats).into();
+    }
+    row
+}
+
+/// What the producer has selected: tracks (the first, `trackRef`, is the one Kumi follows), clips, and the time range,
+/// whose start and end alike are the cursor.
+fn selection_row(session: &Value, lives: &Lives) -> Value {
     let selection = &session["selection"];
     let refs = |key: &str, kind: Kind| {
         list(selection, key).iter().filter_map(|id| Some(Ref::Object(lives.now(kind, id.as_u64()?)?).to_string())).collect::<Vec<_>>()
     };
-    let meter = list(session, "meter").first().map(|meter| format!("{}/{}", meter["numerator"], meter["denominator"]));
-    json!({
-        "name": session["name"],
-        "path": session["path"],
-        "dirty": session["dirty"],
-        "sampleRate": session["sample_rate"],
-        "bitDepth": session["bit_depth"],
-        "mainFormat": session["main_format"],
-        "lengthSeconds": seconds(session, &session["length_samples"]),
-        "tempo": list(session, "tempo").first().map(|tempo| tempo["bpm"].clone()),
-        "meter": meter,
-        "editMode": session["edit_mode"],
-        "grid": session["grid"],
-        "trackCount": tracks(session).len(),
-        "markerCount": list(session, "markers").len(),
-        "selection": {
-            "trackRefs": refs("tracks", Kind::Track),
-            "clipRefs": refs("clips", Kind::Clip),
-            "startSeconds": seconds(session, &selection["start"]),
-            "endSeconds": seconds(session, &selection["end"]),
-        },
-        "transport": {
-            "playing": session["transport"]["playing"],
-            "recording": session["transport"]["recording"],
-            "seconds": seconds(session, &session["transport"]["position"]),
-        },
-    })
+    let track_refs = refs("tracks", Kind::Track);
+    let mut row = json!({
+        "trackRef": track_refs.first(),
+        "trackRefs": track_refs,
+        "clipRefs": refs("clips", Kind::Clip),
+        "startSeconds": seconds(session, &selection["start"]),
+        "endSeconds": seconds(session, &selection["end"]),
+    });
+    let first = list(selection, "tracks").first().and_then(Value::as_u64);
+    if let Some(track) = first.and_then(|id| tracks(session).iter().find(|track| track["id"].as_u64() == Some(id))) {
+        row["track"] = json!({"name": track["name"], "type": chip(&track["kind"])});
+    }
+    row
+}
+
+/// A track's kind in the words Kumi's FOCUS chip shows: an instrument track plays MIDI, an aux track is a return.
+fn chip(kind: &Value) -> Value {
+    match kind.as_str() {
+        Some("midi" | "instrument") => "midi".into(),
+        Some("aux") => "send".into(),
+        Some("vca") => "group".into(),
+        _ => kind.clone(),
+    }
+}
+
+/// How many of `rows`, from the first, fit `limit` rows and `bytes`: one at least.
+fn first(rows: &[(String, Value)], limit: usize, bytes: usize) -> usize {
+    let mut used = 0;
+    let fit = rows
+        .iter()
+        .take(limit)
+        .take_while(|(_, row)| {
+            used += serde_json::to_string(row).map_or(0, |text| text.len() + 1);
+            used <= bytes
+        })
+        .count();
+    fit.max(rows.len().min(1))
 }
 
 fn track_row(session: &Value, track: &Value, index: usize, lives: &Lives) -> Option<(String, Value)> {
     let id = now(lives, Kind::Track, track)?;
     let key = Ref::Object(id).to_string();
     let selected = list(&session["selection"], "tracks").iter().any(|selected| selected.as_u64() == Some(id.id));
+    let instrument = track.get("instrument").filter(|instrument| !instrument.is_null());
     let mut row = json!({
         "ref": key,
         "index": index,
         "name": track["name"],
-        "kind": track["kind"],
+        "type": track["kind"],
         "format": track["format"],
         "mute": track["mute"],
         "solo": track["solo"],
@@ -672,14 +786,14 @@ fn track_row(session: &Value, track: &Value, index: usize, lives: &Lives) -> Opt
         "hidden": track["hidden"],
         "inactive": track["inactive"],
         "automationMode": track["automation_mode"],
-        "insertCount": list(track, "inserts").len(),
+        "deviceCount": list(track, "inserts").len() + usize::from(instrument.is_some()),
         "sendCount": list(track, "sends").len(),
         "clipCount": list(track, "clips").len(),
         "playlist": track["playlist"],
         "playlists": track["playlists"],
         "selected": selected,
     });
-    if let Some(instrument) = track.get("instrument").filter(|instrument| !instrument.is_null()) {
+    if let Some(instrument) = instrument {
         row["instrument"] = instrument.clone();
     }
     route(&mut row, "input", &track["input"], lives);

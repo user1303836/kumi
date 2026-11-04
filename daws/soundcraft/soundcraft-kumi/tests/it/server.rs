@@ -225,7 +225,7 @@ async fn the_host_connects_through_the_discovery_file_and_status_answers_from_th
     assert_eq!((welcome.identity.daw.as_str(), welcome.identity.pid), ("soundcraft", std::process::id()));
     assert_eq!(welcome.identity.project.as_ref().and_then(|project| project.name.as_deref()), Some("Midnight Groove"));
     let offered = (welcome.methods.clone(), welcome.events.clone());
-    assert_eq!(offered, (vec!["ping".to_string(), "status".into(), "read".into()], vec!["project".to_string()]));
+    assert_eq!(offered, (vec!["ping".to_string(), "status".into(), "read".into(), "snapshot".into()], vec!["project".to_string()]));
     assert_eq!(client.request("ping", json!({}), WAIT).await.unwrap(), json!({}));
     let status = client.request("status", json!({}), WAIT).await.unwrap();
     assert_eq!((&status["busy"], &status["project"]["name"]), (&json!(false), &json!("Midnight Groove")));
@@ -284,6 +284,11 @@ async fn the_host_reads_through_the_bridge_and_a_read_while_the_app_is_busy_is_r
     let tracks = client.request("read", json!({"kind": "track"}), WAIT).await.unwrap();
     assert_eq!((&tracks["items"], &tracks["total"]), (&json!([]), &json!(0)), "{tracks}");
     assert!(tracks["epoch"].is_string());
+    let snapshot = client.request("snapshot", json!({}), WAIT).await.unwrap();
+    assert_eq!(
+        (&snapshot["epoch"], &snapshot["project"]["name"], &snapshot["tracks"]),
+        (&tracks["epoch"], &json!("Midnight Groove"), &json!([]))
+    );
     lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
     status_until(&client, |status| status["busy"] == "modal").await;
     let began = Instant::now();

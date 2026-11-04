@@ -151,13 +151,17 @@ async fn tracks_read_as_rows_named_by_refs() {
     assert_eq!(answer["epoch"], app.reads.epoch());
     let kick = &rows[0];
     assert_eq!(
-        (&kick["ref"], &kick["name"], &kick["selected"], &kick["insertCount"]),
+        (&kick["ref"], &kick["name"], &kick["selected"], &kick["deviceCount"]),
         (&json!("s:track:3"), &json!("Kick"), &json!(true), &json!(2))
     );
     let verb = rows.iter().find(|row| row["name"] == "Verb").unwrap();
-    assert_eq!((&verb["kind"], &verb["inputRef"], &verb["output"]), (&json!("aux"), &json!("s:bus:1"), &json!("Main")));
+    assert_eq!((&verb["type"], &verb["inputRef"], &verb["output"]), (&json!("aux"), &json!("s:bus:1"), &json!("Main")));
     let keys = rows.iter().find(|row| row["name"] == "Keys").unwrap();
-    assert_eq!((&keys["instrument"], &keys["sendCount"]), (&json!("subtractive_synth"), &json!(1)));
+    assert_eq!(
+        (&keys["instrument"], &keys["sendCount"], &keys["deviceCount"]),
+        (&json!("subtractive_synth"), &json!(1), &json!(1)),
+        "its instrument is a device"
+    );
 }
 
 #[tokio::test]
@@ -524,4 +528,92 @@ async fn two_points_at_one_sample_from_a_loaded_session_are_a_tie_and_never_a_gu
     assert_eq!(ties, [&json!(2), &json!(2), &Value::Null]);
     assert_eq!(app.read(json!({"ref": "s:point:3:volume:0"})).await.unwrap_err().0, "failed", "which of the two isn't known");
     assert_eq!(app.read(json!({"ref": "s:point:3:volume:48000"})).await.unwrap()["items"][0]["value"], -3.0);
+}
+
+/// The snapshot as Kumi's look takes it.
+async fn snapshot(app: &mut App) -> Value {
+    app.reads.snapshot(Instant::now() + Duration::from_secs(5)).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_snapshot_shows_the_session_on_one_screen() {
+    let mut app = App::new(json!([])).await;
+    let snapshot = snapshot(&mut app).await;
+    assert_eq!(misplaced(&snapshot), Vec::<String>::new(), "{snapshot}");
+    let epoch = app.reads.epoch().to_string();
+    assert_eq!(snapshot["epoch"], epoch.as_str());
+    // (the recorded session was never saved: no id, and the epoch is who it is)
+    let project = &snapshot["project"];
+    assert_eq!(
+        (&project["name"], &project["id"], &project["identity"]),
+        (&json!("Midnight Groove"), &Value::Null, &json!(format!("unsaved:{epoch}")))
+    );
+    let tracks = snapshot["tracks"].as_array().unwrap();
+    assert_eq!(tracks.len(), 9);
+    assert_eq!((&tracks[0]["ref"], &tracks[0]["type"], &tracks[0]["deviceCount"]), (&json!("s:track:3"), &json!("audio"), &json!(2)));
+    assert_eq!(
+        (&snapshot["selection"]["trackRef"], &snapshot["selection"]["track"]),
+        (&json!("s:track:3"), &json!({"name": "Kick", "type": "audio"}))
+    );
+    // At the start: 104 bpm in 4/4.
+    let transport = &snapshot["transport"];
+    assert_eq!(
+        (&transport["state"], &transport["beat"], &transport["bar"], &transport["beatInBar"]),
+        (&json!("stopped"), &json!(0.0), &json!(1), &json!(1))
+    );
+    assert_eq!((&transport["tempo"], &transport["timeSignature"], &transport["beatsPerBar"]), (&json!(104.0), &json!([4, 4]), &json!(4.0)));
+    assert_eq!(snapshot["markers"].as_array().map(Vec::len), recorded()["markers"].as_array().map(Vec::len), "every marker");
+    assert!(snapshot.get("truncated").is_none(), "nothing left out");
+}
+
+#[tokio::test]
+async fn a_saved_sessions_id_is_its_path_hashed_and_the_session_read_says_the_same() {
+    let path = json!("/sessions/Midnight Groove/Midnight Groove.scraft");
+    let mut app = App::new(json!([])).await;
+    app.session.lock().unwrap()["path"] = path.clone();
+    let project = snapshot(&mut app).await["project"].clone();
+    let id = project["id"].as_str().unwrap();
+    assert!(id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)), "a place's id: {id}");
+    assert_eq!(project["identity"], format!("saved:{}", path.as_str().unwrap()));
+    let session = app.read(json!({"kind": "session"})).await.unwrap();
+    assert_eq!(
+        (&session["items"][0]["id"], &session["items"][0]["identity"]),
+        (&project["id"], &project["identity"]),
+        "what Kumi compares when the epoch moves"
+    );
+    // The bridge started again, the same file open: the same id, so its conversations are where they were.
+    let mut again = App::new(json!([])).await;
+    again.session.lock().unwrap()["path"] = path;
+    assert_eq!(snapshot(&mut again).await["project"]["id"], project["id"]);
+}
+
+#[tokio::test]
+async fn a_snapshot_names_the_tracks_it_leaves_out_and_read_goes_on_from_there() {
+    let mut app = App::new(json!([])).await;
+    {
+        let mut session = app.session.lock().unwrap();
+        let tracks = session["tracks"].as_array_mut().unwrap();
+        let kick = tracks[0].clone();
+        for n in 0..241 {
+            let mut copy = kick.clone();
+            (copy["id"], copy["name"]) = (json!(1000 + n), json!(format!("Copy {n}")));
+            tracks.push(copy);
+        }
+    }
+    let snapshot = snapshot(&mut app).await;
+    assert_eq!(snapshot["tracks"].as_array().unwrap().len(), 200);
+    let left = &snapshot["truncated"]["tracks"];
+    assert_eq!(left["total"], 250);
+    let rest = app.read(json!({"kind": "track", "cursor": left["nextCursor"], "limit": 100})).await.unwrap();
+    assert_eq!(refs(&rest)[0], "s:track:1191", "the 201st track, the first the snapshot left out");
+    assert!(rest.get("nextCursor").is_none(), "and the 50 after it are all");
+}
+
+#[tokio::test]
+async fn a_tempo_map_with_more_than_steps_gives_the_transport_no_beats() {
+    let mut app = App::new(json!([])).await;
+    app.session.lock().unwrap()["tempo"][0]["ramp"] = json!(true);
+    let transport = snapshot(&mut app).await["transport"].clone();
+    assert_eq!((&transport["seconds"], &transport["state"]), (&json!(0.0), &json!("stopped")));
+    assert!(transport.get("beat").is_none() && transport.get("timeSignature").is_none(), "no beats rather than wrong ones: {transport}");
 }

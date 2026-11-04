@@ -123,7 +123,7 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     let (events, _) = broadcast::channel::<(String, Value)>(64);
     let (ending, ended) = watch::channel(None::<&'static str>);
     let offer = Offer {
-        methods: vec!["ping".into(), "status".into(), "read".into()],
+        methods: vec!["ping".into(), "status".into(), "read".into(), "snapshot".into()],
         events: vec![event::PROJECT.into()],
         heartbeat_ms: config.heartbeat_ms,
         credit_bytes: None,
@@ -323,7 +323,7 @@ async fn connection(
                             counts.waiting.fetch_sub(1, Ordering::SeqCst);
                             counts.authenticated.fetch_add(1, Ordering::SeqCst);
                         }
-                        ServerAction::Request(request) if request.method == "read" => {
+                        ServerAction::Request(request) if matches!(request.method.as_str(), "read" | "snapshot") => {
                             out.extend(read_request(request, serving, answers.clone()).unwrap_or_default());
                         }
                         ServerAction::Request(request) => out.extend(answer(&request, seen).encode()),
@@ -369,8 +369,8 @@ async fn connection(
     authenticated
 }
 
-/// A `read`: answered when the app has, in a task of its own (one read at a time), so the connection goes on meanwhile.
-/// While the app is busy it's refused at once, nothing read, and one whose deadline has passed isn't started.
+/// A `read` or a `snapshot`: answered when the app has, in a task of its own (one read at a time), so the connection goes
+/// on meanwhile. While the app is busy it's refused at once, nothing read, and one whose deadline has passed isn't started.
 fn read_request(request: Request, serving: &Serving, answers: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> Option<Vec<u8>> {
     if let Some((_, reason)) = &lock(&serving.seen).busy {
         return Some(Frame::error(request.id, code::BUSY, format!("{reason}; nothing was read")).encode());
@@ -380,7 +380,11 @@ fn read_request(request: Request, serving: &Serving, answers: tokio::sync::mpsc:
     };
     let reads = serving.reads.clone();
     tokio::spawn(async move {
-        let read = reads.lock().await.read(&request.params, until).await;
+        let mut reads = reads.lock().await;
+        let read = match request.method.as_str() {
+            "snapshot" => reads.snapshot(until).await,
+            _ => reads.read(&request.params, until).await,
+        };
         let frame = match read {
             Ok(result) => Frame::ok(request.id, result),
             Err((code, why)) => Frame::error(request.id, code, why),
