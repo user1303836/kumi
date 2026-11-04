@@ -137,7 +137,7 @@ What runs:
   - A PR with `bridge bump` or `migration`, or one that moves files, runs `gh workflow run Installer --ref <branch>` (all six systems, the update from the last release and the migrations; only a tag publishes) and `gh workflow run Extended --ref <branch>`, and waits for both.
 - **Extended** (every test: oracle replays, long simulations, SDK interop, the eval runner's own tests): each Monday and by hand, never on a pull request.
 - **Installer and Network:** only when their own files change (their workflows' `paths:`, written from `scripts/areas.toml` by `python3 scripts/dev.py areas --write-workflows`); the Installer also on a release tag, and each night, when it builds all six bundles and installs on the three systems.
-- **CodeQL:** only for a change to Python, JavaScript or TypeScript, C or C++, or a workflow, and each Monday over all of them.
+- **CodeQL:** only for a change to Python, JavaScript or TypeScript (an HTML page's scripts too), C or C++, or a workflow, and each Monday over all of them.
 
 Rules:
 - No new workflow, job, matrix entry, schedule, required check or step in the PR gate without the owner's yes in the PR. A one-off measurement or probe runs locally or through `workflow_dispatch` of a workflow that exists; it's never committed as a workflow of its own.
