@@ -74,10 +74,11 @@ pub fn kinds(daw: Daw) -> Kinds {
                 "edit-settings",
             ],
         },
-        // (what soundcraft-kumi's read takes: no bodies or changes yet)
+        // (what soundcraft-kumi's read and focus_body take: no changes yet. No routing view: SoundCraft has no track's
+        // routing window, only I/O Setup's busses and outputs and the Mix window's sections)
         Daw::SoundCraft => Kinds {
             read: &["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"],
-            bodies: &[],
+            bodies: &["edit", "midi", "fx", "mixer"],
             outside_undo: &[],
         },
     }
