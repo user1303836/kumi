@@ -1,0 +1,721 @@
+//! `read`: SoundCraft's session as rows, a page at a time, each object named by its ref ([`crate::refs`]).
+//!
+//! The session's objects come from `session.inspect {"detail":"full"}`, asked again at most once a second and shared by the
+//! reads in between, and a clip's notes from `midi.notes`. The lives of the objects learn from every look at the session:
+//! a read's, and the look loop's every few seconds. Every answer carries the epoch of the table of lives its refs are
+//! from. A new one starts when the bridge starts again, and when a look sees another session open: by its name or path,
+//! by an undo history emptied with nothing to redo (only a session opened, made or closed does that), or by none of the
+//! objects it saw before. SoundCraft gives ids out again, so a ref or parent comes with the epoch it came from, and one
+//! from another epoch is stale. What a read can be refused for without the app is refused before it's asked. A page ends
+//! at the limit asked for (50, at most 200) or at the bytes an answer may take. Its cursor names the object it starts at,
+//! so a list that changed between pages says so rather than skipping or repeating rows.
+use crate::control::{Control, Error};
+use crate::refs::{fingerprints, Id, Kind, Lives, Missing, Ref, Slot};
+use daw_bridge::wire::code;
+use serde_json::{json, Map, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::watch;
+
+pub const DEFAULT_LIMIT: usize = 50;
+pub const MAX_LIMIT: usize = 200;
+/// What `read` takes as a kind (`note` with a clip as its parent).
+pub const KINDS: [&str; 10] = ["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note"];
+/// The bytes a page's rows may take: the host takes answers of up to 256 KiB, and the rest is the envelope.
+const ANSWER_BYTES: usize = 224 * 1024;
+/// How long one inspection serves the reads after it.
+const FRESH: Duration = Duration::from_secs(1);
+/// The longest a read waits for the app.
+const READ_WAIT: Duration = Duration::from_secs(5);
+
+/// Why a read has no answer: its kumi-daw/1 code, and the words.
+pub type Refusal = (&'static str, String);
+
+/// What a look saw of the session, to tell another session from it: its name and path, the tops of its undo and redo
+/// histories, and who its objects were.
+struct Look {
+    named: (Value, Value),
+    history: (Value, Value),
+    who: HashSet<(Kind, u64, u64)>,
+}
+
+/// The bridge's reads of one copy of SoundCraft: the lives of its objects (and their epoch), the last look, and the last
+/// full inspection.
+pub struct Reads {
+    control: Control,
+    lives: Lives,
+    looked: Option<Look>,
+    inspected: Option<(Instant, Arc<Value>)>,
+    /// The epoch as it changes, for whoever can't wait for a read to end.
+    told: watch::Sender<String>,
+}
+
+impl Reads {
+    pub fn new(control: Control) -> Self {
+        let lives = Lives::new();
+        let (told, _) = watch::channel(lives.epoch().to_string());
+        Self { control, lives, looked: None, inspected: None, told }
+    }
+
+    /// The epoch as it changes, readable while a read holds the reads.
+    pub fn epochs(&self) -> watch::Receiver<String> {
+        self.told.subscribe()
+    }
+
+    /// The epoch now: its table's.
+    pub fn epoch(&self) -> &str {
+        self.lives.epoch()
+    }
+
+    /// What a look saw of the session (`session.inspect`, in full or not): the lives learn from it, and another session
+    /// starts a new epoch, with new lives. The last full inspection serves no more reads, so their rows and the lives come
+    /// from one look.
+    pub fn saw(&mut self, session: &Value) {
+        let prints = fingerprints(session);
+        let now = Look {
+            named: (session["name"].clone(), session["path"].clone()),
+            history: (session["undo"].clone(), session["redo"].clone()),
+            who: prints.iter().flat_map(|(kind, objects)| objects.iter().map(|(id, print)| (*kind, *id, print.who))).collect(),
+        };
+        let emptied = |history: &(Value, Value)| history.0.is_null() && history.1.is_null();
+        let another = self.looked.as_ref().is_some_and(|before| {
+            before.named != now.named
+                // (an undo leaves something to redo, and a redo or a step something to undo: only another session empties
+                // a history)
+                || (!emptied(&before.history) && emptied(&now.history))
+                || (!before.who.is_empty() && before.who.is_disjoint(&now.who))
+        });
+        if another {
+            self.lives = Lives::new();
+            self.told.send_replace(self.lives.epoch().to_string());
+        }
+        for (kind, objects) in prints {
+            self.lives.saw(kind, objects);
+        }
+        self.looked = Some(now);
+        self.inspected = None;
+    }
+
+    /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, or `{ref}` for one object, with the `epoch` the ref or
+    /// parent came from. Not started after `until` (the request's deadline).
+    pub async fn read(&mut self, params: &Value, until: Instant) -> Result<Value, Refusal> {
+        let (kind, one, parent, cursor, epoch) =
+            (text(params, "kind")?, text(params, "ref")?, text(params, "parent")?, text(params, "cursor")?, text(params, "epoch")?);
+        let limit = limit(params)?;
+        let one = one.map(|one| one.parse::<Ref>().map_err(bad)).transpose()?;
+        let parent = parent.map(|parent| parent.parse::<Ref>().map_err(bad)).transpose()?;
+        let cursor = cursor.as_deref().map(Cursor::parse).transpose()?;
+        if (one.is_some() || parent.is_some()) && epoch.is_none() {
+            return Err(bad("epoch: the epoch of the answer the ref or parent came from (SoundCraft gives ids out again)".into()));
+        }
+        let listing = match (&one, kind) {
+            (Some(_), _) => None,
+            (None, Some(kind)) => Some(Listing::of(&kind, parent)?),
+            (None, None) => return Err(bad(format!("kind: what to read, one of {} (or ref: one object)", KINDS.join(", ")))),
+        };
+        let session = self.inspect(until).await?;
+        if let Some(epoch) = epoch.filter(|epoch| epoch != self.epoch()) {
+            return Err((
+                code::STALE,
+                format!(
+                    "those refs are from another epoch ({epoch}; now {}): another session is open, or the bridge started again: read again",
+                    self.epoch()
+                ),
+            ));
+        }
+        let Some(listing) = listing else {
+            let row = self.one(&session, &one.expect("a ref, without a kind"), until).await?;
+            return Ok(json!({"items": [row], "epoch": self.epoch()}));
+        };
+        // (each row with its ref, which a cursor names it by)
+        let rows: Vec<(String, Value)> = match listing {
+            Listing::Notes(clip) => self.notes(&session, &clip, until).await?,
+            listing => self.rows(&session, listing)?,
+        };
+        self.page(&rows, cursor.as_ref(), limit)
+    }
+
+    /// The session as the app shows it now, from the last inspection when it's fresh enough.
+    async fn inspect(&mut self, until: Instant) -> Result<Arc<Value>, Refusal> {
+        if let Some((at, session)) = &self.inspected {
+            if at.elapsed() < FRESH {
+                return Ok(Arc::clone(session));
+            }
+        }
+        let session = self.control.call("session.inspect", json!({"detail": "full"}), wait_within(until)?).await.map_err(asked)?;
+        self.saw(&session);
+        let session = Arc::new(session);
+        self.inspected = Some((Instant::now(), Arc::clone(&session)));
+        Ok(session)
+    }
+
+    /// The rows of a listing the session alone answers: every listing but a clip's notes, which come from the app.
+    fn rows(&self, session: &Value, listing: Listing) -> Result<Vec<(String, Value)>, Refusal> {
+        let lives = &self.lives;
+        Ok(match listing {
+            Listing::Session => vec![("session".to_string(), session_row(session, lives))],
+            Listing::Tracks => {
+                tracks(session).iter().enumerate().filter_map(|(index, track)| track_row(session, track, index, lives)).collect()
+            }
+            Listing::Clips(of) => self
+                .tracks_of(session, of)?
+                .into_iter()
+                .flat_map(|track| list(track, "clips").iter().filter_map(move |clip| clip_row(session, track, clip, lives)))
+                .collect(),
+            Listing::Inserts(of) => self.tracks_of(session, of)?.into_iter().flat_map(|track| insert_rows(track, lives)).collect(),
+            Listing::Sends(of) => self
+                .tracks_of(session, of)?
+                .into_iter()
+                .flat_map(|track| list(track, "sends").iter().filter_map(move |send| send_row(track, send, lives)))
+                .collect(),
+            Listing::Busses => list(session, "busses").iter().filter_map(|bus| bus_row(bus, lives)).collect(),
+            Listing::Markers => list(session, "markers").iter().filter_map(|marker| marker_row(session, marker, lives)).collect(),
+            Listing::Groups => list(session, "groups").iter().filter_map(|group| group_row(group, lives)).collect(),
+            Listing::Sources => list(session, "sources").iter().filter_map(|source| source_row(session, source, lives)).collect(),
+            Listing::Notes(_) => unreachable!("a clip's notes are read from the app"),
+        })
+    }
+
+    /// The tracks whose things a read lists: the one `of` names, else every track.
+    fn tracks_of<'a>(&self, session: &'a Value, of: Option<Id>) -> Result<Vec<&'a Value>, Refusal> {
+        Ok(match of {
+            None => tracks(session).iter().collect(),
+            Some(id) => vec![self.track(session, &id)?],
+        })
+    }
+
+    /// The track a ref names, if it's the one there now.
+    fn track<'a>(&self, session: &'a Value, id: &Id) -> Result<&'a Value, Refusal> {
+        let id = self.lives.resolve(id).map_err(|missing| gone(missing, &Ref::Object(*id)))?;
+        tracks(session)
+            .iter()
+            .find(|track| track["id"].as_u64() == Some(id))
+            .ok_or_else(|| gone(Missing::Gone, &Ref::Object(Id { kind: Kind::Track, id, life: 1 })))
+    }
+
+    /// One object's row, by its ref.
+    async fn one(&mut self, session: &Value, named: &Ref, until: Instant) -> Result<Value, Refusal> {
+        let missing = || gone(Missing::Gone, named);
+        match named {
+            Ref::Object(id) => {
+                let found = self.lives.resolve(id).map_err(|missing| gone(missing, named))?;
+                let key = match id.kind {
+                    Kind::Track => "tracks",
+                    Kind::Bus => "busses",
+                    Kind::Group => "groups",
+                    Kind::Marker => "markers",
+                    Kind::Source => "sources",
+                    Kind::Clip => {
+                        let (track, clip) = tracks(session)
+                            .iter()
+                            .find_map(|track| {
+                                list(track, "clips").iter().find(|clip| clip["id"].as_u64() == Some(found)).map(|clip| (track, clip))
+                            })
+                            .ok_or_else(missing)?;
+                        return clip_row(session, track, clip, &self.lives).map(|(_, row)| row).ok_or_else(missing);
+                    }
+                };
+                let (index, item) =
+                    list(session, key).iter().enumerate().find(|(_, item)| item["id"].as_u64() == Some(found)).ok_or_else(missing)?;
+                match id.kind {
+                    Kind::Track => track_row(session, item, index, &self.lives),
+                    Kind::Bus => bus_row(item, &self.lives),
+                    Kind::Group => group_row(item, &self.lives),
+                    Kind::Marker => marker_row(session, item, &self.lives),
+                    Kind::Source => source_row(session, item, &self.lives),
+                    Kind::Clip => unreachable!("answered above"),
+                }
+                .map(|(_, row)| row)
+                .ok_or_else(missing)
+            }
+            Ref::Insert { track, slot } => {
+                let track = self.track(session, track)?;
+                match slot {
+                    Slot::Instrument => instrument_row(track, &self.lives),
+                    Slot::Insert(_) => list(track, "inserts")
+                        .iter()
+                        .find(|insert| slot_of(insert) == Some(*slot))
+                        .and_then(|insert| insert_row(track, insert, &self.lives)),
+                }
+                .map(|(_, row)| row)
+                .ok_or_else(missing)
+            }
+            Ref::Send { track, slot } => {
+                let track = self.track(session, track)?;
+                let send = list(track, "sends").iter().find(|send| send["slot"].as_u64() == Some((*slot).into())).ok_or_else(missing)?;
+                send_row(track, send, &self.lives).map(|(_, row)| row).ok_or_else(missing)
+            }
+            Ref::Note { clip, .. } => {
+                let key = named.to_string();
+                let (_, row) = self.notes(session, clip, until).await?.into_iter().find(|(at, _)| *at == key).ok_or_else(missing)?;
+                match row.get("tie") {
+                    Some(count) => Err((
+                        code::FAILED,
+                        format!("{count} notes of that clip have that start, pitch and channel: read its notes, which mark the tie"),
+                    )),
+                    None => Ok(row),
+                }
+            }
+            Ref::Param { .. } | Ref::Lane { .. } | Ref::Point { .. } | Ref::Playlist { .. } => {
+                Err(bad(format!("{named}: SoundCraft's bridge doesn't read parameters, automation or playlists yet")))
+            }
+        }
+    }
+
+    /// A MIDI clip's notes as rows (`midi.notes`), in the clip's order (edits keep it by start, pitch, channel, length and
+    /// velocity). Notes alike (the same start, pitch and channel, which SoundCraft keeps both of) are marked `tie`: one ref
+    /// can't tell them apart. A clip that isn't MIDI is refused before the app is asked, which would say so in its status
+    /// line.
+    async fn notes(&mut self, session: &Value, clip: &Id, until: Instant) -> Result<Vec<(String, Value)>, Refusal> {
+        let named = Ref::Object(*clip);
+        let id = self.lives.resolve(clip).map_err(|missing| gone(missing, &named))?;
+        let shown = tracks(session)
+            .iter()
+            .flat_map(|track| list(track, "clips"))
+            .find(|shown| shown["id"].as_u64() == Some(id))
+            .ok_or_else(|| gone(Missing::Gone, &named))?;
+        if shown.get("notes").is_none() {
+            return Err(bad(format!("parent: {named} isn't a MIDI clip, so it has no notes")));
+        }
+        let mut answer =
+            self.control.execute("midi.notes", json!({"clip": id}), wait_within(until)?).await.map_err(|error| match error {
+                Error::Refused(said) => (code::FAILED, format!("{named}: {said}")),
+                other => asked(other),
+            })?;
+        let notes = match answer.get_mut("notes").map(Value::take) {
+            Some(Value::Array(notes)) => notes,
+            _ => Vec::new(),
+        };
+        let field = |note: &Value, key: &str| note.get(key).and_then(Value::as_i64).unwrap_or_default();
+        let place = |note: &Value| (field(note, "start"), field(note, "pitch"), field(note, "channel"));
+        let mut alike: HashMap<(i64, i64, i64), usize> = HashMap::with_capacity(notes.len());
+        for note in &notes {
+            *alike.entry(place(note)).or_default() += 1;
+        }
+        Ok(notes
+            .iter()
+            .map(|note| {
+                let (start, pitch, channel) = place(note);
+                let key = Ref::Note { clip: *clip, start, pitch: pitch as u8, channel: channel as u8 }.to_string();
+                let mut row = json!({
+                    "ref": key,
+                    "start": start,
+                    "length": field(note, "length"),
+                    "pitch": pitch,
+                    "velocity": field(note, "velocity"),
+                    "releaseVelocity": field(note, "release_velocity"),
+                    "channel": channel,
+                });
+                if let Some(count) = alike.get(&(start, pitch, channel)).filter(|count| **count > 1) {
+                    row["tie"] = (*count).into();
+                }
+                (key, row)
+            })
+            .collect())
+    }
+
+    /// A page of rows from the cursor's row: up to `limit`, and no more bytes than an answer may take.
+    fn page(&self, rows: &[(String, Value)], cursor: Option<&Cursor>, limit: usize) -> Result<Value, Refusal> {
+        let from = match cursor {
+            None => 0,
+            Some(cursor) => self.resume(cursor, rows)?,
+        };
+        let (mut items, mut bytes, mut next) = (vec![], 0, None);
+        for (position, (_, row)) in rows.iter().enumerate().skip(from) {
+            let size = serde_json::to_string(row).map_or(0, |text| text.len() + 1);
+            if items.len() == limit || (!items.is_empty() && bytes + size > ANSWER_BYTES) {
+                next = Some(Cursor::at(self.epoch(), rows, position).to_string());
+                break;
+            }
+            bytes += size;
+            items.push(row.clone());
+        }
+        let mut answer = json!({"items": items, "epoch": self.epoch(), "total": rows.len(), "indexFrom": 0});
+        if let Some(next) = next {
+            answer["nextCursor"] = next.into();
+        }
+        Ok(answer)
+    }
+
+    /// Where a cursor's page starts: at the row it names, wherever that is now.
+    fn resume(&self, cursor: &Cursor, rows: &[(String, Value)]) -> Result<usize, Refusal> {
+        if cursor.epoch != self.epoch() {
+            return Err((code::STALE, "that cursor is from another epoch: read again from the start".into()));
+        }
+        rows.iter()
+            .enumerate()
+            .filter(|(_, (key, _))| *key == cursor.key)
+            .nth(cursor.alike - 1)
+            .map(|(position, _)| position)
+            .ok_or((code::CHANGED, "the list changed since that cursor: read it again from the start".into()))
+    }
+}
+
+/// What a read lists, by kind, and what its rows are under: checked before the app is asked.
+enum Listing {
+    Session,
+    Tracks,
+    /// A track's clips, inserts or sends: one track's, or every track's.
+    Clips(Option<Id>),
+    Inserts(Option<Id>),
+    Sends(Option<Id>),
+    Busses,
+    Markers,
+    Groups,
+    Sources,
+    /// A MIDI clip's notes.
+    Notes(Id),
+}
+
+impl Listing {
+    fn of(kind: &str, parent: Option<Ref>) -> Result<Listing, Refusal> {
+        let track = |parent: Option<Ref>| match parent {
+            None => Ok(None),
+            Some(Ref::Object(id @ Id { kind: Kind::Track, .. })) => Ok(Some(id)),
+            Some(other) => Err(bad(format!("parent: a track (s:track:…), not {other}"))),
+        };
+        let listing = match kind {
+            "clip" => return Ok(Listing::Clips(track(parent)?)),
+            "insert" => return Ok(Listing::Inserts(track(parent)?)),
+            "send" => return Ok(Listing::Sends(track(parent)?)),
+            "note" => {
+                return match parent {
+                    Some(Ref::Object(clip @ Id { kind: Kind::Clip, .. })) => Ok(Listing::Notes(clip)),
+                    _ => Err(bad("parent: the clip whose notes to read (s:clip:…)".into())),
+                }
+            }
+            "session" => Listing::Session,
+            "track" => Listing::Tracks,
+            "bus" => Listing::Busses,
+            "marker" => Listing::Markers,
+            "group" => Listing::Groups,
+            "source" => Listing::Sources,
+            other => return Err(bad(format!("kind: one of {}, not {other}", KINDS.join(", ")))),
+        };
+        match parent {
+            None => Ok(listing),
+            Some(parent) => Err(bad(format!("parent: {kind} rows aren't read under anything, so not under {parent}"))),
+        }
+    }
+}
+
+/// Where a page starts: `c1.<epoch>~<ref>` names the row with that ref, and `c1.<epoch>~<ref>#<n>` the nth of the rows
+/// with it (notes alike share a ref).
+struct Cursor {
+    epoch: String,
+    key: String,
+    alike: usize,
+}
+
+impl Cursor {
+    fn parse(text: &str) -> Result<Cursor, Refusal> {
+        let unknown = || bad("cursor: pass the nextCursor an earlier read gave, unchanged".into());
+        let (epoch, rest) = text.strip_prefix("c1.").and_then(|rest| rest.split_once('~')).ok_or_else(unknown)?;
+        let (key, alike) = match rest.rsplit_once('#') {
+            Some((key, alike)) => (key, alike.parse().ok().filter(|alike: &usize| *alike > 1).ok_or_else(unknown)?),
+            None => (rest, 1),
+        };
+        (!epoch.is_empty() && !key.is_empty()).then_some(()).ok_or_else(unknown)?;
+        Ok(Cursor { epoch: epoch.into(), key: key.into(), alike })
+    }
+
+    /// The cursor naming the row at `position`.
+    fn at(epoch: &str, rows: &[(String, Value)], position: usize) -> Cursor {
+        let key = &rows[position].0;
+        let alike = rows[..=position].iter().filter(|(at, _)| at == key).count();
+        Cursor { epoch: epoch.into(), key: key.clone(), alike }
+    }
+}
+
+impl std::fmt::Display for Cursor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "c1.{}~{}", self.epoch, self.key)?;
+        if self.alike > 1 {
+            write!(f, "#{}", self.alike)?;
+        }
+        Ok(())
+    }
+}
+
+/// How long the app may take to answer, within the read's deadline.
+fn wait_within(until: Instant) -> Result<Duration, Refusal> {
+    match READ_WAIT.min(until.saturating_duration_since(Instant::now())) {
+        wait if wait.is_zero() => Err((code::DEADLINE, "the read's deadline passed before it started: nothing was read".into())),
+        wait => Ok(wait),
+    }
+}
+
+fn text(params: &Value, key: &str) -> Result<Option<String>, Refusal> {
+    match params.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(text)) if !text.is_empty() => Ok(Some(text.clone())),
+        Some(_) => Err(bad(format!("{key} must be a non-empty string"))),
+    }
+}
+
+fn limit(params: &Value) -> Result<usize, Refusal> {
+    match params.get("limit") {
+        None | Some(Value::Null) => Ok(DEFAULT_LIMIT),
+        Some(limit) => limit
+            .as_u64()
+            .filter(|limit| (1..=MAX_LIMIT as u64).contains(limit))
+            .map(|limit| limit as usize)
+            .ok_or_else(|| bad(format!("limit must be a whole number from 1 to {MAX_LIMIT}"))),
+    }
+}
+
+fn bad(why: String) -> Refusal {
+    (code::BAD_PARAMS, why)
+}
+
+/// What a ref that names nothing there now gets.
+fn gone(missing: Missing, named: &Ref) -> Refusal {
+    match missing {
+        Missing::Stale => (code::STALE, format!("{named} names an earlier object on that id: read again for its ref now")),
+        Missing::Unknown => (code::STALE, format!("{named} isn't from this session: read again")),
+        Missing::Gone => (code::FAILED, format!("{named} isn't in the session now (deleted, or undone)")),
+    }
+}
+
+/// What a request the app didn't answer gets: busy (nothing read) or failed.
+fn asked(error: Error) -> Refusal {
+    if matches!(error, Error::Busy | Error::Deadline | Error::Stalled | Error::Crowded) {
+        (code::BUSY, format!("{error}: nothing was read"))
+    } else {
+        (code::FAILED, error.to_string())
+    }
+}
+
+fn list<'a>(of: &'a Value, key: &str) -> &'a [Value] {
+    of.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default()
+}
+
+fn tracks(session: &Value) -> &[Value] {
+    list(session, "tracks")
+}
+
+fn seconds(session: &Value, samples: &Value) -> Value {
+    match (samples.as_f64(), session["sample_rate"].as_f64().filter(|rate| *rate > 0.)) {
+        (Some(samples), Some(rate)) => json!((samples / rate * 1000.).round() / 1000.),
+        _ => Value::Null,
+    }
+}
+
+fn now(lives: &Lives, kind: Kind, item: &Value) -> Option<Id> {
+    lives.now(kind, item["id"].as_u64()?)
+}
+
+/// A route (`Main`, `None`, `{"Bus": 1}`): a bus as its ref under `<key>Ref`, anything else as words under `<key>`.
+fn route(row: &mut Value, key: &str, route: &Value, lives: &Lives) {
+    match route.get("Bus").and_then(Value::as_u64) {
+        Some(bus) => match lives.now(Kind::Bus, bus) {
+            Some(id) => row[format!("{key}Ref")] = Ref::Object(id).to_string().into(),
+            None => row[key] = format!("bus {bus}").into(),
+        },
+        None => row[key] = route.clone(),
+    }
+}
+
+fn slot_of(insert: &Value) -> Option<Slot> {
+    insert["slot"].as_u64().filter(|slot| *slot < 10).map(|slot| Slot::Insert(slot as u8))
+}
+
+fn session_row(session: &Value, lives: &Lives) -> Value {
+    let selection = &session["selection"];
+    let refs = |key: &str, kind: Kind| {
+        list(selection, key).iter().filter_map(|id| Some(Ref::Object(lives.now(kind, id.as_u64()?)?).to_string())).collect::<Vec<_>>()
+    };
+    let meter = list(session, "meter").first().map(|meter| format!("{}/{}", meter["numerator"], meter["denominator"]));
+    json!({
+        "name": session["name"],
+        "path": session["path"],
+        "dirty": session["dirty"],
+        "sampleRate": session["sample_rate"],
+        "bitDepth": session["bit_depth"],
+        "mainFormat": session["main_format"],
+        "lengthSeconds": seconds(session, &session["length_samples"]),
+        "tempo": list(session, "tempo").first().map(|tempo| tempo["bpm"].clone()),
+        "meter": meter,
+        "editMode": session["edit_mode"],
+        "grid": session["grid"],
+        "trackCount": tracks(session).len(),
+        "markerCount": list(session, "markers").len(),
+        "selection": {
+            "trackRefs": refs("tracks", Kind::Track),
+            "clipRefs": refs("clips", Kind::Clip),
+            "startSeconds": seconds(session, &selection["start"]),
+            "endSeconds": seconds(session, &selection["end"]),
+        },
+        "transport": {
+            "playing": session["transport"]["playing"],
+            "recording": session["transport"]["recording"],
+            "seconds": seconds(session, &session["transport"]["position"]),
+        },
+    })
+}
+
+fn track_row(session: &Value, track: &Value, index: usize, lives: &Lives) -> Option<(String, Value)> {
+    let id = now(lives, Kind::Track, track)?;
+    let key = Ref::Object(id).to_string();
+    let selected = list(&session["selection"], "tracks").iter().any(|selected| selected.as_u64() == Some(id.id));
+    let mut row = json!({
+        "ref": key,
+        "index": index,
+        "name": track["name"],
+        "kind": track["kind"],
+        "format": track["format"],
+        "mute": track["mute"],
+        "solo": track["solo"],
+        "recordArm": track["record_arm"],
+        "volumeDb": track["volume_db"],
+        "pan": track["pan"],
+        "hidden": track["hidden"],
+        "inactive": track["inactive"],
+        "automationMode": track["automation_mode"],
+        "insertCount": list(track, "inserts").len(),
+        "sendCount": list(track, "sends").len(),
+        "clipCount": list(track, "clips").len(),
+        "playlist": track["playlist"],
+        "playlists": track["playlists"],
+        "selected": selected,
+    });
+    if let Some(instrument) = track.get("instrument").filter(|instrument| !instrument.is_null()) {
+        row["instrument"] = instrument.clone();
+    }
+    route(&mut row, "input", &track["input"], lives);
+    route(&mut row, "output", &track["output"], lives);
+    Some((key, row))
+}
+
+fn clip_row(session: &Value, track: &Value, clip: &Value, lives: &Lives) -> Option<(String, Value)> {
+    let id = now(lives, Kind::Clip, clip)?;
+    let key = Ref::Object(id).to_string();
+    let selected = list(&session["selection"], "clips").iter().any(|selected| selected.as_u64() == Some(id.id));
+    let mut row = json!({
+        "ref": key,
+        "trackRef": Ref::Object(now(lives, Kind::Track, track)?).to_string(),
+        "name": clip["name"],
+        "start": clip["start"],
+        "length": clip["length"],
+        "startSeconds": seconds(session, &clip["start"]),
+        "lengthSeconds": seconds(session, &clip["length"]),
+        "gainDb": clip["gain_db"],
+        "muted": clip["muted"],
+        "locked": clip["locked"],
+        "fadeIn": clip["fade_in"],
+        "fadeOut": clip["fade_out"],
+        "selected": selected,
+    });
+    // (what it plays: a source's audio, its notes, or a video)
+    if let Some(source) = clip["source"].as_u64() {
+        if let Some(source) = lives.now(Kind::Source, source) {
+            row["sourceRef"] = Ref::Object(source).to_string().into();
+        }
+        row["offset"] = clip["offset"].clone();
+    } else if clip.get("notes").is_some() {
+        row["notes"] = clip["notes"].clone();
+    } else if clip.get("video").is_some() {
+        row["video"] = clip["video"].clone();
+        row["offset"] = clip["offset"].clone();
+    }
+    Some((key, row))
+}
+
+/// A track's inserts: its instrument first, when it has one, then its slots a to j.
+fn insert_rows(track: &Value, lives: &Lives) -> Vec<(String, Value)> {
+    instrument_row(track, lives)
+        .into_iter()
+        .chain(list(track, "inserts").iter().filter_map(|insert| insert_row(track, insert, lives)))
+        .collect()
+}
+
+/// An instrument track's instrument, as the insert `s:insert:<track>:instrument`: its plug-in (its parameters are only in
+/// the session file).
+fn instrument_row(track: &Value, lives: &Lives) -> Option<(String, Value)> {
+    let plugin = track.get("instrument").filter(|plugin| !plugin.is_null())?;
+    let track_id = now(lives, Kind::Track, track)?;
+    let key = Ref::Insert { track: track_id, slot: Slot::Instrument }.to_string();
+    let row = json!({"ref": key, "trackRef": Ref::Object(track_id).to_string(), "slot": "instrument", "plugin": plugin});
+    Some((key, row))
+}
+
+fn insert_row(track: &Value, insert: &Value, lives: &Lives) -> Option<(String, Value)> {
+    let track_id = now(lives, Kind::Track, track)?;
+    let slot = slot_of(insert)?;
+    let key = Ref::Insert { track: track_id, slot }.to_string();
+    let params = insert["params"].as_object().map(Map::len);
+    let row = json!({
+        "ref": key,
+        "trackRef": Ref::Object(track_id).to_string(),
+        "slot": key.rsplit(':').next(),
+        "plugin": insert["plugin"],
+        "bypass": insert["bypass"],
+        "paramCount": params,
+    });
+    Some((key, row))
+}
+
+fn bus_row(bus: &Value, lives: &Lives) -> Option<(String, Value)> {
+    object_row(Kind::Bus, bus, lives, |bus| json!({"name": bus["name"], "format": bus["format"]}))
+}
+
+fn send_row(track: &Value, send: &Value, lives: &Lives) -> Option<(String, Value)> {
+    let track_id = now(lives, Kind::Track, track)?;
+    let slot = u32::try_from(send["slot"].as_u64()?).ok()?;
+    let key = Ref::Send { track: track_id, slot }.to_string();
+    let mut row = json!({
+        "ref": key,
+        "trackRef": Ref::Object(track_id).to_string(),
+        "slot": slot,
+        "levelDb": send["level_db"],
+        "pan": send["pan"],
+        "mute": send["mute"],
+        "preFader": send["pre_fader"],
+    });
+    route(&mut row, "target", &send["target"], lives);
+    Some((key, row))
+}
+
+fn object_row(kind: Kind, item: &Value, lives: &Lives, fields: impl Fn(&Value) -> Value) -> Option<(String, Value)> {
+    let key = Ref::Object(now(lives, kind, item)?).to_string();
+    let mut row = fields(item);
+    row["ref"] = key.clone().into();
+    Some((key, row))
+}
+
+fn marker_row(session: &Value, marker: &Value, lives: &Lives) -> Option<(String, Value)> {
+    object_row(Kind::Marker, marker, lives, |marker| {
+        json!({
+            "number": marker["number"],
+            "name": marker["name"],
+            "kind": marker["kind"],
+            "start": marker["start"],
+            "end": marker["end"],
+            "startSeconds": seconds(session, &marker["start"]),
+        })
+    })
+}
+
+fn group_row(group: &Value, lives: &Lives) -> Option<(String, Value)> {
+    object_row(Kind::Group, group, lives, |group| {
+        let members: Vec<String> = list(group, "members")
+            .iter()
+            .filter_map(|member| Some(Ref::Object(lives.now(Kind::Track, member.as_u64()?)?).to_string()))
+            .collect();
+        json!({"name": group["name"], "letter": group["letter"], "active": group["active"], "memberRefs": members})
+    })
+}
+
+fn source_row(session: &Value, source: &Value, lives: &Lives) -> Option<(String, Value)> {
+    object_row(Kind::Source, source, lives, |source| {
+        json!({
+            "name": source["name"],
+            "channels": source["channels"],
+            "frames": source["frames"],
+            "seconds": seconds(session, &source["frames"]),
+            "path": source["path"],
+            "loaded": source["loaded"],
+        })
+    })
+}
