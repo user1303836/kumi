@@ -76,6 +76,13 @@ class Liveness(StateTest):
         self.assertFalse(snapshots.focus(empty, now_ms=NOW)["connected"])
         self.assertIsNone(snapshots.map_revision(empty))
 
+    def test_without_owner_json_a_snapshot_keeps_its_own_owner_and_reads_stale(self) -> None:
+        (self.state / "owner.json").unlink()
+        status = snapshots.status(self.state, now_ms=NOW)
+        # The runtime's chat is still where requests go; nothing is live without a heartbeat.
+        self.assertEqual(status["owner"]["session_id"], fixtures.OWNER["session_id"])
+        self.assertEqual((status["connected"], status["stale"]), (False, True))
+
 
 class Files(StateTest):
     def test_a_file_of_another_schema_or_not_json_reads_as_missing(self) -> None:

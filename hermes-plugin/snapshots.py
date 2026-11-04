@@ -83,8 +83,12 @@ def owner(state: Path, now_ms: int | None = None) -> dict:
 
 
 def _liveness(state: Path, now_ms: int | None) -> dict:
+    """How fresh the runtime is, from owner.json; its `owner` too when it names one (a snapshot keeps its own else)."""
     own = owner(state, now_ms)
-    return {"stale": own["stale"], "age_ms": own["age_ms"], "owner": own.get("owner")}
+    live = {"stale": own["stale"], "age_ms": own["age_ms"]}
+    if isinstance(own.get("owner"), dict):
+        live["owner"] = own["owner"]
+    return live
 
 
 def map_current(state: Path) -> str | None:
