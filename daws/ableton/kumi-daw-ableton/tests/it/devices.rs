@@ -1697,8 +1697,9 @@ fn gen_patcher_saved(code: &str) -> Value {
 }
 
 /// #808 in a device made from another: an mc.gen~ keeps its patcher in its wrapper's data, as Max saves it (with the key
-/// Max knows the wrapper by), and an mcs.gen~ in its own field, as a gen~ does. Each is said with its code, kept when
-/// it's given again unchanged, and changed in place, its code where Max keeps it; a new one's code is checked.
+/// Max knows the wrapper by), and an mcs.gen~ or a gen~ in its own field. Each is said with its code, kept when it's given
+/// again unchanged, and changed in place, its code where Max keeps it and the rest of its data as it was; a new one's code
+/// is checked.
 #[tokio::test(flavor = "current_thread")]
 async fn a_devices_mc_gen_and_mcs_gen_are_said_with_their_code_and_changed_in_place_where_max_keeps_it() {
     let library = tempfile::tempdir().unwrap();
@@ -1709,15 +1710,18 @@ async fn a_devices_mc_gen_and_mcs_gen_are_said_with_their_code_and_changed_in_pl
             { "box": { "id": "obj-1", "maxclass": "newobj", "text": "plugin~", "numinlets": 2, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 20.0, 53.0, 22.0] } },
             { "box": { "id": "obj-2", "maxclass": "newobj", "text": "mc.pack~ 2", "numinlets": 2, "numoutlets": 1, "outlettype": ["multichannelsignal"], "patching_rect": [40.0, 60.0, 70.0, 22.0] } },
             { "box": { "id": "obj-3", "maxclass": "newobj", "text": "mc.gen~ @chans 2", "varname": "each", "numinlets": 1, "numoutlets": 1,
-                "outlettype": ["multichannelsignal"], "patching_rect": [40.0, 100.0, 110.0, 22.0], "data": { "patcher": gen_patcher_saved("out1 = in1 * 0.5;") },
-                "wrapper_uniquekey": "u284001356" } },
+                "outlettype": ["multichannelsignal"], "patching_rect": [40.0, 100.0, 110.0, 22.0],
+                "data": { "patcher": gen_patcher_saved("out1 = in1 * 0.5;"), "other": "as Max saved it" }, "wrapper_uniquekey": "u284001356" } },
             { "box": { "id": "obj-4", "maxclass": "newobj", "text": "mcs.gen~", "varname": "whole", "numinlets": 1, "numoutlets": 1,
                 "outlettype": ["multichannelsignal"], "patching_rect": [40.0, 140.0, 60.0, 22.0], "patcher": gen_patcher_saved("out1 = in1 * 0.5;") } },
             { "box": { "id": "obj-5", "maxclass": "newobj", "text": "mc.unpack~ 2", "numinlets": 1, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 180.0, 80.0, 22.0] } },
-            { "box": { "id": "obj-6", "maxclass": "newobj", "text": "plugout~", "numinlets": 2, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 220.0, 60.0, 22.0] } }
+            { "box": { "id": "obj-6", "maxclass": "newobj", "text": "plugout~", "numinlets": 2, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 220.0, 60.0, 22.0] } },
+            { "box": { "id": "obj-7", "maxclass": "newobj", "text": "gen~", "varname": "plain", "numinlets": 1, "numoutlets": 1, "outlettype": ["signal"],
+                "patching_rect": [140.0, 40.0, 40.0, 22.0], "patcher": gen_patcher_saved("out1 = in1 * 0.5;") } }
         ],
         "lines": [
-            { "patchline": { "source": ["obj-1", 0], "destination": ["obj-2", 0] } },
+            { "patchline": { "source": ["obj-1", 0], "destination": ["obj-7", 0] } },
+            { "patchline": { "source": ["obj-7", 0], "destination": ["obj-2", 0] } },
             { "patchline": { "source": ["obj-1", 1], "destination": ["obj-2", 1] } },
             { "patchline": { "source": ["obj-2", 0], "destination": ["obj-3", 0] } },
             { "patchline": { "source": ["obj-3", 0], "destination": ["obj-4", 0] } },
@@ -1748,9 +1752,11 @@ async fn a_devices_mc_gen_and_mcs_gen_are_said_with_their_code_and_changed_in_pl
     let patch = opened["patch"].as_str().unwrap();
     assert!(patch.contains("each = [mc.gen~ @chans 2] {\nout1 = in1 * 0.5;\n}"), "{patch}");
     assert!(patch.contains("whole = [mcs.gen~] {\nout1 = in1 * 0.5;\n}"), "{patch}");
+    assert!(patch.contains("plain = [gen~] {\nout1 = in1 * 0.5;\n}"), "{patch}");
     assert!(opened.get("kept").is_none(), "{opened}");
 
-    // Given again with new code: in place, the mc.gen~'s code in its data, as Kumi makes one (without the original's key).
+    // Given again with new code: in place, the mc.gen~'s code in its data beside the rest of it, as Kumi makes one (without
+    // the original's key).
     let quieter =
         call(&tool, json!({ "from": from, "name": "Quieter", "patch": "each = [mc.gen~ @chans 2] {\n  out1 = in1 * 0.25;\n}\nwhole = [mcs.gen~] {\n  out1 = in1 * 0.25;\n}\n" }))
             .await;
@@ -1760,6 +1766,7 @@ async fn a_devices_mc_gen_and_mcs_gen_are_said_with_their_code_and_changed_in_pl
     let each = &new["obj-3"];
     assert!(code(&each["data"]["patcher"]).contains("in1 * 0.25"), "{each}");
     assert_eq!((each.get("patcher"), each.get("wrapper_uniquekey")), (None, None), "{each}");
+    assert_eq!(each["data"]["other"], "as Max saved it", "{each}");
     assert_eq!((&each["varname"], &each["patching_rect"]), (&old["obj-3"]["varname"], &old["obj-3"]["patching_rect"]));
     let whole = &new["obj-4"];
     assert!(code(&whole["patcher"]).contains("in1 * 0.25"), "{whole}");
@@ -1773,17 +1780,22 @@ async fn a_devices_mc_gen_and_mcs_gen_are_said_with_their_code_and_changed_in_pl
     assert!(!changed(&same, "each") && changed(&same, "whole"), "{same}");
     assert_eq!(made("Same")["obj-3"], old["obj-3"]);
 
-    // Made another gen: its code moves to where that one keeps it, and nothing of the other's stays.
-    let swapped =
-        call(&tool, json!({ "from": from, "name": "Swapped", "patch": "each = [gen~] {\n  out1 = in1 * 0.5;\n}\nwhole = [mc.gen~ @chans 2] {\n  out1 = in1 * 0.5;\n}\n" }))
-            .await;
-    assert!(changed(&swapped, "each") && changed(&swapped, "whole"), "{swapped}");
+    // Made another gen: its code moves to where that one keeps it, and none of the other's stays.
+    let swapped = call(
+        &tool,
+        json!({ "from": from, "name": "Swapped", "patch": "each = [gen~] {\n  out1 = in1 * 0.5;\n}\nwhole = [mc.gen~ @chans 2] {\n  out1 = in1 * 0.5;\n}\nplain = [mc.gen~ @chans 1] {\n  out1 = in1 * 0.5;\n}\n" }),
+    )
+    .await;
+    assert!(["each", "whole", "plain"].iter().all(|name| changed(&swapped, name)), "{swapped}");
     let new = made("Swapped");
-    let (each, whole) = (&new["obj-3"], &new["obj-4"]);
+    let (each, whole, plain) = (&new["obj-3"], &new["obj-4"], &new["obj-7"]);
     assert!(code(&each["patcher"]).contains("in1 * 0.5"), "{each}");
-    assert_eq!((each.get("data"), each.get("wrapper_uniquekey")), (None, None), "{each}");
-    assert!(code(&whole["data"]["patcher"]).contains("in1 * 0.5"), "{whole}");
-    assert_eq!(whole.get("patcher"), None, "{whole}");
+    assert_eq!((&each["data"], each.get("wrapper_uniquekey")), (&json!({ "other": "as Max saved it" }), None), "{each}");
+    for made_wrapper in [whole, plain] {
+        assert!(code(&made_wrapper["data"]["patcher"]).contains("in1 * 0.5"), "{made_wrapper}");
+        assert_eq!(made_wrapper.get("patcher"), None, "{made_wrapper}");
+    }
+    assert_eq!(cords_of(&library.path().join("Kumi/Audio Effects/Swapped.amxd")), cords_of(&spread));
 
     // A new mc.gen~'s code is checked, as a gen~'s is.
     let driven = call(

@@ -703,18 +703,32 @@ fn max_box(mut fields: Map<String, Value>) -> MaxBox {
 /// A box's fields after it's given again: what it is from the new one, where it sits and how it looks from the old.
 fn retyped(old: &MaxBox, new: Map<String, Value>) -> MaxBox {
     let Value::Object(mut fields) = old.to_value() else { return old.clone() };
-    // An mc.gen~'s wrapper keeps its patcher in its data, beside the key Max knows the wrapper by: both go with what it
-    // is, so one given again, or in place of another box, is made as Kumi makes one, with no key. Another object's data
-    // (a dict's, say) is its own, and stays.
-    let wrapper: &[&str] =
-        if keeps_patcher_in_data(&old.fields) || keeps_patcher_in_data(&new) { &["data", "wrapper_uniquekey"] } else { &[] };
-    let what_it_is = |key: &str| WHAT_IT_IS.contains(&key) || wrapper.contains(&key);
-    for key in WHAT_IT_IS.iter().chain(wrapper) {
-        fields.shift_remove(*key);
+    for key in WHAT_IT_IS {
+        fields.shift_remove(key);
+    }
+    // An mc.gen~'s wrapper keeps its patcher in its data: that's what it is, and comes from the new box, while the rest of
+    // its data stays, as another object's data does. The key Max knows the wrapper by went with the old patcher, so it
+    // goes: one given new code is made as Kumi makes one, with no key.
+    let wraps = keeps_patcher_in_data(&new);
+    if wraps || keeps_patcher_in_data(&old.fields) {
+        fields.shift_remove("wrapper_uniquekey");
+        let data = fields.entry("data").or_insert_with(|| json!({}));
+        if !data.is_object() {
+            *data = json!({});
+        }
+        if let Some(data) = data.as_object_mut() {
+            data.shift_remove("patcher");
+            if let Some(patcher) = new.get("data").and_then(|data| data.get("patcher")).filter(|_| wraps) {
+                data.insert("patcher".into(), patcher.clone());
+            }
+        }
+        if fields.get("data").and_then(Value::as_object).is_some_and(Map::is_empty) {
+            fields.shift_remove("data");
+        }
     }
     let same_class = MaxBox { fields: new.clone(), ..MaxBox::default() }.class() == old.class();
     for (key, value) in new {
-        if what_it_is(&key) {
+        if WHAT_IT_IS.contains(&key.as_str()) {
             fields.insert(key, value);
         }
     }
