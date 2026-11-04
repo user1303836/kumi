@@ -257,9 +257,10 @@ impl TuiApp {
         let (kept, marks) = selected.map_or((screen, drawn), |(_, original, marks)| (original, marks));
         *self.0.screen.borrow_mut() = Some(kept);
         *self.0.marks.borrow_mut() = marks;
-        // Between frames, the terminal's status follows what was drawn.
+        // Between frames, the terminal's status follows what was drawn, and so does herdr's pane.
         if !self.0.state.borrow().closing {
             self.show_status();
+            self.tell_herdr();
         }
     }
     fn status_line(&self) -> (Style, String) {

@@ -3264,6 +3264,10 @@ impl Session {
     pub async fn conversation_now(&self) -> Option<ConversationNow> {
         // A chat that keeps none (without Live, started without -c or -r) has nothing to say of one.
         self.0.options.conversations.as_ref()?;
+        // What's being kept is kept first (as long as closing waits for it): right after a new conversation's first
+        // request, it's kept.
+        let saving = self.0.saving.borrow().clone();
+        let _ = self.bounded(saving).await;
         let (place, id, touched, first, name) = {
             let s = self.0.state.borrow();
             (s.place.clone(), s.conversation_id.clone(), s.touched, s.conversation_first.clone(), s.conversation_name.clone())

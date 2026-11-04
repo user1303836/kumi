@@ -78,6 +78,7 @@ mod tui_away;
 mod tui_composer;
 mod tui_details;
 mod tui_drawer;
+mod tui_herdr;
 mod tui_jobs;
 mod tui_keys;
 mod tui_map;

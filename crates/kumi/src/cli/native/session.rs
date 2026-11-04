@@ -1206,6 +1206,9 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         options.choose_conversation = choose.clone();
         options.whats_new = whats_new;
         options.away = away;
+        // Inside herdr, its pane shows what Kumi is doing, and herdr's restart starts Kumi again there as it was started,
+        // on the conversation going on.
+        options.herdr = crate::tui::herdr::HerdrPane::from_env(&io.env, started_as(io.command(), &io.args));
         options.instant = instant;
         options.copy_on_select = copy_on_select;
         options.mouse = mouse;
@@ -1501,6 +1504,13 @@ fn reopened_args(args: &[String], going: Option<&str>) -> Vec<String> {
     }
 }
 
+/// What starts Kumi again as it was started (`kumi --daw reaper`), without the conversation it asked for then: herdr runs
+/// it in Kumi's pane once herdr starts again, with the conversation going on by then.
+fn started_as(command: &str, args: &[String]) -> Vec<String> {
+    let rest = crate::config::take_resume(args).map(|(rest, _)| rest).unwrap_or_else(|_| args.to_vec());
+    command.split_whitespace().map(str::to_string).chain(rest).collect()
+}
+
 /// What Kumi opens again with when it follows the producer to the DAW they opened: the same arguments, with no
 /// conversation (each DAW's project has its own) and still no DAW asked for, so the start chooses the one open and goes
 /// on following.
@@ -1518,7 +1528,7 @@ fn switched_args(args: &[String], daw: kumi_types::daw::DawId) -> Vec<String> {
 
 #[cfg(test)]
 mod reopen_tests {
-    use super::{reopened_args, switched_args};
+    use super::{reopened_args, started_as, switched_args};
     use kumi_types::daw::DawId;
     #[test]
     fn opened_again_with_another_daw_kumi_asks_for_it_and_no_conversation() {
@@ -1545,6 +1555,16 @@ mod reopen_tests {
         // Not asked for, or nothing kept: as it was.
         assert_eq!(reopened_args(&args(&["--inference-only"]), Some("mv66")), args(&["--inference-only"]));
         assert_eq!(reopened_args(&args(&["-c"]), None), args(&["-c"]));
+    }
+    #[test]
+    fn herdr_starts_kumi_again_as_it_was_started_without_the_conversation_asked_for_then() {
+        let args = |words: &[&str]| words.iter().map(|w| w.to_string()).collect::<Vec<_>>();
+        assert_eq!(started_as("kumi", &args(&["-r", "night", "drive", "--daw", "reaper"])), args(&["kumi", "--daw", "reaper"]));
+        assert_eq!(started_as("kumi", &args(&["-c"])), args(&["kumi"]));
+        assert_eq!(
+            started_as("cargo run -p kumi --", &args(&["--inference-only", "--resume=mv66"])),
+            args(&["cargo", "run", "-p", "kumi", "--", "--inference-only"])
+        );
     }
 }
 #[cfg(test)]

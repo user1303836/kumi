@@ -1,8 +1,9 @@
 //! For a producer who isn't looking at Kumi's window: Kumi's status in the terminal (OSC 7501, 9;4
-//! progress) all the time, and, while the window is behind another, a desktop notification and a line
-//! in the DAW's own window (Live's status bar) when Kumi finishes or needs them.
+//! progress) and in herdr's pane all the time, and, while the window is behind another, a desktop notification and a
+//! line in the DAW's own window (Live's status bar) when Kumi finishes or needs them.
 
 use super::super::alerts::{self, Blocked, NotifyChannel, ProgramState, StatusReport, TerminalProfile};
+use super::super::herdr::AgentState;
 use super::*;
 use kumi_ai::failure::reset_words;
 
@@ -80,30 +81,35 @@ impl TuiApp {
         self.0.state.borrow_mut().resting = Some((state, alerts::one_line(words, 400)));
     }
 
-    /// What the terminal's status says now: working with NOW's words while Kumi answers, blocked while a pick or
-    /// a sign-in waits for the producer, otherwise how the last answer ended.
+    /// What Kumi is doing: working while it answers, blocked while a pick or a sign-in waits for the producer, otherwise
+    /// how the last answer ended.
+    pub(super) fn program_state(&self) -> ProgramState {
+        if self.busy() {
+            ProgramState::Working
+        } else if self.answers_open() {
+            ProgramState::Blocked(Blocked::Question)
+        } else if self.signing_in() {
+            ProgramState::Blocked(Blocked::Auth)
+        } else {
+            self.0.state.borrow().resting.as_ref().map_or(ProgramState::Idle, |(rest, _)| *rest)
+        }
+    }
+
+    /// What the terminal's status says now: the state, with NOW's words while Kumi answers, what it waits for while
+    /// blocked, otherwise how the last answer ended.
     pub(super) fn program_status(&self) -> StatusReport {
-        let title = self.0.state.borrow().set_name.clone();
-        let report = |state: ProgramState, msg: String, progress: Option<u8>| StatusReport {
+        let state = self.program_state();
+        let (msg, progress) = match state {
+            ProgramState::Working => (self.working_words(), self.progress()),
+            ProgramState::Blocked(blocked) => (blocked.words().to_string(), None),
+            _ => (self.0.state.borrow().resting.as_ref().map(|(_, words)| words.clone()).unwrap_or_default(), None),
+        };
+        StatusReport {
             state: Some(state),
             id: None,
             progress,
-            title: title.clone(),
+            title: self.0.state.borrow().set_name.clone(),
             msg: Some(msg).filter(|msg| !msg.is_empty()),
-        };
-        if self.busy() {
-            return report(ProgramState::Working, self.working_words(), self.progress());
-        }
-        if self.answers_open() {
-            return report(ProgramState::Blocked(Blocked::Question), "Your answer, in Kumi".into(), None);
-        }
-        if self.signing_in() {
-            return report(ProgramState::Blocked(Blocked::Auth), "Signing in, in Kumi".into(), None);
-        }
-        let state = self.0.state.borrow();
-        match &state.resting {
-            Some((rest, words)) => report(*rest, words.clone(), None),
-            None => report(ProgramState::Idle, String::new(), None),
         }
     }
 
@@ -187,6 +193,46 @@ impl TuiApp {
         }
         self.0.tty.write(&out);
         self.0.state.borrow_mut().status_sent = Some((report, now));
+    }
+
+    /// Inside herdr, its pane shows the state the frame just drawn shows; a new one has the session asked again which
+    /// conversation herdr's restart takes up (a new conversation's first request keeps it).
+    pub(super) fn tell_herdr(&self) {
+        let Some(herdr) = &self.0.herdr else { return };
+        if herdr.state(AgentState::of(self.program_state())) {
+            self.herdr_look();
+        }
+    }
+
+    /// herdr hears which conversation its restart takes up, as the session says: one look at a time, and one more after
+    /// it when another conversation may have begun meanwhile.
+    pub(super) fn herdr_look(&self) {
+        if self.0.herdr.is_none() {
+            return;
+        }
+        {
+            let mut state = self.0.state.borrow_mut();
+            if state.herdr_looking {
+                state.herdr_look_again = true;
+                return;
+            }
+            state.herdr_looking = true;
+        }
+        let (weak, session) = (Rc::downgrade(&self.0), self.0.options.session.clone());
+        tokio::task::spawn_local(async move {
+            loop {
+                let now = session.op(op::ConversationNow {}).await.ok().flatten();
+                let Some(a) = weak.upgrade() else { return };
+                if let Some(herdr) = &a.herdr {
+                    herdr.conversation(continued(now).map(|now| now.id));
+                }
+                let mut state = a.state.borrow_mut();
+                if !std::mem::take(&mut state.herdr_look_again) {
+                    state.herdr_looking = false;
+                    return;
+                }
+            }
+        });
     }
 
     /// Whether Kumi's window is known to be in front: the terminal said so last (and has said anything at all).

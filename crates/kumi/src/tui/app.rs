@@ -147,6 +147,8 @@ pub struct TuiOptions {
     pub alert_gap_ms: Option<f64>,
     /// Whether the terminal's app is in front, for a terminal that says nothing of focus; None asks the system.
     pub front_app: Option<FrontApp>,
+    /// Kumi's pane in herdr, which hears what Kumi is doing and how to start it again there; None outside herdr.
+    pub herdr: Option<super::herdr::HerdrPane>,
     /// Fixed phrases ("tempo 124", "mute drums") change Live at once, with no model call (`instantPhrases`).
     pub instant: bool,
     /// How changes' pictures show: read from the terminal when None.
@@ -256,6 +258,7 @@ impl TuiOptions {
             run_notifier: None,
             alert_gap_ms: None,
             front_app: None,
+            herdr: None,
             instant: true,
             graphics: None,
             next_time: None,
@@ -566,6 +569,9 @@ struct State {
     status_timer: Option<JoinHandle<()>>,
     /// How the status rests between answers: done or error with its words, or idle.
     resting: Option<(ProgramState, String)>,
+    /// The session is being asked which conversation herdr's restart takes up; asked again once it says.
+    herdr_looking: bool,
+    herdr_look_again: bool,
     /// The newest alert waiting for the gap after the last, or for the DAW to stop recording; when the last went.
     alert_waiting: Option<away::Alert>,
     alert_sent_at: f64,
@@ -756,6 +762,8 @@ impl State {
             status_sent: None,
             status_timer: None,
             resting: None,
+            herdr_looking: false,
+            herdr_look_again: false,
             alert_waiting: None,
             alert_sent_at: f64::NEG_INFINITY,
             alert_timer: None,
@@ -805,6 +813,8 @@ struct Inner {
     output_failed: Cell<bool>,
     /// How this terminal shows Kumi's status and notifications.
     profile: TerminalProfile,
+    /// What tells herdr what Kumi is doing, inside a herdr pane.
+    herdr: Option<super::herdr::Reporter>,
     /// How changes' pictures show on this terminal.
     graphics: super::pictures::Graphics,
     /// What each key does, keys.json's over Kumi's own.
@@ -988,6 +998,7 @@ impl TuiApp {
                 .full_repaint(options.full_repaint.unwrap_or(profile.repaint))
                 .erasing(profile.erase)
                 .linking(profile.status);
+            let herdr = options.herdr.clone().map(super::herdr::Reporter::new);
             Inner {
                 state: RefCell::new(State::new(&options)),
                 options,
@@ -1004,6 +1015,7 @@ impl TuiApp {
                 done,
                 output_failed: Cell::new(false),
                 profile,
+                herdr,
                 graphics,
                 keymap,
                 keys_said,
@@ -1130,6 +1142,7 @@ impl TuiApp {
     fn finish(&self, code: i32, message: Option<String>) -> LocalBoxFuture<'static, i32> {
         let printing;
         let closing;
+        let reopening;
         {
             let mut state = self.0.state.borrow_mut();
             if state.closing {
@@ -1147,6 +1160,7 @@ impl TuiApp {
             state.stream.discard();
             // The producer quitting, not Kumi closing to open again (with another DAW, or updated) or failing to start.
             printing = self.0.options.transcript_on_quit && message.is_none() && !state.reopening;
+            reopening = state.reopening;
             let flashes = std::mem::take(&mut state.flash_timers);
             let timers = [
                 state.tree_refresh.take(),
@@ -1180,6 +1194,8 @@ impl TuiApp {
         if let Some(voice) = &self.0.voice {
             voice.cancel();
         }
+        // herdr hears nothing more from this Kumi; the producer quitting gives its pane back once Kumi has closed.
+        let herdr = self.0.herdr.as_ref().map(|herdr| herdr.close(!reopening));
         self.0.scheduler.dispose();
         let app = self.clone();
         tokio::task::spawn_local(async move {
@@ -1225,6 +1241,9 @@ impl TuiApp {
                 if let Some(next) = &app.0.options.next_time {
                     app.0.options.output.write(&format!("{next}\n"));
                 }
+            }
+            if let Some(release) = herdr {
+                release.await;
             }
             app.0.done.send_replace(Some(code));
         });
@@ -1436,9 +1455,13 @@ pub(crate) fn conversation_line(now: &ConversationNow, clean: impl Fn(&str) -> S
 pub(crate) fn not_kept() -> String {
     format!("A chat without {} keeps no conversations; {k} -c or {k} -r carries on a kept one.", crate::daw::words().app, k = *KUMI_START)
 }
-/// The line that brings this run's conversation back: when it's kept, and this run made a request in it or took it up.
+/// This run's conversation, as `-r` brings it back: once it's kept, and this run made a request in it or took it up.
+pub(crate) fn continued(now: Option<ConversationNow>) -> Option<ConversationNow> {
+    now.filter(|now| now.kept && now.touched)
+}
+/// The line that brings this run's conversation back ([`continued`]).
 pub(crate) fn continue_hint(now: Option<ConversationNow>) -> Option<String> {
-    now.filter(|now| now.kept && now.touched).map(|now| format!("Continue this conversation: {} -r {}", *KUMI_START, now.id))
+    continued(now).map(|now| format!("Continue this conversation: {} -r {}", *KUMI_START, now.id))
 }
 const CHANGE_FLASH_MS: f64 = 4000.;
 /// Steps the conversation doesn't show: what Kumi keeps on its own, and finding a tool that wasn't sent up front.
