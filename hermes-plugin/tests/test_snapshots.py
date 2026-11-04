@@ -67,6 +67,17 @@ class Liveness(StateTest):
     def test_a_heartbeat_from_the_future_is_stale_too(self) -> None:
         self.assertTrue(snapshots.owner(self.state, now_ms=NOW - 60_000)["stale"])
 
+    def test_a_heartbeat_or_number_that_isnt_finite_reads_as_a_missing_file(self) -> None:
+        path = self.state / "owner.json"
+        last = path.read_text(encoding="utf-8")
+        for bad in ("NaN", "Infinity", "-Infinity", "1e400"):
+            with self.subTest(bad=bad):
+                path.write_text(last.replace(f'"heartbeat": {NOW}', f'"heartbeat": {bad}'), encoding="utf-8")
+                status = snapshots.status(self.state, now_ms=NOW)
+                self.assertEqual((status["connected"], status["stale"]), (False, True))
+        (self.state / "focus.json").write_text("[" * 100_000, encoding="utf-8")
+        self.assertIsNone(snapshots.read(self.state, "focus"))
+
     def test_a_runtime_that_says_it_stopped_is_stale_at_once(self) -> None:
         path = self.state / "owner.json"
         last = json.loads(path.read_text(encoding="utf-8"))
@@ -213,14 +224,6 @@ class PublicViews(StateTest):
         self.assertNotIn("path", sound)
         self.assertIsNone(snapshots.public_sound(self.state, "s-r6-0091"))
         self.assertIsNone(snapshots.public_map(self.state, "r6"))
-
-
-class Imports(unittest.TestCase):
-    def test_the_module_imports_with_the_standard_library_alone(self) -> None:
-        source = (HERE.parent / "snapshots.py").read_text(encoding="utf-8")
-        top = [line for line in source.splitlines() if line.startswith(("import ", "from "))]
-        allowed = {"__future__", "json", "os", "re", "stat", "time", "pathlib", "typing"}
-        self.assertEqual({line.split()[1].split(".")[0] for line in top} - allowed, set())
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ helpers are imported where they're used.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 import stat
@@ -42,13 +43,26 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+def _no_constant(name: str) -> Any:
+    raise ValueError(f"{name} is no number the runtime writes")
+
+
+def _finite(text: str) -> float:
+    value = float(text)
+    if not math.isfinite(value):
+        raise ValueError(f"{text} is no finite number")
+    return value
+
+
 def _load(path: Path) -> Any:
+    """A JSON file, or None when it's missing, too big or not what the runtime writes (NaN, Infinity and numbers too
+    big to be finite included: no route could answer with them)."""
     try:
         if path.stat().st_size > SNAPSHOT_MAX_BYTES:
             return None
         with path.open("rb") as file:
-            return json.load(file)
-    except (OSError, ValueError):
+            return json.load(file, parse_constant=_no_constant, parse_float=_finite)
+    except (OSError, ValueError, RecursionError):
         return None
 
 
@@ -78,7 +92,8 @@ def owner(state: Path, now_ms: int | None = None) -> dict:
         return {"stale": True, "age_ms": None}
     beat = data.get("heartbeat", data.get("at"))
     now = _now_ms() if now_ms is None else now_ms
-    age = now - int(beat) if isinstance(beat, (int, float)) and not isinstance(beat, bool) else None
+    finite = isinstance(beat, (int, float)) and not isinstance(beat, bool) and math.isfinite(beat)
+    age = now - int(beat) if finite else None
     quiet = age is None or not -STALE_AFTER_S * 1000 <= age <= STALE_AFTER_S * 1000
     return {**_public(data), "stale": quiet or data.get("running") is False, "age_ms": age}
 
