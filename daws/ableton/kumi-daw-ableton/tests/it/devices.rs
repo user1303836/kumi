@@ -1602,6 +1602,41 @@ async fn a_change_says_whats_wrong_with_it_and_leaves_what_it_cant_change_as_it_
     assert_eq!(time["presentation_rect"], old["obj-8"]["presentation_rect"], "where it was on the face");
 }
 
+/// #772's live test: a Mix dial a model typed into the patch, as an object, was off the face and named "mix_dial" in Live.
+/// A Live parameter given in a patch is left out, with its cords, and controls is named as what makes one, whether the
+/// device is made from another or new.
+#[tokio::test(flavor = "current_thread")]
+async fn a_live_parameter_given_in_a_patch_is_left_out_and_controls_is_named_as_what_makes_one() {
+    use_own_kumi_folder();
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let echo = downloads.path().join("Echo.amxd");
+    std::fs::write(&echo, encode_amxd(DeviceType::MidiEffect, &downloaded_echo())).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let dial = "mix_dial = [live.dial @parameter_enable 1 @parameter_longname Mix @parameter_mmin 0 @parameter_mmax 100 @presentation 1 @presentation_rect 570 10 44 60]\n";
+    let refused = |made: &Value| {
+        made["wrong"].as_array().into_iter().flatten().any(|said| {
+            said.as_str().is_some_and(|said| {
+                said.starts_with("patch line 1: [live.dial @parameter_enable 1") && said.contains("give it in controls")
+            })
+        })
+    };
+    let made =
+        call(&tool, json!({ "from": echo.to_string_lossy(), "name": "Echo Mix", "patch": format!("{dial}mix_dial -> pipe_4.2\n") })).await;
+    assert!(refused(&made), "{made}");
+    let new = boxes_by_id(&library.path().join("Kumi/MIDI Effects/Echo Mix.amxd"));
+    let old = boxes_by_id(&echo);
+    assert_eq!(new.len(), old.len() + 1, "the record's comment is the one box more: no dial");
+    assert!(new.values().all(|item| !item["text"].as_str().is_some_and(|text| text.starts_with("live.dial"))), "{new:#?}");
+
+    let fresh = call(
+        &tool,
+        json!({ "type": "midi_effect", "name": "Mixer", "about": "Passes MIDI through.", "patch": format!("{dial}in -> out\nmix_dial -> [print mix]\n") }),
+    )
+    .await;
+    assert!(refused(&fresh), "a new device is told the same: {fresh}");
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_frozen_device_made_into_a_new_one_keeps_its_files_frozen_into_it() {
     use kumi_daw_ableton::devices::patch::frozen::read_device;
