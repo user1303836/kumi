@@ -29,6 +29,26 @@ pub fn intersect(a: Rect, b: Rect) -> Rect {
     Rect { x, y, width: (right - x).max(0), height: (bottom - y).max(0) }
 }
 
+/// What of `rect` is outside `cut`, as up to four rectangles: the rows above and below it, and the cells left and right
+/// of it on the rows it covers. `rect` itself where they don't meet; nothing where `cut` covers it all.
+pub fn outside(rect: Rect, cut: Rect) -> Vec<Rect> {
+    let met = intersect(rect, cut);
+    if met.width == 0 || met.height == 0 {
+        return vec![rect];
+    }
+    let (right, bottom) = (rect.x + rect.width, rect.y + rect.height);
+    let (met_right, met_bottom) = (met.x + met.width, met.y + met.height);
+    [
+        Rect::new(rect.x, rect.y, rect.width, met.y - rect.y),
+        Rect::new(rect.x, met_bottom, rect.width, bottom - met_bottom),
+        Rect::new(rect.x, met.y, met.x - rect.x, met.height),
+        Rect::new(met_right, met.y, right - met_right, met.height),
+    ]
+    .into_iter()
+    .filter(|part| part.width > 0 && part.height > 0)
+    .collect()
+}
+
 /// `/[\u0000-\u001f\u007f-\u009f]/`
 fn has_control(grapheme: &str) -> bool {
     grapheme.chars().any(|character| character < '\u{20}' || ('\u{7f}'..='\u{9f}').contains(&character))
@@ -189,5 +209,29 @@ impl Screen {
         self.codes[index] = code;
         self.widths[index] = cells as u8;
         self.styles[index] = id;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn what_is_outside_a_cut_is_every_cell_of_a_rect_but_the_cuts_once() {
+        let rect = Rect::new(0, 0, 10, 8);
+        let area = |parts: &[Rect]| parts.iter().map(|part| part.width * part.height).sum::<i32>();
+        // Apart, or only touching at an edge: the rect is whole.
+        assert_eq!(outside(rect, Rect::new(10, 0, 4, 4)), [rect]);
+        assert_eq!(outside(rect, Rect::new(0, 8, 10, 2)), [rect]);
+        // Over all of it: nothing.
+        assert!(outside(rect, Rect::new(-1, -1, 12, 10)).is_empty());
+        // In its middle: the rows above and below, and either side on the rows it covers.
+        let parts = outside(rect, Rect::new(3, 2, 4, 3));
+        assert_eq!(parts, [Rect::new(0, 0, 10, 2), Rect::new(0, 5, 10, 3), Rect::new(0, 2, 3, 3), Rect::new(7, 2, 3, 3)]);
+        assert_eq!(area(&parts), 80 - 12);
+        // Over its left side and past its top: what's right of it and under it.
+        let parts = outside(rect, Rect::new(-2, -2, 6, 5));
+        assert_eq!(parts, [Rect::new(0, 3, 10, 5), Rect::new(4, 0, 6, 3)]);
+        assert_eq!(area(&parts), 80 - 12);
     }
 }

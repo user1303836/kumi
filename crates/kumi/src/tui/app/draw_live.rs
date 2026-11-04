@@ -3,7 +3,7 @@ use super::super::{
     activity::activity_glyph,
     frame,
     icons::{icon, track_kind},
-    screen::Screen,
+    screen::{outside, Screen},
     style::Style,
     tree::{tree_window, TreeRole},
     width::{text_width, truncate, truncate_with},
@@ -69,6 +69,14 @@ impl TuiApp {
             below.carries = None;
         }
     }
+    /// A frame drawn over `area` (a panel, the `/` menu), frame and all: a drag that starts beside it, in the
+    /// conversation or the drawer under it, stops at its edge, so a copy never takes its frame or its words with what's
+    /// beside them. Its own rows are an area of their own, which it adds as it draws them.
+    pub(super) fn shut_out(&self, area: Rect) {
+        let mut state = self.0.state.borrow_mut();
+        let under = std::mem::take(&mut state.select_areas);
+        state.select_areas = under.into_iter().flat_map(|rect| outside(rect, area)).collect();
+    }
     /// Where the producer is, at (x, y): the track's chip and its path, the value on the same row where it fits, and,
     /// `with_context`, the rest on the row under it. The column after the first row's words; None where there's no track.
     fn draw_focus_path(&self, screen: &mut Screen, x: i32, y: i32, width: i32, with_context: bool) -> Option<i32> {
@@ -124,10 +132,11 @@ impl TuiApp {
         let heading = focus.busy.map(|said| sp(said, st::WARN)).or(focus.heading.map(|heading| sp(heading, st::FAINT)));
         frame::left_words(screen, framed, framed.y, &std::iter::once(sp("FOCUS", st::LABEL)).chain(heading).collect::<Vec<_>>());
         let now_at = area.y + focus.rows.map_or(6, |rows| 4 + rows);
-        // The tabs' rule, where it's inside the frame with a row for the tabs above the bottom edge; NOW's rows end there.
-        // Where the window is short, the tabs come first, as they always have: NOW keeps what's left above them.
-        let top = area.y + area.height - bottom;
-        let tabs = top > framed.y && top + 1 < edge;
+        // The tabs' rule, with at least one row for the tabs above the bottom edge (a short window raises it); NOW's rows
+        // end there. The tabs come first, as they always have: NOW keeps what's left above them, so the keyboard Shift-Tab
+        // takes into the tabs always has them on screen.
+        let top = (area.y + area.height - bottom).min(edge - 2);
+        let tabs = top > framed.y;
         let now_end = if tabs { top } else { edge };
         // The parts' rows, from and to, that a drag copies.
         let mut parts = vec![(framed.y + 1, now_at.min(now_end))];

@@ -514,3 +514,88 @@ case!(a_drag_in_the_side_pane_copies_one_parts_rows_and_never_the_frames_lines, 
     assert!(!text.contains(FRAME), "{text:?}");
     h.close().await;
 });
+
+case!(a_drag_beside_the_menu_or_a_panel_takes_none_of_it, async {
+    use std::cell::RefCell;
+    let copied = Rc::new(RefCell::new(Vec::<String>::new()));
+    let copy = copied.clone();
+    let h = Harness::with(160, 40, Rc::new(Control::default()), move |o| {
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }));
+    });
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"notice","message":"Words in the conversation"}));
+    let drag = |from: (usize, usize), to: (usize, usize)| {
+        format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", from.0 + 1, from.1 + 1, to.0 + 1, to.1 + 1, to.0 + 1, to.1 + 1)
+    };
+    // The `/` menu, with one command, framed above the box; at 160 columns it spans the first 74.
+    h.type_text("/qu").await;
+    let lines = h.screen();
+    let menu = lines.iter().position(|line| line.contains("/quit")).unwrap();
+    let said = lines.iter().position(|line| line.contains("Words in the conversation")).unwrap();
+    let at = lines[said][..lines[said].find("Words").unwrap()].chars().count();
+    // From the conversation down into the menu: the conversation's rows, none of the menu's.
+    h.type_text(&drag((at, said), (20, menu))).await;
+    h.type_text("\x03").await;
+    let text = copied.borrow().last().cloned().unwrap_or_default();
+    assert!(text.starts_with("Words in the conversation"), "{text:?}");
+    // From beside it, to its right, across it to its left: none of it.
+    h.type_text(&drag((100, menu), (5, menu))).await;
+    h.type_text("\x03").await;
+    // The help over the conversation, from beside it across it: none of it.
+    h.type_text("\x15").await;
+    h.type_text("?").await;
+    h.wait_for("Keys and commands").await;
+    let lines = h.screen();
+    let row = lines.iter().position(|line| line.contains("Keys and commands")).unwrap() + 4;
+    h.type_text(&drag((108, row), (10, row - 2))).await;
+    h.type_text("\x03").await;
+    for text in copied.borrow().iter() {
+        assert!(!text.contains("/quit") && !text.contains("Keys and commands") && !text.contains(FRAME), "{text:?}");
+    }
+    h.close().await;
+});
+
+case!(the_keyboard_goes_only_into_tabs_and_a_tree_on_screen, async {
+    // The strip, below 100 columns and 24 rows, has neither: Shift-Tab and Tab leave the keyboard in the box.
+    let h = Harness::new(80, 23);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    h.type_text("\x1b[Z").await;
+    h.type_text("\t").await;
+    assert!(h.selected_line().is_none(), "{}", h.screen().join("\n"));
+    // The strip, then the box: the box keeps the light, and what's typed goes into it.
+    assert_eq!(lit(&h), [false, true]);
+    h.type_text("tighten the hats").await;
+    h.has("tighten the hats");
+    h.close().await;
+    // In the drawer's tabs when the window shrinks to the strip: the keyboard comes back to the box.
+    let h = Harness::new(80, 30);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some(), "{}", h.screen().join("\n"));
+    h.resize(80, 23);
+    delay(10).await;
+    assert!(h.selected_line().is_none(), "{}", h.screen().join("\n"));
+    assert_eq!(lit(&h), [false, true]);
+    h.close().await;
+    // The side pane in a short window keeps a row for its tabs under NOW's rule, which Shift-Tab goes into.
+    let h = Harness::new(100, 12);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    let lines = h.screen();
+    let rule = lines.iter().position(|line| line.contains("├─ HISTORY")).unwrap_or_else(|| panic!("{}", lines.join("\n")));
+    // (at 100 columns the pane starts at column 64: its bottom edge is two rows under the rule, the tabs' row between)
+    assert!(lines[rule - 1].contains("├─ NOW") && lines[rule + 2].chars().nth(64) == Some('╰'), "{}", lines.join("\n"));
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some_and(|line| line.contains("Chords · 3 notes moved")), "{}", h.screen().join("\n"));
+    assert_eq!(lit(&h), [true, false]);
+    h.close().await;
+});

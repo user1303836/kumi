@@ -14,7 +14,7 @@ use super::super::{
     width::{text_width, truncate},
     wrap::Span,
 };
-use super::drawer::{drawer_fits, PANE_COLUMNS};
+use super::drawer::{drawer_fits, strip_only, PANE_COLUMNS};
 use super::*;
 use crate::text::library_line;
 use kumi_agent::core::protocol::{size_words, MAX_MESSAGE};
@@ -168,6 +168,12 @@ impl TuiApp {
         } else if drawer {
             self.draw_drawer(&mut screen, Rect::new(0, docked, columns, dock));
         } else {
+            // The strip has no tabs or tree on screen: a keyboard that was in them when the window shrank to it comes back
+            // to the box.
+            if strip_only(columns, rows) {
+                self.0.tabs.leave();
+                self.0.state.borrow_mut().tree_cursor = None;
+            }
             self.keep_tree_fresh(None);
             self.draw_dock(&mut screen, Rect::new(0, docked, columns, dock));
         }
@@ -862,6 +868,7 @@ impl TuiApp {
         let area = Rect::new(0, box_top - 3 - shown as i32, width + 2, shown as i32 + 2);
         frame::border(screen, area, &self.frame_line(true), self.corners());
         self.cover(area);
+        self.shut_out(area);
         let (top, bottom) = (area.y, area.y + area.height - 1);
         // A drag over it copies what's inside its frame, from where its rows start.
         self.0.state.borrow_mut().select_areas.insert(0, Rect::new(frame::INSET, top + 1, width - frame::INSET, shown as i32));

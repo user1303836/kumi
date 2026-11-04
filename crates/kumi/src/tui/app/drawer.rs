@@ -96,6 +96,12 @@ pub(super) fn drawer_fits(columns: i32, rows: i32) -> bool {
     columns < PANE_COLUMNS && rows >= DRAWER_ROWS
 }
 
+/// Whether the pane is only the two-line strip at this size, too narrow for the side pane and too short for the drawer:
+/// it has no tabs or tree for the keyboard to go into.
+pub(super) fn strip_only(columns: i32, rows: i32) -> bool {
+    columns < PANE_COLUMNS && rows < DRAWER_ROWS
+}
+
 impl TuiApp {
     /// The drawer follows what landed since the last frame: a new change opens it to NOW, and the tab panel turning to
     /// another tab (GOAL as a goal starts) opens a folded one on it. Only while it's on screen, the producer hasn't

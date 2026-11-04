@@ -158,6 +158,7 @@ impl TuiApp {
         let bottom = area.y + area.height - 1;
         frame::border(screen, area, &self.frame_line(true), self.corners());
         self.cover(area);
+        self.shut_out(area);
         // A drag over it copies what's inside its frame, from where its rows start.
         self.0.state.borrow_mut().select_areas.insert(0, Rect::new(x, top + 1, inner, (area.height - 2).max(0)));
         if let Some(title) = lines.first() {
