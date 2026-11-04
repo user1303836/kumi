@@ -298,7 +298,15 @@ impl Tty {
             return;
         }
         if self.is_active() {
-            inner.options.output.write(if on { MOUSE_MOVES_ON } else { MOUSE_MOVES_OFF });
+            if on {
+                inner.options.output.write(MOUSE_MOVES_ON);
+            } else {
+                // xterm and the terminals that follow it (Ghostty among them) keep one mouse mode, which 1003's reset
+                // turns off altogether: without the clicks' modes asked for again, Kumi would hear no click, drag or
+                // wheel once the map closed.
+                inner.options.output.write(MOUSE_MOVES_OFF);
+                inner.options.output.write(MOUSE_ON);
+            }
         }
     }
 
@@ -1028,6 +1036,38 @@ mod tests {
         }
     }
 
+    /// The mouse's tracking modes (1000, 1002, 1003) in what was written, in turn: each set (`h`) or reset (`l`).
+    fn mouse_modes(written: &str) -> impl Iterator<Item = (u16, bool)> + '_ {
+        written.split("\u{1b}[?").skip(1).filter_map(|rest| {
+            let end = rest.find(|c: char| !c.is_ascii_digit())?;
+            let mode = rest[..end].parse::<u16>().ok().filter(|mode| [1000, 1002, 1003].contains(mode))?;
+            match rest[end..].chars().next()? {
+                'h' => Some((mode, true)),
+                'l' => Some((mode, false)),
+                _ => None,
+            }
+        })
+    }
+
+    /// The tracking a terminal that keeps one mouse mode (xterm, Ghostty) is left in by what was written: a mode set
+    /// takes the last one's place, and any one reset turns tracking off (None).
+    fn one_mouse_mode(written: &str) -> Option<u16> {
+        mouse_modes(written).fold(None, |_, (mode, set)| set.then_some(mode))
+    }
+
+    /// The tracking modes on, after what was written, in a terminal that keeps each on or off by itself.
+    fn mouse_modes_on(written: &str) -> Vec<u16> {
+        let mut on = std::collections::BTreeSet::new();
+        for (mode, set) in mouse_modes(written) {
+            if set {
+                on.insert(mode);
+            } else {
+                on.remove(&mode);
+            }
+        }
+        on.into_iter().collect()
+    }
+
     #[test]
     fn with_the_mouse_off_the_terminal_keeps_it_and_its_wheel_types_no_keys() {
         let terminal = Rc::new(Crash { raw: Arc::new(AtomicBool::new(false)), crashed: Arc::default(), written: RefCell::default() });
@@ -1089,9 +1129,12 @@ mod tests {
         terminal.written.borrow_mut().clear();
         assert!(tty.recover());
         assert_eq!(*terminal.written.borrow(), format!("{ENTER}{MOUSE_ON}{MOUSE_MOVES_ON}"));
-        terminal.written.borrow_mut().clear();
         tty.report_moves(false);
-        assert_eq!(*terminal.written.borrow(), MOUSE_MOVES_OFF);
+        // The moves taken back, the clicks are still reported: in a terminal that keeps one mouse mode (xterm, Ghostty),
+        // which 1003's reset turns off, as in one that keeps each mode on or off by itself.
+        let written = terminal.written.borrow().clone();
+        assert_eq!(one_mouse_mode(&written), Some(1002), "{written:?}");
+        assert_eq!(mouse_modes_on(&written), [1000, 1002], "{written:?}");
         // A second caught panic, then Kumi quits without a frame between: it's given back once (by the crash path, not
         // again on quitting, which would put the cursor back over the message), and nothing stays registered.
         terminal.written.borrow_mut().clear();
