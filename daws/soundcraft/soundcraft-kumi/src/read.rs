@@ -13,7 +13,7 @@
 //! so a list that changed between pages says so rather than skipping or repeating rows.
 use crate::control::{Control, Error};
 use crate::refs::{fingerprints, lane, Id, Kind, Lives, Missing, Ref, Slot};
-use crate::timebase::Timebase;
+use crate::timebase::{Timebase, PPQ};
 use daw_bridge::auth::sha256_hex;
 use daw_bridge::wire::code;
 use serde_json::{json, Map, Value};
@@ -37,6 +37,9 @@ const READ_WAIT: Duration = Duration::from_secs(5);
 const SNAPSHOT_TRACKS: usize = 200;
 const SNAPSHOT_TRACK_BYTES: usize = 150 * 1024;
 const SNAPSHOT_MARKERS: usize = 100;
+/// The selected tracks and clips a selection names by ref, as REAPER's does (it counts them all).
+const SELECTED_TRACKS: usize = 50;
+const SELECTED_CLIPS: usize = 20;
 
 /// Why a read has no answer: its kumi-daw/1 code, and the words.
 pub type Refusal = (&'static str, String);
@@ -80,8 +83,11 @@ impl Reads {
     }
 
     /// What a look saw of the session (`session.inspect`, in full or not): the lives learn from it, and another session
-    /// starts a new epoch, with new lives. The last full inspection serves no more reads, so their rows and the lives come
-    /// from one look.
+    /// starts a new epoch, with new lives. Another session is one under another name or path (a save or Save As, which names
+    /// the session after its file and changes nothing else, is the same one), one whose undo history was emptied, or one
+    /// with none of the objects before though no step took them (File > New on a session with nothing to undo). A save the
+    /// looks see only after an edit that followed it counts as another session. The last full inspection serves no more
+    /// reads, so their rows and the lives come from one look.
     pub fn saw(&mut self, session: &Value) {
         let prints = fingerprints(session);
         let now = Look {
@@ -91,11 +97,13 @@ impl Reads {
         };
         let emptied = |history: &(Value, Value)| history.0.is_null() && history.1.is_null();
         let another = self.looked.as_ref().is_some_and(|before| {
-            before.named != now.named
+            let (kept_history, kept_objects) = (before.history == now.history, before.who == now.who);
+            (before.named != now.named && !(kept_history && kept_objects))
                 // (an undo leaves something to redo, and a redo or a step something to undo: only another session empties
                 // a history)
                 || (!emptied(&before.history) && emptied(&now.history))
-                || (!before.who.is_empty() && before.who.is_disjoint(&now.who))
+                // (a step that took every object moved the history)
+                || (kept_history && !before.who.is_empty() && before.who.is_disjoint(&now.who))
         });
         if another {
             self.lives = Lives::new();
@@ -665,13 +673,13 @@ fn slot_of(insert: &Value) -> Option<Slot> {
 }
 
 /// The session as kumi-daw/1 names a project: its name and path; its id, which SoundCraft keeps none of, as a saved
-/// session's path hashed to the 32 hex digits a place takes, so its conversations stay with it; and its identity, which
-/// is its path, or for an unsaved session its epoch (a table is one session's).
+/// session's place ([`place_id`]); and its identity, the open session's: its epoch, which only another session changes (a
+/// save or Save As keeps it), so Kumi's conversation goes on into the place a save gives it.
 fn project_row(session: &Value, epoch: &str) -> Value {
     let path = session["path"].as_str().filter(|path| !path.is_empty());
     json!({
-        "id": path.map(|path| sha256_hex(path.as_bytes())[..32].to_string()),
-        "identity": path.map_or_else(|| format!("unsaved:{epoch}"), |path| format!("saved:{path}")),
+        "id": path.and_then(place_id),
+        "identity": epoch,
         "name": session["name"],
         "path": path,
         "saved": path.is_some(),
@@ -681,6 +689,21 @@ fn project_row(session: &Value, epoch: &str) -> Value {
         "editMode": session["edit_mode"],
         "grid": session["grid"],
     })
+}
+
+/// A saved session's place: its file's path made canonical (through links, in the case the file system keeps) and hashed
+/// to the 32 hex digits a place takes, so its conversations stay with the file. A path that doesn't resolve now is hashed
+/// as SoundCraft holds it; a relative one gives none, as SoundCraft resolves it from a folder the bridge can't know. The
+/// place follows the file's path, not the session: a Save As, or the file moved or renamed outside SoundCraft, is another
+/// place (REAPER's and Renoise's ids travel inside their files).
+fn place_id(path: &str) -> Option<String> {
+    let path = std::path::Path::new(path);
+    if !path.is_absolute() {
+        return None;
+    }
+    let canonical = std::fs::canonicalize(path).ok();
+    let named = canonical.as_deref().unwrap_or(path).to_string_lossy();
+    Some(sha256_hex(named.as_bytes())[..32].to_string())
 }
 
 fn session_row(session: &Value, lives: &Lives, epoch: &str) -> Value {
@@ -699,7 +722,8 @@ fn session_row(session: &Value, lives: &Lives, epoch: &str) -> Value {
 }
 
 /// The transport at `position` samples: whether it plays or records, seconds, and through the tempo map (when SoundCraft's
-/// maps are steps) quarter notes from the start, the bar and the beat in it (from 1), the tempo and the meter there.
+/// maps are steps) quarter notes from the start, the bar (from 1) and the quarter notes into it (from 1, with their
+/// fraction, as kumi-daw/1 counts them in any meter), the tempo and the meter there.
 fn transport_row(session: &Value, position: &Value, playing: &Value, recording: &Value) -> Value {
     let state = match (recording.as_bool(), playing.as_bool()) {
         (Some(true), _) => "recording",
@@ -713,7 +737,8 @@ fn transport_row(session: &Value, position: &Value, playing: &Value, recording: 
         let (numerator, denominator) = timebase.time_signature(beats);
         row["beat"] = json!((beats * 1000.0).round() / 1000.0);
         row["bar"] = at.bar.into();
-        row["beatInBar"] = at.beat.into();
+        let into_bar = 1.0 + (at.beat - 1) as f64 * 4.0 / f64::from(denominator) + at.ticks as f64 / PPQ;
+        row["beatInBar"] = json!((into_bar * 1000.0).round() / 1000.0);
         row["tempo"] = timebase.tempo(beats).into();
         row["timeSignature"] = json!([numerator, denominator]);
         row["beatsPerBar"] = timebase.beats_a_bar(beats).into();
@@ -722,17 +747,21 @@ fn transport_row(session: &Value, position: &Value, playing: &Value, recording: 
 }
 
 /// What the producer has selected: tracks (the first, `trackRef`, is the one Kumi follows), clips, and the time range,
-/// whose start and end alike are the cursor.
+/// whose start and end alike are the cursor. It names the first 50 tracks and 20 clips by ref, as REAPER does, and counts
+/// them all, so a big selection can't outgrow the snapshot.
 fn selection_row(session: &Value, lives: &Lives) -> Value {
     let selection = &session["selection"];
-    let refs = |key: &str, kind: Kind| {
-        list(selection, key).iter().filter_map(|id| Some(Ref::Object(lives.now(kind, id.as_u64()?)?).to_string())).collect::<Vec<_>>()
+    let refs = |key: &str, kind: Kind, most: usize| {
+        let named = list(selection, key).iter().filter_map(|id| Some(Ref::Object(lives.now(kind, id.as_u64()?)?).to_string()));
+        named.take(most).collect::<Vec<_>>()
     };
-    let track_refs = refs("tracks", Kind::Track);
+    let track_refs = refs("tracks", Kind::Track, SELECTED_TRACKS);
     let mut row = json!({
         "trackRef": track_refs.first(),
         "trackRefs": track_refs,
-        "clipRefs": refs("clips", Kind::Clip),
+        "trackCount": list(selection, "tracks").len(),
+        "clipRefs": refs("clips", Kind::Clip, SELECTED_CLIPS),
+        "clipCount": list(selection, "clips").len(),
         "startSeconds": seconds(session, &selection["start"]),
         "endSeconds": seconds(session, &selection["end"]),
     });

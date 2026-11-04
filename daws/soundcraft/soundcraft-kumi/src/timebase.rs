@@ -50,8 +50,9 @@ pub struct Timebase {
 }
 
 impl Timebase {
-    /// The session's (`session.inspect`), when its maps change in steps only: each starts at tick 0, and a meter changes
-    /// on a bar line, as SoundCraft keeps them.
+    /// The session's (`session.inspect`), when its maps change in steps only and each starts at tick 0. A meter SoundCraft
+    /// sets is on a bar line; one a file brings off a bar line starts the next bar, the part-bar before it counted whole,
+    /// as SoundCraft counts it.
     pub fn of(session: &Value) -> Option<Timebase> {
         let rate = session["sample_rate"].as_f64().filter(|rate| *rate > 0.0)?;
         let mut tempos: Vec<Tempo> = vec![];
@@ -75,8 +76,8 @@ impl Timebase {
                 None => (tick == 0.0).then_some(1)?,
                 Some(before) => {
                     let bars = (tick - before.tick) / before.ticks_a_bar();
-                    (bars > 0.0 && bars.fract() == 0.0).then_some(())?;
-                    before.bar + bars as i64
+                    (bars > 0.0).then_some(())?;
+                    before.bar + bars.ceil() as i64
                 }
             };
             meters.push(Meter { tick, numerator, denominator, bar });
@@ -112,9 +113,9 @@ impl Timebase {
         self.meter((beats * PPQ).round()).ticks_a_bar() / PPQ
     }
 
-    /// The tempo at `beats`.
+    /// The tempo at `beats` (the tick rounded, as the other lookups have it: a playhead on a change has the new tempo).
     pub fn tempo(&self, beats: f64) -> f64 {
-        let tick = beats * PPQ;
+        let tick = (beats * PPQ).round();
         self.tempos.iter().rev().find(|tempo| tempo.tick <= tick).unwrap_or(&self.tempos[0]).bpm
     }
 
