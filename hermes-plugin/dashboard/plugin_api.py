@@ -122,8 +122,8 @@ def audio(id: str = Query(..., min_length=1, max_length=128)) -> dict:  # noqa: 
 
 @router.get("/setup")
 def setup() -> dict:
-    """Where setup stands (the runtime, the DAW component, the next step), read without network or writes: setup.py's
-    own `status()`, or, before it has one, what the runtime last said in status.json."""
+    """Where setup stands (the runtime, the DAW component, the next step), read without network or writes by
+    setup.py's own `status()` (W5). A setup.py without one answers that the state is unknown."""
     try:
         module = _load("setup", "setup.py") if (_PLUGIN_DIR / "setup.py").is_file() else None
         read_status = getattr(module, "status", None)
@@ -132,8 +132,7 @@ def setup() -> dict:
             return read_status(daw=daw if isinstance(daw, str) else None)
     except Exception as exc:  # health: allow BLE001 -- setup state is shown, never fatal to the UI
         return {"state": "unknown", "message": f"Kumi couldn't read its setup state: {exc}"}
-    state = snapshots.state_dir()
-    return dict((snapshots.read(state, "status") or {}).get("setup") or {"state": "unknown"})
+    return {"state": "unknown", "message": "This version of Kumi's plugin can't tell how far setup got."}
 
 
 @router.get("/job")

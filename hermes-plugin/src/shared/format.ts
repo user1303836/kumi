@@ -101,7 +101,7 @@ export function cleanupWords(cleanup: unknown): string {
 /** The status chip's words: `Live · Night Drive · 124 BPM`, or what's missing. */
 export function chipWords(status: Status | null, tempo?: unknown): { tone: 'bad' | 'good' | 'muted' | 'warn'; text: string } {
   if (!status) return { tone: 'muted', text: 'Kumi' }
-  const daw = dawName(status.daw ?? status.setup?.daw)
+  const daw = dawName(status.daw)
   const project = clean(status.project?.name ?? '', 40)
   if (status.connected) {
     const parts = [daw, project, bpm(tempo)].filter(Boolean)

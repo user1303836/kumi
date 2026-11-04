@@ -95,7 +95,7 @@
   }
   function chipWords(status, tempo) {
     if (!status) return { tone: "muted", text: "Kumi" };
-    const daw = dawName(status.daw ?? status.setup?.daw);
+    const daw = dawName(status.daw);
     const project = clean(status.project?.name ?? "", 40);
     if (status.connected) {
       const parts = [daw, project, bpm(tempo)].filter(Boolean);

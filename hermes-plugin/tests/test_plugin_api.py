@@ -106,13 +106,36 @@ class Routes(unittest.TestCase):
         with self.assertRaises(HTTPException):
             self.api.audio(id="s-r7-0091")
 
-    def test_setup_answers_from_setup_py_and_else_from_the_runtimes_word(self) -> None:
-        reply = self.api.setup()
-        module = sys.modules.get("hermes_dashboard_plugin_kumi_setup")
-        if module is not None and callable(getattr(module, "status", None)):
-            self.assertIn("state", reply)
-            return
-        self.assertEqual((reply["state"], reply["runtime"], reply["next_step"]), ("ready", {"installed": True, "version": "1.24.70"}, None))
+    def test_setup_answers_what_setup_pys_status_says_for_the_daw_setting_and_unknown_without_it(self) -> None:
+        import types
+
+        name = "hermes_dashboard_plugin_kumi_setup"
+        saved = (sys.modules.get(name), self.api._setting)
+        asked = []
+        ready = {"state": "ready", "runtime": {"installed": True, "version": "1.24.70"}, "next_step": None}
+
+        def status(*, daw=None, **_):
+            asked.append(daw)
+            return ready
+
+        def broken(*, daw=None, **_):
+            raise OSError("the runtime's folder is unreadable")
+
+        try:
+            self.api._setting = lambda key: "reaper" if key == "daw" else None
+            sys.modules[name] = types.SimpleNamespace(status=status)
+            self.assertEqual((self.api.setup(), asked), (ready, ["reaper"]))
+            sys.modules[name] = types.SimpleNamespace(status=broken)
+            self.assertEqual(self.api.setup()["state"], "unknown")
+            self.assertIn("unreadable", self.api.setup()["message"])
+            sys.modules[name] = types.SimpleNamespace()
+            self.assertEqual(self.api.setup()["state"], "unknown")
+        finally:
+            module, self.api._setting = saved
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
 
     def test_a_job_is_read_by_its_id_and_an_unknown_one_is_404(self) -> None:
         from fastapi import HTTPException

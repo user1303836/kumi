@@ -27,10 +27,11 @@ export interface Status extends Liveness {
   daw?: string
   project?: Project
   runtime?: { version?: string; protocol?: string }
-  setup?: Record<string, unknown>
+  /** What `kumi serve` sees of its DAW part (W1); where setup stands is `/setup`'s answer instead. */
+  setup?: { component?: { installed?: boolean; version?: string | null; bundled?: string | null }; daw_open?: boolean }
   capabilities?: string[]
   revisions?: { status?: number | null; focus?: number | null; history?: number | null; map?: string | null }
-  /** An operation whose outcome Kumi couldn't confirm (CC-2 R6, if adopted): look again before another change. */
+  /** An operation whose outcome Kumi couldn't confirm (CC-2 R6), cleared by the next completed look. */
   unsure?: { at?: number; op?: string; reason?: string; cleanup?: string } | null
 }
 
@@ -112,8 +113,6 @@ export interface SetupStatus {
   existing_kumi?: { path?: string; adopted?: boolean } | null
   next_step?: string | null
   message?: string
-  installed?: boolean
-  version?: string
 }
 
 /** `kumi_media::audio::Analysis`, as `kumi_listen` serializes it (camelCase; nulls where nothing was measured). */

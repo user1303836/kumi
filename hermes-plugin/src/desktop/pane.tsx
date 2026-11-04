@@ -37,8 +37,7 @@ export function nextStep(state: KumiState): { label: string; request: string } |
   if (setup && (NEEDS_SETUP[setup.state ?? ''] || setup.next_step === 'install_runtime' || setup.next_step === 'install_daw_component')) {
     return { label: `Set up Kumi for ${dawName(daw)}`, request: setupRequest(daw) }
   }
-  const ready = setup?.state === 'ready' || setup?.installed === true
-  if (ready && !state.status?.connected) return { label: `Connect to ${dawName(daw)}`, request: connectRequest(daw) }
+  if (setup?.state === 'ready' && !state.status?.connected) return { label: `Connect to ${dawName(daw)}`, request: connectRequest(daw) }
   return null
 }
 

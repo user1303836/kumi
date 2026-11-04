@@ -72,7 +72,7 @@ function cleanupWords(cleanup) {
 }
 function chipWords(status, tempo) {
   if (!status) return { tone: "muted", text: "Kumi" };
-  const daw = dawName(status.daw ?? status.setup?.daw);
+  const daw = dawName(status.daw);
   const project = clean(status.project?.name ?? "", 40);
   if (status.connected) {
     const parts = [daw, project, bpm(tempo)].filter(Boolean);
@@ -703,8 +703,7 @@ function nextStep(state) {
   if (setup && (NEEDS_SETUP[setup.state ?? ""] || setup.next_step === "install_runtime" || setup.next_step === "install_daw_component")) {
     return { label: `Set up Kumi for ${dawName(daw)}`, request: setupRequest(daw) };
   }
-  const ready = setup?.state === "ready" || setup?.installed === true;
-  if (ready && !state.status?.connected) return { label: `Connect to ${dawName(daw)}`, request: connectRequest(daw) };
+  if (setup?.state === "ready" && !state.status?.connected) return { label: `Connect to ${dawName(daw)}`, request: connectRequest(daw) };
   return null;
 }
 var TONE2 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
