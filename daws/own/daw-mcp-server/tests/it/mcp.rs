@@ -241,8 +241,11 @@ async fn soundcrafts_host_lists_what_its_bridge_serves_and_starts_nothing_while_
     );
     assert!(read["epoch"].is_object() && read["grid"].is_null(), "its refs carry an epoch, and it reads no parameter texts: {read}");
     // A call goes by SoundCraft's command and its parameters by name, not REAPER's function and arguments.
-    assert!(read["command"]["description"].as_str().unwrap().contains("Only commands that read run"), "{read}");
-    assert_eq!((&read["params"]["type"], &read["fn"], &read["args"]), (&json!("object"), &Value::Null, &Value::Null), "{read}");
+    assert_eq!(
+        (&read["command"]["type"], &read["params"]["type"], &read["fn"], &read["args"]),
+        (&json!("string"), &json!("object"), &Value::Null, &Value::Null),
+        "{read}"
+    );
     let snapshot = tools[3]["description"].as_str().unwrap();
     assert!(snapshot.starts_with("The open SoundCraft session on one screen"), "{snapshot}");
     // Its views, in its words: no routing view (SoundCraft has no track's routing window).
