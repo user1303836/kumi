@@ -82,12 +82,12 @@ start, and Live's log (Log.txt) has the reason.
 - **Windows:** the file's owner is your user, and its access list is protected
   (no inherited entries) with exactly one entry: your user, allowed full
   control. The script checks this by running Windows PowerShell
-  (`powershell.exe`, found on Live's PATH, with no console window, up to 10
-  seconds a check). Live's own Python has no `ctypes`, so the access-list check
-  decides alone there; mode bits aren't checked on Windows. Each Live start
-  runs a check for every file involved. The start's check of the reference,
-  the configuration and the secret runs on a thread of its own, in one
-  PowerShell run, not on Live's main thread.
+  (`powershell.exe`, by its full path under `%SystemRoot%`, with no console
+  window, up to 10 seconds a check). Live's own Python has no `ctypes`, so the
+  access-list check decides alone there; mode bits aren't checked on Windows.
+  Each Live start runs a check for every file involved. The start's check of
+  the reference, the configuration and the secret runs on a thread of its own,
+  in one PowerShell run, not on Live's main thread.
 
 `kumi bridge` and the lifecycle set these permissions themselves.
 
@@ -98,7 +98,7 @@ are checked, not when Live makes the Control Surface.
 
 Live's embedded Python starves background threads, so the script does its work
 on Live's main thread, in the Control Surface's display callback (about ten
-times a second) and a scheduled callback. Each tick it:
+times a second) and Live's timer (below). Each tick it:
 
 1. serves the TCP connections for at most 50 ms: reads requests, runs them and
    writes the answers, serving every connection at least one request, and
