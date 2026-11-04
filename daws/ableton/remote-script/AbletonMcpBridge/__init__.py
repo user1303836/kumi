@@ -687,6 +687,7 @@ class _FilesChecked:
 
     def __init__(self, check: Callable[[], None] | None) -> None:
         self._done = threading.Event()
+        self._finished_at: float | None = None
         if check is None:
             self._done.set()
             return
@@ -697,6 +698,7 @@ class _FilesChecked:
             except Exception:
                 pass  # (the start checks again, failing closed)
             finally:
+                self._finished_at = time.monotonic()  # (the verdicts' clock, _keep_acl_verdict)
                 self._done.set()
 
         threading.Thread(target=run, name="AbletonMcpBridge file check", daemon=True).start()
@@ -706,6 +708,10 @@ class _FilesChecked:
 
     def wait(self, seconds: float) -> bool:
         return self._done.wait(seconds)
+
+    def stale(self) -> bool:
+        """Whether its verdicts may be gone by the time the start reads them (_CHECK_FRESH_SECONDS)."""
+        return self._finished_at is not None and time.monotonic() - self._finished_at >= _CHECK_FRESH_SECONDS
 
 
 # Live's own Python can starve a thread of its own (a hello once took about a second from one), and the check's few
@@ -717,6 +723,10 @@ class _FilesChecked:
 _CHECK_ON_ITS_OWN_SECONDS = 0.5
 _CHECK_WAIT_SECONDS = 0.01
 _CHECK_WAIT_EVERY_SECONDS = 0.1
+# A check's verdicts last _ACL_VERDICT_SECONDS from when it kept them. A start later than this after the check (Live's
+# first callback held back by a dialog, say) would find them gone and run PowerShell again on Live's thread: it checks
+# again off it instead, and the bridge starts at the first callback after that check.
+_CHECK_FRESH_SECONDS = _ACL_VERDICT_SECONDS - 5
 
 
 def _files_check() -> Callable[[], None] | None:
@@ -747,7 +757,8 @@ class AbletonMcpBridge(_ControlSurface):
     def _start_when_ready(self, display_tick: bool = False) -> bool:
         """Whether the bridge runs, starting it here (on Live's thread) once its files are checked. A start that fails is
         said (_say_start_failure) and isn't tried again. A display tick past _CHECK_ON_ITS_OWN_SECONDS gives a check
-        still running a moment of the interpreter (_CHECK_WAIT_SECONDS, at most every _CHECK_WAIT_EVERY_SECONDS)."""
+        still running a moment of the interpreter (_CHECK_WAIT_SECONDS, at most every _CHECK_WAIT_EVERY_SECONDS). A check
+        done longer ago than _CHECK_FRESH_SECONDS is done again, off Live's thread, before the bridge starts."""
         if getattr(self, "_bridge", None) is not None:
             return True
         checked = getattr(self, "_checked", None)
@@ -762,6 +773,9 @@ class AbletonMcpBridge(_ControlSurface):
             self._waited_at = now
             if not checked.wait(_CHECK_WAIT_SECONDS):
                 return False
+        if checked.stale():
+            self._checked = _FilesChecked(_files_check())
+            return False
         self._checked = None
         try:
             self._bridge = _Bridge(self._instance, _read_config(), song=self._song, provenance="real-live", diagnostics_validator=_diagnostics_path_safe)

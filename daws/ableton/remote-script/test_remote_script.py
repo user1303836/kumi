@@ -734,6 +734,35 @@ class RemoteScriptTests(unittest.TestCase):
         self.assertEqual(len(ran_on), 1, "PowerShell ran once: the start found every verdict waiting")
         self.assertNotEqual(ran_on[0], threading.get_ident(), "and not on Live's thread")
 
+    def test_a_check_done_long_before_the_first_tick_is_done_again_off_lives_thread_before_the_bridge_starts(self):
+        """A check's verdicts last _ACL_VERDICT_SECONDS from when it kept them: a start later than that after it (Live's
+        first callback held back by a dialog, say) would run PowerShell again on Live's thread. From _CHECK_FRESH_SECONDS
+        after the check, the start checks again off it instead, and the bridge starts at the first tick after."""
+        package = __import__("AbletonMcpBridge")
+
+        class Bridge:
+            def __init__(self, *args, **kwargs): self.served = 0
+            def update_display(self): self.served += 1
+
+        for age, checks in ((package._CHECK_FRESH_SECONDS - 1, 1), (package._CHECK_FRESH_SECONDS, 2), (package._ACL_VERDICT_SECONDS, 2)):
+            now, ran_on, read = [1000.0], [], []
+            clock = types.SimpleNamespace(monotonic=lambda: now[0], perf_counter=time.perf_counter, time=time.time)
+            with self.subTest(age=age), patch.object(package, "time", clock), patch.dict(sys.modules, {"Live": None}), \
+                    patch.object(package, "_files_check", return_value=lambda: ran_on.append(threading.get_ident())), \
+                    patch.object(package, "_read_config", lambda: read.append(len(ran_on)) or {}), patch.object(package, "_Bridge", Bridge):
+                surface = package.AbletonMcpBridge(FakeInstance())
+                surface._keep_willington = lambda: None
+                self.wait_for_the_check(surface._checked)
+                now[0] += age
+                surface.update_display()
+                if checks == 2:
+                    self.assertIsNone(surface._bridge, "an old check: no start yet")
+                    self.wait_for_the_check(surface._checked)
+                    surface.update_display()
+                self.assertEqual(surface._bridge.served, 1, "started, and served, at the first tick after a check fresh enough")
+                self.assertEqual((len(ran_on), read), (checks, [checks]), "the start read the files once, after the last check")
+                self.assertNotIn(threading.get_ident(), ran_on, "no check ran on the ticking thread")
+
     def test_a_failed_start_stops_the_timer_and_a_good_one_counts_its_rate_from_the_start(self):
         package = __import__("AbletonMcpBridge"); made = []
         self.no_files_check(package)
