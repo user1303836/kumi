@@ -50,7 +50,8 @@ impl std::ops::DerefMut for Reaped {
 
 /// What the fake app shows: its session's name, tracks, selection and last undo, an open dialog, whether it answers late,
 /// whether it answers nothing in time, and whether a full inspection (a read's) takes it two seconds; its windows
-/// (`ui.inspect`'s `ui`), its playhead and whether it plays or records; and its undo history as `engine.history` answers it.
+/// (`ui.inspect`'s `ui`), its playhead and whether it plays or records, and its tempo; and its undo history as
+/// `engine.history` answers it.
 struct Shown {
     name: String,
     tracks: Value,
@@ -64,6 +65,7 @@ struct Shown {
     position: u64,
     playing: bool,
     recording: bool,
+    bpm: f64,
     history: Value,
 }
 
@@ -90,6 +92,7 @@ impl Lab {
             position: 0,
             playing: false,
             recording: false,
+            bpm: 120.0,
             history: json!({"undo": [], "can_redo": false}),
         }));
         let answering = shown.clone();
@@ -100,7 +103,7 @@ impl Lab {
                 (Some("session.inspect"), _) => {
                     let session = ok(json!({
                         "name": shown.name, "path": null, "tracks": shown.tracks, "undo": shown.undo, "redo": null,
-                        "sample_rate": 48000, "tempo": [{"bpm": 120.0, "tick": 0}], "meter": [{"denominator": 4, "numerator": 4, "tick": 0}],
+                        "sample_rate": 48000, "tempo": [{"bpm": shown.bpm, "tick": 0}], "meter": [{"denominator": 4, "numerator": 4, "tick": 0}],
                         "selection": shown.selection,
                         "transport": {"playing": shown.playing, "position": shown.position, "recording": shown.recording},
                     }));
@@ -255,7 +258,8 @@ async fn the_host_connects_through_the_discovery_file_and_status_answers_from_th
     assert_eq!(welcome.identity.project.as_ref().and_then(|project| project.name.as_deref()), Some("Midnight Groove"));
     let offered = (welcome.methods.clone(), welcome.events.clone());
     let methods = ["ping", "status", "focus", "read", "snapshot", "focus_body"].map(String::from).to_vec();
-    assert_eq!(offered, (methods, vec!["project".to_string()]));
+    let events = ["project", "transport", "tracks", "selection"].map(String::from).to_vec();
+    assert_eq!(offered, (methods, events));
     assert_eq!(client.request("ping", json!({}), WAIT).await.unwrap(), json!({}));
     let status = client.request("status", json!({}), WAIT).await.unwrap();
     assert_eq!((&status["busy"], &status["project"]["name"]), (&json!(false), &json!("Midnight Groove")));
@@ -709,6 +713,97 @@ async fn another_session_under_the_same_name_is_told_as_a_project_event_with_a_n
     let told = tokio::time::timeout(WAIT, events.recv()).await.unwrap().unwrap();
     assert_eq!((told.name.as_str(), &told.data["name"]), ("project", &json!("Untitled")));
     assert!(told.data["epoch"].is_string() && told.data["epoch"] != before, "{:?} after {before}", told.data);
+}
+
+/// The next event, within a few seconds.
+async fn next_event(events: &mut tokio::sync::broadcast::Receiver<daw_bridge::wire::Event>) -> daw_bridge::wire::Event {
+    tokio::time::timeout(WAIT, events.recv()).await.expect("an event").unwrap()
+}
+
+/// After a few looks at the app's windows and its session that change nothing, no event has come.
+async fn quiet(lab: &Lab, events: &mut tokio::sync::broadcast::Receiver<daw_bridge::wire::Event>) {
+    looked(lab, "ui.inspect").await;
+    looked(lab, "session.inspect").await;
+    looked(lab, "session.inspect").await;
+    let told = events.try_recv();
+    assert!(matches!(told, Err(tokio::sync::broadcast::error::TryRecvError::Empty)), "nothing changed, yet {told:?}");
+}
+
+/// A bridge serving the lab's SoundCraft, a client of it listening for events, and a look at the session since it
+/// started (the first look tells nothing).
+async fn listening(lab: &Lab) -> (BridgeClient, tokio::sync::broadcast::Receiver<daw_bridge::wire::Event>) {
+    tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    let mut events = client.events();
+    asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
+    quiet(lab, &mut events).await;
+    (client, events)
+}
+
+#[tokio::test]
+async fn the_transport_is_told_once_when_soundcraft_plays_records_or_changes_tempo() {
+    let lab = Lab::new().await;
+    let (_client, mut events) = listening(&lab).await;
+    lab.shown.lock().unwrap().playing = true;
+    let played = next_event(&mut events).await;
+    assert_eq!((played.name.as_str(), &played.data), ("transport", &json!({"playing": true, "recording": false, "bpm": 120.0})));
+    quiet(&lab, &mut events).await;
+    lab.shown.lock().unwrap().recording = true;
+    let take = next_event(&mut events).await;
+    assert_eq!((take.name.as_str(), &take.data), ("transport", &json!({"playing": true, "recording": true, "bpm": 120.0})));
+    quiet(&lab, &mut events).await;
+    lab.shown.lock().unwrap().bpm = 90.0;
+    let tempo = next_event(&mut events).await;
+    assert_eq!((tempo.name.as_str(), &tempo.data), ("transport", &json!({"playing": true, "recording": true, "bpm": 90.0})));
+    quiet(&lab, &mut events).await;
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        (shown.playing, shown.recording) = (false, false);
+    }
+    let stopped = next_event(&mut events).await;
+    assert_eq!((stopped.name.as_str(), &stopped.data), ("transport", &json!({"playing": false, "recording": false, "bpm": 90.0})));
+    quiet(&lab, &mut events).await;
+}
+
+#[tokio::test]
+async fn the_tracks_are_told_once_when_one_comes_or_goes_and_not_when_one_changes() {
+    let lab = Lab::new().await;
+    lab.shown.lock().unwrap().tracks = kick_and_keys();
+    let (client, mut events) = listening(&lab).await;
+    let epoch = client.request("status", json!({}), WAIT).await.unwrap()["project"]["epoch"].clone();
+    let pad = json!({"id": 8, "kind": "audio", "format": "Stereo", "name": "Pad", "instrument": null, "inserts": [], "clips": []});
+    lab.shown.lock().unwrap().tracks.as_array_mut().unwrap().push(pad);
+    let more = next_event(&mut events).await;
+    assert_eq!((more.name.as_str(), &more.data), ("tracks", &json!({"count": 3, "epoch": epoch})));
+    quiet(&lab, &mut events).await;
+    // Renamed: the same tracks.
+    lab.shown.lock().unwrap().tracks[2]["name"] = json!("Pad 2");
+    quiet(&lab, &mut events).await;
+    lab.shown.lock().unwrap().tracks.as_array_mut().unwrap().remove(0);
+    let fewer = next_event(&mut events).await;
+    assert_eq!((fewer.name.as_str(), &fewer.data), ("tracks", &json!({"count": 2, "epoch": epoch})));
+    quiet(&lab, &mut events).await;
+}
+
+#[tokio::test]
+async fn the_selected_tracks_are_told_once_when_they_change() {
+    let lab = Lab::new().await;
+    lab.shown.lock().unwrap().tracks = kick_and_keys();
+    let (_client, mut events) = listening(&lab).await;
+    lab.shown.lock().unwrap().selection = json!({"tracks": [5, 3], "clips": [], "start": 0, "end": 0});
+    let selected = next_event(&mut events).await;
+    assert_eq!(
+        (selected.name.as_str(), &selected.data),
+        ("selection", &json!({"tracks": [{"guid": "s:track:5", "name": "Keys"}, {"guid": "s:track:3", "name": "Kick"}]}))
+    );
+    quiet(&lab, &mut events).await;
+    // The time selected, the insertion point or a clip moving isn't the tracks selected.
+    lab.shown.lock().unwrap().selection = json!({"tracks": [5, 3], "clips": [], "start": 48000, "end": 96000});
+    quiet(&lab, &mut events).await;
+    lab.shown.lock().unwrap().selection = json!({"tracks": [], "clips": [], "start": 0, "end": 0});
+    let none = next_event(&mut events).await;
+    assert_eq!((none.name.as_str(), &none.data), ("selection", &json!({"tracks": []})));
+    quiet(&lab, &mut events).await;
 }
 
 #[tokio::test]

@@ -103,6 +103,15 @@ impl Reads {
         selection_row(session, &self.lives)
     }
 
+    /// Every selected track, in the selection's order: its ref in the epoch now, and its name.
+    pub fn selected_tracks(&self, session: &Value) -> Vec<(String, Value)> {
+        list(&session["selection"], "tracks")
+            .iter()
+            .filter_map(|id| tracks(session).iter().find(|track| track["id"] == *id))
+            .filter_map(|track| Some((Ref::Object(now(&self.lives, Kind::Track, track)?).to_string(), track["name"].clone())))
+            .collect()
+    }
+
     /// The plug-in a window of SoundCraft's shows, which it names `[track, slot]` (the instrument's slot is the largest
     /// number there is): its insert's `fxRef`, and its `fxName`, a built-in's as `engine.plugins` names it; and its track's
     /// ref now (`fxTrackRef`, `read`'s) and name (`fxTrackName`), the selected track or not. Nothing for a track or slot
