@@ -20,7 +20,7 @@ use kumi_agent::core::{
     view::{BodyKind, BodyRequest, DawFocus, FocusBody, FocusItem, FocusParameter, ItemKind, ViewKind, ViewPresentation},
 };
 use kumi_agent::mcp::client::BridgeDescriptor;
-use kumi_daw_own::bridge::{create_own_integration, OwnDaw, OwnOptions, OwnTools};
+use kumi_daw_own::bridge::{create_own_integration, CallWords, OwnDaw, OwnOptions, OwnTools};
 use kumi_daw_own::catchup::{as_read, CatchUpWords, Mixer, RecipeKinds};
 use kumi_daw_own::phrases::{bar_span, track, OwnPhrases, PhraseLook, Phrased};
 use kumi_daw_own::views::{self as own_views, body_args, focus_track, selected, view};
@@ -56,6 +56,13 @@ pub const DAW: OwnDaw = OwnDaw {
     read_tool: "reaper_read",
     read_description: "Read REAPER: the project, its tracks, and what's in them (items, FX, parameters, sends, markers, regions, MIDI notes, envelopes), a page at a time. Rows carry refs to pass back as parent; a page with nextCursor has more. Tracks come in project order: depth is how deep in folders a track sits (0 at the top), folder 1 starts a folder and -1 or less closes one or more; pan runs -1 to 1. A send's mode is 0 post-fader, 1 pre-FX, 3 pre-fader, 8 pre-receive (modeName says it). Items' position and length are seconds, with positionBeats and lengthBeats in quarter notes from the project's start; markers and regions add positionBeats too; a note's start (from its item's start) and length are quarter notes, its channel 1-16. Kind event lists a MIDI take's events beyond notes (cc, pitchbend, program, pressure, poly-pressure, text, sysex; start in quarter notes from the item's start) with the index the MIDI event changes take; a take read alone lists its stretch and take markers with theirs. Kind call calls one of REAPER's API functions that only reads, by name (fn), with args in order or by the SDK's parameter names (refs for tracks, items, takes and envelopes): its result, and in out the values it writes back. An FX's parent is a track (its input FX follow its main chain, input: true), a take or a container; one FX read by ref also gives its state chunk, presets, wet and delta. Envelopes come with their units; kind point reads an envelope's (or an automation item's) points in those units, kind autoitem an envelope's automation items.",
     read_kinds: &["project", "track", "item", "take", "fx", "param", "send", "marker", "region", "note", "event", "envelope", "call", "point", "autoitem"],
+    call: Some(CallWords {
+        name: "fn",
+        name_about: "For kind call: a REAPER API function that only reads (GetMediaTrackInfo_Value, TrackFX_GetParamName…)",
+        args: "args",
+        args_types: &["array", "object"],
+        args_about: "For kind call: its arguments, in order or by the SDK's names; tracks, items, takes and envelopes as refs",
+    }),
     project_kind: "project",
     fill_focus,
     bodies: &[BodyKind::Tree, BodyKind::Notes, BodyKind::Timeline, BodyKind::Routing, BodyKind::Mixer],

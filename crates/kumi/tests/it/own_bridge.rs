@@ -1,6 +1,7 @@
-//! REAPER's and Renoise's integrations over Kumi's host, with a stand-in host that answers as the M2 contract says:
-//! the observation carries the project as the DAW names it, its tracks in short refs, and the conversation's place;
-//! the model's read pages in short refs and passes them back long; a DAW that isn't there is said in its words.
+//! REAPER's, Renoise's and SoundCraft's integrations over Kumi's host, with a stand-in host that answers as the M2
+//! contract says: the observation carries the project as the DAW names it, its tracks in short refs, and the
+//! conversation's place; the model's read pages in short refs and passes them back long; a DAW that isn't there is said in
+//! its words.
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_agent::core::{
@@ -14,6 +15,7 @@ use kumi_common::abort::Signal;
 use kumi_daw_own::bridge::{Connect, OwnOptions};
 use kumi_daw_reaper::create_reaper_integration;
 use kumi_daw_renoise::create_renoise_integration;
+use kumi_daw_soundcraft::create_soundcraft_integration;
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
@@ -156,6 +158,52 @@ async fn reapers_observation_is_its_project_in_short_refs_at_its_place() {
             let page: Value = serde_json::from_str(&page.text).unwrap();
             assert_eq!(page["items"][0]["ref"], "item:1");
             assert_eq!(page["items"][0]["takeRef"], "take:1");
+        })
+        .await;
+}
+
+/// (M2) SoundCraft's read of one command: the short refs in its params go long with the epoch they were read in, the refs
+/// in its result come back short, and the read tool takes SoundCraft's words for it (command, params), not REAPER's.
+#[tokio::test(flavor = "current_thread")]
+async fn soundcrafts_call_takes_short_refs_in_its_params_and_answers_in_short_ones() {
+    const KICK: &str = "s:track:3.2";
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let snapshot = json!({
+                "epoch": "e1",
+                "project": {"id": PROJECT_ID, "identity": "4243", "name": "Midnight Groove", "path": "/Users/someone/Music/Midnight Groove.scraft"},
+                "transport": {"playing": false, "position": 0},
+                "tracks": [{"ref": KICK, "index": 1, "name": "Kick", "selected": true}],
+                "selection": {"trackRef": KICK},
+            });
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![("status", json!({"connected": true}), false), ("snapshot", snapshot, false)]),
+                asked: RefCell::default(),
+            });
+            let soundcraft = create_soundcraft_integration(options(host.clone(), Rc::default()));
+            soundcraft.start(Signal::new()).await.unwrap();
+            let seen = soundcraft.observe(Signal::new(), None).await.unwrap();
+            let read = seen.tools.iter().find(|tool| tool.name() == "soundcraft_read").unwrap().clone();
+            let properties = Value::Object(read.input_schema())["properties"].clone();
+            assert_eq!((&properties["command"]["type"], &properties["params"]["type"]), (&json!("string"), &json!("object")));
+            assert!(properties["kind"]["enum"].as_array().unwrap().contains(&json!("call")), "{properties}");
+            assert!(properties.get("fn").is_none() && properties.get("args").is_none(), "REAPER's words stay REAPER's: {properties}");
+            host.answers.borrow_mut().push((
+                "read",
+                json!({"command": "track.inspect", "result": {"track": {"ref": KICK, "inserts": [{"ref": "s:insert:3:a", "plugin": "EQ"}]}}, "epoch": "e1"}),
+                false,
+            ));
+            let call = json!({"kind": "call", "command": "track.inspect", "params": {"track": "track:1"}});
+            let answered = read.execute(call.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(!answered.is_error, "{}", answered.text);
+            assert_eq!(
+                host.asked.borrow().last().unwrap().1,
+                json!({"kind": "call", "command": "track.inspect", "params": {"track": KICK}, "epoch": "e1"}),
+                "the track's ref made long, with the epoch it was read in"
+            );
+            let answered: Value = serde_json::from_str(&answered.text).unwrap();
+            assert_eq!(answered["result"]["track"]["ref"], "track:1");
+            assert_eq!(answered["result"]["track"]["inserts"][0]["ref"], "insert:1");
         })
         .await;
 }

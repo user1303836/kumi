@@ -15,7 +15,7 @@ use kumi_agent::core::{
     view::{BodyKind, BodyRequest, DawFocus, FocusBody, FocusItem, ItemKind, ViewKind, ViewPresentation},
 };
 use kumi_agent::mcp::client::BridgeDescriptor;
-use kumi_daw_own::bridge::{create_own_integration, OwnBridge, OwnDaw, OwnOptions, OwnTools};
+use kumi_daw_own::bridge::{create_own_integration, CallWords, OwnBridge, OwnDaw, OwnOptions, OwnTools};
 use kumi_daw_own::catchup::{CatchUpWords, RecipeKinds};
 use kumi_daw_own::phrases::{OwnPhrases, Phrased};
 use kumi_daw_own::views::{self as own_views, body_args, focus_track, selected, view};
@@ -52,7 +52,15 @@ pub const DAW: OwnDaw = OwnDaw {
     mechanical: "a muted or inactive track in the path, an insert bypassed, a send to a bus nothing returns, two equal sends to one bus",
     read_tool: "soundcraft_read",
     read_description: "Read SoundCraft's session: a kind lists its rows (clip, insert, send and env under a track as parent, note under a MIDI clip, param under an insert, point under an automation lane), and ref reads one. Pass a ref or parent with the epoch of the answer it came in. A page with nextCursor has more.",
-    read_kinds: &["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"],
+    read_kinds: &["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point", "call"],
+    // (a call runs only commands that read: the bridge refuses any other)
+    call: Some(CallWords {
+        name: "command",
+        name_about: "For kind call: a SoundCraft command that only reads, by its id (track.inspect, clip.inspect, engine.plugins…)",
+        args: "params",
+        args_types: &["object"],
+        args_about: "For kind call: its parameters by name; tracks, clips and inserts as refs",
+    }),
     project_kind: "session",
     fill_focus,
     bodies: &[BodyKind::Timeline, BodyKind::Notes, BodyKind::Tree, BodyKind::Mixer],

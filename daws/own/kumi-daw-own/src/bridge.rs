@@ -115,6 +115,8 @@ pub struct OwnDaw {
     pub read_tool: &'static str,
     pub read_description: &'static str,
     pub read_kinds: &'static [&'static str],
+    /// A read of one call by name (kind `call`), in the DAW's words; None where the DAW reads no calls.
+    pub call: Option<CallWords>,
     /// The project row's word in the read tool ("project", "song").
     pub project_kind: &'static str,
     /// What the producer is looking at, from the host's `focus` (contract §4).
@@ -582,10 +584,20 @@ const PAGE_TEXT_BYTES: usize = 60 * 1024;
 /// The most pages a fixed phrase reads of a list (tracks, the sequence, patterns) before it leaves the request to the
 /// model.
 const PHRASE_PAGES: usize = 40;
+/// A read of one call by name, in the DAW's words: the field that names the call (REAPER's API function, SoundCraft's
+/// command) and the one that carries its arguments, with the JSON types they come in.
+pub struct CallWords {
+    pub name: &'static str,
+    pub name_about: &'static str,
+    pub args: &'static str,
+    pub args_types: &'static [&'static str],
+    pub args_about: &'static str,
+}
+
 /// A turn's short ref (`track:3`): the shape of a name this turn gave.
 pub static SHORT_REF: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]+:[0-9]+$").unwrap());
 
-/// A call's arguments (`args`, in order or by name) with this turn's short refs anywhere in them made long: they sit under no
+/// A call's arguments (in order or by name) with this turn's short refs anywhere in them made long: they sit under no
 /// ref-named field, so the book's own walk passes them by.
 pub fn lengthen_anywhere<S: RefScheme>(book: &Book<S>, value: &Value) -> Value {
     match value {
@@ -2324,10 +2336,11 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
                 "limit": {"type": "integer", "minimum": 1, "maximum": MOST_ROWS, "description": "How many rows (50 by default)"},
             },
         });
-        // A REAPER API function that only reads, by name, with its arguments.
-        if self.daw.read_kinds.contains(&"call") {
-            schema["properties"]["fn"] = json!({"type": "string", "description": "For kind call: a REAPER API function that only reads (GetMediaTrackInfo_Value, TrackFX_GetParamName…)"});
-            schema["properties"]["args"] = json!({"type": ["array", "object"], "description": "For kind call: its arguments, in order or by the SDK's names; tracks, items, takes and envelopes as refs"});
+        // One call by name with its arguments, in the DAW's words (REAPER's API function, SoundCraft's command).
+        if let Some(call) = &self.daw.call {
+            schema["properties"][call.name] = json!({"type": "string", "description": call.name_about});
+            let types = if let [one] = call.args_types { json!(one) } else { json!(call.args_types) };
+            schema["properties"][call.args] = json!({"type": types, "description": call.args_about});
         }
         // A tracker's lines are read one track at a time.
         if self.daw.read_kinds.contains(&"line") {
@@ -2343,8 +2356,9 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
         };
         let args = self.book.borrow().lengthen(&Value::Object(input.clone()));
         let mut args = args.as_object().cloned().unwrap_or_default();
-        if let Some(call_args) = args.get("args").cloned() {
-            args.insert("args".into(), lengthen_anywhere(&self.book.borrow(), &call_args));
+        // (a call's arguments hold refs under no ref-named field)
+        if let Some((key, call_args)) = self.daw.call.as_ref().and_then(|call| Some((call.args, args.get(call.args).cloned()?))) {
+            args.insert(key.into(), lengthen_anywhere(&self.book.borrow(), &call_args));
         }
         // A short ref this turn doesn't know (an earlier song's, or made up) is refused in Kumi's words, not the DAW's.
         for key in ["ref", "parent", "trackRef"] {
@@ -2368,7 +2382,12 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
         }
         // Refs that hold across projects are read only in the project they came from: the DAW refuses another (`stale`).
         let primary = args.get("ref").or_else(|| args.get("parent")).and_then(Value::as_str).map(str::to_owned);
-        let epoch = primary.and_then(|reference| self.seen_in.borrow().get(&reference).cloned());
+        let epoch = primary.and_then(|reference| self.seen_in.borrow().get(&reference).cloned()).or_else(|| {
+            // (a call's refs sit in its arguments: the first this turn read names the project they're from)
+            let text = args.get(self.daw.call.as_ref()?.args)?.to_string();
+            let seen_in = self.seen_in.borrow();
+            self.book.borrow().scheme.refs_in(&text).into_iter().find_map(|reference| seen_in.get(reference).cloned())
+        });
         if let Some(epoch) = epoch.filter(|_| !self.book.borrow().scheme.positional()) {
             args.insert("epoch".into(), epoch.into());
         }
