@@ -248,6 +248,8 @@ async fn soundcrafts_host_lists_what_its_bridge_serves_and_starts_nothing_while_
     let (said, around) = (views["description"].as_str().unwrap(), &views["inputSchema"]["properties"]["around"]["description"]);
     assert!(said.contains("ref (the clip or track it is about)"), "{said}");
     assert!(around.as_str().unwrap().contains("(the Edit window or the mixer)"), "{around}");
+    // A view's refs need their epoch, as a read's do.
+    assert_eq!(views["inputSchema"]["properties"]["epoch"]["type"], "string", "{views}");
     // (the isolated runner's process listing shows no SoundCraft running: no bridge is started for it)
     let status = session.tool(4, "status", json!({})).await;
     assert_eq!((&status["connected"], &status["reason"]), (&json!(false), &json!("no SoundCraft is running: open SoundCraft")), "{status}");

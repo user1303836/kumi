@@ -49,7 +49,12 @@ fn tool_list(daw: Daw) -> Value {
             &pick,
             epoch,
         );
-        let views = focus_body_tool(daw, ("the clip or track it is about", "the Edit window or the mixer"), kinds.bodies, &pick);
+        let mut views = focus_body_tool(daw, ("the clip or track it is about", "the Edit window or the mixer"), kinds.bodies, &pick);
+        // (a view's ref or around means nothing without its epoch either; without one, the bridge takes its last look's)
+        views["inputSchema"]["properties"]["epoch"] = json!({
+            "type": "string",
+            "description": "The epoch of the answer the ref or around came from. If another session is open now, or the bridge started again, the view is refused as stale instead of drawing something else.",
+        });
         return json!([status, discover, read, snapshot_tool(daw, "session", &pick), focus_tool(daw, &pick), views]);
     }
     let kinds = kinds(daw);
