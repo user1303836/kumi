@@ -15,6 +15,18 @@ impl TuiApp {
         if self.0.state.borrow().closing {
             return;
         }
+        // Another conversation may be going on (one taken up or forked, requests taken back, another Set open): herdr
+        // hears which its restart takes up.
+        if matches!(
+            event,
+            SessionEvent::Resumed { .. }
+                | SessionEvent::Forked { .. }
+                | SessionEvent::TakenBack { .. }
+                | SessionEvent::Observation { .. }
+                | SessionEvent::SetAsked { .. }
+        ) {
+            self.herdr_look();
+        }
         // Anything from the model, or the turn's end, means the wait is over; once it's handled, the model at work takes
         // in what the producer asked to say now. Every kernel event is placed here, so a new one has to be.
         let (ends_wait, at_work) = match &event {

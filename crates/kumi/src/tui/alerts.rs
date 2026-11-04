@@ -240,6 +240,16 @@ pub enum Blocked {
     Auth,
 }
 
+impl Blocked {
+    /// What Kumi waits for, in a line: what the terminal's status and herdr's pane say.
+    pub fn words(self) -> &'static str {
+        match self {
+            Blocked::Question => "Your answer, in Kumi",
+            Blocked::Auth => "Signing in, in Kumi",
+        }
+    }
+}
+
 impl ProgramState {
     fn name(self) -> &'static str {
         match self {

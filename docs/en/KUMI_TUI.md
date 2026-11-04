@@ -442,6 +442,11 @@ text, and `/help` lists those this session has.
   sign-in, done, failed), which terminals that know it show in a tab or sidebar.
   Windows Terminal, ConEmu and Ghostty also get OSC 9;4 progress. Both clear
   when Kumi quits.
+- **In herdr:** inside a [herdr](https://herdr.dev) pane, herdr's sidebar and
+  `herdr agent list` show Kumi working, waiting for your pick or a sign-in, or
+  idle, and herdr tells you when Kumi finishes or needs you. When herdr starts
+  again, the pane starts Kumi again as you started it, on the conversation it
+  had (`kumi -r <id>`). Quitting gives the pane back.
 - **While Kumi's window is behind another**, Kumi tells you when it finishes an
   answer of 15 s or more, needs your pick or a sign-in, waits for a plan's limit,
   stops on an error, or ends a `/goal`, `/loop` or match run:

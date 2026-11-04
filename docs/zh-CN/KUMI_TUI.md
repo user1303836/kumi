@@ -249,6 +249,7 @@ Kumi 占据整个终端窗口，并在 Kumi 关闭、崩溃或被停止时把窗
 ## 离开 Kumi 时
 
 - **终端中的状态：** Kumi 用 OSC 7501 报告它在做什么（工作中，附 NOW 的文字和运行进度；等你选择或登录；完成；失败），支持它的终端会显示在标签页或侧栏中。Windows Terminal、ConEmu 和 Ghostty 还会收到 OSC 9;4 进度。Kumi 退出时两者都会清除。
+- **在 herdr 中：** 在 [herdr](https://herdr.dev) 的窗格里运行时，herdr 的侧栏和 `herdr agent list` 会显示 Kumi 正在工作、在等你选择或登录，还是空闲；Kumi 完成或需要你时，herdr 会通知你。herdr 再次启动时，该窗格会按你当初的启动方式重新启动 Kumi，并接着原来的对话（`kumi -r <id>`）。退出时，Kumi 会把窗格交还给 herdr。
 - **Kumi 的窗口在其他窗口后面时**，Kumi 会在以下情况告诉你：完成一个用时 15 秒或更久的回答、需要你选择或登录、等待套餐上限、因错误停止，或结束一次 `/goal`、`/loop` 或匹配：
   - 桌面通知：用终端自己的通知（Ghostty、WezTerm 和 foot 用 OSC 777；iTerm2 用 OSC 9；kitty 用 OSC 99），否则用 macOS 的通知（Terminal.app 等）、Linux 上的 `notify-send`，或 Windows Terminal 的响铃（任务栏会闪烁）；
   - Live（或 Renoise）状态栏中的一行（“Kumi · done · the bass is darker”）；从不弹出对话框，也不进入 HISTORY。REAPER 没有 Kumi 能写入的状态栏。

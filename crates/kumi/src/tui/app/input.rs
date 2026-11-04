@@ -1346,6 +1346,8 @@ impl TuiApp {
                         state.last_call = None;
                     }
                     let started = session.op(op::NewConversation {}).await;
+                    // herdr's restart starts this one, afresh, not the one before it.
+                    self.herdr_look();
                     // Its name, kept with it from its first save.
                     if started.is_ok() && !name.is_empty() {
                         if self.can().conversations {

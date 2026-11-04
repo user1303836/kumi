@@ -4699,6 +4699,19 @@ local_test!(a_name_goes_with_the_first_save_and_kept_ones_are_pinned_renamed_or_
     assert_eq!(h.session.find_conversation(&first.id).await.unwrap(), ConversationMatch::None);
     h.session.close().await.unwrap();
 });
+local_test!(a_new_conversation_is_kept_as_soon_as_its_first_request_has_ended, {
+    let dir = tempfile::tempdir().unwrap();
+    let store = create_conversation_store(dir.path());
+    let h = harness(None, |o| o.conversations = Some(store.clone()));
+    live(&h, Some(SET_A));
+    h.session.start().await.unwrap();
+    assert!(!now(&h).await.kept);
+    h.session.submit("hello", None).await.unwrap();
+    // Its save is under way as the request ends: what the session says of it then (herdr's restart, /status) waits for it.
+    let first = now(&h).await;
+    assert!(first.kept && first.touched, "{first:?}");
+    h.session.close().await.unwrap();
+});
 local_test!(a_conversation_had_with_another_model_says_so_once_and_this_model_carries_on, {
     let dir = tempfile::tempdir().unwrap();
     let store = create_conversation_store(dir.path());

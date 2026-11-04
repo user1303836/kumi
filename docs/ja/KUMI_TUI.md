@@ -249,6 +249,7 @@ REAPER と Renoise でも画面は同じで（[つなぎ方](KUMI_GUIDE.md#reape
 ## Kumi から離れているとき
 
 - **ターミナルのステータス：** Kumi は OSC 7501 でしていることを伝えます（NOW の言葉と実行の進み具合を添えた作業中、選択やサインインの待ち、完了、失敗）。対応しているターミナルはタブやサイドバーに表示します。Windows Terminal、ConEmu、Ghostty には OSC 9;4 の進捗も送ります。どちらも Kumi の終了時に消えます。
+- **herdr の中：** [herdr](https://herdr.dev) のペインで動かすと、herdr のサイドバーと `herdr agent list` に、Kumi が作業中か、選択やサインインを待っているか、何もしていないかが表示され、Kumi が終えたときやあなたが必要なときは herdr が知らせます。herdr がもう一度起動すると、そのペインはあなたが起動したとおりに Kumi をもう一度起動し、それまでの会話を続けます（`kumi -r <id>`）。終了するとペインを herdr に返します。
 - **Kumi のウィンドウがほかのウィンドウの後ろにある間**、Kumi は 15 秒以上かかった答えを終えたとき、選択やサインインが必要なとき、プランの上限を待つとき、エラーで止まったとき、`/goal`、`/loop`、マッチングの実行が終わったときに知らせます：
   - デスクトップ通知：ターミナル自身の通知（Ghostty、WezTerm、foot は OSC 777、iTerm2 は OSC 9、kitty は OSC 99）、それ以外は macOS の通知（Terminal.app など）、Linux では `notify-send`、Windows Terminal ではベル（タスクバーが点滅します）。
   - Live（または Renoise）のステータスバーに一行（「Kumi · done · the bass is darker」）。ダイアログは出さず、HISTORY にも入れません。REAPER には Kumi が書き込めるステータスバーがありません。

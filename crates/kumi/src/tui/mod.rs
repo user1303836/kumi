@@ -8,6 +8,7 @@ pub mod details;
 pub mod editor;
 pub mod external_editor;
 pub mod frame;
+pub mod herdr;
 pub mod icons;
 pub mod keymap;
 pub mod keys;
