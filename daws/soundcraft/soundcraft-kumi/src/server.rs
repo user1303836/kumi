@@ -9,6 +9,10 @@
 //!   playing: what's open and selected, and whether it records. The reads' lives learn from it too, so a project event
 //!   goes out for another session even under the same name.
 //!
+//! Events go out when what they tell changed between two looks (the first look tells nothing): `project`, `transport`
+//! (whether the app plays, from `ui.inspect`; whether it records and its tempo at the playhead, from the session),
+//! `tracks` (the set of its tracks' ids, from the session) and `selection` (its selected tracks, from the session).
+//!
 //! FOCUS's `changed` moves with the history, and with the session's content when that changed with no move of the
 //! history between two looks to tell it: a gesture SoundCraft merges into its last step (a fader's, an automation pass),
 //! or an edit whose history reads as it did. A plug-in's parameters, which no summary shows, move neither.
@@ -20,6 +24,7 @@
 use crate::control::{Control, Error};
 use crate::launch::Launched;
 use crate::read::Reads;
+use crate::timebase::Timebase;
 use daw_bridge::auth::Secret;
 use daw_bridge::files::{process_alive, read_secret, write_discovery, Discovery, DISCOVERY_SCHEMA};
 use daw_bridge::handshake::{refuse_connection, Offer, ServerAction, ServerConnection};
@@ -111,6 +116,8 @@ struct Glance {
     plugin: Option<(Value, Value)>,
     /// The ref of the clip the MIDI Editor shows ([`Reads::midi_editor_clip`]).
     midi_clip: Option<String>,
+    /// Every selected track, by its ref and name.
+    selected: Vec<(String, Value)>,
     /// The summary itself: the rate and the tempo and meter maps the playhead is read through, and whether it records.
     session: Arc<Value>,
 }
@@ -163,7 +170,7 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     let (ending, ended) = watch::channel(None::<&'static str>);
     let offer = Offer {
         methods: vec!["ping".into(), "status".into(), "focus".into(), "read".into(), "snapshot".into(), "focus_body".into()],
-        events: vec![event::PROJECT.into()],
+        events: vec![event::PROJECT.into(), event::TRANSPORT.into(), event::TRACKS.into(), event::SELECTION.into()],
         heartbeat_ms: config.heartbeat_ms,
         credit_bytes: None,
     };
@@ -222,8 +229,8 @@ async fn look_at_session(
                 None => None,
             };
             let midi_clip = reads.midi_editor_clip(&session);
-            let (epoch, selection) = (reads.epoch().into(), reads.selection(&session));
-            Some(Glance { epoch, selection, plugin, midi_clip, session })
+            let (epoch, selection, selected) = (reads.epoch().into(), reads.selection(&session), reads.selected_tracks(&session));
+            Some(Glance { epoch, selection, plugin, midi_clip, selected, session })
         }
         Err(_) => None,
     };
@@ -303,6 +310,66 @@ impl Schedule {
     }
 }
 
+/// What the events last told, from the looks that saw it: the transport, the set of the tracks' ids, and the selected
+/// tracks. Each is told when a look sees it otherwise than the last did; the first look at it tells nothing.
+#[derive(Default)]
+struct Told {
+    /// Whether the session plays and records, and its tempo at the playhead: all from one look at the session, so a take
+    /// started from a stop is told recording from the first. A `ui.inspect` tells only a stop, at once.
+    transport: Option<Value>,
+    /// The tracks' ids and the selected tracks, each with the epoch it was seen in: another session on the same ids
+    /// (SoundCraft numbers a new session's objects from 1 again) is news, and never named in the last one's words.
+    tracks: Option<(String, Vec<u64>)>,
+    selection: Option<(String, Vec<String>)>,
+}
+
+impl Told {
+    /// A `ui.inspect` saw the app playing or not: a stop is told at once. A start waits for the look at the session,
+    /// which says whether it records.
+    fn played(&mut self, playing: bool) -> Vec<(&'static str, Value)> {
+        let Some(told) = self.transport.as_ref().filter(|told| !playing && told["playing"] == true) else { return vec![] };
+        let now = json!({"playing": false, "recording": false, "bpm": told["bpm"].clone()});
+        self.transport = Some(now.clone());
+        vec![(event::TRANSPORT, now)]
+    }
+
+    /// A look at the session saw `glance`, with the playhead at `position` samples: the transport, the tracks and the
+    /// selection, each if it's news.
+    fn looked(&mut self, glance: &Glance, position: &Value) -> Vec<(&'static str, Value)> {
+        let session = &*glance.session;
+        let bpm = match (Timebase::of(session), position.as_f64()) {
+            (Some(timebase), Some(samples)) => timebase.tempo(timebase.beats(samples)).into(),
+            _ => session["tempo"][0]["bpm"].clone(),
+        };
+        // (a stopped take doesn't record)
+        let playing = session["transport"]["playing"] == true;
+        let transport = json!({"playing": playing, "recording": playing && session["transport"]["recording"] == true, "bpm": bpm});
+        let mut news = Vec::new();
+        if changed(&mut self.transport, transport.clone()) {
+            news.push((event::TRANSPORT, transport));
+        }
+        let mut ids: Vec<u64> = session["tracks"].as_array().into_iter().flatten().filter_map(|track| track["id"].as_u64()).collect();
+        ids.sort_unstable();
+        let count = ids.len();
+        if changed(&mut self.tracks, (glance.epoch.clone(), ids)) {
+            news.push((event::TRACKS, json!({"count": count, "epoch": glance.epoch})));
+        }
+        let refs = glance.selected.iter().map(|(key, _)| key.clone()).collect();
+        if changed(&mut self.selection, (glance.epoch.clone(), refs)) {
+            let tracks: Vec<Value> = glance.selected.iter().map(|(key, name)| json!({"guid": key, "name": name})).collect();
+            news.push((event::SELECTION, json!({"tracks": tracks})));
+        }
+        news
+    }
+}
+
+/// Keeps `now` as what was told, and says whether it's news: something was told before, and not this.
+fn changed<T: PartialEq>(told: &mut Option<T>, now: T) -> bool {
+    let news = told.as_ref().is_some_and(|before| *before != now);
+    *told = Some(now);
+    news
+}
+
 /// Looks at the app on its [`Schedule`] until it quits, keeping what was seen and telling the connections what changed.
 /// From a missed `ui.inspect` or while the app is busy, it asks nothing else.
 async fn look(
@@ -323,6 +390,12 @@ async fn look(
     let (mut misses, mut playing, mut windows) = (0u32, false, Value::Null);
     // (the history the last poll saw; the content the last look at the session saw, and whether a move was counted since)
     let (mut history, mut content, mut moved) = (None::<Value>, None::<u64>, false);
+    let mut told = Told::default();
+    let tell = |news: Vec<(&'static str, Value)>| {
+        for (name, data) in news {
+            let _ = events.send((name.into(), data));
+        }
+    };
     loop {
         tick.tick().await;
         if schedule.ui_due(at_tick(&schedule)) {
@@ -340,6 +413,7 @@ async fn look(
                     }
                     (windows, playing) = (ui["ui"]["plugin_windows"].clone(), now_playing);
                     lock(seen).ui = Some((ui, Instant::now()));
+                    tell(told.played(now_playing));
                     busy
                 }
                 Err(Error::Unreachable(_) | Error::Closed) if !process_alive(pid) => return End::AppQuit,
@@ -377,6 +451,8 @@ async fn look(
         let looked = look_at_session(control, reads, epochs, window, schedule.session_deadline(), every).await;
         schedule.looked_at_session(asked, Instant::now());
         let Some(looked) = looked else { continue };
+        let position = lock(seen).ui.as_ref().map_or(Value::Null, |(ui, _)| ui["position"].clone());
+        let news = looked.glance.as_ref().map(|glance| told.looked(glance, &position)).unwrap_or_default();
         let mut guard = lock(seen);
         // (the session changed with no move of the history to tell it: a merged gesture, or an edit whose history reads
         // as it did)
@@ -387,14 +463,17 @@ async fn look(
         if looked.glance.is_some() {
             guard.glance = looked.glance;
         }
-        if guard.identity.project.as_ref() == Some(&looked.project) {
-            continue;
+        // (another session first: the tracks and selection after it are its)
+        if guard.identity.project.as_ref() != Some(&looked.project) {
+            guard.identity.project = Some(looked.project.clone());
+            let identity = guard.identity.clone();
+            drop(guard);
+            rewrite(&identity);
+            let _ = events.send((event::PROJECT.into(), serde_json::to_value(&looked.project).unwrap_or(Value::Null)));
+        } else {
+            drop(guard);
         }
-        guard.identity.project = Some(looked.project.clone());
-        let identity = guard.identity.clone();
-        drop(guard);
-        rewrite(&identity);
-        let _ = events.send((event::PROJECT.into(), serde_json::to_value(&looked.project).unwrap_or(Value::Null)));
+        tell(news);
     }
 }
 
