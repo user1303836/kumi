@@ -667,6 +667,17 @@ impl TuiApp {
                         continue;
                     }
                 }
+                // A DAW Kumi only opens, to reach it, opens once the producer says so: never unasked.
+                if live.asks_to_open() {
+                    let session = live.closed_set();
+                    let with = session.as_deref().and_then(|set| std::path::Path::new(set).file_name());
+                    let with = with.map_or(String::new(), |name| format!(" with {}", name.to_string_lossy()));
+                    let say = vec![why.clone(), format!("Kumi opens {app}{with}.")];
+                    let open = vec![choice(&format!("Open {app}"), "", "open"), later()];
+                    if self.setup_choose(&format!("{app} isn't open"), say, open).await.as_deref() != Some("open") {
+                        return LiveStep::Later(None);
+                    }
+                }
             }
             let said = why.clone();
             self.setup_show(move |s| {
