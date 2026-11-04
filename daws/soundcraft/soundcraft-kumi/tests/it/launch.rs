@@ -2,7 +2,11 @@
 //! program name, run as a program) prints its port as the app does and answers only with the token it was started with,
 //! as SoundCraft does once it checks tokens.
 use super::fake::{ok, refused, Answer, Fake};
-use soundcraft_kumi::launch::{self, App, Found, Launched, Start, Waits};
+use daw_bridge::daw::Daw;
+use daw_bridge::detect::{self, SoundCraftApp};
+use daw_bridge::files::Launched;
+use daw_bridge::paths::BridgePaths;
+use soundcraft_kumi::launch::{self, Found, Start, Waits};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
@@ -16,14 +20,21 @@ fn ms(n: u64) -> Duration {
     Duration::from_millis(n)
 }
 
-/// This test binary under SoundCraft's program name: a look for the copy checks the program its pid runs.
-fn soundcraft_in(dir: &Path) -> App {
+/// This test binary under SoundCraft's program name: a look for the copy checks the program its pid runs. On macOS a copy
+/// (a clone, on APFS) rather than a hard link: macOS names a hard-linked program's process by whichever of its names it
+/// looked up last.
+fn soundcraft_in(dir: &Path) -> SoundCraftApp {
     let program = dir.join(if cfg!(windows) { "soundcraft.exe" } else { "soundcraft" });
     let this = std::env::current_exe().unwrap();
-    if std::fs::hard_link(&this, &program).is_err() {
+    if cfg!(target_os = "macos") || std::fs::hard_link(&this, &program).is_err() {
         std::fs::copy(&this, &program).unwrap();
     }
-    App { path: program, version: Some("0.17.0".into()) }
+    SoundCraftApp { path: program, version: Some("0.17.0".into()) }
+}
+
+/// What the bridge's launch record says, as the bridge reads it.
+fn recorded(paths: &BridgePaths) -> Option<Launched> {
+    Launched::read(&paths.launch_record())
 }
 
 /// The fake app as a start runs it: one of this binary's ignored tests, with what a start gives it.
@@ -101,50 +112,50 @@ fn owner_only(path: &Path) -> bool {
 #[tokio::test]
 async fn a_start_waits_for_the_apps_port_and_token_and_a_later_session_finds_that_copy() {
     let home = tempfile::tempdir().unwrap();
-    let folder = home.path().join("bridges").join("soundcraft");
+    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
     let app = soundcraft_in(home.path());
     let started = Arc::new(Mutex::new(None));
     let _ends = Ends(started.clone());
     let found =
-        launch::launch_with(&app, None, &folder, false, USUAL, starting("launch::a_fake_soundcraft", started.clone())).await.unwrap();
+        launch::launch_with(&app, None, &paths, false, USUAL, starting("launch::a_fake_soundcraft", started.clone())).await.unwrap();
     let pid = started.lock().unwrap().unwrap();
     let launched = found.launched.clone();
     assert!(found.answering);
     assert_eq!((launched.pid, launched.version.as_deref(), launched.token.len()), (pid, Some("0.17.0"), 43));
     assert_ne!(launched.port, 0);
-    assert_eq!(launch::recorded(&folder), Some(launched.clone()));
+    assert_eq!(recorded(&paths), Some(launched.clone()));
     #[cfg(unix)]
-    assert!(owner_only(&folder.join(launch::LAUNCHED)), "launched.json holds the token");
+    assert!(owner_only(&paths.launch_record()), "the launch record holds the token");
     assert!(!format!("{launched:?}").contains(&launched.token), "its Debug leaves the token out");
     // A later session finds the same copy, and its channel answers with that token.
-    assert_eq!(launch::attach(&folder, SECOND).await, Some(Found { launched: launched.clone(), answering: true }));
+    assert_eq!(launch::attach(&paths, SECOND).await, Some(Found { launched: launched.clone(), answering: true }));
     // Once it has quit, nothing is found.
     kill(pid);
     let until = Instant::now() + Duration::from_secs(5);
     while daw_bridge::files::process_alive(pid) && Instant::now() < until {
         tokio::time::sleep(ms(20)).await;
     }
-    assert_eq!(launch::attach(&folder, SECOND).await, None);
+    assert_eq!(launch::attach(&paths, SECOND).await, None);
 }
 
 #[tokio::test]
 async fn a_copy_still_opening_its_session_is_kumis_busy_copy_kept_and_found_again() {
     let home = tempfile::tempdir().unwrap();
-    let folder = home.path().join("bridges").join("soundcraft");
+    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
     let app = soundcraft_in(home.path());
     let started = Arc::new(Mutex::new(None));
     let _ends = Ends(started.clone());
     let waits = Waits { port: Duration::from_secs(30), answer: ms(300) };
     let opening = starting("launch::a_fake_soundcraft_opening_a_big_session", started.clone());
-    let found = launch::launch_with(&app, None, &folder, false, waits, opening).await.unwrap();
+    let found = launch::launch_with(&app, None, &paths, false, waits, opening).await.unwrap();
     assert!(!found.answering, "its window takes no request while it opens the session");
-    assert_eq!(launch::recorded(&folder), Some(found.launched.clone()), "kept all the same");
-    assert_eq!(launch::attach(&folder, ms(300)).await.map(|found| found.answering), Some(false), "found again, busy");
+    assert_eq!(recorded(&paths), Some(found.launched.clone()), "kept all the same");
+    assert_eq!(launch::attach(&paths, ms(300)).await.map(|found| found.answering), Some(false), "found again, busy");
     // Once the session is open, the same copy answers.
     let began = Instant::now();
     let mut answering = false;
     while !answering && began.elapsed() < Duration::from_secs(10) {
-        answering = launch::attach(&folder, ms(500)).await.is_some_and(|again| again.answering && again.launched == found.launched);
+        answering = launch::attach(&paths, ms(500)).await.is_some_and(|again| again.answering && again.launched == found.launched);
     }
     assert!(answering);
 }
@@ -152,57 +163,56 @@ async fn a_copy_still_opening_its_session_is_kumis_busy_copy_kept_and_found_agai
 #[tokio::test]
 async fn an_app_that_ends_before_it_opens_its_channel_is_told_in_its_own_words_at_once() {
     let home = tempfile::tempdir().unwrap();
-    let folder = home.path().join("bridges").join("soundcraft");
+    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
     let app = soundcraft_in(home.path());
     let began = Instant::now();
-    let failed = launch::launch_with(&app, None, &folder, false, USUAL, ending("launch::a_soundcraft_that_cant_open_its_channel"))
-        .await
-        .unwrap_err();
+    let failed =
+        launch::launch_with(&app, None, &paths, false, USUAL, ending("launch::a_soundcraft_that_cant_open_its_channel")).await.unwrap_err();
     assert_eq!(failed, "SoundCraft ended before it opened its control channel: control server failed to bind 127.0.0.1:0: refused");
     assert!(began.elapsed() < Duration::from_secs(20), "not the whole wait: {:?}", began.elapsed());
-    assert_eq!(launch::recorded(&folder), None);
+    assert_eq!(recorded(&paths), None);
 }
 
 #[tokio::test]
 async fn a_copy_that_doesnt_open_its_channel_in_time_is_closed_and_not_kept() {
     let home = tempfile::tempdir().unwrap();
-    let folder = home.path().join("bridges").join("soundcraft");
+    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
     let app = soundcraft_in(home.path());
     let started = Arc::new(Mutex::new(None));
     let _ends = Ends(started.clone());
     let waits = Waits { port: SECOND, answer: SECOND };
     let silent = starting("launch::a_soundcraft_that_never_opens_its_channel", started.clone());
-    let failed = launch::launch_with(&app, None, &folder, false, waits, silent).await.unwrap_err();
+    let failed = launch::launch_with(&app, None, &paths, false, waits, silent).await.unwrap_err();
     assert_eq!(failed, "SoundCraft didn't open its control channel within 1 s, so Kumi closed the copy it started: a dialog waits");
     assert!(ended(&started, Duration::from_secs(10)), "closed, so it doesn't stand in the next start's way");
-    assert_eq!(launch::recorded(&folder), None);
+    assert_eq!(recorded(&paths), None);
 }
 
 #[tokio::test]
 async fn a_copy_whose_channel_wont_take_kumis_token_is_closed_and_not_kept() {
     let home = tempfile::tempdir().unwrap();
-    let folder = home.path().join("bridges").join("soundcraft");
+    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
     let app = soundcraft_in(home.path());
     let started = Arc::new(Mutex::new(None));
     let _ends = Ends(started.clone());
     let refusing = starting("launch::a_soundcraft_that_wants_another_token", started.clone());
-    let failed = launch::launch_with(&app, None, &folder, false, USUAL, refusing).await.unwrap_err();
+    let failed = launch::launch_with(&app, None, &paths, false, USUAL, refusing).await.unwrap_err();
     assert!(failed.contains("(unauthorized: the token is wrong)") && failed.ends_with("so Kumi closed the copy it started"), "{failed}");
     assert!(ended(&started, Duration::from_secs(10)), "closed");
-    assert_eq!(launch::recorded(&folder), None);
+    assert_eq!(recorded(&paths), None);
 }
 
 #[tokio::test]
 async fn a_copy_that_answers_in_its_own_words_without_kumis_first_request_is_kept() {
     let home = tempfile::tempdir().unwrap();
-    let folder = home.path().join("bridges").join("soundcraft");
+    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
     let app = soundcraft_in(home.path());
     let started = Arc::new(Mutex::new(None));
     let _ends = Ends(started.clone());
     let without = starting("launch::a_soundcraft_without_ui_inspect", started.clone());
-    let found = launch::launch_with(&app, None, &folder, false, USUAL, without).await.unwrap();
+    let found = launch::launch_with(&app, None, &paths, false, USUAL, without).await.unwrap();
     assert!(found.answering, "it took the token and answered: `unknown method` is its own word");
-    assert_eq!(launch::recorded(&folder), Some(found.launched));
+    assert_eq!(recorded(&paths), Some(found.launched));
     assert!(daw_bridge::files::process_alive(started.lock().unwrap().unwrap()), "kept running");
 }
 
@@ -219,7 +229,8 @@ async fn where_the_start_cant_say_the_apps_pid_it_is_the_process_holding_the_app
         *keep.lock().unwrap() = Some(fake_app("launch::a_fake_soundcraft", start)?.id());
         Ok(None)
     };
-    let found = launch::launch_with(&app, None, &home.path().join("one"), false, USUAL, unsaid).await.unwrap();
+    let found =
+        launch::launch_with(&app, None, &BridgePaths::new(&home.path().join("one"), Daw::SoundCraft), false, USUAL, unsaid).await.unwrap();
     assert_eq!(Some(found.launched.pid), *started.lock().unwrap(), "the port's listener, which holds the app's stdout");
     // One that ends at once is told well before the whole wait.
     let began = Instant::now();
@@ -227,7 +238,9 @@ async fn where_the_start_cant_say_the_apps_pid_it_is_the_process_holding_the_app
         fake_app("launch::a_soundcraft_that_cant_open_its_channel", start)?.wait().map_err(|error| error.to_string())?;
         Ok(None)
     };
-    let failed = launch::launch_with(&app, None, &home.path().join("two"), false, USUAL, ends_at_once).await.unwrap_err();
+    let failed = launch::launch_with(&app, None, &BridgePaths::new(&home.path().join("two"), Daw::SoundCraft), false, USUAL, ends_at_once)
+        .await
+        .unwrap_err();
     assert!(failed.starts_with("SoundCraft ended before it opened its control channel"), "{failed}");
     assert!(began.elapsed() < Duration::from_secs(15), "{:?}", began.elapsed());
 }
@@ -235,10 +248,10 @@ async fn where_the_start_cant_say_the_apps_pid_it_is_the_process_holding_the_app
 #[test]
 fn a_second_look_then_start_waits_for_the_first() {
     let home = tempfile::tempdir().unwrap();
-    let folder = home.path().join("soundcraft");
-    let first = launch::lock(&folder).unwrap();
+    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
+    let first = launch::lock(&paths).unwrap();
     let (said, heard) = std::sync::mpsc::channel();
-    let second = folder.clone();
+    let second = paths.clone();
     let waiting = std::thread::spawn(move || {
         let _held = launch::lock(&second).unwrap();
         said.send(()).unwrap();
@@ -247,40 +260,6 @@ fn a_second_look_then_start_waits_for_the_first() {
     drop(first);
     assert!(heard.recv_timeout(Duration::from_secs(5)).is_ok(), "then goes on");
     waiting.join().unwrap();
-}
-
-#[cfg(unix)]
-#[test]
-fn a_record_that_isnt_this_users_alone_is_not_followed() {
-    use daw_bridge::owner;
-    use std::os::unix::fs::PermissionsExt;
-    let home = tempfile::tempdir().unwrap();
-    let folder = home.path().join("soundcraft");
-    owner::create_owner_only_dir(&folder).unwrap();
-    let launched = Launched {
-        pid: std::process::id(),
-        started_ms: 1,
-        port: 9,
-        token: "kept".into(),
-        app: PathBuf::from("/lab/SoundCraft.app"),
-        version: None,
-    };
-    let path = folder.join(launch::LAUNCHED);
-    let bytes = serde_json::to_vec(&launched).unwrap();
-    owner::write_owner_only(&path, &bytes).unwrap();
-    assert_eq!(launch::recorded(&folder), Some(launched));
-    let mode = |path: &Path, mode| std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode)).unwrap();
-    mode(&path, 0o644);
-    assert_eq!(launch::recorded(&folder), None, "others can read it");
-    mode(&path, 0o600);
-    mode(&folder, 0o777);
-    assert_eq!(launch::recorded(&folder), None, "others can write its folder");
-    mode(&folder, 0o700);
-    let planted = home.path().join("planted.json");
-    owner::write_owner_only(&planted, &bytes).unwrap();
-    std::fs::remove_file(&path).unwrap();
-    std::os::unix::fs::symlink(&planted, &path).unwrap();
-    assert_eq!(launch::recorded(&folder), None, "a link isn't followed");
 }
 
 #[test]
@@ -292,7 +271,7 @@ fn soundcraft_opened_another_way_is_named_and_nothing_starts() {
             .args(["launch", "--kumi-home"])
             .arg(home.path())
             .env("KUMI_PROCESSES", format!("{me} /Applications/SoundCraft.app/Contents/MacOS/SoundCraft"))
-            .env(launch::APP_VARIABLE, home.path().join("no-app-here"))
+            .env(detect::SOUNDCRAFT_APP, home.path().join("no-app-here"))
             .output()
             .unwrap()
     };
@@ -301,11 +280,11 @@ fn soundcraft_opened_another_way_is_named_and_nothing_starts() {
     assert_eq!(said.status.code(), Some(1), "{words}");
     assert!(words.contains(&format!("SoundCraft is open without its control channel (pid {me})")), "{words}");
     assert!(said.stdout.is_empty());
-    let folder = home.path().join("bridges").join("soundcraft");
-    assert_eq!(launch::recorded(&folder), None, "nothing started");
+    let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
+    assert_eq!(recorded(&paths), None, "nothing started");
     // The copy Kumi itself started, once it no longer takes Kumi's requests, is named as Kumi's.
     let ours = Launched { pid: me, started_ms: 1, port: 9, token: "kept".into(), app: PathBuf::from("/lab/SoundCraft.app"), version: None };
-    daw_bridge::owner::write_owner_only(&folder.join(launch::LAUNCHED), &serde_json::to_vec(&ours).unwrap()).unwrap();
+    daw_bridge::owner::write_owner_only(&paths.launch_record(), &serde_json::to_vec(&ours).unwrap()).unwrap();
     let words = String::from_utf8_lossy(&run().stderr).into_owned();
     assert!(words.contains(&format!("The SoundCraft Kumi started (pid {me}) no longer takes Kumi's requests")), "{words}");
 }
@@ -352,37 +331,11 @@ fn the_sessions_soundcraft_will_offer_to_recover_are_the_ones_its_own_rule_keeps
 }
 
 #[test]
-fn the_settings_folder_is_the_one_soundcraft_config_dir_names() {
-    let named = |value: &'static str| move |name: &str| (name == "SOUNDCRAFT_CONFIG_DIR").then(|| value.to_string());
-    let lab = std::path::absolute("/lab/profile").unwrap();
-    assert_eq!(launch::settings_folder(&named("/lab/profile"), None), Some(lab));
-    assert_eq!(launch::settings_folder(&named(""), None), None, "set empty, SoundCraft keeps no settings");
-    let relative = launch::settings_folder(&named("profile"), None).unwrap();
-    assert_eq!(relative, std::env::current_dir().unwrap().join("profile"), "where the app is told it is");
-}
-
-#[test]
-fn a_portable_copy_keeps_its_settings_beside_its_program() {
-    let folder = tempfile::tempdir().unwrap();
-    let nothing = |_: &str| None;
-    let program = folder.path().join("soundcraft.exe");
-    std::fs::write(&program, b"").unwrap();
-    let beside = folder.path().join("SoundCraftData");
-    assert_ne!(launch::settings_folder(&nothing, Some(&program)), Some(beside.clone()));
-    std::fs::write(folder.path().join("portable.txt"), b"").unwrap();
-    assert_eq!(launch::settings_folder(&nothing, Some(&program)), Some(beside));
-    let bundle = folder.path().join("SoundCraft.app");
-    std::fs::create_dir_all(bundle.join("Contents/MacOS")).unwrap();
-    std::fs::write(bundle.join("Contents/MacOS/portable.txt"), b"").unwrap();
-    assert_eq!(launch::settings_folder(&nothing, Some(&bundle)), Some(bundle.join("Contents/MacOS/SoundCraftData")));
-}
-
-#[test]
 fn the_app_kumi_soundcraft_app_names_is_used_when_it_is_there() {
     let folder = tempfile::tempdir().unwrap();
     let program = folder.path().join("soundcraft-somewhere");
     std::fs::write(&program, b"").unwrap();
-    let named = |path: PathBuf| move |name: &str| (name == launch::APP_VARIABLE).then(|| path.display().to_string());
+    let named = |path: PathBuf| move |name: &str| (name == detect::SOUNDCRAFT_APP).then(|| path.display().to_string());
     assert_eq!(launch::find(&named(program.clone())).map(|app| app.path), Some(program));
     assert_eq!(launch::find(&named(folder.path().join("missing"))), None);
 }

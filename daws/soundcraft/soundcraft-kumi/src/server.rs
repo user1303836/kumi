@@ -22,13 +22,14 @@
 //! the app's pid and settings folder. It goes when the bridge ends: when the host that started it goes (its stdin ends),
 //! or when SoundCraft quits.
 use crate::control::{Control, Error};
-use crate::launch::Launched;
+use crate::launch;
 use crate::read::Reads;
 use crate::timebase::Timebase;
 use daw_bridge::auth::Secret;
-use daw_bridge::files::{process_alive, read_secret, write_discovery, Discovery, DISCOVERY_SCHEMA};
+use daw_bridge::daw::Daw;
+use daw_bridge::files::{process_alive, read_secret, write_discovery, Discovery, Launched, DISCOVERY_SCHEMA};
 use daw_bridge::handshake::{refuse_connection, Offer, ServerAction, ServerConnection};
-use daw_bridge::loopback::peer_allowed;
+use daw_bridge::loopback::{self, peer_allowed};
 use daw_bridge::wire::{code, event, Frame, Identity, Project, Request, HEARTBEAT_MS, MAX_AUTHENTICATED, MAX_UNAUTHENTICATED, PROTOCOL};
 use serde_json::{json, Map, Value};
 use std::future::Future;
@@ -40,8 +41,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, watch};
 
-/// The DAW's id on the wire and in file names.
-pub const DAW: &str = "soundcraft";
 /// The bridge's own version.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// How often the bridge looks at the app.
@@ -126,11 +125,18 @@ fn lock(seen: &Mutex<Seen>) -> MutexGuard<'_, Seen> {
     seen.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
 }
 
-/// Serves until `stop` comes or SoundCraft quits, and says which. The discovery file is written before it serves and
-/// removed when it ends.
-pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End, String> {
-    let control = config.launched.control();
-    let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|error| format!("the bridge can't listen on loopback: {error}"))?;
+/// The listener the bridge serves on: 127.0.0.1, the first free port of SoundCraft's range.
+pub fn bind() -> std::io::Result<std::net::TcpListener> {
+    loopback::bind(Daw::SoundCraft, None)
+}
+
+/// Serves on `listener` ([`bind`]'s, or a test's) until `stop` comes or SoundCraft quits, and says which. The discovery
+/// file is written before it serves and removed when it ends.
+pub async fn serve(listener: std::net::TcpListener, config: Config, stop: impl Future<Output = ()>) -> Result<End, String> {
+    let control = launch::control(&config.launched);
+    let listening = |error: std::io::Error| format!("the bridge can't listen on loopback: {error}");
+    listener.set_nonblocking(true).map_err(listening)?;
+    let listener = TcpListener::from_std(listener).map_err(listening)?;
     let port = listener.local_addr().map_err(|error| error.to_string())?.port();
     let reads = Reads::new(control.clone(), config.launched.version.clone());
     let epochs = reads.epochs();
@@ -141,7 +147,7 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     };
     let identity = Identity {
         preset_files: vec![],
-        daw: DAW.into(),
+        daw: Daw::SoundCraft.id().into(),
         bridge: VERSION.into(),
         daw_version: config.launched.version.clone().unwrap_or_default(),
         pid: config.launched.pid,
@@ -151,9 +157,9 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     let started_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64);
     let notice = move |identity: &Identity| Discovery {
         schema: DISCOVERY_SCHEMA.into(),
-        daw: DAW.into(),
+        daw: Daw::SoundCraft.id().into(),
         pid: identity.pid,
-        host: "127.0.0.1".into(),
+        host: loopback::BIND_ADDRESS.to_string(),
         port,
         protocol: PROTOCOL.into(),
         version: identity.bridge.clone(),
