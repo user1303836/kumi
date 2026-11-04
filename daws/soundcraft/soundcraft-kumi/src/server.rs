@@ -90,7 +90,9 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     let control = config.launched.control();
     let listener = TcpListener::bind(("127.0.0.1", 0)).await.map_err(|error| format!("the bridge can't listen on loopback: {error}"))?;
     let port = listener.local_addr().map_err(|error| error.to_string())?.port();
-    let reads = Arc::new(tokio::sync::Mutex::new(Reads::new(control.clone())));
+    let reads = Reads::new(control.clone());
+    let epochs = reads.epochs();
+    let reads = Arc::new(tokio::sync::Mutex::new(reads));
     let identity = Identity {
         preset_files: vec![],
         daw: DAW.into(),
@@ -98,7 +100,7 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
         daw_version: config.launched.version.clone().unwrap_or_default(),
         pid: config.launched.pid,
         resource: config.resource.clone(),
-        project: look_at_session(&control, &reads, config.look).await,
+        project: look_at_session(&control, &reads, &epochs, config.look).await,
     };
     let started_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64);
     let notice = move |identity: &Identity| Discovery {
@@ -133,7 +135,7 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     };
     let end = tokio::select! {
         () = stop => End::Stopped,
-        end = look(&control, &seen, &reads, &events, &rewrite, config.look) => end,
+        end = look(&control, &seen, &reads, &epochs, &events, &rewrite, config.look) => end,
     };
     // The file and the lock go and the listener closes first, so no host finds a bridge that's ending, and the next one
     // finds the copy free; then the connections say bye.
@@ -148,15 +150,22 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     Ok(end)
 }
 
-/// A look at the session (`session.inspect`, its summary), which the reads' lives learn from: what's open now, with the
-/// epoch of its objects' refs. Nothing while the app doesn't answer, or while a read holds the reads (it looks itself).
-async fn look_at_session(control: &Control, reads: &tokio::sync::Mutex<Reads>, deadline: Duration) -> Option<Project> {
+/// A look at the session (`session.inspect`, its summary): what's open now, with the epoch of its objects' refs. The reads'
+/// lives learn from it, unless a read holds them (that read looks itself), and the epoch is told either way. Nothing while
+/// the app doesn't answer.
+async fn look_at_session(
+    control: &Control,
+    reads: &tokio::sync::Mutex<Reads>,
+    epochs: &watch::Receiver<String>,
+    deadline: Duration,
+) -> Option<Project> {
     let session = control.call("session.inspect", json!({}), deadline).await.ok()?;
-    let mut reads = reads.try_lock().ok()?;
-    reads.saw(&session);
+    if let Ok(mut reads) = reads.try_lock() {
+        reads.saw(&session);
+    }
     let text = |key: &str| session.get(key).and_then(Value::as_str).map(str::to_string);
     let mut extra = Map::new();
-    extra.insert("epoch".into(), reads.epoch().into());
+    extra.insert("epoch".into(), epochs.borrow().as_str().into());
     Some(Project { name: text("name"), path: text("path"), extra, ..Project::default() })
 }
 
@@ -165,6 +174,7 @@ async fn look(
     control: &Control,
     seen: &Mutex<Seen>,
     reads: &tokio::sync::Mutex<Reads>,
+    epochs: &watch::Receiver<String>,
     events: &broadcast::Sender<(String, Value)>,
     rewrite: &(dyn Fn(&Identity) + Sync),
     every: Duration,
@@ -198,7 +208,7 @@ async fn look(
         if looks % LOOKS_PER_SESSION != 0 || lock(seen).busy.is_some() {
             continue;
         }
-        let Some(now) = look_at_session(control, reads, every).await else { continue };
+        let Some(now) = look_at_session(control, reads, epochs, every).await else { continue };
         let mut guard = lock(seen);
         if guard.identity.project.as_ref() == Some(&now) {
             continue;

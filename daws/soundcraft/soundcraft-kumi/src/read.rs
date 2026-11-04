@@ -16,6 +16,7 @@ use serde_json::{json, Map, Value};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use tokio::sync::watch;
 
 pub const DEFAULT_LIMIT: usize = 50;
 pub const MAX_LIMIT: usize = 200;
@@ -46,11 +47,20 @@ pub struct Reads {
     lives: Lives,
     looked: Option<Look>,
     inspected: Option<(Instant, Arc<Value>)>,
+    /// The epoch as it changes, for whoever can't wait for a read to end.
+    told: watch::Sender<String>,
 }
 
 impl Reads {
     pub fn new(control: Control) -> Self {
-        Self { control, lives: Lives::new(), looked: None, inspected: None }
+        let lives = Lives::new();
+        let (told, _) = watch::channel(lives.epoch().to_string());
+        Self { control, lives, looked: None, inspected: None, told }
+    }
+
+    /// The epoch as it changes, readable while a read holds the reads.
+    pub fn epochs(&self) -> watch::Receiver<String> {
+        self.told.subscribe()
     }
 
     /// The epoch now: its table's.
@@ -78,6 +88,7 @@ impl Reads {
         });
         if another {
             self.lives = Lives::new();
+            self.told.send_replace(self.lives.epoch().to_string());
         }
         for (kind, objects) in prints {
             self.lives.saw(kind, objects);

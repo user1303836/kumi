@@ -48,13 +48,15 @@ impl std::ops::DerefMut for Reaped {
     }
 }
 
-/// What the fake app shows: its session's name, tracks and undo history, an open dialog, and whether it answers late.
+/// What the fake app shows: its session's name, tracks and undo history, an open dialog, whether it answers late, and
+/// whether a full inspection (a read's) takes it two seconds.
 struct Shown {
     name: String,
     tracks: Value,
     undo: Value,
     dialog: Option<String>,
     late: bool,
+    slow_reads: bool,
 }
 
 /// A fake SoundCraft, and a Kumi folder for its bridge.
@@ -67,14 +69,24 @@ struct Lab {
 
 impl Lab {
     async fn new() -> Self {
-        let shown =
-            Arc::new(Mutex::new(Shown { name: "Midnight Groove".into(), tracks: json!([]), undo: Value::Null, dialog: None, late: false }));
+        let shown = Arc::new(Mutex::new(Shown {
+            name: "Midnight Groove".into(),
+            tracks: json!([]),
+            undo: Value::Null,
+            dialog: None,
+            late: false,
+            slow_reads: false,
+        }));
         let answering = shown.clone();
         let fake = Fake::start(16, move |request| {
             let shown = answering.lock().unwrap();
             match request["method"].as_str() {
                 Some("session.inspect") => {
-                    Answer::Now(ok(json!({"name": shown.name, "path": null, "tracks": shown.tracks, "undo": shown.undo, "redo": null})))
+                    let session = ok(json!({"name": shown.name, "path": null, "tracks": shown.tracks, "undo": shown.undo, "redo": null}));
+                    match request["params"]["detail"] == "full" && shown.slow_reads {
+                        true => Answer::After(ms(2000), session),
+                        false => Answer::Now(session),
+                    }
                 }
                 Some("ui.inspect") if shown.late => Answer::After(ms(400), ok(json!({"dialog": null}))),
                 Some("ui.inspect") => Answer::Now(ok(json!({"dialog": shown.dialog}))),
@@ -328,6 +340,30 @@ async fn another_session_under_the_same_name_is_told_as_a_project_event_with_a_n
     let told = tokio::time::timeout(WAIT, events.recv()).await.unwrap().unwrap();
     assert_eq!((told.name.as_str(), &told.data["name"]), ("project", &json!("Untitled")));
     assert!(told.data["epoch"].is_string() && told.data["epoch"] != before, "{:?} after {before}", told.data);
+}
+
+#[tokio::test]
+async fn a_new_session_is_told_while_a_read_holds_the_reads() {
+    let lab = Lab::new().await;
+    lab.shown.lock().unwrap().slow_reads = true;
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    let mut events = client.events();
+    // A read the app takes two seconds over holds the reads, and the session switches meanwhile.
+    let read = async {
+        let answer = client.request("read", json!({"kind": "track"}), WAIT).await;
+        (Instant::now(), answer)
+    };
+    let told = async {
+        tokio::time::sleep(ms(100)).await;
+        lab.shown.lock().unwrap().name = "Next Song".into();
+        let event = tokio::time::timeout(WAIT, events.recv()).await.unwrap().unwrap();
+        (Instant::now(), event)
+    };
+    let ((read_at, answer), (told_at, event)) = tokio::join!(read, told);
+    assert!(answer.is_ok(), "{answer:?}");
+    assert_eq!((event.name.as_str(), &event.data["name"]), ("project", &json!("Next Song")));
+    assert!(told_at < read_at, "told while the read went on, not after it");
 }
 
 #[tokio::test]
