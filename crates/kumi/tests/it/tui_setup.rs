@@ -221,7 +221,7 @@ fn setup(
     configure: impl FnOnce(&mut TuiOptions),
 ) -> Harness {
     Harness::with(width, 30, Control::with_models(models), |o| {
-        o.connect_live = live.map(|(why, live)| ConnectLive { why: why.map(str::to_string), bridge: "1.0.74".into(), live });
+        o.connect_live = live.map(|(why, live)| ConnectLive { why: why.map(str::to_string), bridge: "1.0.74".into(), live, asked: false });
         configure(o)
     })
 }
@@ -1062,6 +1062,19 @@ case!(a_daw_kumi_only_opens_to_reach_it_opens_only_once_the_producer_says_so, as
     h.wait_for("Open Live").await;
     h.type_text("\r").await;
     h.wait_for("waiting for Live").await;
+    assert_eq!(live.calls(), ["open?", "install", "start", "connect"]);
+    h.close().await;
+    // Asked for by name (`--daw`): that was the say, so it opens without the question.
+    let live = FakeLive::new(false);
+    live.asks.set(true);
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |o| {
+        if let Some(connect) = o.connect_live.as_mut() {
+            connect.asked = true;
+        }
+    });
+    h.start().await;
+    h.wait_for("waiting for Live").await;
+    assert!(!h.screen().iter().any(|line| line.contains("Open Live")), "no question");
     assert_eq!(live.calls(), ["open?", "install", "start", "connect"]);
     h.close().await;
 });
