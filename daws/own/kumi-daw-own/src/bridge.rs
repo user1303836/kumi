@@ -59,6 +59,46 @@ const UNDRAWN_FOCUS_MS: u64 = 1_000;
 /// The most a page of the model's read asks for.
 const MOST_ROWS: u64 = 200;
 
+/// Kumi's bridge for a DAW, as Kumi brings it up to date: loaded into the DAW (REAPER's extension, Renoise's tool), so
+/// one older than Kumi is put in again and the DAW restarted; or a program beside Kumi (SoundCraft's), which comes with
+/// Kumi itself and lacks only what it hasn't learnt yet.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnBridge {
+    /// Loaded into the DAW, as the producer knows it: "extension", "tool".
+    Loaded(&'static str),
+    Beside,
+}
+
+impl OwnBridge {
+    /// Why `app`'s bridge can't make a change it has no method for (its host's `--daw` is `host_flag`).
+    pub fn cant_change(self, app: &str, host_flag: &str) -> String {
+        match self {
+            OwnBridge::Loaded(kind) => format!(
+                "{app}'s {kind} is older than this Kumi and can't make changes yet: run kumi --daw {host_flag} bridge, then restart {app}"
+            ),
+            OwnBridge::Beside => format!("{app}'s bridge can't make changes yet"),
+        }
+    }
+
+    /// Why `app`'s bridge can't listen: its status says nothing of listening.
+    pub fn cant_listen(self, app: &str) -> String {
+        match self {
+            OwnBridge::Loaded(_) => {
+                format!("This {app} bridge can't listen yet (it's older than Kumi): update Kumi's bridge and restart {app}.")
+            }
+            OwnBridge::Beside => format!("This {app} bridge can't listen yet."),
+        }
+    }
+
+    /// Why `app`'s bridge can't keep a scratch copy as a track.
+    pub fn cant_keep(self, app: &str) -> String {
+        match self {
+            OwnBridge::Loaded(_) => format!("this {app} bridge can't keep a copy as a track yet: update Kumi's bridge"),
+            OwnBridge::Beside => format!("this {app} bridge can't keep a copy as a track yet"),
+        }
+    }
+}
+
 /// What one DAW gives the shared integration: its profile, how its host is started, its instructions, and the kinds
 /// its read tool takes.
 pub struct OwnDaw {
@@ -66,6 +106,8 @@ pub struct OwnDaw {
     pub descriptor: BridgeDescriptor,
     /// What `daw-mcp-server --daw` takes: "reaper", "renoise".
     pub host_flag: &'static str,
+    /// Its bridge, as Kumi brings it up to date: what the producer is told when it lacks something.
+    pub bridge: OwnBridge,
     pub instructions: &'static str,
     /// What a clear mechanical mistake looks like in this DAW, for the shared rules (`own_rules`): examples, in its words.
     pub mechanical: &'static str,

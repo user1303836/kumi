@@ -64,6 +64,7 @@ fn prefix(daw: DawId) -> Option<&'static str> {
         DawId::Ableton => None,
         DawId::Reaper => Some("reaper"),
         DawId::Renoise => Some("renoise"),
+        DawId::SoundCraft => Some("soundcraft"),
     }
 }
 
@@ -80,7 +81,7 @@ impl Place {
             return Some(Place::Saved { daw: DawId::Ableton, id: text.into() });
         }
         let (name, rest) = text.split_once('-')?;
-        let daw = [DawId::Reaper, DawId::Renoise].into_iter().find(|daw| prefix(*daw) == Some(name))?;
+        let daw = DawId::ALL.into_iter().find(|daw| prefix(*daw) == Some(name))?;
         if rest == UNSAVED {
             Some(Place::Unsaved(daw))
         } else if is_project_id(rest) {
@@ -123,6 +124,7 @@ pub fn unsaved(daw: DawId) -> &'static str {
         DawId::Ableton => UNSAVED,
         DawId::Reaper => "reaper-unsaved",
         DawId::Renoise => "renoise-unsaved",
+        DawId::SoundCraft => "soundcraft-unsaved",
     }
 }
 
@@ -134,7 +136,17 @@ mod tests {
 
     #[test]
     fn lives_places_are_as_they_were_and_another_dafs_carry_its_name() {
-        for text in [ID, "unsaved", "imported", &format!("reaper-{ID}"), "reaper-unsaved", &format!("renoise-{ID}"), "renoise-unsaved"] {
+        for text in [
+            ID,
+            "unsaved",
+            "imported",
+            &format!("reaper-{ID}"),
+            "reaper-unsaved",
+            &format!("renoise-{ID}"),
+            "renoise-unsaved",
+            &format!("soundcraft-{ID}"),
+            "soundcraft-unsaved",
+        ] {
             assert_eq!(Place::parse(text).map(|place| place.text()).as_deref(), Some(text), "{text}");
         }
         for text in ["A2DFD5F2CF329C593C5FDC7448524087", "unsaved:x", "../unsaved", "reaper-", "reaper-x", "ableton-unsaved", "", &ID[..31]]
@@ -143,7 +155,7 @@ mod tests {
         }
         assert_eq!(unsaved(DawId::Ableton), "unsaved");
         assert_eq!(unsaved(DawId::Renoise), "renoise-unsaved");
-        for daw in [DawId::Ableton, DawId::Reaper, DawId::Renoise] {
+        for daw in DawId::ALL {
             assert_eq!(Place::parse(unsaved(daw)), Some(Place::Unsaved(daw)));
         }
     }

@@ -1219,6 +1219,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             why: connect_why,
             bridge: bundled.clone().unwrap_or_default(),
             live: provider.setup(&io.env, live_config.clone(), given, setup_reaches.clone()),
+            asked: asked.is_some(),
         });
         options.secrets = secrets.clone();
         options.history = Some(history);

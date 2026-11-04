@@ -425,6 +425,32 @@ async fn creation_tokens_retirement_and_owned_cleanup() {
         .await;
 }
 #[tokio::test]
+async fn ownership_forgotten_at_a_ref_no_longer_authorizes_a_cleanup_there() {
+    // What a transaction made, deleted another way (where it moved to, by its identity), leaves nothing to clean up
+    // at the ref it was made at: an owned delete there is refused before anything is sent.
+    LocalSet::new()
+        .run_until(async {
+            let peer = Server::start(vec!["track.create", "track.delete"], |r, _| {
+                if r["operation"] == "track.create" {
+                    Reply::Value(track_result())
+                } else {
+                    Reply::Value(json!({"deleted":"1:track:1"}))
+                }
+            })
+            .await;
+            let adapter = peer.connect().await;
+            let ctx = context("creating-transaction");
+            adapter.invoke_async(&create_track(), Some(&ctx)).await.unwrap();
+            adapter.forget_cleanup_ownership("creating-transaction", "1:track:1");
+            adapter.forget_cleanup_ownership("creating-transaction", "1:track:1");
+            let before = peer.seen.borrow().len();
+            assert!(matches!(adapter.invoke_async(&delete_track(), Some(&ctx)).await, Err(LiveError::MutationNotDispatched(_))));
+            assert_eq!(peer.seen.borrow().len(), before);
+            adapter.close().await.unwrap();
+        })
+        .await;
+}
+#[tokio::test]
 async fn explicit_deletion_and_bad_mutation_refused_before_dispatch() {
     LocalSet::new()
         .run_until(async {

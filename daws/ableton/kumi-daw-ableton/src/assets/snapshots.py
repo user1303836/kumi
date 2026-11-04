@@ -12,9 +12,12 @@
 #   Arrangement audio clips are made aside at their length (one Live can't make that long refuses here); then the
 #   remnants (the pieces Live left) go, and each clip is made again whole. Leaving: clips the change's own undo takes
 #   away first, so not in a clip's way. With check, only the checks. What Live won't set back exactly is named in
-#   partial. A failure once something changed is answered with how far it got ("error", "removed", "made").
+#   partial. Each clip made comes with its new identity and the hash of what it is now, which a later undo checks
+#   in place of the one it had before. A failure once something changed is answered with how far it got ("error",
+#   "removed", "made").
 # - "notes": {"track", "trackName", "trackId", "clip", "notes", "notesHash"}: more of a restored clip's notes (a big
-#   clip's take several calls); with notesHash, the last, which checks the clip holds every note it had.
+#   clip's take several calls); with notesHash, the last, which checks the clip holds every note it had and says its
+#   hash now.
 # - "state": {"track", "trackName", "trackId", "from", "scenes"}: what the track holds from a time on and in some
 #   scenes' slots, to tell whether Live's undo put things back as they were.
 import hashlib, os
@@ -421,7 +424,8 @@ def same(key, now, kept):
         for p, q in zip(x[1], y[1])) for x, y in zip(a, b))
 
 def missing(clip, kept, notes_to_come, failed):
-    """What of a made clip isn't as it was kept, in words (its notes only once all of them are in)."""
+    """What of a made clip isn't as it was kept, in words (its notes only once all of them are in), and the clip as it is
+    now (its leaf, read once)."""
     now, out = leaf(clip), list(kept.get("partial", []))
     out += [key for key in failed if key not in out]
     for key in kept:
@@ -429,7 +433,7 @@ def missing(clip, kept, notes_to_come, failed):
             continue
         if not same(key, now.get(key), kept[key]):
             out.append(key)
-    return [WORDS.get(key, key) for key in out]
+    return [WORDS.get(key, key) for key in out], now
 
 def restore(args):
     track = find_track(args)
@@ -458,9 +462,10 @@ def restore(args):
             clip = put_in_place(track, stands.pop(index), item["where"], kept) if index in stands else create(track, item["where"], kept)
             done["made"].append({"identity": identity(clip), "where": place(clip), "name": kept["name"]})
             settle(clip, kept)
-            gaps = missing(clip, kept, item.get("notesToCome", False), put_back(clip, track, kept))
+            gaps, now = missing(clip, kept, item.get("notesToCome", False), put_back(clip, track, kept))
             if gaps:
                 done["partial"].append({"name": kept["name"], "missing": gaps})
+            done["made"][-1]["hash"] = digest(now)
     except Exception as error:
         for stand in stands.values():
             attempt(lambda stand=stand: track.delete_clip(stand))
@@ -474,7 +479,9 @@ def more_notes(args):
             add_notes(clip, args["notes"])
             out = {"added": len(args["notes"])}
             if args.get("notesHash"):
-                out["exact"] = digest(sorted(note_row(note) for note in clip.get_all_notes_extended())) == args["notesHash"]
+                now = leaf(clip)
+                out["exact"] = digest(now["notes"]) == args["notesHash"]
+                out["hash"] = digest(now)
             return out
     raise ValueError("the clip Kumi made again isn't there any more")
 

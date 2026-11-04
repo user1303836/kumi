@@ -6,7 +6,7 @@ use super::patch::{NoFiles, Patcher};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
-pub use kumi_types::amxd::{decode_amxd, encode_amxd, patcher_chunk, DecodedAmxd, DeviceType};
+pub use kumi_types::amxd::{decode_amxd, encode_amxd, encrypted, patcher_chunk, with_patcher_chunk, DecodedAmxd, DeviceType};
 
 /// Live shows a device 169 pixels tall: room for three rows of dials.
 const FACE_ROWS: usize = 3;

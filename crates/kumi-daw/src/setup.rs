@@ -75,6 +75,34 @@ pub trait DawSetup {
     fn can_ask_to_quit(&self) -> bool {
         true
     }
+    /// Why the DAW, open now, has to restart for Kumi, in the producer's words: by default, it loads Kumi's bridge as it
+    /// starts.
+    fn restart_why(&self, app: &str) -> String {
+        format!("{app} loads the bridge when it starts.")
+    }
+    /// What Kumi does once the producer has quit the DAW, in their words: by default, it puts its bridge in place and opens
+    /// the DAW again.
+    fn once_closed(&self, app: &str) -> String {
+        format!("Kumi then puts its bridge in place and opens {app} again.")
+    }
+    /// Whether setup asks before it opens the DAW, closed as setup began: by default it opens it as the step goes on, its
+    /// bridge put in place; a DAW Kumi only opens, to reach it, is never opened unasked.
+    fn asks_to_open(&self) -> bool {
+        false
+    }
+    /// The session to open a DAW with that wasn't open when setup began, for a DAW Kumi opens with what the producer had
+    /// open last: none by default, so it opens as it starts by itself.
+    fn closed_set(&self) -> Option<String> {
+        None
+    }
+    /// Why the DAW didn't open, when what opened it said: setup says it in place of "open it yourself".
+    fn open_failed(&self) -> Option<String> {
+        None
+    }
+    /// What's worth knowing from what opened the DAW, once it opened (a recovery it will offer): said as setup ends.
+    fn opened_note(&self) -> Option<String> {
+        None
+    }
     /// How long Live gets to quit once asked, before Kumi says it's still open (its save dialog
     /// cancelled, say) and offers to ask again.
     fn quit_wait(&self) -> Duration {

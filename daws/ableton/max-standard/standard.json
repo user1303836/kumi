@@ -16,6 +16,7 @@
     "params.no-info": { "level": "advice", "looks_at": "parameters", "measured": { "found": 198, "of": 203 } },
     "gen.param-twice": { "level": "error", "looks_at": "Param declarations", "measured": { "found": 2, "of": 359 } },
     "face.hidden-by-panel": { "level": "warn", "looks_at": "panels", "measured": { "found": 0, "of": 10 } },
+    "face.past-device-width": { "level": "warn", "looks_at": "boxes on the face" },
     "timing.polled-position": { "level": "error", "looks_at": "plugsync~ objects", "measured": { "found": 0, "of": 0 } },
     "timing.ms-clock": { "level": "error", "looks_at": "clocks that time MIDI", "measured": { "found": 0, "of": 0 } },
     "timing.off-grid-clock": { "level": "error", "looks_at": "clocks that time MIDI", "measured": { "found": 0, "of": 0 } },

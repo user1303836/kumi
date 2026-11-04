@@ -12,7 +12,7 @@
 //! - **params**: Live parameters are named for what they do, once each, kept in Push's banks and explained in Live's
 //!   Info View.
 //! - **gen**: a gen~ Param is declared once.
-//! - **face**: no opaque panel hides what's on the device's face.
+//! - **face**: no opaque panel hides what's on the device's face, and nothing shown on it lies past the device's width.
 //! - **timing**: notes a clock times play on Live's grid and tempo, on Max's high-priority thread: no step made from
 //!   plugsync~'s polled position, no clock in milliseconds or off Live's grid, nothing low-priority between a clock and
 //!   a note. Only a path to a note counts. Kumi's own building blocks ([p kumi.clock] and the rest) are made that way, so
@@ -23,6 +23,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::sync::LazyLock;
 
+use kumi_common::js::number;
 use regex::Regex;
 use serde_json::Value;
 
@@ -48,6 +49,7 @@ pub const BANK_MISSING: &str = "params.bank-missing";
 pub const NO_INFO: &str = "params.no-info";
 pub const PARAM_TWICE: &str = "gen.param-twice";
 pub const HIDDEN_BY_PANEL: &str = "face.hidden-by-panel";
+pub const PAST_DEVICE_WIDTH: &str = "face.past-device-width";
 pub const POLLED_POSITION: &str = "timing.polled-position";
 pub const MS_CLOCK: &str = "timing.ms-clock";
 pub const OFF_GRID_CLOCK: &str = "timing.off-grid-clock";
@@ -55,7 +57,7 @@ pub const LOW_PRIORITY_NOTES: &str = "timing.low-priority-notes";
 pub const OWN_MAPPING: &str = "map.own-mapping";
 
 /// Every rule the checker knows.
-pub const RULES: [&str; 20] = [
+pub const RULES: [&str; 21] = [
     UNKNOWN_OBJECT,
     NO_SUCH_PORT,
     CORD_OVER_BOX,
@@ -71,6 +73,7 @@ pub const RULES: [&str; 20] = [
     NO_INFO,
     PARAM_TWICE,
     HIDDEN_BY_PANEL,
+    PAST_DEVICE_WIDTH,
     POLLED_POSITION,
     MS_CLOCK,
     OFF_GRID_CLOCK,
@@ -86,8 +89,8 @@ const TOUCH: f64 = 3.0;
 static REVERSED_DOMAIN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]{2,6}\.[A-Za-z0-9-]+\.[A-Za-z0-9_.-]+$").unwrap());
 /// Boxes Max draws behind others on purpose: a cord or a box over one is fine.
 const BACKDROPS: [&str; 3] = ["panel", "fpic", "live.line"];
-/// Max's Live objects that are parameters unless turned off.
-const LIVE_PARAMETERS: [&str; 9] =
+/// Max's Live objects that are parameters unless turned off: on a device's face, Kumi makes them only from controls.
+pub(super) const LIVE_PARAMETERS: [&str; 9] =
     ["live.button", "live.dial", "live.gain~", "live.menu", "live.numbox", "live.slider", "live.tab", "live.text", "live.toggle"];
 
 /// A broken rule.
@@ -196,7 +199,7 @@ impl Checker<'_> {
         for item in &patcher.boxes {
             let inner = match (&item.patcher, &item.file) {
                 (Some(inner), _) => inner,
-                (None, Some((name, inner))) if self.files_seen.insert(name.clone()) => inner,
+                (None, Some((name, inner))) if self.files_seen.insert(name.clone()) => inner.as_ref(),
                 _ => continue,
             };
             let kit = is_kit(item);
@@ -740,6 +743,33 @@ impl Checker<'_> {
                 HIDDEN_BY_PANEL,
                 "",
                 format!("{line}. Max draws a box above the boxes after it in its layer: list the panel after them, or put it in the background layer."),
+            );
+        }
+        // Live shows a device's face only as wide as its devicewidth (without one, as wide as what's on it): past it, a box
+        // is cut off or not there at all. A backdrop running past the edge hides nothing.
+        let Some(width) = patcher.fields.get("devicewidth").and_then(Value::as_f64).filter(|width| *width > 0.0) else { return };
+        let shown: Vec<(&MaxBox, Rect)> = patcher
+            .boxes
+            .iter()
+            .filter(|item| {
+                item.shown() && !BACKDROPS.contains(&item.maxclass()) && item.fields.get("hidden").and_then(Value::as_f64) != Some(1.0)
+            })
+            .filter_map(|item| Some((item, item.presentation_rect()?)))
+            .collect();
+        self.looked(PAST_DEVICE_WIDTH, shown.len());
+        let label = labels(patcher);
+        for (item, rect) in shown.into_iter().filter(|(_, rect)| rect.right() > width + TOUCH) {
+            let seen = if rect.x >= width { "Live doesn't show it at all" } else { "Live cuts it off" };
+            self.found(
+                PAST_DEVICE_WIDTH,
+                "",
+                format!(
+                    "{} is on the face from x {} to {}, past the device's width ({}): {seen}. Move it within the width, or widen the device (devicewidth).",
+                    label[item.id()],
+                    number::to_string(rect.x),
+                    number::to_string(rect.right()),
+                    number::to_string(width)
+                ),
             );
         }
     }
@@ -1393,5 +1423,35 @@ mod tests {
             [("a".to_string(), "(1, min=0, max=2)".to_string()), ("b".to_string(), String::new()), ("d".to_string(), "(2)".to_string())]
         );
         assert!(default_name("live.text[4]", "live.text") && default_name("jsui[2]", "jsui") && !default_name("Drive[2]", "live.dial"));
+    }
+
+    /// #772: a box shown on the face past the device's width is one Live cuts off, or doesn't show at all; a backdrop
+    /// past it, a hidden box, or a face without a width set, is fine.
+    #[test]
+    fn a_box_on_the_face_past_the_devices_width_is_found() {
+        let shown = |id: &str, maxclass: &str, rect: [f64; 4]| {
+            json!({ "box": { "id": id, "maxclass": maxclass, "presentation": 1, "presentation_rect": rect, "patching_rect": [0., 0., 44., 48.],
+                "annotation": "a", "saved_attribute_attributes": { "valueof": { "parameter_longname": id } } } })
+        };
+        let face = |width: Value| {
+            read(json!({ "devicewidth": width, "boxes": [
+                shown("Mix", "live.dial", [570., 10., 44., 60.]),
+                shown("Tone", "live.dial", [380., 10., 44., 60.]),
+                shown("Drive", "live.dial", [366., 10., 44., 60.]),
+                shown("back", "panel", [0., 0., 900., 169.]),
+                { "box": { "id": "Gone", "maxclass": "comment", "text": "x", "presentation": 1, "hidden": 1, "presentation_rect": [700., 0., 40., 20.] } }
+            ], "lines": [] }))
+        };
+        let said: Vec<String> =
+            check(&face(json!(412.))).findings.iter().filter(|finding| finding.rule == PAST_DEVICE_WIDTH).map(Finding::to_string).collect();
+        assert_eq!(
+            said,
+            [
+                "face.past-device-width: live.dial \"Mix\" is on the face from x 570 to 614, past the device's width (412): Live doesn't show it at all. Move it within the width, or widen the device (devicewidth).",
+                "face.past-device-width: live.dial \"Tone\" is on the face from x 380 to 424, past the device's width (412): Live cuts it off. Move it within the width, or widen the device (devicewidth).",
+            ],
+            "Drive reaches 410, within the width; the panel is a backdrop, and the comment is hidden"
+        );
+        assert!(!rules(&check(&face(json!(0.)))).contains(&PAST_DEVICE_WIDTH), "a face without a width is as wide as what's on it");
     }
 }

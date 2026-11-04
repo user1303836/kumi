@@ -941,13 +941,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
                 words.app
             ),
             Some("gone") => format!("{what} is gone from the {}: nothing changed", words.place),
-            Some("unknown-method") => format!(
-                "{}'s {} is older than this Kumi and can't make changes yet: run kumi --daw {} bridge, then restart {}",
-                words.app,
-                if self.link().daw.host_flag == "renoise" { "tool" } else { "extension" },
-                self.link().daw.host_flag,
-                words.app
-            ),
+            Some("unknown-method") => self.link().daw.bridge.cant_change(words.app, self.link().daw.host_flag),
             _ => why,
         }
     }

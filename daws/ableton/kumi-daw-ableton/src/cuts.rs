@@ -158,6 +158,8 @@ pub fn kept(clips: &[Captured], objects: &[String]) -> Vec<KeptClip> {
             object: object.clone(),
             name: clip.name(),
             notes_hash: clip.notes_hash.clone(),
+            identity: Some(clip.identity.clone()),
+            hash: Some(clip.hash.clone()),
         })
         .collect()
 }

@@ -221,6 +221,9 @@ impl AsyncLiveAdapter for Adapter {
         self.calls.borrow_mut().push(clean(json!({"method":"status","context":context(c)})));
         self.sim.status()
     }
+    fn forget_cleanup_ownership(&self, transaction: &str, reference: &str) {
+        self.calls.borrow_mut().push(clean(json!({"method":"forget","transactionId":transaction,"reference":reference})));
+    }
 }
 
 fn context(c: Option<&LiveOperationContext>) -> Value {
@@ -325,6 +328,73 @@ async fn undoing_a_clip_that_moved_ref_is_refused_before_anything_is_sent() {
     let record = host.transaction_record(made[1].as_str().unwrap()).unwrap();
     assert_eq!(record.borrow()["state"], "applied", "{result}");
     assert_eq!(adapter.sim.state.borrow()["arrangementClips"].as_array().unwrap().len(), 1);
+}
+#[tokio::test]
+async fn undoing_an_audio_clip_a_clip_was_added_before_takes_it_from_where_it_is_now_unless_it_changed() {
+    // An Arrangement audio clip Kumi made keeps no notes: as made, its settings at the ref it was made at say so, and it
+    // goes from where it is now. Changed since (muted, say), it stays, and nothing is sent.
+    for changed in [false, true] {
+        let adapter = Rc::new(Adapter::new());
+        let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+        let preview = host.live_arrangement_clip_preview_async(&json!(1), &params("audio")).await;
+        let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+        let apply = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+        host.live_arrangement_clip_apply_async(&json!(2), &apply, None).await.unwrap();
+        let record = host.transaction_record(body["transactionId"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            (record.borrow()["state"].clone(), record.borrow()["kind"].clone()),
+            (json!("applied"), json!("arrangement-audio-create"))
+        );
+        let made_at = record.borrow()["created"]["ref"].clone();
+        let made = record.borrow()["created"]["objectIdentity"].clone();
+        {
+            // A clip added before it takes its ref, and it moves to the next.
+            let mut state = adapter.sim.state.borrow_mut();
+            let rows = state["arrangementClips"].as_array_mut().unwrap();
+            let at = rows.iter().position(|row| row["clip"]["ref"] == made_at).unwrap();
+            let mut before = rows[at].clone();
+            before["clip"]["objectIdentity"] = json!("simulator:arrangement-clip:900");
+            before["clip"]["name"] = json!("Kumi Arrangement");
+            before["clip"]["start"] = json!(0);
+            rows[at]["clip"]["ref"] = json!("arrangement-clip:track-1:moved");
+            if changed {
+                rows[at]["clip"]["muted"] = json!(true);
+            }
+            rows.insert(at, before);
+        }
+        adapter.calls.borrow_mut().clear();
+        let undo = json!({"transactionId":body["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
+        let result = host
+            .with_undo_watch(&json!(3), &undo, async { Ok(host.undo_arrangement_clip_async(&json!(3), &undo, None).await) })
+            .await
+            .unwrap();
+        let calls = adapter.calls.borrow().clone();
+        let deletes: Vec<&Value> = calls.iter().filter(|call| call["invocation"]["operation"] == "arrangement.clip.delete").collect();
+        let forgotten: Vec<&Value> = calls.iter().filter(|call| call["method"] == "forget").collect();
+        let identities: Vec<Value> = adapter.sim.state.borrow()["arrangementClips"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["clip"]["objectIdentity"].clone())
+            .collect();
+        if changed {
+            let text = result["result"]["content"][0]["text"].as_str().unwrap();
+            assert!(
+                text.contains("the clip moved since it was made (a clip before it was added or removed): delete it in Live"),
+                "{result}"
+            );
+            assert!(deletes.is_empty() && forgotten.is_empty(), "{calls:?}");
+            assert_eq!(record.borrow()["state"], "applied", "{result}");
+            assert!(identities.contains(&made), "{identities:?}");
+        } else {
+            assert_eq!(record.borrow()["state"], "undone", "{result}");
+            assert_eq!(deletes.len(), 1, "{deletes:?}");
+            assert_eq!(deletes[0]["invocation"]["args"]["ref"], "arrangement-clip:track-1:moved");
+            assert_eq!(deletes[0]["invocation"]["args"]["explicitDeletion"], true);
+            assert_eq!(forgotten, [&json!({"method":"forget","transactionId":"$transaction","reference":made_at})]);
+            assert!(!identities.contains(&made) && identities.contains(&json!("simulator:arrangement-clip:900")), "{identities:?}");
+        }
+    }
 }
 #[tokio::test]
 async fn undoing_a_clip_with_another_after_it_is_confirmed_by_identity() {

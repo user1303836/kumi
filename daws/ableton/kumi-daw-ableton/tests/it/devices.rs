@@ -1267,3 +1267,734 @@ fn kumis_own_devices_keep_its_standard_for_max_patchers() {
         assert!(broken.is_empty(), "the {kind} breaks {} rules:\n{}", broken.len(), broken.join("\n"));
     }
 }
+
+/// A MIDI echo as Max saves one, with nothing of Kumi's in it: boxes numbered by Max, a dial with its parameter, and a
+/// comment and a backdrop on its face.
+fn downloaded_echo() -> Value {
+    json!({ "patcher": {
+        "fileversion": 1, "appversion": { "major": 8, "minor": 6, "revision": 2, "architecture": "x64", "modernui": 1 },
+        "classnamespace": "box", "rect": [34.0, 87.0, 640.0, 480.0], "openinpresentation": 1, "devicewidth": 0.0, "description": "Echoes each note.",
+        "boxes": [
+            { "box": { "id": "obj-1", "maxclass": "newobj", "text": "midiin", "numinlets": 1, "numoutlets": 1, "outlettype": ["int"], "patching_rect": [40.0, 20.0, 40.0, 22.0] } },
+            { "box": { "id": "obj-2", "maxclass": "newobj", "text": "midiparse", "numinlets": 1, "numoutlets": 8, "outlettype": ["", "", "", "int", "int", "", "int", ""], "patching_rect": [40.0, 60.0, 92.0, 22.0] } },
+            { "box": { "id": "obj-3", "maxclass": "newobj", "text": "unpack 0 0", "numinlets": 1, "numoutlets": 2, "outlettype": ["int", "int"], "patching_rect": [40.0, 100.0, 61.0, 22.0] } },
+            { "box": { "id": "obj-4", "maxclass": "newobj", "text": "pipe 0 0 250", "numinlets": 3, "numoutlets": 2, "outlettype": ["", ""], "patching_rect": [40.0, 140.0, 80.0, 22.0], "fontname": "Arial" } },
+            { "box": { "id": "obj-5", "maxclass": "newobj", "text": "pack 0 0", "numinlets": 2, "numoutlets": 1, "outlettype": [""], "patching_rect": [40.0, 180.0, 55.0, 22.0] } },
+            { "box": { "id": "obj-6", "maxclass": "newobj", "text": "midiformat", "numinlets": 7, "numoutlets": 2, "outlettype": ["int", ""], "patching_rect": [40.0, 220.0, 82.0, 22.0] } },
+            { "box": { "id": "obj-7", "maxclass": "newobj", "text": "midiout", "numinlets": 1, "numoutlets": 0, "patching_rect": [40.0, 260.0, 50.0, 22.0] } },
+            { "box": { "id": "obj-8", "maxclass": "live.dial", "varname": "Time", "parameter_enable": 1, "numinlets": 1, "numoutlets": 2, "outlettype": ["", "float"],
+                "presentation": 1, "presentation_rect": [10.0, 20.0, 44.0, 48.0], "patching_rect": [200.0, 100.0, 44.0, 48.0],
+                "saved_attribute_attributes": { "valueof": { "parameter_longname": "Time", "parameter_shortname": "Time", "parameter_type": 0, "parameter_mmin": 1.0,
+                    "parameter_mmax": 1000.0, "parameter_initial": [250.0], "parameter_unitstyle": 2, "parameter_initial_enable": 1 } } } },
+            { "box": { "id": "obj-9", "maxclass": "comment", "text": "Echo by someone", "numinlets": 1, "numoutlets": 0, "presentation": 1,
+                "presentation_rect": [60.0, 20.0, 100.0, 18.0], "patching_rect": [300.0, 20.0, 100.0, 18.0] } },
+            { "box": { "id": "obj-10", "maxclass": "panel", "background": 1, "numinlets": 1, "numoutlets": 0, "presentation": 1,
+                "presentation_rect": [0.0, 0.0, 170.0, 169.0], "patching_rect": [300.0, 60.0, 100.0, 50.0] } }
+        ],
+        "lines": [
+            { "patchline": { "source": ["obj-1", 0], "destination": ["obj-2", 0] } },
+            { "patchline": { "source": ["obj-2", 0], "destination": ["obj-3", 0] } },
+            { "patchline": { "source": ["obj-3", 0], "destination": ["obj-4", 0] } },
+            { "patchline": { "source": ["obj-3", 1], "destination": ["obj-4", 1] } },
+            { "patchline": { "source": ["obj-4", 0], "destination": ["obj-5", 0] } },
+            { "patchline": { "source": ["obj-4", 1], "destination": ["obj-5", 1] } },
+            { "patchline": { "source": ["obj-5", 0], "destination": ["obj-6", 0] } },
+            { "patchline": { "source": ["obj-6", 0], "destination": ["obj-7", 0] } },
+            { "patchline": { "source": ["obj-8", 0], "destination": ["obj-4", 2] } }
+        ],
+        "dependency_cache": [], "autosave": 0
+    } })
+}
+
+/// A frozen device as Max lays one out: the device file around a container of the device's patcher and its own files
+/// (`(type, name, flags, bytes)`, the patcher flagged 1), then their directory.
+fn frozen(code: &str, files: &[(&str, &str, u32, &[u8])]) -> Vec<u8> {
+    let mut container = b"mx@c".to_vec();
+    container.extend_from_slice(&16u32.to_be_bytes());
+    container.extend_from_slice(&0u32.to_be_bytes());
+    container.extend_from_slice(&0u32.to_be_bytes());
+    let mut entries = Vec::new();
+    for (kind, name, flags, bytes) in files {
+        let start = container.len() as u32;
+        container.extend_from_slice(bytes);
+        let field = |tag: &[u8], value: &[u8]| {
+            let mut out = tag.to_vec();
+            out.extend_from_slice(&(8 + value.len() as u32).to_be_bytes());
+            out.extend_from_slice(value);
+            out
+        };
+        let mut padded = name.as_bytes().to_vec();
+        padded.resize(name.len().div_ceil(4) * 4 + 4, 0);
+        let mut body = field(b"type", kind.as_bytes());
+        body.extend(field(b"fnam", &padded));
+        body.extend(field(b"sz32", &(bytes.len() as u32).to_be_bytes()));
+        body.extend(field(b"of32", &start.to_be_bytes()));
+        body.extend(field(b"vers", &0u32.to_be_bytes()));
+        body.extend(field(b"flag", &flags.to_be_bytes()));
+        body.extend(field(b"mdat", &3_700_000_000u32.to_be_bytes()));
+        let mut entry = b"dire".to_vec();
+        entry.extend_from_slice(&(8 + body.len() as u32).to_be_bytes());
+        entry.extend(body);
+        entries.extend(entry);
+    }
+    let directory = container.len() as u32;
+    container[12..16].copy_from_slice(&directory.to_be_bytes());
+    container.extend_from_slice(b"dlst");
+    container.extend_from_slice(&(8 + entries.len() as u32).to_be_bytes());
+    container.extend(entries);
+    let mut bytes = b"ampf\x04\x00\x00\x00".to_vec();
+    bytes.extend_from_slice(code.as_bytes());
+    bytes.extend_from_slice(b"meta\x04\x00\x00\x00\x07\x00\x00\x00ptch");
+    bytes.extend_from_slice(&(container.len() as u32).to_le_bytes());
+    bytes.extend(container);
+    bytes
+}
+
+/// A call to make_device, answered as JSON (an error as its text).
+async fn call(tool: &Rc<dyn kumi_types::contracts::KernelTool>, input: Value) -> Value {
+    let said = tool.execute(input.as_object().unwrap().clone(), kumi_common::abort::Signal::new()).await.unwrap();
+    if said.is_error {
+        json!({ "error": said.text })
+    } else {
+        serde_json::from_str(&said.text).unwrap_or_else(|_| panic!("{}", said.text))
+    }
+}
+
+/// A device's boxes by id, as its file has them.
+fn boxes_by_id(file: &std::path::Path) -> std::collections::HashMap<String, Value> {
+    use kumi_daw_ableton::devices::patch::frozen::read_device;
+    let patcher = read_device(&std::fs::read(file).unwrap()).unwrap().patcher;
+    patcher["patcher"]["boxes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| (entry["box"]["id"].as_str().unwrap().to_string(), entry["box"].clone()))
+        .collect()
+}
+
+/// A device's cords, "from:outlet -> to:inlet".
+fn cords_of(file: &std::path::Path) -> Vec<String> {
+    use kumi_daw_ableton::devices::patch::frozen::read_device;
+    let patcher = read_device(&std::fs::read(file).unwrap()).unwrap().patcher;
+    wires(&patcher)
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn make_device_opens_a_device_thats_already_there_and_says_it_in_the_notation_writing_nothing() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let echo = downloads.path().join("Echo.amxd");
+    std::fs::write(&echo, encode_amxd(DeviceType::MidiEffect, &downloaded_echo())).unwrap();
+    let before = std::fs::read(&echo).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let opened = call(&tool, json!({ "from": echo.to_string_lossy() })).await;
+    assert_eq!((opened["device"].as_str(), opened["type"].as_str()), (Some("Echo"), Some("MIDI effect")), "{opened}");
+    assert_eq!(opened["controls"], json!(["\"Time\" (live.dial: 1–1000 ms; 250)"]));
+    let patch = opened["patch"].as_str().unwrap();
+    for line in [
+        "midiparse_2 = [midiparse]",
+        "pipe_4 = [pipe 0 0 250]",
+        "in -> midiparse_2",
+        "unpack_3.1 -> pipe_4.1",
+        "midiformat_6 -> out",
+        "\"Time\" -> pipe_4.2",
+    ] {
+        assert!(patch.lines().any(|said| said == line), "{line} in:\n{patch}");
+    }
+    assert_eq!(opened["kept"], json!(["comment_9: a comment: \"Echo by someone\"", "panel_10: a panel, on the face"]));
+    assert!(opened["next"].as_str().unwrap().contains("never written"), "{opened}");
+    // What it says is the notation: read back, every box and cord of it is one of the device's.
+    let (notation, found) = kumi_daw_ableton::devices::patch::notation::parse_beside(patch, &Default::default());
+    assert!(found.is_empty(), "{found:?}");
+    assert_eq!(notation.boxes.len(), 5);
+    assert_eq!(std::fs::read(&echo).unwrap(), before, "opening writes nothing");
+    assert!(!library.path().join("Kumi").exists(), "and makes nothing");
+
+    // By its Browser item or its name in the User Library, frozen or not; Live's own encrypted devices can't be opened.
+    let folder = library.path().join("Presets").join("MIDI Effects").join("Max MIDI Effect");
+    std::fs::create_dir_all(&folder).unwrap();
+    let mut main = stringify(&downloaded_echo()).into_bytes();
+    main.push(0);
+    let tick = b"RIFF\x24\x00\x00\x00WAVEfmt ";
+    std::fs::write(
+        folder.join("Frozen Echo.amxd"),
+        frozen(
+            "mmmm",
+            &[("JSON", "Frozen Echo.amxd", 0x11, &main), ("TEXT", "notes.js", 0, b"post('hi');"), ("WAVE", "tick.wav", 0, tick)],
+        ),
+    )
+    .unwrap();
+    let by_name = call(&tool, json!({ "from": "Frozen Echo" })).await;
+    assert_eq!(by_name["device"], "Frozen Echo", "{by_name}");
+    assert!(by_name["frozen"].as_str().unwrap().starts_with("Frozen, with 2 files of its own (notes.js, tick.wav)"), "{by_name}");
+    let by_item = call(&tool, json!({ "from": "user_library/Presets/MIDI Effects/Max MIDI Effect/Frozen Echo.amxd" })).await;
+    assert_eq!(by_item["patch"], by_name["patch"]);
+    let lfo = b"ampf\x04\x00\x00\x00aaaameta\x04\x00\x00\x00\x00\x00\x00\x00ciph\x04\x00\x00\x00\x01\x02\x03\x04".to_vec();
+    std::fs::write(downloads.path().join("LFO.amxd"), &lfo).unwrap();
+    let encrypted = call(&tool, json!({ "from": downloads.path().join("LFO.amxd").to_string_lossy() })).await;
+    assert!(encrypted["error"].as_str().unwrap().contains("encrypted"), "{encrypted}");
+    let missing = call(&tool, json!({ "from": "Nowhere" })).await;
+    assert!(missing["error"].as_str().unwrap().contains("the User Library has no device of that name"), "{missing}");
+    let outside = call(&tool, json!({ "from": "user_library/../secret.amxd" })).await;
+    assert!(outside["error"].as_str().unwrap().contains("isn't an item in the User Library"), "{outside}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn make_device_makes_a_new_device_from_another_with_only_whats_asked_changed_and_never_writes_the_original() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let echo = downloads.path().join("Echo.amxd");
+    std::fs::write(&echo, encode_amxd(DeviceType::MidiEffect, &downloaded_echo())).unwrap();
+    let before = std::fs::read(&echo).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let made = call(
+        &tool,
+        json!({
+            "from": echo.to_string_lossy(),
+            "patch": "shift = [+ 0]\nunpack_3 -> shift -> pipe_4\n\"Transpose\" -> shift.1\npipe_4 = [pipe 0 0 500]\n",
+            "controls": [{ "name": "Transpose", "type": "integer", "min": -12, "max": 12, "default": 0, "unit": "st" }],
+            "remove": ["unpack_3 -> pipe_4", "comment_9"],
+        }),
+    )
+    .await;
+    assert_eq!(made["made"], "Echo 2", "{made}");
+    assert_eq!(made["itemId"], "user_library/Kumi/MIDI Effects/Echo 2");
+    assert!(
+        made["changed"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|said| said == "name: made as \"Echo 2\": it's made from Echo, which keeps its name and its file."),
+        "{made}"
+    );
+    assert!(made.get("wrong").is_none(), "{made}");
+    let controls: Vec<&str> = made["controls"].as_array().unwrap().iter().map(|said| said.as_str().unwrap()).collect();
+    assert_eq!(controls[0], "\"Time\" (live.dial: 1–1000 ms; 250)");
+    assert!(
+        controls.len() == 2 && controls[1].starts_with("\"Transpose\" (live.") && controls[1].ends_with(": -12–12 st; 0)"),
+        "{controls:?}"
+    );
+    assert!(made["next"].as_str().unwrap().contains("(the original has these too: \"Time\")"), "{made}");
+    assert_eq!(std::fs::read(&echo).unwrap(), before, "the original's file is as it was");
+
+    let file = library.path().join("Kumi/MIDI Effects/Echo 2.amxd");
+    let (old, new) = (boxes_by_id(&echo), boxes_by_id(&file));
+    // Every box the change didn't touch is as Max wrote it.
+    for id in ["obj-1", "obj-2", "obj-3", "obj-5", "obj-6", "obj-7", "obj-8", "obj-10"] {
+        assert_eq!(new[id], old[id], "{id}");
+    }
+    assert!(!new.contains_key("obj-9"), "the comment is taken out");
+    // The pipe given again is changed where it sits, keeping its look and its ports.
+    let pipe = &new["obj-4"];
+    assert_eq!(
+        (pipe["text"].as_str(), &pipe["patching_rect"], &pipe["fontname"]),
+        (Some("pipe 0 0 500"), &old["obj-4"]["patching_rect"], &json!("Arial"))
+    );
+    assert_eq!((pipe["numinlets"].as_u64(), pipe["numoutlets"].as_u64()), (Some(3), Some(2)));
+    let shift = new.values().find(|item| item["text"] == "+ 0").expect("the new box");
+    let shift_id = shift["id"].as_str().unwrap();
+    assert!(!["obj-1", "obj-2", "obj-3", "obj-4", "obj-5", "obj-6", "obj-7", "obj-8", "obj-9", "obj-10"].contains(&shift_id), "a new id");
+    let transpose = new.values().find(|item| item["varname"] == "Transpose").expect("the new control");
+    assert_eq!(transpose["presentation"], 1);
+    let rect = |item: &Value| item["presentation_rect"].as_array().unwrap().iter().map(|n| n.as_f64().unwrap()).collect::<Vec<_>>();
+    let (dial, added) = (rect(&new["obj-8"]), rect(transpose));
+    let apart =
+        added[0] >= dial[0] + dial[2] || dial[0] >= added[0] + added[2] || added[1] >= dial[1] + dial[3] || dial[1] >= added[1] + added[3];
+    assert!(apart, "the new control sits clear of the old one: {dial:?} {added:?}");
+    let cords = cords_of(&file);
+    let transpose_id = transpose["id"].as_str().unwrap();
+    for cord in [
+        format!("obj-3:0>{shift_id}:0"),
+        format!("{shift_id}:0>obj-4:0"),
+        format!("{transpose_id}:0>{shift_id}:1"),
+        "obj-3:1>obj-4:1".into(),
+        "obj-8:0>obj-4:2".into(),
+    ] {
+        assert!(cords.contains(&cord), "{cord} in {cords:?}");
+    }
+    assert!(!cords.contains(&"obj-3:0>obj-4:0".to_string()), "the cord taken out");
+    // It records what it was made from: the file and its hash.
+    let record = new.values().find(|item| item["varname"] == "kumi-from").expect("the record");
+    let hash = {
+        use sha2::Digest;
+        hex::encode(sha2::Sha256::digest(&before))
+    };
+    let said = record["text"].as_str().unwrap();
+    // Not where it was on this computer: its file's name, as anyone it's shared with may read it.
+    assert!(said.starts_with(&format!("Kumi made this device from Echo (Echo.amxd, SHA-256 {})", &hash[..16])), "{said}");
+    assert!(!said.contains(&*downloads.path().to_string_lossy()), "{said}");
+    // Opened, the new device says what it was made from.
+    let opened = call(&tool, json!({ "from": file.to_string_lossy() })).await;
+    assert_eq!(opened["madeFrom"].as_str(), Some(said));
+
+    // Made again from the original in this conversation with the name it was made as, it replaces that one; the original
+    // stays as it was.
+    let again = call(&tool, json!({ "from": echo.to_string_lossy(), "name": "Echo 2", "patch": "pipe_4 = [pipe 0 0 750]" })).await;
+    assert_eq!((again["made"].as_str(), again["replaced"].is_string()), (Some("Echo 2"), true), "{again}");
+    assert_eq!(boxes_by_id(&file)["obj-4"]["text"], "pipe 0 0 750");
+    assert!(boxes_by_id(&file).values().all(|item| item["text"] != "+ 0"), "made from the original again, not from the first");
+    // Made from that one, it builds on it: in this conversation, its own device is replaced in place.
+    let further = call(&tool, json!({ "from": file.to_string_lossy(), "name": "Echo 2", "patch": "pipe_4 = [pipe 0 0 1000]" })).await;
+    assert_eq!(further["made"], "Echo 2", "{further}");
+    // The draft it's made from is what it replaced, and the answer says so; made from the original, the original is as it was.
+    let checks = |said: &Value| said["checks"].as_str().unwrap_or_default().to_string();
+    assert!(checks(&further).ends_with("the original was this conversation's own draft, which this replaced (see replaced)"), "{further}");
+    assert!(checks(&again).ends_with("the original's file is as it was"), "{again}");
+    assert_eq!(boxes_by_id(&file)["obj-4"]["text"], "pipe 0 0 1000");
+    let records: Vec<String> = boxes_by_id(&file)
+        .values()
+        .filter(|item| item["varname"] == "kumi-from")
+        .map(|item| item["text"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(records.len(), 1, "one record, saying what each was made from: {records:?}");
+    assert!(
+        records[0].starts_with("Kumi made this device from Echo 2 (user_library/Kumi/MIDI Effects/Echo 2.amxd, SHA-256 ")
+            && records[0].contains("Before that: Kumi made this device from Echo (Echo.amxd, "),
+        "{records:?}"
+    );
+    // In another conversation it's another's: made from it under its own name, the new device is numbered past it.
+    let other = tool_in(library.path(), Default::default());
+    let written = std::fs::read(&file).unwrap();
+    let numbered = call(&other, json!({ "from": file.to_string_lossy(), "name": "Echo 2", "patch": "pipe_4 = [pipe 0 0 10]" })).await;
+    assert_eq!(numbered["made"], "Echo 2 2", "{numbered}");
+    assert_eq!(std::fs::read(&file).unwrap(), written, "a device another conversation made is never written");
+    assert_eq!(std::fs::read(&echo).unwrap(), before);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_change_says_whats_wrong_with_it_and_leaves_what_it_cant_change_as_it_is() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let echo = downloads.path().join("Echo.amxd");
+    std::fs::write(&echo, encode_amxd(DeviceType::MidiEffect, &downloaded_echo())).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let made = call(
+        &tool,
+        json!({
+            "from": echo.to_string_lossy(), "name": "Echo Fixed",
+            "patch": "panel_10 = [metro 10]\n\"Time\" -> [print time]\nmidiparse_2.1 -> nowhere\npipe_4.7 -> pack_5\n",
+            "controls": [{ "name": "Time", "type": "number", "min": 1, "max": 2000, "default": 500, "unit": "ms" }, { "name": "Spare", "type": "switch", "default": false }],
+            "remove": ["out", "ghost_1", "midiparse_2 -> pipe_4"],
+        }),
+    )
+    .await;
+    let wrong: Vec<&str> = made["wrong"].as_array().unwrap().iter().map(|said| said.as_str().unwrap()).collect();
+    for expected in [
+        "patch line 1: panel_10 is kept as it is (a panel, on the face), so it wasn't changed: remove it and make a new box in its place.",
+        "patch line 3: no box is named nowhere (name = [object] makes one), so the cord was left out.",
+        "patch line 4: a cord leaves outlet 7 of [pipe 0 0 250], which has outlets 0 to 1, so Kumi left it out, as Max would.",
+        "remove out: out is the device's way out, so it stays.",
+        "remove ghost_1: the device has no box or control of that name, so nothing was taken out.",
+        "remove midiparse_2 -> pipe_4: there's no such cord, so nothing was taken out.",
+        "patch: \"Spare\" isn't wired, so it changes nothing: take its value from \"Spare\" -> … (or leave the control out).",
+    ] {
+        assert!(wrong.contains(&expected), "{expected} in {wrong:#?}");
+    }
+    assert!(
+        made["changed"].as_array().unwrap().iter().any(|said| said == "controls: \"Time\" was changed in place, where it is on the face."),
+        "{made}"
+    );
+    let new = boxes_by_id(&library.path().join("Kumi/MIDI Effects/Echo Fixed.amxd"));
+    let old = boxes_by_id(&echo);
+    assert_eq!(new["obj-10"], old["obj-10"], "the panel as it was");
+    let time = &new["obj-8"];
+    assert_eq!(time["saved_attribute_attributes"]["valueof"]["parameter_mmax"].as_f64(), Some(2000.0));
+    assert_eq!(time["presentation_rect"], old["obj-8"]["presentation_rect"], "where it was on the face");
+}
+
+/// #772's live test: a Mix dial a model typed into the patch, as an object, was off the face and named "mix_dial" in Live.
+/// A Live parameter given in a patch is left out, with its cords, and controls is named as what makes one, whether the
+/// device is made from another or new.
+#[tokio::test(flavor = "current_thread")]
+async fn a_live_parameter_given_in_a_patch_is_left_out_and_controls_is_named_as_what_makes_one() {
+    use_own_kumi_folder();
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let echo = downloads.path().join("Echo.amxd");
+    std::fs::write(&echo, encode_amxd(DeviceType::MidiEffect, &downloaded_echo())).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let dial = "mix_dial = [live.dial @parameter_enable 1 @parameter_longname Mix @parameter_mmin 0 @parameter_mmax 100 @presentation 1 @presentation_rect 570 10 44 60]\n";
+    let refused = |made: &Value| {
+        made["wrong"].as_array().into_iter().flatten().any(|said| {
+            said.as_str().is_some_and(|said| {
+                said.starts_with("patch line 1: [live.dial @parameter_enable 1") && said.contains("give it in controls")
+            })
+        })
+    };
+    let made =
+        call(&tool, json!({ "from": echo.to_string_lossy(), "name": "Echo Mix", "patch": format!("{dial}mix_dial -> pipe_4.2\n") })).await;
+    assert!(refused(&made), "{made}");
+    let new = boxes_by_id(&library.path().join("Kumi/MIDI Effects/Echo Mix.amxd"));
+    let old = boxes_by_id(&echo);
+    assert_eq!(new.len(), old.len() + 1, "the record's comment is the one box more: no dial");
+    assert!(new.values().all(|item| !item["text"].as_str().is_some_and(|text| text.starts_with("live.dial"))), "{new:#?}");
+
+    let fresh = call(
+        &tool,
+        json!({ "type": "midi_effect", "name": "Mixer", "about": "Passes MIDI through.", "patch": format!("{dial}in -> out\nmix_dial -> [print mix]\n") }),
+    )
+    .await;
+    assert!(refused(&fresh), "a new device is told the same: {fresh}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_frozen_device_made_into_a_new_one_keeps_its_files_frozen_into_it() {
+    use kumi_daw_ableton::devices::patch::frozen::read_device;
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let mut main = stringify(&downloaded_echo()).into_bytes();
+    main.push(0);
+    let tick = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00".to_vec();
+    let path = downloads.path().join("Frozen Echo.amxd");
+    std::fs::write(
+        &path,
+        frozen(
+            "mmmm",
+            &[("JSON", "Frozen Echo.amxd", 0x11, &main), ("TEXT", "notes.js", 0, b"post('hi');"), ("WAVE", "tick.wav", 0, &tick)],
+        ),
+    )
+    .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let made =
+        call(&tool, json!({ "from": path.to_string_lossy(), "name": "Frozen Echo Long", "patch": "pipe_4 = [pipe 0 0 2000]" })).await;
+    assert!(made.get("wrong").is_none(), "{made}");
+    let bytes = std::fs::read(library.path().join("Kumi/MIDI Effects/Frozen Echo Long.amxd")).unwrap();
+    let device = read_device(&bytes).unwrap();
+    let files = device.frozen.expect("still frozen");
+    assert_eq!(files.bytes(files.file("notes.js").unwrap()), Some(&b"post('hi');"[..]));
+    assert_eq!(files.bytes(files.file("tick.wav").unwrap()), Some(&tick[..]));
+    assert_eq!(device.code, "mmmm");
+    let pipe = device.patcher["patcher"]["boxes"].as_array().unwrap().iter().find(|entry| entry["box"]["id"] == "obj-4").unwrap();
+    assert_eq!(pipe["box"]["text"], "pipe 0 0 2000");
+    assert_eq!(&bytes[..24], &before[..24], "its type and meta as the original's");
+    // Every directory field but where each file lies and how long the patcher is stays byte for byte.
+    let fields = |bytes: &[u8], tag: &[u8]| -> Vec<Vec<u8>> {
+        let listed = bytes.windows(4).rposition(|window| window == b"dlst").unwrap();
+        let directory = &bytes[listed..];
+        directory.windows(4).enumerate().filter(|(_, window)| *window == tag).map(|(at, _)| directory[at..at + 12].to_vec()).collect()
+    };
+    for tag in [&b"vers"[..], b"mdat", b"flag", b"type", b"fnam"] {
+        assert_eq!(fields(&bytes, tag), fields(&before, tag), "{}", String::from_utf8_lossy(tag));
+    }
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn kumis_own_device_opened_in_another_conversation_changes_its_code_in_place() {
+    let library = tempfile::tempdir().unwrap();
+    let first = tool_in(library.path(), Default::default());
+    let half = json!({
+        "type": "audio_effect", "name": "Half", "about": "Halves the level.",
+        "patch": "fx = [gen~] { out1 = in1 * 0.5; out2 = in2 * 0.5; }\nin.0 -> fx\nin.1 -> fx.1\nfx -> out.0\nfx.1 -> out.1\n",
+    });
+    assert_eq!(call(&first, half).await["made"], "Half");
+    let original = library.path().join("Kumi/Audio Effects/Half.amxd");
+    let before = std::fs::read(&original).unwrap();
+    // Another conversation, which didn't make it: by its name.
+    let tool = tool_in(library.path(), Default::default());
+    let opened = call(&tool, json!({ "from": "Half" })).await;
+    let patch = opened["patch"].as_str().unwrap();
+    assert!(patch.contains("fx = [gen~] {\nout1 = in1 * 0.5; out2 = in2 * 0.5;\n}"), "{patch}");
+    assert!(patch.lines().any(|line| line == "in -> fx") && patch.lines().any(|line| line == "fx.1 -> out.1"), "{patch}");
+    assert!(opened.get("ways").is_none(), "Kumi's own device's way in and out: {opened}");
+    let made =
+        call(&tool, json!({ "from": "Half", "name": "Quarter", "patch": "fx = [gen~] {\n  out1 = in1 * 0.25; out2 = in2 * 0.25;\n}\n" }))
+            .await;
+    assert!(made.get("wrong").is_none(), "{made}");
+    assert!(
+        made["changed"].as_array().unwrap().iter().any(|said| said.as_str().unwrap().starts_with("patch line 1: fx was changed in place")),
+        "{made}"
+    );
+    let new = boxes_by_id(&library.path().join("Kumi/Audio Effects/Quarter.amxd"));
+    let old = boxes_by_id(&original);
+    let fx = new.values().find(|item| item["varname"] == "fx").unwrap();
+    let was = old.values().find(|item| item["varname"] == "fx").unwrap();
+    assert_eq!((&fx["id"], &fx["patching_rect"]), (&was["id"], &was["patching_rect"]));
+    assert!(code_of_box(fx).contains("in1 * 0.25"), "{fx}");
+    assert_eq!(std::fs::read(&original).unwrap(), before, "Kumi's own device is as it was too");
+}
+
+/// The GenExpr in a gen~ box's codebox.
+fn code_of_box(item: &Value) -> String {
+    item["patcher"]["boxes"].as_array().unwrap().iter().find(|entry| entry["box"]["maxclass"] == "codebox").unwrap()["box"]["code"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
+/// A gen patcher as Max saves one: its GenExpr in a codebox between its in and out.
+fn gen_patcher_saved(code: &str) -> Value {
+    json!({ "fileversion": 1, "classnamespace": "dsp.gen", "rect": [0.0, 0.0, 400.0, 300.0], "boxes": [
+        { "box": { "id": "obj-1", "maxclass": "newobj", "text": "in 1", "numinlets": 0, "numoutlets": 1, "outlettype": [""], "patching_rect": [20.0, 20.0, 30.0, 22.0] } },
+        { "box": { "id": "obj-2", "maxclass": "codebox", "code": code, "numinlets": 1, "numoutlets": 1, "outlettype": [""], "patching_rect": [20.0, 60.0, 200.0, 100.0] } },
+        { "box": { "id": "obj-3", "maxclass": "newobj", "text": "out 1", "numinlets": 1, "numoutlets": 0, "patching_rect": [20.0, 180.0, 37.0, 22.0] } }
+    ], "lines": [
+        { "patchline": { "source": ["obj-1", 0], "destination": ["obj-2", 0] } },
+        { "patchline": { "source": ["obj-2", 0], "destination": ["obj-3", 0] } }
+    ] })
+}
+
+/// #808 in a device made from another: an mc.gen~ keeps its patcher in its wrapper's data, as Max saves it (with the key
+/// Max knows the wrapper by), and an mcs.gen~ or a gen~ in its own field. Each is said with its code, kept when it's given
+/// again unchanged, and changed in place, its code where Max keeps it and the rest of its data as it was; a new one's code
+/// is checked.
+#[tokio::test(flavor = "current_thread")]
+async fn a_devices_mc_gen_and_mcs_gen_are_said_with_their_code_and_changed_in_place_where_max_keeps_it() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let device = json!({ "patcher": {
+        "fileversion": 1, "classnamespace": "box", "rect": [34.0, 87.0, 640.0, 480.0], "openinpresentation": 1,
+        "boxes": [
+            { "box": { "id": "obj-1", "maxclass": "newobj", "text": "plugin~", "numinlets": 2, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 20.0, 53.0, 22.0] } },
+            { "box": { "id": "obj-2", "maxclass": "newobj", "text": "mc.pack~ 2", "numinlets": 2, "numoutlets": 1, "outlettype": ["multichannelsignal"], "patching_rect": [40.0, 60.0, 70.0, 22.0] } },
+            { "box": { "id": "obj-3", "maxclass": "newobj", "text": "mc.gen~ @chans 2", "varname": "each", "numinlets": 1, "numoutlets": 1,
+                "outlettype": ["multichannelsignal"], "patching_rect": [40.0, 100.0, 110.0, 22.0],
+                "data": { "patcher": gen_patcher_saved("out1 = in1 * 0.5;"), "other": "as Max saved it" }, "wrapper_uniquekey": "u284001356" } },
+            { "box": { "id": "obj-4", "maxclass": "newobj", "text": "mcs.gen~", "varname": "whole", "numinlets": 1, "numoutlets": 1,
+                "outlettype": ["multichannelsignal"], "patching_rect": [40.0, 140.0, 60.0, 22.0], "patcher": gen_patcher_saved("out1 = in1 * 0.5;") } },
+            { "box": { "id": "obj-5", "maxclass": "newobj", "text": "mc.unpack~ 2", "numinlets": 1, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 180.0, 80.0, 22.0] } },
+            { "box": { "id": "obj-6", "maxclass": "newobj", "text": "plugout~", "numinlets": 2, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 220.0, 60.0, 22.0] } },
+            { "box": { "id": "obj-7", "maxclass": "newobj", "text": "gen~", "varname": "plain", "numinlets": 1, "numoutlets": 1, "outlettype": ["signal"],
+                "patching_rect": [140.0, 40.0, 40.0, 22.0], "patcher": gen_patcher_saved("out1 = in1 * 0.5;") } }
+        ],
+        "lines": [
+            { "patchline": { "source": ["obj-1", 0], "destination": ["obj-7", 0] } },
+            { "patchline": { "source": ["obj-7", 0], "destination": ["obj-2", 0] } },
+            { "patchline": { "source": ["obj-1", 1], "destination": ["obj-2", 1] } },
+            { "patchline": { "source": ["obj-2", 0], "destination": ["obj-3", 0] } },
+            { "patchline": { "source": ["obj-3", 0], "destination": ["obj-4", 0] } },
+            { "patchline": { "source": ["obj-4", 0], "destination": ["obj-5", 0] } },
+            { "patchline": { "source": ["obj-5", 0], "destination": ["obj-6", 0] } },
+            { "patchline": { "source": ["obj-5", 1], "destination": ["obj-6", 1] } }
+        ]
+    } });
+    let spread = downloads.path().join("Spread.amxd");
+    std::fs::write(&spread, encode_amxd(DeviceType::AudioEffect, &device)).unwrap();
+    let before = std::fs::read(&spread).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let from = spread.to_string_lossy().to_string();
+    let code = |patcher: &Value| {
+        patcher["boxes"].as_array().unwrap().iter().find(|entry| entry["box"]["maxclass"] == "codebox").unwrap()["box"]["code"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    let made = |name: &str| boxes_by_id(&library.path().join(format!("Kumi/Audio Effects/{name}.amxd")));
+    let changed = |said: &Value, name: &str| {
+        said["changed"]
+            .as_array()
+            .is_some_and(|changed| changed.iter().any(|line| line.as_str().unwrap().contains(&format!(": {name} was changed in place"))))
+    };
+
+    let opened = call(&tool, json!({ "from": from })).await;
+    let patch = opened["patch"].as_str().unwrap();
+    assert!(patch.contains("each = [mc.gen~ @chans 2] {\nout1 = in1 * 0.5;\n}"), "{patch}");
+    assert!(patch.contains("whole = [mcs.gen~] {\nout1 = in1 * 0.5;\n}"), "{patch}");
+    assert!(patch.contains("plain = [gen~] {\nout1 = in1 * 0.5;\n}"), "{patch}");
+    assert!(opened.get("kept").is_none(), "{opened}");
+
+    // Given again with new code: in place, the mc.gen~'s code in its data beside the rest of it, as Kumi makes one (without
+    // the original's key).
+    let quieter =
+        call(&tool, json!({ "from": from, "name": "Quieter", "patch": "each = [mc.gen~ @chans 2] {\n  out1 = in1 * 0.25;\n}\nwhole = [mcs.gen~] {\n  out1 = in1 * 0.25;\n}\n" }))
+            .await;
+    assert!(quieter.get("wrong").is_none(), "{quieter}");
+    assert!(changed(&quieter, "each") && changed(&quieter, "whole"), "{quieter}");
+    let (new, old) = (made("Quieter"), boxes_by_id(&spread));
+    let each = &new["obj-3"];
+    assert!(code(&each["data"]["patcher"]).contains("in1 * 0.25"), "{each}");
+    assert_eq!((each.get("patcher"), each.get("wrapper_uniquekey")), (None, None), "{each}");
+    assert_eq!(each["data"]["other"], "as Max saved it", "{each}");
+    assert_eq!((&each["varname"], &each["patching_rect"]), (&old["obj-3"]["varname"], &old["obj-3"]["patching_rect"]));
+    let whole = &new["obj-4"];
+    assert!(code(&whole["patcher"]).contains("in1 * 0.25"), "{whole}");
+    assert_eq!(whole.get("data"), None, "{whole}");
+    assert_eq!(cords_of(&library.path().join("Kumi/Audio Effects/Quieter.amxd")), cords_of(&spread));
+
+    // Given again unchanged, it stays as Max saved it, key and all.
+    let same =
+        call(&tool, json!({ "from": from, "name": "Same", "patch": "each = [mc.gen~ @chans 2] {\n  out1 = in1 * 0.5;\n}\nwhole = [mcs.gen~] {\n  out1 = in1 * 0.75;\n}\n" }))
+            .await;
+    assert!(!changed(&same, "each") && changed(&same, "whole"), "{same}");
+    assert_eq!(made("Same")["obj-3"], old["obj-3"]);
+
+    // Made another gen: its code moves to where that one keeps it, and none of the other's stays.
+    let swapped = call(
+        &tool,
+        json!({ "from": from, "name": "Swapped", "patch": "each = [gen~] {\n  out1 = in1 * 0.5;\n}\nwhole = [mc.gen~ @chans 2] {\n  out1 = in1 * 0.5;\n}\nplain = [mc.gen~ @chans 1] {\n  out1 = in1 * 0.5;\n}\n" }),
+    )
+    .await;
+    assert!(["each", "whole", "plain"].iter().all(|name| changed(&swapped, name)), "{swapped}");
+    let new = made("Swapped");
+    let (each, whole, plain) = (&new["obj-3"], &new["obj-4"], &new["obj-7"]);
+    assert!(code(&each["patcher"]).contains("in1 * 0.5"), "{each}");
+    assert_eq!((&each["data"], each.get("wrapper_uniquekey")), (&json!({ "other": "as Max saved it" }), None), "{each}");
+    for made_wrapper in [whole, plain] {
+        assert!(code(&made_wrapper["data"]["patcher"]).contains("in1 * 0.5"), "{made_wrapper}");
+        assert_eq!(made_wrapper.get("patcher"), None, "{made_wrapper}");
+    }
+    assert_eq!(cords_of(&library.path().join("Kumi/Audio Effects/Swapped.amxd")), cords_of(&spread));
+
+    // A new mc.gen~'s code is checked, as a gen~'s is.
+    let driven = call(
+        &tool,
+        json!({ "from": from, "name": "Driven", "patch": "drive = [mc.gen~ @chans 2] {\n  Param drive(1);\n  Param drive(10);\n  out1 = in1 * drive;\n}\neach -> drive\n" }),
+    )
+    .await;
+    assert!(driven.to_string().contains("declares Param drive 2 times"), "{driven}");
+    assert_eq!(std::fs::read(&spread).unwrap(), before, "the original's file is never written");
+}
+
+/// #772: a device made from another without a name keeps its record beside the next one's, so the call the answer
+/// suggests next (from its file, by its name) replaces it; and a name or an about alone opens a device, making nothing.
+#[tokio::test(flavor = "current_thread")]
+async fn devices_made_without_a_name_each_stay_this_conversations_and_a_name_alone_opens_one() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let (echo, delay) = (downloads.path().join("Echo.amxd"), downloads.path().join("Delay.amxd"));
+    for path in [&echo, &delay] {
+        std::fs::write(path, encode_amxd(DeviceType::MidiEffect, &downloaded_echo())).unwrap();
+    }
+    let tool = tool_in(library.path(), Default::default());
+    let first = call(&tool, json!({ "from": echo.to_string_lossy(), "patch": "pipe_4 = [pipe 0 0 300]" })).await;
+    assert_eq!(first["made"], "Echo 2", "{first}");
+    let second = call(&tool, json!({ "from": delay.to_string_lossy(), "patch": "pipe_4 = [pipe 0 0 400]" })).await;
+    assert_eq!(second["made"], "Delay 2", "{second}");
+    let again = call(&tool, json!({ "from": first["file"], "name": "Echo 2", "patch": "pipe_4 = [pipe 0 0 350]" })).await;
+    assert_eq!((again["made"].as_str(), again["replaced"].is_string()), (Some("Echo 2"), true), "{again}");
+
+    let named = call(&tool, json!({ "from": echo.to_string_lossy(), "name": "Echo", "about": "An echo." })).await;
+    assert!(named["patch"].is_string() && named.get("made").is_none(), "{named}");
+    assert!(named["aside"].as_str().unwrap().starts_with("name, about: a device is made from another only with a change"), "{named}");
+    assert!(!library.path().join("Kumi/MIDI Effects/Echo.amxd").exists(), "nothing made");
+}
+
+/// #772: Kumi's output stage, and its safety net, are only a sound device's way out when Kumi made the device: a
+/// downloaded one's [plugout~] given in a change is one more [plugout~], and the answer says nothing of Kumi's stage.
+#[tokio::test(flavor = "current_thread")]
+async fn only_a_sound_device_kumi_made_goes_out_through_its_output_stage() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let device = json!({ "patcher": {
+        "fileversion": 1, "classnamespace": "box", "rect": [34.0, 87.0, 640.0, 480.0], "openinpresentation": 1,
+        "boxes": [
+            { "box": { "id": "obj-1", "maxclass": "newobj", "text": "plugin~", "numinlets": 2, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 20.0, 53.0, 22.0] } },
+            { "box": { "id": "obj-2", "maxclass": "newobj", "text": "*~ 0.5", "numinlets": 2, "numoutlets": 1, "outlettype": ["signal"], "patching_rect": [40.0, 60.0, 40.0, 22.0] } },
+            { "box": { "id": "obj-3", "maxclass": "newobj", "text": "plugout~", "numinlets": 2, "numoutlets": 2, "outlettype": ["signal", "signal"], "patching_rect": [40.0, 100.0, 60.0, 22.0] } }
+        ],
+        "lines": [
+            { "patchline": { "source": ["obj-1", 0], "destination": ["obj-2", 0] } },
+            { "patchline": { "source": ["obj-2", 0], "destination": ["obj-3", 0] } }
+        ]
+    } });
+    let quiet = downloads.path().join("Quiet.amxd");
+    std::fs::write(&quiet, encode_amxd(DeviceType::AudioEffect, &device)).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let patch = "louder = [*~ 2.]\nin -> louder\nlouder -> [plugout~]\n";
+    let theirs = call(&tool, json!({ "from": quiet.to_string_lossy(), "name": "Louder", "patch": patch })).await;
+    assert!(theirs.get("made").is_some() && !theirs.to_string().contains("output stage"), "{theirs}");
+    let made = boxes_by_id(&library.path().join("Kumi/Audio Effects/Louder.amxd"));
+    assert_eq!(made.values().filter(|item| item["text"] == "plugout~").count(), 2, "its own and the new one");
+
+    let half = json!({
+        "type": "audio_effect", "name": "Half", "about": "Halves the level.",
+        "patch": "fx = [gen~] { out1 = in1 * 0.5; out2 = in2 * 0.5; }\nin.0 -> fx\nin.1 -> fx.1\nfx -> out.0\nfx.1 -> out.1\n",
+    });
+    assert_eq!(call(&tool, half).await["made"], "Half");
+    let ours =
+        call(&tool, json!({ "from": "Half", "name": "Half Louder", "patch": "louder = [*~ 2.]\nfx -> louder\nlouder -> [plugout~]\n" }))
+            .await;
+    assert!(ours.to_string().contains("was made as out: Kumi's output stage, with its safety net, is the device's only way out"), "{ours}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_device_whose_file_cant_be_made_again_whole_is_refused_and_nothing_is_written() {
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let good = downloads.path().join("Echo.amxd");
+    std::fs::write(&good, encode_amxd(DeviceType::MidiEffect, &downloaded_echo())).unwrap();
+    assert_eq!(
+        call(&tool, json!({ "from": good.to_string_lossy(), "name": "Echo Long", "patch": "pipe_4 = [pipe 0 0 900]" })).await["made"],
+        "Echo Long"
+    );
+    let draft = library.path().join("Kumi/MIDI Effects/Echo Long.amxd");
+    let drafted = std::fs::read(&draft).unwrap();
+    // A frozen device whose files overlap: the last starts inside the one before it.
+    let mut main = stringify(&downloaded_echo()).into_bytes();
+    main.push(0);
+    let mut overlapping =
+        frozen("mmmm", &[("JSON", "Echo.amxd", 0x11, &main), ("TEXT", "a.js", 0, b"post(1);"), ("TEXT", "b.js", 0, b"post(2);")]);
+    let places: Vec<usize> = overlapping.windows(4).enumerate().filter(|(_, window)| *window == b"of32").map(|(at, _)| at + 8).collect();
+    let start = u32::from_be_bytes(overlapping[places[1]..places[1] + 4].try_into().unwrap()) + 1;
+    overlapping[places[2]..places[2] + 4].copy_from_slice(&start.to_be_bytes());
+    // And a device cut short: its patcher's chunk says it's longer than the file.
+    let mut short = std::fs::read(&good).unwrap();
+    let size = u32::from_le_bytes(short[28..32].try_into().unwrap()) + 100;
+    short[28..32].copy_from_slice(&size.to_le_bytes());
+    for (name, bytes, said) in [("Overlapping.amxd", overlapping, "frozen files overlap"), ("Short.amxd", short, "is cut short")] {
+        let path = downloads.path().join(name);
+        std::fs::write(&path, &bytes).unwrap();
+        let opened = call(&tool, json!({ "from": path.to_string_lossy() })).await;
+        assert!(opened.get("error").is_none(), "it opens to be read: {opened}");
+        let refused = call(&tool, json!({ "from": path.to_string_lossy(), "name": "Echo Long", "patch": "pipe_4 = [pipe 0 0 10]" })).await;
+        assert!(refused["error"].as_str().unwrap().contains(said), "{refused}");
+        assert_eq!(std::fs::read(&draft).unwrap(), drafted, "the draft of that name is as it was");
+        let other = call(&tool, json!({ "from": path.to_string_lossy(), "patch": "pipe_4 = [pipe 0 0 10]" })).await;
+        assert!(other["error"].is_string(), "{other}");
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+    }
+    let written: Vec<String> = std::fs::read_dir(library.path().join("Kumi/MIDI Effects"))
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(written, ["Echo Long.amxd"], "nothing else is written, not even an empty file");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_device_is_only_ever_opened_from_this_computer_and_a_name_in_another_case_is_another_device() {
+    let library = tempfile::tempdir().unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    for from in ["\\\\host\\share\\Echo.amxd", "//host/share/Echo.amxd", "Presets/Echo.amxd", "C:Echo", "Echo\u{7}"] {
+        let refused = call(&tool, json!({ "from": from })).await;
+        assert!(refused["error"].is_string(), "{from}: {refused}");
+    }
+    // Kumi's own device, made in another conversation, changed under its name in another case.
+    let first = tool_in(library.path(), Default::default());
+    let made = call(&first, json!({ "type": "midi_effect", "name": "Echo", "about": "Passes MIDI.", "patch": "in -> out" })).await;
+    assert_eq!(made["made"], "Echo", "{made}");
+    let original = library.path().join("Kumi/MIDI Effects/Echo.amxd");
+    let before = std::fs::read(&original).unwrap();
+    let again = call(&tool, json!({ "from": "Echo", "name": "ECHO", "patch": "in -> [t i] -> out" })).await;
+    let file = std::path::PathBuf::from(again["file"].as_str().unwrap());
+    assert!(file.exists() && std::fs::read(&original).unwrap() == before, "{again}");
+    let same = std::fs::canonicalize(&file).unwrap() == std::fs::canonicalize(&original).unwrap();
+    assert!(!same, "a name in another case is never the original's file, whatever the disk makes of case: {again}");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn a_frozen_device_whose_big_file_two_thousand_boxes_use_opens_and_changes_in_a_moment() {
+    // 2,000 [big] boxes and a frozen-in big.maxpat of one 2 MB box: read once and shared, not 2,000 times (4 GB).
+    // (devices::patch's own test reads a 20 MB one for 10,000 boxes; this one stays quick on a busy runner.)
+    let library = tempfile::tempdir().unwrap();
+    let downloads = tempfile::tempdir().unwrap();
+    let mut device = downloaded_echo();
+    let boxes = device["patcher"]["boxes"].as_array_mut().unwrap();
+    for n in 0..2_000 {
+        boxes.push(json!({ "box": { "id": format!("obj-big-{n}"), "maxclass": "newobj", "text": "big", "numinlets": 0, "numoutlets": 0,
+            "patching_rect": [600.0, 20.0 + n as f64 * 30.0, 30.0, 22.0] } }));
+    }
+    let mut main = stringify(&device).into_bytes();
+    main.push(0);
+    let huge = "x".repeat(2 * 1024 * 1024);
+    let big =
+        stringify(&json!({ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "comment", "text": huge } }], "lines": [] } }));
+    let path = downloads.path().join("Big Echo.amxd");
+    std::fs::write(&path, frozen("mmmm", &[("JSON", "Big Echo.amxd", 0x11, &main), ("JSON", "big.maxpat", 0, big.as_bytes())])).unwrap();
+    let tool = tool_in(library.path(), Default::default());
+    let opened = call(&tool, json!({ "from": path.to_string_lossy() })).await;
+    assert_eq!(opened["device"], "Big Echo", "{}", opened.to_string().chars().take(300).collect::<String>());
+    let made = call(&tool, json!({ "from": path.to_string_lossy(), "name": "Big Echo Long", "patch": "pipe_4 = [pipe 0 0 900]" })).await;
+    assert_eq!(made["made"], "Big Echo Long", "{}", made.to_string().chars().take(300).collect::<String>());
+}
