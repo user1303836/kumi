@@ -303,7 +303,7 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
         return plan
     if setup_daw is None:
         raise SetupError("needs_runtime_client", "Setup needs Kumi's runtime to plan the DAW step.")
-    dry = _component(setup_daw({"daw": daw, "dry_run": True}))
+    dry = _ask_runtime(setup_daw, {"daw": daw, "dry_run": True}, f"Kumi's runtime couldn't plan the step for {DAWS[daw]}")
     if dry["state"] in ("same", "newer"):
         plan.update(step="none", paths=[], effects=[], component=dry)
     elif dry["state"] == "other_owner":
@@ -324,9 +324,27 @@ def plan(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir: 
     result["digest"] = _digest(result)
     try:
         _write_json(data_dir / "setup" / "plan.json", result)
+        component = result.get("component") or {}
+        if result["step"] == "none" and component.get("state") == "same":  # installed by this Kumi home already
+            receipt = _read_json(data_dir / "setup" / "receipt.json") or {}
+            if daw not in (receipt.get("daw_components") or {}):
+                _record_component(data_dir, daw, component, installed_at=None)
     except OSError as error:
         raise _io_failed(data_dir, error) from None
     return result
+
+
+def _ask_runtime(setup_daw: Callable[[dict], Any], args: dict, doing: str) -> dict:
+    """The runtime's `setup_daw`, its answer checked. The client's own failures (a refusal, a runtime that won't
+    start) become SetupError with the runtime's code, so setup's callers handle one kind of error."""
+    try:
+        return _component(setup_daw(args))
+    except SetupError:
+        raise
+    except Exception as error:
+        code = getattr(error, "code", None)
+        reason = getattr(error, "reason", None) or str(error) or type(error).__name__
+        raise SetupError(code if isinstance(code, str) and code else "daw_step_failed", f"{doing}: {reason}") from None
 
 
 def _cached_plan(daw: str, data_dir: Path, now: int | None = None) -> dict | None:
@@ -525,23 +543,24 @@ def _install_runtime(approved: dict, data_dir: Path, target: str, progress: Call
     return f"Kumi {version}'s runtime is installed in {final}."
 
 
+def _record_component(data_dir: Path, daw: str, component: Mapping[str, Any], *, installed_at: int | None) -> None:
+    """What `setup_daw` reported for `daw`, in the receipt that status() reads."""
+    receipt = _read_json(data_dir / "setup" / "receipt.json") or {"schema": SCHEMA}
+    components = receipt.get("daw_components") if isinstance(receipt.get("daw_components"), dict) else {}
+    parts = [part for part in component.get("parts") or [] if isinstance(part, dict)]
+    components[daw] = {"component": component.get("component"), "version": component.get("version"),
+                       "paths": component.get("paths") or [], "after": component.get("after"), "parts": parts,
+                       "installed_at": installed_at}
+    receipt["daw_components"] = components
+    _write_json(data_dir / "setup" / "receipt.json", receipt)
+
+
 def _install_component(approved: dict, setup_daw: Callable[[dict], Any] | None, data_dir: Path) -> str:
     if setup_daw is None:
         raise SetupError("needs_runtime_client", "Setup needs Kumi's runtime for the DAW step.")
-    try:
-        done = _component(setup_daw({"daw": approved["daw"], "dry_run": False}))
-    except SetupError:
-        raise
-    except Exception as error:  # the runtime client's own failures (refusals, a dead process)
-        raise SetupError("daw_step_failed", f"Installing Kumi's part in {DAWS[approved['daw']]} failed: {error}") from None
-    receipt = _read_json(data_dir / "setup" / "receipt.json") or {"schema": SCHEMA}
-    components = receipt.get("daw_components") if isinstance(receipt.get("daw_components"), dict) else {}
-    parts = [part for part in done.get("parts") or [] if isinstance(part, dict)]
-    components[approved["daw"]] = {"component": done.get("component"), "version": done.get("version"),
-                                   "paths": done["paths"], "after": done.get("after"), "parts": parts,
-                                   "installed_at": done.get("installed_at") or _now_ms()}
-    receipt["daw_components"] = components
-    _write_json(data_dir / "setup" / "receipt.json", receipt)
+    done = _ask_runtime(setup_daw, {"daw": approved["daw"], "dry_run": False},
+                        f"Installing Kumi's part in {DAWS[approved['daw']]} failed")
+    _record_component(data_dir, approved["daw"], done, installed_at=done.get("installed_at") or _now_ms())
     after = {"choose_control_surface": " In Live, choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI).",
              "restart_daw": f" Restart {DAWS[approved['daw']]} to load it.",
              "enable_tool": " Enable the Kumi tool in Renoise's Tool Browser."}.get(done.get("after") or "", "")

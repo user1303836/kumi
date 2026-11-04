@@ -232,6 +232,38 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(self.install(Served(b""), setup_daw=runtime)["error"]["code"], "owned_elsewhere")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, runtime.calls)
 
+    def test_a_runtime_that_refuses_or_fails_is_a_setup_error_with_its_code(self) -> None:
+        self.install_runtime()
+
+        class Refusal(Exception):  # what the runtime client raises for an isError answer
+            code, reason = "other_daw", "Kumi's runtime in this profile works in REAPER"
+
+        def refuses(args: dict) -> dict:
+            raise Refusal()
+
+        with self.assertRaises(setup.SetupError) as raised:
+            self.plan(setup_daw=refuses)
+        self.assertEqual(raised.exception.code, "other_daw")
+        self.assertIn("works in REAPER", raised.exception.message)
+        self.plan(setup_daw=Runtime())
+
+        def dies_installing(args: dict) -> dict:
+            if args["dry_run"]:
+                return Runtime()(args)
+            raise RuntimeError("Kumi's runtime stopped")
+
+        result = self.install(Served(b""), setup_daw=dies_installing)
+        self.assertEqual(result["error"]["code"], "daw_step_failed")
+        self.assertIn("runtime stopped", result["error"]["message"])
+        self.assertEqual(self.status()["daw_component"]["state"], "not_installed")
+
+    def test_a_component_this_kumi_installed_before_is_recorded_when_planning(self) -> None:
+        self.install_runtime()
+        self.assertEqual(self.status()["state"], "needs_daw_component")
+        self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none")
+        state = self.status()
+        self.assertEqual((state["state"], state["daw_component"]["state"]), ("ready", "installed"))
+
     def test_adopting_the_installation_that_owns_the_component_records_only_its_folder(self) -> None:
         self.install_runtime()
         standalone = self.data.parent / "standalone-kumi"
