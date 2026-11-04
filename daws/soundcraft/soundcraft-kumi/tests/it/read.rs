@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 const STALE_AFTER: Duration = Duration::from_millis(1100);
 
 /// The session SoundCraft 0.17.0 showed (`session.inspect {"detail":"full"}`).
-fn recorded() -> Value {
+pub fn recorded() -> Value {
     let all = vectors("soundcraft-0.17.0.ndjson");
     let full = all.iter().find(|exchange| exchange["method"] == "session.inspect" && exchange["params"]["detail"] == "full").unwrap();
     full["reply"]["result"].clone()
@@ -83,7 +83,7 @@ fn note(start: i64, pitch: u8, channel: u8, length: i64) -> Value {
 
 /// What in an answer isn't where Kumi's app looks for refs: a SoundCraft ref under a key that holds none, or under a key
 /// that holds refs, something that isn't one. (daw-bridge's `misplaced_refs` knows only some of SoundCraft's kinds.)
-fn misplaced(answer: &Value) -> Vec<String> {
+pub fn misplaced(answer: &Value) -> Vec<String> {
     fn walk(value: &Value, path: &str, holds: (bool, bool), found: &mut Vec<String>) {
         let is_ref = |text: &str| text.parse::<Ref>().is_ok();
         match value {

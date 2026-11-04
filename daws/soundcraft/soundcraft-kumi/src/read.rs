@@ -11,7 +11,10 @@
 //! step to take them. SoundCraft gives ids out again, so a ref or parent comes with the epoch it came from, and one
 //! from another epoch is stale. What a read can be refused for without the app is refused before it's asked. A page ends
 //! at the limit asked for (50, at most 200) or at the bytes an answer may take. Its cursor names the object it starts at,
-//! so a list that changed between pages says so rather than skipping or repeating rows.
+//! so a list that changed between pages says so rather than skipping or repeating rows. `call` runs one of SoundCraft's
+//! read-only commands by its id ([`call`]).
+pub mod call;
+
 use crate::control::{Control, Error};
 use crate::refs::{fingerprints, lane, Id, Kind, Lives, Missing, Ref, Slot};
 use crate::timebase::{Timebase, PPQ};
@@ -25,9 +28,10 @@ use tokio::sync::watch;
 
 pub const DEFAULT_LIMIT: usize = 50;
 pub const MAX_LIMIT: usize = 200;
-/// What `read` takes as a kind (`note` with a clip as its parent, `param` with an insert, `point` with a lane).
-pub const KINDS: [&str; 13] =
-    ["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"];
+/// What `read` takes as a kind (`note` with a clip as its parent, `param` with an insert, `point` with a lane; `call`
+/// with a command).
+pub const KINDS: [&str; 14] =
+    ["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point", "call"];
 /// The bytes a page's rows may take: the host takes answers of up to 256 KiB, and the rest is the envelope.
 const ANSWER_BYTES: usize = 224 * 1024;
 /// How long one inspection serves the reads after it.
@@ -66,13 +70,15 @@ pub struct Reads {
     told: watch::Sender<String>,
     /// The built-in plug-ins as `engine.plugins` describes them, asked once: they come with the app's version.
     plugins: Option<Vec<Value>>,
+    /// The ids of the app's commands (`engine.commands`), asked once, for what `call` refuses.
+    commands: Option<Vec<String>>,
 }
 
 impl Reads {
     pub fn new(control: Control) -> Self {
         let lives = Lives::new();
         let (told, _) = watch::channel(lives.epoch().to_string());
-        Self { control, lives, looked: None, inspected: None, told, plugins: None }
+        Self { control, lives, looked: None, inspected: None, told, plugins: None, commands: None }
     }
 
     /// The epoch as it changes, readable while a read holds the reads.
@@ -160,9 +166,13 @@ impl Reads {
         self.inspected = kept.filter(|(_, _, held)| same && *held == content);
     }
 
-    /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, or `{ref}` for one object, with the `epoch` the ref or
-    /// parent came from. Not started after `until` (the request's deadline).
+    /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, `{ref}` for one object, or `{kind: "call", command,
+    /// params?}` for a read-only command's answer ([`call`]), with the `epoch` the refs came from. Not started after
+    /// `until` (the request's deadline).
     pub async fn read(&mut self, params: &Value, until: Instant) -> Result<Value, Refusal> {
+        if params.get("kind").and_then(Value::as_str) == Some("call") {
+            return self.call(params, until).await;
+        }
         let (kind, one, parent, cursor, epoch) =
             (text(params, "kind")?, text(params, "ref")?, text(params, "parent")?, text(params, "cursor")?, text(params, "epoch")?);
         let limit = limit(params)?;
