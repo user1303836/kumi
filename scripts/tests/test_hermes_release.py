@@ -189,6 +189,7 @@ class PinTest(unittest.TestCase):
         for problem, data in bad.items():
             with self.subTest(problem):
                 self.github = FakeGitHub()
+                self.out.unlink(missing_ok=True)
                 self.github.replace_bundle(target, data)
                 self.assertIn(f"kumi-{target}.tar.xz", self.refused())
 
