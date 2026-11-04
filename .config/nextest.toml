@@ -71,7 +71,8 @@ fail-fast = false
 # The extension REAPER loads is built, loaded and called through its C++ shim on every platform by CI's REAPER job.
 # Windows' job leaves out the slowest of these there (9 to 16 s each: ci.yml's KUMI_WINDOWS_EXTENDED_ONLY); `extended`
 # runs them.
-# SoundCraft's control channel from Kumi's side: its loopback connections, and what they do at their limits (control).
+# SoundCraft's control channel from Kumi's side: its loopback connections, and what they do at their limits (control),
+# and SoundCraft started with it on, a process of its own (launch).
 [profile.ci-os]
 default-filter = '''
 (
@@ -97,7 +98,7 @@ default-filter = '''
   | (binary_id(ableton-mcp-server::it) & test(/^(extension_launcher|extension_channel|stdio|fixture_paths|project)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(host_probes|analysis_runner|sqlite_reader|native_connected)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(remote_adapter|loopback)::/))
-  | (binary_id(soundcraft-kumi::it) & test(/^control::/))
+  | (binary_id(soundcraft-kumi::it) & test(/^(control|launch)::/))
   | (binary_id(kumi-ai::it) & test(/^ai_transport::/))
   | (binary_id(kumi-net::it) & test(/^network::/))
   | (binary_id(kumi-store::it) & test(/^store::/))

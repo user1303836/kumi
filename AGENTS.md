@@ -38,7 +38,7 @@ daws/                       everything DAW-specific, one folder per DAW
   reaper/                   reaper-kumi/ (REAPER's extension; SDK in sdk/), kumi-daw-reaper/ (L5)
   renoise/                  com.kumi.Bridge.xrnx/ (Lua tool), tests/ (against a mock Renoise), kumi-daw-renoise/ (L5)
   soundcraft/               soundcraft-kumi/ (Kumi's bridge beside SoundCraft, a program its host starts; so far the
-                            client of SoundCraft's control channel, and its recorded vectors)
+                            client of SoundCraft's control channel and its recorded vectors, and starting SoundCraft)
 testdata/oracles/<crate>/   recorded oracles; .ignore hides them from search (rg -u finds them)
 plugin-formats/             plug-in preset formats Kumi builds in
 vendor/willington/          Willington's files: owner only
