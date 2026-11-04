@@ -1208,8 +1208,9 @@ mod tests {
     /// The kernel's listing is `ps -axo pid=,comm=`'s, without the `ps`, held to two `ps` lists made just before and just
     /// after it, and only where those agree: another test's processes spawn, exec and end around this one. Every
     /// process in both is in the kernel's list, another account's too, in the same order. Where both name it alike, this
-    /// account's are named exactly as `ps` names them: on Linux every one, and on macOS those it names by a path, as a
-    /// DAW started from the Finder or the Dock is (and a child known only by its argv[0] by it). Other names aren't
+    /// account's are named as `ps` names them: on Linux every one (an AppImage's entry, `AppRun` to `ps`, by its program's
+    /// path, as Kumi lists it), and on macOS those it names by a path, as a DAW started from the Finder or the Dock is (and
+    /// a child known only by its argv[0] by it). Other names aren't
     /// compared: on macOS `ps`, setuid root, reads any process's argv[0], which can be a title ("Core Audio Driver
     /// (NullAudio.driver)" on a runner), where Kumi, not root, names another account's by its program's path.
     #[cfg(any(target_os = "macos", target_os = "linux"))]
@@ -1271,7 +1272,12 @@ mod tests {
             steady.iter().filter(|(_, uid, name)| *uid == me && (cfg!(target_os = "linux") || name.starts_with('/'))).collect();
         assert!(!compared.is_empty(), "this account's processes are compared");
         for (pid, _, name) in &compared {
-            assert_eq!(kernel[pid], name, "pid {pid}");
+            let name = if cfg!(target_os = "linux") {
+                listed_name(name.clone(), || std::fs::read_link(format!("/proc/{pid}/exe")).ok())
+            } else {
+                name.clone()
+            };
+            assert_eq!(kernel[pid], &name, "pid {pid}");
         }
         let steady_pids: HashSet<u32> = steady.iter().map(|(pid, _, _)| *pid).collect();
         let ps_order: Vec<u32> = before.iter().map(|(pid, _, _)| *pid).filter(|pid| steady_pids.contains(pid)).collect();
