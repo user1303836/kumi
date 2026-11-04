@@ -254,8 +254,15 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
         with:
           fetch-depth: 2
+          # The job runs Hermes's plugin checks, which load the plugin's code: no token in .git/config.
+          persist-credentials: false
       - id: affected
         run: python3 scripts/dev.py affected ${KUMI_BASE:+--base "$KUMI_BASE"} --github-output
+      # The plugin's own floor, Python 3.11 (Hermes's v0.22.7 environment is newer).
+      - if: steps.affected.outputs.hermes_plugin == 'true'
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
+        with:
+          python-version: "3.11"
       - name: Hermes v0.22.7 and its locked Python, in a folder of their own
         id: hermes
         if: steps.affected.outputs.hermes_plugin == 'true'
@@ -284,12 +291,13 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
               output.write(f"python={python}\n")
           PY
-      - name: The plugin's tests, on Hermes's Python
+      - name: The plugin's tests, on Python 3.11 and on Hermes's own Python
         if: steps.affected.outputs.hermes_plugin == 'true'
         env:
           PYTHON: ${{ steps.runtime.outputs.python }}
           PYTHONDONTWRITEBYTECODE: "1"
         run: |
+          python3.11 -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
           "$PYTHON" --version
           "$PYTHON" -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
       - name: The Hermes catalog's checks (validate --install-deps, doctor --ci, the payload scan, the self-updater check)
@@ -397,7 +405,8 @@ jobs:
     # branch passed on Linux, macOS and Windows.
     name: Required CI
     if: always()
-    needs: [rust-linux, rust-lint, checks, hermes-plugin, reaper-extension, rust-macos, rust-windows, remote-script-platforms]
+    needs: [rust-linux, rust-lint, checks, hermes-plugin, reaper-extension, rust-macos, rust-windows, remote-script-platforms,
+            hermes-plugin-platforms]
     runs-on: ubuntu-24.04
     steps:
       - name: Every job passed
@@ -410,7 +419,7 @@ jobs:
             test "$result" = success
           done
           for result in "${{ needs.rust-macos.result }}" "${{ needs.rust-windows.result }}" \
-            "${{ needs.remote-script-platforms.result }}"; do
+            "${{ needs.remote-script-platforms.result }}" "${{ needs.hermes-plugin-platforms.result }}"; do
             if [ "$EVENT" = pull_request ]; then test "$result" = skipped; else test "$result" = success; fi
           done
 
@@ -569,6 +578,37 @@ jobs:
           python-version: "3.11"
       - run: python -m unittest discover -s . -p 'test_*.py'
       - run: python -m compileall -q AbletonMcpBridge
+
+  hermes-plugin-platforms:
+    # The Hermes plugin's tests on macOS and on Windows, where its one-runtime-per-profile lock is msvcrt's and its
+    # runtime starts without a console (Linux's run in Hermes plugin).
+    name: Hermes plugin / ${{ matrix.os }}
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, windows-2025]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Stop Windows Defender scanning the workspace
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: Set-MpPreference -DisableRealtimeMonitoring $true
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1 (Node 24)
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
+        with:
+          python-version: "3.11"
+      - name: The plugin's tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
 
   main-failed:
     # macOS and Windows first test a change once it's on main, and a release waits for main's CI on all three systems: a

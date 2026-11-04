@@ -5,7 +5,11 @@ It takes the runtime's arguments, answers MCP over stdin and stdout as the runti
 `--state-dir`, with a resource update after each. Standard library only.
 
     python fixture_runtime.py serve --stdio --state-dir DIR --kumi-home DIR --daw ableton
-        [--server-version V] [--protocol P] [--exit-on TOOL] [--slow TOOL=SECONDS]
+        [--server-version V] [--protocol P] [--exit-on TOOL] [--slow TOOL=SECONDS] [--leased-by SESSION]
+        [--refuse-subscribe URI] [--stderr-flood BYTES] [--close-stdout] [--ignore-eof]
+
+The knobs make it a runtime that's the wrong version, crashes or answers late on a tool, holds a lease for another chat,
+refuses a subscription, floods its stderr, closes its output and stays, or stays after its stdin ends.
 
 It writes what it was started with (`fixture-start.json`: its arguments and environment's names) and every message it
 received (`fixture-requests.jsonl`) into the state directory, for tests to read.
@@ -55,6 +59,9 @@ class Fixture:
         self.slow = dict(item.split("=", 1) for item in options.slow)
         self.writing = threading.Lock()
         self.record("fixture-start.json", {"argv": sys.argv[1:], "environment": sorted(os.environ)})
+        if options.stderr_flood:
+            sys.stderr.write("noise " * (options.stderr_flood // 6) + "\n")
+            sys.stderr.flush()
 
     # The wire.
     def send(self, message: dict) -> None:
@@ -76,6 +83,12 @@ class Fixture:
                 self.send({"jsonrpc": "2.0", "id": ident, "error": {"code": -32601, "message": str(unknown)}})
                 continue
             self.send({"jsonrpc": "2.0", "id": ident, "result": result})
+            if self.options.close_stdout and method == "initialize":
+                sys.stdout.close()
+                os.close(1)  # closes its output and goes on running, as a stuck runtime might
+                time.sleep(3600)
+        if self.options.ignore_eof:
+            time.sleep(3600)  # stays after its stdin ends, as a runtime that never settles might
 
     def answer(self, method: str, params: dict) -> dict:
         if method == "initialize":
@@ -83,7 +96,11 @@ class Fixture:
                     "capabilities": {"tools": {}, "resources": {"subscribe": True}}}
         if method == "tools/list":
             return {"tools": [{"name": name, "inputSchema": {"type": "object"}} for name in TOOLS]}
+        if method == "resources/list":
+            return {"resources": [{"uri": uri, "name": name} for name, uri in RESOURCES.items()]}
         if method == "resources/subscribe":
+            if params.get("uri") in self.options.refuse_subscribe:
+                raise LookupError(f"no subscription to {params.get('uri')}")
             self.subscribed.add(params["uri"])
             return {}
         if method == "tools/call":
@@ -98,7 +115,10 @@ class Fixture:
             time.sleep(float(self.slow[name]))
         if name not in TOOLS:
             return error("unknown_tool", f"kumi serve has no tool {name}")
-        value = TOOLS[name](self, args, host)
+        try:
+            value = TOOLS[name](self, args, host)
+        except (KeyError, TypeError, ValueError, AttributeError) as invalid:  # an OpError::Invalid, as the runtime's
+            value = error("invalid", f"{name}'s arguments don't fit its schema: {invalid!r}")
         if "error" in value:
             return {"isError": True, "content": [{"type": "text", "text": value["error"]["reason"]}],
                     "structuredContent": value}
@@ -161,6 +181,7 @@ def connect(fixture: Fixture, args: dict, host: dict) -> dict:
         return error("other_daw", f"kumi serve was started for {fixture.daw}")
     fixture.connected = True
     fixture.owner = {"profile": host.get("profile_id"), "session_id": host.get("session_id"), "pid": os.getpid()}
+    fixture.seq += 1
     fixture.record("owner.json", {"schema": 1, "seq": fixture.seq, "at": now(), "owner": fixture.owner,
                                   "daw": fixture.daw, "heartbeat": now()})
     fixture.publish("status", "focus", "history")
@@ -188,6 +209,9 @@ def read(fixture: Fixture, args: dict, host: dict) -> dict:
 
 
 def change(fixture: Fixture, args: dict, host: dict) -> dict:
+    if fixture.options.leased_by:
+        owner = {"profile": "default", "session_id": fixture.options.leased_by, "pid": 4242, "since": now()}
+        return {"error": {"code": "leased", "reason": "Another chat holds the DAW for changes.", "owner": owner}}
     refused = {"state": "refused", "history_ids": [], "steps": [], "summary": "Nothing changed.", "undo_available": False}
     if (args.get("expected_project_key"), str(args.get("expected_epoch"))) != (fixture.set["key"], fixture.epoch):
         return {**refused, "reason": "stale: the project or its epoch changed since it was read; read it again"}
@@ -249,6 +273,11 @@ def main() -> None:
     parser.add_argument("--protocol", default=PROTOCOL)
     parser.add_argument("--exit-on")
     parser.add_argument("--slow", action="append", default=[])
+    parser.add_argument("--leased-by", help="refuse changes as another chat's lease would")
+    parser.add_argument("--refuse-subscribe", action="append", default=[])
+    parser.add_argument("--stderr-flood", type=int, default=0, help="bytes written to stderr on start")
+    parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
+    parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
     Fixture(parser.parse_args()).serve()
 
 

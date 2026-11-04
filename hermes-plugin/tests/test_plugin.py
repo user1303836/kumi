@@ -60,7 +60,7 @@ class Tools(unittest.TestCase):
 
     def test_connect_starts_this_chats_runtime_and_status_then_reads_it(self):
         support.install(self.data)
-        connected = self.call("kumi_connect", {}, session_id="s1", tool_call_id="call-1")
+        connected = self.call("kumi_connect", {}, session_id="s1", task_id="t1", user_task="connect")
         self.assertTrue(connected["connected"])
         self.assertEqual(connected["project"], {"name": "Night Drive", "key": "live:night-drive", "epoch": "1"})
         self.assertEqual(connected["owner"]["session_id"], "s1")
@@ -69,8 +69,9 @@ class Tools(unittest.TestCase):
                          (True, "Night Drive", "kumi-serve/1"))
         received = support.requests(self.data / "state")
         host = next(m["params"]["arguments"]["_host"] for m in received if m.get("params", {}).get("name") == "connect")
-        self.assertEqual({key: host[key] for key in ("profile_id", "session_id", "tool_call_id")},
-                         {"profile_id": "default", "session_id": "s1", "tool_call_id": "call-1"})
+        self.assertEqual({key: host[key] for key in ("profile_id", "session_id", "task_id", "tool_call_id")},
+                         {"profile_id": "default", "session_id": "s1", "task_id": "t1", "tool_call_id": None},
+                         "Hermes gives a handler no tool-call id: null until CC-5's hook hands one over")
         self.host.on_session_finalize(session_id="s1", platform="cli")
         self.assertIsNone(self.runtimes.get(self.data), "the chat that started it ended")
 

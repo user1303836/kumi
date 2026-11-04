@@ -512,7 +512,7 @@ def check_steps(result: Affected, base: str, windows: bool = sys.platform == "wi
     if "hermes-plugin" in result.areas:
         # CI also runs Hermes's own `plugins validate` and `doctor` on it, against a pinned Hermes (the Hermes plugin job).
         steps.append(Step("the Hermes plugin's tests", [python, "-m", "unittest", "discover", "-s", "hermes-plugin/tests",
-                                                         "-p", "test_*.py"]))
+                                                         "-p", "test_*.py"], {"PYTHONDONTWRITEBYTECODE": "1"}))
     steps += [Step("the release scripts' tests", [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_*release.py"]),
               Step("dev.py's tests", [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_dev.py"])]
     if not windows:

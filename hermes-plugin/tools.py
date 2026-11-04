@@ -33,7 +33,9 @@ class Host:
     def data_dir(self) -> Path:
         if self._data_dir is not None:
             return self._data_dir()
-        from plugins.plugin_storage import plugin_data_dir  # Hermes's, documented: <profile home>/plugin-data/kumi
+        # Hermes's, documented: <profile home>/plugin-data/kumi, which it creates (empty) on the first call; the only
+        # write a read tool makes.
+        from plugins.plugin_storage import plugin_data_dir
         return plugin_data_dir(PLUGIN)
 
     def daw(self) -> str:
@@ -44,10 +46,13 @@ class Host:
         return runtime.installed(data_dir, self._pinned())
 
     def identity(self, kwargs: dict) -> dict:
-        """Hermes's identity for one call, which the runtime records and deduplicates by (C2 `_host`)."""
+        """Hermes's identity for one call, which the runtime records (C2 `_host`). Hermes gives a tool handler its
+        session and task, never the model's tool-call id: `tool_call_id` stays null until the pre_tool_call hook hands
+        it over (CONTRACT-CHANGES CC-5), and the runtime dedups only on a real one."""
         return {"profile_id": str(getattr(self._ctx, "profile_name", "") or ""),
-                "session_id": str(kwargs.get("session_id") or ""),
-                "tool_call_id": str(kwargs.get("tool_call_id") or ""),
+                "session_id": kwargs.get("session_id") or None,
+                "task_id": kwargs.get("task_id") or None,
+                "tool_call_id": None,
                 "request_id": uuid.uuid4().hex}
 
     def on_session_finalize(self, session_id: str | None = None, **kwargs: Any) -> None:

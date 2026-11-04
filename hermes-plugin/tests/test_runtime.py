@@ -1,10 +1,16 @@
 """runtime.py against the fixture runtime: what setup installed, the scrubbed launch, the check that it's the pinned
-runtime, calls and their errors, a runtime that stops or doesn't answer, events, and who stops it."""
+runtime, calls and their errors, a runtime that stops, doesn't answer, floods its stderr, closes its output or won't
+exit, events, one runtime per profile, and who stops it (its chat, idleness)."""
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import stat
+import subprocess
+import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -13,46 +19,70 @@ import support
 runtime = support.module("runtime")
 
 
+def eventually(check, timeout: float = 10.0) -> bool:
+    """Wait for a state, never for a fixed time: true once `check()` is, false after `timeout`."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return True
+        time.sleep(0.02)
+    return check()
+
+
 class Runtimes(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
         self.addCleanup(folder.cleanup)
         self.data = Path(folder.name)
         self.events: list[tuple[str, dict]] = []
-        self.runtimes = runtime.Runtimes(events=lambda event, payload: self.events.append((event, payload)),
-                                         environ=lambda: {"PATH": "/usr/bin:/bin", "HOME": str(self.data),
-                                                          "OPENAI_API_KEY": "sk-secret", "MIRELO_API_KEY": "m-secret",
-                                                          "HERMES_HOME": "/elsewhere", "KUMI_HOME": "/elsewhere"},
-                                         start_timeout=10)
-        self.addCleanup(self.runtimes.stop_all)
+        self.runtimes = self.make()
 
-    def start(self, *fixture_args: str, session: str = "s1"):
+    def make(self, **options):
+        runtimes = runtime.Runtimes(events=lambda event, payload: self.events.append((event, payload)),
+                                    environ=lambda: {"PATH": "/usr/bin:/bin", "HOME": str(self.data),
+                                                     "OPENAI_API_KEY": "sk-secret", "MIRELO_API_KEY": "m-secret",
+                                                     "HERMES_HOME": "/elsewhere", "KUMI_HOME": "/elsewhere"},
+                                    start_timeout=10, **options)
+        self.addCleanup(runtimes.stop_all)
+        return runtimes
+
+    def start(self, *fixture_args: str, session: str | None = "s1", runtimes=None, daw: str = "ableton"):
         support.install(self.data, *fixture_args)
-        return self.runtimes.start(self.data, runtime.installed(self.data, support.VERSION), "ableton", session)
+        return (runtimes or self.runtimes).start(self.data, runtime.installed(self.data, support.VERSION), daw, session)
 
     def host(self, session: str = "s1") -> dict:
-        return {"profile_id": "default", "session_id": session, "tool_call_id": "call-1", "request_id": "r1"}
+        return {"profile_id": "default", "session_id": session, "task_id": "t1", "tool_call_id": None,
+                "request_id": "r1"}
+
+    def started(self) -> dict:
+        return json.loads((self.data / "state" / "fixture-start.json").read_text(encoding="utf-8"))
 
     def test_a_started_runtime_is_the_pinned_one_and_answers(self):
         live = self.start()
         self.assertEqual(live.info, {"name": "kumi-serve", "version": support.VERSION})
         status = live.call("status", {}, self.host(), timeout=10)
         self.assertEqual(status["runtime"], {"version": support.VERSION, "protocol": "kumi-serve/1"})
-        self.assertFalse(status["connected"])
-        started = json.loads((self.data / "state" / "fixture-start.json").read_text(encoding="utf-8"))
-        self.assertEqual(started["argv"], ["serve", "--stdio", "--state-dir", str(self.data / "state"),
-                                           "--kumi-home", str(self.data / "kumi-home"), "--daw", "ableton"])
+        self.assertEqual(self.started()["argv"], ["serve", "--stdio", "--state-dir", str(self.data / "state"),
+                                                  "--kumi-home", str(self.data / "kumi-home"), "--daw", "ableton"])
         self.assertIs(self.runtimes.get(self.data), live)
         self.assertIs(self.runtimes.start(self.data, live.install, "ableton", "s2"), live, "one runtime a profile")
+        with self.assertRaises(runtime.Unavailable) as other:
+            self.runtimes.start(self.data, live.install, "reaper", "s2")
+        self.assertEqual(other.exception.code, "other_daw")
 
     def test_the_runtime_gets_no_key_and_never_checks_for_updates(self):
         self.start()
-        environment = set(json.loads((self.data / "state" / "fixture-start.json").read_text(encoding="utf-8"))["environment"])
+        environment = set(self.started()["environment"])
         self.assertTrue({"PATH", "HOME", "KUMI_NO_UPDATE_CHECK"} <= environment, environment)
         self.assertFalse(environment & {"OPENAI_API_KEY", "MIRELO_API_KEY", "HERMES_HOME", "KUMI_HOME"}, environment)
         self.assertEqual(runtime.launch_environment({"Path": "C:\\Windows", "SystemRoot": "C:\\Windows",
                                                      "AWS_SECRET_ACCESS_KEY": "x"}, windows=True),
                          {"Path": "C:\\Windows", "SystemRoot": "C:\\Windows", "KUMI_NO_UPDATE_CHECK": "1"})
+
+    @unittest.skipIf(os.name == "nt", "a session of its own is POSIX's; Windows gives it no console")
+    def test_the_runtime_runs_in_a_session_of_its_own_so_hermess_ctrl_c_never_reaches_it(self):
+        live = self.start()
+        self.assertNotEqual(os.getsid(live.client.pid), os.getsid(0))
 
     def test_another_version_or_protocol_is_refused_before_anything_else_and_stopped(self):
         for args in (("--server-version", "1.24.65"), ("--protocol", "kumi-serve/2")):
@@ -65,13 +95,17 @@ class Runtimes(unittest.TestCase):
                          if message.get("method") == "tools/call"]
                 self.assertLessEqual(set(asked), {"status"}, "nothing but the status naming its protocol was asked")
                 (self.data / "state" / "fixture-requests.jsonl").unlink()
+        self.start()  # the profile's lock was freed both times
 
-    def test_a_refusal_carries_the_runtimes_code_and_reason(self):
-        live = self.start()
+    def test_a_refusal_carries_the_runtimes_code_reason_and_owner(self):
+        live = self.start("--leased-by", "s9")
         with self.assertRaises(runtime.Refused) as refused:
             live.call("observe", {"scope": "focus"}, self.host(), timeout=10)
         self.assertEqual(refused.exception.as_json(), {"error": {
             "code": "not_connected", "reason": "Kumi isn't connected to the DAW: connect first."}})
+        with self.assertRaises(runtime.Refused) as leased:
+            live.call("change", {"title": "x"}, self.host(), timeout=10)
+        self.assertEqual((leased.exception.code, leased.exception.owner["session_id"]), ("leased", "s9"))
 
     def test_a_runtime_that_stops_mid_call_fails_it_and_nothing_is_sent_again(self):
         live = self.start("--exit-on", "change")
@@ -80,15 +114,13 @@ class Runtimes(unittest.TestCase):
         with self.assertRaises(runtime.Unavailable) as stopped:
             live.call("change", {"title": "Louder", "steps": []}, self.host(), timeout=10)
         self.assertEqual(stopped.exception.code, "stopped")
-        with self.assertRaises(runtime.Unavailable):
+        with self.assertRaises(runtime.Unavailable) as after:
             live.call("status", {}, self.host(), timeout=10)
+        self.assertEqual(after.exception.code, "not_running", "a call after the end was never sent")
         changes = [m for m in support.requests(self.data / "state") if m.get("params", {}).get("name") == "change"]
         self.assertEqual(len(changes), 1, "the change was sent once and never again")
         self.assertIsNone(self.runtimes.get(self.data))
-        deadline = time.monotonic() + 5
-        while ("status.changed", {"seq": None}) not in self.events and time.monotonic() < deadline:
-            time.sleep(0.02)
-        self.assertIn(("status.changed", {"seq": None}), self.events, "the UIs hear that the runtime stopped")
+        self.assertTrue(eventually(lambda: self.events == [("status.changed", {"seq": None})]), self.events)
 
     def test_a_call_past_its_time_is_cancelled_and_reported_unknown(self):
         live = self.start("--slow", "history=1.5")
@@ -106,21 +138,118 @@ class Runtimes(unittest.TestCase):
         live = self.start()
         self.events.clear()
         live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
-        deadline = time.monotonic() + 5
-        while len(self.events) < 3 and time.monotonic() < deadline:
-            time.sleep(0.02)
         seqs = {json.loads((self.data / "state" / f"{name}.json").read_text(encoding="utf-8"))["seq"]
                 for name in ("status", "focus", "history")}
         self.assertEqual({event for event, _ in self.events}, {"status.changed", "focus.changed", "history.changed"})
         self.assertEqual({payload["seq"] for _, payload in self.events}, seqs)
 
-    def test_ending_the_chat_that_started_it_stops_it_and_another_chats_end_doesnt(self):
+    def test_a_refused_subscription_leaves_the_others_and_the_runtime_starts(self):
+        with self.assertLogs(runtime.log, "WARNING") as logged:
+            live = self.start("--refuse-subscribe", "kumi://focus")
+        self.assertIn("refused a subscription to kumi://focus", logged.output[0])
+        self.events.clear()
+        live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
+        self.assertEqual({event for event, _ in self.events}, {"status.changed", "history.changed"})
+
+    def test_a_runtime_flooding_its_stderr_still_answers(self):
+        live = self.start("--stderr-flood", str(4 * 1024 * 1024))
+        self.assertTrue(live.call("status", {}, self.host(), timeout=10)["runtime"])
+
+    def test_ending_the_chat_that_started_it_stops_it_once_and_another_chats_end_doesnt(self):
         live = self.start(session="s1")
         self.runtimes.stop_session("s2")
         self.assertIs(self.runtimes.get(self.data), live)
+        self.events.clear()
         self.runtimes.stop_session("s1")
         self.assertIsNone(self.runtimes.get(self.data))
         self.assertFalse(live.client.running)
+        self.assertEqual(self.events, [("status.changed", {"seq": None})], "one event a stop")
+
+    def test_an_idle_runtime_stops_even_with_no_chat_but_never_with_a_call_in_flight(self):
+        runtimes = self.make(idle_after=0.3)
+        live = self.start("--slow", "history=1.2", session=None, runtimes=runtimes)
+        answers = []
+        caller = threading.Thread(target=lambda: answers.append(live.call("history", {}, self.host(), timeout=10)))
+        caller.start()
+        caller.join()
+        self.assertEqual(len(answers), 1, "the slow call outlived the idle time and was answered")
+        self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "then, idle, it stopped")
+        self.assertTrue(eventually(lambda: not live.client.running), "and its process ended")
+
+    def test_a_second_hermes_process_on_the_profile_starts_no_runtime(self):
+        live = self.start()
+        with self.assertRaises(runtime.Unavailable) as other:
+            self.start(runtimes=self.make())  # another Hermes process's registry, on the same profile
+        self.assertEqual(other.exception.code, "other_runtime")
+        self.assertIn(f"pid {os.getpid()}", other.exception.reason)
+        self.runtimes.stop(self.data)
+        self.assertFalse(live.client.running)
+        self.start(runtimes=self.make())  # the lock came free with the first runtime's end
+
+    @unittest.skipIf(os.name == "nt", "on Windows the lock isn't inherited; owner.json's live pid holds the folder")
+    def test_the_lock_outlives_a_hermes_process_whose_runtime_is_still_settling(self):
+        live = self.start()
+        live.state_lock._file.close()  # Hermes's own hold ends, as it would if Hermes died
+        with self.assertRaises(runtime.Unavailable) as other:
+            runtime.StateLock(self.data / "state" / "runtime.lock").acquire()
+        self.assertEqual(other.exception.code, "other_runtime")
+        live.state_lock._file = None
+        self.runtimes.stop(self.data)
+        lock = runtime.StateLock(self.data / "state" / "runtime.lock")
+        lock.acquire()  # the runtime's end freed it
+        lock.release()
+
+    def test_a_live_runtime_named_in_owner_json_holds_the_folder(self):
+        state = self.data / "state"
+        state.mkdir()
+        owner = {"schema": 1, "owner": {"pid": os.getpid()}, "heartbeat": int(time.time() * 1000)}
+        (state / "owner.json").write_text(json.dumps(owner), encoding="utf-8")
+        self.assertEqual(runtime._live_owner(state), os.getpid())
+        self.assertIsNone(runtime._live_owner(state, now_ms=owner["heartbeat"] + 11_000), "a stale heartbeat")
+
+
+class Client(unittest.TestCase):
+    """The client against runtimes that misbehave in ways the fixture runtime can't reach through `Runtimes`."""
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.state = Path(folder.name)
+
+    def spawn(self, *knobs: str, **options):
+        argv = [sys.executable, str(support.FIXTURE), "serve", "--stdio", "--state-dir", str(self.state), "--kumi-home",
+                str(self.state), "--daw", "ableton", *knobs]
+        exits = []
+        client = runtime.Client(argv, {"PATH": os.environ.get("PATH", "")}, on_exit=exits.append, **options)
+        self.addCleanup(client.close, 2)
+        return client, exits
+
+    def initialize(self, client) -> None:
+        client.request("initialize", {"protocolVersion": runtime.MCP_PROTOCOL, "capabilities": {},
+                                      "clientInfo": runtime.CLIENT_INFO}, timeout=10)
+
+    def test_a_runtime_that_closes_its_output_and_stays_is_ended(self):
+        client, exits = self.spawn("--close-stdout", exit_wait=0.3)
+        with self.assertLogs(runtime.log, "WARNING") as logged:
+            self.initialize(client)
+            self.assertTrue(eventually(lambda: exits), "its output ended")
+        self.assertIn("closed its output and is still running", logged.output[0])
+        self.assertIsNotNone(client._process.poll(), "and it was ended rather than left running")
+
+    def test_a_runtime_that_stays_after_its_stdin_ends_is_ended_by_close(self):
+        client, _ = self.spawn("--ignore-eof")
+        self.initialize(client)
+        with self.assertLogs(runtime.log, "WARNING"):
+            client.close(timeout=0.3)
+        self.assertIsNotNone(client._process.poll())
+
+    def test_a_program_that_cant_start_means_setup_is_needed(self):
+        broken = self.state / "kumi"
+        broken.write_text("not a program\n", encoding="utf-8")
+        broken.chmod(broken.stat().st_mode | stat.S_IXUSR)
+        with self.assertRaises(runtime.Unavailable) as needed:
+            runtime.Client([str(broken), "serve"], {"PATH": ""})
+        self.assertEqual(needed.exception.code, "setup_needed")
 
 
 class Installed(unittest.TestCase):
@@ -150,21 +279,39 @@ class Installed(unittest.TestCase):
         self.receipt(target="riscv64-unknown-linux-gnu")
         self.assertIn("not this computer", self.reason())
 
-    def test_a_receipt_pointing_outside_plugin_data_or_at_nothing_is_never_run(self):
-        support.install(self.data)
-        for kumi in ("../kumi", "/bin/sh", "runtime/1.24.66/missing"):
-            with self.subTest(kumi=kumi):
-                self.receipt(kumi=kumi)
+    def test_a_receipt_pointing_outside_plugin_data_or_at_nothing_runnable_is_never_run(self):
+        kumi = support.install(self.data)
+        outside = tempfile.TemporaryDirectory()
+        self.addCleanup(outside.cleanup)
+        program = Path(outside.name) / "kumi"
+        program.write_text("#!/bin/sh\n", encoding="utf-8")
+        program.chmod(stat.S_IRWXU)
+        paths = ["../kumi", "/bin/sh", "runtime/1.24.66/missing"]
+        try:
+            (self.data / "runtime" / "link").symlink_to(program)  # a runnable program, outside plugin data
+            paths.append("runtime/link")
+        except OSError:  # Windows, without the right to make symlinks
+            pass
+        for path in paths:
+            with self.subTest(kumi=path):
+                self.receipt(kumi=path)
                 self.assertIn("missing or damaged", self.reason())
-        self.receipt(kumi="runtime/1.24.66/kumi", schema=2)
+        self.receipt(kumi="runtime/1.24.66/kumi")
+        if os.name != "nt":
+            kumi.chmod(stat.S_IRUSR | stat.S_IWUSR)
+            self.assertIn("missing or damaged", self.reason(), "not executable")
+            kumi.chmod(stat.S_IRWXU)
+        self.receipt(schema=2)
         self.assertIn("another plugin version", self.reason())
         (self.data / "runtime" / "current.json").write_text("{", encoding="utf-8")
         self.assertIn("can't be read", self.reason())
 
-    def test_an_adopted_transport_home_is_used(self):
+    def test_an_adopted_transport_home_is_used_only_as_a_full_path(self):
         support.install(self.data)
-        self.receipt(kumi_home="/Users/someone/.kumi")
-        self.assertEqual(runtime.installed(self.data, support.VERSION).kumi_home, Path("/Users/someone/.kumi"))
+        self.receipt(kumi_home=str(Path("/Users/someone/.kumi").resolve()))
+        self.assertEqual(runtime.installed(self.data, support.VERSION).kumi_home, Path("/Users/someone/.kumi").resolve())
+        self.receipt(kumi_home="someone/.kumi")
+        self.assertIn("full path", self.reason())
 
 
 if __name__ == "__main__":
