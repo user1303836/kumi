@@ -1,0 +1,139 @@
+"""dashboard/plugin_api.py: the read-only routes both UIs read (contract C4)."""
+
+from __future__ import annotations
+
+import base64
+import importlib.util
+import json
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+
+try:
+    import fastapi  # noqa: F401
+
+    HAVE_FASTAPI = True
+except ImportError:
+    HAVE_FASTAPI = False
+
+try:
+    from fastapi.testclient import TestClient
+except ImportError:  # the test client needs httpx
+    TestClient = None
+
+
+def _load(name: str, path: Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+fixtures = _load("kumi_test_ui_fixtures", HERE / "ui_fixtures.py")
+
+
+@unittest.skipUnless(HAVE_FASTAPI, "plugin_api.py runs inside Hermes, which has FastAPI")
+class Routes(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls) -> None:
+        # The module name Hermes gives it when it mounts the routes.
+        cls.api = _load("hermes_dashboard_plugin_kumi", HERE.parent / "dashboard" / "plugin_api.py")
+
+    def setUp(self) -> None:
+        self.tmp = tempfile.TemporaryDirectory()
+        root = Path(self.tmp.name)
+        self.data = root / "plugin-data" / "kumi"
+        self.library = root / "samples"
+        self.state = fixtures.write_state(self.data, self.library, audio="some")
+        api = self.api
+        self.saved = (api.snapshots.state_dir, api._library_folders)
+        api.snapshots.state_dir = lambda: self.state
+        api._library_folders = lambda: [str(self.library)]
+
+    def tearDown(self) -> None:
+        self.api.snapshots.state_dir, self.api._library_folders = self.saved
+        self.tmp.cleanup()
+
+    def test_every_route_is_a_get(self) -> None:
+        methods = {route.path: route.methods for route in self.api.router.routes}
+        self.assertEqual(set(methods), {"/status", "/focus", "/history", "/map", "/sound", "/audio", "/setup", "/job"})
+        self.assertTrue(all(found == {"GET"} for found in methods.values()), methods)
+
+    def test_status_focus_and_history_read_this_profiles_state_on_every_request(self) -> None:
+        self.assertTrue(self.api.status()["connected"])
+        self.assertEqual(self.api.focus()["transport"]["tempo"], 124.0)
+        self.assertEqual([item["label"] for item in self.api.history(limit=2)["items"]], ["c14", "c13"])
+        # Another profile's state, resolved on the next request: nothing is cached.
+        other = Path(self.tmp.name) / "other" / "state"
+        self.api.snapshots.state_dir = lambda: other
+        self.assertEqual((self.api.status()["connected"], self.api.status()["stale"]), (False, True))
+
+    def test_the_map_and_a_sound_never_carry_a_file_path(self) -> None:
+        current = self.api.sound_map(revision=None)
+        self.assertEqual((current["revision"], current["current"]), ("r7", "r7"))
+        self.assertTrue(current["sounds"])
+        self.assertFalse(any("path" in sound for sound in current["sounds"].values()))
+        self.assertNotIn("schema", current)
+        sound = self.api.sound(id="s-r7-0091")
+        self.assertNotIn("path", sound)
+        self.assertTrue(sound["playable"])
+        self.assertFalse(self.api.sound(id="s-r7-0001")["playable"])
+
+    def test_no_map_yet_is_an_empty_map_not_an_error(self) -> None:
+        (self.state / "map" / "current").unlink()
+        empty = self.api.sound_map(revision=None)
+        self.assertEqual((empty["revision"], empty["points"], empty["sounds"]), (None, [], {}))
+
+    def test_audio_is_a_data_url_of_the_files_bytes(self) -> None:
+        reply = self.api.audio(id="a-7f32")
+        self.assertTrue(reply["data_url"].startswith("data:audio/wav;base64,"))
+        payload = base64.b64decode(reply["data_url"].split(",", 1)[1])
+        self.assertEqual(payload, (self.state / "artifacts" / "a-7f32-dusty.wav").read_bytes())
+        self.assertEqual(reply["bytes"], len(payload))
+        self.assertTrue(self.api.audio(id="s-r7-0091")["data_url"].startswith("data:audio/wav;base64,"))
+
+    def test_audio_refuses_an_unknown_id_and_a_file_outside_the_approved_folders(self) -> None:
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as unknown:
+            self.api.audio(id="a-nothing")
+        self.assertEqual(unknown.exception.status_code, 404)
+        self.api._library_folders = lambda: []
+        with self.assertRaises(HTTPException):
+            self.api.audio(id="s-r7-0091")
+
+    def test_setup_answers_from_setup_py_and_else_from_the_runtimes_word(self) -> None:
+        reply = self.api.setup()
+        module = sys.modules.get("hermes_dashboard_plugin_kumi_setup")
+        if module is not None and callable(getattr(module, "status", None)):
+            self.assertIn("state", reply)
+            return
+        self.assertEqual((reply["state"], reply["runtime"], reply["next_step"]), ("ready", {"installed": True, "version": "1.24.70"}, None))
+
+    def test_a_job_is_read_by_its_id_and_an_unknown_one_is_404(self) -> None:
+        from fastapi import HTTPException
+
+        self.assertEqual(self.api.job(id="j-scan-1")["progress"]["done"], 412)
+        with self.assertRaises(HTTPException):
+            self.api.job(id="../owner")
+
+    @unittest.skipIf(TestClient is None, "the FastAPI test client needs httpx")
+    def test_over_http_queries_are_validated_and_a_post_is_refused(self) -> None:
+        from fastapi import FastAPI
+
+        app = FastAPI()
+        app.include_router(self.api.router, prefix="/api/plugins/kumi")
+        client = TestClient(app)
+        self.assertEqual(client.get("/api/plugins/kumi/history", params={"limit": 500}).status_code, 422)
+        self.assertEqual(client.get("/api/plugins/kumi/history", params={"limit": 3}).json()["items"][0]["label"], "c14")
+        self.assertEqual(client.post("/api/plugins/kumi/status").status_code, 405)
+        self.assertEqual(client.get("/api/plugins/kumi/audio", params={"id": "a-nothing"}).status_code, 404)
+        self.assertNotIn(str(self.library), json.dumps(client.get("/api/plugins/kumi/map").json()))
+
+
+if __name__ == "__main__":
+    unittest.main()
