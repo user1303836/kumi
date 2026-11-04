@@ -778,6 +778,52 @@ class RemoteScriptTests(unittest.TestCase):
                 self.assertEqual((len(ran_on), read), (checks, [checks]), "the start read the files once, after the last check")
                 self.assertNotIn(threading.get_ident(), ran_on, "no check ran on the ticking thread")
 
+    def test_a_check_redone_before_its_verdicts_expire_asks_powershell_again_so_the_start_finds_them_fresh(self):
+        """Between _CHECK_FRESH_SECONDS and _ACL_VERDICT_SECONDS after the check, its verdicts are still kept, but would
+        be gone a moment later. The redo asks PowerShell about every file again, off Live's thread, so the start at the
+        callback after it finds every verdict waiting and runs no PowerShell on Live's thread. Through the real cache,
+        the real batch and a recording subprocess.run; the start reads its files as _read_config does on Windows."""
+        package = __import__("AbletonMcpBridge")
+
+        class Bridge:
+            def __init__(self, *args, **kwargs): self.served = 0
+            def update_display(self): self.served += 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            paths = [Path(directory) / name for name in ("bridge-reference.json", "bridge-config.json", "secret")]
+            for path in paths:
+                path.write_text("x", encoding="utf-8")
+            for age in (27.0, 29.99):
+                now, ran_on = [1000.0], []
+                clock = types.SimpleNamespace(monotonic=lambda: now[0], perf_counter=time.perf_counter, time=time.time)
+
+                def run(args, **kwargs):
+                    ran_on.append(threading.get_ident())
+                    return types.SimpleNamespace(returncode=package._ACL_ANSWERED)
+
+                def start():
+                    package._prefetch_acl_verdicts(paths)
+                    return [package._windows_acl_owner_only(path) for path in paths] and {}
+
+                with self.subTest(age=age), patch.object(package, "time", clock), patch.dict(package._ACL_VERDICTS, clear=True), \
+                        patch.dict(sys.modules, {"Live": None}), patch("AbletonMcpBridge.subprocess.run", run), \
+                        patch.object(package, "_files_check", lambda fresh=False: lambda: package._prefetch_acl_verdicts(paths, fresh=fresh)), \
+                        patch.object(package, "_read_config", start), patch.object(package, "_Bridge", Bridge):
+                    surface = package.AbletonMcpBridge(FakeInstance())
+                    surface._keep_willington = lambda: None
+                    self.wait_for_the_check(surface._checked)
+                    self.assertEqual(len(ran_on), 1, "the check: one batch for the three files")
+                    now[0] += age
+                    surface.update_display()
+                    self.assertIsNone(surface._bridge, "an old check: no start yet")
+                    self.wait_for_the_check(surface._checked)
+                    self.assertEqual(len(ran_on), 2, "the redo asked PowerShell again, though the verdicts were still kept")
+                    now[0] += 0.01
+                    surface.update_display()
+                    self.assertEqual(surface._bridge.served, 1, "started at the next callback, 10 ms later")
+                    self.assertEqual(len(ran_on), 2, "the start found every verdict waiting")
+                    self.assertNotIn(threading.get_ident(), ran_on, "no PowerShell ran on Live's thread")
+
     def test_a_failed_start_stops_the_timer_and_a_good_one_counts_its_rate_from_the_start(self):
         package = __import__("AbletonMcpBridge"); made = []
         self.no_files_check(package)

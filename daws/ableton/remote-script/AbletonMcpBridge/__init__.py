@@ -274,13 +274,14 @@ def _windows_acl_owner_only(path: Path) -> bool:
     return verdict
 
 
-def _prefetch_acl_verdicts(paths: list[Path]) -> None:
+def _prefetch_acl_verdicts(paths: list[Path], fresh: bool = False) -> None:
     """Check several files' ACLs in one PowerShell run and keep the verdicts, so the checks after it don't each
-    start one. Best effort: a path that can't be looked at is left for its own check."""
+    start one. Best effort: a path that can't be looked at is left for its own check. `fresh` asks about every path,
+    a verdict still kept too, so each one kept starts its time again."""
     wanted = []
     for path in paths:
         key = _acl_key(path) if path is not None else None
-        if key is not None and _acl_cached(key) is None and key not in [held for _, held in wanted]:
+        if key is not None and (fresh or _acl_cached(key) is None) and key not in [held for _, held in wanted]:
             wanted.append((path, key))
     for start in range(0, len(wanted), _ACL_BATCH):
         batch = wanted[start:start + _ACL_BATCH]
@@ -724,17 +725,19 @@ _CHECK_ON_ITS_OWN_SECONDS = 0.5
 _CHECK_WAIT_SECONDS = 0.01
 _CHECK_WAIT_EVERY_SECONDS = 0.1
 # A check's verdicts last _ACL_VERDICT_SECONDS from when it kept them. A start later than this after the check (Live's
-# first callback held back by a dialog, say) would find them gone and run PowerShell again on Live's thread: it checks
-# again off it instead, and the bridge starts at the first callback after that check.
+# first callback held back by a dialog, say) could find them gone and run PowerShell again on Live's thread: it checks
+# again off it instead, asking PowerShell about every file whatever is still kept, and the bridge starts at the first
+# callback after that check.
 _CHECK_FRESH_SECONDS = _ACL_VERDICT_SECONDS - 5
 
 
-def _files_check() -> Callable[[], None] | None:
-    """What checks the bridge's files off Live's thread: Windows' ACL batch for the reference, configuration and secret."""
+def _files_check(fresh: bool = False) -> Callable[[], None] | None:
+    """What checks the bridge's files off Live's thread: Windows' ACL batch for the reference, configuration and secret
+    (`fresh`: all of them again, whatever verdicts are still kept)."""
     if os.name != "nt":
         return None
     reference = Path(__file__).with_name("bridge-reference.json")
-    return lambda: _prefetch_acl_verdicts(_config_paths(reference))
+    return lambda: _prefetch_acl_verdicts(_config_paths(reference), fresh=fresh)
 
 
 class AbletonMcpBridge(_ControlSurface):
@@ -775,7 +778,7 @@ class AbletonMcpBridge(_ControlSurface):
             if not checked.wait(_CHECK_WAIT_SECONDS):
                 return False
         if checked.stale():
-            self._checked = _FilesChecked(_files_check())
+            self._checked = _FilesChecked(_files_check(fresh=True))
             return False
         self._checked = None
         try:
