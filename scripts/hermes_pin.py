@@ -11,10 +11,12 @@ its `SHA256SUMS`, and the digest GitHub recorded for the uploaded file.
 
     python3 scripts/hermes_pin.py 1.24.67             write the pin for v1.24.67
     python3 scripts/hermes_pin.py 1.24.67 --check     say whether the committed pin matches that release
-    python3 scripts/hermes_pin.py 1.24.67 --download  also download each bundle and hash it (about 170 MB)
 
-The file (schema 1) holds the version, the tag and, for each target, the exact URL, SHA-256 and size of its
-`.tar.xz` bundle, with the DAW component versions it carries.
+Both also download each bundle once (about 170 MB, one at a time, deleted after), confirm its size and SHA-256,
+and read it as setup will: a `.tar.xz` of plain files and folders, with `kumi` (`kumi.exe` on Windows) at its root.
+
+The file (schema 1) holds the version, the tag and, for each target, the exact URL, SHA-256, download size and
+unpacked size of its `.tar.xz` bundle, with the DAW component versions it carries.
 """
 from __future__ import annotations
 
@@ -27,6 +29,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -166,8 +169,31 @@ def read_pin(github: GitHub, version: str) -> dict:
     return pin_of(version, github.repository, release, manifest, sums, per_target)
 
 
-def check_downloads(github: GitHub, pin: dict) -> None:
-    """Download each bundle and confirm its size and SHA-256, one at a time, deleting each after."""
+def executable(target: str) -> str:
+    return "kumi.exe" if "windows" in target else "kumi"
+
+
+def unpacked_bytes(path: Path, target: str) -> int:
+    """The bundle's size once extracted. Refuses an archive setup would refuse: anything but plain files and
+    folders, a name that is absolute or climbs out with `..`, or no Kumi executable at its root."""
+    try:
+        with tarfile.open(path, "r:xz") as archive:
+            members = archive.getmembers()
+    except (tarfile.TarError, OSError, EOFError) as error:
+        raise Refused(f"{path.name} isn't a readable .tar.xz: {error}") from None
+    for member in members:
+        parts = Path(member.name).parts
+        if member.name.startswith(("/", "\\")) or ".." in parts or not (member.isfile() or member.isdir()):
+            raise Refused(f"{path.name} holds {member.name!r}, which setup won't extract")
+    if not any(member.isfile() and member.name.lstrip("./") == executable(target) for member in members):
+        raise Refused(f"{path.name} has no {executable(target)} at its root")
+    return sum(member.size for member in members if member.isfile())
+
+
+def measured(github: GitHub, pin: dict) -> dict:
+    """The pin with each target's unpacked size, after downloading each bundle (one at a time, deleted after) and
+    confirming its size and SHA-256 against the release's own records."""
+    targets = {}
     with tempfile.TemporaryDirectory(prefix="hermes-pin-") as scratch:
         for target, record in pin["targets"].items():
             name = record["url"].rsplit("/", 1)[1]
@@ -177,10 +203,13 @@ def check_downloads(github: GitHub, pin: dict) -> None:
                 for chunk in iter(lambda: stream.read(1 << 20), b""):
                     digest.update(chunk)
             size = path.stat().st_size
-            path.unlink()
             if size != record["size"] or digest.hexdigest() != record["sha256"]:
                 raise Refused(f"the downloaded {name} doesn't match its pin ({size} bytes, sha256 {digest.hexdigest()})")
-            print(f"  {target}: {name} matches ({size} bytes)")
+            unpacked = unpacked_bytes(path, target)
+            path.unlink()
+            targets[target] = {**record, "unpacked_bytes": unpacked}
+            print(f"  {target}: {name} matches ({size} bytes, {unpacked} unpacked)")
+    return {**pin, "targets": targets}
 
 
 def text_of(pin: dict) -> str:
@@ -201,16 +230,13 @@ def main(argv: list[str] | None = None, github: GitHub | None = None) -> int:
     parser.add_argument("--repository", default=REPOSITORY, help=f"owner/name (default {REPOSITORY})")
     parser.add_argument("--out", type=Path, default=PIN, help=f"the pin file (default {PIN.relative_to(ROOT)})")
     parser.add_argument("--check", action="store_true", help="don't write: say whether --out matches the release")
-    parser.add_argument("--download", action="store_true", help="also download each bundle and hash it (~170 MB)")
     args = parser.parse_args(argv)
     try:
         version = args.version.removeprefix("v")
         if not VERSION.fullmatch(version):
             raise Refused(f"{args.version!r} isn't a version like 1.24.67: the pin names one exact release")
         github = github or GitHub(args.repository)
-        pin = read_pin(github, version)
-        if args.download:
-            check_downloads(github, pin)
+        pin = measured(github, read_pin(github, version))
         if args.check:
             try:
                 committed = json.loads(args.out.read_text(encoding="utf-8"))
@@ -222,7 +248,7 @@ def main(argv: list[str] | None = None, github: GitHub | None = None) -> int:
             return 0
         write(args.out, pin)
         print(f"wrote {args.out}: Kumi {version}, {len(pin['targets'])} targets, each checked against "
-              "kumi-release.json, its target's file, SHA256SUMS and GitHub's digest")
+              "kumi-release.json, its target's file, SHA256SUMS, GitHub's digest and the downloaded bundle")
         return 0
     except Refused as refusal:
         print(f"hermes_pin.py: {refusal}", file=sys.stderr)
