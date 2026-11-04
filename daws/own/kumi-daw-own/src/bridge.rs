@@ -619,12 +619,15 @@ pub fn shorten_anywhere<S: RefScheme>(book: &mut Book<S>, value: &Value) -> Valu
 }
 
 /// The short refs (`track:3`) anywhere in a call's arguments, in order: before lengthening, those the model named; after,
-/// those this turn doesn't know.
-fn short_refs_in(value: &Value) -> Vec<String> {
+/// those this turn doesn't know. Only kinds this turn named count: `slot:3`, with no `slot` named, is a word (an
+/// extension's key), not a ref.
+fn short_refs_in<S: RefScheme>(book: &Book<S>, value: &Value) -> Vec<String> {
     match value {
-        Value::String(text) if SHORT_REF.is_match(text) => vec![text.clone()],
-        Value::Array(items) => items.iter().flat_map(short_refs_in).collect(),
-        Value::Object(fields) => fields.values().flat_map(short_refs_in).collect(),
+        Value::String(text) if SHORT_REF.is_match(text) && text.split(':').next().is_some_and(|kind| book.names_kind(kind)) => {
+            vec![text.clone()]
+        }
+        Value::Array(items) => items.iter().flat_map(|item| short_refs_in(book, item)).collect(),
+        Value::Object(fields) => fields.values().flat_map(|item| short_refs_in(book, item)).collect(),
         _ => Vec::new(),
     }
 }
@@ -2377,7 +2380,7 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
             let (asked, sent) = (input.get(key)?.as_str()?, args.get(key)?.as_str()?);
             (asked == sent && SHORT_REF.is_match(asked)).then(|| asked.to_owned())
         });
-        let unknown = named.or_else(|| short_refs_in(args.get(self.daw.call.as_ref()?.args)?).into_iter().next());
+        let unknown = named.or_else(|| short_refs_in(&self.book.borrow(), args.get(self.daw.call.as_ref()?.args)?).into_iter().next());
         if let Some(asked) = unknown {
             let place = self.daw.profile.words.place;
             return Ok(ToolResult::error(format!(
@@ -2460,7 +2463,7 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
                         .or_else(|| input.get("parent"))
                         .and_then(Value::as_str)
                         .map(str::to_owned)
-                        .or_else(|| short_refs_in(input.get(self.daw.call.as_ref()?.args)?).into_iter().next());
+                        .or_else(|| short_refs_in(&self.book.borrow(), input.get(self.daw.call.as_ref()?.args)?).into_iter().next());
                     let what = named.as_deref().unwrap_or("That ref");
                     let positional = self.book.borrow().scheme.positional();
                     return Ok(ToolResult::error(match code.as_str() {

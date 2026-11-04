@@ -432,6 +432,11 @@ impl<S: RefScheme> Book<S> {
         }
         Ok(())
     }
+    /// Whether this turn has named a ref of `kind` (`track:1`…): only then is a `kind:n` in a call's arguments one of its
+    /// refs, and not a word that looks like one (an extension's key such as `slot:3`).
+    pub fn names_kind(&self, kind: &str) -> bool {
+        self.counts.contains_key(kind)
+    }
     pub fn short_ref(&mut self, reference: &str) -> String {
         let Some(kind) = self.scheme.kind_of(reference) else { return reference.into() };
         if let Some(name) = self.short.get(reference) {

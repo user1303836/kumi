@@ -261,6 +261,11 @@ async fn reapers_call_takes_its_args_refs_with_their_epoch() {
             let count = json!({"kind": "call", "fn": "CountTracks", "args": {"proj": 0}});
             read.execute(count.as_object().unwrap().clone(), Signal::new()).await.unwrap();
             assert_eq!(host.asked.borrow().last().unwrap().1, count, "no ref, no epoch");
+            // A word shaped like a ref, of a kind this turn never named (an extension's key), is the function's own.
+            let key = json!({"kind": "call", "fn": "GetExtState", "args": ["kumi", "slot:3"]});
+            let answered = read.execute(key.as_object().unwrap().clone(), Signal::new()).await.unwrap();
+            assert!(!answered.is_error, "{}", answered.text);
+            assert_eq!(host.asked.borrow().last().unwrap().1, key, "sent as given, with no epoch");
             host.answers.borrow_mut().push(("read", json!({"error": "those refs are from an earlier epoch", "code": "stale"}), true));
             let stale = read.execute(volume.as_object().unwrap().clone(), Signal::new()).await.unwrap();
             assert!(stale.is_error && stale.text.starts_with("track:2 was read in another project"), "{}", stale.text);
