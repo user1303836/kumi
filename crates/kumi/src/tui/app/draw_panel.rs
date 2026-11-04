@@ -170,6 +170,11 @@ impl TuiApp {
             if let Some(right) = &right {
                 frame::right_words(screen, area, top, std::slice::from_ref(right), after);
             }
+            // The title's words in the edge are copied as what's inside the frame is, on their own: a drag on them stays
+            // on them.
+            if after - 1 > x {
+                self.0.state.borrow_mut().select_areas.insert(0, Rect::new(x, top, after - 1 - x, 1));
+            }
         }
         let row_of = |index: usize| top + index as i32 + if index > 0 { gap } else { 0 };
         for (index, line) in lines.iter().enumerate().skip(1) {

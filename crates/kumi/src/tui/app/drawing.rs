@@ -166,6 +166,7 @@ impl TuiApp {
         if pane != 0 {
             self.draw_pane(&mut screen, Rect::new(left, 1, pane, rows - 1));
         } else if drawer {
+            self.keep_keyboard_in_drawer();
             self.draw_drawer(&mut screen, Rect::new(0, docked, columns, dock));
         } else {
             // The strip has no tabs or tree on screen: a keyboard that was in them when the window shrank to it comes back

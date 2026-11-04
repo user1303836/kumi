@@ -265,6 +265,36 @@ case!(a_focus_body_taller_than_the_drawer_stops_at_its_edge, async {
     h.close().await;
 });
 
+case!(a_focus_body_taller_than_a_short_side_pane_stops_above_its_tabs, async {
+    let c = Rc::new(Control::default());
+    *c.tree.borrow_mut() = Some(
+        serde_json::from_value(json!({"trackRef":"3:track:1","devices":[
+            {"ref":"d1","name":"Operator","className":"Operator","deviceType":"instrument"},
+            {"ref":"d2","name":"Saturator on the low end","className":"Saturator","deviceType":"audio_effect"}]}))
+        .unwrap(),
+    );
+    let h = Harness::with(100, 8, c, |_| {});
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"focus","focus":{"track":{"name":"Bass","color":"#f59a3c","kind":"midi"},"trackRef":"3:track:1","device":"Operator","detail":"Device","view":"Session"}}));
+    h.wait_for_call("tree:3:track:1").await;
+    delay(5).await;
+    let lines = h.screen();
+    let rule = lines.iter().position(|line| line.contains("├─ HISTORY")).unwrap_or_else(|| panic!("{}", lines.join("\n")));
+    // The device tree has no room above the tabs: their row shows only what HISTORY says while it's empty, none of the
+    // tree's (at 100 columns the pane's frame starts at column 64).
+    let inside = lines[rule + 1].chars().skip(65).take(34).collect::<String>();
+    assert_eq!(inside.trim(), "Nothing changed yet", "{}", lines.join("\n"));
+    // A click on their rule or row is theirs, never a hidden device's to point at.
+    for y in [rule, rule + 1] {
+        h.type_text(&format!("\x1b[<0;{};{}M\x1b[<0;{};{}m", 80, y + 1, 80, y + 1)).await;
+    }
+    delay(5).await;
+    let lines = h.screen();
+    assert!(!lines.iter().any(|line| line.contains("Operator  ×") || line.contains("low end  ×")), "{}", lines.join("\n"));
+    h.close().await;
+});
+
 case!(kumi_turning_the_tabs_to_goal_opens_the_drawer_on_them, async {
     let c = Rc::new(Control::default());
     c.set("goal", json!(true));
@@ -583,6 +613,25 @@ case!(the_keyboard_goes_only_into_tabs_and_a_tree_on_screen, async {
     h.resize(80, 23);
     delay(10).await;
     assert!(h.selected_line().is_none(), "{}", h.screen().join("\n"));
+    assert_eq!(lit(&h), [false, true]);
+    h.close().await;
+    // In the side pane's tabs when the window narrows to the drawer, folded: the keyboard comes back to the box.
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some(), "{}", h.screen().join("\n"));
+    h.resize(80, 30);
+    delay(10).await;
+    assert!(h.selected_line().is_none(), "{}", h.screen().join("\n"));
+    assert_eq!(lit(&h), [true]);
+    // In the drawer's tabs when another of its tabs is chosen: the same.
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some(), "{}", h.screen().join("\n"));
+    click(&h, tabs(&h.screen()), "NOW").await;
+    assert!(h.selected_line().is_none(), "{}", h.screen().join("\n"));
+    // (the drawer open on NOW, then the box)
     assert_eq!(lit(&h), [false, true]);
     h.close().await;
     // The side pane in a short window keeps a row for its tabs under NOW's rule, which Shift-Tab goes into.

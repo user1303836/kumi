@@ -50,13 +50,17 @@ impl TuiApp {
         let action = self.click(f);
         self.0.state.borrow_mut().hits.push(Hit { x, y, width, action });
     }
+    /// What's drawn over `area` takes the clicks there: those of what it hides go.
+    fn drop_hits(&self, area: Rect) {
+        let under =
+            |hit: &Hit| hit.y >= area.y && hit.y < area.y + area.height && hit.x < area.x + area.width && hit.x + hit.width > area.x;
+        self.0.state.borrow_mut().hits.retain(|hit| !under(hit));
+    }
     /// A panel or menu drawn over `area` hides what's under it: what was there can't be clicked through it, and a copy
     /// there takes the panel's own cells, not the conversation's rows (nor joins the row below it to them).
     pub(super) fn cover(&self, area: Rect) {
-        let under =
-            |hit: &Hit| hit.y >= area.y && hit.y < area.y + area.height && hit.x < area.x + area.width && hit.x + hit.width > area.x;
+        self.drop_hits(area);
         let mut state = self.0.state.borrow_mut();
-        state.hits.retain(|hit| !under(hit));
         let covered = area.y..area.y + area.height;
         state.text_rows.retain(|row| !covered.contains(&row.y));
         // Tabs under it (the drawer's, below 100 columns) aren't the wheel's either: it goes to what covers them.
@@ -110,9 +114,9 @@ impl TuiApp {
         Some(column)
     }
     /// The side pane, in a frame from under the header's blank row down to the input box's bottom edge: FOCUS in its top
-    /// edge with its heading, NOW and the tabs on rules across it, each only where it lands inside the frame (a very short
-    /// window has room for FOCUS and NOW alone). Its line is lit while the keyboard is in it, and a drag copies one part's
-    /// rows at a time, never the frame's lines.
+    /// edge with its heading, NOW and the tabs on rules across it. The tabs keep a row at any height, and FOCUS and NOW
+    /// what's above them. Its line is lit while the keyboard is in it, and a drag copies one part's rows at a time, never
+    /// the frame's lines.
     pub(super) fn draw_pane(&self, screen: &mut Screen, area: Rect) {
         let framed = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
         // Its bottom edge: what's drawn in it stops above.
@@ -127,7 +131,7 @@ impl TuiApp {
         // A body taller than a short window has room for stops at the frame's edge, and what ran past it is painted over.
         let below = Rect::new(area.x, edge + 1, area.width, (area.y + area.height - edge - 1).max(0));
         screen.fill(below, &st::GROUND);
-        self.cover(below);
+        self.drop_hits(below);
         frame::outline(screen, framed, &line, self.corners());
         let heading = focus.busy.map(|said| sp(said, st::WARN)).or(focus.heading.map(|heading| sp(heading, st::FAINT)));
         frame::left_words(screen, framed, framed.y, &std::iter::once(sp("FOCUS", st::LABEL)).chain(heading).collect::<Vec<_>>());
@@ -178,6 +182,9 @@ impl TuiApp {
             parts.push((now_at + 1, now_end));
         }
         if tabs {
+            // What FOCUS's body ran on into their rows goes first: its words, and its clicks down to the bottom edge.
+            screen.fill(Rect::new(framed.x + 1, top, framed.width - 2, edge - top), &st::GROUND);
+            self.drop_hits(Rect::new(framed.x, top, framed.width, edge + 1 - top));
             // The tabs' strip is set into a rule of the frame's, their rows down to its bottom edge.
             frame::divider(screen, framed, top, &line);
             let tabs_area = Rect::new(x, top, width, edge - top);

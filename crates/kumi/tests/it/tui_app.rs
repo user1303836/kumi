@@ -302,12 +302,18 @@ case!(a_copy_over_a_panel_takes_its_lines_not_the_conversation_under_them, async
     h.wait_for("word word").await;
     h.type_text("/btw how long can its tail be?\r").await;
     h.wait_for("up to a minute").await;
-    // From the panel's first row inside its frame (its title is in the frame's top edge) down past its right side: its
-    // own words, none of its frame's, and nothing of the conversation's rows under it.
-    let (title, _) = find(&h, "btw · how long can its tail be?");
+    let drag = |from: (usize, usize), to: (usize, usize)| {
+        format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", from.0 + 1, from.1 + 1, to.0 + 1, to.1 + 1, to.0 + 1, to.1 + 1)
+    };
+    // From the panel's first row inside its frame down past its right side: its own words, none of its frame's, and
+    // nothing of the conversation's rows under it.
+    let (title, at) = find(&h, "btw · how long can its tail be?");
     let (below, x) = find(&h, "Erbe-Verb's tail runs up to a minute.");
-    h.type_text(&format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", x + 1, title + 2, 119, below + 1, 119, below + 1)).await;
+    h.type_text(&drag((x, title + 1), (119, below))).await;
     assert_eq!(copied.borrow().last().map(String::as_str), Some("Erbe-Verb's tail runs up to a minute."));
+    // Its title, in the frame's top edge, on its own: the words, not the edge's lines around them.
+    h.type_text(&drag((at, title), (119, below))).await;
+    assert_eq!(copied.borrow().last().map(String::as_str), Some("btw · how long can its tail be?"));
     h.close().await;
 });
 case!(quitting_prints_the_conversation_into_the_scrollback_before_the_goodbye, async {

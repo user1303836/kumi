@@ -196,6 +196,22 @@ impl TuiApp {
         }
     }
 
+    /// The keyboard stays only in what the drawer shows: its tabs while it's open on them, FOCUS's tree while it's open
+    /// on FOCUS. Anywhere else (the window narrowed to the drawer from the side pane, another of its tabs was chosen, it
+    /// folded), the keyboard comes back to the box.
+    pub(super) fn keep_keyboard_in_drawer(&self) {
+        let (open, tab) = {
+            let state = self.0.state.borrow();
+            (state.drawer.is_open(), state.drawer.tab)
+        };
+        if self.0.tabs.inside() && !(open && tab == DrawerTab::Tabs) {
+            self.0.tabs.leave();
+        }
+        if !(open && tab == DrawerTab::Focus) {
+            self.0.state.borrow_mut().tree_cursor = None;
+        }
+    }
+
     /// A click on one of the drawer's tabs (`id`, the tab panel's): on the one showing it closes the drawer, as ctrl+\
     /// does; on another it opens there.
     fn click_drawer_tab(&self, tab: DrawerTab, id: Option<&str>) {
