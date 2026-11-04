@@ -53,13 +53,15 @@ test('a comparison shows both files, the measured numbers side by side and the d
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
   assert.ok(!html.includes('BUILT-IN PLAYER'))
-  assert.ok(!html.includes('Model interpretation'))
+  assert.ok(!html.includes('Interpretation'))
   assert.ok(!/\bheard\b/i.test(html))
 })
 
-test("a model's reading is labelled as one, and a failed reading is one quiet line", () => {
-  const read = render({ result: { ...result, interpretation: { text: 'Less upper-mid energy.', inputs: ['metrics', 'spectrogram'] } } })
-  assert.ok(read.includes('Model interpretation of the measurements and spectrogram image'))
+test("a model's reading sits under a plain heading with its model, its own opening line said once", () => {
+  const opening = 'Model interpretation of measurements (no raw audio heard)'
+  const read = render({ result: { ...result, interpretation: { text: `${opening}\nLess upper-mid energy.`, model: 'm-1' } } })
+  assert.ok(read.includes('Interpretation · m-1'))
+  assert.equal(read.split(opening).length - 1, 1)
   assert.ok(read.includes('Less upper-mid energy.'))
   const failed = render({ result: { ...result, interpretation_error: 'the model timed out' } })
   assert.ok(failed.includes('No model interpretation: the model timed out'))

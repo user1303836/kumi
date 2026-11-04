@@ -141,7 +141,8 @@ export interface ListenResult {
   verdict_text?: string
   media_tag?: string
   compare?: { artifact_id?: string; metrics?: Analysis; differences?: Comparison }
-  interpretation?: { text?: string; inputs?: string[]; model?: string }
+  /** A model's reading of the measurements (CC-1). Its text opens with the runtime's own line saying what it was given. */
+  interpretation?: { text?: string; model?: string }
   interpretation_error?: string
   error?: string
 }

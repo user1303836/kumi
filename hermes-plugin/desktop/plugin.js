@@ -393,10 +393,8 @@ function listenView(result) {
   }
   const interpretation = result.interpretation;
   if (interpretation && typeof interpretation.text === "string" && interpretation.text.trim()) {
-    const inputs = Array.isArray(interpretation.inputs) ? interpretation.inputs : [];
-    const what = inputs.some((input) => typeof input === "string" && input.includes("spectrogram")) ? "the measurements and spectrogram image" : "the measurements";
-    const model = typeof interpretation.model === "string" && interpretation.model ? ` (${clean(interpretation.model, 40)})` : "";
-    view.interpretation = { label: `Model interpretation of ${what}${model}`, text: interpretation.text.trim().slice(0, 4e3) };
+    const model = typeof interpretation.model === "string" && interpretation.model ? ` · ${clean(interpretation.model, 40)}` : "";
+    view.interpretation = { label: `Interpretation${model}`, text: interpretation.text.trim().slice(0, 4e3) };
   } else if (typeof result.interpretation_error === "string" && result.interpretation_error) {
     view.interpretationError = clean(result.interpretation_error, 200);
   }

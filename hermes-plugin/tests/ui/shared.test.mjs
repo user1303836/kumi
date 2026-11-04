@@ -72,12 +72,12 @@ test('the listen card shows measured numbers beside the reference, with differen
   assert.equal(view.interpretation, undefined)
 })
 
-test("a model's reading shows only when given, labelled as an interpretation of what it was shown", () => {
-  const withImage = listen.listenView({ ...compared, interpretation: { text: 'Less 2–6 kHz energy.', inputs: ['metrics', 'spectrogram'], model: 'm-1' } })
-  assert.equal(withImage.interpretation.label, 'Model interpretation of the measurements and spectrogram image (m-1)')
-  const numbersOnly = listen.listenView({ ...compared, interpretation: { text: 'Quieter.', inputs: ['metrics'] } })
-  assert.equal(numbersOnly.interpretation.label, 'Model interpretation of the measurements')
-  assert.match(JSON.stringify(withImage), /^(?!.*\bheard\b)/s)
+test("a model's reading shows only when given, under a plain heading with the model it reports", () => {
+  const withModel = listen.listenView({ ...compared, interpretation: { text: 'Less 2–6 kHz energy.', model: 'm-1' } })
+  assert.equal(withModel.interpretation.label, 'Interpretation · m-1')
+  assert.equal(withModel.interpretation.text, 'Less 2–6 kHz energy.')
+  assert.equal(listen.listenView({ ...compared, interpretation: { text: 'Quieter.' } }).interpretation.label, 'Interpretation')
+  assert.equal(listen.listenView({ ...compared, interpretation: { text: '  ' } }).interpretation, undefined)
   assert.equal(listen.listenView({ ...compared, interpretation_error: 'the model timed out' }).interpretationError, 'the model timed out')
   assert.equal(listen.parseListen('not json'), null)
   assert.equal(listen.parseListen({ error: 'no file' }), null)
