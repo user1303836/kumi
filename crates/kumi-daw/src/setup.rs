@@ -85,6 +85,19 @@ pub trait DawSetup {
     fn once_closed(&self, app: &str) -> String {
         format!("Kumi then puts its bridge in place and opens {app} again.")
     }
+    /// The session to open a DAW with that wasn't open when setup began, for a DAW Kumi opens with what the producer had
+    /// open last: none by default, so it opens as it starts by itself.
+    fn closed_set(&self) -> Option<String> {
+        None
+    }
+    /// Why the DAW didn't open, when what opened it said: setup says it in place of "open it yourself".
+    fn open_failed(&self) -> Option<String> {
+        None
+    }
+    /// What's worth knowing from what opened the DAW, once it opened (a recovery it will offer): said as setup ends.
+    fn opened_note(&self) -> Option<String> {
+        None
+    }
     /// How long Live gets to quit once asked, before Kumi says it's still open (its save dialog
     /// cancelled, say) and offers to ask again.
     fn quit_wait(&self) -> Duration {

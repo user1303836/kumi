@@ -889,7 +889,7 @@ fn open_app(app: &Path) -> bool {
 
 /// Starts `command` with no terminal and in a process group of its own, so the DAW's output never prints over Kumi's,
 /// and closing Kumi's terminal (or Ctrl-C) never takes the DAW and its unsaved project with it. Whether it started.
-pub(crate) fn start_apart(mut command: std::process::Command) -> bool {
+fn start_apart(mut command: std::process::Command) -> bool {
     use std::process::Stdio;
     command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     #[cfg(unix)]

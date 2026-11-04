@@ -1,10 +1,14 @@
 //! A DAW whose bridge is a program Kumi ships beside its own executable (SoundCraft's `soundcraft-kumi`): nothing goes
-//! into the DAW. Kumi's host starts the program, and the program reaches a DAW that Kumi opened with its way in on,
-//! through the program's own `launch`. The DAW counts as set up for Kumi once Kumi has opened it that way, as the
-//! program's launch record says, and its integration is the shared one, through Kumi's host, as REAPER's and Renoise's
-//! is. Nothing is put in, brought up to date, rolled back or taken out of the DAW: the program comes and goes with Kumi.
+//! into the DAW. Kumi's host starts the program, and the program reaches a copy of the DAW that Kumi opened with its way
+//! in on, through the program's own `launch`. The DAW counts as set up for Kumi once Kumi has opened it that way, as the
+//! program's launch record says; a copy open another way (from the Dock, say) can't be reached, so whenever the DAW isn't
+//! open through Kumi, setup opens it (having the producer quit one open another way first), and so does
+//! `kumi --daw <daw> bridge`. Its integration is the shared one, through Kumi's host, as REAPER's and Renoise's is.
+//! Nothing is put in, brought up to date, rolled back or taken out of the DAW: the program comes and goes with Kumi.
 use crate::bridge::OwnOptions;
-use crate::provider::{answers, bridge_log, closed, host_check, kumi_home, open_now, probe_host, running_app, unknown_to, OwnHosts};
+use crate::provider::{
+    answers, bridge_log, closed, detected, host_check, kumi_home, open_now, probe_host, running_app, unknown_to, OwnHosts,
+};
 use async_trait::async_trait;
 use daw_bridge::{daw::Daw, detect, install::min_version};
 use futures::{future::LocalBoxFuture, FutureExt};
@@ -19,13 +23,14 @@ use kumi_daw::{
     check::{Check, Probe, Probes},
     io::{Answers, DawIo},
     provider::{
-        BridgeCommand, BridgeRollbackStep, BridgeState, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle, ToggleWords,
-        WatchWords,
+        older_than, BridgeCommand, BridgeRollbackStep, BridgeState, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle,
+        ToggleWords, WatchWords,
     },
     setup::{DawSetup, SetupSession},
 };
 use kumi_library::daws::LibrarySources;
 use kumi_types::{
+    command::{KUMI, KUMI_REPAIR},
     daw::{DawId, DawProfile},
     errors::RuntimeError,
     system::Env,
@@ -55,9 +60,13 @@ pub struct Beside {
     pub site: &'static str,
     /// The program, by its name beside Kumi's executable: "soundcraft-kumi".
     pub program: &'static str,
+    /// The variable the program takes for the app to open ("KUMI_SOUNDCRAFT_APP"): Kumi sets it to the app it found, so
+    /// the program opens that one.
+    pub app_variable: &'static str,
     /// Kumi's folder of the bridge's state, under Kumi's home: "bridges/soundcraft".
     pub bridge_folder: &'static str,
-    /// The file there that says Kumi has opened the DAW for its bridge: the program's launch record.
+    /// The file there that says Kumi has opened the DAW for its bridge: the program's launch record, which names the copy
+    /// it opened by its `pid`.
     pub launch_record: &'static str,
     pub create: fn(OwnOptions) -> Rc<dyn Integration>,
     /// What chatting without the DAW says it is.
@@ -77,8 +86,8 @@ pub struct Beside {
     pub app: fn(&Env) -> Option<PathBuf>,
     /// The version of the app a path picks out (else of any one found).
     pub app_version: AppVersion,
-    /// The session the producer has open, from the DAW's own files (its newest recent), for Kumi to open again once
-    /// they've quit it.
+    /// The session the producer had open last, from the DAW's own files (its newest recent), for Kumi to open the DAW
+    /// with.
     pub last_session: fn(&Env) -> Option<String>,
 }
 
@@ -94,17 +103,85 @@ pub fn opened_by_kumi(home: &Path, folder: &str, record: &str) -> bool {
     home.join(folder).join(record).is_file()
 }
 
-/// Opens the DAW with its way in on, through `program launch` for the Kumi home `home`, with `session` when there is
-/// one: whether it opened. The program opens the DAW apart from Kumi and returns.
-pub fn launch(program: &Path, home: &Path, session: Option<&str>) -> bool {
+/// Whether the copy Kumi opened runs: the launch record's `pid` is, in `listing` (pid and program), a copy of `daw`.
+pub fn open_as_launched(home: &Path, folder: &str, record: &str, daw: Daw, listing: &[(u32, String)]) -> bool {
+    let read = std::fs::read(home.join(folder).join(record)).ok();
+    let pid = read.and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok()?.get("pid")?.as_u64());
+    pid.is_some_and(|pid| listing.iter().any(|(running, name)| u64::from(*running) == pid && detect::process_is(daw, name)))
+}
+
+/// What the program's `launch` came to: whether the DAW opened (or the copy Kumi opened was open still), and what it
+/// said, a line each, without its name before them: why it didn't open, or what's worth knowing (a recovery the DAW will
+/// offer).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Launched {
+    pub opened: bool,
+    pub said: Vec<String>,
+}
+
+/// Opens the DAW with its way in on, through `program launch` for the Kumi home `home`: the app setup found when there
+/// is one (named in the program's variable), with `session` when there is one. The program opens the DAW apart from Kumi
+/// and returns; the copy Kumi opened, still open, is found again rather than opened twice.
+pub fn launch(program: &Path, home: &Path, app: Option<(&str, &Path)>, session: Option<&str>) -> Launched {
     use std::process::Stdio;
     let mut command = std::process::Command::new(program);
     command.arg("launch").arg("--kumi-home").arg(home);
     if let Some(session) = session.filter(|session| !session.is_empty()) {
         command.arg(session);
     }
-    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
-    command.status().is_ok_and(|status| status.success())
+    if let Some((variable, app)) = app {
+        command.env(variable, app);
+    }
+    command.stdin(Stdio::null()).stdout(Stdio::null());
+    match command.output() {
+        Ok(done) => Launched { opened: done.status.success(), said: said_by(program, &done.stderr) },
+        Err(error) => Launched { opened: false, said: vec![format!("{} couldn't run: {error}", program.display())] },
+    }
+}
+
+/// A program's lines on stderr, without its name before each (`soundcraft-kumi: …`).
+fn said_by(program: &Path, stderr: &[u8]) -> Vec<String> {
+    let name = program.file_stem().and_then(|stem| stem.to_str()).unwrap_or_default();
+    let prefix = format!("{name}: ");
+    String::from_utf8_lossy(stderr)
+        .lines()
+        .map(|line| line.strip_prefix(prefix.as_str()).unwrap_or(line).trim().to_owned())
+        .filter(|line| !line.is_empty())
+        .collect()
+}
+
+/// A log of launches that has grown past this starts again.
+const LAUNCH_LOG_MOST: u64 = 64 * 1024;
+
+/// Keeps what a launch came to in the bridge's `logs` (`folder`'s, where `kumi report` reads the bridge's logs), a line a
+/// launch: a failure, or a recovery the DAW offered, is still there once setup has moved on.
+fn keep_said(folder: &Path, launched: &Launched) {
+    use std::io::Write;
+    let logs = folder.join("logs");
+    if std::fs::create_dir_all(&logs).is_err() {
+        return;
+    }
+    let file = logs.join("launch.log");
+    let mut options = std::fs::OpenOptions::new();
+    if std::fs::metadata(&file).is_ok_and(|meta| meta.len() > LAUNCH_LOG_MOST) {
+        options.create(true).write(true).truncate(true);
+    } else {
+        options.create(true).append(true);
+    }
+    let Ok(mut log) = options.open(&file) else { return };
+    let came = if launched.opened { "opened" } else { "didn't open" };
+    let said = if launched.said.is_empty() { String::new() } else { format!(": {}", launched.said.join(" | ")) };
+    let _ = writeln!(log, "{} launch {came}{said}", chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true));
+}
+
+/// A line as a sentence ends: with its stop.
+fn sentence(line: &str) -> String {
+    let line = line.trim();
+    if line.ends_with(['.', '!', '?']) {
+        line.to_owned()
+    } else {
+        format!("{line}.")
+    }
 }
 
 impl Beside {
@@ -127,13 +204,53 @@ impl Beside {
         self.program().filter(|_| self.opened(env))
     }
 
+    /// Whether the copy Kumi opened through the program runs now, from a listing made now (KUMI_PROCESSES in the
+    /// session's environment stands in for it): only that copy can be reached.
+    fn open_through_kumi(&self, env: &Env) -> bool {
+        let listing = detected(env, |found| detect::list_processes(found.var));
+        open_as_launched(&kumi_home(env), self.bridge_folder, self.launch_record, self.daw, &listing)
+    }
+
     /// Whether this user has used the DAW, or Kumi has opened it: else the doctor has nothing to say of it.
     fn present(&self, env: &Env) -> bool {
         self.opened(env) || (self.used)(env)
     }
 
     fn not_carried(&self) -> String {
-        format!("this Kumi doesn't carry {} for {}", self.program, self.name())
+        format!("This Kumi doesn't carry {} for {}", self.program, self.name())
+    }
+
+    /// The command that opens the DAW for Kumi, `kumi` being how the producer runs Kumi: `kumi --daw <daw> bridge`.
+    fn open_command(&self, kumi: &str) -> String {
+        format!("{kumi} --daw {} bridge", self.id.as_str())
+    }
+
+    /// The version of `app`, when it's older than Kumi works with.
+    fn older(&self, env: &Env, app: &Path) -> Option<String> {
+        (self.app_version)(env, &|path: &Path| path == app).filter(|version| older_than(version, min_version(self.daw)))
+    }
+
+    /// What a session says of the DAW, by whether the program is beside Kumi, Kumi has opened the DAW yet (`missing`
+    /// when not) and the copy it opened runs now: in plain mode, how to open it; in the app, why setup opens it (`why`),
+    /// whenever the DAW isn't open through Kumi.
+    fn state(&self, program: bool, missing: bool, through_kumi: bool, command: &str) -> BridgeState {
+        if !program {
+            let said = self.not_carried();
+            return BridgeState {
+                notice: Some(format!("{said}; chatting without it. Run {} to repair Kumi.", *KUMI_REPAIR)),
+                why: Some(format!("{said}.")),
+            };
+        }
+        if through_kumi && !missing {
+            return BridgeState::default();
+        }
+        let (app, open) = (self.name(), self.open_command(command));
+        let (notice, why) = if missing {
+            (format!("Kumi hasn't opened {app} yet"), format!("Kumi opens {app} for you, so that it can reach it."))
+        } else {
+            (format!("{app} isn't open through Kumi"), format!("Kumi reaches the {app} it opens itself."))
+        };
+        BridgeState { notice: Some(format!("{notice}; chatting without it. Run {open} to open it.")), why: Some(why) }
     }
 }
 
@@ -196,25 +313,12 @@ impl DawProvider for Beside {
     fn probe(&self, _bridge_config: String, answers: &Answers, env: &Env) -> LocalBoxFuture<'static, Probe> {
         probe_host(self.create, kumi_home(env), answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id)))
     }
-    fn bridge_state(&self, _env: &Env, _found: bool, missing: bool, _bundled: Option<&str>, command: &str) -> BridgeState {
-        if !missing {
-            return BridgeState::default();
-        }
-        if self.program().is_none() {
-            let said = self.not_carried();
-            return BridgeState {
-                notice: Some(format!("{said}; chatting without it. Run {} to repair Kumi.", *kumi_types::command::KUMI_REPAIR)),
-                why: Some(format!("{said}.")),
-            };
-        }
-        let app = self.name();
-        BridgeState {
-            notice: Some(format!(
-                "Kumi hasn't opened {app} yet; chatting without it. Run {command} --daw {} to open it.",
-                self.id.as_str()
-            )),
-            why: Some(format!("Kumi opens {app} for you, so that it can reach it.")),
-        }
+    /// Missing, or set up but not open through Kumi (closed, or opened another way), the session says how to open it, and
+    /// the app's setup opens it.
+    fn bridge_state(&self, env: &Env, _found: bool, missing: bool, _bundled: Option<&str>, command: &str) -> BridgeState {
+        let program = self.program().is_some();
+        let through_kumi = program && !missing && self.open_through_kumi(env);
+        self.state(program, missing, through_kumi, command)
     }
     fn setup(
         &self,
@@ -223,23 +327,29 @@ impl DawProvider for Beside {
         given: bool,
         session: Rc<RefCell<Option<Weak<dyn SetupSession>>>>,
     ) -> Rc<dyn DawSetup> {
-        Rc::new(BesideSetup { beside: *self, env: env.clone(), bridge, given, session })
+        Rc::new(BesideSetup { beside: *self, env: env.clone(), bridge, given, session, launched: RefCell::default() })
     }
     fn doctor_checks<'a>(&'a self, io: &'a DawIo, _node: &'a Check) -> LocalBoxFuture<'a, Vec<Check>> {
         if !self.present(&io.env) {
             return async { vec![] }.boxed_local();
         }
-        let (id, name) = (self.id, self.name());
+        let (name, open) = (self.name(), self.open_command(&KUMI));
         let (program, opened, probe) = (self.program(), self.opened(&io.env), io.answers.get::<Probes>().cloned());
+        // Open, but not the copy Kumi opened: Kumi can't reach it until it's quit and opened again.
+        let elsewhere = program.is_some() && opened && open_now(self.daw, &io.env) && !self.open_through_kumi(&io.env);
         let not_carried = self.not_carried();
+        let id = self.id;
         async move {
+            let carried = program.is_some();
             let mut checks = vec![match program {
                 Some(program) => Check::ok(format!("Kumi's bridge for {name} is beside Kumi ({})", program.display())),
-                None => Check::fix(not_carried, Some(format!("Run {} to repair Kumi", *kumi_types::command::KUMI_REPAIR))),
+                None => Check::fix(not_carried, Some(format!("Run {} to repair Kumi", *KUMI_REPAIR))),
             }];
-            if !opened {
-                let open = format!("{} --daw {} opens it", *kumi_types::command::KUMI, id.as_str());
-                checks.push(Check::note(format!("Kumi hasn't opened {name} yet"), Some(open)));
+            if carried && !opened {
+                checks.push(Check::note(format!("Kumi hasn't opened {name} yet"), Some(format!("{open} opens it"))));
+            } else if elsewhere {
+                let fix = format!("Save your {}, quit {name}, then {open} opens it again", self.profile.words.place);
+                checks.push(Check::note(format!("{name} is open, but not through Kumi, so Kumi can't reach it"), Some(fix)));
             }
             if let Some(fix) = host_check(probe, id, name).await {
                 checks.push(fix);
@@ -252,9 +362,19 @@ impl DawProvider for Beside {
         if !self.present(&io.env) {
             return async { vec![] }.boxed_local();
         }
+        let name = self.name();
         let check = match (self.app)(&io.env) {
-            Some(_) => Check::ok(format!("{} is installed here.", self.name())),
-            None => Check::note(format!("{}: {}.", self.name(), self.not_found), None),
+            Some(app) => match self.older(&io.env, &app) {
+                Some(version) => {
+                    let min = min_version(self.daw);
+                    Check::fix(
+                        format!("This is {name} {version}; Kumi needs {name} {min} or newer"),
+                        Some(format!("Install {name} {min} or newer ({})", self.site)),
+                    )
+                }
+                None => Check::ok(format!("{name} is installed here.")),
+            },
+            None => Check::note(format!("{name}: {}.", self.not_found), None),
         };
         async move { vec![check] }.boxed_local()
     }
@@ -285,21 +405,51 @@ impl DawProvider for Beside {
     fn finish_transition<'a>(&'a self, _io: &'a DawIo) -> LocalBoxFuture<'a, ()> {
         async {}.boxed_local()
     }
-    /// `kumi --daw <daw> bridge`: nothing goes into the DAW, and that's said, with what opens it for Kumi instead.
+    /// `kumi --daw <daw> bridge`: nothing goes into the DAW, so this opens it for Kumi, through the program, with the
+    /// session the producer had open last. Open through Kumi already, there's nothing to do; open another way, Kumi can't
+    /// reach it, so the producer saves and quits it first.
     fn setup_bridge(&self, io: DawIo, _command: BridgeCommand) -> LocalBoxFuture<'static, Result<i32, RuntimeError>> {
-        let app = self.name();
-        let said = match self.program() {
-            Some(_) => format!(
-                "Kumi's bridge for {app} comes with Kumi, and nothing goes into {app}: {} --daw {} opens {app} so that Kumi can reach it.\n",
-                *kumi_types::command::KUMI,
-                self.id.as_str()
-            ),
-            None => format!("{}: run {} to repair it.\n", self.not_carried(), *kumi_types::command::KUMI_REPAIR),
-        };
-        let code = if self.program().is_some() { 0 } else { 1 };
+        let beside = *self;
         async move {
-            io.out.write(&said);
-            Ok(code)
+            let (app, place) = (beside.name(), beside.profile.words.place);
+            let Some(program) = beside.program() else {
+                io.out.write(&format!("{}: run {} to repair it.\n", beside.not_carried(), *KUMI_REPAIR));
+                return Ok(1);
+            };
+            let env = io.env.clone();
+            let (through_kumi, open) = tokio::task::spawn_blocking(move || (beside.open_through_kumi(&env), open_now(beside.daw, &env)))
+                .await
+                .unwrap_or((false, false));
+            if through_kumi {
+                io.out.write(&format!("{app} is open through Kumi already, so Kumi reaches it.\n"));
+                return Ok(0);
+            }
+            if open {
+                io.out.write(&format!(
+                    "{app} is open, but not through Kumi, so Kumi can't reach it: save your {place}, quit {app}, and run this again. Kumi then opens {app} with it.\n"
+                ));
+                return Ok(1);
+            }
+            let session = (beside.last_session)(&io.env);
+            let found = (beside.app)(&io.env);
+            let (home, shown) = (kumi_home(&io.env), session.clone());
+            let launched = tokio::task::spawn_blocking(move || {
+                launch(&program, &home, found.as_deref().map(|found| (beside.app_variable, found)), shown.as_deref())
+            })
+            .await
+            .unwrap_or_else(|_| Launched { opened: false, said: vec![] });
+            keep_said(&kumi_home(&io.env).join(beside.bridge_folder), &launched);
+            if !launched.opened {
+                let why = launched.said.last().map_or(String::new(), |why| format!(": {}", sentence(why)));
+                io.out.write(&format!("Kumi couldn't open {app}{}\n", if why.is_empty() { ".".into() } else { why }));
+                return Ok(1);
+            }
+            let with = session.as_deref().and_then(|session| Path::new(session).file_name()).map(|name| name.to_string_lossy().into_owned());
+            let with = with.map_or(String::new(), |name| format!(" with {name}"));
+            let said: Vec<String> = launched.said.iter().map(|line| sentence(line)).collect();
+            let notes = if said.is_empty() { String::new() } else { format!(" {}", said.join(" ")) };
+            io.out.write(&format!("Kumi opened {app}{with}; {} --daw {} works in it.{notes}\n", *KUMI, beside.id.as_str()));
+            Ok(0)
         }
         .boxed_local()
     }
@@ -333,9 +483,22 @@ impl DawProvider for Beside {
     }
 }
 
+/// What a rollback says while KUMI_DAW names the DAW: an earlier Kumi without the program doesn't know the DAW; one
+/// with it may still not (the program can ship before Kumi works with the DAW), so that's said as a may. Nothing while
+/// KUMI_DAW names another DAW, or none.
+fn rollback_words(env: &Env, id: DawId, name: &str, version: &str, carried: bool) -> Option<String> {
+    if !carried {
+        return unknown_to(env, id, name, version);
+    }
+    env.get("KUMI_DAW").filter(|daw| daw.eq_ignore_ascii_case(id.as_str()))?;
+    Some(format!(
+        "KUMI_DAW is set to {} where you run Kumi: if Kumi {version} doesn't know {name} yet, it won't start while it's set, so unset KUMI_DAW then.\n",
+        id.as_str()
+    ))
+}
+
 /// A rollback's step for a DAW whose bridge is a program beside Kumi: the program goes back with the Kumi it came with,
-/// so there's nothing to move; an earlier Kumi that doesn't carry it doesn't know the DAW, and says so while KUMI_DAW
-/// names it.
+/// so there's nothing to move; what's said is whether the earlier Kumi knows the DAW, while KUMI_DAW names it.
 struct BesideRollback(Beside);
 
 #[async_trait(?Send)]
@@ -348,10 +511,9 @@ impl BridgeRollbackStep for BesideRollback {
     }
     async fn after_swap(&self, io: &DawIo, _home: &str, app: &str, version: &str, _native: bool) -> i32 {
         let beside = &self.0;
-        if program_beside(beside.program, Path::new(app)).is_none() {
-            if let Some(said) = unknown_to(&io.env, beside.id, beside.name(), version) {
-                io.out.write(&said);
-            }
+        let carried = program_beside(beside.program, Path::new(app)).is_some();
+        if let Some(said) = rollback_words(&io.env, beside.id, beside.name(), version, carried) {
+            io.out.write(&said);
         }
         0
     }
@@ -359,7 +521,7 @@ impl BridgeRollbackStep for BesideRollback {
 
 /// Setup's DAW side for a DAW whose bridge is a program beside Kumi: nothing goes in, and Kumi opens the DAW itself,
 /// through the program, so that the program can reach it. One the producer opened can't be reached, so they quit it, and
-/// Kumi opens it again with the session they had open.
+/// Kumi opens it again with the session they had open; one that's closed opens with the session they had open last.
 struct BesideSetup {
     beside: Beside,
     env: Env,
@@ -369,6 +531,8 @@ struct BesideSetup {
     /// A bridge configuration given on the command line stays.
     given: bool,
     session: Rc<RefCell<Option<Weak<dyn SetupSession>>>>,
+    /// What the last launch came to, for setup to say.
+    launched: RefCell<Option<Launched>>,
 }
 
 #[async_trait(?Send)]
@@ -392,14 +556,26 @@ impl DawSetup for BesideSetup {
     async fn install(&self) -> Result<String, String> {
         match self.beside.program() {
             Some(_) => Ok(KUMI_VERSION.to_string()),
-            None => Err(format!("{}: run {} to repair it", self.beside.not_carried(), *kumi_types::command::KUMI_REPAIR)),
+            None => Err(format!("{}: run {} to repair it", self.beside.not_carried(), *KUMI_REPAIR)),
         }
     }
-    /// Opens the DAW through the program's `launch`, with `set` (the session the producer had open) when Kumi knows it.
-    async fn start(&self, _app: Option<String>, set: Option<String>) -> bool {
+    /// Opens the DAW through the program's `launch`: `app` (the one that was open, else the one Kumi finds), with `set`
+    /// when there's one. The DAW has closed by then, so the session it had open is read again: one first saved as it quit
+    /// is its newest recent now.
+    async fn start(&self, app: Option<String>, set: Option<String>) -> bool {
         let Some(program) = self.beside.program() else { return false };
         let home = kumi_home(&self.env);
-        tokio::task::spawn_blocking(move || launch(&program, &home, set.as_deref())).await.unwrap_or(false)
+        let set = set.map(|set| (self.beside.last_session)(&self.env).unwrap_or(set));
+        let app = app.filter(|app| !app.is_empty()).map(PathBuf::from).or_else(|| (self.beside.app)(&self.env));
+        let variable = self.beside.app_variable;
+        let launched =
+            tokio::task::spawn_blocking(move || launch(&program, &home, app.as_deref().map(|app| (variable, app)), set.as_deref()))
+                .await
+                .unwrap_or_else(|_| Launched { opened: false, said: vec![] });
+        keep_said(&kumi_home(&self.env).join(self.beside.bridge_folder), &launched);
+        let opened = launched.opened;
+        *self.launched.borrow_mut() = Some(launched);
+        opened
     }
     /// The DAW is opening for Kumi: the session takes the program as its bridge and reconnects; one still starting is
     /// asked again shortly.
@@ -425,11 +601,12 @@ impl DawSetup for BesideSetup {
         let is = |path: &Path| app.as_deref().is_none_or(|app| app == path);
         (self.beside.app_version)(&self.env, &is)
     }
+    /// The app Kumi opens, unless it's older than Kumi works with.
     async fn installed(&self) -> Installed {
-        if (self.beside.app)(&self.env).is_some() {
-            Installed::Ready
-        } else {
-            Installed::Missing
+        let Some(app) = (self.beside.app)(&self.env) else { return Installed::Missing };
+        match self.beside.older(&self.env, &app) {
+            Some(version) => Installed::Older(version),
+            None => Installed::Ready,
         }
     }
     /// The session the producer has open, for Kumi to open again once they've quit the DAW.
@@ -439,8 +616,32 @@ impl DawSetup for BesideSetup {
     fn restart_why(&self, _app: &str) -> String {
         self.beside.restart_why.to_string()
     }
+    /// The session is promised only when Kumi knows one to open.
     fn once_closed(&self, app: &str) -> String {
-        format!("Kumi then opens {app} again, with your session.")
+        match (self.beside.last_session)(&self.env) {
+            Some(_) => format!("Kumi then opens {app} again, with your session."),
+            None => format!("Kumi then opens {app} again."),
+        }
+    }
+    /// A DAW that wasn't open opens with the session the producer had open last.
+    fn closed_set(&self) -> Option<String> {
+        (self.beside.last_session)(&self.env)
+    }
+    /// Why the program couldn't open the DAW, as it said, and how to try again.
+    fn open_failed(&self) -> Option<String> {
+        let launched = self.launched.borrow();
+        let launched = launched.as_ref().filter(|launched| !launched.opened)?;
+        let (app, again) = (self.beside.name(), self.beside.open_command(&KUMI));
+        Some(match launched.said.last() {
+            Some(why) => format!("Kumi couldn't open {app}: {} {again} tries again.", sentence(why)),
+            None => format!("Kumi couldn't open {app}. {again} tries again."),
+        })
+    }
+    /// What the program said as the DAW opened (a recovery it will offer).
+    fn opened_note(&self) -> Option<String> {
+        let launched = self.launched.borrow();
+        let launched = launched.as_ref().filter(|launched| launched.opened && !launched.said.is_empty())?;
+        Some(launched.said.iter().map(|line| sentence(line)).collect::<Vec<_>>().join(" "))
     }
 }
 
@@ -448,6 +649,50 @@ impl DawSetup for BesideSetup {
 mod tests {
     use super::*;
     use crate::bridge::OwnBridge;
+
+    struct NoLibrary;
+    impl LibrarySources for NoLibrary {
+        fn profile(&self) -> &'static DawProfile {
+            &DawProfile::RENOISE
+        }
+    }
+    static NO_LIBRARY: NoLibrary = NoLibrary;
+    const NO_TOOLS: ToolPresentation =
+        ToolPresentation { label: |_| None, doing: |_| None, activity: |_| None, plan: |_| false, acts: |_| false, read_prefix: None };
+    fn no_integration(_: OwnOptions) -> Rc<dyn Integration> {
+        unreachable!("these tests make no integration")
+    }
+
+    /// A DAW beside Kumi as these tests have it: Renoise's names, and its app, the app's version and the session it had
+    /// open last from the environment.
+    const TESTED: Beside = Beside {
+        id: DawId::Renoise,
+        daw: Daw::Renoise,
+        profile: &DawProfile::RENOISE,
+        presentation: &NO_TOOLS,
+        view: &ViewPresentation::NONE,
+        library: &NO_LIBRARY,
+        site: "renoise.com",
+        program: "program",
+        app_variable: "TEST_APP",
+        bridge_folder: "bridges/renoise",
+        launch_record: "launched.json",
+        create: no_integration,
+        instructions: "",
+        not_found: "",
+        restart_why: "",
+        watch_words: WatchWords { starting: "", unreachable: "", answered: "" },
+        removal_question: "",
+        used: |_| true,
+        here: |_| true,
+        app: |env| env.get("TEST_APP").map(PathBuf::from),
+        app_version: |env, _| env.get("TEST_VERSION").cloned(),
+        last_session: |env| env.get("TEST_SESSION").cloned(),
+    };
+
+    fn env(vars: &[(&str, &str)]) -> Env {
+        vars.iter().map(|(name, value)| (name.to_string(), value.to_string())).collect()
+    }
 
     #[test]
     fn the_program_beside_kumi_is_the_bridge_once_kumi_has_opened_the_daw_through_it() {
@@ -462,22 +707,97 @@ mod tests {
         assert!(opened_by_kumi(home.path(), "bridges/soundcraft", "launched.json"));
     }
 
+    #[test]
+    fn the_copy_kumi_opened_is_the_launch_records_pid_running_as_the_daw() {
+        let home = tempfile::tempdir().unwrap();
+        let renoise = "/Applications/Renoise.app/Contents/MacOS/Renoise";
+        let open =
+            |pid: u32, name: &str| open_as_launched(home.path(), "bridges/renoise", "launched.json", Daw::Renoise, &[(pid, name.into())]);
+        assert!(!open(4242, renoise), "no launch record");
+        std::fs::create_dir_all(home.path().join("bridges/renoise")).unwrap();
+        std::fs::write(home.path().join("bridges/renoise/launched.json"), br#"{"pid":4242,"port":51234}"#).unwrap();
+        assert!(open(4242, renoise));
+        assert!(!open(4243, renoise), "another copy, opened another way");
+        assert!(!open(4242, "/bin/zsh"), "its pid, another program's now");
+    }
+
+    #[test]
+    fn setup_opens_the_daw_whenever_it_isnt_open_through_kumi_and_plain_mode_names_the_command_that_does() {
+        let open = |state: &BridgeState| state.notice.as_deref().is_some_and(|notice| notice.contains("kumi --daw renoise bridge"));
+        let never = TESTED.state(true, true, false, "kumi");
+        assert!(never.why.is_some() && open(&never), "{never:?}");
+        // Opened once, then quit, or opened again from the Dock: setup opens it again.
+        let elsewhere = TESTED.state(true, false, false, "kumi");
+        assert!(elsewhere.why.is_some() && open(&elsewhere), "{elsewhere:?}");
+        let through = TESTED.state(true, false, true, "kumi");
+        assert!(through.why.is_none() && through.notice.is_none(), "open through Kumi: it connects");
+        let carried = TESTED.state(false, true, false, "kumi");
+        assert!(carried.why.as_deref().is_some_and(|why| why.starts_with("This Kumi doesn't carry program")), "{carried:?}");
+    }
+
     #[cfg(unix)]
     #[test]
-    fn kumi_opens_the_daw_through_the_programs_launch_with_its_home_and_the_session() {
+    fn kumi_opens_the_daw_through_the_programs_launch_with_its_home_the_app_and_the_session() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let (program, said) = (dir.path().join("program"), dir.path().join("said"));
-        std::fs::write(&program, format!("#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\n", said.display())).unwrap();
-        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let (program, args) = (dir.path().join("program"), dir.path().join("args"));
+        let write = |script: &str| {
+            std::fs::write(&program, format!("#!/bin/sh\n{script}")).unwrap();
+            std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        write(&format!(
+            "printf '%s\\n' \"$@\" \"app=$TEST_APP\" > '{}'\necho 'program: Renoise will offer to recover what it was doing' >&2\n",
+            args.display()
+        ));
         let home = dir.path().join("kumi home");
-        assert!(launch(&program, &home, Some("/sessions/Groove.scraft")));
-        let args = std::fs::read_to_string(&said).unwrap();
-        assert_eq!(args.lines().collect::<Vec<_>>(), ["launch", "--kumi-home", home.to_str().unwrap(), "/sessions/Groove.scraft"]);
-        assert!(launch(&program, &home, None));
-        assert_eq!(std::fs::read_to_string(&said).unwrap().lines().count(), 3, "no session when there's none");
-        std::fs::write(&program, "#!/bin/sh\nexit 1\n").unwrap();
-        assert!(!launch(&program, &home, None), "a launch that fails says so");
+        let launched = launch(&program, &home, Some(("TEST_APP", Path::new("/Apps/Renoise.app"))), Some("/songs/Groove.xrns"));
+        assert_eq!(launched, Launched { opened: true, said: vec!["Renoise will offer to recover what it was doing".into()] });
+        let given = std::fs::read_to_string(&args).unwrap();
+        assert_eq!(
+            given.lines().collect::<Vec<_>>(),
+            ["launch", "--kumi-home", home.to_str().unwrap(), "/songs/Groove.xrns", "app=/Apps/Renoise.app"]
+        );
+        assert!(launch(&program, &home, None, None).opened);
+        assert_eq!(std::fs::read_to_string(&args).unwrap().lines().collect::<Vec<_>>()[3..], ["app="], "no session, no app");
+        write("echo 'program: Renoise is open without its control channel (pid 7). Save, quit it.' >&2\nexit 1\n");
+        let failed = launch(&program, &home, None, None);
+        assert_eq!(
+            failed,
+            Launched { opened: false, said: vec!["Renoise is open without its control channel (pid 7). Save, quit it.".into()] }
+        );
+        // Kept where `kumi report` reads the bridge's logs.
+        keep_said(&home.join("bridges/renoise"), &failed);
+        let log = std::fs::read_to_string(home.join("bridges/renoise/logs/launch.log")).unwrap();
+        assert!(log.contains("launch didn't open: Renoise is open without its control channel"), "{log}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn setup_opens_a_closed_daw_only_in_a_version_kumi_works_with_and_with_the_session_it_had_open_last() {
+        let setup = |vars: &[(&str, &str)]| TESTED.setup(&env(vars), Rc::default(), false, Rc::default());
+        assert_eq!(setup(&[]).installed().await, Installed::Missing);
+        let older = setup(&[("TEST_APP", "/Apps/Renoise.app"), ("TEST_VERSION", "3.4.4")]);
+        assert_eq!(older.installed().await, Installed::Older("3.4.4".into()));
+        assert_eq!(setup(&[("TEST_APP", "/Apps/Renoise.app"), ("TEST_VERSION", "3.5.4")]).installed().await, Installed::Ready);
+        assert_eq!(setup(&[("TEST_APP", "/Apps/Renoise.app")]).installed().await, Installed::Ready, "a version it can't tell");
+        // The session is promised, and a closed DAW opens with it, only when Kumi knows one.
+        let known = setup(&[("TEST_SESSION", "/songs/Groove.xrns")]);
+        assert_eq!(known.closed_set().as_deref(), Some("/songs/Groove.xrns"));
+        assert!(known.once_closed("Renoise").contains("with your session"));
+        let unknown = setup(&[]);
+        assert_eq!(unknown.closed_set(), None);
+        assert!(!unknown.once_closed("Renoise").contains("session"));
+        assert_eq!((unknown.open_failed(), unknown.opened_note()), (None, None), "nothing launched, nothing said");
+    }
+
+    #[test]
+    fn a_rollback_names_the_daw_kumi_daw_sets_as_unknown_or_maybe_unknown_by_whether_that_kumi_carries_the_program() {
+        let named = env(&[("KUMI_DAW", "renoise")]);
+        let without = rollback_words(&named, DawId::Renoise, "Renoise", "1.20.0", false).unwrap();
+        assert!(without.contains("Kumi 1.20.0 doesn't know Renoise"), "{without}");
+        let with = rollback_words(&named, DawId::Renoise, "Renoise", "1.20.0", true).unwrap();
+        assert!(with.contains("if Kumi 1.20.0 doesn't know Renoise yet"), "{with}");
+        assert_eq!(rollback_words(&env(&[]), DawId::Renoise, "Renoise", "1.20.0", true), None, "KUMI_DAW unset");
+        assert_eq!(rollback_words(&env(&[("KUMI_DAW", "reaper")]), DawId::Renoise, "Renoise", "1.20.0", false), None);
     }
 
     #[test]
