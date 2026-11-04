@@ -1099,7 +1099,13 @@ impl DawProfile {
             build_chains: "send to aux tracks, insert plug-ins on them",
             keep_candidates: "don't undo them: the producer may want to A/B them",
             layers: "instrument tracks layered together",
-            cant_reach: "Kumi can't reach SoundCraft. Is it open, with its control channel on? Kumi opens it that way (kumi --daw soundcraft); a copy opened from the Dock can't be reached, so save, quit it and let Kumi open it again.",
+            cant_reach: if cfg!(target_os = "macos") {
+                "Kumi can't reach SoundCraft. Is it open, with its control channel on? Kumi opens it that way (kumi --daw soundcraft); a copy opened from the Dock can't be reached, so save, quit it and let Kumi open it again."
+            } else if cfg!(windows) {
+                "Kumi can't reach SoundCraft. Is it open, with its control channel on? Kumi opens it that way (kumi --daw soundcraft); a copy opened from the Start menu can't be reached, so save, quit it and let Kumi open it again."
+            } else {
+                "Kumi can't reach SoundCraft. Is it open, with its control channel on? Kumi opens it that way (kumi --daw soundcraft); a copy opened from your desktop's app menu can't be reached, so save, quit it and let Kumi open it again."
+            },
             crash_note: "If it crashed, SoundCraft offers your session from its autosave when it opens again.",
             goal_needs: "Goals need SoundCraft connected, and Kumi doesn't listen in SoundCraft yet.",
             render_leftovers: "Kumi couldn't remove its scratch copies; delete the “Kumi · try” tracks from the session by hand.",
@@ -1359,6 +1365,7 @@ mod tests {
         assert_eq!(DawProfile::REAPER.vocab.own_undo, format!("REAPER's own undo ({key} in REAPER)"));
         assert_eq!(DawProfile::RENOISE.vocab.own_undo, format!("Renoise's own undo ({key} in Renoise)"));
         assert_eq!(DawProfile::SOUNDCRAFT.vocab.own_undo, format!("SoundCraft's own undo ({key} in SoundCraft)"));
+        assert_eq!(DawProfile::ABLETON.vocab.own_undo, "Live's own undo (Cmd-Z in Live)");
     }
 
     #[test]
