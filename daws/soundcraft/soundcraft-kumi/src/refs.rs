@@ -119,7 +119,8 @@ pub enum Ref {
         slot: Slot,
         param: String,
     },
-    /// An automation lane, by what it moves: `volume`, `pan`, or a slot and a parameter (`a:high_shelf_gain`).
+    /// An automation lane, by what it moves, as SoundCraft's automation commands name it: `volume`, `pan`, `pan2`, `mute`,
+    /// `send_a_level`, or a plug-in's parameter, `plugin:a:high_shelf_gain`.
     Lane {
         track: Id,
         param: String,
@@ -232,10 +233,11 @@ fn param_id(text: &str) -> bool {
     !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-/// What a lane moves: a word of the track's (`volume`), or a slot and a parameter (`a:high_shelf_gain`).
+/// What a lane moves, in SoundCraft's automation ids: a word of the track's (`volume`, `pan2`, `send_a_level`), or
+/// `plugin:<slot>:<parameter>`.
 fn lane(text: &str) -> bool {
-    match text.split_once(':') {
-        Some((slot, param)) => Slot::parse(slot).is_some() && param_id(param),
+    match text.strip_prefix("plugin:").and_then(|plugin| plugin.split_once(':')) {
+        Some((slot, param)) => matches!(Slot::parse(slot), Some(Slot::Insert(_))) && param_id(param),
         None => param_id(text),
     }
 }
