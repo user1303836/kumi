@@ -354,9 +354,14 @@ async fn discover_removes_a_gone_bridges_file_and_starts_one_bridge_in_its_place
     let found = host.discover().await;
     assert_eq!(found["staleRemoved"], 1, "{found}");
     assert!(!file.exists(), "the gone bridge's file was removed");
-    // (the new bridge is listed when it serves within the call's wait; on Windows the refused connect takes that wait)
+    // (the new bridge is listed when it serves within the call's wait; on Windows the refused connect takes that wait, and
+    // the call answers that the bridge is starting before its start's task has run)
     let listed = found["instances"].as_array().map_or(0, Vec::len);
     assert!(listed == 1 || found["hint"] == STARTING, "{found}");
+    let until = Instant::now() + Duration::from_secs(5);
+    while lab.world.starts() == 0 && Instant::now() < until {
+        tokio::time::sleep(ms(20)).await;
+    }
     assert_eq!(lab.world.starts(), 1, "one bridge started in its place");
 }
 
