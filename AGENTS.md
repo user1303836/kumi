@@ -41,6 +41,8 @@ daws/                       everything DAW-specific, one folder per DAW
                             SoundCraft's control channel and its recorded vectors, starting SoundCraft, kumi-daw/1),
                             kumi-daw-soundcraft/ (L5: experimental and read-only; its provider, `Beside`, opens SoundCraft
                             through the bridge program beside Kumi)
+hermes-plugin/              Kumi as a Hermes Agent plugin: Python (standard library only) over `kumi serve --stdio`,
+                            tests/ against a fixture runtime; the Hermes catalog installs this folder alone
 testdata/oracles/<crate>/   recorded oracles; .ignore hides them from search (rg -u finds them)
 plugin-formats/             plug-in preset formats Kumi builds in
 vendor/willington/          Willington's files: owner only
@@ -57,6 +59,7 @@ Why it's shaped this way (keep it so):
 - **Dependencies point down** (`LAYERS` in `scripts/dev.py`, checked by Required CI). Small acyclic crates mean a change rebuilds and tests only what depends on it; `dev.py affected` reads the graph and CI picks its jobs from it.
 - **The app reaches a DAW only through `kumi-daw`**, which each `kumi-daw-<daw>` implements; `crates/kumi/src/daw/registry.rs` is the table of DAWs. Outside its folder, a new DAW adds only its `DawId`, profile and place names in `kumi-types`, one table entry, and (own-bridge DAWs) its entry in `daw-bridge`'s DAW list, its module in `daw-mcp-server` and its entry in `scripts/daws.toml`, the list the release and packaging scripts read.
 - **Bridges are separate programs.** They run in or beside a DAW, work without Kumi (other MCP clients use them), use nothing of Kumi's but `kumi-common`, and have their own versions. Updating one means restarting the DAW. The exception is a `program` in `scripts/daws.toml` (SoundCraft's `soundcraft-kumi`): it runs beside the DAW, which loads nothing of it, and takes Kumi's version (section 5).
+- **The Hermes plugin is self-contained.** The Hermes catalog installs `hermes-plugin/` alone, from a pinned commit: nothing in it reaches outside the folder, and it carries no compiled code (setup downloads the Kumi release it pins, checked by SHA-256). It has no Rust and no layer.
 - **Frozen:** what an installed app is read by (`kumi` at the app's root, `package.json`, `bridge/prepared.json` and the package it names) and the wire protocols. Installed copies update, roll back and talk across versions through them.
 
 Where new code goes:
@@ -127,7 +130,7 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
 CI catches what would break for a producer before a release does, and nothing more. It stays this small: the owner decides any addition, in the PR that makes it.
 
 What runs:
-- **A pull request:** `Required CI`, on Linux only, for what the PR changes (`dev.py affected` from its merge commit): `Rust / Linux` in three parts (the `ci` tests), `Rust / Lint` (fmt, the gating clippy), `Checks` (the repository's scripts, the Remote Script, the Live extension, Renoise's tool) and `REAPER extension loads`. With `Willington files`, nothing else gates a merge.
+- **A pull request:** `Required CI`, on Linux only, for what the PR changes (`dev.py affected` from its merge commit): `Rust / Linux` in three parts (the `ci` tests), `Rust / Lint` (fmt, the gating clippy), `Checks` (the repository's scripts, the Remote Script, the Live extension, Renoise's tool), `Hermes plugin` (its tests, and the Hermes catalog's own checks on Hermes v0.22.7) and `REAPER extension loads`. With `Willington files`, nothing else gates a merge.
 - **Main, after each merge:** the same, plus `Rust / macOS`, `Rust / Windows` (the `ci-os` set) and the Remote Script on macOS and Windows, and its `Required CI` passes only when every system did. No newer merge cancels a main run. A red one opens an issue ("Main's CI failed") and is fixed before anything else, by whoever broke it; no release goes out until main is green on all three systems.
 - **By hand, before merging:**
   - A PR that changes platform-specific code runs `gh workflow run CI --ref <branch>`, and waits for its `Required CI`, which then means every system passed. Platform-specific: `cfg(windows)` or `cfg(target_os = "macos")` code, `install.ps1`, Hands (`hands/`), REAPER's extension (`daws/reaper/reaper-kumi`) or the Remote Script.

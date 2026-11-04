@@ -51,7 +51,7 @@ AREAS = [
     dev.Area("docs", [dev.glob(p) for p in ("docs/**", "**/*.md", "LICENSE*")]),
     dev.Area("workspace", [dev.glob("Cargo.lock")], feeds=["*"]),
     dev.Area("protocol", [dev.glob("protocol/**")], feeds=["runtime"]),
-    dev.Area("renoise-tool", [dev.glob("daws/renoise/**")]),
+    dev.Area("renoise-tool", [dev.glob("daws/renoise/**")], rust=False),
     dev.Area("renoise-tool-read", [dev.glob("daws/renoise/tool/version.lua")], feeds=["app"],
              layout=[dev.glob("daws/renoise/tool/**")]),
     dev.Area("reaper-extension", [dev.glob("crates/extension/**")]),
@@ -60,6 +60,7 @@ AREAS = [
     dev.Area("network", [dev.glob("crates/runtime/src/net/**")]),
     dev.Area("workflows", [dev.glob(".github/**")]),
     dev.Area("ci", [dev.glob(".github/workflows/ci.yml")]),
+    dev.Area("hermes-plugin", [dev.glob("hermes-plugin/**")], rust=False),
 ]
 
 
@@ -138,8 +139,34 @@ class Affected(unittest.TestCase):
         self.assertNotIn("reaper_extension", jobs(run("M\tcrates/store/src/lib.rs")))
 
     def test_ci_s_workflow_runs_every_ci_job_and_another_workflow_the_broad_ones(self):
-        self.assertEqual(jobs(run("M\t.github/workflows/ci.yml")), RUST | CODE | {"reaper_extension", "renoise_tool"})
+        self.assertEqual(jobs(run("M\t.github/workflows/ci.yml")),
+                         RUST | CODE | {"reaper_extension", "renoise_tool", "hermes_plugin"})
         self.assertEqual(jobs(run("M\t.github/workflows/extended.yml")), RUST | CODE)
+
+    def test_the_hermes_plugin_runs_its_own_job_and_no_rust_its_words_included(self):
+        self.assertEqual(jobs(run("M\thermes-plugin/runtime.py")), CODE | {"hermes_plugin"})
+        # Its README is the catalog's page and its skills are what the model reads: they ship, so they're checked.
+        for change in ("M\thermes-plugin/README.md", "A\thermes-plugin/skills/daw/SKILL.md"):
+            self.assertEqual(jobs(run(change)), {"hermes_plugin"}, change)
+        for change in ("M\thermes-plugin/runtime.py", "M\thermes-plugin/README.md"):
+            self.assertEqual(run(change).packages, [], change)
+        self.assertNotIn("hermes_plugin", jobs(run("M\tcrates/store/src/lib.rs")))
+        self.assertNotIn("hermes_plugin", jobs(run("M\t.github/workflows/extended.yml")))
+
+    def test_a_file_runs_rust_when_any_of_its_areas_has_rust(self):
+        areas = AREAS + [dev.Area("shared", [dev.glob("hermes-plugin/shared.json")], feeds=["app"])]
+        result = dev.affected(dev.parse_name_status("M\thermes-plugin/shared.json"), WORKSPACE, areas)
+        self.assertEqual(result.packages, ["app"])
+        self.assertEqual(jobs(result), RUST | CODE | {"hermes_plugin"})
+
+    def test_an_areas_rust_is_true_or_false(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "areas.toml"
+            path.write_text('[tool]\npaths = ["tool/**"]\nrust = false\n[rest]\npaths = ["rest/**"]\n', encoding="utf-8")
+            self.assertEqual([(area.name, area.rust) for area in dev.load_areas(path)], [("tool", False), ("rest", True)])
+            path.write_text('[tool]\npaths = ["tool/**"]\nrust = "no"\n', encoding="utf-8")
+            with self.assertRaises(dev.Refused):
+                dev.load_areas(path)
 
     def test_a_change_no_package_holds_and_no_area_feeds_affects_every_package(self):
         self.assertEqual(run("M\t.github/workflows/extended.yml").packages, sorted(WORKSPACE.folders))
@@ -244,6 +271,9 @@ class Check(unittest.TestCase):
     def test_each_area_runs_its_own_checks(self):
         self.assertTrue(any("daws/renoise/tests/run.sh" in step for step in self.steps("M\tdaws/renoise/tool/payload/notes.lua")))
         self.assertTrue(any("pwsh" in step and "--profile ci -p" in step for step in self.steps("M\tcrates/store/src/lib.rs", windows=True)))
+        plugin = self.steps("M\thermes-plugin/runtime.py")
+        self.assertIn(f"{sys.executable} -m unittest discover -s hermes-plugin/tests -p test_*.py", plugin)
+        self.assertFalse(any(step.startswith("cargo") or "test-isolated" in step for step in plugin), plugin)
 
 
 # The layers as Kumi's crates keep them: the app on the DAWs' integrations, the integrations on kumi-daw, the agent and

@@ -7,6 +7,8 @@
 #   if it were their own, and so the packages that depend on them.
 # - except: globs of files the paths match that aren't the area's.
 # - layout: a file added, removed or renamed under these globs counts as one of this area's.
+# - rust: false when a change here tests no Rust package (unless another area holding the same file does): CI's Rust
+#   jobs then pass at once for a change to these files alone.
 
 # Words for people: a change to these alone builds and tests nothing.
 [docs]
@@ -40,6 +42,7 @@ feeds = ["ableton-mcp-server", "kumi"]
 # Kumi's Renoise tool (Lua) and its tests against a mock of Renoise's API.
 [renoise-tool]
 paths = ["daws/renoise/com.kumi.Bridge.xrnx/**", "daws/renoise/tests/**"]
+rust = false
 
 # What Kumi reads of the tool: its entry, manifest, version, change kinds and actions (Kumi's list of them, and the fields
 # each offers, are checked against them), and the folder as it's installed.
@@ -55,6 +58,12 @@ paths = [
 ]
 layout = ["daws/renoise/com.kumi.Bridge.xrnx/**"]
 feeds = ["kumi-agent", "kumi"]
+
+# Kumi's Hermes Agent plugin (Python, with its Desktop and dashboard halves): the Hermes catalog installs this folder
+# alone, so nothing in it reaches outside it. CI's Hermes plugin job holds it to Hermes's own checks.
+[hermes-plugin]
+paths = ["hermes-plugin/**"]
+rust = false
 
 # REAPER's extension as it ships: its crate and the release script's check of what a bundle may carry (with what the
 # DAW list says of the extension).

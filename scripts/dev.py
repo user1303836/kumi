@@ -19,14 +19,16 @@
 holds it (the longest such folder); its areas are the ones in scripts/areas.toml whose globs match it. The affected
 packages are those packages and the ones an area feeds, then every package that depends on them (a dev-dependency's
 dependent once, for its tests). A change that would run Rust's jobs but that no package holds and no area feeds (a
-workflow, a script, git's settings) affects every package: nothing says which it doesn't. The jobs are CI's
+workflow, a script, git's settings) affects every package: nothing says which it doesn't. A file whose areas all say
+`rust = false` (the Renoise tool's Lua, the Hermes plugin's Python) runs no Rust at all. The jobs are CI's
 (.github/workflows/ci.yml), which each read this on a pull request (its merge commit against main, `--base HEAD^1`):
 
-- rust_lint: any change but to docs, or to the Renoise tool beyond what Kumi reads of it (the Rust parts, and the other
-  systems' jobs, pick their packages from `packages`);
+- rust_lint: any change but to docs, or to an area with `rust = false` alone (the Rust parts, and the other systems'
+  jobs, pick their packages from `packages`);
 - remote_script, live_extension: any change but to docs;
 - reaper_extension: REAPER's extension, a package it builds with, or CI's workflow;
-- renoise_tool: the Renoise tool, or CI's workflow.
+- renoise_tool: the Renoise tool, or CI's workflow;
+- hermes_plugin: the Hermes plugin (its words included: its README and skills ship in it), or CI's workflow.
 
 The Installer and Network workflows run for their own areas (`install`, `network`) by their `paths:`, which repeat those
 areas' globs (an `except` as a `!` glob): `areas --write-workflows` writes them, and scripts/tests/test_dev.py fails when
@@ -35,8 +37,9 @@ they differ.
 `check` runs, in CI's order and for what the branch changes since `--base` (origin/main): the change's whitespace and
 the areas' check; then, when it affects Rust packages, `cargo fmt --all --check`, the gating Clippy lint and the `ci`
 tests (cargo-nextest, through scripts/test-isolated) of those packages, the ones CI's Rust jobs test; then the Remote
-Script's, the Live extension's and the Renoise tool's tests when their areas changed (each skipped, and said, without its
-npm or LuaJIT); and the release scripts' and the installers' checks (the latter skipped without shellcheck and pwsh).
+Script's, the Live extension's, the Renoise tool's and the Hermes plugin's tests when their areas changed (each skipped,
+and said, without its npm or LuaJIT); and the release scripts' and the installers' checks (the latter skipped without
+shellcheck and pwsh).
 
 `deps` lists each package's layer and what it uses of the workspace; `--check` fails, naming them, on the dependencies
 the layer rules refuse. Crates in crates/ have layers (LAYERS: the app 6, kumi-daw 4, the agent 3, then 2 down to 0), and
@@ -85,7 +88,7 @@ ROOT = Path(__file__).resolve().parents[1]
 AREAS = ROOT / "scripts/areas.toml"
 # REAPER's extension, which CI builds as it ships and loads on each system.
 REAPER_EXTENSION = "reaper-kumi"
-JOBS = ("rust_lint", "remote_script", "live_extension", "reaper_extension", "renoise_tool")
+JOBS = ("rust_lint", "remote_script", "live_extension", "reaper_extension", "renoise_tool", "hermes_plugin")
 # The workflows that run for an area's paths alone (their `paths:` filters repeat the area): workflow, area.
 PATH_FILTERED = ((".github/workflows/installer.yml", "install"), (".github/workflows/network.yml", "network"))
 # Where the repository's paths moved, oldest first: `rebase-moves` reads it from the branch it rebases onto.
@@ -154,6 +157,8 @@ class Area:
     feeds: list[str] = field(default_factory=list)
     unless: list[re.Pattern[str]] = field(default_factory=list)
     layout: list[re.Pattern[str]] = field(default_factory=list)
+    # False: a change to this area's files tests no Rust package (unless another of the file's areas does).
+    rust: bool = True
 
     def holds(self, path: str, moved: bool = False) -> bool:
         """Whether `path` is one of this area's: a file it names, or one added, removed or renamed in its layout."""
@@ -165,11 +170,13 @@ class Area:
 def load_areas(path: Path = AREAS) -> list[Area]:
     areas = []
     for name, table in tomllib.loads(path.read_text(encoding="utf-8")).items():
-        unknown = set(table) - {"paths", "feeds", "except", "layout"}
-        if unknown or not table.get("paths"):
-            raise Refused(f"{path.name}: [{name}] needs paths, and takes only feeds, except and layout besides")
+        unknown = set(table) - {"paths", "feeds", "except", "layout", "rust"}
+        if unknown or not table.get("paths") or not isinstance(table.get("rust", True), bool):
+            raise Refused(f"{path.name}: [{name}] needs paths, and takes only feeds, except, layout and rust (true or "
+                          f"false) besides")
         areas.append(Area(name, [glob(p) for p in table["paths"]], list(table.get("feeds", [])),
-                          [glob(p) for p in table.get("except", [])], [glob(p) for p in table.get("layout", [])]))
+                          [glob(p) for p in table.get("except", [])], [glob(p) for p in table.get("layout", [])],
+                          table.get("rust", True)))
     return areas
 
 
@@ -261,12 +268,13 @@ def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, 
     if changes is None:
         return Affected(0, sorted(workspace.folders), sorted(area.name for area in areas), {job: True for job in JOBS})
     owners, fed, hit = set(), set(), set()
-    code = rust = renoise = reaper = unfed = False
+    code = rust = renoise = reaper = hermes = unfed = False
     files = 0
     for status, paths in changes:
         for path in paths:
             files += 1
-            names = {area.name for area in areas if area.holds(path, moved=status in "ADR")}
+            held = [area for area in areas if area.holds(path, moved=status in "ADR")]
+            names = {area.name for area in held}
             hit |= names
             # Words alone build and test nothing, even inside a package's folder.
             docs = "docs" in names
@@ -278,12 +286,14 @@ def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, 
                         feeds |= set(workspace.folders) if "*" in area.feeds else set(area.feeds)
             owners |= {owner} if owner else set()
             fed |= feeds
-            tests_rust = not docs and ("renoise-tool" not in names or "renoise-tool-read" in names)
+            # A file only areas without Rust hold (the Renoise tool's own Lua, the Hermes plugin) tests no Rust package.
+            tests_rust = not docs and not (held and not any(area.rust for area in held))
             code |= not docs
             rust |= tests_rust
             unfed |= tests_rust and not owner and not feeds
             renoise |= bool(names & {"renoise-tool", "ci"})
             reaper |= bool(names & {"reaper-extension", "ci"})
+            hermes |= bool(names & {"hermes-plugin", "ci"})
     unknown = fed - set(workspace.folders)
     if unknown:
         raise Refused(f"areas.toml feeds packages the workspace doesn't have: {', '.join(sorted(unknown))}")
@@ -292,7 +302,7 @@ def affected(changes: list[tuple[str, list[str]]] | None, workspace: Workspace, 
     # The extension's own jobs follow what it builds with, never the everything above.
     reaper |= REAPER_EXTENSION in named
     jobs = {"rust_lint": rust, "remote_script": code, "live_extension": code, "reaper_extension": reaper,
-            "renoise_tool": renoise}
+            "renoise_tool": renoise, "hermes_plugin": hermes}
     return Affected(files, sorted(packages), sorted(hit), jobs)
 
 
@@ -499,6 +509,10 @@ def check_steps(result: Affected, base: str, windows: bool = sys.platform == "wi
                   Step("the Live extension's tests", ["npm", "test", "--prefix", "daws/ableton/live-extension"], needs=("npm",))]
     if "renoise-tool" in result.areas:
         steps.append(Step("the Renoise tool's tests", ["sh", "daws/renoise/tests/run.sh"], needs=("luajit",)))
+    if "hermes-plugin" in result.areas:
+        # CI also runs Hermes's own `plugins validate` and `doctor` on it, against a pinned Hermes (the Hermes plugin job).
+        steps.append(Step("the Hermes plugin's tests", [python, "-m", "unittest", "discover", "-s", "hermes-plugin/tests",
+                                                         "-p", "test_*.py"]))
     steps += [Step("the release scripts' tests", [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_*release.py"]),
               Step("dev.py's tests", [python, "-m", "unittest", "discover", "-s", "scripts/tests", "-p", "test_dev.py"])]
     if not windows:
