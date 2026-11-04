@@ -1,7 +1,7 @@
 [package]
 name = "soundcraft-kumi"
 version = "0.1.0"
-description = "Kumi's bridge beside SoundCraft. So far: the client of SoundCraft's control channel."
+description = "Kumi's bridge beside SoundCraft. So far: the client of SoundCraft's control channel, and starting SoundCraft with it on."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
@@ -12,6 +12,15 @@ publish = false
 name = "soundcraft_kumi"
 path = "src/lib.rs"
 
+[[bin]]
+name = "soundcraft-kumi"
+path = "src/main.rs"
+
 [dependencies]
+daw-bridge.workspace = true
+serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
