@@ -98,7 +98,7 @@ impl Survey {
         // The survey reads Max's own patchers and devices whole: past the budget a device Kumi is given has, an
         // abstraction box would count as an object of its own name.
         let read = if file.extension().and_then(|ext| ext.to_str()) == Some("amxd") {
-            read_device(&bytes).map(|device| {
+            read_device(&bytes).ok().map(|device| {
                 let files: Box<dyn Files> = match device.frozen {
                     Some(frozen) => Box::new(frozen),
                     None => Box::new(NoFiles),

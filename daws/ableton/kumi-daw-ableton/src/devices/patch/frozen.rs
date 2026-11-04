@@ -52,23 +52,38 @@ pub struct DeviceFile {
     pub frozen: Option<Frozen>,
 }
 
+/// The most a device's own patcher can weigh, in bytes: its JSON takes many times its size to read, so one past it isn't.
+pub const MOST_PATCHER_BYTES: usize = 64 * 1024 * 1024;
+
+/// Why a device file wasn't read.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Unread {
+    /// It isn't a device file, or its patcher isn't JSON.
+    NotADevice,
+    /// Its own patcher weighs more than [`MOST_PATCHER_BYTES`]: this many bytes.
+    TooBig(usize),
+}
+
 /// A device file's patcher, from its JSON or from the files frozen into it.
-pub fn read_device(bytes: &[u8]) -> Option<DeviceFile> {
-    let (code, chunk) = patcher_chunk(bytes)?;
+pub fn read_device(bytes: &[u8]) -> Result<DeviceFile, Unread> {
+    let (code, chunk) = patcher_chunk(bytes).ok_or(Unread::NotADevice)?;
     let code = String::from_utf8_lossy(code).into_owned();
     match Frozen::read(chunk) {
         Some(frozen) => {
-            let patcher = parse(frozen.bytes(frozen.main_file()?)?)?;
-            Some(DeviceFile { code, patcher, frozen: Some(frozen) })
+            let patcher = parse(frozen.main_file().and_then(|main| frozen.bytes(main)).ok_or(Unread::NotADevice)?)?;
+            Ok(DeviceFile { code, patcher, frozen: Some(frozen) })
         }
-        None => Some(DeviceFile { code, patcher: parse(chunk)?, frozen: None }),
+        None => Ok(DeviceFile { code, patcher: parse(chunk)?, frozen: None }),
     }
 }
 
 /// JSON as Max saves it, a NUL at its end.
-fn parse(bytes: &[u8]) -> Option<Value> {
+fn parse(bytes: &[u8]) -> Result<Value, Unread> {
+    if bytes.len() > MOST_PATCHER_BYTES {
+        return Err(Unread::TooBig(bytes.len()));
+    }
     let end = bytes.iter().rposition(|byte| *byte != 0).map_or(0, |at| at + 1);
-    serde_json::from_slice(&bytes[..end]).ok()
+    serde_json::from_slice(&bytes[..end]).map_err(|_| Unread::NotADevice)
 }
 
 /// A big-endian number in the container.
@@ -222,7 +237,7 @@ impl Files for Frozen {
 
     fn patcher(&self, name: &str) -> Option<Value> {
         let file = self.file(name).filter(|file| file.kind == "JSON")?;
-        parse(self.bytes(file)?)
+        parse(self.bytes(file)?).ok()
     }
 
     fn text(&self, name: &str) -> Option<String> {

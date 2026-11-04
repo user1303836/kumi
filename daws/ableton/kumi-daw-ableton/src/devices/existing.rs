@@ -17,7 +17,7 @@ use super::amxd::{encrypted, with_patcher_chunk, DeviceType};
 use super::findings::Findings;
 use super::look;
 use super::patch::check::{check_with, UNKNOWN_OBJECT};
-use super::patch::frozen::{read_device, Frozen};
+use super::patch::frozen::{read_device, Frozen, Unread, MOST_PATCHER_BYTES};
 use super::patch::geometry::Rect;
 use super::patch::layout::{arrange, text_width};
 use super::patch::notation::{expand, parse_beside, ports_had, Outside, OUTSIDE};
@@ -26,7 +26,8 @@ use super::patch::standard::{standard, Level};
 use super::patch::{embedded_patcher, keeps_patcher_in_data, Cord, Files, MaxBox, NoFiles, Patcher};
 use super::spec::Control;
 use super::tool::kind_folder;
-use kumi_common::path::{local_path, reserved_device};
+use kumi_agent::core::plugin_tools::local_path;
+use kumi_common::path::reserved_device;
 
 /// The most a device file Kumi opens can weigh: one with samples frozen in is big, and it's read whole.
 const MOST_BYTES: u64 = 256 * 1024 * 1024;
@@ -229,7 +230,14 @@ pub fn open(path: &Path, user_library: &Path) -> Result<Original, String> {
             "{shown} is one of Live's own Max for Live devices, whose patch is encrypted: only Live can read it, so Kumi can't make a device from it. Make a new one that does what's wanted instead."
         ));
     }
-    let device = read_device(&bytes).ok_or_else(|| format!("{shown} isn't a Max for Live device file Kumi can read."))?;
+    let device = read_device(&bytes).map_err(|unread| match unread {
+        Unread::TooBig(size) => format!(
+            "{shown}'s patch is {} MB, more than the {} MB Kumi reads of one, so Kumi can't make a device from it.",
+            size.div_ceil(1024 * 1024),
+            MOST_PATCHER_BYTES / (1024 * 1024)
+        ),
+        Unread::NotADevice => format!("{shown} isn't a Max for Live device file Kumi can read."),
+    })?;
     let kind = DeviceType::ALL.into_iter().find(|kind| kind.code() == device.code).ok_or_else(|| {
         format!(
             "{shown} is a kind of Max for Live device Kumi doesn't make ({}): only MIDI effects, audio effects and instruments.",

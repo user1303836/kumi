@@ -92,18 +92,17 @@ impl Made {
         }
     }
 
-    /// The device of `kind` this conversation made by the name asked for (or made as that name), while its file is as
-    /// Kumi wrote it. No name asked for is no device's, and one of another kind isn't this one's to replace: a saved Set
-    /// expects the kind it has.
-    fn ours(&self, folder: &Path, asked: &str, kind: DeviceType) -> Option<MadeDevice> {
+    /// The devices of `kind` this conversation made that a device made by the name `asked` would replace: the one asked
+    /// for by that name, then the one made as it. Which is still as Kumi wrote it is [`still_ours`]'s to say. No name asked
+    /// for is no device's, and one of another kind isn't this one's to replace: a saved Set expects the kind it has.
+    fn candidates(&self, asked: &str, kind: DeviceType) -> Vec<MadeDevice> {
         if asked.is_empty() {
-            return None;
+            return Vec::new();
         }
-        let unchanged = |device: &&MadeDevice| {
-            std::fs::read(folder.join(format!("{}.amxd", device.file))).is_ok_and(|bytes| hashed(&bytes) == device.written)
-        };
-        let by_name = self.devices.iter().find(|device| device.kind == kind && device.asked == asked).filter(unchanged);
-        by_name.or_else(|| self.devices.iter().find(|device| device.kind == kind && device.file == asked).filter(unchanged)).cloned()
+        let by_name = self.devices.iter().find(|device| device.kind == kind && device.asked == asked);
+        let by_file = self.devices.iter().find(|device| device.kind == kind && device.file == asked);
+        let by_file = by_file.filter(|file| !by_name.is_some_and(|name| std::ptr::eq(*file, name)));
+        by_name.into_iter().chain(by_file).cloned().collect()
     }
 
     /// Whether Live's Browser may not list this item yet: a device written without waiting for it.
@@ -132,6 +131,14 @@ impl Made {
         });
         self.devices.push(device);
     }
+}
+
+/// The first of `candidates` whose file in `folder` is still as Kumi wrote it: each is read and hashed whole, which takes
+/// as long as it's big.
+fn still_ours(folder: &Path, candidates: Vec<MadeDevice>) -> Option<MadeDevice> {
+    candidates
+        .into_iter()
+        .find(|device| std::fs::read(folder.join(format!("{}.amxd", device.file))).is_ok_and(|bytes| hashed(&bytes) == device.written))
 }
 
 fn hashed(bytes: &[u8]) -> u64 {
@@ -338,7 +345,14 @@ impl DeviceTool {
         if let Err(error) = builder.create(&folder).await {
             return Ok(Err(ToolResult::error(unwritable(&folder, &error))));
         }
-        let ours = self.options.made.borrow().ours(&folder, &naming.asked, kind);
+        let candidates = self.options.made.borrow().candidates(&naming.asked, kind);
+        let ours = if candidates.is_empty() {
+            None
+        } else {
+            // Reading the file of a device made here, and hashing it, take as long as it's big: beside the app's thread.
+            let place = folder.clone();
+            beside(signal, move || still_ours(&place, candidates)).await?.flatten()
+        };
         let windows = kumi_types::system::platform() == "win32";
         // Kumi Ears is kept beside the audio effects, and Kumi writes it again whenever it differs: its name is its own.
         let mut reserved: Vec<&str> = naming.reserved.iter().map(String::as_str).collect();
@@ -413,7 +427,10 @@ impl DeviceTool {
             }
             return Ok(Err(ToolResult::error(unwritable(&folder, &error))));
         }
-        self.options.made.borrow_mut().made(MadeDevice { asked: naming.asked, file: name.clone(), kind, written: hashed(&bytes) });
+        // Hashing what was written takes as long as it's big: beside the app's thread, and waited for even after a stop, as
+        // the device is written.
+        let written = tokio::task::spawn_blocking(move || hashed(&bytes)).await.unwrap_or_default();
+        self.options.made.borrow_mut().made(MadeDevice { asked: naming.asked, file: name.clone(), kind, written });
         let item_id = format!("user_library/Kumi/{}/{name}", kind_folder(kind));
         let deadline = now_ms().saturating_add(self.options.wait_ms.unwrap_or(20_000) as i64);
         let mut seen = false;
@@ -442,15 +459,15 @@ impl DeviceTool {
         reference: Option<&'static reference::Reference>,
         signal: Signal,
     ) -> Result<ToolResult, RuntimeError> {
-        // Looking through the User Library and reading the file (up to 256 MB) happen off the thread the app runs on.
+        // Looking through the User Library and reading the file (up to 256 MB) take as long as they take: beside the app's
+        // thread.
         let (asked_from, library) = (from.to_string(), PathBuf::from(&self.options.user_library));
         let opened =
-            tokio::task::spawn_blocking(move || existing::find(&asked_from, &library).and_then(|path| existing::open(&path, &library)))
-                .await
-                .unwrap_or_else(|_| Err("Kumi couldn't open the device.".into()));
+            beside(&signal, move || existing::find(&asked_from, &library).and_then(|path| existing::open(&path, &library))).await?;
         let original = match opened {
-            Ok(original) => Arc::new(original),
-            Err(why) => return Ok(ToolResult::error(why)),
+            Some(Ok(original)) => Arc::new(original),
+            Some(Err(why)) => return Ok(ToolResult::error(why)),
+            None => return Ok(ToolResult::error("Kumi couldn't open the device.".to_string())),
         };
         // A new device is made from it only with a change: a name or an about alone opens it.
         if !["patch", "controls", "remove"].iter().any(|key| given(key)) {
@@ -843,29 +860,22 @@ mod tests {
     fn only_a_device_this_conversation_made_and_kumi_wrote_is_ours_to_replace() {
         let folder = tempfile::tempdir().unwrap();
         let mut made = Made::default();
+        let ours = |made: &Made, asked: &str, kind| still_ours(folder.path(), made.candidates(asked, kind)).map(|device| device.file);
         made.conversation("first");
         std::fs::write(folder.path().join("Echo 2.amxd"), b"written").unwrap();
         made.made(MadeDevice { asked: "Echo".into(), file: "Echo 2".into(), kind: DeviceType::MidiEffect, written: hashed(b"written") });
-        assert_eq!(
-            made.ours(folder.path(), "Echo", DeviceType::MidiEffect).map(|device| device.file),
-            Some("Echo 2".into()),
-            "by the name asked for"
-        );
-        assert_eq!(
-            made.ours(folder.path(), "Echo 2", DeviceType::MidiEffect).map(|device| device.file),
-            Some("Echo 2".into()),
-            "by the name it was made as"
-        );
-        assert!(made.ours(folder.path(), "Delay", DeviceType::MidiEffect).is_none());
-        assert!(made.ours(folder.path(), "Echo", DeviceType::AudioEffect).is_none(), "an audio effect doesn't replace a MIDI effect");
+        assert_eq!(ours(&made, "Echo", DeviceType::MidiEffect), Some("Echo 2".into()), "by the name asked for");
+        assert_eq!(ours(&made, "Echo 2", DeviceType::MidiEffect), Some("Echo 2".into()), "by the name it was made as");
+        assert!(ours(&made, "Delay", DeviceType::MidiEffect).is_none());
+        assert!(ours(&made, "Echo", DeviceType::AudioEffect).is_none(), "an audio effect doesn't replace a MIDI effect");
         made.made(MadeDevice { asked: "".into(), file: "Echo 3".into(), kind: DeviceType::MidiEffect, written: hashed(b"written") });
         std::fs::write(folder.path().join("Echo 3.amxd"), b"written").unwrap();
-        assert!(made.ours(folder.path(), "", DeviceType::MidiEffect).is_none(), "two devices made without a name are two");
+        assert!(ours(&made, "", DeviceType::MidiEffect).is_none(), "two devices made without a name are two");
         std::fs::write(folder.path().join("Echo 2.amxd"), b"saved in Max").unwrap();
-        assert!(made.ours(folder.path(), "Echo", DeviceType::MidiEffect).is_none(), "a file changed since is someone's own");
+        assert!(ours(&made, "Echo", DeviceType::MidiEffect).is_none(), "a file changed since is someone's own");
         std::fs::write(folder.path().join("Echo 2.amxd"), b"written").unwrap();
         made.conversation("second");
-        assert!(made.ours(folder.path(), "Echo", DeviceType::MidiEffect).is_none(), "another conversation's");
+        assert!(ours(&made, "Echo", DeviceType::MidiEffect).is_none(), "another conversation's");
     }
 
     #[test]
