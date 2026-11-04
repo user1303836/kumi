@@ -8,13 +8,10 @@ use super::read::{misplaced, recorded};
 use super::vectors::vectors;
 use serde_json::{json, Value};
 use soundcraft_kumi::control::Control;
-use soundcraft_kumi::read::call::READ_ONLY;
+use soundcraft_kumi::read::call::{CALL_ANSWER_BYTES, READ_ONLY};
 use soundcraft_kumi::read::Reads;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-
-/// The bytes a read's answer may take (read.rs's `ANSWER_BYTES`).
-const ANSWER_BYTES: usize = 224 * 1024;
 
 /// A fake SoundCraft showing the recorded session, listing 0.17.0's commands, and answering the engine commands a test
 /// sets (by id), else `unknown command`.
@@ -86,7 +83,10 @@ fn track(id: u64) -> Value {
 
 /// How each refusal of a command off the list ends: the commands that run.
 fn reads() -> String {
-    format!(". The commands Kumi reads: {}", READ_ONLY.iter().map(|command| command.id).collect::<Vec<_>>().join(", "))
+    let ids = READ_ONLY.iter().map(|command| command.id).collect::<Vec<_>>().join(", ");
+    format!(
+        ". The commands Kumi reads: {ids} (engine.commands' filter keeps its answer small: all of SoundCraft 0.17.0's commands come to 100-110 KB)"
+    )
 }
 
 #[tokio::test]
@@ -283,45 +283,46 @@ async fn a_ref_from_another_epoch_or_an_earlier_life_is_stale() {
 }
 
 #[tokio::test]
-async fn an_answer_past_the_bytes_a_read_may_take_is_cut_and_says_where() {
+async fn an_answer_past_what_a_model_takes_whole_is_cut_and_says_where() {
     let mut app = App::new().await;
     let note = |at: i64| json!({"start": at * 120, "length": 120, "pitch": 60, "velocity": 100, "release_velocity": 64, "channel": 0});
-    let notes: Vec<Value> = (0..20_000).map(note).collect();
+    let notes: Vec<Value> = (0..5_000).map(note).collect();
     app.answers("midi.notes", ok(json!({"notes": notes})));
     let answer = app.call("midi.notes", json!({"clip": "s:clip:25"})).await.unwrap();
     assert_eq!(app.executed(), [json!({"command": "midi.notes", "params": {"clip": 25}})]);
     let shown = answer["result"]["notes"].as_array().unwrap().len();
-    assert_eq!(answer["truncated"], json!({"/result/notes": {"total": 20_000, "shown": shown}}));
-    assert!(shown > 1000 && shown < 20_000, "{shown}");
-    assert!(serde_json::to_string(&answer["result"]).unwrap().len() <= ANSWER_BYTES);
+    assert_eq!(answer["truncated"], json!({"/result/notes": {"total": 5_000, "shown": shown}}));
+    assert!(shown > 100 && shown < 5_000, "{shown}");
+    assert!(serde_json::to_string(&answer["result"]).unwrap().len() <= CALL_ANSWER_BYTES);
+    assert!(serde_json::to_string(&answer).unwrap().len() <= 60 * 1024, "the whole answer, under a read page's 60 KiB");
     assert_eq!(answer["result"]["notes"][shown - 1], note(shown as i64 - 1), "the first notes, as they were");
 
     // A text alone too long is cut at its start.
-    app.answers("engine.parity", ok(json!({"report": "x".repeat(300 * 1024)})));
+    app.answers("engine.parity", ok(json!({"report": "x".repeat(100 * 1024)})));
     let parity = app.call("engine.parity", json!({})).await.unwrap();
     let shown = parity["result"]["report"].as_str().unwrap().len();
-    assert_eq!(parity["truncated"], json!({"/result/report": {"totalBytes": 300 * 1024, "shownBytes": shown}}));
-    assert!(serde_json::to_string(&parity["result"]).unwrap().len() <= ANSWER_BYTES);
+    assert_eq!(parity["truncated"], json!({"/result/report": {"totalBytes": 100 * 1024, "shownBytes": shown}}));
+    assert!(serde_json::to_string(&parity["result"]).unwrap().len() <= CALL_ANSWER_BYTES);
 }
 
 #[tokio::test]
 async fn an_answer_with_no_one_list_to_cut_empties_the_biggest_and_goes_on() {
     let mut app = App::new().await;
-    // (three lists of 160 KiB: none alone can bring the answer under 224 KiB)
-    let list = || Value::from(vec![Value::from("x".repeat(1022)); 160]);
+    // (three lists of 40 KiB: none alone can bring the answer under 56 KiB)
+    let list = || Value::from(vec![Value::from("x".repeat(1022)); 40]);
     app.answers("engine.history", ok(json!({"a": list(), "b": list(), "c": list()})));
     let answer = app.call("engine.history", json!({})).await.unwrap();
-    assert!(serde_json::to_string(&answer["result"]).unwrap().len() <= ANSWER_BYTES);
+    assert!(serde_json::to_string(&answer["result"]).unwrap().len() <= CALL_ANSWER_BYTES);
     let truncated = answer["truncated"].as_object().unwrap();
     assert_eq!(truncated.len(), 2, "the biggest emptied, then one cut: {truncated:?}");
     for key in ["a", "b", "c"] {
         let shown = answer["result"][key].as_array().unwrap().len();
         match truncated.get(&format!("/result/{key}")) {
-            Some(told) => assert_eq!(told, &json!({"total": 160, "shown": shown})),
-            None => assert_eq!(shown, 160, "{key}: whole when not named"),
+            Some(told) => assert_eq!(told, &json!({"total": 40, "shown": shown})),
+            None => assert_eq!(shown, 40, "{key}: whole when not named"),
         }
     }
-    assert_eq!(truncated["/result/a"], json!({"total": 160, "shown": 0}), "emptied");
+    assert_eq!(truncated["/result/a"], json!({"total": 40, "shown": 0}), "emptied");
 }
 
 #[tokio::test]

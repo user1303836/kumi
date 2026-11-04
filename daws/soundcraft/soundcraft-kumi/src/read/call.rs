@@ -16,9 +16,9 @@
 //!
 //! Refs, never ids, cross to Kumi. A param that names an object takes the object's ref, checked as `read` checks one
 //! (with its epoch; stale or ended, it's refused), and goes to the app as the object's id. The ids in an answer whose
-//! [`Shape`] names them go back as refs, under keys that hold refs. An answer past the bytes a read may take is cut,
-//! and says where under `truncated`.
-use super::{asked, bad, gone, lane_id, list, slot_of, text, tracks, wait_within, Reads, Refusal, ANSWER_BYTES};
+//! [`Shape`] names them go back as refs, under keys that hold refs. An answer past what a model takes whole
+//! ([`CALL_ANSWER_BYTES`]) is cut, and says where under `truncated`.
+use super::{asked, bad, gone, lane_id, list, slot_of, text, tracks, wait_within, Reads, Refusal};
 use crate::control::Error;
 use crate::refs::{Id, Kind, Lives, Missing, Ref};
 use daw_bridge::wire::code;
@@ -27,6 +27,13 @@ use std::time::Instant;
 
 /// The SoundCraft whose commands [`READ_ONLY`] was checked against: 0.17.x. `call` runs on no other.
 pub const CHECKED_FOR: &str = "0.17";
+
+/// The bytes a call's answer (its `result`) may take: what a model takes whole. Kumi's kernel hands the model at most
+/// 64 KB of a tool's text (kumi-agent's kernel/agent.rs, `MAX_TOOL_RESULT`), and its read pages aim at 60 KiB
+/// (kumi-daw-own's bridge.rs, `PAGE_TEXT_BYTES`). A call has no pages, so an answer cut only at the 224 KiB a frame may
+/// take would reach the model cut again mid-entry, without the `truncated` that says where. Cut here, under that
+/// budget, it arrives whole with its `truncated`, and Kumi needs no cutter of its own.
+pub const CALL_ANSWER_BYTES: usize = 56 * 1024;
 
 /// The shape of a command's answer, for the ids in it to go back as refs. Each is as `crate::read`'s rows name them:
 /// - `Session`: `session.inspect`'s (crates/engine/src/inspect.rs:73): its tracks as `Track`, its busses', markers',
@@ -88,7 +95,13 @@ pub const READ_ONLY: [Command; 17] = [
     // query.rs:14-17 (`p.get("clip")`)
     read_only("clip.inspect", &["clip"], &[("clip", Kind::Clip)], Shape::Clip, "one clip, with its notes, as inspect.rs:99 shows it"),
     // query.rs:18-26 (`str_param(p, "filter")`)
-    read_only("engine.commands", &["filter"], &[], Shape::Plain, "the engine's command table (cmd.rs:129), described"),
+    read_only(
+        "engine.commands",
+        &["filter"],
+        &[],
+        Shape::Plain,
+        "the engine's command table (cmd.rs:129), described; its `filter` keeps the answer small (the whole table is 100-110 KB in 0.17.0)",
+    ),
     // query.rs:27
     read_only("engine.history", &[], &[], Shape::Plain, "the undo history's labels and whether there's a redo (lib.rs:333)"),
     // query.rs:28-31
@@ -262,7 +275,7 @@ impl Reads {
             self.saw(&result);
         }
         name_ids(read_only.shape, &mut result, &self.lives);
-        let truncated = cut(&mut result, ANSWER_BYTES)?;
+        let truncated = cut(&mut result, CALL_ANSWER_BYTES)?;
         let mut answer = json!({"command": command, "result": result, "epoch": self.epoch()});
         if !truncated.is_empty() {
             answer["truncated"] = truncated.into();
@@ -318,9 +331,10 @@ impl Reads {
     }
 }
 
-/// The commands `call` runs, for a refusal to name.
+/// The commands `call` runs, for a refusal to name, with how to keep `engine.commands`'s answer whole.
 fn reads() -> String {
-    READ_ONLY.iter().map(|command| command.id).collect::<Vec<_>>().join(", ")
+    let ids = READ_ONLY.iter().map(|command| command.id).collect::<Vec<_>>().join(", ");
+    format!("{ids} (engine.commands' filter keeps its answer small: all of SoundCraft 0.17.0's commands come to 100-110 KB)")
 }
 
 /// The ids in `engine.commands`'s answer.
@@ -523,7 +537,7 @@ fn cut(answer: &mut Value, most: usize) -> Result<Map<String, Value>, Refusal> {
         let Some((pointer, its)) = found.alone.or(found.biggest) else {
             return Err((
                 code::FAILED,
-                format!("the answer is {} KiB, past the {} KiB a read may take, with no list or text to cut", size / 1024, most / 1024),
+                format!("the answer is {} KiB, past the {} KiB a call may answer, with no list or text to cut", size / 1024, most / 1024),
             ));
         };
         // (none alone can do: the biggest is emptied, and the next turn goes on)
