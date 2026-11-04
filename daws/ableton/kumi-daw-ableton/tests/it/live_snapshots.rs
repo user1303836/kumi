@@ -511,6 +511,30 @@ async fn a_piece_kumis_undo_made_again_and_the_producer_edited_since_stays() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn a_piece_lives_own_undo_brought_back_as_it_was_is_used_as_the_change_left_it() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let track = Rc::new(Track { clips: RefCell::new(vec![("live:501".into(), "verse-hash".into())]), next: Cell::new(700) });
+            let live = clear_then_delete(&track).await;
+            let (text, is_error) = live.undo().await;
+            assert!(!is_error, "{text}");
+            // Cmd-Z in Live, twice, takes back Kumi's undo of the deletion and the deletion: the piece is back as the clear
+            // left it, its identity and all.
+            *track.clips.borrow_mut() = vec![("live:501".into(), "left-hash".into()), ("live:502".into(), "right-hash".into())];
+            // The clear's undo finds the pieces as it kept them, and puts "Verse" back whole.
+            let (text, is_error) = live.undo().await;
+            assert!(!is_error, "{text}");
+            let restore = live.python("restore").last().unwrap().clone();
+            assert_eq!(
+                restore["remnants"],
+                json!([{"identity":"live:501","hash":"left-hash","name":"Verse"},{"identity":"live:502","hash":"right-hash","name":"Verse"}])
+            );
+            assert_eq!(*track.clips.borrow(), [("live:701".into(), "live:701 as made again".into())]);
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn without_python_in_live_a_deletion_stays_lives_to_take_back() {
     tokio::task::LocalSet::new()
         .run_until(async {
