@@ -455,6 +455,36 @@ async fn undoing_an_arrangement_copy_a_clip_was_added_before_takes_it_from_where
     }
 }
 #[tokio::test]
+async fn a_session_copys_undo_a_retry_settles_forgets_no_ownership_of_its_own() {
+    // Live deletes the copy and its answer is lost. The retry's replay of that delete, at the ref the copy was made at,
+    // takes its cleanup ownership as any delete's answer does: nothing more is forgotten. (A copy deleted where it moved
+    // to leaves the row kept at the ref it was made at, which the retry forgets: the moved copy's test.)
+    let adapter = Rc::new(Adapter::new());
+    setup(&adapter.sim, "session-midi");
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let preview = host
+        .live_clip_duplicate_preview_async(
+            &json!(1),
+            &json!({"clipRef":"clip:clip-1","targetTrackRef":"track:track-1","targetSceneIndex":1}),
+        )
+        .await;
+    let body: Value = serde_json::from_str(preview["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    let apply = json!({"transactionId":body["transactionId"],"confirmation":"apply","idempotencyKey":"apply-key"});
+    host.live_clip_duplicate_apply_async(&json!(2), &apply, None).await.unwrap();
+    let record = host.transaction_record(body["transactionId"].as_str().unwrap()).unwrap();
+    adapter.reset("undo-after");
+    let undo = json!({"transactionId":body["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
+    let first =
+        host.with_undo_watch(&json!(3), &undo, async { Ok(host.undo_clip_duplicate_async(&json!(3), &undo, None).await) }).await.unwrap();
+    assert_eq!(record.borrow()["state"], "uncertain", "{first}");
+    let second =
+        host.with_undo_watch(&json!(4), &undo, async { Ok(host.undo_clip_duplicate_async(&json!(4), &undo, None).await) }).await.unwrap();
+    assert_eq!(record.borrow()["state"], "undone", "{second}");
+    let answer: Value = serde_json::from_str(second["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert_eq!(answer["deleted"], record.borrow()["created"]["ref"], "{answer}");
+    assert!(!adapter.calls.borrow().iter().any(|call| call["method"] == "forget"), "{:?}", adapter.calls.borrow());
+}
+#[tokio::test]
 async fn a_copy_into_the_arrangement_never_lands_on_another_clip() {
     // Live cuts what a copy lands on, and a copy that splits or covers a clip fails after the cut: refused before
     // anything happens, naming the clip in the way.

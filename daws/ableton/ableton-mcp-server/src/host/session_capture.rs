@@ -116,11 +116,14 @@ impl McpHost {
         // found by its identity (and a retry after it went finds nothing left to delete).
         let Some(at) = owned_clip_ref(&snapshot, identity) else {
             if allow_absent {
-                // Live deleted it and its answer was lost: the cleanup ownership kept for it goes as the delete's would.
-                if let Some(transaction) = &context.transaction_id {
+                // Live deleted it and its answer was lost; the retry's replay of that delete took the cleanup ownership
+                // kept at the ref it was sent to, as any delete's answer does. A clip that had moved was deleted at another
+                // ref than the one it was made at, so the row kept at that one goes as the moved delete's would.
+                let sent = recovery_record.and_then(|record| self.undo_recovery_delete_ref(record, identity));
+                let moved = sent.as_deref().is_some_and(|at| at != reference);
+                if let Some(transaction) = context.transaction_id.as_ref().filter(|_| moved) {
                     adapter.forget_cleanup_ownership(transaction, reference);
                 }
-                let sent = recovery_record.and_then(|record| self.undo_recovery_delete_ref(record, identity));
                 return Ok(sent.unwrap_or_else(|| reference.to_string()));
             }
             self.clip_row(&snapshot, reference)?;
