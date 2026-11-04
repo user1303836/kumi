@@ -474,7 +474,9 @@ impl TuiApp {
             }
             add(String::new(), st::TEXT);
             add("Try".into(), st::FAINT);
-            for text in ["  “What's on this track?”", "  “Set the tempo to 124”", "  “Why might my low end sound muddy?”"] {
+            // (a DAW Kumi only reads: a question, not a change it can't make)
+            let ask = if self.can().reads_only { "  “Which tracks are muted?”" } else { "  “Set the tempo to 124”" };
+            for text in ["  “What's on this track?”", ask, "  “Why might my low end sound muddy?”"] {
                 add(text.into(), st::TEXT);
             }
         } else {

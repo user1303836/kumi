@@ -40,6 +40,20 @@ case!(startup_restore, async {
         .ends_with(&format!("{}Kumi closed. Each Set's conversation continues next time.\n", kumi::tui::tty::RESTORE)));
     h.close().await;
 });
+// A DAW Kumi only reads (SoundCraft's): the welcome suggests a question, never a change Kumi can't make there.
+case!(a_daw_kumi_only_reads_is_offered_questions_not_changes, async {
+    let control = Rc::new(Control::default());
+    control.set("reads-only", json!(true));
+    let h = Harness::with(120, 36, control, |_| {});
+    let done = h.app.run();
+    delay(5).await;
+    h.connect();
+    h.has("Which tracks are muted?");
+    assert!(!h.screen().iter().any(|line| line.contains("Set the tempo")), "{:#?}", h.screen());
+    h.type_text("\x03").await;
+    assert_eq!(done.await, 0);
+    h.close().await;
+});
 case!(drag_select_and_copy_the_displayed_text_while_streaming, async {
     use std::cell::RefCell;
     let copied = Rc::new(RefCell::new(Vec::<String>::new()));

@@ -752,6 +752,7 @@ impl SessionHandle for Control {
             slots: self.slots.borrow().is_some(),
             models: self.models.borrow().is_some(),
             take_back: self.enabled("take-back"),
+            reads_only: self.enabled("reads-only"),
             // Watching, the goal's numbers, lessons and reconfiguring: none.
             ..Capabilities::default()
         }
