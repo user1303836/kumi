@@ -68,6 +68,8 @@ struct FakeLive {
     set_fails: Cell<bool>,
     /// Why Live couldn't start Kumi's bridge, as its log says.
     failure: RefCell<Option<String>>,
+    /// Setup asks before it opens Live, closed (a DAW Kumi only opens, to reach it).
+    asks: Cell<bool>,
 }
 impl FakeLive {
     fn new(open: bool) -> Rc<Self> {
@@ -89,6 +91,7 @@ impl FakeLive {
             live_version: RefCell::new(Some("12.4".into())),
             set_fails: Cell::new(false),
             failure: RefCell::default(),
+            asks: Cell::new(false),
         })
     }
     fn calls(&self) -> Vec<String> {
@@ -190,6 +193,9 @@ impl LiveSetup for FakeLive {
     }
     fn settings_menu(&self) -> Option<String> {
         self.menu.borrow().clone()
+    }
+    fn asks_to_open(&self) -> bool {
+        self.asks.get()
     }
     fn quit_wait(&self) -> std::time::Duration {
         std::time::Duration::from_millis(300)
@@ -1033,6 +1039,30 @@ case!(a_live_12_that_isnt_here_or_never_opened_is_said_before_anything_is_instal
     h.wait_for("Kumi chats without Live for now").await;
     assert_eq!(live.count("quit") + live.count("install"), 0, "nothing asked of Live, nothing installed");
     assert!(live.open.borrow().is_some(), "Live left open");
+    h.close().await;
+});
+
+case!(a_daw_kumi_only_opens_to_reach_it_opens_only_once_the_producer_says_so, async {
+    // Later: nothing opens, and Kumi chats without it.
+    let live = FakeLive::new(false);
+    live.asks.set(true);
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.wait_for("Open Live").await;
+    h.has("Connect to Live     Live isn't open");
+    h.type_text("\x1b[B\r").await;
+    h.wait_for("Kumi chats without Live for now").await;
+    assert_eq!(live.count("start"), 0, "{:?}", live.calls());
+    h.close().await;
+    // Open: it opens.
+    let live = FakeLive::new(false);
+    live.asks.set(true);
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.wait_for("Open Live").await;
+    h.type_text("\r").await;
+    h.wait_for("waiting for Live").await;
+    assert_eq!(live.calls(), ["open?", "install", "start", "connect"]);
     h.close().await;
 });
 

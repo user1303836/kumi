@@ -85,6 +85,11 @@ pub trait DawSetup {
     fn once_closed(&self, app: &str) -> String {
         format!("Kumi then puts its bridge in place and opens {app} again.")
     }
+    /// Whether setup asks before it opens the DAW, closed as setup began: by default it opens it as the step goes on, its
+    /// bridge put in place; a DAW Kumi only opens, to reach it, is never opened unasked.
+    fn asks_to_open(&self) -> bool {
+        false
+    }
     /// The session to open a DAW with that wasn't open when setup began, for a DAW Kumi opens with what the producer had
     /// open last: none by default, so it opens as it starts by itself.
     fn closed_set(&self) -> Option<String> {

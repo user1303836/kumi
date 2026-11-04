@@ -103,9 +103,23 @@ pub fn opened_by_kumi(home: &Path, folder: &str, record: &str) -> bool {
     home.join(folder).join(record).is_file()
 }
 
-/// Whether the copy Kumi opened runs: the launch record's `pid` is, in `listing` (pid and program), a copy of `daw`.
+/// The most a launch record holds, as the program keeps it; and the most of what a launch said that Kumi reads.
+const READ_MOST: u64 = 64 * 1024;
+
+/// Up to [`READ_MOST`] bytes of a file.
+fn read_capped(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut bytes = Vec::new();
+    std::fs::File::open(path).ok()?.take(READ_MOST).read_to_end(&mut bytes).ok()?;
+    Some(bytes)
+}
+
+/// Whether the copy Kumi opened runs: the launch record's `pid` is, in `listing` (pid and program), a copy of `daw`. The
+/// record is read only as the program keeps it: a file of its own (not a link, a pipe or a folder) of at most 64 KiB.
 pub fn open_as_launched(home: &Path, folder: &str, record: &str, daw: Daw, listing: &[(u32, String)]) -> bool {
-    let read = std::fs::read(home.join(folder).join(record)).ok();
+    let path = home.join(folder).join(record);
+    let kept = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file() && meta.len() <= READ_MOST);
+    let read = kept.then(|| read_capped(&path)).flatten();
     let pid = read.and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok()?.get("pid")?.as_u64());
     pid.is_some_and(|pid| listing.iter().any(|(running, name)| u64::from(*running) == pid && detect::process_is(daw, name)))
 }
@@ -132,11 +146,38 @@ pub fn launch(program: &Path, home: &Path, app: Option<(&str, &Path)>, session: 
     if let Some((variable, app)) = app {
         command.env(variable, app);
     }
-    command.stdin(Stdio::null()).stdout(Stdio::null());
-    match command.output() {
-        Ok(done) => Launched { opened: done.status.success(), said: said_by(program, &done.stderr) },
+    // What the program says goes to a file, never a pipe: what it starts can hold its stderr (on Windows the DAW
+    // inherits it, rust-lang/rust#54760), and a pipe would keep the launch waiting until the DAW quits.
+    let (said_to, stderr) = match said_file() {
+        Some((path, file)) => (Some(path), Stdio::from(file)),
+        None => (None, Stdio::null()),
+    };
+    command.stdin(Stdio::null()).stdout(Stdio::null()).stderr(stderr);
+    let status = command.status();
+    // (Kumi's own handle on the file goes with the command)
+    drop(command);
+    let said = said_to
+        .map(|path| {
+            let bytes = read_capped(&path).unwrap_or_default();
+            let _ = std::fs::remove_file(&path);
+            said_by(program, &bytes)
+        })
+        .unwrap_or_default();
+    match status {
+        Ok(status) => Launched { opened: status.success(), said },
         Err(error) => Launched { opened: false, said: vec![format!("{} couldn't run: {error}", program.display())] },
     }
+}
+
+/// A fresh file for what a launch says, readable only by this user: its path, and the file.
+fn said_file() -> Option<(PathBuf, std::fs::File)> {
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |since| since.as_nanos());
+    let path = std::env::temp_dir().join(format!("kumi-launch-{}-{stamp}.txt", std::process::id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
+    options.open(&path).ok().map(|file| (path, file))
 }
 
 /// A program's lines on stderr, without its name before each (`soundcraft-kumi: …`).
@@ -154,9 +195,13 @@ fn said_by(program: &Path, stderr: &[u8]) -> Vec<String> {
 const LAUNCH_LOG_MOST: u64 = 64 * 1024;
 
 /// Keeps what a launch came to in the bridge's `logs` (`folder`'s, where `kumi report` reads the bridge's logs), a line a
-/// launch: a failure, or a recovery the DAW offered, is still there once setup has moved on.
+/// launch: a failure, or a recovery the DAW offered, is still there once setup has moved on. Only in a folder the program
+/// made (owner-only, for the record it keeps there): Kumi never makes that folder itself.
 fn keep_said(folder: &Path, launched: &Launched) {
     use std::io::Write;
+    if !folder.is_dir() {
+        return;
+    }
     let logs = folder.join("logs");
     if std::fs::create_dir_all(&logs).is_err() {
         return;
@@ -431,7 +476,8 @@ impl DawProvider for Beside {
                 return Ok(1);
             }
             let session = (beside.last_session)(&io.env);
-            let found = (beside.app)(&io.env);
+            // (only an app that's there: a path that's gone would stop the program's own search)
+            let found = (beside.app)(&io.env).filter(|found| found.exists());
             let (home, shown) = (kumi_home(&io.env), session.clone());
             let launched = tokio::task::spawn_blocking(move || {
                 launch(&program, &home, found.as_deref().map(|found| (beside.app_variable, found)), shown.as_deref())
@@ -566,7 +612,9 @@ impl DawSetup for BesideSetup {
         let Some(program) = self.beside.program() else { return false };
         let home = kumi_home(&self.env);
         let set = set.map(|set| (self.beside.last_session)(&self.env).unwrap_or(set));
-        let app = app.filter(|app| !app.is_empty()).map(PathBuf::from).or_else(|| (self.beside.app)(&self.env));
+        // The app that was open, else the one Kumi finds; one gone since (moved by its own update, an AppImage's mount)
+        // is left to the program's own search.
+        let app = app.filter(|app| !app.is_empty()).map(PathBuf::from).or_else(|| (self.beside.app)(&self.env)).filter(|app| app.exists());
         let variable = self.beside.app_variable;
         let launched =
             tokio::task::spawn_blocking(move || launch(&program, &home, app.as_deref().map(|app| (variable, app)), set.as_deref()))
@@ -622,6 +670,10 @@ impl DawSetup for BesideSetup {
             Some(_) => format!("Kumi then opens {app} again, with your session."),
             None => format!("Kumi then opens {app} again."),
         }
+    }
+    /// Kumi only opens the DAW to reach it: never unasked.
+    fn asks_to_open(&self) -> bool {
+        true
     }
     /// A DAW that wasn't open opens with the session the producer had open last.
     fn closed_set(&self) -> Option<String> {
@@ -719,6 +771,20 @@ mod tests {
         assert!(open(4242, renoise));
         assert!(!open(4243, renoise), "another copy, opened another way");
         assert!(!open(4242, "/bin/zsh"), "its pid, another program's now");
+        // Read only as the program keeps it: a file of its own, of at most 64 KiB.
+        let record = home.path().join("bridges/renoise/launched.json");
+        let mut big = br#"{"pid":4242}"#.to_vec();
+        big.resize(65 * 1024, b' ');
+        std::fs::write(&record, &big).unwrap();
+        assert!(!open(4242, renoise), "a record bigger than the program writes");
+        #[cfg(unix)]
+        {
+            let elsewhere = home.path().join("elsewhere.json");
+            std::fs::write(&elsewhere, br#"{"pid":4242}"#).unwrap();
+            std::fs::remove_file(&record).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, &record).unwrap();
+            assert!(!open(4242, renoise), "a link in the record's place");
+        }
     }
 
     #[test]
@@ -765,10 +831,31 @@ mod tests {
             failed,
             Launched { opened: false, said: vec!["Renoise is open without its control channel (pid 7). Save, quit it.".into()] }
         );
-        // Kept where `kumi report` reads the bridge's logs.
-        keep_said(&home.join("bridges/renoise"), &failed);
-        let log = std::fs::read_to_string(home.join("bridges/renoise/logs/launch.log")).unwrap();
+        // Kept where `kumi report` reads the bridge's logs, once the program has made the bridge's folder: Kumi never
+        // makes it.
+        let folder = home.join("bridges/renoise");
+        keep_said(&folder, &failed);
+        assert!(!folder.exists(), "no folder made for the log");
+        std::fs::create_dir_all(&folder).unwrap();
+        keep_said(&folder, &failed);
+        let log = std::fs::read_to_string(folder.join("logs/launch.log")).unwrap();
         assert!(log.contains("launch didn't open: Renoise is open without its control channel"), "{log}");
+    }
+
+    /// What the program starts can hold its stderr, as the DAW holds it on Windows: the launch returns as the program
+    /// does all the same, with what it said.
+    #[cfg(unix)]
+    #[test]
+    fn a_launch_returns_as_the_program_does_whatever_still_holds_its_stderr() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("program");
+        std::fs::write(&program, "#!/bin/sh\necho 'program: Renoise opened' >&2\nsleep 10 &\nexit 0\n").unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let started = std::time::Instant::now();
+        let launched = launch(&program, dir.path(), None, None);
+        assert!(started.elapsed() < Duration::from_secs(5), "waited {:?} for what the program left running", started.elapsed());
+        assert_eq!(launched, Launched { opened: true, said: vec!["Renoise opened".into()] });
     }
 
     #[tokio::test(flavor = "current_thread")]
