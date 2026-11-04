@@ -1,5 +1,6 @@
 // What kumi-types holds now, where the runtime's code has always named it.
 
+pub mod audio_tools;
 pub mod chop;
 pub mod commands;
 pub mod context;

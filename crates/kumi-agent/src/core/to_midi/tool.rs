@@ -5,7 +5,7 @@ use super::{drums, pitched, said};
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
 use kumi_common::js::json::stringify;
-use kumi_types::contracts::{JsonObject, KernelTool, Reach, ToolResult};
+use kumi_types::contracts::{AudioTranscriber, JsonObject, KernelTool, Reach, ToolResult};
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 use std::rc::Rc;
@@ -27,10 +27,17 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
     }
 
     pub fn tool(self: &Rc<Self>) -> Rc<dyn KernelTool> {
-        Rc::new(ToMidiTool { owner: self.clone() })
+        Rc::new(ToMidiTool { owner: self.clone(), transcriber: None })
     }
 
-    async fn run(&self, input: JsonObject, signal: Signal) -> Result<Value, String> {
+    async fn run(&self, input: JsonObject, signal: Signal, transcriber: Option<&Rc<dyn AudioTranscriber>>) -> Result<Value, String> {
+        let provider = input.get("provider").and_then(Value::as_str).unwrap_or("auto");
+        if !matches!(provider, "auto" | "mirelo" | "local" | "builtin") {
+            return Err("provider must be auto, mirelo, local or builtin".into());
+        }
+        if transcriber.is_none() && matches!(provider, "mirelo" | "local") {
+            return Err("No audio model service is configured in this session".into());
+        }
         let track = input.get("track").and_then(Value::as_str).ok_or("track: the audio track to turn into MIDI")?;
         let what = input.get("as").and_then(Value::as_str).unwrap_or("drums");
         if !matches!(what, "drums" | "melody" | "harmony") {
@@ -48,7 +55,39 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
         let per_second = beats / seconds;
         let average = per_second * 60.;
         let moving = (average - tempo).abs() > tempo * 0.005;
-        let notes = if what == "drums" {
+        let provided = if let Some(transcriber) = transcriber.filter(|_| provider != "builtin") {
+            let mut request = json!({
+                "audio": render.file, "audio_start_seconds": render.start, "audio_duration_seconds": seconds,
+                "provider": provider
+            })
+            .as_object()
+            .unwrap()
+            .clone();
+            for key in ["quote", "model", "instruments"] {
+                if let Some(value) = input.get(key) {
+                    request.insert(key.into(), value.clone());
+                }
+            }
+            transcriber.transcribe(request, signal.clone()).await.map_err(|error| error.to_string())?
+        } else {
+            None
+        };
+        if input.get("quote") == Some(&Value::Bool(true)) {
+            return provided
+                .map(crate::core::audio_tools::compact)
+                .ok_or_else(|| "The built-in converter has no paid quote; no MIDI was written".into());
+        }
+        let notes = if let Some(result) = &provided {
+            match super::provider_notes(result, per_second, beats, what == "melody") {
+                Ok(notes) => notes,
+                Err(error) => {
+                    return Err(stringify(&json!({
+                        "error":error, "audio_model":provided.map(crate::core::audio_tools::compact),
+                        "next":"Keep the saved outputs; transcription completed but notes were not inserted. Do not repeat a paid transcription just to retry insertion."
+                    })))
+                }
+            }
+        } else if what == "drums" {
             let (mono, rate, _) =
                 kumi_media::audio::decode::read_mono(&render.file, &signal, render.start, seconds).await.map_err(|error| error.0)?;
             drums(&crate::core::chop::hits::hits(&mono, rate), per_second, beats)
@@ -60,12 +99,26 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
         };
         let words = said(&notes, what == "drums", |pitch| self.backend.note_name(pitch));
         if notes.is_empty() {
-            return Ok(json!({"heard": words, "said": format!("Kumi heard no {what} in “{name}” over that stretch: nothing written")}));
+            return Ok(
+                json!({"heard": words, "audio_model": provided.map(crate::core::audio_tools::compact), "said": format!("Kumi heard no {what} in “{name}” over that stretch: nothing written")}),
+            );
         }
         let options = input.get("options").and_then(Value::as_object).cloned().unwrap_or_default();
         let midi_name = format!("{name} {}", if what == "drums" { "drums" } else { what });
-        let made = self.backend.write(track, &midi_name, &notes, what == "drums", from, beats, &options, &signal).await?;
+        let made = match self.backend.write(track, &midi_name, &notes, what == "drums", from, beats, &options, &signal).await {
+            Ok(made) => made,
+            Err(error) if provided.is_some() => {
+                return Err(stringify(&json!({
+                    "error":error, "audio_model":provided.map(crate::core::audio_tools::compact),
+                    "next":"Transcription completed; check the DAW before retrying insertion. Reuse saved notes/MIDI rather than repeating the paid transcription."
+                })))
+            }
+            Err(error) => return Err(error),
+        };
         let mut reply = json!({"heard": words, "track": midi_name, "made": made, "next": "say what was heard; offer to tidy it (quantize) or to try another stretch"});
+        if let Some(provided) = provided {
+            reply["audio_model"] = crate::core::audio_tools::compact(provided);
+        }
         if moving {
             reply["tempo"] = json!(format!(
                 "this stretch plays at {average:.1} BPM on average (the transport shows {tempo:.1}): the notes are placed by its average, so if its tempo changes inside it, they drift from the grid there"
@@ -77,7 +130,7 @@ impl<B: ToMidiBackend + 'static> ToMidi<B> {
 
 fn description(words: &super::backend::Words) -> String {
     format!(
-        "Turn a track's audio in {app} into MIDI with Kumi's own ears: track (an audio track), as drums (each hit a kick, snare or hat on General MIDI's drum keys, as loud as it hits, a ghost softer), melody (the highest note at each moment, by Basic Pitch) or harmony (every note), over fromBeat and beats (at most 128). The notes go on {written}. options: {options}. Kumi renders the track, so nothing plays meanwhile.",
+        "Turn a track's audio in {app} into MIDI: track (an audio track), as drums, melody (highest notes) or harmony (every note), over fromBeat and beats (at most 128). Uses the configured preferred audio model when available; otherwise Kumi's hit detector for drums or Basic Pitch for pitched parts. provider auto follows task settings; mirelo/local explicitly selects that service, builtin is only for an explicit request for the original converter. Provider note velocities are preserved. quote:true obtains only a provider quote and writes nothing. The notes go on {written}. options: {options}. Kumi renders the requested stretch, so nothing plays meanwhile. Tempo changes within it use average-tempo mapping and are reported.",
         app = words.app,
         written = words.written,
         options = words.options
@@ -95,7 +148,11 @@ fn schema(words: &super::backend::Words) -> JsonObject {
             "as": {"type": "string", "enum": ["drums", "melody", "harmony"]},
             "fromBeat": {"type": "number", "minimum": 0},
             "beats": {"type": "number", "exclusiveMinimum": 0, "maximum": MOST_BEATS},
-            "options": options
+            "options": options,
+            "provider": {"type":"string","enum":["auto","mirelo","local","builtin"],"default":"auto"},
+            "quote": {"type":"boolean","default":false},
+            "model": {"type":"string"},
+            "instruments": {"type":"array","items":{"type":"string"}},
         }
     });
     value.as_object().cloned().unwrap_or_default()
@@ -103,6 +160,7 @@ fn schema(words: &super::backend::Words) -> JsonObject {
 
 struct ToMidiTool<B: ToMidiBackend> {
     owner: Rc<ToMidi<B>>,
+    transcriber: Option<Rc<dyn AudioTranscriber>>,
 }
 
 #[async_trait(?Send)]
@@ -120,10 +178,14 @@ impl<B: ToMidiBackend + 'static> KernelTool for ToMidiTool<B> {
     }
 
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError> {
-        Ok(match self.owner.run(input, signal).await {
+        Ok(match self.owner.run(input, signal, self.transcriber.as_ref()).await {
             Ok(reply) => ToolResult { text: stringify(&reply), ..Default::default() },
             Err(why) => ToolResult { text: why, is_error: true, ..Default::default() },
         })
+    }
+
+    fn with_audio_transcriber(&self, transcriber: Rc<dyn AudioTranscriber>) -> Option<Rc<dyn KernelTool>> {
+        Some(Rc::new(Self { owner: self.owner.clone(), transcriber: Some(transcriber) }))
     }
 
     fn reach(&self) -> Reach {

@@ -19,6 +19,78 @@ fn value(args_: &[&str], env: &Env) -> Value {
 fn fixture() -> Value {
     serde_json::from_str(include_str!("../support/config/reference.json")).unwrap()
 }
+
+#[test]
+fn mirelo_login_is_not_a_conversation_provider_and_never_accepts_a_key_argument() {
+    let env = env();
+    assert!(matches!(load_config(&args(&["login", "mirelo"]), &env).unwrap(), AppConfig::Mirelo { remove: false, .. }));
+    assert!(matches!(load_config(&args(&["logout", "mirelo"]), &env).unwrap(), AppConfig::Mirelo { remove: true, .. }));
+    assert!(load_config(&args(&["login", "mirelo", "private-key"]), &env).is_err());
+    assert!(kumi_ai::providers::ProviderId::parse("mirelo").is_none());
+    assert!(!valid_model(Some("mirelo/audio-model"), &[]));
+}
+
+#[test]
+fn audio_switches_survive_other_settings_writes_and_a_new_service() {
+    use kumi_ai::audio::{Endpoint, LocalProtocol, Task};
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json");
+    let auth = folder.path().join("auth.json");
+    let file = file.to_str().unwrap();
+    let auth = auth.to_str().unwrap();
+    let mut env = env();
+    env.insert("KUMI_HOME".into(), folder.path().to_string_lossy().into_owned());
+    std::fs::write(file, json!({"model":"anthropic/claude-sonnet-5", "futureSetting": {"keep":true}}).to_string()).unwrap();
+    let service = kumi::login::audio_service(auth, file, &env);
+    assert!(Task::ALL.into_iter().all(|task| service.config().task(task).auto_mirelo));
+    let mut config = service.config();
+    for (index, task) in Task::ALL.into_iter().enumerate() {
+        let mut next = config.task(task);
+        next.auto_mirelo = index % 2 == 0;
+        config.tasks.insert(task, next);
+    }
+    let midi = config.tasks.get_mut(&Task::AudioToMidi).unwrap();
+    midi.local = Some(Endpoint { url: "http://127.0.0.1:8222".into(), protocol: LocalProtocol::Muscriptor, model: None });
+    midi.fallback = true;
+    service.configure(config.clone()).unwrap();
+    assert_eq!(read_settings(file).model.as_deref(), Some("anthropic/claude-sonnet-5"));
+    write_settings(file, &json!({"model":"openai-codex/gpt-6-astra", "mapHover":false})).unwrap();
+    assert_eq!(service.config(), config);
+    let restarted = kumi::login::audio_service(auth, file, &env);
+    assert_eq!(restarted.config(), config);
+    let raw: Value = serde_json::from_str(&std::fs::read_to_string(file).unwrap()).unwrap();
+    assert_eq!(raw["futureSetting"]["keep"], true);
+    assert_eq!(raw["audioModels"]["tasks"]["video-to-sfx"]["autoMirelo"], false);
+    assert_eq!(raw["model"], "openai-codex/gpt-6-astra");
+    assert!(!std::path::Path::new(auth).exists());
+    let mut invalid = config.clone();
+    invalid.tasks.get_mut(&Task::AudioToMidi).unwrap().local.as_mut().unwrap().url = "not a URL".into();
+    assert!(restarted.configure(invalid).is_err());
+    assert_eq!(restarted.config(), config, "invalid endpoint must not replace saved configuration");
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn corrupt_audio_settings_never_reenable_paid_routing_even_after_an_unrelated_write() {
+    use kumi_ai::audio::Task;
+    let folder = tempfile::tempdir().unwrap();
+    let file = folder.path().join("settings.json");
+    let auth = folder.path().join("auth.json");
+    let mut env = env();
+    env.insert("KUMI_HOME".into(), folder.path().to_string_lossy().into_owned());
+    env.insert("MIRELO_API_KEY".into(), "test-only-account-key".into());
+    let service = kumi::login::audio_service(auth.to_str().unwrap(), file.to_str().unwrap(), &env);
+    for corrupt in ["{", "[]", r#"{"audioModels":{"tasks":{"audio-to-midi":{"autoMirelo":"false"}}}}"#] {
+        std::fs::write(&file, corrupt).unwrap();
+        for task in Task::ALL {
+            assert!(service.preferred(task).await.unwrap().is_none(), "{task:?} re-enabled by {corrupt}");
+        }
+        write_settings(file.to_str().unwrap(), &json!({"mapHover":false})).unwrap();
+        for task in Task::ALL {
+            assert!(service.preferred(task).await.unwrap().is_none(), "{task:?} re-enabled by settings repair");
+        }
+    }
+}
+
 #[test]
 fn models_are_provider_qualified_or_unset_and_need_no_gateway_key() {
     let env = env();

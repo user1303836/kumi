@@ -56,6 +56,11 @@ pub enum AppConfig {
         pi_auth_file: String,
         settings_file: String,
     },
+    Mirelo {
+        remove: bool,
+        auth_file: String,
+        settings_file: String,
+    },
     Logout {
         provider: ProviderId,
         auth_file: String,
@@ -391,6 +396,9 @@ pub struct Settings {
     pub library_folders: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub model_servers: Vec<ServerSetting>,
+    /// Audio generation/transcription providers, separate from the conversation model.
+    #[serde(default, skip_serializing_if = "audio_models_empty")]
+    pub audio_models: kumi_ai::audio::Config,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice: Option<VoiceSettings>,
     /// "off": no desktop notification (or bell) while Kumi's window isn't the one in front; "auto" otherwise.
@@ -445,6 +453,13 @@ pub struct Settings {
     /// Whether every frame is drawn whole; the terminal decides when none is set (Windows Terminal draws whole).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub full_repaint: Option<bool>,
+}
+fn audio_models_empty(config: &kumi_ai::audio::Config) -> bool {
+    config.tasks.is_empty()
+}
+fn disabled_audio_models() -> kumi_ai::audio::Config {
+    use kumi_ai::audio::{Config, Task, TaskConfig};
+    Config { tasks: Task::ALL.into_iter().map(|task| (task, TaskConfig { auto_mirelo: false, ..TaskConfig::default() })).collect() }
 }
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -513,7 +528,16 @@ pub fn read_keys(file: &str) -> Option<Result<Value, String>> {
     Some(serde_json::from_str(&text).map_err(|error| format!("keys.json isn't JSON Kumi can read ({error}), so Kumi keeps its own keys")))
 }
 pub fn read_settings(file: &str) -> Settings {
-    let Some(value) = read_json(file) else { return Settings::default() };
+    let value = match read_json(file) {
+        Some(value) if value.is_object() => value,
+        _ => {
+            // Missing settings use onboarding defaults. Unreadable or corrupt settings must not re-enable paid uploads.
+            return Settings {
+                audio_models: if matches!(Path::new(file).try_exists(), Ok(false)) { Default::default() } else { disabled_audio_models() },
+                ..Settings::default()
+            };
+        }
+    };
     // The producer's answer about their music: settings.json's, or the copy beside it when an older Kumi rewrote
     // settings.json without the keys it doesn't know.
     let kept_beside;
@@ -553,6 +577,10 @@ pub fn read_settings(file: &str) -> Settings {
         music_offered: (music["musicOffered"] == true).then_some(true),
         model_catalog: (value["modelCatalog"] == false).then_some(false),
         model_servers,
+        audio_models: match value.get("audioModels") {
+            None => Default::default(),
+            Some(value) => serde_json::from_value(value.clone()).unwrap_or_else(|_| disabled_audio_models()),
+        },
         mouse: (value["mouse"] == "off").then(|| "off".to_string()),
         copy_on_select: (value["copyOnSelect"] == false).then_some(false),
         transcript_on_quit: (value["transcriptOnQuit"] == false).then_some(false),
@@ -573,6 +601,7 @@ const KNOWN_SETTINGS: &[&str] = &[
     "instantPhrases",
     "libraryFolders",
     "modelServers",
+    "audioModels",
     "voice",
     "notifications",
     "liveStatusBar",
@@ -664,6 +693,12 @@ pub fn write_settings(file: &str, next: &Value) -> Result<(), RuntimeError> {
     }
     if let Some(value) = next.get("modelServers").or_else(|| raw.as_ref().and_then(|r| r.get("modelServers"))) {
         settings.insert("modelServers".into(), value.clone());
+    }
+    // Preserve the raw audio configuration on unrelated writes, including explicit false switches.
+    if let Some(value) = next.get("audioModels").or_else(|| raw.as_ref().and_then(|r| r.get("audioModels"))) {
+        settings.insert("audioModels".into(), value.clone());
+    } else if !matches!(Path::new(file).try_exists(), Ok(false)) && raw.as_ref().is_none_or(|value| !value.is_object()) {
+        settings.insert("audioModels".into(), serde_json::to_value(disabled_audio_models()).unwrap());
     }
     if let Some(value) = kept("voice").and_then(voice_settings) {
         settings.insert("voice".into(), serde_json::to_value(value).unwrap());
@@ -991,6 +1026,16 @@ pub fn load_config(args: &[String], env: &Env) -> Result<AppConfig, RuntimeError
         return Ok(AppConfig::LoginChoose { auth_file: load_auth_file(env)?, pi_auth_file: pi(), settings_file: load_settings_file(env)? });
     }
     if first == Some("login") || first == Some("logout") {
+        if at(1) == Some("mirelo") {
+            if args.len() != 2 {
+                return Err(RuntimeError::plain("Use: login mirelo or logout mirelo. Kumi asks for the key privately."));
+            }
+            return Ok(AppConfig::Mirelo {
+                remove: first == Some("logout"),
+                auth_file: load_auth_file(env)?,
+                settings_file: load_settings_file(env)?,
+            });
+        }
         if matches!(at(1), Some("ollama" | "lmstudio")) {
             return Err(RuntimeError::plain(format!(
                 "{} needs no sign-in: while it's open, its models are in /model, or choose one with: {} model {}/<model>",

@@ -843,6 +843,13 @@ impl TuiApp {
                 self.open_voice(None);
                 return Ok(());
             }
+            Effect::Audio => {
+                self.clear_editor();
+                if let Err(error) = self.open_audio().await {
+                    self.panel_failed(&error);
+                }
+                return Ok(());
+            }
             Effect::Fast => {
                 let Some(models) = self.models() else { return Ok(()) };
                 self.clear_editor();

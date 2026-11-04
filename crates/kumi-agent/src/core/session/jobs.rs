@@ -309,6 +309,9 @@ impl Session {
         // Reuse the conversation's preset folder and discovery cache. Writing a preset file
         // works away from the DAW; preparing, loading and auditioning it stay in the foreground.
         tools.push(self.0.plugins.clone());
+        if let Some(service) = self.audio_service() {
+            tools.push(crate::core::audio_tools::tool(service));
+        }
         tools.extend(self.0.recall.clone());
         if let Some(dirs) = &options.watch {
             tools.extend(video_tools_for(
@@ -330,7 +333,7 @@ impl Session {
         tools
             .into_iter()
             .filter(|tool| tool.reach() == Reach::AwayFromDaw)
-            .map(|tool| Rc::new(UpFront(tool)) as Rc<dyn KernelTool>)
+            .map(|tool| Rc::new(UpFront(self.with_audio(tool))) as Rc<dyn KernelTool>)
             .collect()
     }
 
@@ -373,7 +376,11 @@ impl Session {
             (s.set_name.clone().filter(|name| !name.is_empty()), s.conversation_id.clone())
         };
         let kernel = factory(KernelOptions {
-            instructions: WORKER_INSTRUCTIONS.into(),
+            instructions: if self.0.options.audio.is_some() {
+                format!("{WORKER_INSTRUCTIONS}\n\n{}", crate::core::audio_tools::GUIDANCE)
+            } else {
+                WORKER_INSTRUCTIONS.into()
+            },
             tools,
             signal: handle.signal(),
             checkpoint: None,

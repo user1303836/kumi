@@ -126,12 +126,28 @@ impl ToolRole {
 pub const CONCURRENT: &[&str] =
     &["search_web", "read_web", "find_sounds", "find_presets", "my_sets", "live_manual", "search_conversations"];
 
+/// A configured audio model, supplied by the session to a DAW's converter without coupling the DAW to a provider.
+/// Input names the rendered audio file and the provider choice. A result carries `notes` with pitch, start/end in
+/// seconds and MIDI velocity; `None` selects the converter's built-in transcription. An error never falls through.
+#[async_trait(?Send)]
+pub trait AudioTranscriber {
+    /// Whether a configured provider takes precedence over the DAW's native converter, without sending any media.
+    async fn preferred(&self) -> Result<bool, RuntimeError>;
+    async fn transcribe(&self, input: JsonObject, signal: Signal) -> Result<Option<Value>, RuntimeError>;
+}
+
 #[async_trait(?Send)]
 pub trait KernelTool {
     fn name(&self) -> &str;
     fn description(&self) -> &str;
     fn input_schema(&self) -> JsonObject;
     async fn execute(&self, input: JsonObject, signal: Signal) -> Result<ToolResult, RuntimeError>;
+    /// Bind the session's audio model to a converter that already owns its DAW's render and note-writing steps.
+    /// Other tools return None and remain unchanged.
+    fn with_audio_transcriber(&self, transcriber: Rc<dyn AudioTranscriber>) -> Option<Rc<dyn KernelTool>> {
+        let _ = transcriber;
+        None
+    }
     /// What it does to the DAW. A tool that doesn't say is taken to change it.
     fn reach(&self) -> Reach {
         Reach::DawWrite

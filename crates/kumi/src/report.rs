@@ -386,7 +386,7 @@ pub async fn known_secrets(env: &Env) -> Vec<String> {
     secrets
 }
 /// The variables that hold a key or token Kumi uses.
-pub const KEY_VARIABLES: [&str; 8] = [
+pub const KEY_VARIABLES: [&str; 9] = [
     "AI_GATEWAY_API_KEY",
     "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
@@ -395,6 +395,7 @@ pub const KEY_VARIABLES: [&str; 8] = [
     "GEMINI_API_KEY",
     "GOOGLE_API_KEY",
     "KUMI_LISTENER_KEY",
+    "MIRELO_API_KEY",
 ];
 /// What's safe to share: a report's redaction, for this computer's home folder and account name.
 pub async fn redaction(env: &Env) -> impl Fn(&str) -> String {

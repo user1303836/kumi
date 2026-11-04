@@ -5,6 +5,7 @@ mod complete;
 mod composer;
 mod details;
 pub use away::{AwaySettings, FrontApp, NotifierRunner};
+mod audio;
 mod draw_live;
 mod draw_panel;
 mod drawer;

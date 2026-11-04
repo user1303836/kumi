@@ -108,6 +108,9 @@ pub struct Capabilities {
     pub slots: bool,
     /// Choosing a model and signing in (/model, /effort, /fast, /login, /logout).
     pub models: bool,
+    /// Native audio generation and transcription settings, independent of chat models.
+    #[serde(default)]
+    pub audio_models: bool,
     pub take_back: bool,
     /// Not a thing it can do but what its DAW is: one Kumi only reads. The menu then leaves out what changes it (/undo,
     /// /goal, /loop), and the session refuses those if they're typed.
@@ -364,6 +367,12 @@ requests! {
     /// [`op::StopSlots`] stops it.
     Slots { id: u32, words: String } -> Said;
     StopSlots { id: u32 } -> ();
+    /// Reads only saved settings and credential presence; never fetches usage or billing.
+    AudioStatus {} -> kumi_ai::audio::Status;
+    ConfigureAudio { config: kumi_ai::audio::Config } -> ();
+    SaveMireloKey { key: Secret } -> serde_json::Value;
+    RemoveMireloKey {} -> ();
+    SaveLocalAudioKey { task: kumi_ai::audio::Task, key: Secret } -> ();
     /// The providers Kumi can sign in to, and how each is signed in now.
     Providers {} -> Vec<ProviderStatus>;
     /// The model servers on this computer, and whether each runs.
@@ -686,6 +695,55 @@ impl Session {
     pub async fn answer(&self, op: Op, side: &HandleSide) -> Result<Reply, RuntimeError> {
         let session = self;
         match op {
+            Op::AudioStatus(request) => {
+                answered(request, |op::AudioStatus {}| async move {
+                    session
+                        .audio_service()
+                        .ok_or_else(|| RuntimeError::plain("Audio models aren't available in this session."))?
+                        .status()
+                        .await
+                })
+                .await
+            }
+            Op::ConfigureAudio(request) => {
+                answered(request, |op::ConfigureAudio { config }| async move {
+                    session
+                        .audio_service()
+                        .ok_or_else(|| RuntimeError::plain("Audio models aren't available in this session."))?
+                        .configure(config)
+                })
+                .await
+            }
+            Op::SaveMireloKey(request) => {
+                answered(request, |op::SaveMireloKey { key }| async move {
+                    session
+                        .audio_service()
+                        .ok_or_else(|| RuntimeError::plain("Audio models aren't available in this session."))?
+                        .save_mirelo_key(&key.0, &kumi_common::abort::timeout(20_000))
+                        .await
+                })
+                .await
+            }
+            Op::RemoveMireloKey(request) => {
+                answered(request, |op::RemoveMireloKey {}| async move {
+                    session
+                        .audio_service()
+                        .ok_or_else(|| RuntimeError::plain("Audio models aren't available in this session."))?
+                        .remove_mirelo_key()
+                        .await
+                })
+                .await
+            }
+            Op::SaveLocalAudioKey(request) => {
+                answered(request, |op::SaveLocalAudioKey { task, key }| async move {
+                    session
+                        .audio_service()
+                        .ok_or_else(|| RuntimeError::plain("Audio models aren't available in this session."))?
+                        .save_local_key(task, &key.0)
+                        .await
+                })
+                .await
+            }
             Op::Start(request) => answered(request, |op::Start {}| async move { session.start().await }).await,
             // Only a message with references takes the controller's way for them, so a session's calls stay as they were.
             Op::Submit(request) => {

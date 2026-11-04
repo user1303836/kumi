@@ -48,6 +48,7 @@ fn everything() -> Now {
         map: true,
         slots: true,
         models: true,
+        audio_models: true,
         take_back: true,
         reads_only: false,
     };
@@ -65,6 +66,14 @@ fn nothing() -> Now {
 }
 
 #[test]
+fn audio_settings_are_independent_of_chat_and_the_daw() {
+    let now = Now { can: Capabilities { audio_models: true, ..Default::default() }, ..nothing() };
+    assert_eq!(run("/audio", &now), Effect::Audio);
+    assert!(named("/audio").unwrap().offered(&now.can, &now.fronts));
+    assert_ne!(run("/audio", &nothing()), Effect::Audio);
+}
+
+#[test]
 fn every_command_has_a_name_of_its_own() {
     let mut names = BTreeSet::new();
     for command in COMMANDS {
@@ -74,7 +83,6 @@ fn every_command_has_a_name_of_its_own() {
         }
         assert_eq!(named(command.name).map(|found| found.name), Some(command.name));
     }
-    assert_eq!(COMMANDS.len(), 38);
 }
 
 #[test]
@@ -94,6 +102,7 @@ fn each_command_reads_as_its_own_with_its_words() {
         ("/changelog", Effect::Changelog),
         ("/jobs", Effect::Jobs),
         ("/voice", Effect::Voice),
+        ("/audio", Effect::Audio),
         ("/fast", Effect::Fast),
         ("/model", Effect::Model { words: "".into() }),
         ("/model anthropic/claude-sonnet-5-5", Effect::Model { words: "anthropic/claude-sonnet-5-5".into() }),

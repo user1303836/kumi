@@ -6,6 +6,7 @@
 //! told and retried (`failure`).
 
 pub mod anthropic;
+pub mod audio;
 pub mod auth;
 pub mod binding;
 pub mod control;

@@ -49,7 +49,41 @@ pub struct AuthIo {
     pub env: Env,
     pub fetch: Option<Rc<dyn Fetch>>,
 }
+/// The same native audio service backs CLI onboarding and the running session.
+pub fn audio_service(auth_file: &str, settings_file: &str, env: &Env) -> Rc<kumi_ai::audio::Service> {
+    let read_file = settings_file.to_string();
+    let write_file = settings_file.to_string();
+    kumi_ai::audio::Service::new(kumi_ai::audio::ServiceOptions {
+        store: Rc::new(open_credential_store(auth_file)),
+        env: env.clone(),
+        read_config: Rc::new(move || read_settings(&read_file).audio_models),
+        write_config: Rc::new(move |config| {
+            let mut next = serde_json::to_value(read_settings(&write_file)).map_err(|e| RuntimeError::plain(e.to_string()))?;
+            next["audioModels"] = serde_json::to_value(config).map_err(|e| RuntimeError::plain(e.to_string()))?;
+            crate::config::write_settings(&write_file, &next)
+        }),
+        output_dir: std::path::PathBuf::from(crate::config::kumi_dir(env)).join("audio"),
+    })
+}
+
 pub async fn login(config: &AppConfig, io: LoginIo) -> Result<(), RuntimeError> {
+    if let AppConfig::Mirelo { remove, auth_file, settings_file } = config {
+        let service = audio_service(auth_file, settings_file, &io.env);
+        if *remove {
+            service.remove_mirelo_key().await?;
+            io.out.write("Removed the saved Mirelo key. MIRELO_API_KEY, if set, still applies. Conversation sign-ins are unchanged.\n");
+            return Ok(());
+        }
+        io.out.write("Powered by Mirelo. Use an existing account's API key: https://mirelo.ai/studio/api-keys\nAudio requests may spend your Mirelo credits and upload media. Training follows your account settings: https://mirelo.ai/studio/settings/profile. /audio configures each task separately.\n");
+        let input = io.input.clone().ok_or_else(|| RuntimeError::plain("Kumi needs a terminal to ask for the key."))?;
+        let key = trim(&read_hidden(input, io.out.clone(), "Mirelo API key (hidden): ", io.signal.clone()).await?).to_string();
+        service
+            .save_mirelo_key(&key, &abort::any([io.signal.clone(), abort::timeout(20_000)]))
+            .await
+            .map_err(|e| RuntimeError::plain(crate::config::safe_error_message(Some(&e.message()), &[key])))?;
+        io.out.write("Mirelo account checked; key saved owner-only. /audio changes audio routing immediately; your conversation model is unchanged.\n");
+        return Ok(());
+    }
     let AppConfig::Login { provider, method, auth_file, pi_auth_file, settings_file } = config else {
         return Err(RuntimeError::plain("Expected a login configuration."));
     };
@@ -211,6 +245,15 @@ pub async fn auth_status(config: &AppConfig, io: AuthIo) -> Result<(), RuntimeEr
             lines.push(format!("{} running {}; no sign-in needed", pad_end(&server.id, 13), server.r#where));
         }
     }
+    let audio = audio_service(auth_file, settings_file, &io.env).status().await?;
+    lines.push(format!(
+        "Audio: Mirelo — {}",
+        if audio.mirelo_configured {
+            format!("configured ({}) · Powered by Mirelo", audio.key_source.as_deref().unwrap_or("saved"))
+        } else {
+            format!("not configured ({} login mirelo); /audio also configures self-hosted audio models", *KUMI)
+        }
+    ));
     let model = io
         .env
         .get("KUMI_MODEL")

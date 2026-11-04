@@ -97,6 +97,16 @@ Kumi 自带一份目录副本，最多每天获取一次更新的版本；在 `s
 - **给 Kumi 留出空间。** 仅 Kumi 的指令和工具就约有 2.5 万至 3 万个 token。Kumi 会向 Ollama 请求能容纳它们、对话和回答的空间（约 5.7 万个 token，以模型能读取的上限为准），并在 LM Studio 加载的模型空间不足时让它以这个空间重新加载。这些空间会占用内存，常常比模型本身还多。
 - **不能使用工具的模型**仍然可以谈论工程，但无法修改它；Kumi 会说明一次，并列出同一服务器上可以修改的模型。`kumi doctor` 会列出它找到的服务器。
 
+## Mirelo 与自托管音频模型
+
+- **连接账户：** 在 [Mirelo API 密钥页面](https://mirelo.ai/studio/api-keys)取得密钥，然后运行 `kumi login mirelo`，或在 `/audio` 选择 **Connect an existing Mirelo account**。输入会隐藏，密钥经 Mirelo 验证后保存在仅所有者可读的登录文件中。`kumi auth` 显示配置状态；`kumi logout mirelo` 删除已保存的密钥。没有已保存密钥时也可用 `MIRELO_API_KEY`；要完全断开，还需取消该环境变量。
+- **五项独立设置：** `/audio` 分别为文字生成音效、视频生成音效、延长音频、替换指定音频区域、音频转 MIDI 提供 **Use Mirelo automatically: true/false**。初始值均为 `true`：有密钥时默认用 Mirelo，除非你明确指定其他提供方。更改立即生效并保存。这些是音频提供方，与对话模型 `/model`、聆听槽位 `/slots` 分开。
+- **直接用日常语言请求：** “生成两秒的关门声”“给这个视频加音效”“把录音延长五秒”“替换第 2–4 秒”“把这段音频转成 MIDI”。提供源文件或公开媒体 URL。结果保存在 `~/.kumi/audio`（设置后为 `KUMI_HOME/audio`），不会只留下即将过期的下载链接。Kumi 用 DAW 现有工具插入结果；只生成文件不需要 DAW。
+- **费用与隐私：** 请求使用你的 Mirelo 积分，并把提示词和选定的音频或视频发送给 Mirelo。只提供你有权使用的素材。可以先要报价：预检不会启动付费任务，但可能上传输入。MIDI 报价按估计时长计算，最终计费以服务器测得的时长为准，不是消费上限。训练用途遵循 [Mirelo 账户设置](https://mirelo.ai/studio/settings/profile)，Kumi 不提供训练退出开关。付费账户可以在那里退出训练，免费账户不可以。Powered by Mirelo。
+- **使用自己的服务器替代：** 在对应任务的 `/audio` 面板设置 URL、协议和可选认证；Mirelo 兼容音效还需指定明确的模型版本。关闭 **Use Mirelo automatically** 即优先使用替代服务器；或保留 Mirelo 并打开 **Use alternative as fallback**。故障回退默认关闭，仅在提交前发生连接、限流或服务器故障时切换。可能已经计费的任务不会自动重做。取消只停止等待，不会停止 Mirelo 上已经运行的任务。远程地址必须用 HTTPS；本机或 SSH 隧道的环回地址可用 HTTP。
+- **MuScriptor 只支持音频转 MIDI**，不生成音效。请自行接受 [Hugging Face 模型许可](https://huggingface.co/MuScriptor)（权重为非商业用途的 **CC-BY-NC-4.0**，服务器代码为 MIT），用 `uvx hf auth login` 登录，再运行 `uvx muscriptor serve --model small`。在 `/audio` → **Audio to MIDI** 选择 **MuScriptor**，填入 `http://127.0.0.1:8222` 或远程服务器的 HTTPS 地址。不需要 Mirelo 账户；Kumi 不下载或托管这些模型。MuScriptor 输入最长 15 分钟；Mirelo MIDI 最长 30 分钟、100 MiB。
+- **其他音频模型**需要实现 [Mirelo API](https://mirelo.ai/api-docs) 的服务器，并选择 **Mirelo-compatible**；通用 OpenAI、Hugging Face 或 Gradio 接口不能直接互换。Mirelo 的文字和视频任务默认用 `sfx-2.0`，延长和区域替换用支持编辑的 `sfx-1.6`。
+
 ## 连接 Live
 
 Kumi 通过它的桥接访问 Live：桥接由在 Live 内运行的 Remote Script 和由 Kumi 启动的本地 MCP 服务器组成。第一次打开 Kumi 时，以及每当它自带的桥接比 Live 中的新时，Kumi 的设置都会在应用内只完成尚未完成的步骤：
@@ -264,6 +274,7 @@ Kumi 能听音频文件和工程中的音频片段：参考曲、采样、并轨
 - **轮次记录**把每一轮显示在对话里：目标、修改、修改前 → 后的数值、保留还是撤回及原因、下一步，以及到目前为止的试听次数。连续两次修改都无效的项目会先放一放，Kumi 转去处理下一个。
 - **聆听模型**（如果有）也会听修改前后，听的是单声道（所以不会问它声场宽度或高频空气感）。如果它听出失真、抽吸（pumping）或削波，并且两种顺序下都更喜欢修改前的那一版，就可以否决这处修改；其余判断由仪表决定。有 Gemini API 密钥（`GEMINI_API_KEY`）时使用从 Gemini 自己的列表中选出的最新 Flash 模型；否则有 OpenAI API 密钥时使用 OpenAI 最新的音频模型；`KUMI_LISTENER` 可以指定其他模型（`<base URL>#<model>`，例如你电脑上的模型服务器），`KUMI_LISTENER=off`（或任何不是模型地址的值）则只用仪表。每次运行的第一轮会说明由哪个模型来听。
 - **模型槽位。**`/slots` 显示每项聆听工作由哪个模型负责：分轨（Live 自己的分轨）、扒谱（Live 的转换）、聆听（上面的查找顺序）和嵌入（Kumi 自己的：风格用 LAION-CLAP 的音乐模型，效果用 AFx-Rep）。可以用平常的话替换，例如 `/slots listening gemini`、`/slots listening off`（立即生效，运行中也一样）或 `/slots listening http://127.0.0.1:8080/v1#<model>`。新的聆听模型会先在一段已知的片段上测试，只有听对了才切换。`/slots back <job>` 撤回替换。嵌入在 Kumi 自己的模型运行时里运行：`/slots embeddings ~/models/clap.onnx`（含空格的路径请加引号）或指向任意主机上 `.onnx` 文件的 https 链接（最大 4 GB，按 Esc 可停止下载）会先用两个已知的音测试，能分辨它们才会使用；它会取代风格模型，效果模型仍是 Kumi 自己的。之后文件若不见了，会改用 Kumi 自己的模型，并只提示一次。`/slots embeddings off` 关闭嵌入。分轨和扒谱暂时还不接受模型文件。Kumi 读不了的 `slots.json` 会让聆听保持关闭。设置了 `KUMI_LISTENER` 时，它优先于聆听槽位，但 `/slots listening off` 仍能关闭它。
+- **用户请求的 MIDI 转换与音频生成**在 `/audio` 选择提供方，不在 `/slots` 设置。
 - **由模型来听的风格和效果。**有参考曲时，Kumi 的风格模型（LAION-CLAP）会听参考曲以及这次运行的每次聆听，让声音离参考曲的风格更远的修改会被撤回。对声音目标，效果模型（AFx-Rep）也对声音的效果做同样的事。它们在第一次需要、且磁盘空间足够时下载一次到 Kumi 文件夹里的 `models`（`~/.kumi/models`，或 `KUMI_HOME` 下）（ONNX Runtime 约 10 MB，Windows 上约 80 MB；模型约 245 MB，每个都用校验和验证）。
 
 **参考**也会变成目标。给 Kumi 一个文件、一个装有文件的文件夹、YouTube 视频或播放列表、Spotify 链接，或者只是一句话（“像 Burial”“dub techno”“Kid A”）：它会找到示例曲目（艺人的代表作、专辑里的曲目、某个流派的主要艺人），逐一测量（跳过无声或低于 −45 LUFS 的安静曲目，以及文件夹或搜索中不到 30 秒的小样），并保存一份带有这些曲目所处范围的轮廓，“在这种风格里”就是指在这个范围之内。话可能有多种意思时（同名的两位艺人，或同名的专辑和艺人），Kumi 只问你一次指的是哪一个，你的回答就能确定。每个参考只测一次，保存在 `~/.kumi/references`；文件或文件夹里的文件有变化时会重新测量。对于参考中的某个元素（它的贝斯、它的鼓），Kumi 可以把曲目放进你的工程，用 Live 自带的分轨功能分离出分轨（Kumi 可能会请你点一下这条轨道的片段），再测量其中一轨。
@@ -552,6 +563,7 @@ Kumi 会在启动时检查是否有新版本，每天最多一次；没有新版
 - **下载**来自 GitHub（Kumi 的发布版本和更新检查、yt-dlp、ffmpeg 和 whisper.cpp、ONNX Runtime 和 Kumi 自己的模型）、Hugging Face（语音模型）、你为槽位的模型给出的任意 https 地址，以及你指定的视频网站。
 - 用文字指定的**参考**会按名字在 MusicBrainz 和 ListenBrainz 上查找，Spotify 链接从 Spotify 的公开页面读取（艺人链接从 MusicBrainz），音频通过 YouTube 搜索获取，测量完即删除。
 - **音频**在你的电脑上分析；只有数字会发送给模型。如果有聆听模型，它会收到所判定修改的简短片段（每段最长 10 秒，单声道）：有 Gemini API 密钥时发给 Gemini，有 OpenAI API 密钥时发给 OpenAI，或发给 `KUMI_LISTENER` 或聆听槽位（`/slots`）指定的模型（设置了 `KUMI_LISTENER_KEY` 时连同它一起）。`KUMI_LISTENER=off` 或 `/slots listening off` 可以关闭；试用新的聆听模型时只会发送一段已知的测试音。
+- **用户请求的音频生成、编辑和 MIDI 转换**会把所提供的媒体与提示词发送给 `/audio` 选定的提供方。本机服务器让媒体留在本地，远程服务器则会收到媒体。`/slots listening off` 不会禁用这些请求。
 - **你的声音**在你的电脑上转写，录音随即删除；只有你发送时的文字会离开。
 - **你的素材库**在你的电脑上学习；只有手册的页面来自网络。
 - **你的音乐**在你的电脑上学习。Kumi 使用你的口味时，它挑选的歌曲名称（艺人、标题、专辑）和一句描述它们听起来如何的话会发送给你的模型提供商，文件本身从不发送。
@@ -590,6 +602,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | `instantPhrases` | `false`：固定短语（"tempo 124"、"mute drums"）也像其他消息一样发给模型（[即时短语](KUMI_TUI.md#即时短语)） |
 | `contextMeter` | 顶栏上显示模型上下文用了多少的计量条：`"auto"`（默认）在用到一半以上时显示，`"always"` 始终显示，`"off"` 不显示 |
 | `modelServers` | 你命名的模型服务器：`[{ "name", "baseURL", "apiKey", "format" }]`（[你电脑上的模型](#你电脑上的模型)） |
+| `audioModels` | `/audio` 设置：`tasks` 以 `text-to-sfx`、`video-to-sfx`、`extend`、`inpaint`、`audio-to-midi` 为键。各含 `autoMirelo`（默认 `true`）、`fallback`（默认 `false`）及可选的 `local: {url, protocol, model}`。密钥保存在登录文件 |
 | `libraryFolders` | 供 Kumi 学习声音、预设和工程的其他文件夹 |
 | `musicFolders` | Kumi 用来学习你口味的、你自己的音乐文件夹（`/music add`）；在你同意之前不存在 |
 | `musicOffered` | Kumi 问过是否学习你的音乐后为 `true`：只问一次 |
@@ -613,6 +626,7 @@ Kumi 把一切都保存在 `~/.kumi` 中。`~/.kumi/settings.json` 包含：
 | --- | --- |
 | `KUMI_MODEL` | 本次运行使用的 `<provider>/<model>`，覆盖所选模型 |
 | `KUMI_AUTH_FILE`、`KUMI_SETTINGS_FILE` | 登录信息存储和设置文件 |
+| `MIRELO_API_KEY` | 没有已保存 Mirelo 密钥时使用的音频 API 密钥，与对话模型分开 |
 | `KUMI_MEMORY_FILE`、`KUMI_TECHNIQUES_FILE`、`KUMI_PLAYBOOK_FILE` | 关于你的笔记、技巧和经验 |
 | `KUMI_RECIPES_DIR`、`KUMI_PROJECTS_DIR`、`KUMI_GOALS_DIR` | 配方；每个工程的对话、笔记和最后状态；进行中的目标和搜索，以及 Kumi 关闭时中断的后台任务 |
 | `KUMI_REFERENCES_DIR` | 测量过的参考 |

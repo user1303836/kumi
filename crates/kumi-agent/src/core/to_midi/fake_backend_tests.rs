@@ -102,3 +102,77 @@ async fn what_audio_to_midi_needs_is_said() {
     assert!(run(&tool, json!({"track": "t1", "as": "chords", "fromBeat": 0, "beats": 4})).await.unwrap_err().starts_with("as is drums"));
     assert!(run(&tool, json!({"track": "t1", "fromBeat": 0, "beats": 500})).await.unwrap_err().starts_with("fromBeat and beats"));
 }
+
+struct Provider {
+    result: Result<Option<Value>, String>,
+    calls: RefCell<Vec<JsonObject>>,
+}
+
+#[async_trait(?Send)]
+impl kumi_types::contracts::AudioTranscriber for Provider {
+    async fn preferred(&self) -> Result<bool, kumi_types::errors::RuntimeError> {
+        Ok(self.result.as_ref().is_ok_and(Option::is_some))
+    }
+    async fn transcribe(&self, input: JsonObject, _: Signal) -> Result<Option<Value>, kumi_types::errors::RuntimeError> {
+        self.calls.borrow_mut().push(input);
+        self.result.clone().map_err(kumi_types::errors::RuntimeError::plain)
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn configured_provider_notes_keep_velocity_and_map_render_seconds_to_beats() {
+    let fake = Rc::new(Fake { dir: tempfile::tempdir().unwrap(), written: RefCell::default() });
+    let provider = Rc::new(Provider {
+        result: Ok(Some(json!({
+            "provider":"mirelo", "attribution":"Powered by Mirelo", "midi_path":"/output/transcription.mid",
+            "notes":[{"pitch":60,"start":0.3,"end":0.6,"velocity":17},{"pitch":72,"start":1.2,"end":2.,"velocity":109}]
+        }))),
+        calls: RefCell::default(),
+    });
+    let tool = ToMidi::new(fake.clone()).tool().with_audio_transcriber(provider.clone()).unwrap();
+    let done = run(&tool, json!({"track":"t1","as":"harmony","fromBeat":16,"beats":4,"provider":"local"})).await.unwrap();
+    let written = fake.written.borrow();
+    let notes = &written[0].1;
+    assert_eq!(notes.iter().map(|n| n.velocity).collect::<Vec<_>>(), [17, 109]);
+    assert!((notes[0].start - 0.85).abs() < 1e-9);
+    assert!((notes[0].length - 0.85).abs() < 1e-9);
+    assert!((notes[1].start + notes[1].length - 4.).abs() < 1e-9);
+    assert_eq!(done["audio_model"]["attribution"], "Powered by Mirelo");
+    let calls = provider.calls.borrow();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0]["provider"], "local");
+    assert_eq!(calls[0]["audio_start_seconds"], 0.);
+    assert!((calls[0]["audio_duration_seconds"].as_f64().unwrap() - 4. * 60. / 170.).abs() < 1e-9);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn quote_and_provider_failure_never_insert_or_silently_fall_back() {
+    for (result, quote, fails) in [
+        (Ok(Some(json!({"quote":true,"credits":2}))), true, false),
+        (Err("provider unavailable".to_string()), false, true),
+        (Ok(Some(json!({"midi_path":"/retained.mid"}))), false, true),
+        (Ok(Some(json!({"notes":[{"pitch":140,"start":0.,"end":1.,"velocity":100}]}))), false, true),
+    ] {
+        let fake = Rc::new(Fake { dir: tempfile::tempdir().unwrap(), written: RefCell::default() });
+        let provider = Rc::new(Provider { result, calls: RefCell::default() });
+        let tool = ToMidi::new(fake.clone()).tool().with_audio_transcriber(provider.clone()).unwrap();
+        let result = run(&tool, json!({"track":"t1","fromBeat":0,"beats":4,"quote":quote})).await;
+        assert_eq!(result.is_err(), fails);
+        assert!(fake.written.borrow().is_empty());
+        assert_eq!(provider.calls.borrow().len(), 1);
+    }
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn disabled_provider_and_explicit_builtin_preserve_original_detector() {
+    for builtin in [false, true] {
+        let fake = Rc::new(Fake { dir: tempfile::tempdir().unwrap(), written: RefCell::default() });
+        let provider = Rc::new(Provider { result: Ok(None), calls: RefCell::default() });
+        let tool = ToMidi::new(fake.clone()).tool().with_audio_transcriber(provider.clone()).unwrap();
+        let result =
+            run(&tool, json!({"track":"t1","fromBeat":0,"beats":4,"provider":if builtin {"builtin"} else {"auto"}})).await.unwrap();
+        assert!(result["heard"].as_str().unwrap().contains("kicks"));
+        assert_eq!(provider.calls.borrow().len(), usize::from(!builtin));
+        assert!(!fake.written.borrow()[0].1.is_empty());
+    }
+}

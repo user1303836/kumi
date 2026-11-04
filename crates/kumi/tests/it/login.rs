@@ -192,6 +192,28 @@ impl Fixture {
         AuthIo { out: self.out.clone(), env: self.env.clone(), fetch: Some(self.fetch.clone()) }
     }
 }
+
+#[tokio::test(flavor = "current_thread")]
+async fn mirelo_status_and_removal_keep_chat_signins_and_keys_private() {
+    let mut f = Fixture::new(200);
+    f.env.insert("KUMI_HOME".into(), f._dir.path().to_string_lossy().into_owned());
+    f.env.insert("MIRELO_API_KEY".into(), "private-mirelo-env-key".into());
+    let store = open_credential_store(&f.env["KUMI_AUTH_FILE"]);
+    for (name, key) in [("mirelo", "private-mirelo-saved-key"), ("anthropic", "private-chat-key")] {
+        store.update(name, Box::new(move |_| async move { Ok(Some(Credential::ApiKey { key: key.into() })) }.boxed_local())).await.unwrap();
+    }
+    auth_status(&f.config(&["auth"]), f.auth()).await.unwrap();
+    assert!(f.out.0.borrow().contains("Mirelo"));
+    assert!(!f.out.0.borrow().contains("private-mirelo"));
+    login(&f.config(&["logout", "mirelo"]), f.io(None)).await.unwrap();
+    assert!(store.get("mirelo").await.unwrap().is_none());
+    assert!(store.get("anthropic").await.unwrap().is_some());
+    f.out.0.borrow_mut().clear();
+    auth_status(&f.config(&["auth"]), f.auth()).await.unwrap();
+    assert!(f.out.0.borrow().contains("MIRELO_API_KEY"));
+    assert!(!f.out.0.borrow().contains("private-mirelo"));
+    assert!(!f.out.0.borrow().contains("private-chat"));
+}
 #[tokio::test(flavor = "current_thread")]
 async fn api_key_login_checks_before_saving_and_reports_unreachable_or_refused() {
     for status in [200, 401, 500] {

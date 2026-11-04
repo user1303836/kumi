@@ -42,6 +42,7 @@ serde.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 thiserror.workspace = true
+tempfile.workspace = true
 tokio.workspace = true
 unicode-normalization.workspace = true
 unicode-segmentation.workspace = true
@@ -58,6 +59,5 @@ kumi-testkit.workspace = true
 tokio = { workspace = true, features = ["test-util"] }
 # The GenExpr interpreter the building blocks' tests run their gen~ code in (optimized even in tests).
 kumi-genexpr.workspace = true
-tempfile.workspace = true
 # live_views reads deep Set snapshots, as the bridge does.
 serde_json = { workspace = true, features = ["unbounded_depth"] }
