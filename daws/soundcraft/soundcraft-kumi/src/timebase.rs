@@ -42,6 +42,16 @@ pub struct BarBeat {
     pub ticks: i64,
 }
 
+/// Where the meter map counts bars from, as a timeline draws it: at `position` quarter notes, bar `bar` (from 1) with
+/// `beat` quarter notes of it gone, in bars of `beats_per_bar` quarter notes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MeterMark {
+    pub position: f64,
+    pub bar: i64,
+    pub beat: f64,
+    pub beats_per_bar: f64,
+}
+
 /// A session's tempo and meter maps.
 pub struct Timebase {
     rate: f64,
@@ -111,6 +121,27 @@ impl Timebase {
     /// Quarter notes a bar at `beats`.
     pub fn beats_a_bar(&self, beats: f64) -> f64 {
         self.meter((beats * PPQ).round()).ticks_a_bar() / PPQ
+    }
+
+    /// Quarter notes from the start of the bar `beats` is in (as [`Timebase::bar_beat`] counts it) to `beats`.
+    pub fn into_bar(&self, beats: f64) -> f64 {
+        let at = self.bar_beat(beats);
+        let (_, denominator) = self.time_signature(beats);
+        (at.beat - 1) as f64 * 4.0 / f64::from(denominator) + at.ticks as f64 / PPQ
+    }
+
+    /// How bars are counted from `from` to `to` quarter notes: the bar `from` is in, then each meter that starts after
+    /// it, up to `to`, on its bar line.
+    pub fn meter_marks(&self, from: f64, to: f64) -> Vec<MeterMark> {
+        let opening =
+            MeterMark { position: from, bar: self.bar_beat(from).bar, beat: self.into_bar(from), beats_per_bar: self.beats_a_bar(from) };
+        let changes = self.meters.iter().filter(|meter| meter.tick / PPQ > from && meter.tick / PPQ <= to).map(|meter| MeterMark {
+            position: meter.tick / PPQ,
+            bar: meter.bar,
+            beat: 0.0,
+            beats_per_bar: meter.ticks_a_bar() / PPQ,
+        });
+        std::iter::once(opening).chain(changes).collect()
     }
 
     /// The tempo at `beats` (the tick rounded, as the other lookups have it: a playhead on a change has the new tempo).

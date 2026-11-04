@@ -23,7 +23,7 @@ pub fn recorded() -> Value {
 }
 
 /// The built-in plug-ins SoundCraft 0.17.0 describes (`engine.plugins`, as soundcraft-cli 0.17.0's engine answered it).
-fn plugins() -> Value {
+pub fn plugins() -> Value {
     vectors("soundcraft-0.17.0-plugins.json").remove(0)
 }
 

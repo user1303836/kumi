@@ -254,7 +254,7 @@ async fn the_host_connects_through_the_discovery_file_and_status_answers_from_th
     assert_eq!((welcome.identity.daw.as_str(), welcome.identity.pid), ("soundcraft", std::process::id()));
     assert_eq!(welcome.identity.project.as_ref().and_then(|project| project.name.as_deref()), Some("Midnight Groove"));
     let offered = (welcome.methods.clone(), welcome.events.clone());
-    let methods = ["ping", "status", "focus", "read", "snapshot"].map(String::from).to_vec();
+    let methods = ["ping", "status", "focus", "read", "snapshot", "focus_body"].map(String::from).to_vec();
     assert_eq!(offered, (methods, vec!["project".to_string()]));
     assert_eq!(client.request("ping", json!({}), WAIT).await.unwrap(), json!({}));
     let status = client.request("status", json!({}), WAIT).await.unwrap();
@@ -313,12 +313,13 @@ async fn the_host_reads_through_the_bridge_and_a_read_while_the_app_is_busy_is_r
     // (the lab's SoundCraft shows a session with no tracks)
     let tracks = client.request("read", json!({"kind": "track"}), WAIT).await.unwrap();
     assert_eq!((&tracks["items"], &tracks["total"]), (&json!([]), &json!(0)), "{tracks}");
-    assert!(tracks["epoch"].is_string());
     let snapshot = client.request("snapshot", json!({}), WAIT).await.unwrap();
     assert_eq!(
         (&snapshot["epoch"], &snapshot["project"]["name"], &snapshot["tracks"]),
         (&tracks["epoch"], &json!("Midnight Groove"), &json!([]))
     );
+    let mixer = client.request("focus_body", json!({"kind": "mixer"}), WAIT).await.unwrap();
+    assert_eq!((&mixer["kind"], &mixer["epoch"], &mixer["strips"]), (&json!("mixer"), &tracks["epoch"], &json!([])));
     lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
     asked_until(&client, "status", |status| status["busy"] == "modal").await;
     let began = Instant::now();
@@ -326,6 +327,8 @@ async fn the_host_reads_through_the_bridge_and_a_read_while_the_app_is_busy_is_r
     let RequestError::Bridge { code, message } = refused else { panic!("{refused:?}") };
     assert_eq!((code.as_str(), message.as_str()), ("busy", "a dialog is open in SoundCraft (Save Changes); nothing was read"));
     assert!(began.elapsed() < ms(500), "at once: {:?}", began.elapsed());
+    let body = client.request("focus_body", json!({"kind": "mixer"}), WAIT).await.unwrap_err();
+    assert!(matches!(&body, RequestError::Bridge { code, .. } if code == "busy"), "{body:?}");
 }
 
 #[tokio::test]
@@ -407,10 +410,69 @@ async fn focus_answers_with_the_window_the_selection_and_the_playhead() {
     // app's built-ins don't give, so it stays its id).
     shows(json!({"window": "Edit", "show_midi_editor": false, "plugin_windows": [[3, 0], [5, u64::MAX]]}));
     let instrument = asked_until(&client, "focus", |focus| focus["selection"]["fxRef"] == "s:insert:5:instrument").await;
+    // The window is on Keys while Kick is selected: its track is named, as `read` names it.
     assert_eq!(
-        (&instrument["selection"]["fxRef"], &instrument["selection"]["fxName"]),
-        (&json!("s:insert:5:instrument"), &json!("subtractive_synth"))
+        (
+            &instrument["selection"]["fxRef"],
+            &instrument["selection"]["fxName"],
+            &instrument["selection"]["fxTrackRef"],
+            &instrument["selection"]["fxTrackName"],
+            &instrument["selection"]["trackRef"]
+        ),
+        (&json!("s:insert:5:instrument"), &json!("subtractive_synth"), &json!("s:track:5"), &json!("Keys"), &json!("s:track:3"))
     );
+}
+
+#[tokio::test]
+async fn a_bodys_ref_from_before_another_session_opened_is_stale_though_the_body_sees_the_new_session_first() {
+    let lab = Lab::new().await;
+    lab.shown.lock().unwrap().tracks = kick_and_keys();
+    // Looks four seconds apart: a body's own look at the session sees the switch before the look loop does.
+    let config = Config { look: ms(4000), ..lab.config(std::process::id()) };
+    let _serving = tokio::spawn(server::serve(config, std::future::pending()));
+    let client = lab.connect().await;
+    let focus = asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
+    // FOCUS sends a body's refs with no epoch: they're read in the last look's.
+    let kick = client.request("focus_body", json!({"kind": "fx", "ref": "s:track:3"}), WAIT).await.unwrap();
+    assert_eq!((&kick["epoch"], &kick["name"]), (&focus["epoch"], &json!("Kick")));
+    // Another song, with Pad on Kick's id; the look's summary grows old.
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        shown.name = "Next Song".into();
+        shown.tracks =
+            json!([{"id": 3, "kind": "audio", "format": "Stereo", "name": "Pad", "instrument": null, "inserts": [], "clips": []}]);
+    }
+    tokio::time::sleep(ms(1100)).await;
+    for params in [json!({"kind": "fx", "ref": "s:track:3"}), json!({"kind": "mixer", "around": "s:track:3"})] {
+        let refused = client.request("focus_body", params.clone(), WAIT).await.unwrap_err();
+        assert!(matches!(&refused, RequestError::Bridge { code, .. } if code == "stale"), "{params}: {refused:?}");
+    }
+    // A body that names no ref is drawn in the new session.
+    let mixer = client.request("focus_body", json!({"kind": "mixer"}), WAIT).await.unwrap();
+    assert_ne!(mixer["epoch"], focus["epoch"]);
+    assert_eq!(mixer["strips"][0]["name"], "Pad");
+}
+
+#[tokio::test]
+async fn in_the_midi_editor_focus_names_the_clip_it_shows() {
+    let lab = Lab::new().await;
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        shown.tracks = kick_and_keys();
+        shown.tracks[1]["clips"] = json!([{"id": 7, "name": "Keys", "start": 0, "length": 96000, "notes": 4, "muted": false}]);
+        shown.selection = json!({"tracks": [5], "clips": [], "start": 0, "end": 0});
+    }
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    let edit = asked_until(&client, "focus", |focus| focus["view"] == "edit" && focus["selection"]["trackRef"] == "s:track:5").await;
+    assert!(edit["selection"].get("midiClipRef").is_none(), "only in the MIDI Editor: {edit}");
+    lab.shown.lock().unwrap().ui = json!({"window": "Edit", "show_midi_editor": true, "plugin_windows": []});
+    let midi = asked_until(&client, "focus", |focus| focus["view"] == "midi").await;
+    assert_eq!(midi["selection"]["midiClipRef"], "s:clip:7");
+    // Kick selected: no MIDI track, so the MIDI Editor shows no clip.
+    lab.shown.lock().unwrap().selection = json!({"tracks": [3], "clips": [], "start": 0, "end": 0});
+    let none = asked_until(&client, "focus", |focus| focus["selection"]["trackRef"] == "s:track:3").await;
+    assert!(none["selection"].get("midiClipRef").is_none(), "{none}");
 }
 
 #[tokio::test]

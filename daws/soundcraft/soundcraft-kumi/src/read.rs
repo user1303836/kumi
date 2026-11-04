@@ -11,13 +11,14 @@
 //! step to take them. SoundCraft gives ids out again, so a ref or parent comes with the epoch it came from, and one
 //! from another epoch is stale. What a read can be refused for without the app is refused before it's asked. A page ends
 //! at the limit asked for (50, at most 200) or at the bytes an answer may take. Its cursor names the object it starts at,
-//! so a list that changed between pages says so rather than skipping or repeating rows. `call` runs one of SoundCraft's
-//! read-only commands by its id ([`call`]).
+//! so a list that changed between pages says so rather than skipping or repeating rows. FOCUS's bodies ([`bodies`]) are
+//! read the same way, and `call` runs one of SoundCraft's read-only commands by its id ([`call`]).
+mod bodies;
 pub mod call;
 
 use crate::control::{Control, Error};
 use crate::refs::{fingerprints, lane, Id, Kind, Lives, Missing, Ref, Slot};
-use crate::timebase::{Timebase, PPQ};
+use crate::timebase::Timebase;
 use daw_bridge::auth::sha256_hex;
 use daw_bridge::wire::code;
 use serde_json::{json, Map, Value};
@@ -58,14 +59,17 @@ struct Look {
     held: HashSet<(Kind, u64, u64)>,
 }
 
-/// The bridge's reads of one copy of SoundCraft: the lives of its objects (and their epoch), the last look, and the last
-/// full inspection.
+/// The bridge's reads of one copy of SoundCraft: the lives of its objects (and their epoch), the last look, the last
+/// full inspection, and the session the last look of either kind saw.
 pub struct Reads {
     control: Control,
     lives: Lives,
     looked: Option<Look>,
     /// The last full inspection, when it came, and its content ([`content`]).
     inspected: Option<(Instant, Arc<Value>, u64)>,
+    /// The session the last look saw (a summary, or a full inspection), and when it came: what FOCUS's bodies are drawn
+    /// from, as they read nothing only the full inspection has.
+    summary: Option<(Instant, Arc<Value>)>,
     /// The epoch as it changes, for whoever can't wait for a read to end.
     told: watch::Sender<String>,
     /// The built-in plug-ins as `engine.plugins` describes them, asked once: they come with the app's version.
@@ -81,7 +85,7 @@ impl Reads {
     pub fn new(control: Control, version: Option<String>) -> Self {
         let lives = Lives::new();
         let (told, _) = watch::channel(lives.epoch().to_string());
-        Self { control, lives, looked: None, inspected: None, told, plugins: None, commands: None, version }
+        Self { control, lives, looked: None, inspected: None, summary: None, told, plugins: None, commands: None, version }
     }
 
     /// The epoch as it changes, readable while a read holds the reads.
@@ -100,8 +104,9 @@ impl Reads {
     }
 
     /// The plug-in a window of SoundCraft's shows, which it names `[track, slot]` (the instrument's slot is the largest
-    /// number there is): its insert's `fxRef`, and its `fxName`, a built-in's as `engine.plugins` names it. Nothing for a
-    /// track or slot the session doesn't have.
+    /// number there is): its insert's `fxRef`, and its `fxName`, a built-in's as `engine.plugins` names it; and its track's
+    /// ref now (`fxTrackRef`, `read`'s) and name (`fxTrackName`), the selected track or not. Nothing for a track or slot
+    /// the session doesn't have.
     pub async fn plugin_window(&mut self, session: &Value, window: &Value, until: Instant) -> Option<Value> {
         let (track, slot) = (window[0].as_u64()?, window[1].as_u64()?);
         let track = tracks(session).iter().find(|row| row["id"].as_u64() == Some(track))?;
@@ -113,8 +118,18 @@ impl Reads {
         };
         // (a plug-in's name only fills in its id: one the app won't describe stays the id)
         let _ = self.know_plugins(until).await;
-        let known = self.plugins.as_deref().unwrap_or_default().iter().find(|known| known["id"] == row["plugin"]);
-        Some(json!({"fxRef": key, "fxName": known.map_or(&row["plugin"], |known| &known["name"])}))
+        Some(json!({
+            "fxRef": key,
+            "fxName": self.plugin_name(&row["plugin"]),
+            "fxTrackRef": row["trackRef"],
+            "fxTrackName": track["name"],
+        }))
+    }
+
+    /// A plug-in's name, as `engine.plugins` gives a built-in's ([`Reads::know_plugins`] first); else its id.
+    fn plugin_name(&self, plugin: &Value) -> Value {
+        let known = self.plugins.as_deref().unwrap_or_default().iter().find(|known| known["id"] == *plugin);
+        known.map_or(plugin, |known| &known["name"]).clone()
     }
 
     /// What a look saw of the session (`session.inspect`, in full or not): the lives learn from it, and another session
@@ -157,6 +172,7 @@ impl Reads {
         }
         self.looked = Some(now);
         self.inspected = None;
+        self.summary = None;
     }
 
     /// A look at the session's summary, whose content the look took ([`content`]): the lives learn from it as from any
@@ -169,6 +185,12 @@ impl Reads {
         self.inspected = kept.filter(|(_, _, held)| same && *held == content);
     }
 
+    /// A look at the session's summary, as [`Reads::looked`], which FOCUS's bodies are drawn from while it's fresh.
+    pub fn looked_at(&mut self, summary: Arc<Value>, content: u64) {
+        self.looked(&summary, content);
+        self.summary = Some((Instant::now(), summary));
+    }
+
     /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, `{ref}` for one object, or `{kind: "call", command,
     /// params?}` for a read-only command's answer ([`call`]), with the `epoch` the refs came from. Not started after
     /// `until` (the request's deadline).
@@ -178,7 +200,7 @@ impl Reads {
         }
         let (kind, one, parent, cursor, epoch) =
             (text(params, "kind")?, text(params, "ref")?, text(params, "parent")?, text(params, "cursor")?, text(params, "epoch")?);
-        let limit = limit(params)?;
+        let limit = limit(params, DEFAULT_LIMIT, MAX_LIMIT)?;
         let one = one.map(|one| one.parse::<Ref>().map_err(bad)).transpose()?;
         if let Some(refused) = one.as_ref().and_then(not_yet) {
             return Err(refused);
@@ -194,15 +216,7 @@ impl Reads {
             (None, None) => return Err(bad(format!("kind: what to read, one of {} (or ref: one object)", KINDS.join(", ")))),
         };
         let session = self.inspect(until).await?;
-        if let Some(epoch) = epoch.filter(|epoch| epoch != self.epoch()) {
-            return Err((
-                code::STALE,
-                format!(
-                    "those refs are from another epoch ({epoch}; now {}): another session is open, or the bridge started again: read again",
-                    self.epoch()
-                ),
-            ));
-        }
+        self.same_epoch(epoch)?;
         let Some(listing) = listing else {
             let row = self.one(&session, &one.expect("a ref, without a kind"), until).await?;
             return Ok(json!({"items": [row], "epoch": self.epoch()}));
@@ -217,6 +231,21 @@ impl Reads {
             listing => self.rows(&session, listing)?,
         };
         self.page(&rows, cursor.as_ref(), limit)
+    }
+
+    /// Refs or a parent from `epoch` (the answer's they came from) are read only in that epoch: SoundCraft gives ids out
+    /// again.
+    fn same_epoch(&self, epoch: Option<String>) -> Result<(), Refusal> {
+        match epoch.filter(|epoch| epoch != self.epoch()) {
+            None => Ok(()),
+            Some(epoch) => Err((
+                code::STALE,
+                format!(
+                    "those refs are from another epoch ({epoch}; now {}): another session is open, or the bridge started again: read again",
+                    self.epoch()
+                ),
+            )),
+        }
     }
 
     /// The session on one screen, kumi-daw/1's `snapshot`: the project, the transport, the selection, and the first
@@ -269,6 +298,7 @@ impl Reads {
         let held = content(&session);
         let session = Arc::new(session);
         self.inspected = Some((Instant::now(), Arc::clone(&session), held));
+        self.summary = Some((Instant::now(), Arc::clone(&session)));
         Ok(session)
     }
 
@@ -495,25 +525,16 @@ impl Reads {
             None => 0,
             Some(cursor) => self.resume(cursor, rows)?,
         };
-        let (mut items, mut bytes, mut next) = (vec![], 0, None);
-        for (position, (_, row)) in rows.iter().enumerate().skip(from) {
-            let size = serde_json::to_string(row).map_or(0, |text| text.len() + 1);
-            if items.len() == limit || (!items.is_empty() && bytes + size > ANSWER_BYTES) {
-                next = Some(Cursor::at(self.epoch(), rows, position).to_string());
-                break;
-            }
-            bytes += size;
-            items.push(row.clone());
-        }
+        let (items, more) = fill(rows[from..].iter().map(|(_, row)| row.clone()), limit, ANSWER_BYTES);
         let mut answer = json!({"items": items, "epoch": self.epoch(), "total": rows.len(), "indexFrom": 0});
-        if let Some(next) = next {
-            answer["nextCursor"] = next.into();
+        if more {
+            answer["nextCursor"] = Cursor::at(self.epoch(), rows, from + items.len()).to_string().into();
         }
         Ok(answer)
     }
 
     /// Where a cursor's page starts: at the row it names, wherever that is now.
-    fn resume(&self, cursor: &Cursor, rows: &[(String, Value)]) -> Result<usize, Refusal> {
+    fn resume<T>(&self, cursor: &Cursor, rows: &[(String, T)]) -> Result<usize, Refusal> {
         if cursor.epoch != self.epoch() {
             return Err((code::STALE, "that cursor is from another epoch: read again from the start".into()));
         }
@@ -524,6 +545,20 @@ impl Reads {
             .map(|(position, _)| position)
             .ok_or((code::CHANGED, "the list changed since that cursor: read it again from the start".into()))
     }
+}
+
+/// Rows from the first, up to `limit` and no more bytes than `bytes` (one at least): those taken, and whether any was left.
+fn fill(rows: impl Iterator<Item = Value>, limit: usize, bytes: usize) -> (Vec<Value>, bool) {
+    let (mut items, mut used) = (vec![], 0);
+    for row in rows {
+        let size = serde_json::to_string(&row).map_or(0, |text| text.len() + 1);
+        if items.len() == limit || (!items.is_empty() && used + size > bytes) {
+            return (items, true);
+        }
+        used += size;
+        items.push(row);
+    }
+    (items, false)
 }
 
 /// What a read lists, by kind, and what its rows are under: checked before the app is asked.
@@ -618,7 +653,7 @@ impl Cursor {
     }
 
     /// The cursor naming the row at `position`.
-    fn at(epoch: &str, rows: &[(String, Value)], position: usize) -> Cursor {
+    fn at<T>(epoch: &str, rows: &[(String, T)], position: usize) -> Cursor {
         let key = &rows[position].0;
         let alike = rows[..=position].iter().filter(|(at, _)| at == key).count();
         Cursor { epoch: epoch.into(), key: key.clone(), alike }
@@ -663,14 +698,14 @@ fn text(params: &Value, key: &str) -> Result<Option<String>, Refusal> {
     }
 }
 
-fn limit(params: &Value) -> Result<usize, Refusal> {
+fn limit(params: &Value, default: usize, most: usize) -> Result<usize, Refusal> {
     match params.get("limit") {
-        None | Some(Value::Null) => Ok(DEFAULT_LIMIT),
+        None | Some(Value::Null) => Ok(default),
         Some(limit) => limit
             .as_u64()
-            .filter(|limit| (1..=MAX_LIMIT as u64).contains(limit))
+            .filter(|limit| (1..=most as u64).contains(limit))
             .map(|limit| limit as usize)
-            .ok_or_else(|| bad(format!("limit must be a whole number from 1 to {MAX_LIMIT}"))),
+            .ok_or_else(|| bad(format!("limit must be a whole number from 1 to {most}"))),
     }
 }
 
@@ -824,17 +859,20 @@ pub fn transport(session: &Value, position: &Value, playing: &Value, recording: 
     let mut row = json!({"playing": playing, "recording": recording, "state": state, "seconds": seconds(session, position)});
     if let (Some(timebase), Some(samples)) = (Timebase::of(session), position.as_f64()) {
         let beats = timebase.beats(samples);
-        let at = timebase.bar_beat(beats);
         let (numerator, denominator) = timebase.time_signature(beats);
-        row["beat"] = json!((beats * 1000.0).round() / 1000.0);
-        row["bar"] = at.bar.into();
-        let into_bar = 1.0 + (at.beat - 1) as f64 * 4.0 / f64::from(denominator) + at.ticks as f64 / PPQ;
-        row["beatInBar"] = json!((into_bar * 1000.0).round() / 1000.0);
+        row["beat"] = thousandths(beats).into();
+        row["bar"] = timebase.bar_beat(beats).bar.into();
+        row["beatInBar"] = thousandths(1.0 + timebase.into_bar(beats)).into();
         row["tempo"] = timebase.tempo(beats).into();
         row["timeSignature"] = json!([numerator, denominator]);
         row["beatsPerBar"] = timebase.beats_a_bar(beats).into();
     }
     row
+}
+
+/// A beat or a position, to a thousandth.
+fn thousandths(value: f64) -> f64 {
+    (value * 1000.0).round() / 1000.0
 }
 
 /// What the producer has selected: tracks (the first, `trackRef`, is the one Kumi follows), clips, and the time range,
