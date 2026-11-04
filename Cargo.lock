@@ -3122,6 +3122,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "soundcraft-kumi"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "sqlite-wasm-rs"
 version = "0.5.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
