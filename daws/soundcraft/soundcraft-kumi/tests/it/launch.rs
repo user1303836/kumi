@@ -39,42 +39,52 @@ fn fake_app(test: &str, start: &Start) -> Result<Child, String> {
         .map_err(|error| error.to_string())
 }
 
-/// A start of a fake app that runs until the test kills it, kept in `started`.
-fn starting(test: &'static str, started: Arc<Mutex<Option<Child>>>) -> impl FnOnce(&Start) -> Result<Option<u32>, String> {
+/// A start of a fake app that runs until the test kills it: the launcher gets its process, and `started` its pid.
+fn starting(test: &'static str, started: Arc<Mutex<Option<u32>>>) -> impl FnOnce(&Start) -> Result<Option<Child>, String> {
     move |start: &Start| {
         let child = fake_app(test, start)?;
-        let pid = child.id();
-        *started.lock().unwrap() = Some(child);
-        Ok(Some(pid))
+        *started.lock().unwrap() = Some(child.id());
+        Ok(Some(child))
     }
 }
 
-/// A start of a fake app that ends by itself, waited for as the launcher's own start waits for the app.
-fn ending(test: &'static str) -> impl FnOnce(&Start) -> Result<Option<u32>, String> {
-    move |start: &Start| {
-        let mut child = fake_app(test, start)?;
-        let pid = child.id();
-        std::thread::spawn(move || child.wait());
-        Ok(Some(pid))
-    }
+/// A start of a fake app that ends by itself.
+fn ending(test: &'static str) -> impl FnOnce(&Start) -> Result<Option<Child>, String> {
+    move |start: &Start| fake_app(test, start).map(Some)
 }
 
-struct Ends(Arc<Mutex<Option<Child>>>);
+/// Kills a process that still runs (a copy the launcher kept, which a thread of its own waits for).
+fn kill(pid: u32) {
+    if !daw_bridge::files::process_alive(pid) {
+        return;
+    }
+    #[cfg(unix)]
+    // SAFETY: sends a signal to the test's own child.
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
+    }
+    #[cfg(windows)]
+    let _ = Command::new("taskkill").args(["/F", "/PID", &pid.to_string()]).stdout(Stdio::null()).stderr(Stdio::null()).status();
+}
+
+/// Ends the started app with the test, however the test ends, unless the launcher closed it already.
+struct Ends(Arc<Mutex<Option<u32>>>);
 
 impl Drop for Ends {
     fn drop(&mut self) {
-        if let Some(mut child) = self.0.lock().unwrap().take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(pid) = self.0.lock().unwrap().take() {
+            kill(pid);
         }
     }
 }
 
-/// Whether the started app has ended within `wait`.
-fn ended(started: &Arc<Mutex<Option<Child>>>, wait: Duration) -> bool {
+/// Whether the started app has ended within `wait` (the launcher closes a copy through its process, and waits for it).
+fn ended(started: &Arc<Mutex<Option<u32>>>, wait: Duration) -> bool {
+    let pid = started.lock().unwrap().expect("started");
     let began = Instant::now();
     while began.elapsed() < wait {
-        if started.lock().unwrap().as_mut().unwrap().try_wait().unwrap().is_some() {
+        if !daw_bridge::files::process_alive(pid) {
+            started.lock().unwrap().take();
             return true;
         }
         std::thread::sleep(ms(25));
@@ -97,7 +107,7 @@ async fn a_start_waits_for_the_apps_port_and_token_and_a_later_session_finds_tha
     let _ends = Ends(started.clone());
     let found =
         launch::launch_with(&app, None, &folder, false, USUAL, starting("launch::a_fake_soundcraft", started.clone())).await.unwrap();
-    let pid = started.lock().unwrap().as_ref().unwrap().id();
+    let pid = started.lock().unwrap().unwrap();
     let launched = found.launched.clone();
     assert!(found.answering);
     assert_eq!((launched.pid, launched.version.as_deref(), launched.token.len()), (pid, Some("0.17.0"), 43));
@@ -109,9 +119,11 @@ async fn a_start_waits_for_the_apps_port_and_token_and_a_later_session_finds_tha
     // A later session finds the same copy, and its channel answers with that token.
     assert_eq!(launch::attach(&folder, SECOND).await, Some(Found { launched: launched.clone(), answering: true }));
     // Once it has quit, nothing is found.
-    let mut child = started.lock().unwrap().take().unwrap();
-    child.kill().unwrap();
-    child.wait().unwrap();
+    kill(pid);
+    let until = Instant::now() + Duration::from_secs(5);
+    while daw_bridge::files::process_alive(pid) && Instant::now() < until {
+        tokio::time::sleep(ms(20)).await;
+    }
     assert_eq!(launch::attach(&folder, SECOND).await, None);
 }
 
@@ -180,6 +192,20 @@ async fn a_copy_whose_channel_wont_take_kumis_token_is_closed_and_not_kept() {
     assert_eq!(launch::recorded(&folder), None);
 }
 
+#[tokio::test]
+async fn a_copy_that_answers_in_its_own_words_without_kumis_first_request_is_kept() {
+    let home = tempfile::tempdir().unwrap();
+    let folder = home.path().join("bridges").join("soundcraft");
+    let app = soundcraft_in(home.path());
+    let started = Arc::new(Mutex::new(None));
+    let _ends = Ends(started.clone());
+    let without = starting("launch::a_soundcraft_without_ui_inspect", started.clone());
+    let found = launch::launch_with(&app, None, &folder, false, USUAL, without).await.unwrap();
+    assert!(found.answering, "it took the token and answered: `unknown method` is its own word");
+    assert_eq!(launch::recorded(&folder), Some(found.launched));
+    assert!(daw_bridge::files::process_alive(started.lock().unwrap().unwrap()), "kept running");
+}
+
 /// macOS's `open` says nothing of the app it started: the app is the process holding its stdout's file.
 #[cfg(target_os = "macos")]
 #[tokio::test]
@@ -190,11 +216,11 @@ async fn where_the_start_cant_say_the_apps_pid_it_is_the_process_holding_the_app
     let _ends = Ends(started.clone());
     let keep = started.clone();
     let unsaid = move |start: &Start| {
-        *keep.lock().unwrap() = Some(fake_app("launch::a_fake_soundcraft", start)?);
+        *keep.lock().unwrap() = Some(fake_app("launch::a_fake_soundcraft", start)?.id());
         Ok(None)
     };
     let found = launch::launch_with(&app, None, &home.path().join("one"), false, USUAL, unsaid).await.unwrap();
-    assert_eq!(found.launched.pid, started.lock().unwrap().as_ref().unwrap().id());
+    assert_eq!(Some(found.launched.pid), *started.lock().unwrap(), "the port's listener, which holds the app's stdout");
     // One that ends at once is told well before the whole wait.
     let began = Instant::now();
     let ends_at_once = |start: &Start| {
@@ -414,4 +440,12 @@ fn a_soundcraft_that_never_opens_its_channel() {
 fn a_soundcraft_that_cant_open_its_channel() {
     eprintln!("control server failed to bind 127.0.0.1:0: refused");
     std::process::exit(1);
+}
+
+#[tokio::test]
+#[ignore = "run as the app by a_copy_that_answers_in_its_own_words_without_kumis_first_request_is_kept"]
+async fn a_soundcraft_without_ui_inspect() {
+    let fake = Fake::start(16, |_| Answer::Now(refused("unknown method `ui.inspect`"))).await;
+    println!("\nSOUNDCRAFT_CONTROL_PORT={}", fake.port());
+    std::future::pending::<()>().await;
 }

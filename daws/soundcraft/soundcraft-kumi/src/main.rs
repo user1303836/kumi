@@ -54,7 +54,9 @@ fn launch_command(args: &[String]) -> ExitCode {
     if let Some(found) = runtime.block_on(launch::attach(&folder, launch::Waits::USUAL.answer)) {
         return said(&found, false);
     }
-    if let Some(pid) = launch::running(&var).first().copied() {
+    // (found first: a program KUMI_SOUNDCRAFT_APP names under another name is known by that name too)
+    let app = launch::find(&var);
+    if let Some(pid) = launch::running(&var, app.as_ref().map(|app| app.path.as_path())).first().copied() {
         if launch::recorded(&folder).is_some_and(|launched| launched.pid == pid) {
             return failed(&format!(
                 "The SoundCraft Kumi started (pid {pid}) no longer takes Kumi's requests on its control channel. Save, quit \
@@ -66,7 +68,7 @@ fn launch_command(args: &[String]) -> ExitCode {
              restarted by its own update. Save, quit it, and Kumi opens your session again."
         ));
     }
-    let Some(app) = launch::find(&var) else {
+    let Some(app) = app else {
         return failed(&format!("SoundCraft isn't installed here (or {} names a program that isn't there)", launch::APP_VARIABLE));
     };
     if let Some(settings) = launch::settings_folder(&var, Some(&app.path)) {

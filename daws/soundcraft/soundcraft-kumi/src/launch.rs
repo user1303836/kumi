@@ -16,14 +16,15 @@ use daw_bridge::owner;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// The file in the bridge's folder that names the copy of SoundCraft Kumi started last.
 pub const LAUNCHED: &str = "launched.json";
 /// The bridge folder's lock, held from a look for the copy through a start's record of it.
 pub const LOCK: &str = "launch.lock";
-/// The variable that names SoundCraft's program (its `.app` on macOS), in place of the usual places.
+/// The variable that names SoundCraft's program (its `.app` on macOS), in place of the usual places. It names the program
+/// itself, not a wrapper that starts it: Kumi finds its copy again by the program the copy's process runs.
 pub const APP_VARIABLE: &str = "KUMI_SOUNDCRAFT_APP";
 /// What the app prints once its channel listens.
 const PORT_LINE: &str = "SOUNDCRAFT_CONTROL_PORT=";
@@ -295,11 +296,13 @@ pub fn recorded(folder: &Path) -> Option<Launched> {
     serde_json::from_slice(&std::fs::read(&path).ok()?).ok()
 }
 
-/// The copy an earlier start left, if it's still there: its process runs as SoundCraft, listens on its port, and its
-/// channel takes its token within `answer` (or is busy).
+/// The copy an earlier start left, if it's still there: its process runs SoundCraft's program, listens on its port, and
+/// its channel takes its token within `answer` (or is busy).
 pub async fn attach(folder: &Path, answer: Duration) -> Option<Found> {
     let launched = recorded(folder)?;
-    let there = daw_bridge::files::process_alive(launched.pid) && runs_soundcraft(launched.pid) && listens(launched.port, launched.pid);
+    let there = daw_bridge::files::process_alive(launched.pid)
+        && runs_soundcraft(launched.pid, &launched.app)
+        && listens(launched.port, launched.pid);
     if !there {
         return None;
     }
@@ -307,10 +310,21 @@ pub async fn attach(folder: &Path, answer: Duration) -> Option<Found> {
     Some(Found { launched, answering })
 }
 
-/// Whether `pid`'s program is SoundCraft's, where the system says (Linux's /proc, Windows' image name): a pid another
-/// program got since isn't the copy. macOS doesn't say, and there the listener check names the pid.
-fn runs_soundcraft(pid: u32) -> bool {
-    daw_bridge::detect::program_of(pid).is_none_or(|program| is_soundcraft(&program.to_string_lossy()))
+/// Whether `pid`'s program is SoundCraft's (or `app`'s own, under whatever name), where the system says (Linux's /proc,
+/// Windows' image name): a pid another program got since isn't the copy. macOS doesn't say, and there the listener check
+/// names the pid.
+fn runs_soundcraft(pid: u32, app: &Path) -> bool {
+    daw_bridge::detect::program_of(pid).is_none_or(|program| program_is(&program.to_string_lossy(), app))
+}
+
+/// Whether a process's program (as the system names it) is SoundCraft's, or the program at `app` (one
+/// `KUMI_SOUNDCRAFT_APP` names under another name). Linux names a program whose file was replaced since it started (a
+/// package upgrade) `<path> (deleted)`: still that program.
+pub fn program_is(program: &str, app: &Path) -> bool {
+    let program = program.strip_suffix(" (deleted)").unwrap_or(program);
+    let name = program.rsplit(['/', '\\']).next().unwrap_or(program);
+    let app_name = app.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+    is_soundcraft(program) || (!app_name.is_empty() && name.eq_ignore_ascii_case(&app_name))
 }
 
 /// Whether `pid` listens on `port`: on macOS by the socket's owner (`lsof`). Elsewhere only whether something accepts a
@@ -323,18 +337,22 @@ fn listens(port: u16, pid: u32) -> bool {
     std::net::TcpStream::connect_timeout(&address, Duration::from_millis(500)).is_ok()
 }
 
+/// macOS's own `lsof`, never another one on PATH.
+const LSOF: &str = "/usr/sbin/lsof";
+
 /// The process listening on a loopback port, by `lsof`.
 fn listener(port: u16) -> Option<u32> {
-    let said = Command::new("lsof").args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fp"]).output().ok()?;
+    let said = Command::new(LSOF).args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-Fp"]).output().ok()?;
     String::from_utf8_lossy(&said.stdout).lines().find_map(|line| line.strip_prefix('p')?.parse().ok())
 }
 
-/// What a request carrying the copy's token says of its channel: Ok(true) when it answers, Ok(false) while it's busy (its
-/// window took no request in time, or its queue or its connections are full), an error when it isn't the copy's channel
-/// (nothing listens, the token is refused, or what answers isn't SoundCraft's).
+/// What a request carrying the copy's token says of its channel: Ok(true) when the app answers (its words, a refusal, a
+/// method it hasn't got), Ok(false) while it's busy (its window took no request in time, or its queue or its connections
+/// are full), an error when it isn't the copy's channel (nothing listens, the token is refused, or what answers isn't
+/// SoundCraft's).
 async fn probe(launched: &Launched, answer: Duration) -> Result<bool, Error> {
     match launched.control().call("ui.inspect", json!({}), answer).await {
-        Ok(_) | Err(Error::Refused(_) | Error::Broken(_)) => Ok(true),
+        Ok(_) | Err(Error::Refused(_) | Error::Broken(_) | Error::Protocol(_)) => Ok(true),
         Err(Error::Deadline | Error::Stalled | Error::Busy | Error::Crowded) => Ok(false),
         Err(error) => Err(error),
     }
@@ -358,15 +376,16 @@ pub async fn launch(app: &App, session: Option<&Path>, folder: &Path, background
     launch_with(app, session, folder, background, Waits::USUAL, start_app).await
 }
 
-/// [`launch`], with the app started by `start` (a test's stand-in), which answers its process, or None when it can't say
-/// (macOS's `open`): then it's the process holding the app's stdout's file.
+/// [`launch`], with the app started by `start` (a test's stand-in). The start gives back the app's process when it has it
+/// (a copy Kumi can't use is closed through it, never by a pid another program may have by then), or None (macOS's
+/// `open`): then the app is the process holding its stdout's file, and its port's listener once there is one.
 pub async fn launch_with(
     app: &App,
     session: Option<&Path>,
     folder: &Path,
     background: bool,
     waits: Waits,
-    start: impl FnOnce(&Start) -> Result<Option<u32>, String>,
+    start: impl FnOnce(&Start) -> Result<Option<Child>, String>,
 ) -> Result<Found, String> {
     let token = daw_bridge::auth::Secret::generate();
     let started_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64);
@@ -382,27 +401,43 @@ pub async fn launch_with(
     owner::write_atomic(&err, b"").map_err(made)?;
     // (the app opens a relative path against its own working folder, which is `/` when `open` starts it)
     let session = session.map(std::path::absolute).transpose().map_err(|error| format!("the session's path can't be read: {error}"))?;
-    let given = start(&Start { app, session: session.as_deref(), token: token.expose(), out: &out, err: &err, background })?;
-    let pid = match given {
-        Some(pid) => Some(pid),
-        None => holder(&out).await,
+    let mut copy = Copy {
+        child: start(&Start { app, session: session.as_deref(), token: token.expose(), out: &out, err: &err, background })?,
+        out: &out,
     };
-    let port = match port_from(&out, &err, pid, waits.port).await {
+    let process = match &copy.child {
+        Some(child) => Process::Known(child.id()),
+        None => match holder(&out, &app.path).await {
+            Some(pid) => Process::Known(pid),
+            // (no copy of SoundCraft holds it: the app ended at once; one runs, but which can't be told yet)
+            None if running(&|_: &str| None, Some(&app.path)).is_empty() => Process::Ended,
+            None => Process::Unknown,
+        },
+    };
+    let printed = port_from(&out, &err, &mut || copy.ended(process), waits.port).await;
+    let port = match printed {
         Ok(port) => port,
         Err((ended, said)) => {
             let how = if ended {
+                copy.reap();
                 "SoundCraft ended before it opened its control channel".to_string()
-            } else {
+            } else if copy.stop(process.pid()) {
                 // (running with no channel: of no use to Kumi, and in the next start's way)
-                pid.into_iter().for_each(stop);
                 format!("SoundCraft didn't open its control channel within {} s, so Kumi closed the copy it started", waits.port.as_secs())
+            } else {
+                format!("SoundCraft didn't open its control channel within {} s", waits.port.as_secs())
             };
             return Err(if said.is_empty() { how } else { format!("{how}: {said}") });
         }
     };
-    let pid = match pid {
-        Some(pid) => pid,
-        None => listener(port).ok_or_else(|| format!("SoundCraft opened its channel on port {port}, and no process listens there now"))?,
+    // (on macOS the port's listener is the app: it printed that port itself)
+    let pid = match (&copy.child, process) {
+        (Some(child), _) => Some(child.id()),
+        (None, _) => listener(port),
+    };
+    let Some(pid) = pid else {
+        copy.stop(process.pid());
+        return Err(format!("SoundCraft opened its channel on port {port}, and no process listens there now"));
     };
     let launched =
         Launched { pid, started_ms, port, token: token.expose().to_string(), app: app.path.clone(), version: app.version.clone() };
@@ -410,27 +445,111 @@ pub async fn launch_with(
     // and a running copy no record names would look like one opened from the Dock.
     let written = serde_json::to_vec_pretty(&launched).expect("launched.json is JSON");
     if let Err(error) = owner::write_owner_only(&folder.join(LAUNCHED), &written) {
-        stop(pid);
+        copy.stop(Some(pid));
         return Err(format!("{}, so Kumi closed the copy it started", made(error)));
     }
     match probe(&launched, waits.answer).await {
-        Ok(answering) => Ok(Found { launched, answering }),
+        Ok(answering) => {
+            copy.keep();
+            Ok(Found { launched, answering })
+        }
         Err(error) => {
-            stop(pid);
+            copy.stop(Some(pid));
             let _ = std::fs::remove_file(folder.join(LAUNCHED));
             Err(format!("SoundCraft opened its channel on port {port}, but it didn't take Kumi's request ({error}), so Kumi closed the copy it started"))
         }
     }
 }
 
-/// The pid of the process holding the app's stdout's file, by `lsof`: macOS's `open` doesn't say the pid of the app it
-/// started. The app's own process comes first (a helper it starts later holds the file too, with a later pid). None once
-/// nothing holds it, as when the app ended at once.
-async fn holder(out: &Path) -> Option<u32> {
+/// What a start knows of the app's process.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Process {
+    Known(u32),
+    /// It ended (or never showed up).
+    Ended,
+    /// It runs, but which process it is can't be told before its port's listener can.
+    Unknown,
+}
+
+impl Process {
+    fn pid(self) -> Option<u32> {
+        match self {
+            Process::Known(pid) => Some(pid),
+            Process::Ended | Process::Unknown => None,
+        }
+    }
+}
+
+/// The copy a start made: its process when the start gave it, and its stdout's file.
+struct Copy<'a> {
+    child: Option<Child>,
+    out: &'a Path,
+}
+
+impl Copy<'_> {
+    /// Ends a copy Kumi started and can't use, so it doesn't stand in the next start's way: through its process, else (no
+    /// process given) by `pid` while that process still holds the app's stdout's file. It has only just started: at most it
+    /// opened the session it was given, which it hasn't changed. Whether anything was ended.
+    fn stop(&mut self, pid: Option<u32>) -> bool {
+        if let Some(mut child) = self.child.take() {
+            let ended = child.kill().is_ok();
+            let _ = child.wait();
+            return ended;
+        }
+        #[cfg(unix)]
+        if let Some(pid) = pid.filter(|pid| holders(self.out).contains(pid)) {
+            // SAFETY: sends a signal to a process; nothing of this one's is read or written.
+            return unsafe { libc::kill(pid as libc::pid_t, libc::SIGTERM) } == 0;
+        }
+        let _ = pid;
+        false
+    }
+
+    /// Whether the app's process has ended: asked of its process when the start gave it (which waits for one that ended, as
+    /// a pid alone can't tell an ended child that nobody waited for), else of its pid.
+    fn ended(&mut self, process: Process) -> bool {
+        match (&mut self.child, process) {
+            (Some(child), _) => !matches!(child.try_wait(), Ok(None)),
+            (None, Process::Known(pid)) => !daw_bridge::files::process_alive(pid),
+            (None, Process::Ended) => true,
+            (None, Process::Unknown) => false,
+        }
+    }
+
+    /// A copy that ended by itself: its process is waited for, so it leaves no zombie.
+    fn reap(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            let _ = child.wait();
+        }
+    }
+
+    /// The copy Kumi keeps: waited for on a thread of its own, so it leaves no zombie when it quits before the bridge does.
+    fn keep(&mut self) {
+        if let Some(mut child) = self.child.take() {
+            std::thread::spawn(move || child.wait());
+        }
+    }
+}
+
+/// The pids of the processes holding a file, by macOS's `lsof`.
+fn holders(file: &Path) -> Vec<u32> {
+    let said = Command::new(LSOF).arg("-t").arg(file).stdin(Stdio::null()).stderr(Stdio::null()).output();
+    said.map(|said| String::from_utf8_lossy(&said.stdout).lines().filter_map(|line| line.trim().parse().ok()).collect()).unwrap_or_default()
+}
+
+/// The program of a process, as macOS's `ps` names it (a path).
+fn program_of_pid(pid: u32) -> Option<String> {
+    let said = Command::new("/bin/ps").args(["-o", "comm=", "-p", &pid.to_string()]).stderr(Stdio::null()).output().ok()?;
+    Some(String::from_utf8_lossy(&said.stdout).trim().to_string()).filter(|program| !program.is_empty())
+}
+
+/// The app's process when the start can't say it (macOS's `open`): the one holding its stdout's file whose program is
+/// SoundCraft's (or `app`'s own), its first if several (a helper it starts later holds the file too, with a later pid).
+/// None once none holds it.
+async fn holder(out: &Path, app: &Path) -> Option<u32> {
     let deadline = Instant::now() + HOLDER_WAIT;
     loop {
-        let said = Command::new("lsof").arg("-t").arg(out).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
-        let held = String::from_utf8_lossy(&said.stdout).lines().filter_map(|line| line.trim().parse().ok()).min();
+        let held = holders(out).into_iter().filter(|pid| program_of_pid(*pid).is_some_and(|program| program_is(&program, app))).min();
         if held.is_some() || Instant::now() >= deadline {
             return held;
         }
@@ -440,14 +559,14 @@ async fn holder(out: &Path) -> Option<u32> {
 
 /// The port the app printed, once it has. Else whether its process ended first (or never showed up), and the last lines
 /// it wrote to its stderr.
-async fn port_from(out: &Path, err: &Path, pid: Option<u32>, wait: Duration) -> Result<u16, (bool, String)> {
+async fn port_from(out: &Path, err: &Path, ended: &mut dyn FnMut() -> bool, wait: Duration) -> Result<u16, (bool, String)> {
     let deadline = Instant::now() + wait;
     loop {
         let printed = std::fs::read_to_string(out).unwrap_or_default();
         if let Some(port) = printed.lines().find_map(|line| line.trim().strip_prefix(PORT_LINE)?.parse().ok()) {
             return Ok(port);
         }
-        let ended = pid.is_none_or(|pid| !daw_bridge::files::process_alive(pid));
+        let ended = ended();
         if ended || Instant::now() >= deadline {
             let said = std::fs::read_to_string(err).unwrap_or_default();
             let last: Vec<&str> = said.lines().map(str::trim).filter(|line| !line.is_empty()).collect();
@@ -455,26 +574,6 @@ async fn port_from(out: &Path, err: &Path, pid: Option<u32>, wait: Duration) -> 
         }
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
-}
-
-/// Ends a copy Kumi started and can't use, so it doesn't stand in the next start's way. It has only just started: at
-/// most it opened the session it was given, which it hasn't changed.
-fn stop(pid: u32) {
-    if !daw_bridge::files::process_alive(pid) {
-        return;
-    }
-    #[cfg(unix)]
-    // SAFETY: sends a signal to a process; nothing of this one's is read or written.
-    unsafe {
-        libc::kill(pid as libc::pid_t, libc::SIGTERM);
-    }
-    #[cfg(windows)]
-    let _ = Command::new("taskkill")
-        .args(["/F", "/T", "/PID", &pid.to_string()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status();
 }
 
 /// A new folder for one start's output, named by when it began (a millisecond on, when another start has that one). The
@@ -514,7 +613,7 @@ fn config_dir() -> Option<PathBuf> {
 /// Starts SoundCraft as the system starts apps: on macOS through `open` (a new copy, `-n`, which LaunchServices starts on
 /// its own, so it outlives Kumi), elsewhere as a process of its own group, detached from Kumi's. Either way the app
 /// inherits this process's environment, where the token goes: never on a command line, which other programs can read.
-fn start_app(start: &Start) -> Result<Option<u32>, String> {
+fn start_app(start: &Start) -> Result<Option<Child>, String> {
     let app = start.app.path.display();
     if cfg!(target_os = "macos") {
         let mut open = Command::new("open");
@@ -559,11 +658,7 @@ fn start_app(start: &Start) -> Result<Option<u32>, String> {
     };
     #[cfg(not(windows))]
     let child = command.spawn();
-    let mut child = child.map_err(|error| format!("{app} couldn't start: {error}"))?;
-    let pid = child.id();
-    // Waited for on a thread of its own, so the app leaves no zombie when it quits before the bridge does.
-    std::thread::spawn(move || child.wait());
-    Ok(Some(pid))
+    child.map(Some).map_err(|error| format!("{app} couldn't start: {error}"))
 }
 
 /// Whether a process's program (a path, or an image name) is SoundCraft's app: `SoundCraft` in macOS's bundle,
@@ -574,12 +669,15 @@ pub fn is_soundcraft(program: &str) -> bool {
     base.eq_ignore_ascii_case("soundcraft")
 }
 
-/// The pids of this user's copies of SoundCraft running now, by the process listing (KUMI_PROCESSES stands in for it).
-/// Another account's copy (fast user switching, another remote session) isn't this user's to quit, so it's left out.
-pub fn running(var: &dyn Fn(&str) -> Option<String>) -> Vec<u32> {
+/// The pids of this user's copies of SoundCraft running now, by the process listing (KUMI_PROCESSES stands in for it):
+/// SoundCraft's program, or `app`'s own under another name. Another account's copy (fast user switching, another remote
+/// session) isn't this user's to quit, so it's left out.
+pub fn running(var: &dyn Fn(&str) -> Option<String>, app: Option<&Path>) -> Vec<u32> {
     daw_bridge::detect::processes(var)
         .iter()
-        .filter(|(pid, program)| is_soundcraft(program) && daw_bridge::files::process_alive(*pid))
+        .filter(|(pid, program)| {
+            app.map_or(is_soundcraft(program), |app| program_is(program, app)) && daw_bridge::files::process_alive(*pid)
+        })
         .map(|(pid, _)| *pid)
         .collect()
 }
@@ -598,5 +696,16 @@ mod tests {
         for program in ["soundcraft-cli", "/usr/bin/soundcraft-cli", "SoundCraftHelper", "Renoise"] {
             assert!(!is_soundcraft(program), "{program}");
         }
+    }
+
+    #[test]
+    fn kumis_copy_is_known_by_its_program_after_an_upgrade_or_under_another_name() {
+        let app = Path::new("/usr/bin/soundcraft");
+        assert!(program_is("/usr/bin/soundcraft (deleted)", app), "Linux's name for a program replaced since it started");
+        let renamed = Path::new("/opt/studio/SoundCraft-0.17.0");
+        assert!(program_is("/opt/studio/SoundCraft-0.17.0", renamed), "the program KUMI_SOUNDCRAFT_APP names");
+        assert!(program_is(r"C:\ArtCraft\SoundCraft\SOUNDCRAFT.EXE", Path::new(r"C:\ArtCraft\SoundCraft\soundcraft.exe")));
+        assert!(!program_is("/usr/bin/bwrap", renamed));
+        assert!(!program_is("/usr/local/bin/soundcraft-cli", app));
     }
 }
