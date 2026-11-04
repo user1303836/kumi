@@ -228,7 +228,10 @@ async fn soundcrafts_host_lists_what_its_bridge_serves_and_starts_nothing_while_
     session.call(json!({"jsonrpc":"2.0","method":"notifications/initialized"})).await;
     let listed = session.call(json!({"jsonrpc":"2.0","id":2,"method":"tools/list"})).await;
     let tools = listed["result"]["tools"].as_array().unwrap();
-    assert_eq!(tools.iter().filter_map(|tool| tool["name"].as_str()).collect::<Vec<_>>(), ["status", "discover", "read"]);
+    assert_eq!(
+        tools.iter().filter_map(|tool| tool["name"].as_str()).collect::<Vec<_>>(),
+        ["status", "discover", "read", "snapshot", "focus"]
+    );
     let said = tools[0]["description"].as_str().unwrap();
     assert!(said.starts_with("Whether Kumi's bridge beside SoundCraft is connected") && said.contains("the open session"), "{said}");
     let read = &tools[2]["inputSchema"]["properties"];
@@ -237,8 +240,12 @@ async fn soundcrafts_host_lists_what_its_bridge_serves_and_starts_nothing_while_
         json!(["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"])
     );
     assert!(read["epoch"].is_object() && read["grid"].is_null(), "its refs carry an epoch, and it reads no parameter texts: {read}");
-    let snapshot = session.call(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"snapshot","arguments":{}}})).await;
-    assert_eq!(snapshot["error"]["message"], "Unknown tool: snapshot", "the other DAWs' tools aren't SoundCraft's yet");
+    let snapshot = tools[3]["description"].as_str().unwrap();
+    assert!(snapshot.starts_with("The open SoundCraft session on one screen"), "{snapshot}");
+    let view = session
+        .call(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"focus_body","arguments":{"kind": "mixer"}}}))
+        .await;
+    assert_eq!(view["error"]["message"], "Unknown tool: focus_body", "the other DAWs' views aren't SoundCraft's yet");
     // (the isolated runner's process listing shows no SoundCraft running: no bridge is started for it)
     let status = session.tool(4, "status", json!({})).await;
     assert_eq!((&status["connected"], &status["reason"]), (&json!(false), &json!("no SoundCraft is running: open SoundCraft")), "{status}");

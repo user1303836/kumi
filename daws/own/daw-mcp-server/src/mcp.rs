@@ -29,7 +29,8 @@ fn tool_list(daw: Daw) -> Value {
         "pid": {"type": "integer", "minimum": 1, "description": format!("The {daw} process to use, from discover, when several run.")},
         "resource": {"type": "string", "description": format!("The {daw} resource or preferences folder to use, from discover, when several run.")},
     });
-    // (SoundCraft's bridge serves ping, status and read so far: its change and listening tools come as it learns them)
+    // (SoundCraft's bridge serves ping, status, read, snapshot and focus so far: its change and listening tools come as it
+    // learns them)
     if daw == Daw::SoundCraft {
         let [status, discover] = finding(daw, "session", &pick);
         let epoch = json!({"epoch": {
@@ -47,7 +48,7 @@ fn tool_list(daw: Daw) -> Value {
             &pick,
             epoch,
         );
-        return json!([status, discover, read]);
+        return json!([status, discover, read, snapshot_tool(daw, "session", &pick), focus_tool(daw, &pick)]);
     }
     let kinds = kinds(daw);
     // Each DAW's own words: what it opens, what a read's parent holds, what a view is about.
@@ -84,20 +85,8 @@ fn tool_list(daw: Daw) -> Value {
         status,
         discover,
         read,
-        {
-            "name": "snapshot",
-            "title": format!("{daw} snapshot"),
-            "description": format!("The open {daw} {place} on one screen: {{epoch, project, transport, tracks, selection, markers?}}. What is too big to include is named under truncated, to read with `read`."),
-            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
-        },
-        {
-            "name": "focus",
-            "title": format!("{daw} focus"),
-            "description": format!("What the producer is looking at in {daw}: {{epoch, view, selection, transport, changed}}. Cheap enough to poll about every 150 ms; read again only when changed moves."),
-            "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": false, "openWorldHint": false},
-        },
+        snapshot_tool(daw, place, &pick),
+        focus_tool(daw, &pick),
         {
             "name": "focus_body",
             "title": format!("{daw} view"),
@@ -463,6 +452,28 @@ fn read_tool(daw: Daw, (place, inside, parent): (&str, &str, &str), kinds: &crat
         "description": format!("Rows of one kind from the open {daw} {place}, a page at a time: {{items, nextCursor?, epoch}}. Pass parent (a row's ref) to read what is inside it, such as {inside}; pass the previous page's nextCursor as cursor for the next page. Or pass ref alone for the one object it names. Refs hold until the epoch changes. With several {daw} instances running, pass pid or resource from discover."),
         "inputSchema": {"type": "object", "properties": merged(pick, merged(&common, more)), "additionalProperties": false},
         "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
+    })
+}
+
+/// The `snapshot` tool: the project, in the DAW's words, on one screen.
+fn snapshot_tool(daw: Daw, place: &str, pick: &Value) -> Value {
+    json!({
+        "name": "snapshot",
+        "title": format!("{daw} snapshot"),
+        "description": format!("The open {daw} {place} on one screen: {{epoch, project, transport, tracks, selection, markers?}}. What is too big to include is named under truncated, to read with `read`."),
+        "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
+        "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
+    })
+}
+
+/// The `focus` tool: what the producer is looking at, cheap enough to poll.
+fn focus_tool(daw: Daw, pick: &Value) -> Value {
+    json!({
+        "name": "focus",
+        "title": format!("{daw} focus"),
+        "description": format!("What the producer is looking at in {daw}: {{epoch, view, selection, transport, changed}}. Cheap enough to poll about every 150 ms; read again only when changed moves."),
+        "inputSchema": {"type": "object", "properties": pick, "additionalProperties": false},
+        "annotations": {"readOnlyHint": true, "idempotentHint": false, "openWorldHint": false},
     })
 }
 
