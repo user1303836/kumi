@@ -73,3 +73,4 @@ Hermes に「Live 用に Kumi をセットアップして」（REAPER や Renois
 - `/kumi`（ターミナルでは `hermes kumi status`）で、セットアップに足りないものがわかります。
 - Hermes Desktop に Kumi が出てこない: Capabilities → Plugins で Kumi がオンか、Hermes で有効か（`hermes plugins enable kumi`）を確かめてください。
 - Live につながらない: AbletonMcpBridge がコントロールサーフェスに選ばれているか確かめてください。
+- Live のトラックを聴くときに Kumi Ears がないと言われる: セットアップをもう一度実行してください。Hermes の中の Kumi が別の Kumi のインストールを使っている場合は、その Kumi で `kumi bridge` を実行してください。Kumi Ears には Max for Live が必要です。

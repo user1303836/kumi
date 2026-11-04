@@ -73,3 +73,4 @@ hermes plugins enable kumi
 - `/kumi`（在终端中用 `hermes kumi status`）会告诉你设置还缺什么。
 - Hermes Desktop 中看不到 Kumi：检查 Capabilities → Plugins 里是否打开了 Kumi，以及 Hermes 中是否已启用（`hermes plugins enable kumi`）。
 - Live 连不上：检查是否已把 AbletonMcpBridge 选为控制界面。
+- 聆听 Live 音轨时提示缺少 Kumi Ears：再运行一次设置。如果 Hermes 中的 Kumi 使用的是另一套 Kumi 安装，请改在那套 Kumi 中运行 `kumi bridge`。Kumi Ears 需要 Max for Live。

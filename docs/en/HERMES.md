@@ -87,3 +87,5 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - Nothing from Kumi in Hermes Desktop: check that Kumi is switched on under Capabilities → Plugins, and enabled in
   Hermes (`hermes plugins enable kumi`).
 - Live doesn't connect: check that AbletonMcpBridge is chosen as a Control Surface.
+- Listening to a Live track says Kumi Ears is missing: run setup again. If Kumi in Hermes uses another Kumi
+  installation, run `kumi bridge` in that Kumi instead. Kumi Ears needs Max for Live.
