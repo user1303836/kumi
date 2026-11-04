@@ -95,16 +95,18 @@ impl Survey {
             self.unread += 1;
             return;
         };
+        // The survey reads Max's own patchers and devices whole: past the budget a device Kumi is given has, an
+        // abstraction box would count as an object of its own name.
         let read = if file.extension().and_then(|ext| ext.to_str()) == Some("amxd") {
             read_device(&bytes).map(|device| {
                 let files: Box<dyn Files> = match device.frozen {
                     Some(frozen) => Box::new(frozen),
                     None => Box::new(NoFiles),
                 };
-                Patcher::read(&device.patcher, files.as_ref())
+                Patcher::read_all(&device.patcher, files.as_ref())
             })
         } else {
-            serde_json::from_slice::<Value>(&bytes).ok().map(|value| Patcher::read(&value, &NoFiles))
+            serde_json::from_slice::<Value>(&bytes).ok().map(|value| Patcher::read_all(&value, &NoFiles))
         };
         let Some(patcher) = read else {
             self.unread += 1;

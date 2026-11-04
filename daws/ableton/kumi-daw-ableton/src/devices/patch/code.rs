@@ -1,9 +1,16 @@
 //! What a code box's JavaScript does with a message, read from its code and the files it includes or requires:
 //! whether the function the message calls sends out of an outlet at once. A message that only redraws a [v8ui], or
 //! starts a Task that sends later, goes no further than the box.
+//!
+//! A device's code can be anyone's, so what reading it takes is bounded: each file is read for its functions once,
+//! however many boxes run it, its functions' bodies kept as places in it; a file bigger than [`MOST_SOURCE`] isn't read
+//! at all; and the questions asked of one patcher's code read at most [`MOST_ASKED`] of its bodies in all. Past either,
+//! what the code does is unknown, as it is for code that can't be read.
 
-use std::collections::HashSet;
-use std::sync::LazyLock;
+use std::collections::{HashMap, HashSet};
+use std::ops::Range;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, LazyLock, Mutex};
 
 use regex::Regex;
 use serde_json::Value;
@@ -12,23 +19,77 @@ use super::{Files, MaxBox};
 
 /// How deep includes and requires are followed.
 const MAX_DEPTH: usize = 8;
+/// The most JavaScript in one file (or held in one box) that's read for its functions, in bytes: Kumi's own devices hold
+/// well under it.
+const MOST_SOURCE: usize = 256 * 1024;
+/// The most of its functions' bodies the questions asked of one patcher's code read in all, in bytes: code made so that a
+/// question reads it over and over (functions nested in each other, each calling the next) is unknown past it.
+pub(crate) const MOST_ASKED: usize = 16 * 1024 * 1024;
 
-/// The JavaScript a code box runs, as its functions.
-#[derive(Debug, Clone, PartialEq, Default)]
+/// The JavaScript a code box runs: the scripts of its own code and of what that includes and requires.
+#[derive(Debug, Clone)]
 pub struct Code {
-    pub functions: Vec<Function>,
-    /// Whether a file it includes or requires couldn't be read, so what it does is only partly known.
+    /// Each script, the box's own first, then what it includes and requires as they're met, with whether it runs in the
+    /// box's own scope (an include does; a required module keeps its own).
+    scripts: Vec<(Arc<Script>, bool)>,
+    /// Whether a file it includes or requires couldn't be read, or was too big to, so what it does is only partly known.
     pub partial: bool,
+    asked: Asked,
 }
 
-/// A function in the code: a message calls one by its name when it's defined at the top (in the box's own file or
-/// one it includes), never one in a required module.
+impl PartialEq for Code {
+    fn eq(&self, other: &Code) -> bool {
+        self.scripts == other.scripts && self.partial == other.partial
+    }
+}
+
+/// What questions of the code may still read (shared by every box of one patcher), and what each found, by the function
+/// it started from.
+#[derive(Debug)]
+struct Asked {
+    left: Arc<AtomicUsize>,
+    found: Mutex<HashMap<(usize, usize), Option<bool>>>,
+}
+
+impl Clone for Asked {
+    fn clone(&self) -> Asked {
+        Asked { left: Arc::clone(&self.left), found: Mutex::default() }
+    }
+}
+
+/// One file's JavaScript (or what a box holds), read for its functions once, however many boxes run it.
+#[derive(Debug, PartialEq, Default)]
+pub struct Script {
+    /// The code without comments, each string's text blanked: what each function's body is a place in.
+    clean: String,
+    functions: Vec<Function>,
+    /// Each function by its name, in order.
+    named: HashMap<String, Vec<usize>>,
+    /// Where each Task is handed what it runs later (`new Task(…)`), in order: it runs on the Task's clock.
+    tasks: Vec<Range<usize>>,
+    /// What it includes (true) and requires (false), by name, in order.
+    uses: Vec<(bool, String)>,
+    /// Whether it was too big to read: what it does is unknown.
+    unread: bool,
+}
+
+/// A function in a script: a message calls one by its name when it's defined at the top of the box's own scope (in the
+/// box's own code or a file it includes), never one in a required module.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Function {
     pub name: String,
-    pub top: bool,
-    /// Its body without comments, strings or the functions it hands a Task (they run later).
-    pub body: String,
+    /// Whether it's defined outside every block.
+    outermost: bool,
+    /// Its body: its braces after its parameters, or an arrow's expression to the end of its line.
+    body: Range<usize>,
+}
+
+/// What a box's code is.
+pub(crate) enum Own<'a> {
+    /// What it holds itself: a [v8.codebox]'s own code, or code it embeds.
+    Held(&'a str),
+    /// The script file it names.
+    File(&'a str),
 }
 
 static INCLUDE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#"\b(include|require)\s*\(\s*["']([^"']+)["']"#).unwrap());
@@ -48,48 +109,62 @@ static DEFINITION: LazyLock<Regex> = LazyLock::new(|| {
 const KEYWORDS: [&str; 9] = ["if", "for", "while", "switch", "catch", "function", "return", "with", "else"];
 
 impl Code {
-    /// The script file a box's code is read from, when it's read from one (not a [v8.codebox]'s own, nor code a box
-    /// embeds): what boxes running the same code share.
-    pub fn file_of(item: &MaxBox) -> Option<String> {
-        let embedded = item.fields.get("textfile").is_some_and(|file| file.get("embed").and_then(Value::as_i64) == Some(1));
-        let name = match item.class() {
-            "v8ui" | "jsui" if !embedded => item.str("filename"),
-            "js" | "v8" if item.maxclass() == "newobj" && !embedded => item.args().first().copied().unwrap_or(""),
-            _ => return None,
-        };
-        (!name.is_empty() && name != "none").then(|| name.to_string())
+    /// What a box's code is: what it holds (a [v8.codebox]'s own, or what a [v8ui], a [jsui], a [v8] or a [js] embeds,
+    /// with Max's embed flag and its text), else the file it names; None for a box that runs no code.
+    pub(crate) fn own(item: &MaxBox) -> Option<Own<'_>> {
+        let embedded = item
+            .fields
+            .get("textfile")
+            .filter(|file| file.get("embed").and_then(Value::as_i64) == Some(1))
+            .and_then(|file| file.get("text"))
+            .and_then(Value::as_str);
+        match item.class() {
+            "v8.codebox" => Some(item.str("code")).filter(|code| !code.is_empty()).map(Own::Held),
+            "v8ui" | "jsui" => Some(embedded.map_or(Own::File(item.str("filename")), Own::Held)),
+            "js" | "v8" if item.maxclass() == "newobj" => {
+                Some(embedded.map_or_else(|| Own::File(item.args().first().copied().unwrap_or("")), Own::Held))
+            }
+            _ => None,
+        }
     }
 
     /// The code a box runs (a [v8.codebox]'s own, a [v8ui]'s or a [js]'s file, or what it embeds) with what it
-    /// includes and requires, read through `files`; None for a box that runs none, or whose file can't be read.
+    /// includes and requires, read through `files`; None for a box that runs none, or whose file can't be read. A
+    /// patcher's boxes read theirs through [`Code::of`], each file once for all of them.
     pub fn read(item: &MaxBox, files: &dyn Files) -> Option<Code> {
-        let embedded = || {
-            let file = item.fields.get("textfile").filter(|file| file.get("embed").and_then(Value::as_i64) == Some(1))?;
-            file.get("text").and_then(Value::as_str).map(str::to_string)
+        let own = match Code::own(item)? {
+            Own::Held(text) => Script::read(text),
+            Own::File(name) => Script::read(&script(files, name)?),
         };
-        let own = match item.class() {
-            "v8.codebox" => Some(item.str("code").to_string()).filter(|code| !code.is_empty()),
-            "v8ui" | "jsui" => embedded().or_else(|| script(files, item.str("filename"))),
-            "js" | "v8" if item.maxclass() == "newobj" => embedded().or_else(|| script(files, item.args().first().copied().unwrap_or(""))),
-            _ => None,
-        }?;
-        let mut code = Code::default();
-        let mut read = HashSet::new();
-        code.add(&own, true, files, &mut read, 0);
-        Some(code)
+        let mut by_name = |name: &str| script(files, name).map(|text| Arc::new(Script::read(&text)));
+        Some(Code::of(Arc::new(own), &mut by_name, Arc::new(AtomicUsize::new(MOST_ASKED))))
     }
 
-    fn add(&mut self, source: &str, top: bool, files: &dyn Files, read: &mut HashSet<String>, depth: usize) {
-        let clean = clean(source);
-        self.functions.extend(functions(&clean, top));
-        for found in INCLUDE.captures_iter(&clean_keeping_strings(source)) {
-            let name = found[2].to_string();
+    /// The code that runs `own`, with what it includes and requires, each found by `script` (by its name, with or without
+    /// `.js`); questions asked of it read from what `left` says is left.
+    pub(crate) fn of(own: Arc<Script>, script: &mut dyn FnMut(&str) -> Option<Arc<Script>>, left: Arc<AtomicUsize>) -> Code {
+        let mut code = Code { scripts: Vec::new(), partial: false, asked: Asked { left, found: Mutex::default() } };
+        code.add(own, true, script, &mut HashSet::new(), 0);
+        code
+    }
+
+    fn add(
+        &mut self,
+        own: Arc<Script>,
+        top: bool,
+        script: &mut dyn FnMut(&str) -> Option<Arc<Script>>,
+        read: &mut HashSet<String>,
+        depth: usize,
+    ) {
+        self.partial |= own.unread;
+        self.scripts.push((Arc::clone(&own), top));
+        for (include, name) in &own.uses {
             if depth >= MAX_DEPTH || !read.insert(name.clone()) {
                 continue;
             }
-            match script(files, &name) {
+            match script(name) {
                 // An include runs in the box's own scope; a required module keeps its own.
-                Some(text) => self.add(&text, top && &found[1] == "include", files, read, depth + 1),
+                Some(used) => self.add(used, top && *include, script, read, depth + 1),
                 None => self.partial = true,
             }
         }
@@ -97,29 +172,136 @@ impl Code {
 
     /// Whether the message `selector` makes the code send out of an outlet at once: the function it calls (or
     /// `anything` when there's none of its name) or any function that one calls. None when the code is only partly
-    /// known; Some(false) when no function answers it (Max says so, and nothing is sent).
+    /// known, or the question reads more than is left to; Some(false) when no function answers it (Max says so, and
+    /// nothing is sent).
     pub fn sends_at_once(&self, selector: &str) -> Option<bool> {
         if self.partial {
             return None;
         }
-        let handler = |name: &str| self.functions.iter().position(|function| function.top && function.name == name);
-        let Some(start) = handler(selector).or_else(|| handler("anything")) else { return Some(false) };
+        let Some(start) = self.handler(selector).or_else(|| self.handler("anything")) else { return Some(false) };
+        if let Some(found) = self.asked.found.lock().ok().and_then(|found| found.get(&start).copied()) {
+            return found;
+        }
+        let found = self.follow(start);
+        if let Ok(mut known) = self.asked.found.lock() {
+            known.insert(start, found);
+        }
+        found
+    }
+
+    /// The first function of a name that a message calls: one defined at the top of the box's own scope.
+    fn handler(&self, name: &str) -> Option<(usize, usize)> {
+        self.scripts.iter().enumerate().filter(|(_, (_, top))| *top).find_map(|(at, (script, _))| {
+            script.named.get(name)?.iter().copied().find(|&function| script.functions[function].outermost).map(|function| (at, function))
+        })
+    }
+
+    /// Whether the function at `start` (its script, and it in that), or any it calls, reaches an outlet at once; None past
+    /// what's left to read.
+    fn follow(&self, start: (usize, usize)) -> Option<bool> {
         let mut visited = HashSet::new();
         let mut stack = vec![start];
-        while let Some(at) = stack.pop() {
-            if !visited.insert(at) {
+        while let Some((at, index)) = stack.pop() {
+            if !visited.insert((at, index)) {
                 continue;
             }
-            let body = &self.functions[at].body;
-            if OUTLET.is_match(body) {
+            let script = &self.scripts[at].0;
+            let body = script.functions[index].body.clone();
+            if self.asked.left.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| left.checked_sub(body.len())).is_err() {
+                return None;
+            }
+            // What the body hands a Task runs later: it doesn't count.
+            let later = script.tasks_in(&body);
+            let now = |found: usize| {
+                let place = body.start + found;
+                let next = later.partition_point(|task| task.start <= place);
+                next == 0 || later[next - 1].end <= place
+            };
+            let text = &script.clean[body.clone()];
+            if OUTLET.find_iter(text).any(|found| now(found.start())) {
                 return Some(true);
             }
-            for call in CALL.captures_iter(body) {
-                let name = &call[1];
-                stack.extend(self.functions.iter().enumerate().filter(|(_, function)| function.name == name).map(|(index, _)| index));
+            for call in CALL.captures_iter(text).filter(|call| call.get(0).is_some_and(|whole| now(whole.start()))) {
+                for (other, (script, _)) in self.scripts.iter().enumerate() {
+                    if let Some(functions) = script.named.get(&call[1]) {
+                        stack.extend(functions.iter().map(|&function| (other, function)));
+                    }
+                }
             }
         }
         Some(false)
+    }
+}
+
+impl Script {
+    /// A script read for its functions, in one pass over its code; one bigger than [`MOST_SOURCE`] isn't read.
+    pub(crate) fn read(source: &str) -> Script {
+        if source.len() > MOST_SOURCE {
+            return Script { unread: true, ..Script::default() };
+        }
+        let clean = clean(source);
+        let pairs = Pairs::of(&clean);
+        let functions = functions(&clean, &pairs);
+        let mut named: HashMap<String, Vec<usize>> = HashMap::new();
+        for (at, function) in functions.iter().enumerate() {
+            named.entry(function.name.clone()).or_default().push(at);
+        }
+        let tasks = TASK
+            .find_iter(&clean)
+            .map(|found| found.start()..pairs.close(found.end() - 1).map_or(clean.len(), |close| close + 1))
+            .collect();
+        let uses =
+            INCLUDE.captures_iter(&clean_keeping_strings(source)).map(|found| (&found[1] == "include", found[2].to_string())).collect();
+        Script { clean, functions, named, tasks, uses, unread: false }
+    }
+
+    /// The parts of a body it hands Tasks, as places that don't overlap, in order.
+    fn tasks_in(&self, body: &Range<usize>) -> Vec<Range<usize>> {
+        let (from, to) =
+            (self.tasks.partition_point(|task| task.start < body.start), self.tasks.partition_point(|task| task.start < body.end));
+        let mut later: Vec<Range<usize>> = Vec::new();
+        for task in &self.tasks[from..to] {
+            match later.last_mut() {
+                Some(last) if task.start <= last.end => last.end = last.end.max(task.end),
+                _ => later.push(task.clone()),
+            }
+        }
+        later
+    }
+}
+
+/// Where each brace and parenthesis that opens in clean code closes, found in one pass.
+struct Pairs {
+    closes: Vec<u32>,
+}
+
+impl Pairs {
+    fn of(clean: &str) -> Pairs {
+        let mut closes = vec![u32::MAX; clean.len()];
+        let (mut braces, mut parens) = (Vec::new(), Vec::new());
+        for (at, byte) in clean.bytes().enumerate() {
+            match byte {
+                b'{' => braces.push(at),
+                b'(' => parens.push(at),
+                b'}' => {
+                    if let Some(open) = braces.pop() {
+                        closes[open] = at as u32;
+                    }
+                }
+                b')' => {
+                    if let Some(open) = parens.pop() {
+                        closes[open] = at as u32;
+                    }
+                }
+                _ => {}
+            }
+        }
+        Pairs { closes }
+    }
+
+    /// Where the brace or parenthesis opening at `open` closes.
+    fn close(&self, open: usize) -> Option<usize> {
+        self.closes.get(open).filter(|close| **close != u32::MAX).map(|close| *close as usize)
     }
 }
 
@@ -228,20 +410,12 @@ fn strip(source: &str, blank_strings: bool) -> String {
     out
 }
 
-/// The functions defined in clean code, each with its body; `top` says whether the code runs in the box's own scope.
-fn functions(clean: &str, top: bool) -> Vec<Function> {
-    // How many braces are open before each byte, to tell a top-level function from one inside another.
-    let mut depth_at = Vec::with_capacity(clean.len() + 1);
-    let mut depth = 0usize;
-    for byte in clean.bytes() {
-        depth_at.push(depth);
-        match byte {
-            b'{' => depth += 1,
-            b'}' => depth = depth.saturating_sub(1),
-            _ => {}
-        }
-    }
-    depth_at.push(depth);
+/// The functions defined in clean code, each with its body as a place in it, in one pass.
+fn functions(clean: &str, pairs: &Pairs) -> Vec<Function> {
+    let bytes = clean.as_bytes();
+    let lines: Vec<usize> = bytes.iter().enumerate().filter(|(_, byte)| **byte == b'\n').map(|(at, _)| at).collect();
+    // How many braces are open where each function is defined, to tell a top-level function from one inside another.
+    let (mut depth, mut counted) = (0usize, 0usize);
     let mut found = Vec::new();
     for definition in DEFINITION.captures_iter(clean) {
         let (name, whole) = match (definition.name("named"), definition.name("assigned"), definition.name("method")) {
@@ -251,74 +425,34 @@ fn functions(clean: &str, top: bool) -> Vec<Function> {
         if KEYWORDS.contains(&name) {
             continue;
         }
+        for byte in &bytes[counted..whole.start()] {
+            match byte {
+                b'{' => depth += 1,
+                b'}' => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        counted = whole.start();
         // A method's head ends at its body's brace.
         let head_end = if whole.as_str().ends_with('{') { whole.end() - 1 } else { whole.end() };
-        let Some(body) = body_after(clean, head_end) else { continue };
-        found.push(Function { name: name.to_string(), top: top && depth_at[whole.start()] == 0, body: without_tasks(body) });
+        let Some(body) = body_after(clean, head_end, pairs, &lines) else { continue };
+        found.push(Function { name: name.to_string(), outermost: depth == 0, body });
     }
     found
 }
 
 /// The body of the function whose head ends at `from`: the braces after its parameters, or an arrow's expression up to
-/// the end of its line.
-fn body_after(clean: &str, from: usize) -> Option<&str> {
-    let bytes = clean.as_bytes();
+/// the end of its line (`lines` are where the code's lines end).
+fn body_after(clean: &str, from: usize, pairs: &Pairs, lines: &[usize]) -> Option<Range<usize>> {
     // A head that ends inside its parameters (`function name(`) closes them first.
-    let mut at = from;
-    let mut open = usize::from(clean[..from].ends_with('('));
-    while open > 0 && at < bytes.len() {
-        match bytes[at] {
-            b'(' => open += 1,
-            b')' => open -= 1,
-            _ => {}
-        }
-        at += 1;
-    }
+    let at = if clean[..from].ends_with('(') { pairs.close(from - 1).map_or(clean.len(), |close| close + 1) } else { from };
     let rest = clean[at..].trim_start();
     let start = clean.len() - rest.len();
     if !rest.starts_with('{') {
         // An arrow's expression: to the end of its line.
-        let end = rest.find('\n').map_or(clean.len(), |line| start + line);
-        return Some(&clean[start..end]);
+        return Some(start..lines.get(lines.partition_point(|line| *line < start)).copied().unwrap_or(clean.len()));
     }
-    let mut depth = 0usize;
-    for (offset, byte) in rest.bytes().enumerate() {
-        match byte {
-            b'{' => depth += 1,
-            b'}' => {
-                depth -= 1;
-                if depth == 0 {
-                    return Some(&clean[start..start + offset + 1]);
-                }
-            }
-            _ => {}
-        }
-    }
-    None
-}
-
-/// A body with what it hands each Task blanked: a Task runs it later, on its own clock.
-fn without_tasks(body: &str) -> String {
-    let mut body = body.to_string();
-    while let Some(found) = TASK.find(&body) {
-        let mut depth = 1usize;
-        let mut end = body.len();
-        for (offset, byte) in body[found.end()..].bytes().enumerate() {
-            match byte {
-                b'(' => depth += 1,
-                b')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        end = found.end() + offset + 1;
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-        body.replace_range(found.start()..end, &" ".repeat(end - found.start()));
-    }
-    body
+    pairs.close(start).map(|close| start..close + 1)
 }
 
 #[cfg(test)]
@@ -330,6 +464,10 @@ mod tests {
     struct Scripts(HashMap<&'static str, &'static str>);
 
     impl Files for Scripts {
+        fn place(&self, name: &str) -> Option<super::super::Place> {
+            self.0.get(name).map(|text| super::super::Place { at: name.to_string(), bytes: text.len() })
+        }
+
         fn patcher(&self, _name: &str) -> Option<Value> {
             None
         }
@@ -404,5 +542,41 @@ mod tests {
         assert_eq!(syntax_problem("outlets = 1;\nfunction bang() { outlet(0, [1, 2].map((x) => x * 2)); }"), None);
         assert_eq!(syntax_problem("outlets = 1;\nfunction bang() {\n  outlet(0, 1;\n}\n"), Some((3, "Unexpected token ';'".into())));
         assert_eq!(syntax_problem("function f( {"), Some((1, "Unexpected end of input".into())), "the last line, at most");
+    }
+
+    /// #772: code anyone wrote is read in one pass, each function's body a place in it, and what a question of it reads
+    /// is bounded. A box nesting thousands of functions answers at once; one bigger than what's read isn't read; and a
+    /// question that would read the nesting over and over is unknown.
+    #[test]
+    fn nested_functions_are_read_in_one_pass_and_what_a_question_reads_is_bounded() {
+        let nested = |levels: usize, inner: &str| {
+            let mut code = String::from("function bang() { f0(); }\n");
+            for level in 0..levels {
+                code.push_str(&format!("function f{level}() {{ f{}(); ", level + 1));
+            }
+            code.push_str(inner);
+            code.push_str(&"}".repeat(levels));
+            code
+        };
+        let held = |code: String| code_box(json!({ "maxclass": "v8.codebox", "code": code }));
+        let none = Scripts(HashMap::new());
+        let sends = Code::read(&held(nested(5_000, "outlet(0, 1);")), &none).unwrap();
+        assert!(!sends.partial);
+        assert_eq!(sends.sends_at_once("bang"), Some(true), "the innermost function sends");
+        let quiet = Code::read(&held(nested(5_000, "post(1);")), &none).unwrap();
+        assert!(!quiet.partial);
+        assert_eq!(quiet.sends_at_once("bang"), None, "each calls the next: too much to read to know");
+        let huge = Code::read(&held(nested(100_000, "outlet(0, 1);")), &none).unwrap();
+        assert!(huge.partial, "past what's read of one file");
+        assert_eq!(huge.sends_at_once("bang"), None);
+
+        // What a body hands a Task runs later; a function written in a Task's code still sends when it's called itself.
+        let tasked = Code::read(
+            &held("function later() { new Task(function tick() { outlet(0, 1); }).schedule(10); }\nfunction now() { tick(); }".into()),
+            &none,
+        )
+        .unwrap();
+        assert_eq!(tasked.sends_at_once("later"), Some(false));
+        assert_eq!(tasked.sends_at_once("now"), Some(true));
     }
 }

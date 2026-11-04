@@ -7,11 +7,14 @@
 //!   with its header, the value): type ("JSON", "TEXT", "WAVE"…), fnam (the name, NUL-padded), sz32 (its size), of32
 //!   (where it starts, from the container's start) and flag (1 marks the device's own patcher).
 //!
-//! Max stores a file once for each place that uses it; the first entry of a name is the one read.
+//! Max stores a file once for each place that uses it; the first entry of a name is the one read. A container can list
+//! one file under any number of names: a file is known by its place, `of32` and `sz32`.
+
+use std::collections::HashMap;
 
 use serde_json::Value;
 
-use super::Files;
+use super::{Files, Place};
 use crate::devices::amxd::patcher_chunk;
 
 /// A file in a frozen device.
@@ -36,6 +39,8 @@ impl FrozenFile {
 pub struct Frozen {
     container: Vec<u8>,
     pub files: Vec<FrozenFile>,
+    /// Each name's first entry, in `files`.
+    named: HashMap<String, usize>,
 }
 
 /// A device file read whole: its four-letter type ("aaaa", "iiii", "mmmm"…), its patcher, and its frozen files, if it
@@ -134,8 +139,12 @@ impl Frozen {
                 }
                 file
             })
-            .collect();
-        Some(Frozen { container: chunk.to_vec(), files })
+            .collect::<Vec<FrozenFile>>();
+        let mut named = HashMap::new();
+        for (at, file) in files.iter().enumerate() {
+            named.entry(file.name.clone()).or_insert(at);
+        }
+        Some(Frozen { container: chunk.to_vec(), files, named })
     }
 
     /// The container with `bytes` in place of `replaced`'s, and every other file, and every other field of the
@@ -196,7 +205,7 @@ impl Frozen {
 
     /// The first file of a name.
     pub fn file(&self, name: &str) -> Option<&FrozenFile> {
-        self.files.iter().find(|file| file.name == name)
+        self.named.get(name).map(|at| &self.files[*at])
     }
 
     /// The device's own patcher: the file flagged as it, else the first patcher.
@@ -206,6 +215,11 @@ impl Frozen {
 }
 
 impl Files for Frozen {
+    fn place(&self, name: &str) -> Option<Place> {
+        let file = self.file(name)?;
+        Some(Place { at: format!("{}+{}", file.start, file.size), bytes: file.size })
+    }
+
     fn patcher(&self, name: &str) -> Option<Value> {
         let file = self.file(name).filter(|file| file.kind == "JSON")?;
         parse(self.bytes(file)?)
@@ -226,41 +240,80 @@ pub(crate) mod tests {
 
     /// A frozen device as Max lays one out: the container's header, the files, then the directory.
     pub(crate) fn frozen_device(files: &[(&str, &str, u32, &[u8])]) -> Vec<u8> {
+        let mut data = Vec::new();
+        let mut entries = Vec::new();
+        for (kind, name, flags, bytes) in files {
+            entries.push((*kind, *name, *flags, 16 + data.len(), bytes.len()));
+            data.extend_from_slice(bytes);
+        }
+        listed(&data, &entries)
+    }
+
+    /// A frozen device of the files' bytes and a directory of `entries` (type, name, flags, where it starts, its size):
+    /// any number of entries can name one place.
+    fn listed(data: &[u8], entries: &[(&str, &str, u32, usize, usize)]) -> Vec<u8> {
+        fn field(tag: &[u8], value: &[u8]) -> Vec<u8> {
+            let mut out = tag.to_vec();
+            out.extend_from_slice(&(8 + value.len() as u32).to_be_bytes());
+            out.extend_from_slice(value);
+            out
+        }
         let mut container = b"mx@c".to_vec();
         container.extend_from_slice(&16u32.to_be_bytes());
         container.extend_from_slice(&0u32.to_be_bytes());
         container.extend_from_slice(&0u32.to_be_bytes());
-        let mut entries = Vec::new();
-        for (kind, name, flags, bytes) in files {
-            let start = container.len() as u32;
-            container.extend_from_slice(bytes);
-            let field = |tag: &[u8], value: &[u8]| {
-                let mut out = tag.to_vec();
-                out.extend_from_slice(&(8 + value.len() as u32).to_be_bytes());
-                out.extend_from_slice(value);
-                out
-            };
+        container.extend_from_slice(data);
+        let mut directory = Vec::new();
+        for (kind, name, flags, start, size) in entries {
             let mut padded = name.as_bytes().to_vec();
             padded.resize(name.len().div_ceil(4) * 4 + 4, 0);
             let mut body = field(b"type", kind.as_bytes());
             body.extend(field(b"fnam", &padded));
-            body.extend(field(b"sz32", &(bytes.len() as u32).to_be_bytes()));
-            body.extend(field(b"of32", &start.to_be_bytes()));
+            body.extend(field(b"sz32", &(*size as u32).to_be_bytes()));
+            body.extend(field(b"of32", &(*start as u32).to_be_bytes()));
             body.extend(field(b"flag", &flags.to_be_bytes()));
-            let mut entry = b"dire".to_vec();
-            entry.extend_from_slice(&(8 + body.len() as u32).to_be_bytes());
-            entry.extend(body);
-            entries.extend(entry);
+            directory.extend_from_slice(b"dire");
+            directory.extend_from_slice(&(8 + body.len() as u32).to_be_bytes());
+            directory.extend(body);
         }
-        let directory = container.len() as u32;
-        container[12..16].copy_from_slice(&directory.to_be_bytes());
+        let at = container.len() as u32;
+        container[12..16].copy_from_slice(&at.to_be_bytes());
         container.extend_from_slice(b"dlst");
-        container.extend_from_slice(&(8 + entries.len() as u32).to_be_bytes());
-        container.extend(entries);
+        container.extend_from_slice(&(8 + directory.len() as u32).to_be_bytes());
+        container.extend(directory);
         let mut bytes = b"ampf\x04\x00\x00\x00aaaameta\x04\x00\x00\x00\x07\x00\x00\x00ptch".to_vec();
         bytes.extend_from_slice(&(container.len() as u32).to_le_bytes());
         bytes.extend(container);
         bytes
+    }
+
+    /// #772: a container can list one file under any number of names. It's one place, read once for all of them, and a
+    /// name's first entry is the one read.
+    #[test]
+    fn a_file_listed_under_many_names_is_one_place_read_once_for_all_of_them() {
+        let dial = br#"{ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "jsui" } }], "lines": [] } }"#;
+        let names: Vec<String> = (0..500).map(|n| format!("dial{n}.maxpat")).collect();
+        let boxes: Vec<Value> = names
+            .iter()
+            .enumerate()
+            .map(|(n, name)| json!({ "box": { "id": format!("obj-{n}"), "maxclass": "bpatcher", "name": name } }))
+            .collect();
+        let mut main = serde_json::to_vec(&json!({ "patcher": { "boxes": boxes, "lines": [] } })).unwrap();
+        main.push(0);
+        let mut data = main.clone();
+        data.extend_from_slice(dial);
+        let mut entries = vec![("JSON", "Many.amxd", 0x11, 16, main.len())];
+        entries.extend(names.iter().map(|name| ("JSON", name.as_str(), 0, 16 + main.len(), dial.len())));
+        // Another entry of dial0's name, at the main patcher's place, after the first.
+        entries.push(("JSON", "dial0.maxpat", 0, 16, main.len()));
+        let device = read_device(&listed(&data, &entries)).unwrap();
+        let frozen = device.frozen.as_ref().unwrap();
+        assert_eq!(frozen.place("dial0.maxpat"), frozen.place("dial499.maxpat"), "one place, and dial0's first entry");
+        let patcher = super::super::Patcher::read(&device.patcher, frozen);
+        let first = patcher.boxes[0].file.as_ref().map(|(_, read)| std::sync::Arc::as_ptr(read));
+        assert!(first.is_some());
+        assert!(patcher.boxes.iter().all(|item| item.file.as_ref().map(|(_, read)| std::sync::Arc::as_ptr(read)) == first), "read once");
+        assert_eq!(patcher.boxes[499].inner().map(|inner| inner.boxes[0].maxclass()), Some("jsui"));
     }
 
     #[test]

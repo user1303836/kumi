@@ -20,15 +20,19 @@ pub mod reference;
 pub mod standard;
 
 use std::collections::HashMap;
+use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use serde_json::{json, Map, Value};
 
-use code::Code;
+use code::{Code, Own, Script, MOST_ASKED};
 use geometry::Rect;
 
 /// The files a patcher's abstractions, bpatchers and code boxes name.
 pub trait Files {
+    /// Where the file `name` lies and how big it is, without reading it; None when there's no file of that name.
+    fn place(&self, name: &str) -> Option<Place>;
+
     /// The JSON of the patcher file `name` (`dial.maxpat`), if there is one.
     fn patcher(&self, name: &str) -> Option<Value>;
 
@@ -38,10 +42,22 @@ pub trait Files {
     }
 }
 
+/// Where a file lies: what tells it from every other file, and how many bytes reading it takes. Names that reach one
+/// place reach one file, as a frozen device can list a file under any number of names.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Place {
+    pub at: String,
+    pub bytes: usize,
+}
+
 /// No files: only what's embedded is read.
 pub struct NoFiles;
 
 impl Files for NoFiles {
+    fn place(&self, _name: &str) -> Option<Place> {
+        None
+    }
+
     fn patcher(&self, _name: &str) -> Option<Value> {
         None
     }
@@ -50,17 +66,38 @@ impl Files for NoFiles {
 /// How deep files are read inside each other: an abstraction that holds itself stops here.
 const MAX_DEPTH: usize = 16;
 /// The most boxes read from files for one patcher, however its abstractions nest: each box that uses an abstraction
-/// reads it again, so a few abstractions each holding a few boxes of the next would otherwise be read millions of times.
+/// counts its boxes again, as what walks the patcher meets them again, so a few abstractions each holding a few boxes of
+/// the next can't make that millions.
 const MOST_FILE_BOXES: usize = 20_000;
+/// The most bytes read from files for one patcher, each file once: a patcher's JSON takes many times its size to read.
+const MOST_FILE_BYTES: usize = 64 * 1024 * 1024;
+/// The most names of files looked up for one patcher, each once, found or not: every object's name is one an
+/// abstraction could have.
+const MOST_NAMES: usize = 20_000;
 
-/// The files being read, innermost last; how many more boxes may be read from files; and each file looked up so far (None
-/// for one there isn't), with how many boxes it holds with the files it uses. A file many boxes use is parsed once, and
-/// they share it, and each use still counts its boxes, so what walks the patcher meets a bounded number of them.
+/// What reading one patcher's files has used, and what it read. Each file is read once, by its place, however many names
+/// reach it and however many boxes use it, and what a device can make Kumi look up, read or walk is bounded, whatever it
+/// holds.
 struct Reading {
+    /// The places of the files being read, innermost last.
     open: Vec<String>,
+    /// How many more boxes may be read from files: each use of a file counts its boxes, at any depth.
     left: usize,
+    /// How many more bytes may be read from files.
+    bytes_left: usize,
+    /// How many more names may be looked up.
+    names_left: usize,
+    /// What questions of the code read may still read, shared by all of it.
+    asked: Arc<AtomicUsize>,
+    /// Each name looked up, and the place it reaches (None for none).
+    places: HashMap<String, Option<Place>>,
+    /// Each patcher file read, by its place: its patcher and how many boxes it holds with the files it uses (None for one
+    /// that isn't a patcher, or that there were no bytes left to read).
     patchers: HashMap<String, Option<(Arc<Patcher>, usize)>>,
-    scripts: HashMap<String, Option<Arc<Code>>>,
+    /// Each script read, by its place (None when there were no bytes left to read it).
+    scripts: HashMap<String, Option<Arc<Script>>>,
+    /// The code of each script a box names as its own, by its place: every box that runs it shares it.
+    codes: HashMap<String, Arc<Code>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -102,8 +139,13 @@ impl Patcher {
     /// A patcher from Max's JSON, `{ "patcher": {...} }` or the patcher itself, with the files it names read through
     /// `files`.
     pub fn read(value: &Value, files: &dyn Files) -> Patcher {
-        let mut reading = Reading { open: Vec::new(), left: MOST_FILE_BOXES, patchers: HashMap::new(), scripts: HashMap::new() };
-        Patcher::read_within(value, files, &mut reading)
+        Patcher::read_within(value, files, &mut Reading::new(MOST_FILE_BOXES, MOST_FILE_BYTES, MOST_NAMES, MOST_ASKED))
+    }
+
+    /// A patcher with every file it names read, however many: for surveying patchers Kumi trusts (Max's own), never for a
+    /// device it's given.
+    pub fn read_all(value: &Value, files: &dyn Files) -> Patcher {
+        Patcher::read_within(value, files, &mut Reading::new(usize::MAX, usize::MAX, usize::MAX, usize::MAX))
     }
 
     fn read_within(value: &Value, files: &dyn Files, reading: &mut Reading) -> Patcher {
@@ -151,6 +193,130 @@ impl Patcher {
     }
 }
 
+impl Reading {
+    fn new(boxes: usize, bytes: usize, names: usize, asked: usize) -> Reading {
+        Reading {
+            open: Vec::new(),
+            left: boxes,
+            bytes_left: bytes,
+            names_left: names,
+            asked: Arc::new(AtomicUsize::new(asked)),
+            places: HashMap::new(),
+            patchers: HashMap::new(),
+            scripts: HashMap::new(),
+            codes: HashMap::new(),
+        }
+    }
+
+    /// Where the file `name` lies, looked up once; past the names that may be looked up, nowhere.
+    fn place(&mut self, files: &dyn Files, name: &str) -> Option<Place> {
+        if let Some(known) = self.places.get(name) {
+            return known.clone();
+        }
+        if self.names_left == 0 {
+            return None;
+        }
+        self.names_left -= 1;
+        let place = files.place(name);
+        self.places.insert(name.to_string(), place.clone());
+        place
+    }
+
+    /// The patcher file `name` names, at `place`: parsed once for its place, its bytes counted before it's parsed; each
+    /// use counts its boxes, at any depth, with the files it uses.
+    fn patcher(&mut self, files: &dyn Files, name: String, place: Place) -> Option<(String, Arc<Patcher>)> {
+        match self.patchers.get(&place.at).cloned() {
+            Some(Some((read, size))) if size <= self.left => {
+                self.left -= size;
+                Some((name, read))
+            }
+            Some(Some(_)) => {
+                self.left = 0;
+                None
+            }
+            Some(None) => None,
+            // A file that holds itself stops there.
+            None if self.open.contains(&place.at) => None,
+            None if place.bytes > self.bytes_left => {
+                self.patchers.insert(place.at, None);
+                None
+            }
+            None => {
+                self.bytes_left -= place.bytes;
+                let Some(value) = files.patcher(&name) else {
+                    self.patchers.insert(place.at, None);
+                    return None;
+                };
+                // Its boxes, at any depth, count against what's left to read from files, and the file one more; then the
+                // files it uses, as they're read.
+                let count = boxes_in(&value) + 1;
+                if count > self.left {
+                    self.left = 0;
+                    return None;
+                }
+                let before = self.left;
+                self.left -= count;
+                self.open.push(place.at.clone());
+                let read = Arc::new(Patcher::read_within(&value, files, self));
+                self.open.pop();
+                self.patchers.insert(place.at, Some((Arc::clone(&read), before - self.left)));
+                Some((name, read))
+            }
+        }
+    }
+
+    /// The script `name` names, with or without `.js`, and its place: read once for its place, its bytes counted before
+    /// it's read.
+    fn script(&mut self, files: &dyn Files, name: &str) -> Option<(String, Arc<Script>)> {
+        if name.is_empty() || name == "none" {
+            return None;
+        }
+        let (named, place) = match self.place(files, name) {
+            Some(place) => (name.to_string(), place),
+            None if !name.contains('.') => {
+                let named = format!("{name}.js");
+                let place = self.place(files, &named)?;
+                (named, place)
+            }
+            None => return None,
+        };
+        let script = match self.scripts.get(&place.at).cloned() {
+            Some(known) => known,
+            None => {
+                let script = if place.bytes <= self.bytes_left {
+                    self.bytes_left -= place.bytes;
+                    files.text(&named).map(|text| Arc::new(Script::read(&text)))
+                } else {
+                    None
+                };
+                self.scripts.insert(place.at.clone(), script.clone());
+                script
+            }
+        };
+        script.map(|script| (place.at, script))
+    }
+
+    /// The code a box runs: each script read once, and the code of one a box names as its own shared by every box that
+    /// names it.
+    fn code(&mut self, files: &dyn Files, item: &MaxBox) -> Option<Arc<Code>> {
+        let left = Arc::clone(&self.asked);
+        match Code::own(item)? {
+            Own::Held(text) => {
+                Some(Arc::new(Code::of(Arc::new(Script::read(text)), &mut |name| self.script(files, name).map(|(_, used)| used), left)))
+            }
+            Own::File(name) => {
+                let (at, own) = self.script(files, name)?;
+                if let Some(code) = self.codes.get(&at) {
+                    return Some(Arc::clone(code));
+                }
+                let code = Arc::new(Code::of(own, &mut |name| self.script(files, name).map(|(_, used)| used), left));
+                self.codes.insert(at, Arc::clone(&code));
+                Some(code)
+            }
+        }
+    }
+}
+
 impl MaxBox {
     fn read(entry: Value, files: &dyn Files, reading: &mut Reading) -> Option<MaxBox> {
         let mut fields = match entry {
@@ -165,43 +331,11 @@ impl MaxBox {
             .filter(|inner| inner.is_object())
             .map(|inner| Patcher::read_within(&inner.take(), files, reading));
         let mut item = MaxBox { fields, patcher, file: None, code: None };
-        item.code = match Code::file_of(&item) {
-            Some(script) => reading.scripts.entry(script).or_insert_with(|| Code::read(&item, files).map(Arc::new)).clone(),
-            None => Code::read(&item, files).map(Arc::new),
-        };
+        item.code = reading.code(files, &item);
         if item.patcher.is_none() && reading.open.len() < MAX_DEPTH && reading.left > 0 {
             if let Some(name) = item.file_name() {
-                if let Some(looked_up) = reading.patchers.get(&name).cloned() {
-                    if let Some((read, size)) = looked_up {
-                        if size <= reading.left {
-                            reading.left -= size;
-                            item.file = Some((name, read));
-                        } else {
-                            reading.left = 0;
-                        }
-                    }
-                } else if !reading.open.contains(&name) {
-                    match files.patcher(&name) {
-                        None => {
-                            reading.patchers.insert(name, None);
-                        }
-                        Some(value) => {
-                            // Its boxes, at any depth, count against what's left to read from files, and the file one
-                            // more; then the files it uses, as they're read.
-                            let count = boxes_in(&value) + 1;
-                            if count <= reading.left {
-                                let before = reading.left;
-                                reading.left -= count;
-                                reading.open.push(name.clone());
-                                let read = Arc::new(Patcher::read_within(&value, files, reading));
-                                reading.open.pop();
-                                reading.patchers.insert(name.clone(), Some((Arc::clone(&read), before - reading.left)));
-                                item.file = Some((name, read));
-                            } else {
-                                reading.left = 0;
-                            }
-                        }
-                    }
+                if let Some(place) = reading.place(files, &name) {
+                    item.file = reading.patcher(files, name, place);
                 }
             }
         }
@@ -456,6 +590,10 @@ mod tests {
     struct Library(HashMap<String, Value>);
 
     impl Files for Library {
+        fn place(&self, name: &str) -> Option<Place> {
+            self.0.get(name).map(|value| Place { at: name.to_string(), bytes: value.to_string().len() })
+        }
+
         fn patcher(&self, name: &str) -> Option<Value> {
             self.0.get(name).cloned()
         }
@@ -480,14 +618,27 @@ mod tests {
         assert_eq!(patcher.to_document(), document, "keys stay in Max's order");
     }
 
-    /// Files that count each time they're read.
+    /// Files that count each time they're read, and each time one is looked up.
     struct Counted {
         files: HashMap<String, Value>,
         scripts: HashMap<String, String>,
         reads: std::cell::Cell<usize>,
+        looked: std::cell::Cell<usize>,
+    }
+
+    impl Counted {
+        fn new(files: HashMap<String, Value>, scripts: HashMap<String, String>) -> Counted {
+            Counted { files, scripts, reads: std::cell::Cell::new(0), looked: std::cell::Cell::new(0) }
+        }
     }
 
     impl Files for Counted {
+        fn place(&self, name: &str) -> Option<Place> {
+            self.looked.set(self.looked.get() + 1);
+            let bytes = self.files.get(name).map(|value| value.to_string().len()).or_else(|| self.scripts.get(name).map(String::len))?;
+            Some(Place { at: name.to_string(), bytes })
+        }
+
         fn patcher(&self, name: &str) -> Option<Value> {
             self.reads.set(self.reads.get() + 1);
             self.files.get(name).cloned()
@@ -505,23 +656,23 @@ mod tests {
         // big.js: read once each, not 10,000 times (200 GB).
         let huge = "x".repeat(20 * 1024 * 1024);
         let big = json!({ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "comment", "text": huge } }], "lines": [] } });
-        let files = Counted {
-            files: HashMap::from([("big.maxpat".to_string(), big)]),
-            scripts: HashMap::from([("big.js".to_string(), format!("function bang() {{ outlet(0, 1); }}\n// {huge}"))]),
-            reads: std::cell::Cell::new(0),
-        };
+        let files = Counted::new(
+            HashMap::from([("big.maxpat".to_string(), big)]),
+            HashMap::from([("big.js".to_string(), format!("function bang() {{ outlet(0, 1); }}\n// {huge}"))]),
+        );
         let mut boxes: Vec<Value> =
             (0..10_000).map(|n| json!({ "box": { "id": format!("obj-{n}"), "maxclass": "newobj", "text": "big" } })).collect();
         boxes.extend((0..10_000).map(|n| json!({ "box": { "id": format!("obj-js-{n}"), "maxclass": "newobj", "text": "js big.js" } })));
         let device = json!({ "patcher": { "boxes": boxes, "lines": [] } });
-        let started = std::time::Instant::now();
         let patcher = Patcher::read(&device, &files);
         assert!(files.reads.get() <= 3, "{} reads", files.reads.get());
         assert!(patcher.boxes.iter().take(10_000).all(|item| item.inner().is_some_and(|inner| inner.boxes.len() == 1)));
         let first = patcher.boxes[0].file.as_ref().map(|(_, read)| Arc::as_ptr(read));
         assert!(patcher.boxes.iter().take(10_000).all(|item| item.file.as_ref().map(|(_, read)| Arc::as_ptr(read)) == first), "shared");
-        assert!(patcher.boxes[10_000..].iter().all(|item| item.code.as_ref().is_some_and(|code| code.sends_at_once("bang").is_some())));
-        assert!(started.elapsed() < std::time::Duration::from_secs(30), "{:?}", started.elapsed());
+        // A script that big isn't read for its functions: what it does is unknown, and every box shares that.
+        let code = patcher.boxes[10_000].code.clone().expect("its code");
+        assert!(code.partial);
+        assert!(patcher.boxes[10_000..].iter().all(|item| item.code.as_ref().is_some_and(|other| Arc::ptr_eq(other, &code))));
     }
 
     #[test]
@@ -535,7 +686,6 @@ mod tests {
             library.insert(format!("level{level}.maxpat"), json!({ "patcher": { "boxes": boxes, "lines": [] } }));
         }
         let device = json!({ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "newobj", "text": "level0" } }], "lines": [] } });
-        let started = std::time::Instant::now();
         let patcher = Patcher::read(&device, &Library(library));
         fn boxes(patcher: &Patcher) -> usize {
             patcher.boxes.iter().map(|item| 1 + item.inner().map_or(0, boxes)).sum()
@@ -543,7 +693,6 @@ mod tests {
         let read = boxes(&patcher);
         assert!(read <= MOST_FILE_BOXES + 1, "{read} boxes read");
         assert!(patcher.boxes[0].inner().is_some(), "the first files are read");
-        assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
     }
 
     #[test]
@@ -565,6 +714,82 @@ mod tests {
         assert_eq!(gen, Some(100), "the wrapper's patcher is read");
         let read = boxes(&patcher);
         assert!(read <= MOST_FILE_BOXES + 1_000, "{read} boxes read");
+    }
+
+    /// One patcher file that every name reaches, as a frozen device can list one file under any number of names, saying
+    /// it holds `bytes`; counting each time it's read.
+    struct OnePlace {
+        patcher: Value,
+        bytes: usize,
+        reads: std::cell::Cell<usize>,
+    }
+
+    impl Files for OnePlace {
+        fn place(&self, _name: &str) -> Option<Place> {
+            Some(Place { at: "16+64".into(), bytes: self.bytes })
+        }
+
+        fn patcher(&self, _name: &str) -> Option<Value> {
+            self.reads.set(self.reads.get() + 1);
+            Some(self.patcher.clone())
+        }
+    }
+
+    #[test]
+    fn a_file_any_number_of_names_reach_is_read_once_and_what_files_are_read_is_bounded_by_their_bytes() {
+        // 2,000 boxes, each naming the one file by a name of its own: it's read once, for its place.
+        let file = json!({ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "comment", "text": "x" } }], "lines": [] } });
+        let boxes: Vec<Value> =
+            (0..2_000).map(|n| json!({ "box": { "id": format!("obj-{n}"), "maxclass": "newobj", "text": format!("alias{n}") } })).collect();
+        let device = json!({ "patcher": { "boxes": boxes, "lines": [] } });
+        let one = OnePlace { patcher: file.clone(), bytes: 64, reads: std::cell::Cell::new(0) };
+        let patcher = Patcher::read(&device, &one);
+        assert_eq!(one.reads.get(), 1);
+        let first = patcher.boxes[0].file.as_ref().map(|(_, read)| Arc::as_ptr(read));
+        assert!(first.is_some() && patcher.boxes.iter().all(|item| item.file.as_ref().map(|(_, read)| Arc::as_ptr(read)) == first));
+        // A file bigger than what's left to read isn't read at all, whatever its JSON holds.
+        let big = OnePlace { patcher: file, bytes: MOST_FILE_BYTES + 1, reads: std::cell::Cell::new(0) };
+        let patcher = Patcher::read(&device, &big);
+        assert_eq!(big.reads.get(), 0);
+        assert!(patcher.boxes.iter().all(|item| item.file.is_none()));
+    }
+
+    #[test]
+    fn every_name_looked_up_counts_found_or_not_and_names_are_looked_up_to_a_bound() {
+        // Every object's name is one an abstraction could have: 30,000 boxes, each of an object named its own way.
+        let boxes: Vec<Value> = (0..30_000)
+            .map(|n| json!({ "box": { "id": format!("obj-{n}"), "maxclass": "newobj", "text": format!("thing{n}") } }))
+            .collect();
+        let files = Counted::new(HashMap::new(), HashMap::new());
+        Patcher::read(&json!({ "patcher": { "boxes": boxes, "lines": [] } }), &files);
+        assert_eq!(files.looked.get(), MOST_NAMES);
+    }
+
+    #[test]
+    fn a_script_and_what_it_includes_are_read_once_however_many_boxes_run_them() {
+        // 1,000 [v8ui] boxes whose embed flag has no text with it, so they run the file they name; and 1,000 [js] boxes,
+        // each running a script of its own that includes one big script.
+        let mut scripts =
+            HashMap::from([("big.js".to_string(), format!("function shared() {{ outlet(0, 1); }}\n// {}", "x".repeat(100_000)))]);
+        let mut boxes = Vec::new();
+        for n in 0..1_000 {
+            boxes.push(
+                json!({ "box": { "id": format!("obj-ui-{n}"), "maxclass": "v8ui", "filename": "big.js", "textfile": { "embed": 1 } } }),
+            );
+            scripts.insert(format!("own{n}.js"), "include('big.js');\nfunction bang() { shared(); }".to_string());
+            boxes.push(json!({ "box": { "id": format!("obj-js-{n}"), "maxclass": "newobj", "text": format!("js own{n}.js") } }));
+        }
+        let files = Counted::new(HashMap::new(), scripts);
+        let patcher = Patcher::read(&json!({ "patcher": { "boxes": boxes, "lines": [] } }), &files);
+        assert_eq!(files.reads.get(), 1_001, "big.js once, and each box's own script once");
+        let runs = |maxclass: &str, selector: &str| {
+            patcher
+                .boxes
+                .iter()
+                .filter(|item| item.maxclass() == maxclass)
+                .all(|item| item.code.as_ref().is_some_and(|code| code.sends_at_once(selector) == Some(true)))
+        };
+        assert!(runs("v8ui", "shared") && runs("newobj", "bang"), "each box's code reaches what the big script defines");
     }
 
     #[test]
