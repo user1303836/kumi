@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                            ● SoundCraft
 
-                                                                                                                    FOCUS · Mix
-                                                                                                                    ●  Master                     0.0    C
-                                                                                                                    ■  Drums                     −3.0    C
-                                                                                                                    ■  Bass                      −6.0  25L ●
-                                                                                                                    ■  Vox                         −∞  30R M
-                                                                                                                    ■  Pad with a long name       1.5 100R S
-                                                                                                                    ↩  Reverb                    −8.0    C
-                                                                                                                    SoundCraft gives no meters
-
-
-                                          ██                          ▀▀                                            NOW
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                            Ready
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                                        Try                                                         HISTORY ──────────────────────────────────
-                                              “What's on this track?”                                               Nothing changed yet
-                                             “Which tracks are muted?”
-                                        “Why might my low end sound muddy?”
-
-                     Kumi keeps each session's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your session
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS · Mix ──────────────────────────────╮
+                                                                                                                  │ ●  Master                     0.0    C     │
+                                                                                                                  │ ■  Drums                     −3.0    C     │
+                                                                                                                  │ ■  Bass                      −6.0  25L ●   │
+                                                                                                                  │ ■  Vox                         −∞  30R M   │
+                                                                                                                  │ ■  Pad with a long name       1.5 100R S   │
+                                                                                                                  │ ↩  Reverb                    −8.0    C     │
+                                                                                                                  │ SoundCraft gives no meters                 │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          ├─ NOW ──────────────────────────────────────┤
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │ Ready                                      │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY ──────────────────────────────────┤
+                                              “What's on this track?”                                             │ Nothing changed yet                        │
+                                             “Which tracks are muted?”                                            │                                            │
+                                        “Why might my low end sound muddy?”                                       │                                            │
+                                                                                                                  │                                            │
+                     Kumi keeps each session's conversations: /conversations goes back to one.                    │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your session                                                                                 ─╯ ╰────────────────────────────────────────────╯
 
