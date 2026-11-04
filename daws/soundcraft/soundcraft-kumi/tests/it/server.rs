@@ -1,8 +1,8 @@
 //! The bridge's server for Kumi's host, against a fake SoundCraft. The host connects with its own client, through the
-//! discovery file. `ping` and `status` answer from the last look, a dialog or an app that doesn't answer makes the bridge
-//! busy, and a new session is told as a `project` event. The bridge ends when it's stopped or when SoundCraft quits, and
-//! takes its discovery file with it. Run as the program the host starts, it serves one copy of SoundCraft per bridge and
-//! ends with its stdin.
+//! discovery file. `ping`, `status` and `focus` answer from the last looks, a dialog or an app that doesn't answer makes
+//! the bridge busy, and a new session is told as a `project` event. The bridge ends when it's stopped or when SoundCraft
+//! quits, and takes its discovery file with it. Run as the program the host starts, it serves one copy of SoundCraft per
+//! bridge and ends with its stdin.
 use super::fake::{ok, refused, Answer, Fake};
 use daw_bridge::auth::Secret;
 use daw_bridge::files::ensure_secret;
@@ -48,15 +48,21 @@ impl std::ops::DerefMut for Reaped {
     }
 }
 
-/// What the fake app shows: its session's name, tracks and undo history, an open dialog, whether it answers late, and
-/// whether a full inspection (a read's) takes it two seconds.
+/// What the fake app shows: its session's name, tracks, selection and last undo, an open dialog, whether it answers late,
+/// and whether a full inspection (a read's) takes it two seconds; its windows (`ui.inspect`'s `ui`), its playhead and
+/// whether it plays; and its undo history as `engine.history` answers it.
 struct Shown {
     name: String,
     tracks: Value,
+    selection: Value,
     undo: Value,
     dialog: Option<String>,
     late: bool,
     slow_reads: bool,
+    ui: Value,
+    position: u64,
+    playing: bool,
+    history: Value,
 }
 
 /// A fake SoundCraft, and a Kumi folder for its bridge.
@@ -72,24 +78,40 @@ impl Lab {
         let shown = Arc::new(Mutex::new(Shown {
             name: "Midnight Groove".into(),
             tracks: json!([]),
+            selection: json!({"tracks": [], "clips": [], "start": 0, "end": 0}),
             undo: Value::Null,
             dialog: None,
             late: false,
             slow_reads: false,
+            ui: json!({"window": "Edit", "show_midi_editor": false, "plugin_windows": []}),
+            position: 0,
+            playing: false,
+            history: json!({"undo": [], "can_redo": false}),
         }));
         let answering = shown.clone();
         let fake = Fake::start(16, move |request| {
             let shown = answering.lock().unwrap();
-            match request["method"].as_str() {
-                Some("session.inspect") => {
-                    let session = ok(json!({"name": shown.name, "path": null, "tracks": shown.tracks, "undo": shown.undo, "redo": null}));
+            match (request["method"].as_str(), request["params"]["command"].as_str()) {
+                (Some("session.inspect"), _) => {
+                    let session = ok(json!({
+                        "name": shown.name, "path": null, "tracks": shown.tracks, "undo": shown.undo, "redo": null,
+                        "sample_rate": 48000, "tempo": [{"bpm": 120.0, "tick": 0}], "meter": [{"denominator": 4, "numerator": 4, "tick": 0}],
+                        "selection": shown.selection,
+                        "transport": {"playing": shown.playing, "position": shown.position, "recording": false},
+                    }));
                     match request["params"]["detail"] == "full" && shown.slow_reads {
                         true => Answer::After(ms(2000), session),
                         false => Answer::Now(session),
                     }
                 }
-                Some("ui.inspect") if shown.late => Answer::After(ms(400), ok(json!({"dialog": null}))),
-                Some("ui.inspect") => Answer::Now(ok(json!({"dialog": shown.dialog}))),
+                (Some("ui.inspect"), _) if shown.late => Answer::After(ms(400), ok(json!({"dialog": null}))),
+                (Some("ui.inspect"), _) => {
+                    Answer::Now(ok(json!({"dialog": shown.dialog, "playing": shown.playing, "position": shown.position, "ui": shown.ui})))
+                }
+                (Some("engine.execute"), Some("engine.history")) => Answer::Now(ok(shown.history.clone())),
+                (Some("engine.execute"), Some("engine.plugins")) => {
+                    Answer::Now(ok(json!([{"id": "eq_1band", "name": "EQ 1-Band", "instrument": false, "params": []}])))
+                }
                 _ => Answer::Now(refused("unknown method")),
             }
         })
@@ -187,21 +209,23 @@ impl Lab {
     }
 }
 
-/// Asks for `status` until `until` holds of it (the look loop takes a few looks to see a change).
-async fn status_until(client: &BridgeClient, until: impl Fn(&Value) -> bool) -> Value {
+/// Asks for `method` until `until` holds of its answer (the look loop takes a few looks to see a change). A refusal is
+/// no answer yet.
+async fn asked_until(client: &BridgeClient, method: &str, until: impl Fn(&Value) -> bool) -> Value {
     let deadline = Instant::now() + WAIT;
     loop {
-        let status = client.request("status", json!({}), WAIT).await.unwrap();
-        if until(&status) || Instant::now() > deadline {
-            return status;
+        let answer = client.request(method, json!({}), WAIT).await.unwrap_or(Value::Null);
+        if until(&answer) || Instant::now() > deadline {
+            return answer;
         }
-        tokio::time::sleep(ms(50)).await;
+        tokio::time::sleep(ms(20)).await;
     }
 }
 
-/// Waits for the look loop to look at the session twice more, so once after anything shown before now.
-async fn session_looked(lab: &Lab) {
-    let looks = || lab.fake.requests().iter().filter(|request| request["method"] == "session.inspect").count();
+/// Waits for the look loop to ask for `what` (a method, or an engine command) twice more, so once after anything shown
+/// before now.
+async fn looked(lab: &Lab, what: &str) {
+    let looks = || lab.fake.requests().iter().filter(|request| request["method"] == what || request["params"]["command"] == what).count();
     let (before, deadline) = (looks(), Instant::now() + WAIT);
     while looks() < before + 2 && Instant::now() < deadline {
         tokio::time::sleep(ms(20)).await;
@@ -225,7 +249,8 @@ async fn the_host_connects_through_the_discovery_file_and_status_answers_from_th
     assert_eq!((welcome.identity.daw.as_str(), welcome.identity.pid), ("soundcraft", std::process::id()));
     assert_eq!(welcome.identity.project.as_ref().and_then(|project| project.name.as_deref()), Some("Midnight Groove"));
     let offered = (welcome.methods.clone(), welcome.events.clone());
-    assert_eq!(offered, (vec!["ping".to_string(), "status".into(), "read".into(), "snapshot".into()], vec!["project".to_string()]));
+    let methods = ["ping", "status", "focus", "read", "snapshot"].map(String::from).to_vec();
+    assert_eq!(offered, (methods, vec!["project".to_string()]));
     assert_eq!(client.request("ping", json!({}), WAIT).await.unwrap(), json!({}));
     let status = client.request("status", json!({}), WAIT).await.unwrap();
     assert_eq!((&status["busy"], &status["project"]["name"]), (&json!(false), &json!("Midnight Groove")));
@@ -290,12 +315,119 @@ async fn the_host_reads_through_the_bridge_and_a_read_while_the_app_is_busy_is_r
         (&tracks["epoch"], &json!("Midnight Groove"), &json!([]))
     );
     lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
-    status_until(&client, |status| status["busy"] == "modal").await;
+    asked_until(&client, "status", |status| status["busy"] == "modal").await;
     let began = Instant::now();
     let refused = client.request("read", json!({"kind": "track"}), WAIT).await.unwrap_err();
     let RequestError::Bridge { code, message } = refused else { panic!("{refused:?}") };
     assert_eq!((code.as_str(), message.as_str()), ("busy", "a dialog is open in SoundCraft (Save Changes); nothing was read"));
     assert!(began.elapsed() < ms(500), "at once: {:?}", began.elapsed());
+}
+
+/// Kick, with an EQ in its slot a, and Keys, an instrument track.
+fn kick_and_keys() -> Value {
+    json!([
+        {"id": 3, "kind": "audio", "format": "Mono", "name": "Kick", "instrument": null, "clips": [],
+         "inserts": [{"slot": 0, "plugin": "eq_1band", "bypass": false, "params": {}}]},
+        {"id": 5, "kind": "instrument", "format": "Stereo", "name": "Keys", "instrument": "subtractive_synth", "inserts": [], "clips": []},
+    ])
+}
+
+#[tokio::test]
+async fn focus_answers_with_the_window_the_selection_and_the_playhead() {
+    let lab = Lab::new().await;
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        shown.tracks = kick_and_keys();
+        shown.selection = json!({"tracks": [3], "clips": [], "start": 0, "end": 0});
+        // (two seconds in at 120 bpm: four beats, the first of bar 2)
+        shown.position = 96000;
+    }
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    let focus = asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
+    let status = client.request("status", json!({}), WAIT).await.unwrap();
+    assert_eq!(focus["epoch"], status["project"]["epoch"]);
+    assert_eq!(
+        (&focus["view"], &focus["selection"]["trackRef"], &focus["selection"]["track"]),
+        (&json!("edit"), &json!("s:track:3"), &json!({"name": "Kick", "type": "audio"}))
+    );
+    let transport = &focus["transport"];
+    assert_eq!(
+        (&transport["state"], &transport["seconds"], &transport["beat"], &transport["bar"], &transport["beatInBar"], &transport["tempo"]),
+        (&json!("stopped"), &json!(2.0), &json!(4.0), &json!(2), &json!(1.0), &json!(120.0))
+    );
+    assert_eq!(focus["changed"], 0);
+    assert!(focus.get("busy").is_none(), "free, so no busy at all (Kumi takes any busy for busy): {focus}");
+    // The windows the producer opens.
+    let shows = |ui: Value| lab.shown.lock().unwrap().ui = ui;
+    shows(json!({"window": "Mix", "show_midi_editor": false, "plugin_windows": []}));
+    assert_eq!(asked_until(&client, "focus", |focus| focus["view"] == "mixer").await["view"], "mixer");
+    shows(json!({"window": "Mix", "show_midi_editor": true, "plugin_windows": []}));
+    assert_eq!(asked_until(&client, "focus", |focus| focus["view"] == "midi").await["view"], "midi");
+    shows(json!({"window": "Edit", "show_midi_editor": false, "plugin_windows": [[3, 0]]}));
+    let fx = asked_until(&client, "focus", |focus| focus["selection"]["fxRef"].is_string()).await;
+    assert_eq!(
+        (&fx["view"], &fx["selection"]["fxRef"], &fx["selection"]["fxName"]),
+        (&json!("fx"), &json!("s:insert:3:a"), &json!("EQ 1-Band"))
+    );
+    // The last opened is the one shown: Keys' instrument, whose slot is the largest number there is (and whose name the
+    // app's built-ins don't give, so it stays its id).
+    shows(json!({"window": "Edit", "show_midi_editor": false, "plugin_windows": [[3, 0], [5, u64::MAX]]}));
+    let instrument = asked_until(&client, "focus", |focus| focus["selection"]["fxRef"] == "s:insert:5:instrument").await;
+    assert_eq!(
+        (&instrument["selection"]["fxRef"], &instrument["selection"]["fxName"]),
+        (&json!("s:insert:5:instrument"), &json!("subtractive_synth"))
+    );
+}
+
+#[tokio::test]
+async fn changed_moves_with_each_edit_undo_and_redo_and_nothing_else() {
+    let lab = Lab::new().await;
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        shown.tracks = kick_and_keys();
+        shown.history = json!({"undo": ["New Track"], "can_redo": false});
+    }
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    // A selection isn't an edit.
+    lab.shown.lock().unwrap().selection = json!({"tracks": [5], "clips": [], "start": 0, "end": 0});
+    asked_until(&client, "focus", |focus| focus["selection"]["trackRef"] == "s:track:5").await;
+    looked(&lab, "engine.history").await;
+    assert_eq!(client.request("focus", json!({}), WAIT).await.unwrap()["changed"], 0);
+    let moves = [
+        ("an edit", json!({"undo": ["New Track", "Rename Track"], "can_redo": false})),
+        ("its undo", json!({"undo": ["New Track"], "can_redo": true})),
+        ("its redo", json!({"undo": ["New Track", "Rename Track"], "can_redo": false})),
+    ];
+    for (n, (what, history)) in moves.into_iter().enumerate() {
+        lab.shown.lock().unwrap().history = history;
+        let focus = asked_until(&client, "focus", |focus| focus["changed"] != n).await;
+        assert_eq!(focus["changed"], n + 1, "{what}");
+    }
+}
+
+#[tokio::test]
+async fn while_soundcraft_plays_its_playhead_is_looked_at_four_times_as_often_and_focus_moves_it_on() {
+    let lab = Lab::new().await;
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
+    let looks_in_a_second = || async {
+        let looks = || lab.fake.requests().iter().filter(|request| request["method"] == "ui.inspect").count();
+        let before = looks();
+        tokio::time::sleep(ms(1000)).await;
+        looks() - before
+    };
+    let stopped = looks_in_a_second().await;
+    lab.shown.lock().unwrap().playing = true;
+    asked_until(&client, "focus", |focus| focus["transport"]["playing"] == true).await;
+    let playing = looks_in_a_second().await;
+    assert!(playing >= 2 * stopped, "{playing} looks in a second while it plays, {stopped} while it's stopped");
+    // The look saw the playhead at the start: focus moves it on by the look's age (one 10 ms old at least, to tell).
+    let focus = asked_until(&client, "focus", |focus| focus["ageMs"].as_u64() >= Some(10)).await;
+    let (seconds, age) = (focus["transport"]["seconds"].as_f64().unwrap(), focus["ageMs"].as_f64().unwrap());
+    assert!(age >= 10.0 && (seconds * 1000.0 - age).abs() < 5.0, "{focus}");
 }
 
 #[tokio::test]
@@ -304,14 +436,19 @@ async fn a_dialog_or_an_app_that_does_not_answer_makes_the_bridge_busy_until_it_
     let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
-    let modal = status_until(&client, |status| status["busy"] == "modal").await;
+    let modal = asked_until(&client, "status", |status| status["busy"] == "modal").await;
+    assert_eq!(client.request("focus", json!({}), WAIT).await.unwrap()["busy"], "modal");
     assert_eq!((&modal["busy"], &modal["busyReason"]), (&json!("modal"), &json!("a dialog is open in SoundCraft (Save Changes)")));
     lab.shown.lock().unwrap().dialog = None;
     lab.shown.lock().unwrap().late = true;
-    let stalled = status_until(&client, |status| status["busy"] == "stalled").await;
+    let stalled = asked_until(&client, "status", |status| status["busy"] == "stalled").await;
     assert_eq!((&stalled["busy"], &stalled["busyReason"]), (&json!("stalled"), &json!("SoundCraft isn't answering")));
     lab.shown.lock().unwrap().late = false;
-    assert_eq!(status_until(&client, |status| status["busy"] == false).await["busy"], false);
+    assert_eq!(asked_until(&client, "status", |status| status["busy"] == false).await["busy"], false);
+    assert!(
+        asked_until(&client, "focus", |focus| focus.get("busy").is_none()).await.get("busy").is_none(),
+        "no busy at all once it's free"
+    );
 }
 
 #[tokio::test]
@@ -393,9 +530,9 @@ async fn the_lives_learn_from_the_look_loop_so_a_track_undone_and_made_again_bet
     assert_eq!(read["items"][0]["ref"], "s:track:30");
     // Undone, which a look sees; then another Bass DI, with nothing in it, takes the id: no read between.
     lab.shown.lock().unwrap().tracks = json!([]);
-    session_looked(&lab).await;
+    looked(&lab, "session.inspect").await;
     lab.shown.lock().unwrap().tracks = bass(json!([]));
-    session_looked(&lab).await;
+    looked(&lab, "session.inspect").await;
     let refused = client.request("read", json!({"ref": "s:track:30", "epoch": read["epoch"]}), WAIT).await.unwrap_err();
     let RequestError::Bridge { code, .. } = refused else { panic!("{refused:?}") };
     assert_eq!(code, "stale");

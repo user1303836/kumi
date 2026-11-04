@@ -84,6 +84,29 @@ impl Reads {
         self.lives.epoch()
     }
 
+    /// What the producer has selected, in the refs of the epoch now ([`Reads::saw`] the session first).
+    pub fn selection(&self, session: &Value) -> Value {
+        selection_row(session, &self.lives)
+    }
+
+    /// The plug-in a window of SoundCraft's shows, which it names `[track, slot]` (the instrument's slot is the largest
+    /// number there is): its insert's `fxRef`, and its `fxName`, a built-in's as `engine.plugins` names it. Nothing for a
+    /// track or slot the session doesn't have.
+    pub async fn plugin_window(&mut self, session: &Value, window: &Value, until: Instant) -> Option<Value> {
+        let (track, slot) = (window[0].as_u64()?, window[1].as_u64()?);
+        let track = tracks(session).iter().find(|row| row["id"].as_u64() == Some(track))?;
+        let (key, row) = if slot == u64::MAX {
+            instrument_row(track, &self.lives)?
+        } else {
+            let insert = list(track, "inserts").iter().find(|insert| insert["slot"].as_u64() == Some(slot))?;
+            insert_row(track, insert, &self.lives)?
+        };
+        // (a plug-in's name only fills in its id: one the app won't describe stays the id)
+        let _ = self.know_plugins(until).await;
+        let known = self.plugins.as_deref().unwrap_or_default().iter().find(|known| known["id"] == row["plugin"]);
+        Some(json!({"fxRef": key, "fxName": known.map_or(&row["plugin"], |known| &known["name"])}))
+    }
+
     /// What a look saw of the session (`session.inspect`, in full or not): the lives learn from it, and another session
     /// starts a new epoch, with new lives. Another session is:
     /// - one under another name or path, unless its objects hold all they held and either its history reads as it did (a
@@ -178,7 +201,7 @@ impl Reads {
     pub async fn snapshot(&mut self, until: Instant) -> Result<Value, Refusal> {
         let session = self.inspect(until).await?;
         let (session, lives, epoch) = (&*session, &self.lives, self.lives.epoch());
-        let transport = &session["transport"];
+        let playhead = &session["transport"];
         let tracks: Vec<(String, Value)> =
             tracks(session).iter().enumerate().filter_map(|(index, track)| track_row(session, track, index, lives)).collect();
         let markers: Vec<(String, Value)> =
@@ -192,7 +215,7 @@ impl Reads {
         let mut answer = json!({
             "epoch": epoch,
             "project": project_row(session, epoch),
-            "transport": transport_row(session, &transport["position"], &transport["playing"], &transport["recording"]),
+            "transport": transport(session, &playhead["position"], &playhead["playing"], &playhead["recording"]),
             "tracks": rows(&shown[0]),
             "selection": selection_row(session, lives),
             "markers": rows(&shown[1]),
@@ -717,7 +740,7 @@ fn place_id(path: &str) -> Option<String> {
 }
 
 fn session_row(session: &Value, lives: &Lives, epoch: &str) -> Value {
-    let transport = &session["transport"];
+    let playhead = &session["transport"];
     let mut row = project_row(session, epoch);
     row["bitDepth"] = session["bit_depth"].clone();
     row["mainFormat"] = session["main_format"].clone();
@@ -727,14 +750,14 @@ fn session_row(session: &Value, lives: &Lives, epoch: &str) -> Value {
     row["trackCount"] = tracks(session).len().into();
     row["markerCount"] = list(session, "markers").len().into();
     row["selection"] = selection_row(session, lives);
-    row["transport"] = transport_row(session, &transport["position"], &transport["playing"], &transport["recording"]);
+    row["transport"] = transport(session, &playhead["position"], &playhead["playing"], &playhead["recording"]);
     row
 }
 
 /// The transport at `position` samples: whether it plays or records, seconds, and through the tempo map (when SoundCraft's
 /// maps are steps) quarter notes from the start, the bar (from 1) and the quarter notes into it (from 1, with their
 /// fraction, as kumi-daw/1 counts them in any meter), the tempo and the meter there.
-fn transport_row(session: &Value, position: &Value, playing: &Value, recording: &Value) -> Value {
+pub fn transport(session: &Value, position: &Value, playing: &Value, recording: &Value) -> Value {
     let state = match (recording.as_bool(), playing.as_bool()) {
         (Some(true), _) => "recording",
         (_, Some(true)) => "playing",
