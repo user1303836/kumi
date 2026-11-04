@@ -87,6 +87,12 @@
     const said = clean(name ?? "", 80);
     return said ? `Use sound ${soundId} (“${said}”) on the selected track` : `Use sound ${soundId} on the selected track`;
   }
+  var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
+  function cleanupWords(cleanup) {
+    if (cleanup === "restored") return "Kumi put back what it changed meanwhile.";
+    if (cleanup === "unsure") return "Kumi isn’t sure it put everything back.";
+    return "";
+  }
   function chipWords(status, tempo) {
     if (!status) return { tone: "muted", text: "Kumi" };
     const daw = dawName(status.daw ?? status.setup?.daw);
@@ -297,11 +303,7 @@
             track && /* @__PURE__ */ jsx(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
             /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: [track && clean(track, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now)].filter(Boolean).join(" · ") })
           ] }),
-          (item.state === "unsure" || item.state === "partial") && /* @__PURE__ */ jsxs("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [
-            clean(item.reason ?? "Kumi couldn’t confirm what happened.", 200),
-            item.cleanup === "restored" ? " Kumi put back what it changed meanwhile." : item.cleanup === "unsure" ? " Kumi isn’t sure it put everything back." : "",
-            " Ask Kumi to look again before another change."
-          ] })
+          (item.state === "unsure" || item.state === "partial") && /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? "Kumi couldn’t confirm what happened.", 200), cleanupWords(item.cleanup), "Ask Kumi to look again before another change."].filter(Boolean).join(" ") })
         ] }),
         action?.(item)
       ] }, item.id);
@@ -790,6 +792,17 @@
           state.status.runtime.version
         ] }),
         state.setup?.message && state.setup.state !== "ready" && /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message })
+      ] }),
+      state.status?.unsure && /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, padding: "0 2px", alignItems: "flex-start" }, children: [
+        /* @__PURE__ */ jsxs("span", { style: { ...S.muted, color: T.warn, flex: 1 }, children: [
+          "Kumi isn't sure your project is as it was after ",
+          clean(state.status.unsure.op ?? "its last action", 40),
+          state.status.unsure.reason ? `: ${clean(state.status.unsure.reason, 160)}` : "",
+          ". ",
+          cleanupWords(state.status.unsure.cleanup),
+          " Ask Kumi in your chat to look again before another change."
+        ] }),
+        /* @__PURE__ */ jsx(CopyButton, { label: "Copy request", text: LOOK_AGAIN_REQUEST })
       ] }),
       /* @__PURE__ */ jsxs("div", { style: { display: "grid", gridTemplateColumns: "minmax(260px, 1fr) minmax(320px, 2fr)", gap: 12, alignItems: "stretch" }, children: [
         /* @__PURE__ */ jsxs("div", { style: { border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: "hidden", alignSelf: "start" }, children: [

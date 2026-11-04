@@ -91,6 +91,13 @@ export function connectRequest(daw: unknown): string {
 /** After an outcome Kumi couldn't confirm: a fresh look (a read) before anything else. */
 export const LOOK_AGAIN_REQUEST = 'Kumi, look at my project again before changing anything else'
 
+/** What an unsure or partial outcome's `cleanup` says Kumi did about it (CC-2), as a sentence or nothing. */
+export function cleanupWords(cleanup: unknown): string {
+  if (cleanup === 'restored') return 'Kumi put back what it changed meanwhile.'
+  if (cleanup === 'unsure') return 'Kumi isn’t sure it put everything back.'
+  return ''
+}
+
 /** The status chip's words: `Live · Night Drive · 124 BPM`, or what's missing. */
 export function chipWords(status: Status | null, tempo?: unknown): { tone: 'bad' | 'good' | 'muted' | 'warn'; text: string } {
   if (!status) return { tone: 'muted', text: 'Kumi' }

@@ -3,7 +3,7 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { useEffect, useState } from 'react'
 
-import { chipWords, clean, connectRequest, dawName, LOOK_AGAIN_REQUEST, setupRequest, undoRequest } from '../shared/format.ts'
+import { chipWords, clean, cleanupWords, connectRequest, dawName, LOOK_AGAIN_REQUEST, setupRequest, undoRequest } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { useKumi } from '../shared/hooks.ts'
 import type { KumiState, KumiStore } from '../shared/store.ts'
@@ -81,7 +81,8 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ ...S.muted, color: T.warn }}>
               Kumi isn't sure your project is as it was after {clean(state.status.unsure.op ?? 'its last action', 40)}
-              {state.status.unsure.reason ? `: ${clean(state.status.unsure.reason, 160)}` : ''}. It needs a fresh look before another change.
+              {state.status.unsure.reason ? `: ${clean(state.status.unsure.reason, 160)}` : ''}. {cleanupWords(state.status.unsure.cleanup)} It needs a
+              fresh look before another change.
             </span>
             <div style={S.row}>
               <TextButton onClick={() => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session })}>Ask Kumi to look again</TextButton>

@@ -65,6 +65,11 @@ function connectRequest(daw) {
   return `Connect Kumi to ${dawName(daw)}`;
 }
 var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
+function cleanupWords(cleanup) {
+  if (cleanup === "restored") return "Kumi put back what it changed meanwhile.";
+  if (cleanup === "unsure") return "Kumi isn’t sure it put everything back.";
+  return "";
+}
 function chipWords(status, tempo) {
   if (!status) return { tone: "muted", text: "Kumi" };
   const daw = dawName(status.daw ?? status.setup?.daw);
@@ -670,11 +675,7 @@ function HistoryView({ history, now, action }) {
           track && /* @__PURE__ */ jsx3(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
           /* @__PURE__ */ jsx3("span", { style: { ...S.faint, ...S.ellipsis }, children: [track && clean(track, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now)].filter(Boolean).join(" · ") })
         ] }),
-        (item.state === "unsure" || item.state === "partial") && /* @__PURE__ */ jsxs3("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [
-          clean(item.reason ?? "Kumi couldn’t confirm what happened.", 200),
-          item.cleanup === "restored" ? " Kumi put back what it changed meanwhile." : item.cleanup === "unsure" ? " Kumi isn’t sure it put everything back." : "",
-          " Ask Kumi to look again before another change."
-        ] })
+        (item.state === "unsure" || item.state === "partial") && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? "Kumi couldn’t confirm what happened.", 200), cleanupWords(item.cleanup), "Ask Kumi to look again before another change."].filter(Boolean).join(" ") })
       ] }),
       action?.(item)
     ] }, item.id);
@@ -745,7 +746,9 @@ function KumiPane({ ctx, store, onOpenMap }) {
           "Kumi isn't sure your project is as it was after ",
           clean(state.status.unsure.op ?? "its last action", 40),
           state.status.unsure.reason ? `: ${clean(state.status.unsure.reason, 160)}` : "",
-          ". It needs a fresh look before another change."
+          ". ",
+          cleanupWords(state.status.unsure.cleanup),
+          " It needs a fresh look before another change."
         ] }),
         /* @__PURE__ */ jsx4("div", { style: S.row, children: /* @__PURE__ */ jsx4(TextButton, { onClick: () => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: "Ask Kumi to look again" }) })
       ] }),

@@ -4,7 +4,7 @@
 import { T } from '@kumi/theme'
 import { useEffect, useMemo, useState } from 'react'
 
-import { chipWords, undoRequest, useSoundRequest } from '../shared/format.ts'
+import { chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, undoRequest, useSoundRequest } from '../shared/format.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
@@ -83,6 +83,16 @@ function KumiDashboard() {
         {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
         {state.setup?.message && state.setup.state !== 'ready' && <span style={S.muted}>{state.setup.message}</span>}
       </div>
+      {state.status?.unsure && (
+        <div style={{ ...S.row, gap: 10, padding: '0 2px', alignItems: 'flex-start' }}>
+          <span style={{ ...S.muted, color: T.warn, flex: 1 }}>
+            Kumi isn't sure your project is as it was after {clean(state.status.unsure.op ?? 'its last action', 40)}
+            {state.status.unsure.reason ? `: ${clean(state.status.unsure.reason, 160)}` : ''}. {cleanupWords(state.status.unsure.cleanup)} Ask Kumi in
+            your chat to look again before another change.
+          </span>
+          <CopyButton label="Copy request" text={LOOK_AGAIN_REQUEST} />
+        </div>
+      )}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(320px, 2fr)', gap: 12, alignItems: 'stretch' }}>
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', alignSelf: 'start' }}>
           <Section title="Focus">

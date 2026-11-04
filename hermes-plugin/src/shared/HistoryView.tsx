@@ -3,7 +3,7 @@
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 
-import { ago, bpm, clean, colorOf, nameOf } from './format.ts'
+import { ago, bpm, clean, cleanupWords, colorOf, nameOf } from './format.ts'
 import type { Focus, History, HistoryItem } from './types.ts'
 import { Chip, Dot, S } from './ui.tsx'
 
@@ -90,9 +90,9 @@ export function HistoryView({ history, now, action }: { history: History | null;
               </span>
               {(item.state === 'unsure' || item.state === 'partial') && (
                 <span style={{ ...S.muted, color: T.warn, whiteSpace: 'normal' }}>
-                  {clean(item.reason ?? 'Kumi couldn’t confirm what happened.', 200)}
-                  {item.cleanup === 'restored' ? ' Kumi put back what it changed meanwhile.' : item.cleanup === 'unsure' ? ' Kumi isn’t sure it put everything back.' : ''} Ask Kumi
-                  to look again before another change.
+                  {[clean(item.reason ?? 'Kumi couldn’t confirm what happened.', 200), cleanupWords(item.cleanup), 'Ask Kumi to look again before another change.']
+                    .filter(Boolean)
+                    .join(' ')}
                 </span>
               )}
             </span>
