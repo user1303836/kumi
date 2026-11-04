@@ -34,7 +34,7 @@ impl App {
         let ui = vectors("soundcraft-0.17.0.ndjson").into_iter().find(|exchange| exchange["method"] == "ui.inspect").unwrap()["reply"]
             ["result"]
             .clone();
-        App { reads: Reads::new(Control::new(fake.port(), None)), fake, session, ui }
+        App { reads: Reads::new(Control::new(fake.port(), None), Some("0.17.0".into())), fake, session, ui }
     }
 
     async fn body(&mut self, params: Value) -> Result<Value, (&'static str, String)> {
@@ -423,7 +423,7 @@ async fn refs_from_another_epoch_or_an_ended_life_are_stale_and_without_an_epoch
     assert!(app.body(json!({"kind": "fx", "ref": "s:track:15", "epoch": epoch})).await.is_ok(), "this epoch's");
     assert!(app.body(json!({"kind": "fx", "ref": "s:track:15"})).await.is_ok(), "no epoch: read in this one");
     // The bridge started again, SoundCraft still open: a table of its own.
-    let before = Reads::new(Control::new(app.fake.port(), None)).epoch().to_string();
+    let before = Reads::new(Control::new(app.fake.port(), None), Some("0.17.0".into())).epoch().to_string();
     let stale = app.body(json!({"kind": "fx", "ref": "s:track:15", "epoch": before})).await.unwrap_err();
     assert_eq!(stale.0, "stale", "{stale:?}");
     assert_eq!(app.body(json!({"kind": "fx", "ref": "s:track:999"})).await.unwrap_err().0, "stale", "not of this session");
