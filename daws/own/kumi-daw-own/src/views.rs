@@ -504,6 +504,18 @@ pub fn mixer(body: &Value) -> MixerView {
     }
 }
 
+/// The mixer's meters alone (REAPER's `levels` body).
+pub fn levels(body: &Value) -> Vec<TrackLevel> {
+    list(body, "levels")
+        .filter_map(|row| {
+            let both = row.get("peakDb")?;
+            let peak_db = [both.get(0)?.as_f64()?, both.get(1)?.as_f64()?];
+            Some(TrackLevel { track_ref: row.get("ref")?.as_str()?.to_owned(), peak_db })
+        })
+        .take(80)
+        .collect()
+}
+
 /// The track kind FOCUS's chip shows, from a focus's `track.type`.
 pub fn track_kind(kind: &str) -> Option<TrackKind> {
     Some(match kind {
@@ -711,6 +723,19 @@ mod tests {
         let gainer = &lanes[0].devices.as_ref().unwrap()[0];
         assert_eq!((gainer.r#ref.as_str(), gainer.note.as_deref()), ("3:device:2.4#1.1", None));
         assert_eq!(lanes[0].devices.as_ref().unwrap()[1].note.as_deref(), Some("bypassed"));
+    }
+
+    #[test]
+    fn the_meters_alone_keep_what_names_a_track_and_says_both_sides() {
+        let body = json!({"levels": [
+            {"ref": "r:track:master", "peakDb": [-0.5, -0.8]},
+            {"ref": "r:track:{K}", "peakDb": [-150.0]},
+            {"peakDb": [-3.0, -3.0]},
+            {"ref": "r:track:{S}", "peakDb": [-6.0, -9.0]},
+        ], "trackCount": 2, "from": 0});
+        let read: Vec<(String, [f64; 2])> = levels(&body).into_iter().map(|level| (level.track_ref, level.peak_db)).collect();
+        assert_eq!(read, [("r:track:master".to_string(), [-0.5, -0.8]), ("r:track:{S}".to_string(), [-6.0, -9.0])]);
+        assert!(levels(&json!({})).is_empty());
     }
 
     #[test]

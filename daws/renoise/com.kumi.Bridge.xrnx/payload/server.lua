@@ -90,7 +90,7 @@ function M:close(record, reason)
   -- Its reads are of no use to anyone now.
   record.requests = {}
   if self.ctx.cancel_jobs then self.ctx.cancel_jobs(record) end
-  record.job = nil
+  record.job, record.side = nil, nil
   self.ctx.log("info", "retiring " .. record.key .. ": " .. tostring(reason))
 end
 
@@ -263,18 +263,32 @@ M.IMMEDIATE = { ping = true, status = true, focus = true }
 -- (M5 m5-renoise: a listening job's state, its cancel and an audition's stop)
 M.IMMEDIATE.listen_status, M.IMMEDIATE.listen_cancel, M.IMMEDIATE.audition_stop = true, true, true
 
--- A read is running: what is short among the waiting requests is answered now, out of order; the rest waits for the job.
+-- A connection's digest (catch-up's and watch_me's look at the whole song: long, and it writes nothing) lets the reads
+-- that come after it go around it, one at a time and in the order they came: FOCUS's bodies and Kumi's reads would
+-- otherwise wait for the whole digest (measured, 3.5.4: a FOCUS body asked during catch-up took 74-107 ms against 13-44
+-- alone). The first request of any other kind stops them: it, and everything after it, waits for the digest as before.
+-- The host matches answers by id, as it does for the short methods answered at once.
+M.BACKGROUND = { digest = true }
+M.GOES_AROUND = { read = true, snapshot = true, focus_body = true }
+
+-- A read is running: what is short among the waiting requests is answered now, out of order; the rest waits for the job,
+-- but for a read that goes around a digest (M.GOES_AROUND).
 function M:run_immediate(record)
   if record.closing or record.gone then return end
   local quick, rest = {}, {}
   for _, request in ipairs(record.requests) do
     if M.IMMEDIATE[request.method] then quick[#quick + 1] = request else rest[#rest + 1] = request end
   end
-  if not quick[1] then return end
   record.requests = rest
   for _, request in ipairs(quick) do
     if record.closing or record.gone then return end
     self:answer(record, request)
+  end
+  local job, first = record.job, record.requests[1]
+  if job and not record.side and first and M.BACKGROUND[job.request.method] and M.GOES_AROUND[first.method]
+    and not record.closing and not record.gone then
+    table.remove(record.requests, 1)
+    self:answer(record, first, true)
   end
 end
 
@@ -303,7 +317,8 @@ function M:run_requests(record)
   end
 end
 
-function M:answer(record, request)
+-- `side`: a read going around the connection's digest (M:run_immediate); its job is `record.side`.
+function M:answer(record, request, side)
   local deadline = request.deadlineMs
   if type(deadline) == "number" and self.ctx.unix_ms() >= deadline then
     return self:send(record, wire.error(request.id, "deadline", "the deadline passed before the work started"), true)
@@ -312,15 +327,21 @@ function M:answer(record, request)
   -- A long read comes back as a job to be run a slice at a time; the connection's later requests wait behind it, so
   -- answers keep their order.
   if ok and type(result) == "table" and result.kumi_job then
-    record.job = self.ctx.start_job(record, request, result.kumi_job, result.kumi_wrote)
+    local job = self.ctx.start_job(record, request, result.kumi_job, result.kumi_wrote)
+    if side then record.side = job else record.job = job end
     return
   end
   self:respond(record, request, ok, result)
 end
 
--- A job has ended: its answer goes out, then the requests that waited behind it are answered.
+-- A job has ended: its answer goes out, then the requests that waited behind it are answered. A digest that ends while a
+-- read goes around it leaves that read as the connection's job: it came first of what waits.
 function M:finish_job(record, request, ok, value)
-  record.job = nil
+  if record.side and record.side.request == request then
+    record.side = nil
+  else
+    record.job, record.side = record.side, nil
+  end
   if self.ctx.connections[record.key] ~= record or record.closing then return end
   self:respond(record, request, ok, value)
   self:run_requests(record)

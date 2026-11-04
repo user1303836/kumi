@@ -67,7 +67,7 @@
   },
   "roles": {
     "about": "What an object is for, as a patcher's colours can show it.",
-    "dsp": ["gen", "gen~", "mc.gen~", "mc.poly~", "pfft~", "poly~", "rnbo~"],
+    "dsp": ["gen", "gen~", "mc.gen~", "mc.poly~", "mcs.gen~", "pfft~", "poly~", "rnbo~"],
     "storage": ["buffer~", "coll", "dict", "polybuffer~", "pattrstorage", "table", "value"],
     "timing": ["defer", "deferlow", "delay", "line", "metro", "pipe", "qlim", "speedlim", "timer"],
     "wireless": ["forward", "mc.receive~", "mc.send~", "receive", "receive~", "send", "send~"]

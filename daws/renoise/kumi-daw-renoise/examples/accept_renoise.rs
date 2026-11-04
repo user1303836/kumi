@@ -2,7 +2,11 @@
 //! whole stack (its change tools, make_changes, undo_change and HISTORY; the host in process; the tool in Renoise).
 //!
 //! accept_renoise <kumi-home> [--only <case,...>] [--big] [--out <results.md>] | --lua <probe.lua>
+//! accept_renoise <kumi-home> --point-reference | --restore-reference
 //!
+//! - `--point-reference`, before Renoise starts, points the installed tool's bridge-reference.json at `<kumi-home>` (nothing
+//!   then reaches a producer's ~/.kumi), keeping the original beside the lab's files; `--restore-reference` puts it back. A
+//!   run stops at once when the tool reports somewhere else.
 //! - Renoise runs with Kumi's tool installed and connected to `<kumi-home>` (its discovery and secret), stopped. The runner
 //!   builds what each case needs in the open song (tracks, instruments, patterns named "K …"): use a scratch song, never a
 //!   producer's.
@@ -252,13 +256,21 @@ struct Case {
     /// A known limit of Renoise's: failures of the steps after the second apply (Renoise's undo and redo, and Kumi's undo
     /// after them) make the case a limit, with this reason.
     limit: &'static str,
+    /// Lua the producer's Renoise runs between Kumi's change and its undo.
+    between: &'static str,
+    /// How long the plug-in needs after Kumi's undo before the change is made again.
+    settle_ms: u64,
 }
 
 const fn case(tool: &'static str, setup: &'static str, input: &'static str, probe: &'static str) -> Case {
-    Case { tool, label: "", setup, host: &[], input, probe, note: "", limit: "" }
+    Case { tool, label: "", setup, host: &[], input, probe, note: "", limit: "", between: "", settle_ms: 0 }
 }
 
 impl Case {
+    const fn between(mut self, between: &'static str) -> Self {
+        self.between = between;
+        self
+    }
     const fn label(mut self, label: &'static str) -> Self {
         self.label = label;
         self
@@ -273,6 +285,10 @@ impl Case {
     }
     const fn limit(mut self, why: &'static str) -> Self {
         self.limit = why;
+        self
+    }
+    const fn settle(mut self, ms: u64) -> Self {
+        self.settle_ms = ms;
         self
     }
     fn name(&self) -> String {
@@ -293,14 +309,57 @@ const PHRASE: &str = "local i = new_instrument('K phrase', 1) song:instrument(i)
 const CHAIN: &str =
     "local i = new_instrument('K chain', 1) local c = song:instrument(i):insert_sample_device_chain_at(1) c.name = 'K ch' return {i = i}";
 const CHAIN_DEVICES: &str = "local i = new_instrument('K chain', 1) local c = song:instrument(i):insert_sample_device_chain_at(1) c:insert_device_at('Audio/Effects/Native/Gainer', 2) c:insert_device_at('Audio/Effects/Native/Delay', 3) return {i = i}";
+/// A chain's Gainer and an *LFO aimed at its first parameter, and what reads them: Renoise gives a device made from its
+/// settings no aim, and clears one as its target goes (#399 N-S22).
+const AIMED_CHAIN: &str = "local i = new_instrument('K aim', 1) local c = song:instrument(i):insert_sample_device_chain_at(1) c:insert_device_at('Audio/Effects/Native/Gainer', 2) local l = c:insert_device_at('Audio/Effects/Native/*LFO', 3) for _, p in ipairs(l.parameters) do if p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end return {i = i}";
+const CHAIN_AIMS: &str = "local out = {} local chains = song:instrument($i).sample_device_chains if #chains == 0 then return out end for k, d in ipairs(chains[1].devices) do local row = d.device_path for _, p in ipairs(d.parameters) do if p.name:find('^Dest') then row = row .. ' ' .. p.name .. '=' .. p.value end end out[k] = row end return out";
+/// A track's device and a meta device moving its first parameter, as Renoise moves it whatever the transport does (#804).
+const AIMED_TRACK: &str = "local t = new_track('K aimed', {'Audio/Effects/Native/Gainer', 'Audio/Effects/Native/*LFO'}) for _, p in ipairs(song:track(t):device(3).parameters) do if p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end return {t = t}";
+const AIMED_ACROSS: &str = "local t = new_track('K aimed', {'Audio/Effects/Native/Gainer'}) local o = new_track('K lfo', {'Audio/Effects/Native/*LFO'}) for _, p in ipairs(song:track(o):device(2).parameters) do if p.name == 'Dest. Track' then p.value = t - 1 elseif p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end return {t = t, o = o}";
+const AIMED_DOOFER: &str = "local t = new_track('K aimed', {'Audio/Effects/Native/Doofer', 'Audio/Effects/Native/*LFO'}) local d = song:track(t):device(2) for _, p in ipairs(song:track(t):device(3).parameters) do if p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end d:parameter(2).value = 75 local x = d.active_preset_data d:parameter(2).value = 50 return {t = t, x = x}";
+const AIMED_EQ: &str = "local t = new_track('K aimed', {'Audio/Effects/Native/EQ 5', 'Audio/Effects/Native/*LFO'}) for _, p in ipairs(song:track(t):device(3).parameters) do if p.name == 'Dest. Effect' or p.name == 'Dest. Parameter' then p.value = 1 end end return {t = t}";
+/// A Doofer with an *LFO inside aimed at the Gainer inside, written as its data says it (a device's own data keeps no aim), and data
+/// for it with its second macro changed.
+const AIMED_INSIDE: &str = "local t = new_track('K inside', {'Audio/Effects/Native/Gainer', 'Audio/Effects/Native/*LFO', 'Audio/Effects/Native/Doofer'}) local tr = song:track(t) local function body(d, slot) return d.active_preset_data:match('<DeviceSlot type=\\\"' .. slot .. '\\\">(.-)</DeviceSlot>') end local inner = '<Devices><GainerDevice type=\\\"GainerDevice\\\">' .. body(tr:device(2), 'GainerDevice') .. '</GainerDevice><LfoDevice type=\\\"LfoDevice\\\">' .. body(tr:device(3), 'LfoDevice') .. '</LfoDevice></Devices>' local d = tr:device(4) d.active_preset_data = d.active_preset_data:gsub('<DeviceChain>', '<DeviceChain>' .. inner:gsub('%%', '%%%%'), 1) local aimed = d.active_preset_data:gsub('(<DestEffect>%s*<Value>)[^<]*', '%10', 1):gsub('(<DestParameter>%s*<Value>)[^<]*', '%11', 1) d.active_preset_data = aimed tr:delete_device_at(3) tr:delete_device_at(2) local now = tr:device(2) now:parameter(2).value = 75 local x = now.active_preset_data now:parameter(2).value = 50 return {t = t, x = x}";
+/// A Gainer whose Gain automation Renoise plays: the transport runs through the case.
+const AUTOMATED: &str = "song:pattern(1).number_of_lines = 16 local t = new_track('K automated', {'Audio/Effects/Native/Gainer'}) local a = song:pattern(1):track(t):create_automation(song:track(t):device(2):parameter(1)) a:add_point_at(1, 0.1) a:add_point_at(9, 0.9) song.transport:start_at(1) return {t = t}";
+const AIMS_ON: &str = "local out = {} for k, d in ipairs(song:track($t).devices) do local row = d.device_path for _, p in ipairs(d.parameters) do if p.name:find('^Dest') then row = row .. ' ' .. p.name .. '=' .. p.value end end out[k] = row end return out";
+/// An empty instrument with settings of its own, which clear() resets, and a file to load into it (#399 N-S12).
+const KEPT_SLOT: &str = "local f = new_instrument('K xrni', 1) song.selected_instrument_index = f renoise.app():save_instrument('$dir/k.xrni') local i = new_instrument('K slot', 0) local s = song:instrument(i) s.volume = 0.5 s.transpose = 3 s.midi_output_properties.channel = 5 s:macro(1).name = 'Cut' return {i = i}";
+const KEPT_SLOT_MIDDLE: &str = "local f = new_instrument('K xrni', 1) song.selected_instrument_index = f renoise.app():save_instrument('$dir/k.xrni') local i = new_instrument('K slot', 0) local s = song:instrument(i) s.volume = 0.5 s.transpose = 3 s.midi_output_properties.channel = 5 s:macro(1).name = 'Cut' song:insert_instrument_at(i + 1) return {i = i}";
+const KIT_SLOT: &str = "local f = new_instrument('K wav', 1) song:instrument(f):sample(1).sample_buffer:save_as('$dir/k1.wav', 'wav') local i = new_instrument('K slot', 0) local s = song:instrument(i) s.volume = 0.5 s.transpose = 3 return {i = i}";
+const SLOT_SETTINGS: &str = "local s = song:instrument($i) return {s.name, s.volume, s.transpose, s.midi_output_properties.channel, s:macro(1).name, #s.samples, #song.instruments}";
 const PLUGIN: &str = "local i = new_instrument('K plugin', 0) song:instrument(i).plugin_properties:load_plugin('Audio/Generators/AU/aumu:dls :appl') local pp = song:instrument(i).plugin_properties return {i = i, s = not pp.auto_suspend}";
+/// A plug-in with several programs: Dexed, free, if it's installed. Apple's AU instruments have one each.
+const PROGRAMS: &str = "local i = new_instrument('K programs', 0) local pp = song:instrument(i).plugin_properties if not pp:load_plugin('Audio/Generators/AU/aumu:Dexd:DGSB') then error('NOT_RUN: no plug-in with several programs here (install Dexed for it)') end return {i = i}";
+/// What the plug-in holds and its program, for a change of program.
+const PROGRAM_NOW: &str = "local d = song:instrument($i).plugin_properties.plugin_device local x, h = d.active_preset_data, 0 for k = 1, #x do h = (h * 31 + x:byte(k)) % 2147483647 end return {d.active_preset, h, values(d)}";
+/// A VST3 instrument (Dexed, if it's installed) playing its first program, and its fifth program's state as a .vstpreset:
+/// what Renoise holds of a VST3 is that file's bytes, base64 in the slot's ParameterChunk.
+const VST3_PRESET: &str = r#"local i = new_instrument('K vst3', 0) local pp = song:instrument(i).plugin_properties
+local path for _, info in ipairs(pp.available_plugin_infos) do if info.path:find('/VST3/', 1, true) and info.name:find('Dexed', 1, true) then path = info.path end end
+if not path or not pp:load_plugin(path) then error('NOT_RUN: no VST3 instrument here (turn VST3 on in Renoise and install Dexed for it)') end
+local d = pp.plugin_device d.active_preset = 5
+local b64 = d.active_preset_data:match('<ParameterChunk><!%[CDATA%[(.-)%]%]></ParameterChunk>')
+if not b64 then error('no ParameterChunk: ' .. d.active_preset_data:sub(1, 200)) end
+local A = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+local bytes, acc, bits = {}, 0, 0
+for c in b64:gmatch('[%w%+/]') do
+  acc = acc * 64 + A:find(c, 1, true) - 1 bits = bits + 6
+  if bits >= 8 then bits = bits - 8 bytes[#bytes + 1] = string.char(math.floor(acc / 2 ^ bits) % 256) acc = acc % 2 ^ bits end
+end
+local f = io.open('$dir/k.vstpreset', 'wb') f:write(table.concat(bytes)) f:close()
+d.active_preset = 1 return {i = i}"#;
+/// What Kumi's kit sounds from: two files on disk.
+const KIT_FILES: &str = "local i = new_instrument('K kit source', 2) local ins = song:instrument(i) ins:sample(1).sample_buffer:save_as('$dir/kit1.wav', 'wav') ins:sample(2).sample_buffer:save_as('$dir/kit2.wav', 'wav') return {}";
 const SLOT: &str = "local q, p = new_slot() return {q = q, p = p}";
 /// What a Doofer holds: its devices' types and their gains, as its preset data says.
 const INSIDE: &str = r#"local x = pdata(song:track($t):device(2)) local out = {} for k in x:gmatch('type="(%w+)"') do out[#out + 1] = k end for v in x:gmatch('<Volume>%s*<Value>([^<]*)</Value>') do out[#out + 1] = v end return out"#;
-/// Why Kumi's undo of lines refuses after Renoise's undo and redo of them.
-const LINES_REDO: &str = "Renoise's redo of lines can't be told from its undo bringing back the producer's like lines (review MUST 6, 10): Kumi's undo refuses after it, and HISTORY says Renoise put them back";
+/// Lines that Renoise's undo and redo took back and put again. Each case makes Kumi's step the newest, so the redo must be told
+/// for sure and Kumi's undo must work: an unsure redo or a refused undo fails the case.
+const LINES_REDO: &str = "Kumi's step is the newest (#393): Renoise's redo of it is told for sure, and Kumi's undo works";
 /// Why Renoise's undo can't take a plug-in instrument's change back now and then.
-const AU_UNDO: &str = "Renoise's undo history goes empty now and then once AU plug-in instruments load and unload (can_undo() false before its undo; as after n-devices' device inventory): its undo takes nothing back, HISTORY stays as it was, Kumi's undo works";
+const AU_UNDO: &str = "Renoise sometimes holds its undo step open after an AU instrument loads, until it loses the app focus (can_undo() false, later changes folded into that step; #393): the runner moves the focus away and back, and where a step was folded before that, Renoise's undo takes more back; Kumi's undo works";
 
 static CASES: &[Case] = &[
     // Mixer, names, structure (M3 kinds, now through the whole stack)
@@ -320,6 +379,13 @@ static CASES: &[Case] = &[
     case("device_add", TRACK, r#"{"ref":"$E:track:$t","path":"Audio/Effects/Native/Delay"}"#, "return paths($t)"),
     case("device_delete", "return {t = new_track('K device', {'Audio/Effects/Native/Delay'})}", r#"{"ref":"$E:device:$t.2"}"#, "return paths($t)"),
     case("device_move", "return {t = new_track('K device', {'Audio/Effects/Native/Delay', 'Audio/Effects/Native/Gainer'})}", r#"{"ref":"$E:device:$t.2","index":3}"#, "return paths($t)"),
+    case("device_delete", AIMED_TRACK, r#"{"ref":"$E:device:$t.2"}"#, AIMS_ON).label("device_delete a meta device moves, on its track"),
+    case("device_delete", AIMED_ACROSS, r#"{"ref":"$E:device:$t.2"}"#, "return paths($t)").label("device_delete a meta device moves, from another track"),
+    case("device_delete", AUTOMATED, r#"{"ref":"$E:device:$t.2"}"#, "return paths($t)").label("device_delete a device automation moves, playing"),
+    case("device_move", AIMED_TRACK, r#"{"ref":"$E:device:$t.2","index":3}"#, "return paths($t)").label("device_move a device a meta device moves"),
+    case("device_preset", AIMED_EQ, r#"{"ref":"$E:device:$t.2","preset":2}"#, "local d = song:track($t):device(2) return {d.active_preset, d:parameter(2).value, d:parameter(3).value}").label("device_preset on a device a meta device moves"),
+    case("device_preset_data", AIMED_DOOFER, r#"{"ref":"$E:device:$t.2","presetData":"$x"}"#, "return song:track($t):device(2):parameter(2).value").label("device_preset_data on a Doofer whose macro a meta device moves"),
+    case("device_preset_data", AIMED_INSIDE, r#"{"ref":"$E:device:$t.2","presetData":"$x"}"#, "return song:track($t):device(2):parameter(2).value").label("device_preset_data on a Doofer with a meta device aimed inside"),
     case("device_bypass", "return {t = new_track('K device', {'Audio/Effects/Native/Delay'})}", r#"{"ref":"$E:device:$t.2","bypass":true}"#, "return song:track($t):device(2).is_active"),
     case("device_param", GAINER, r#"{"ref":"$E:device:$t.2","param":1,"value":0.5}"#, "return values(song:track($t):device(2))"),
     case("notes_write", TRACK, r#"{"patternRef":"$E:pattern:1","trackRef":"$E:track:$t","lines":[{"line":0,"notes":[{"col":1,"note":"C-4","instrument":0}]},{"line":4,"notes":[{"col":1,"note":"E-4","instrument":0}]}]}"#, "return notes(1, $t, 8)").note(LINES_REDO),
@@ -335,6 +401,10 @@ static CASES: &[Case] = &[
     case("instrument_macro", INSTRUMENT, r#"{"ref":"$E:instrument:$i","macro":1,"value":0.8,"name":"K cut"}"#, "local m = song:instrument($i):macro(1) return {m.value, m.name}"),
     case("sample_set", INSTRUMENT, r#"{"ref":"$E:sample:$i.1","volumeDb":-6,"transpose":3}"#, "local s = song:instrument($i):sample(1) return {s.volume, s.transpose}"),
     case("keyzone_set", INSTRUMENT, r#"{"ref":"$E:sample:$i.1","baseNote":60,"noteRange":[36,72]}"#, "local m = song:instrument($i):sample(1).sample_mapping return {m.base_note, m.note_range[1], m.note_range[2]}"),
+    case("keyzone_map", "return {i = new_instrument('K map', 2)}", r#"{"ref":"$E:instrument:$i","samples":[{"sampleRef":"$E:sample:$i.1","noteRange":[36,47],"baseNote":36},{"sampleRef":"$E:sample:$i.2","noteRange":[48,59],"baseNote":48}],"overlap":"cycle"}"#, "local ins = song:instrument($i) local a, b = ins:sample(1).sample_mapping, ins:sample(2).sample_mapping return {a.base_note, a.note_range[1], a.note_range[2], b.base_note, b.note_range[1], b.note_range[2], ins.sample_mapping_overlap_mode}"),
+    case("sample_invert", "return {i = new_instrument('K invert', 1)}", r#"{"ref":"$E:sample:$i.1"}"#, "local b = song:instrument($i):sample(1).sample_buffer return {b:sample_data(1, 10), b:sample_data(1, 50), b:sample_data(1, 90)}"),
+    case("instrument_kit", KIT_FILES, r#"{"samples":[{"path":"$dir/kit1.wav"},{"path":"$dir/kit2.wav"}]}"#, "local n, out = #song.instruments, {inames()} for k, smp in ipairs(song:instrument(n).samples) do out[#out + 1] = smp.name end return out"),
+    case("scratch_keep", "local t = new_track('K scratch source') put(1, t, 1, 'C-4') return {t = t}", r#"{"ref":"$c","name":"K kept"}"#, "local out = {} for _, name in ipairs(names()) do if not name:find('Kumi', 1, true) then out[#out + 1] = name end end return out"),
     case("run_lua", TRACK, r#"{"code":"song:track($t).name = 'K lua named' return 42"}"#, "return song:track($t).name")
         .note("Kumi can't take back what Lua did (it doesn't know what it changed): its undo refuses, Renoise's undo takes it back"),
     // Song settings
@@ -389,6 +459,20 @@ static CASES: &[Case] = &[
     case("moddevice_param", "local i = new_instrument('K mod', 1) moddev(song:instrument(i).sample_modulation_sets[1], 'AHDSR') return {i = i}", r#"{"ref":"$E:moddevice:$i.1.1","param":"Attack","value":0.3}"#, "return values(song:instrument($i).sample_modulation_sets[1].devices[1])"),
     case("chain_add", INSTRUMENT, r#"{"ref":"$E:instrument:$i","name":"K chain"}"#, "return chainnames($i)"),
     case("chain_delete", CHAIN, r#"{"ref":"$E:chain:$i.1"}"#, "return chainnames($i)"),
+    case("chain_delete", AIMED_CHAIN, r#"{"ref":"$E:chain:$i.1"}"#, CHAIN_AIMS).label("chain_delete aimed"),
+    case("chaindevice_delete", AIMED_CHAIN, r#"{"ref":"$E:chaindevice:$i.1.3"}"#, CHAIN_AIMS).label("chaindevice_delete the meta"),
+    case("chaindevice_delete", AIMED_CHAIN, r#"{"ref":"$E:chaindevice:$i.1.2"}"#, CHAIN_AIMS).label("chaindevice_delete its target"),
+    case("notes_write", TRACK, r#"{"patternRef":"$E:pattern:1","trackRef":"$E:track:$t","lines":[{"line":0,"notes":[{"col":1,"note":"C-4","instrument":0}]},{"line":4,"notes":[{"col":1,"note":"E-4","instrument":0}]}]}"#, "return notes(1, $t, 8)")
+        .label("notes_write undone after an instrument renumbers them")
+        .between("song:insert_instrument_at(1)")
+        .note(LINES_REDO),
+    case("notes_write", TRACK, r#"{"patternRef":"$E:pattern:1","trackRef":"$E:track:$t","lines":[{"line":0,"notes":[{"col":1,"note":"C-4","instrument":0}]},{"line":4,"notes":[{"col":1,"note":"E-4","instrument":0}]}]}"#, "return notes(1, $t, 8)")
+        .label("notes_write refused after an edit in the same callback as an instrument op")
+        .between("song:insert_instrument_at(1) song:pattern(1):track($t):line(7):note_column(1).note_string = 'C-5'")
+        .limit("Kumi's undo is meant to refuse: the edit is the producer's, and these steps can't be run past it."),
+    case("instrument_load", KEPT_SLOT, r#"{"path":"$dir/k.xrni","ref":"$E:instrument:$i"}"#, SLOT_SETTINGS).label("instrument_load into a slot with settings"),
+    case("instrument_load", KEPT_SLOT_MIDDLE, r#"{"path":"$dir/k.xrni","ref":"$E:instrument:$i"}"#, SLOT_SETTINGS).label("instrument_load into a slot in the middle"),
+    case("instrument_kit", KIT_SLOT, r#"{"ref":"$E:instrument:$i","samples":[{"path":"$dir/k1.wav","name":"K one"}]}"#, "local s = song:instrument($i) return {s.name, s.volume, s.transpose, #s.samples}").label("instrument_kit into a slot with settings"),
     case("chain_set", CHAIN, r#"{"ref":"$E:chain:$i.1","name":"K air"}"#, "return chainnames($i)"),
     case("chaindevice_add", CHAIN, r#"{"ref":"$E:chain:$i.1","path":"Gainer"}"#, "return chainpaths($i, 1)"),
     case("chaindevice_delete", CHAIN_DEVICES, r#"{"ref":"$E:chaindevice:$i.1.2"}"#, "return chainpaths($i, 1)"),
@@ -410,11 +494,14 @@ static CASES: &[Case] = &[
     case("phrase_script", PHRASE, r#"{"ref":"$E:phrase:$i.1","code":"return pattern { unit = \"1/8\", event = { \"c4\", \"e4\" } }"}"#, "local ph = song:instrument($i):phrase(1) return {ph.playback_mode, table.concat(ph.script.paragraphs, '\\n')}"),
     case("phrase_render", "local i = new_instrument('K render', 1) local ph = song:instrument(i):insert_phrase_at(1) ph.playback_mode = R.InstrumentPhrase.PLAY_SCRIPT ph.script.paragraphs = {'return pattern { unit = \"1/8\", event = { \"c4\", \"e4\", \"g4\" } }'} ph.script:commit() return {i = i}", r#"{"ref":"$E:phrase:$i.1"}"#, "local ph = song:instrument($i):phrase(1) return {ph.playback_mode, ph.number_of_lines, phnotes($i, 1, 8)}"),
     case("plugin_load", "return {i = new_instrument('K plugin', 0)}", r#"{"ref":"$E:instrument:$i","path":"DLSMusicDevice"}"#, "local ins = song:instrument($i) local pp = ins.plugin_properties return {pp.plugin_loaded, pp.plugin_device and pp.plugin_device.name or false, ins.name}").limit(AU_UNDO),
-    case("plugin_param", PLUGIN, r#"{"ref":"$E:instrument:$i","param":"Volume","value":0.5}"#, "return values(song:instrument($i).plugin_properties.plugin_device)").limit(AU_UNDO),
+    case("plugin_param", PLUGIN, r#"{"ref":"$E:instrument:$i","param":"Volume","value":0.5}"#, "return values(song:instrument($i).plugin_properties.plugin_device)"),
     case("plugin_preset", PLUGIN, r#"{"ref":"$E:instrument:$i","preset":1}"#, "local d = song:instrument($i).plugin_properties.plugin_device local x, h = d.active_preset_data, 0 for k = 1, #x do h = (h * 31 + x:byte(k)) % 2147483647 end return {d.active_preset, h, values(d)}")
-        .limit("This Mac's AU instruments (DLSMusicDevice, AUMIDISynth, AUSampler, MS2000 Emulator) have one program each, which Renoise keeps: the answer is unchanged with no HISTORY row (checked); another program can't be tried here"),
-    case("plugin_set", PLUGIN, r#"{"ref":"$E:instrument:$i","channel":2}"#, "return song:instrument($i).plugin_properties.channel").limit(AU_UNDO),
-    case("plugin_suspend", PLUGIN, r#"{"ref":"$E:instrument:$i","autoSuspend":"$s"}"#, "return song:instrument($i).plugin_properties.auto_suspend").limit(AU_UNDO),
+        .limit("Apple's AU instruments (DLSMusicDevice, AUMIDISynth, AUSampler) have one program each, which Renoise keeps: the answer is unchanged with no HISTORY row (checked); `plugin_preset (programs)` tries another program"),
+    // (Dexed ignores a program for two seconds after its state is written: its `lastStateSave`)
+    case("plugin_preset", PROGRAMS, r#"{"ref":"$E:instrument:$i","preset":3}"#, PROGRAM_NOW).label("programs").settle(2_500),
+    case("plugin_preset_data", VST3_PRESET, r#"{"ref":"$E:instrument:$i","path":"$dir/k.vstpreset"}"#, PROGRAM_NOW).settle(2_500),
+    case("plugin_set", PLUGIN, r#"{"ref":"$E:instrument:$i","channel":2}"#, "return song:instrument($i).plugin_properties.channel"),
+    case("plugin_suspend", PLUGIN, r#"{"ref":"$E:instrument:$i","autoSuspend":"$s"}"#, "return song:instrument($i).plugin_properties.auto_suspend"),
     case("midi_set", "return {i = new_instrument('K midi', 0)}", r#"{"ref":"$E:instrument:$i","channel":10}"#, "return song:instrument($i).midi_output_properties.channel"),
     // Devices (n-devices)
     case("device_preset", EQ5, r#"{"ref":"$E:device:$t.2","preset":2}"#, "local d = song:track($t):device(2) return {d.active_preset, values(d)}"),
@@ -518,6 +605,20 @@ impl Lab {
         }
         let song = host_call(&self.host, "read", json!({"kind": "song"})).await.unwrap_or_default();
         song["epoch"].as_str().unwrap_or_default().to_owned()
+    }
+
+    /// An AU instrument's load sometimes leaves Renoise holding its undo step open: `can_undo()` reads false and later changes
+    /// fold into that step, until Renoise loses the app focus (#393, measured). Moves the focus away and back when so.
+    async fn close_held_step(&self) {
+        if self.lua("return song:can_undo()").await != Ok(json!(false)) {
+            return;
+        }
+        let open = |app: &str| std::process::Command::new("open").args(["-a", app]).status();
+        if open(&std::env::var("KUMI_LAB_BACK_APP").unwrap_or_else(|_| "Finder".into())).is_ok() {
+            tokio::time::sleep(Duration::from_millis(1_200)).await;
+            open("Renoise").ok();
+            tokio::time::sleep(Duration::from_millis(600)).await;
+        }
     }
 
     async fn pause(&self) {
@@ -649,6 +750,10 @@ impl Outcome {
 
 async fn setup(lab: &Lab, case: &Case) -> Result<BTreeMap<String, Value>, String> {
     let mut vars = lab.vars.clone();
+    // (a case before may have left the transport running, or a meta device moving what it aimed at)
+    lab.lua("song.transport:stop() for t = 1, #song.tracks do for d = 2, #song:track(t).devices do local device = song:track(t):device(d) if device.is_active and device.device_path:find('/*LFO', 1, true) then device.is_active = false end end end return true")
+        .await
+        .map_err(|why| format!("setup: {why}"))?;
     let made = lab.lua(&fill_lua(case.setup, &vars)).await.map_err(|why| format!("setup: {why}"))?;
     if let Value::Object(fields) = made {
         vars.extend(fields);
@@ -663,6 +768,19 @@ async fn setup(lab: &Lab, case: &Case) -> Result<BTreeMap<String, Value>, String
         let args = json!({"transactionId": preview["transactionId"], "confirmation": preview["confirmation"], "idempotencyKey": key});
         host_call(&lab.host, "change_apply", args).await.map_err(|(why, _)| format!("setup {kind}: {why}"))?;
         host_call(&lab.host, "change_release", json!({"transactionIds": [preview["transactionId"]]})).await.ok();
+    }
+    if case.setup.contains("load_plugin") {
+        lab.close_held_step().await;
+    }
+    // (a scratch copy of the track, by the host's call Kumi's listening uses)
+    if case.tool == "scratch_keep" {
+        let epoch = lab.epoch().await;
+        let track = format!("{epoch}:track:{}", vars["t"]);
+        let made = host_call(&lab.host, "scratch", json!({"action": "make", "ref": track, "count": 1, "label": "accept", "epoch": epoch}))
+            .await
+            .map_err(|(why, _)| format!("scratch make: {why}"))?;
+        let copy = made.pointer("/copies/0/ref").cloned().ok_or_else(|| format!("no copy: {made}"))?;
+        vars.insert("c".into(), copy);
     }
     vars.insert("E".into(), json!(lab.epoch().await));
     Ok(vars)
@@ -692,6 +810,13 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
     out.note = case.note.to_owned();
     let mut vars = match setup(lab, case).await {
         Ok(vars) => vars,
+        // (the machine has no plug-in for the case: nothing was tried)
+        Err(why) if why.contains("NOT_RUN: ") => {
+            out.verdict = Verdict::Limit;
+            let reason = why.split("NOT_RUN: ").nth(1).unwrap_or_default();
+            out.note = format!("not run: {}", reason.lines().next().unwrap_or_default());
+            return out;
+        }
         Err(why) => return out.fail("setup", why),
     };
     let p0 = probe(lab, case, &vars).await;
@@ -724,6 +849,12 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
         let note = row.note.clone().unwrap_or_default();
         out.step("note", note.contains("Renoise") && note.contains("Kumi"), format!("“{}”", short(&note, 90)));
     }
+    if !case.between.is_empty() {
+        if let Err(why) = lab.lua(&fill_lua(case.between, &vars)).await {
+            return out.fail("between", why);
+        }
+        lab.pause().await;
+    }
     // 2. Kumi's undo, read back
     let undo = lab.undo(&row.id).await;
     let p2 = probe(lab, case, &vars).await;
@@ -738,8 +869,12 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
     if case.tool == "run_lua" {
         return run_lua_case(lab, case, out, vars, p0).await;
     }
+    if case.tool == "scratch_keep" {
+        return scratch_keep_case(lab, out).await;
+    }
     // 3. Again, then Renoise's own undo and redo
     lab.pause().await;
+    tokio::time::sleep(Duration::from_millis(case.settle_ms)).await;
     if outside_undo {
         // (a step Renoise's undo takes instead: this change makes none)
         if let Err(why) = lab.lua("song.artist = 'K sentinel ' .. tostring(os.clock())").await {
@@ -758,6 +893,9 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
         out.info("again", format!("took otherwise: {p3}"));
     }
     lab.pause().await;
+    if case.tool.starts_with("plugin_") {
+        lab.close_held_step().await;
+    }
     let stack = lab.lua("return {song:can_undo(), song:can_redo()}").await.unwrap_or_default();
     // (Renoise keeps no undo step now and then for a whole session: its undo then takes nothing back, which is no case's doing)
     let kept_none = stack[0] == json!(false);
@@ -810,7 +948,12 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
             Some(ChangeState::Unsure) => format!("unsure “{}”", short(&told.and_then(|r| r.note).unwrap_or_default(), 50)),
             _ => format!("{state:?}"),
         };
-        let ok = same(&p3, &p5) && matches!(state, Some(ChangeState::Applied | ChangeState::Unsure));
+        let ok = same(&p3, &p5)
+            && match state {
+                Some(ChangeState::Applied) => true,
+                Some(ChangeState::Unsure) => case.note != LINES_REDO,
+                _ => false,
+            };
         out.step("daw redo", ok, if same(&p3, &p5) { told } else { format!("{told} → {p5}") });
     }
     // 4. Kumi's undo once more: puts it back, or refuses and says why
@@ -828,7 +971,7 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
             let note = row.and_then(|r| r.note).unwrap_or_default();
             out.step(
                 "last undo",
-                !note.is_empty(),
+                !note.is_empty() && case.note != LINES_REDO,
                 format!("refused{}: “{}”", if unsure { " (after an unsure redo)" } else { "" }, short(&note, 80)),
             );
             // (the bridge's own words, under HISTORY's)
@@ -849,6 +992,39 @@ async fn run_case(lab: &Lab, case: &Case, outside_undo: bool) -> Outcome {
         out.verdict = Verdict::Limit;
         out.note = "Renoise kept no undo step for it (can_undo() false before its undo): its undo took nothing back".into();
     }
+    out
+}
+
+/// scratch_keep: Kumi's undo above deleted the track, so the copy can't be kept again. The first case's flow is enough to see
+/// what's kept and what's taken back; this makes a second copy and keeps it, for Renoise's own undo, which takes back only its
+/// name.
+async fn scratch_keep_case(lab: &Lab, mut out: Outcome) -> Outcome {
+    let mut vars = match setup(lab, &CASES.iter().find(|case| case.tool == "scratch_keep").expect("the case")).await {
+        Ok(vars) => vars,
+        Err(why) => return out.fail("second copy", why),
+    };
+    vars.insert("E".into(), json!(lab.epoch().await));
+    let input = fill_json(&json!({"ref": "$c", "name": "K kept again"}), &vars);
+    let (said, added) = lab.plan(json!([{"tool": "scratch_keep", "input": input}])).await;
+    let Some(row) = added.last().cloned() else { return out.fail("second keep", short(&said.text, 200)) };
+    let kept = lab.lua("return names()").await.unwrap_or_default();
+    lab.pause().await;
+    if let Err(why) = lab.lua("song:undo()").await {
+        return out.fail("daw undo", why);
+    }
+    let told = lab.wait_state(&row.id, ChangeState::Undone, TOLD_MS).await;
+    let after = lab.lua("return names()").await.unwrap_or_default();
+    let named_back = !after.to_string().contains("K kept again");
+    out.step("daw undo takes the name", told.is_some() && named_back, format!("{after}"));
+    lab.pause().await;
+    if let Err(why) = lab.lua("song:redo()").await {
+        return out.fail("daw redo", why);
+    }
+    let told = lab.wait_state(&row.id, ChangeState::Applied, TOLD_MS).await;
+    out.step("daw redo", told.is_some() && same(&lab.lua("return names()").await.unwrap_or_default(), &kept), "");
+    let last = lab.undo(&row.id).await;
+    let gone = !lab.lua("return names()").await.unwrap_or_default().to_string().contains("K kept again");
+    out.step("last undo deletes it", !last.error && gone, short(&last.text, 100));
     out
 }
 
@@ -894,6 +1070,57 @@ fn library_file(root: &Path, folder: &str, extension: &str, prefer: &str) -> Opt
     Some(pick.to_string_lossy().into_owned())
 }
 
+/// The installed tool's bridge-reference.json, which says what Kumi home it reports to (the Renoise Kumi's tool goes in).
+fn tool_reference() -> Option<PathBuf> {
+    let var = |name: &str| std::env::var(name).ok();
+    let env = daw_bridge::detect::Env { os: daw_bridge::detect::Os::current(), home: dirs_home(), var: &var, root: None };
+    let target = daw_bridge::detect::detect_renoise(&env).target?;
+    Some(target.tools().join(daw_bridge::install::RENOISE_TOOL_FOLDER).join("bridge-reference.json")).filter(|path| path.is_file())
+}
+
+fn saved_reference(home: &Path) -> PathBuf {
+    home.join("accept-renoise").join("bridge-reference.saved.json")
+}
+
+/// Points the tool at `home`, keeping what it said to put back. A saved one is kept as it is: only the first is the original.
+fn point_reference(home: &Path) -> Result<(), String> {
+    let path = tool_reference().ok_or("no installed tool with a bridge-reference.json")?;
+    let text = std::fs::read_to_string(&path).map_err(|why| why.to_string())?;
+    let mut reference: Value = serde_json::from_str(&text).map_err(|why| why.to_string())?;
+    let saved = saved_reference(home);
+    std::fs::create_dir_all(saved.parent().expect("a folder")).map_err(|why| why.to_string())?;
+    if !saved.exists() {
+        std::fs::write(&saved, &text).map_err(|why| why.to_string())?;
+    }
+    let ours = home.join("bridges/renoise");
+    for (key, name) in [("secretFile", "bridge.secret"), ("discoveryDir", "discovery"), ("logDir", "logs")] {
+        reference[key] = json!(ours.join(name).to_string_lossy());
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&reference).expect("JSON")).map_err(|why| why.to_string())?;
+    println!("{} reports to {}; put it back with --restore-reference", path.display(), home.display());
+    Ok(())
+}
+
+fn restore_reference(home: &Path) -> Result<(), String> {
+    let saved = saved_reference(home);
+    let path = tool_reference().ok_or("no installed tool with a bridge-reference.json")?;
+    std::fs::copy(&saved, &path).map_err(|why| format!("{}: {why}", saved.display()))?;
+    std::fs::remove_file(&saved).map_err(|why| why.to_string())
+}
+
+/// Why the run can't reach Renoise through `home`, when the tool reports somewhere else.
+fn reference_elsewhere(home: &Path) -> Option<String> {
+    let path = tool_reference()?;
+    let reference: Value = serde_json::from_str(&std::fs::read_to_string(&path).ok()?).ok()?;
+    let discovery = reference.get("discoveryDir")?.as_str()?;
+    (!Path::new(discovery).starts_with(home)).then(|| {
+        format!(
+            "Renoise's tool reports to {discovery}, not {}: quit Renoise, run this with --point-reference, and start it again",
+            home.display()
+        )
+    })
+}
+
 fn markdown(outcomes: &[Outcome]) -> String {
     let mut text = String::from("| Case | Apply | Steps | Result | Note |\n|---|---|---|---|---|\n");
     for o in outcomes {
@@ -920,7 +1147,20 @@ fn main() {
     let only: Option<Vec<String>> = flag("--only").map(|list| list.split(',').map(str::to_owned).collect());
     let big = argv.iter().any(|a| a == "--big");
     let out_path = flag("--out");
-    let home = PathBuf::from(home);
+    // (absolute: what's written into the reference is read from Renoise's own folder)
+    let home = std::path::absolute(home).expect("a Kumi home");
+    if argv.iter().any(|a| a == "--point-reference" || a == "--restore-reference") {
+        let done = if argv.iter().any(|a| a == "--point-reference") { point_reference(&home) } else { restore_reference(&home) };
+        if let Err(why) = done {
+            eprintln!("{why}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let Some(why) = reference_elsewhere(&home) {
+        eprintln!("{why}");
+        std::process::exit(2);
+    }
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     tokio::task::LocalSet::new().block_on(&runtime, async {
         let host = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, &home)), id: Cell::new(0) });
@@ -972,15 +1212,28 @@ fn main() {
             };
         }
         let lab = Lab { host, hooked, daw: daw.clone(), tools: RefCell::new(tools), rows, told, focus, vars };
-        // Renoise keeps no undo step now and then for a whole session (seen from its start too): a run then proves nothing of its
-        // undo, so it stops at once and says so.
+        // A held step (an AU's load, moving the focus closes it) or no step for a whole session: a run then proves nothing of
+        // Renoise's undo, so it stops at once and says which it was. A call that failed says so, and what failed.
         if !big {
-            lab.lua("song.artist = 'K undo check'").await.ok();
-            lab.pause().await;
-            let kept = lab.lua("return song:can_undo()").await;
-            lab.lua("song:undo()").await.ok();
-            if kept != Ok(json!(true)) {
-                eprintln!("Renoise keeps no undo step in this session (can_undo() false after a change): quit and start it again");
+            let through = home.display();
+            let problem = match lab.lua("song.artist = 'K undo check'").await {
+                Err(why) => Some(format!("Couldn't run Lua in Renoise through {through}: {why}")),
+                Ok(_) => {
+                    lab.pause().await;
+                    lab.close_held_step().await;
+                    let kept = lab.lua("return song:can_undo()").await;
+                    lab.lua("song:undo()").await.ok();
+                    match kept {
+                        Ok(value) if value == json!(true) => None,
+                        Ok(value) => Some(format!(
+                            "Renoise keeps no undo step in this session (can_undo() {value} after a change and a focus change): quit and start it again"
+                        )),
+                        Err(why) => Some(format!("Couldn't read Renoise's undo through {through}: {why}")),
+                    }
+                }
+            };
+            if let Some(why) = problem {
+                eprintln!("{why}");
                 lab.daw.close().await.ok();
                 std::process::exit(3);
             }
@@ -1118,7 +1371,7 @@ mod extras {
             done(outcomes, selection(lab).await);
         }
         println!("== edge cases");
-        for name in ["edge changed", "edge copy", "edge alias", "edge group", "edge hidden"] {
+        for name in ["edge changed", "edge copy", "edge alias", "edge group", "edge hidden", "edge later step"] {
             if !wanted(name) {
                 continue;
             }
@@ -1127,7 +1380,8 @@ mod extras {
                 "edge copy" => copy(lab).await,
                 "edge alias" => alias(lab).await,
                 "edge group" => group(lab).await,
-                _ => hidden(lab).await,
+                "edge hidden" => hidden(lab).await,
+                _ => later_step(lab).await,
             };
             done(outcomes, out);
         }
@@ -1343,6 +1597,44 @@ mod extras {
         out.step("refused", said.error && added.is_empty(), short(&said.text, 140));
         out.step("producer's value kept", same(&now, &json!(0.3)), format!("{now}"));
         out.step("edit made", !lab.hooked.armed(), "");
+        out
+    }
+
+    /// #393: the producer clears Kumi's note and types the same one. Renoise's undo and redo of that later step leave the lines
+    /// as Kumi wrote them with nothing left to redo, but it isn't Kumi's step: its undo refuses, and the typed note stays.
+    async fn later_step(lab: &Lab) -> Outcome {
+        let mut out = Outcome::new("edge redo of a later step".into());
+        let Ok(vars) = fresh(lab, "return {t = new_track('K later')}").await else { return out.fail("setup", "") };
+        let write = r#"{"patternRef":"$E:pattern:1","trackRef":"$E:track:$t","lines":[{"line":0,"notes":[{"col":1,"note":"C-4","instrument":0}]}]}"#;
+        let (said, added) = lab.plan(json!([{"tool": "notes_write", "input": input(write, &vars)}])).await;
+        let Some(id) = added.last().map(|row| row.id.clone()) else { return out.fail("apply", short(&said.text, 140)) };
+        let notes = fill_lua("return notes(1, $t, 4)", &vars);
+        let kumis = read(lab, &notes).await;
+        lab.pause().await;
+        let clear = fill_lua("song:pattern(1):track($t):line(1):note_column(1):clear()", &vars);
+        let typed = fill_lua("put(1, $t, 1, 'C-4')", &vars);
+        for edit in [clear, typed] {
+            if let Err(why) = lab.lua(&edit).await {
+                return out.fail("the producer's steps", why);
+            }
+            lab.pause().await;
+        }
+        out.step("reads as Kumi wrote", same(&read(lab, &notes).await, &kumis), "");
+        if let Err(why) = lab.lua("song:undo()").await {
+            return out.fail("daw undo", why);
+        }
+        let undone = lab.wait_state(&id, ChangeState::Undone, TOLD_MS).await;
+        out.step("daw undo told", undone.is_some(), "");
+        lab.pause().await;
+        if let Err(why) = lab.lua("song:redo()").await {
+            return out.fail("daw redo", why);
+        }
+        let unsure = lab.wait_state(&id, ChangeState::Unsure, TOLD_MS).await;
+        let stack = read(lab, "return {song:can_undo(), song:can_redo()}").await;
+        out.step("daw redo unsure", unsure.is_some(), format!("can_undo, can_redo: {stack}"));
+        let refused = lab.undo(&id).await;
+        out.step("refused", refused.error || lab.row(&id).is_some_and(|row| row.state == ChangeState::Kept), short(&refused.text, 100));
+        out.step("typed note kept", same(&read(lab, &notes).await, &kumis), "");
         out
     }
 

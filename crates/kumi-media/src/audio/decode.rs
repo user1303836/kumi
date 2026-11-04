@@ -246,12 +246,25 @@ async fn convert(
     };
     let input_s = input.to_string_lossy();
     let output_s = output.to_string_lossy();
+    let folder = output.parent().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
     // How long it is (ffprobe, or what ffmpeg says of it, decoding nothing): to ask room for what will be written, and to
     // keep the file's length when the copy stops short of it. A reading can be wrong, so where ffmpeg stops isn't up to it.
     // (A stretch's length is known: nothing to read first. Nor is a length known already read again.)
-    let length = match until {
+    //
+    // Read after the copy, `later`, when the reading changes nothing before it: there's room for the copy to the reach
+    // (so for one stopping sooner too), and the reach's conversion has the same time whatever the reading. ffmpeg then
+    // says the file's length as it opens it to convert (its Duration line: the reading the probe makes), and a file
+    // ending well before the reach keeps the copy's length whatever the probe would say: the probe runs only for the rest.
+    let later = match until {
+        Some(until) if from.is_none() && known.is_none() && until <= READ_LATER_UP_TO => {
+            kumi_types::disk::low_disk(&folder, until * BYTES_A_SECOND, "Kumi reads audio on").await.is_none()
+        }
+        _ => false,
+    };
+    let mut length = match until {
         Some(_) if from.is_none() => match known {
             Some(known) => Some(known),
+            None if later => None,
             None => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
         },
         _ => None,
@@ -260,15 +273,19 @@ async fn convert(
     let reach = until.map(|until| until - from.unwrap_or(0.));
     let until_text = reach.map(|reach| to_fixed(reach, 3));
     let from_text = from.map(|from| to_fixed(from, 3));
-    let folder = output.parent().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
     // How big the file is: how long converting it may take when its length isn't known.
     let bytes = tokio::fs::metadata(input).await.map_or(0, |metadata| metadata.len());
     let (mut no_room, mut timed_out) = (None, None);
     for Attempt { command, args, mut writes } in
-        attempts(mac, &ffmpeg, &input_s, &output_s, reach.zip(until_text.as_deref()), length, from_text.as_deref())
+        attempts(mac, &ffmpeg, &input_s, &output_s, reach.zip(until_text.as_deref()), length, from_text.as_deref(), later)
     {
         if let Some(s) = &signal {
             s.check()?;
+        }
+        // ffmpeg didn't convert it: its length is read now, as it would have been first, for afconvert's room.
+        if command == "afconvert" && later {
+            length = crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await;
+            writes = length;
         }
         // A Mac's afconvert copies the whole file, a stretch's too, whose length wasn't read: read it now, to ask room
         // for the copy.
@@ -290,8 +307,22 @@ async fn convert(
             None => {}
         }
         let timeout = conversion_timeout_ms(writes, bytes);
-        match run(command, &args, RunOptions { signal: signal.clone(), timeout_ms: Some(timeout), max_buffer: Some(1024 * 1024) }).await {
+        // What ffmpeg says as it opens the file, when it says it, is more than its errors: room for it.
+        let max_buffer = if later && command != "afconvert" { SAYS_LENGTH_BUFFER } else { 1024 * 1024 };
+        match run(command, &args, RunOptions { signal: signal.clone(), timeout_ms: Some(timeout), max_buffer: Some(max_buffer) }).await {
             Ok(_) if command == "afconvert" => return Ok((None, 0., true)),
+            Ok(output) if later => {
+                let length = match (crate::frames::duration_in(&output.stderr), until) {
+                    // Whole in its copy: read by the probe, it would be as long as the copy (not past the reach).
+                    (Some(said), Some(until)) if said + WHOLE_BEFORE_REACH <= until => Some(said),
+                    _ => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+                };
+                // Stopped while it was read: stopped, as when it was read first, not a length unknown.
+                if let Some(s) = &signal {
+                    s.check()?;
+                }
+                return Ok((length, 0., false));
+            }
             Ok(_) => return Ok((length, from.unwrap_or(0.), false)),
             Err(e) => {
                 if signal.as_ref().is_some_and(Signal::is_cancelled) {
@@ -311,6 +342,14 @@ async fn convert(
     }
     Err(AudioError(format!("Kumi couldn't decode {} here: it reads WAV and AIFF itself, and other formats with {}ffmpeg. Install ffmpeg, or export the file as WAV.",input.extension().unwrap_or_default().to_string_lossy().to_uppercase(),if mac {"macOS's afconvert or "}else{""})))
 }
+/// How far before the reach a file must end, by ffmpeg's reading of its length as it converts, for the copy to stand for
+/// its length without the probe: well past the difference between that reading (rounded to hundredths) and the probe's.
+const WHOLE_BEFORE_REACH: f64 = 1.0;
+/// The farthest reach whose length is read after the copy: up to it, a conversion has two minutes whatever the length
+/// read (`conversion_timeout_ms`).
+const READ_LATER_UP_TO: f64 = 1_200.0;
+/// What ffmpeg may say converting a file it says the length of: its errors, and what it opens and writes.
+const SAYS_LENGTH_BUFFER: usize = 16 * 1024 * 1024;
 /// f32 at up to 48 kHz stereo: a copy's size a second.
 const BYTES_A_SECOND: f64 = 384_000.0;
 /// How long a conversion may take: two minutes, or a second for every ten seconds of audio it writes when that's longer
@@ -338,8 +377,11 @@ fn attempts<'a>(
     until: Option<(f64, &'a str)>,
     length: Option<f64>,
     from: Option<&'a str>,
+    says_length: bool,
 ) -> Vec<Attempt<'a>> {
-    let mut args = vec!["-v", "error", "-nostdin", "-y"];
+    // Saying the file's length as it opens it (its Duration line, at info): nothing else changes in what it writes.
+    let mut args =
+        if says_length { vec!["-hide_banner", "-nostats", "-v", "info", "-nostdin", "-y"] } else { vec!["-v", "error", "-nostdin", "-y"] };
     if let Some(from) = from {
         args.extend(["-ss", from]);
     }
@@ -772,7 +814,7 @@ mod tests {
         // Each converter tried, in order: where it stops (`-t`), and the seconds it's asked room for.
         let plan = |mac, until: Option<f64>, length| {
             let text = until.map(|until| to_fixed(until, 3));
-            attempts(mac, "ffmpeg", "in.mp3", "out.wav", until.zip(text.as_deref()), length, None)
+            attempts(mac, "ffmpeg", "in.mp3", "out.wav", until.zip(text.as_deref()), length, None, false)
                 .into_iter()
                 .map(|tried| {
                     let stop = tried.args.iter().position(|arg| *arg == "-t").map(|at| tried.args[at + 1].to_string());
@@ -806,6 +848,32 @@ mod tests {
         assert_eq!(plan(false, None, None), [("ffmpeg".to_string(), None, None)]);
         assert!(AudioError::no_room("Only 5 MB is free.").is_no_room());
         assert!(!AudioError("That file is too short to be audio.".into()).is_no_room());
+        // Saying the file's length as it converts only adds what ffmpeg says: the same conversion, to the same reach.
+        let said = attempts(false, "ffmpeg", "in.mp3", "out.wav", Some((31.0, "31.000")), None, None, true);
+        assert_eq!(
+            said[0].args,
+            [
+                "-hide_banner",
+                "-nostats",
+                "-v",
+                "info",
+                "-nostdin",
+                "-y",
+                "-i",
+                "in.mp3",
+                "-vn",
+                "-t",
+                "31.000",
+                "-acodec",
+                "pcm_f32le",
+                "-f",
+                "wav",
+                "out.wav"
+            ]
+        );
+        let quiet = attempts(false, "ffmpeg", "in.mp3", "out.wav", Some((31.0, "31.000")), None, None, false);
+        assert_eq!(said[0].args[6..], quiet[0].args[4..]);
+        assert_eq!(quiet[0].args[..4], ["-v", "error", "-nostdin", "-y"]);
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -885,6 +953,11 @@ mod tests {
         assert_eq!(conversion_timeout_ms(None, 288_000_000), 3_600_000);
         // An hour at most, however big the file: a 2 GB one would otherwise wait seven hours on a converter that stalls.
         assert_eq!(conversion_timeout_ms(None, 2_000_000_000), 3_600_000);
+        // Up to the farthest reach whose length is read after the copy, the time is the same whatever the length read.
+        for writes in [0., 0.5, 31., 600., READ_LATER_UP_TO] {
+            assert_eq!(conversion_timeout_ms(Some(writes), 0), 120_000);
+        }
+        assert!(conversion_timeout_ms(Some(READ_LATER_UP_TO + 10.), 0) > 120_000);
         let late = AudioError::timed_out(720.);
         assert_eq!(late.to_string(), "Converting that file took over 12 minutes, so Kumi stopped: try again later, or export it as WAV.");
         assert!(late.is_timed_out() && !late.is_no_room() && !AudioError::no_room("Only 5 MB is free.").is_timed_out());
@@ -920,21 +993,45 @@ mod tests {
         assert_eq!(length, Some(360.), "the length ffmpeg read");
     }
 
-    /// A stretch from a file's start reads the file's length first, to ask room for the copy and keep the length past it;
-    /// a length known already (a song's tags say it) isn't read again, and no process starts for it.
+    /// A stretch from a file's start keeps the file's length past it, read by the probe: after the copy, and only when
+    /// ffmpeg, converting, didn't say the file ends well before the reach. A length known already (a song's tags say it)
+    /// isn't read again, and no process starts for it. A copy ffmpeg couldn't make reads the length before afconvert's,
+    /// as it was read before.
     #[cfg(unix)]
     #[tokio::test(flavor = "current_thread")]
-    async fn a_length_known_already_isnt_read_from_the_file_again() {
+    async fn a_files_length_is_read_only_when_the_copy_cant_say_it() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
-        let (copy, ran) = (dir.path().join("copy.wav"), dir.path().join("ran"));
+        let (copy, ran, said, fail, slow, probing) = (
+            dir.path().join("copy.wav"),
+            dir.path().join("ran"),
+            dir.path().join("said"),
+            dir.path().join("fail"),
+            dir.path().join("slow"),
+            dir.path().join("probing"),
+        );
         write_test_wav(&copy, &[0.25; 8_000], 8_000);
         let scripts = [
-            ("ffprobe", format!("#!/bin/sh\necho probe >> '{}'\necho 240.5\n", ran.display())),
+            (
+                "ffprobe",
+                format!(
+                    "#!/bin/sh\necho probe >> '{}'\n[ -f '{}' ] && {{ : > '{}'; exec /bin/sleep 5; }}\necho 240.5\n",
+                    ran.display(),
+                    slow.display(),
+                    probing.display()
+                ),
+            ),
             (
                 "ffmpeg",
-                format!("#!/bin/sh\necho convert >> '{}'\nfor last; do :; done\n/bin/cp '{}' \"$last\"\n", ran.display(), copy.display()),
+                format!(
+                    "#!/bin/sh\necho convert >> '{0}'\n[ -f '{1}' ] && exit 1\n[ -f '{2}' ] && /bin/cat '{2}' >&2\nfor last; do :; done\n[ \"$last\" = - ] || /bin/cp '{3}' \"$last\"\n",
+                    ran.display(),
+                    fail.display(),
+                    said.display(),
+                    copy.display()
+                ),
             ),
+            ("afconvert", format!("#!/bin/sh\necho afconvert >> '{}'\nfor last; do :; done\n/bin/cp '{}' \"$last\"\n", ran.display(), copy.display())),
         ];
         for (name, script) in scripts {
             std::fs::write(dir.path().join(name), script).unwrap();
@@ -947,12 +1044,71 @@ mod tests {
         }
         let song = dir.path().join("Song.mp3");
         std::fs::write(&song, b"an mp3").unwrap();
-        let runs = || std::fs::read_to_string(&ran).unwrap_or_default().lines().map(str::to_owned).collect::<Vec<_>>();
+        let runs = || {
+            let runs = std::fs::read_to_string(&ran).unwrap_or_default().lines().map(str::to_owned).collect::<Vec<_>>();
+            let _ = std::fs::remove_file(&ran);
+            runs
+        };
+        let say = |duration: &str| {
+            let line = format!("Input #0, mp3, from 'Song.mp3':\n  Metadata:\n    title           : Song\n  Duration: {duration}, start: 0.025057, bitrate: 128 kb/s\n");
+            std::fs::write(&said, line).unwrap();
+        };
+        // ffmpeg says nothing of its length: read after the copy.
         let read = prepare_audio_range(&song, None, 0., 30.).await.unwrap();
-        assert_eq!((runs(), read.seconds), (vec!["probe".to_string(), "convert".to_string()], Some(240.5)));
-        std::fs::remove_file(&ran).unwrap();
+        assert_eq!((runs(), read.seconds, read.length_known), (vec!["convert".to_string(), "probe".to_string()], Some(240.5), true));
+        // It says the file is longer than the reach: read, and the probe's reading kept (as before, not ffmpeg's).
+        say("00:04:00.48");
+        let read = prepare_audio_range(&song, None, 0., 30.).await.unwrap();
+        assert_eq!((runs(), read.seconds, read.length_known), (vec!["convert".to_string(), "probe".to_string()], Some(240.5), true));
+        // It says it ends within a second of the reach: read, to say what the probe says.
+        say("00:00:29.50");
+        let read = prepare_audio_range(&song, None, 0., 30.).await.unwrap();
+        assert_eq!((runs(), read.seconds), (vec!["convert".to_string(), "probe".to_string()], Some(240.5)));
+        // It says it ends well before: the copy is the whole file, its length known, and no probe.
+        say("00:00:05.02");
+        let read = prepare_audio_range(&song, None, 0., 30.).await.unwrap();
+        assert_eq!((runs(), read.seconds, read.length_known), (vec!["convert".to_string()], None, true));
+        let mut source = open_audio_to(&song, None, Some(30.)).await.unwrap();
+        assert_eq!((runs(), source.length()), (vec!["convert".to_string()], Some(1.)), "the copy's length");
+        assert!(source.read(8_000).await.unwrap().is_some());
+        // A length known: no probe, whatever ffmpeg says.
+        std::fs::remove_file(&said).unwrap();
         let known = prepare_audio_range_of(&song, None, 0., 30., Some(240.)).await.unwrap();
         assert_eq!((runs(), known.seconds), (vec!["convert".to_string()], Some(240.)), "the length known: no probe");
+        // Stopped while its length is read after the copy: stopped, as when it was read first, not a length unknown.
+        say("00:04:00.48");
+        std::fs::write(&slow, "").unwrap();
+        let signal = Signal::new();
+        // Stopped once the probe is under way (the fake one says so as it begins), not at a time a slow runner can miss.
+        let stopping = {
+            let (signal, probing) = (signal.clone(), probing.clone());
+            tokio::spawn(async move {
+                let began = std::time::Instant::now();
+                // (Inside the ci profile's 30 s, so a probe that never began says so before nextest stops the test.)
+                while !probing.exists() && began.elapsed() < std::time::Duration::from_secs(20) {
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                signal.cancel();
+            })
+        };
+        let stopped = prepare_audio_range(&song, Some(signal), 0., 30.).await;
+        stopping.await.unwrap();
+        assert!(probing.exists(), "the probe never began");
+        assert!(stopped.is_err(), "stopped, not read");
+        // (ffmpeg's own reading, tried when the probe stops, may start before it's stopped too.)
+        assert_eq!(runs()[..2], ["convert", "probe"]);
+        std::fs::remove_file(&slow).unwrap();
+        std::fs::remove_file(&said).unwrap();
+        // ffmpeg can't convert it: on a Mac afconvert copies it whole, its length read first as before.
+        std::fs::write(&fail, "").unwrap();
+        let tried = prepare_audio_range(&song, None, 0., 30.).await;
+        if cfg!(target_os = "macos") {
+            let tried = tried.unwrap();
+            assert_eq!((runs(), tried.whole), (vec!["convert".to_string(), "probe".to_string(), "afconvert".to_string()], true));
+        } else {
+            assert!(tried.is_err());
+            assert_eq!(runs(), ["convert"], "no probe for a copy that failed");
+        }
     }
 
     #[test]

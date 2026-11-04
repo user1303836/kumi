@@ -36,6 +36,10 @@ pub struct Hands(pub Rc<dyn Fn() -> LocalBoxFuture<'static, Result<Option<Check>
 #[derive(Clone)]
 pub struct NodeVersions(pub Rc<dyn Fn(String) -> LocalBoxFuture<'static, Option<String>>>);
 
+/// Why the open Live couldn't start its bridge the last time it tried, with its fix (from Live's log), for the doctor.
+#[derive(Clone)]
+pub struct StartFailures(pub Rc<dyn Fn() -> LocalBoxFuture<'static, Option<String>>>);
+
 /// Live's log files, newest first, for `kumi report`.
 #[derive(Clone)]
 pub struct LiveLogs(pub Rc<dyn Fn() -> LocalBoxFuture<'static, Result<Vec<String>, RuntimeError>>>);

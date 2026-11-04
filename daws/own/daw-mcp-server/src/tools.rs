@@ -31,7 +31,7 @@ pub fn kinds(daw: Daw) -> Kinds {
                 "project", "track", "item", "take", "fx", "param", "send", "marker", "region", "note", "event", "envelope", "point",
                 "autoitem", "call", "spans",
             ],
-            bodies: &["arrange", "midi", "fx", "routing", "mixer"],
+            bodies: &["arrange", "midi", "fx", "routing", "mixer", "levels"],
             // (r-tracks) The project's notes, grid and timebase make no step in REAPER's history either (7.82 lab).
             outside_undo: &[
                 "loop-repeat",
@@ -72,7 +72,6 @@ pub fn kinds(daw: Daw) -> Kinds {
                 // M4 (n-song): the metronome switch and the editing settings (measured in 3.5.4)
                 "metronome-switch",
                 "edit-settings",
-                "plugin-suspend",
             ],
         },
     }

@@ -27,7 +27,7 @@ impl LiveRenderer {
         if rig.ears.is_some() {
             return self.ears_pass(rig, signal).await;
         }
-        let tempo = self.observer.tempo.get().unwrap_or(f64::NAN);
+        let tempo = self.pass_tempo(rig)?;
         let mut lap_at = now_ms();
         let mut laps = vec![];
         let mut lap = |what: &str| {
@@ -155,6 +155,11 @@ impl LiveRenderer {
                         lap("record stop");
                     } else {
                         rig.hold.as_mut().unwrap().recording = false;
+                        // Nothing here waits on stopping the recording, as the line above does: Live shows the take only once
+                        // it has stopped playing, a moment after it's asked, and till then a clip read here finds none, or the
+                        // pass before's.
+                        self.stopped_playing(signal.clone()).await?;
+                        lap("stopped");
                     }
                     started = false;
                     let late = Cell::new(false);
@@ -278,10 +283,22 @@ impl LiveRenderer {
         Ok(files)
     }
 
+    /// Waits for Live to have stopped playing, at most about two seconds.
+    async fn stopped_playing(&self, signal: Signal) -> Result<(), RuntimeError> {
+        for _ in 0..40 {
+            let set = self.rows("set", json!({"fields":["playing"]}), signal.clone()).await?;
+            if set.first().and_then(|set| set.get("playing")) != Some(&Value::Bool(true)) {
+                break;
+            }
+            delay(50., signal.clone()).await?;
+        }
+        Ok(())
+    }
+
     /// Why a pass can't go ahead for lack of disk, when it can't. Kumi's own folder holds every take; a record pass's
     /// are Live's recordings first, in the project.
     async fn no_room_for(&self, rig: &Rig) -> Option<String> {
-        let tempo = self.observer.tempo.get().filter(|tempo| *tempo > 0.)?;
+        let tempo = self.pass_tempo(rig).ok()?;
         let seconds = rig.window().beats * 60. / tempo;
         let takes = rig.sources.len();
         if let Some(why) = self.no_room(seconds, takes, &std::env::temp_dir()).await {

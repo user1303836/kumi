@@ -1,0 +1,2 @@
+# As REAPER saved it, byte for byte: it ends its lines with CRLF, on macOS too.
+*.rpp -text whitespace=cr-at-eol

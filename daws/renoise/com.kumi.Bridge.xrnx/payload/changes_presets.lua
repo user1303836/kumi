@@ -165,8 +165,10 @@ end
 
 local function identity(track, device) return base.track_id(track) .. "|" .. device.device_path end
 
--- A Doofer's, a Splitter's, a Notepad's or a plug-in's whole content, beyond its parameters (changes_material.lua).
-local content_fence = material_.content_fence
+-- A device's parameters and its whole content, beyond them when it's a Doofer, a Splitter, a Notepad or a plug-in, as they read
+-- with what moves on its own left out (changes_material.lua).
+local function state_of(song, t, d) return material_.state_at(song, t, d).state end
+local content_at = material_.content_at
 
 -- Where a record finds the device again, and what it was called then (for the words of a refusal).
 local function keep(env, t, d, track, device)
@@ -237,7 +239,7 @@ local function preset_preview(song, env, input)
   local label = label_of(t, track, device)
   return {
     target = target_of(t, d), prior = { preset = device.active_preset, print = M.print_of(xml) },
-    fence = { id = identity(track, device), state = material_.device_state(device).state, preset = device.active_preset, content = content_fence(device, xml) },
+    fence = { id = identity(track, device), state = state_of(song, t, d), preset = device.active_preset, content = content_at(song, t, d, xml) },
     display = {
       title = string.format("%s: preset %s", label, q(name)),
       before = { preset = preset_name(device, device.active_preset) }, after = { preset = name },
@@ -252,7 +254,7 @@ local function preset_apply(song, env, input, fence, desc)
   local label = label_of(t, track, device)
   if fence.id ~= identity(track, device) then fail("changed", base.moved_text(label)) end
   local xml = device.active_preset_data
-  if material_.device_state(device).state ~= fence.state or device.active_preset ~= fence.preset or content_fence(device, xml) ~= fence.content then
+  if state_of(song, t, d) ~= fence.state or device.active_preset ~= fence.preset or content_at(song, t, d, xml) ~= fence.content then
     fail("changed", label .. "'s settings changed since the preview")
   end
   local n, name = preset_number(device, input.preset)
@@ -263,13 +265,14 @@ local function preset_apply(song, env, input, fence, desc)
   watch_all(env, t, d, device)
   device.active_preset = n
   if device.active_preset ~= n then
-    pcall(function() device.active_preset_data = xml end)
+    -- (what it left is written back only if it changed anything: a write would leave a step of its own)
+    if device.active_preset_data ~= xml then pcall(function() device.active_preset_data = xml end) end
     fail("failed", "Renoise didn't take the preset " .. q(name))
   end
   local back = device.active_preset_data
   local printed = M.print_of(back)
   return {
-    applied = { preset = n, state = material_.device_state(device).state, print = printed, content = content_fence(device, back) },
+    applied = { preset = n, state = state_of(song, t, d), print = printed, content = content_at(song, t, d, back) },
     material = (function()
       local kept = keep(env, t, d, track, device)
       kept.presetData = xml
@@ -278,7 +281,8 @@ local function preset_apply(song, env, input, fence, desc)
     target = target_of(t, d),
     display = { title = string.format("%s: preset %s", label, q(name)), before = { preset = preset_name(device, fence.preset) }, after = { preset = name } },
     undo = { desc = desc, entry = true },
-    prior = { print = M.print_of(xml) }, journal_applied = { print = printed }, place = { track = t, device = d },
+    prior = { print = M.print_of(xml), state = fence.state, content = fence.content },
+    journal_applied = { print = printed, state = state_of(song, t, d), content = content_at(song, t, d, back) }, place = { track = t, device = d },
   }
 end
 
@@ -293,11 +297,11 @@ local function settings_restore(kind, song, env, restore, desc, what)
   if M.print_of(now) == prior.print then
     return { restored = { preset = device.active_preset }, display = { title = label .. ": its settings are back already" }, undo = { desc = desc, entry = false }, unwritten = true }
   end
-  if not restore.discard and material_.device_state(device).state ~= applied.state then
+  if not restore.discard and state_of(song, t, d) ~= applied.state then
     fail("changed", string.format("%s's settings changed in Renoise since Kumi %s (automation and meta devices move them too)", label, what))
   end
   -- (a Doofer's or Splitter's devices inside, a Notepad's text, a plug-in's state: what its parameters don't show)
-  if not restore.discard and applied.content ~= nil and content_fence(device, now) ~= applied.content then
+  if not restore.discard and applied.content ~= nil and content_at(song, t, d, now) ~= applied.content then
     fail("changed", string.format("%s changed in Renoise since Kumi %s (what's inside it, its text or its state)", label, what))
   end
   song:describe_undo(desc)
@@ -309,11 +313,11 @@ local function settings_restore(kind, song, env, restore, desc, what)
   -- shows 18 dB of gain where a new EQ 5 shows 20, lab 2026-10-20)
   local preset = prior.preset
   if type(preset) == "number" and preset >= 1 and preset <= #device.presets then
-    local wanted = material_.device_state(device).state
+    local wanted = state_of(song, t, d)
     local chosen = pcall(function() device.active_preset = preset end)
     -- (a container's preset brings its own inside, a plug-in's its own state: unless that is what was kept, the kept data stays)
     local deep = applied.content ~= nil or material_.is_deep(device)
-    if not chosen or material_.device_state(device).state ~= wanted or (deep and M.content_of(device.active_preset_data) ~= M.content_of(material.presetData)) then
+    if not chosen or state_of(song, t, d) ~= wanted or (deep and M.content_of(device.active_preset_data) ~= M.content_of(material.presetData)) then
       pcall(function() device.active_preset_data = material.presetData end)
     end
   end
@@ -330,14 +334,33 @@ local function settings_restore(kind, song, env, restore, desc, what)
   }
 end
 
-local function settings_read(device) return { print = M.print_of(device.active_preset_data) } end
-local function same_print(a, b) return a.print == b.print end
+-- What the journal reads of a device's settings: their data, or where something else moves a parameter, which moves the data too,
+-- their state (without what moves), and what's in it.
+local function settings_reread(song, place)
+  local device = reread(song, place)
+  return device and { device = device, song = song, t = place.track, d = place.device } or nil
+end
+local function settings_read(found)
+  local moving = material_.moving_on(found.song, found.t)
+  local xml = found.device.active_preset_data
+  local now = { print = M.print_of(xml) }
+  if material_.moves_on_its_own(found.device, moving[found.d]) or material_.aims_inside(xml) then
+    now.moves = true
+    now.state = material_.state_at(found.song, found.t, found.d, moving).state
+    now.content = content_at(found.song, found.t, found.d, xml, moving)
+  end
+  return now
+end
+local function same_print(now, kept)
+  if now.moves then return now.state == kept.state and now.content == kept.content end
+  return now.print == kept.print
+end
 
 base.register({
   kind = "device-preset", custom = true, places = true,
   preview = preset_preview, apply = preset_apply,
   restore = function(song, env, restore, desc) return settings_restore("device-preset", song, env, restore, desc, "chose the preset") end,
-  reread = reread, read = settings_read, same = same_print,
+  reread = settings_reread, read = settings_read, same = same_print,
 })
 
 -- device-preset-data: the device's preset data written whole (XML, as Renoise gives it and as a read shows it). Kumi's host
@@ -358,7 +381,7 @@ local function data_preview(song, env, input)
   check_preset_data(device, wanted, label, xml)
   return {
     target = target_of(t, d), prior = { preset = device.active_preset, print = M.print_of(xml) },
-    fence = { id = identity(track, device), state = material_.device_state(device).state, content = content_fence(device, xml) },
+    fence = { id = identity(track, device), state = state_of(song, t, d), content = content_at(song, t, d, xml) },
     display = {
       title = data_title(input, label), unchanged = xml == wanted or nil,
       note = "Kumi keeps the settings it replaces to put back.",
@@ -372,7 +395,7 @@ local function data_apply(song, env, input, fence, desc)
   local label = label_of(t, track, device)
   if fence.id ~= identity(track, device) then fail("changed", base.moved_text(label)) end
   local xml = device.active_preset_data
-  if material_.device_state(device).state ~= fence.state or content_fence(device, xml) ~= fence.content then fail("changed", label .. "'s settings changed since the preview") end
+  if state_of(song, t, d) ~= fence.state or content_at(song, t, d, xml) ~= fence.content then fail("changed", label .. "'s settings changed since the preview") end
   local wanted = input.vst3Data and vst3_.compose(device, xml, input) or input.presetData
   check_preset_data(device, wanted, label, xml)
   if #xml > M.MAX_PRESET_BYTES then
@@ -394,9 +417,10 @@ local function data_apply(song, env, input, fence, desc)
   kept.presetData = xml
   kept.vst3 = input.vst3Data ~= nil
   return {
-    applied = { state = material_.device_state(device).state, print = printed, content = content_fence(device, back) }, material = kept, target = target_of(t, d),
+    applied = { state = state_of(song, t, d), print = printed, content = content_at(song, t, d, back) }, material = kept, target = target_of(t, d),
     display = { title = data_title(input, label) }, undo = { desc = desc, entry = true },
-    prior = { print = M.print_of(xml) }, journal_applied = { print = printed }, place = { track = t, device = d },
+    prior = { print = M.print_of(xml), state = fence.state, content = fence.content },
+    journal_applied = { print = printed, state = state_of(song, t, d), content = content_at(song, t, d, back) }, place = { track = t, device = d },
   }
 end
 
@@ -404,7 +428,7 @@ base.register({
   kind = "device-preset-data", custom = true, places = true,
   preview = data_preview, apply = data_apply,
   restore = function(song, env, restore, desc) return settings_restore("device-preset-data", song, env, restore, desc, "wrote them") end,
-  reread = reread, read = settings_read, same = same_print,
+  reread = settings_reread, read = settings_read, same = same_print,
 })
 
 -- device-set: the device's name in the chain (its display name; "" gives it back its own) and whether it shows maximized.
@@ -1126,11 +1150,17 @@ function M.editor(params, env)
   return { epoch = env.epoch(), layout = env.layout(), visible = device.external_editor_visible, label = label }
 end
 
--- Renoise's user library, where it was made at its first start (Documents/Renoise/User Library).
-function M.user_library()
+-- Renoise's user library, where it was made at its first start (Documents/Renoise/User Library). The host says where that
+-- is (`given`), since Windows can keep Documents outside the home folder (OneDrive) and only the host can ask it: taken when
+-- it's there. Otherwise the home folder's, for an older host or a Renoise that made it there, and `given` to name when
+-- neither is there.
+function M.user_library(given)
+  if type(given) ~= "string" or given == "" then given = nil end
+  if given and io.exists(given) then return given end
   local home = os.getenv("HOME") or os.getenv("USERPROFILE")
-  if not home then return nil end
-  return home .. "/Documents/Renoise/User Library"
+  local guess = home and home .. "/Documents/Renoise/User Library"
+  if guess and io.exists(guess) then return guess end
+  return given or guess
 end
 
 -- The folder a native device's presets go in, as Renoise's library names them: its name without its * or # ("LFO", "Send").
@@ -1152,7 +1182,7 @@ function M.save(params, env)
   if type(name) ~= "string" or name == "" or #name > 128 or name:find('[%c/\\:%*%?"<>|]') or name:match("^%.") or name:match("[%. ]$") then
     bad('name: a preset\'s name, one line without / \\ : * ? " < > | that doesn\'t start with a dot or end with a dot or space')
   end
-  local library = M.user_library()
+  local library = M.user_library(params.library)
   if not library or not io.exists(library) then
     fail("failed", string.format("Kumi can't find Renoise's user library at %s", tostring(library)))
   end
@@ -1180,8 +1210,8 @@ function M.save(params, env)
   for _, preset in ipairs(device.presets) do
     if preset == name then listed = true end
   end
-  -- (where it went, said: Kumi takes the user library from where Renoise makes it, which its preferences can move)
-  local note = string.format("Saved in %s. Renoise lists it from its next start if that is the user library its preferences name.", dir)
+  -- (where it went, said, since Kumi works out where the user library is rather than asking Renoise)
+  local note = string.format("Saved in %s. Renoise lists it from its next start.", dir)
   return { epoch = env.epoch(), layout = env.layout(), file = file, listed = listed, label = label, note = note }
 end
 

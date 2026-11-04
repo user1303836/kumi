@@ -10,7 +10,10 @@ use crate::{
     http::{ByteStream, Fetch, FetchInit, Headers, Response},
 };
 use async_trait::async_trait;
-use futures::{SinkExt, StreamExt};
+use futures::{
+    future::{LocalBoxFuture, Shared as Joint},
+    FutureExt, SinkExt, StreamExt,
+};
 use kumi_common::abort::Signal;
 use serde_json::{json, Map, Value};
 use std::{
@@ -82,6 +85,9 @@ struct Shared {
     line: RefCell<Option<Line>>,
     last: RefCell<Option<Last>>,
     busy: Cell<bool>,
+    /// A connection being readied while the producer types (`SocketFetch::ready`): a request that comes meanwhile waits
+    /// for it rather than opening one of its own.
+    readying: RefCell<Option<Joint<LocalBoxFuture<'static, bool>>>>,
     failures: Cell<u8>,
     /// HTTP until then: the server wouldn't open one, or connections kept failing.
     resting: Cell<Option<Instant>>,
@@ -125,8 +131,57 @@ impl SocketFetch {
 
     /// Whether `line` can take a request from `identity`: not past its time, nor anyone else's, nor read high too long ago.
     fn fits(&self, line: &Line, identity: &Headers) -> bool {
-        line.opened.elapsed() < LIFETIME && line.identity == *identity && !(line.high && line.opened.elapsed() >= self.reread)
+        fits(line, identity, self.reread)
     }
+
+    /// The producer began a message: the connection its request will go on (to `url`, with `headers`) is readied
+    /// meanwhile, as the request would ready it. One unused for `idle` is asked whether it's still there (a ping), and
+    /// none, or one gone or not this request's, is opened with the request's identity. Nothing is sent on it. Whatever
+    /// comes of it, nothing is said and nothing counts against the connection: the request finds what's there and does as
+    /// before, opening its own when none fits. A request that comes meanwhile waits for it.
+    async fn ready(&self, url: &str, headers: &Headers) {
+        let shared = &self.shared;
+        let direct = url::Url::parse(url).is_ok_and(|address| kumi_net::proxy::current().proxy_for(&address).is_none());
+        if !direct || shared.resting() || shared.busy.get() || shared.readying.borrow().is_some() {
+            return;
+        }
+        let (held, url, identity, idle, pong, reread) =
+            (shared.clone(), url.to_string(), identity(headers), self.idle, self.pong, self.reread);
+        let readying = async move {
+            let mut line = held.line.borrow_mut().take().filter(|line| fits(line, &identity, reread));
+            if let Some(unused) = line.as_mut().filter(|line| line.used.elapsed() >= idle) {
+                if alive(&mut unused.socket, pong).await {
+                    unused.used = Instant::now();
+                } else {
+                    line = None;
+                }
+            }
+            let mut ready = true;
+            if line.is_none() {
+                match open(&url, &identity).await {
+                    Ok(opened) => {
+                        // A new connection keeps no earlier response, as a request that opens one finds.
+                        *held.last.borrow_mut() = None;
+                        line = Some(opened);
+                    }
+                    Err(_) => ready = false,
+                }
+            }
+            *held.line.borrow_mut() = line;
+            *held.readying.borrow_mut() = None;
+            ready
+        }
+        .boxed_local()
+        .shared();
+        *shared.readying.borrow_mut() = Some(readying.clone());
+        let _ = readying.await;
+    }
+}
+
+/// Whether `line` can take a request from `identity`: not past its time, nor anyone else's, nor read high (and opened
+/// `reread` ago or more).
+fn fits(line: &Line, identity: &Headers, reread: Duration) -> bool {
+    line.opened.elapsed() < LIFETIME && line.identity == *identity && !(line.high && line.opened.elapsed() >= reread)
 }
 
 /// The request's fields that must match the last one's for this one to carry on from it.
@@ -390,8 +445,22 @@ fn streamed(url: &str, init: &FetchInit) -> Option<Map<String, Value>> {
 
 #[async_trait(?Send)]
 impl Fetch for SocketFetch {
+    async fn warm(&self, url: &str, headers: Headers) {
+        self.ready(url, &headers).await
+    }
     async fn fetch(&self, url: &str, init: FetchInit) -> Result<Response, LanguageModelError> {
         let shared = &self.shared;
+        // Its connection being readied: waited for, unless the request is stopped first (the readying goes on for the next).
+        // One that couldn't be opened just now isn't tried again for this request, which goes over HTTP as one whose own
+        // opening failed would.
+        let readying = shared.readying.borrow().clone();
+        if let Some(readying) = readying {
+            match unless_aborted(&init.signal.clone().unwrap_or_default(), readying).await {
+                None => return Err(aborted()),
+                Some(false) => return self.http.fetch(url, init).await,
+                Some(true) => {}
+            }
+        }
         let direct = url::Url::parse(url).is_ok_and(|address| kumi_net::proxy::current().proxy_for(&address).is_none());
         let body = streamed(url, &init).filter(|_| direct && !shared.resting() && !shared.busy.get());
         let Some(body) = body else { return self.http.fetch(url, init).await };

@@ -17,6 +17,17 @@ pub trait SetupSession {
     fn open_set(&self) -> Option<String>;
 }
 
+/// What a DAW opens by itself when it starts with nothing asked, going by its own settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Reopens {
+    /// Kumi can't tell, or the DAW starts with something new: a saved project is in its list of recent ones.
+    Unknown,
+    /// All it had open as it quit.
+    Everything,
+    /// Only the project it had in front as it quit, if that one was saved.
+    Front,
+}
+
 /// The DAW's side of setup, which the app can't do on its own: the DAW the app, and Kumi's bridge in it. Its methods
 /// keep Live's names (the app's Live side and setup's tests implement them).
 #[async_trait(?Send)]
@@ -44,6 +55,10 @@ pub trait DawSetup {
     fn open_set(&self) -> Option<String> {
         None
     }
+    /// What the DAW opens by itself as setup's restart starts it, once it has closed.
+    fn reopens(&self) -> Reopens {
+        Reopens::Unknown
+    }
     /// Whether Live runs on this computer at all (it doesn't on Linux): without it, setup only signs in.
     fn here(&self) -> bool {
         true
@@ -68,5 +83,11 @@ pub trait DawSetup {
     /// How long the Control Surface step waits before it says where Live's Settings are.
     fn surface_wait(&self) -> Duration {
         Duration::from_secs(45)
+    }
+    /// Why the open Live couldn't start Kumi's bridge the last time it tried, with its fix
+    /// ([`DawProvider::start_failure`](crate::provider::DawProvider::start_failure)): the Control Surface step says it in
+    /// place of asking for the Control Surface, which is chosen already. None when it started, or nothing says.
+    async fn start_failure(&self) -> Option<String> {
+        None
     }
 }

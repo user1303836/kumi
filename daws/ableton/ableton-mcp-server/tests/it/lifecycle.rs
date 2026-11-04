@@ -205,6 +205,21 @@ async fn repair_brings_the_producers_willington_files_into_the_reinstalled_remot
     assert_eq!(integrity(&f).await, true);
 }
 #[tokio::test(flavor = "current_thread")]
+async fn the_remote_scripts_start_failure_record_is_not_drift_and_a_repair_doesnt_bring_it_back() {
+    let f = Fixture::new();
+    run_lifecycle(&f.options).await.unwrap();
+    // The Remote Script writes it beside itself while its last start in a running Live failed: not drift.
+    let record = f.remote().join(RUNTIME_FILES[0]);
+    fs::write(&record, br#"{"version":1,"pid":1,"at":1,"exception":"OSError: [Errno 48] Address already in use"}"#).unwrap();
+    assert_eq!(integrity(&f).await, true);
+    // A repair that installs the Remote Script again (another file beside it is drift) leaves it behind: the next start
+    // writes it again, or no more.
+    fs::write(f.remote().join("user.py"), "custom").unwrap();
+    assert_eq!(run_lifecycle(&f.action("repair")).await.unwrap()["verification"]["changed"], true);
+    assert!(!record.exists());
+    assert_eq!(integrity(&f).await, true);
+}
+#[tokio::test(flavor = "current_thread")]
 async fn a_failed_upgrade_puts_the_config_back_even_when_the_remote_script_cant_go_back() {
     let f = Fixture::new();
     run_lifecycle(&f.options).await.unwrap();

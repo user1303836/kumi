@@ -4,8 +4,7 @@ use crate::daw::Daw;
 use crate::detect::{self, Env, Os};
 use crate::files::{read_secret, scan_discovery};
 use crate::install::{self, RENOISE_TOOL_ID};
-use crate::lifecycle::{Lifecycle, Target};
-use crate::owner;
+use crate::lifecycle::{is_owner_only, Lifecycle, Target};
 use crate::paths::BridgePaths;
 use crate::probe::{listening, probe};
 use serde::Serialize;
@@ -230,7 +229,7 @@ fn bridge_checks(daw: Daw, target: &Target, app_archs: &[detect::Arch], inputs: 
         },
     };
     match read_secret(&paths.secret()) {
-        Ok(_) if inputs.env.os == Os::Windows && !owner::is_owner_only(&paths.secret()) => {
+        Ok(_) if inputs.env.os == Os::Windows && !is_owner_only(&paths.secret()) => {
             checks.push(check("secret", Level::Fail, "the bridge's secret is readable by other accounts"));
         }
         Ok(_) => {}

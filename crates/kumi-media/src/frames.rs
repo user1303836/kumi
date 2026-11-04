@@ -265,7 +265,7 @@ pub async fn duration_of(ffmpeg: &str, file: &str, signal: Option<Signal>) -> Op
     duration_in(&output.stderr)
 }
 /// The length ffmpeg prints for the file it opens: its own `Duration:` line, not a tag's text in the `Metadata:` above it.
-fn duration_in(said: &str) -> Option<f64> {
+pub(crate) fn duration_in(said: &str) -> Option<f64> {
     static DURATION: LazyLock<Regex> =
         LazyLock::new(|| Regex::new(r"(?m)^\s+Duration: ([0-9]+):([0-9]{2}):([0-9]{2}(?:\.[0-9]+)?)").unwrap());
     let found = DURATION.captures(said)?;

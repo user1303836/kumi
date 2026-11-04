@@ -111,9 +111,9 @@ async fn a_daws_project_files_are_learned_as_its_projects_beside_lives_sets_leav
             assert_eq!((tracker.daw, tracker.tempo, tracker.made_in.as_deref()), (Some(DawId::Renoise), Some(128.), Some("Songs 1.0")));
             assert_eq!(named("Recent Song.song").set.as_ref().unwrap().daw, Some(DawId::Renoise));
             assert_eq!(named("Broken.song").error.as_deref(), Some("no tempo"));
-            assert!(!sets.keys().any(|path| path.contains(" copy")), "a copy is left out: {:?}", sets.keys());
-            assert!(!sets.keys().any(|path| path.ends_with("Song.backup-1.als")), "{:?}", sets.keys());
-            assert!(sets.keys().any(|path| path.ends_with("Song.als")), "{:?}", sets.keys());
+            assert!(!sets.keys().any(|path| path.contains(" copy")), "a copy is left out: {:?}", sets.keys().collect::<Vec<_>>());
+            assert!(!sets.keys().any(|path| path.ends_with("Song.backup-1.als")), "{:?}", sets.keys().collect::<Vec<_>>());
+            assert!(sets.keys().any(|path| path.ends_with("Song.als")), "{:?}", sets.keys().collect::<Vec<_>>());
             // The producer's habits are Live's alone: its Sets' two folders, not the songs.
             let taste: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("taste.json")).unwrap()).unwrap();
             assert_eq!(taste["sets"], 2);
@@ -128,7 +128,7 @@ async fn a_daws_project_files_are_learned_as_its_projects_beside_lives_sets_leav
             };
             learn(LearnOptions::new(plan, Signal::new())).await.unwrap();
             let sets = library_logs(&dir.to_string_lossy()).sets.load().await;
-            assert!(sets.keys().all(|path| !path.ends_with("Tracker Song.song")), "{:?}", sets.keys());
+            assert!(sets.keys().all(|path| !path.ends_with("Tracker Song.song")), "{:?}", sets.keys().collect::<Vec<_>>());
         })
         .await;
 }
@@ -162,6 +162,11 @@ fn entry(path: &str, set: SetSummary) -> SetEntry {
     SetEntry { file: Entry { path: path.into(), size: 100, mtime: 1_700_000_000_000, gone: None }, set: Some(set), error: None }
 }
 
+/// A project Kumi couldn't read, as learning keeps it.
+fn unread(path: &str, mtime: i64, why: &str) -> SetEntry {
+    SetEntry { file: Entry { path: path.into(), size: 100, mtime, gone: None }, set: None, error: Some(why.into()) }
+}
+
 async fn my_sets(profile: &DawProfile, options: LibraryToolsOptions, access: &Rc<Learned>, input: Value) -> Option<(Value, bool)> {
     let tools = library_tools_for(profile, access.clone(), options);
     let tool = tools.iter().find(|tool| tool.name() == "my_sets")?;
@@ -171,9 +176,14 @@ async fn my_sets(profile: &DawProfile, options: LibraryToolsOptions, access: &Rc
 
 #[tokio::test]
 async fn my_sets_finds_a_daws_own_projects_only_in_it_and_lives_sets_only_in_live() {
+    // (a whole path as this system writes it: Windows resolves "/Music/…" onto a drive, which isn't what's kept, and my_sets
+    // compares a path as resolved)
+    let music = if cfg!(windows) { "C:\\Music" } else { "/Music" };
+    let at = |file: &str| format!("{music}{}{file}", std::path::MAIN_SEPARATOR);
+    let tracker = at("Tracker Song.song");
     let access = Rc::new(Learned(vec![
         entry(
-            "/Music/Night Drive.als",
+            &at("Night Drive.als"),
             SetSummary {
                 name: "Night Drive".into(),
                 tempo: Some(124.),
@@ -183,7 +193,7 @@ async fn my_sets_finds_a_daws_own_projects_only_in_it_and_lives_sets_only_in_liv
             },
         ),
         entry(
-            "/Music/Tracker Song.song",
+            &tracker,
             SetSummary {
                 name: "Tracker Song".into(),
                 tempo: Some(128.),
@@ -196,7 +206,7 @@ async fn my_sets_finds_a_daws_own_projects_only_in_it_and_lives_sets_only_in_liv
                 ..Default::default()
             },
         ),
-        entry("/Music/Other.rpp", SetSummary { name: "Other".into(), daw: Some(DawId::Reaper), ..Default::default() }),
+        entry(&at("Other.rpp"), SetSummary { name: "Other".into(), daw: Some(DawId::Reaper), ..Default::default() }),
     ]));
     let songs = LibraryToolsOptions { projects: Some(&SONG), ..Default::default() };
     let names =
@@ -205,7 +215,7 @@ async fn my_sets_finds_a_daws_own_projects_only_in_it_and_lives_sets_only_in_liv
     let (found, _) = my_sets(&DawProfile::RENOISE, songs.clone(), &access, json!({})).await.unwrap();
     assert_eq!(names(&found), ["Tracker Song"]);
     assert_eq!(found["known"], 1);
-    for name in ["tracker song", "Tracker Song.song", "/Music/Tracker Song.song"] {
+    for name in ["tracker song", "Tracker Song.song", tracker.as_str()] {
         let (song, error) = my_sets(&DawProfile::RENOISE, songs.clone(), &access, json!({"set": name})).await.unwrap();
         assert!(!error, "{name}: {song}");
         assert_eq!(
@@ -231,6 +241,108 @@ async fn my_sets_finds_a_daws_own_projects_only_in_it_and_lives_sets_only_in_liv
     assert!(error, "a song isn't one of Live's Sets");
     // A DAW whose files Kumi doesn't read isn't offered the tool.
     assert!(my_sets(&DawProfile::REAPER, LibraryToolsOptions::default(), &access, json!({})).await.is_none());
+}
+
+/// #806: a project asked for that Kumi couldn't read is told as that, with why, not as one it doesn't know.
+#[tokio::test]
+async fn my_sets_says_why_it_couldnt_read_a_project_asked_for() {
+    let music = if cfg!(windows) { "C:\\Music" } else { "/Music" };
+    let separator = std::path::MAIN_SEPARATOR;
+    let at = |file: &str| format!("{music}{separator}{file}");
+    let (night_drive, other_moon) = (at("Night Drive.als"), at(&format!("Sketches{separator}Moon.als")));
+    // Newer than what they stand beside, so it's not their age that puts a project Kumi read first.
+    let newer = 1_800_000_000_000;
+    let access = Rc::new(Learned(vec![
+        unread(&night_drive, newer, "That isn't a Live Set."),
+        entry(&at("Night Drive Remix.als"), SetSummary { name: "Night Drive Remix".into(), ..Default::default() }),
+        entry(&at("Moon.als"), SetSummary { name: "Moon".into(), ..Default::default() }),
+        unread(&other_moon, newer, "cut short"),
+        unread(&at("Lost Sketch.ALS"), newer, "no end"),
+        unread(&at(&format!("Old{separator}Twin.als")), newer - 1, "the older's"),
+        unread(&at("Twin.als"), newer, "the newer's"),
+        unread(&at(&format!("Older{separator}Twin.als")), newer - 2, "the oldest's"),
+        unread(&at("Broken.song"), newer, "no tempo"),
+    ]));
+    let live = LibraryToolsOptions::default;
+    let songs = || LibraryToolsOptions { projects: Some(&SONG), ..Default::default() };
+    let said = |place: &str, name: &str, path: &str, why: &str, app: &str| {
+        json!(format!(
+            "Kumi couldn't read the {place} “{name}” ({path}): {why}. Kumi reads it again when the file changes, so saving it from {app} may help."
+        ))
+    };
+    // By its name, its file's name or its path, and by its whole name before another's that only holds those words.
+    for asked in ["Night Drive", "night drive.als", night_drive.as_str()] {
+        let (answer, error) = my_sets(&DawProfile::ABLETON, live(), &access, json!({"set": asked})).await.unwrap();
+        assert!(error, "{asked}: {answer}");
+        assert_eq!(answer, said("Set", "Night Drive", &night_drive, "That isn't a Live Set", "Live"), "{asked}");
+    }
+    // What only a name it couldn't read holds, whatever the case of the file's extension.
+    let (answer, error) = my_sets(&DawProfile::ABLETON, live(), &access, json!({"set": "sketch"})).await.unwrap();
+    assert!(error, "{answer}");
+    assert_eq!(answer, said("Set", "Lost Sketch", &at("Lost Sketch.ALS"), "no end", "Live"));
+    // Of several it couldn't read by that name, the newest.
+    let (answer, _) = my_sets(&DawProfile::ABLETON, live(), &access, json!({"set": "twin"})).await.unwrap();
+    assert_eq!(answer, said("Set", "Twin", &at("Twin.als"), "the newer's", "Live"));
+    // One it read stands before one it couldn't, at each step, but a path names the file it names.
+    for (asked, name) in [("moon", "Moon"), ("night drive r", "Night Drive Remix"), ("oo", "Moon"), ("drive", "Night Drive Remix")] {
+        let (answer, error) = my_sets(&DawProfile::ABLETON, live(), &access, json!({"set": asked})).await.unwrap();
+        assert!(!error, "{asked}: {answer}");
+        assert_eq!(answer["name"], name, "{asked}");
+    }
+    let (answer, error) = my_sets(&DawProfile::ABLETON, live(), &access, json!({"set": other_moon})).await.unwrap();
+    assert!(error, "{answer}");
+    assert_eq!(answer, said("Set", "Moon", &other_moon, "cut short", "Live"));
+    // Only in the DAW whose file it is.
+    let (answer, error) = my_sets(&DawProfile::RENOISE, songs(), &access, json!({"set": "broken"})).await.unwrap();
+    assert!(error, "{answer}");
+    assert_eq!(answer, said("song", "Broken", &at("Broken.song"), "no tempo", "Renoise"));
+    let (answer, error) = my_sets(&DawProfile::RENOISE, songs(), &access, json!({"set": "night drive"})).await.unwrap();
+    assert!(error, "{answer}");
+    assert!(answer.as_str().unwrap().starts_with("Kumi doesn't know a song called “night drive”"), "{answer}");
+    let (answer, error) = my_sets(&DawProfile::ABLETON, live(), &access, json!({"set": "broken"})).await.unwrap();
+    assert!(error, "{answer}");
+    assert!(answer.as_str().unwrap().starts_with("Kumi doesn't know a Set called “broken”"), "{answer}");
+    // No search finds what it couldn't read, or counts it.
+    let (found, _) = my_sets(&DawProfile::ABLETON, live(), &access, json!({})).await.unwrap();
+    assert_eq!((&found["known"], &found["matched"]), (&json!(2), &json!(2)), "{found}");
+    let (found, _) = my_sets(&DawProfile::ABLETON, live(), &access, json!({"words": ["sketch"]})).await.unwrap();
+    assert_eq!(found["matched"], 0, "{found}");
+}
+
+/// #806: what learning itself keeps of a project it couldn't read is what my_sets tells.
+#[tokio::test]
+async fn a_project_learning_couldnt_read_is_told_with_why() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let (music, dir) = (home.path().join("Music"), home.path().join("library"));
+            // (Past the 64 bytes the walk leaves out.)
+            let set = music.join("Night Drive.als");
+            put(&set, &format!("<Ableton Creator=\"Ableton Live 12.2\"><Notes>{}</Notes></Ableton>", "not a Set ".repeat(8)));
+            let song = music.join("Broken.song");
+            put(&song, &format!("not a tempo\n{}", self::song("1")));
+            let plan = LearnPlan {
+                dir: dir.to_string_lossy().into(),
+                sources: vec![Source { path: music.to_string_lossy().into(), label: "Music".into(), kind: SourceKind::Folder }],
+                set_folders: vec![],
+                set_files: vec![],
+                plugin_presets: vec![],
+                workers: None,
+            };
+            learn(LearnOptions { daws: Daws(&WITH_SONGS), ..LearnOptions::new(plan, Signal::new()) }).await.unwrap();
+            let access = Rc::new(Learned(library_logs(&dir.to_string_lossy()).sets.load().await.into_values().collect()));
+            let (answer, error) =
+                my_sets(&DawProfile::ABLETON, LibraryToolsOptions::default(), &access, json!({"set": "Night Drive"})).await.unwrap();
+            assert!(error, "{answer}");
+            let answer = answer.as_str().unwrap().to_owned();
+            assert!(answer.starts_with("Kumi couldn't read the Set “Night Drive” ("), "{answer}");
+            assert!(answer.contains("): That isn't a Live Set. Kumi reads it again"), "{answer}");
+            let songs = LibraryToolsOptions { projects: Some(&SONG), ..Default::default() };
+            let (answer, error) = my_sets(&DawProfile::RENOISE, songs, &access, json!({"set": "Broken"})).await.unwrap();
+            assert!(error, "{answer}");
+            assert!(answer.as_str().unwrap().contains("): no tempo. Kumi reads it again"), "{answer}");
+        })
+        .await;
 }
 
 #[tokio::test]

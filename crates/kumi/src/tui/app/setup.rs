@@ -18,7 +18,7 @@ use kumi_ai::providers::{table, SignIn};
 use kumi_common::abort;
 use kumi_daw::{
     provider::{older_than, EnableStep, Installed as LiveInstalled},
-    setup::DawSetup,
+    setup::{DawSetup, Reopens},
 };
 use kumi_types::version::KUMI_VERSION;
 use tokio::sync::oneshot;
@@ -169,6 +169,9 @@ const CODE_HINT: &[(&[&str], &str)] =
 const LATER_HINT: &[(&[&str], &str)] = &[(&["setup.later"], "later")];
 /// How often the sign-in step looks again for models on this computer while the producer chooses.
 const LOCAL_LOOK: Duration = Duration::from_secs(3);
+/// How often the Control Surface step looks again at why the DAW couldn't start Kumi's bridge (Live reads its log again
+/// only once it has changed).
+const FAILURE_LOOK: Duration = Duration::from_secs(1);
 /// Where the Set is that Kumi's restart closed, when Kumi didn't know it to open it again.
 fn open_recent() -> String {
     let words = crate::daw::words();
@@ -176,6 +179,19 @@ fn open_recent() -> String {
         "If you saved your Set, it's in Live's File › Open Recent Set.".into()
     } else {
         format!("If you saved your {}, {} lists it with its recent {}.", words.place, words.app, words.places)
+    }
+}
+
+/// What's said of the Set after Kumi's restart didn't hand it over: nothing where the DAW brings it all back by itself.
+fn after_restart(live: &Rc<dyn DawSetup>) -> Option<String> {
+    let words = crate::daw::words();
+    match live.reopens() {
+        Reopens::Unknown => Some(open_recent()),
+        Reopens::Everything => None,
+        Reopens::Front => Some(format!(
+            "{} opens the {} you had in front, if you saved it; it lists any others with its recent {}.",
+            words.app, words.place, words.places
+        )),
     }
 }
 
@@ -286,8 +302,8 @@ impl TuiApp {
             };
             // The DAW told to use Kumi's bridge, by the producer, when it needs telling (Live's Control Surface).
             if let Some(enable) = crate::daw::current().enable_step() {
-                if !self.setup_surface(live, app, enable).await {
-                    return self.end_setup(Some(Step::Surface), None).await;
+                if let Err(failing) = self.setup_surface(live, app, enable).await {
+                    return self.end_setup(Some(Step::Surface), failing).await;
                 }
             }
         } else if let Some((live, None)) = live {
@@ -676,9 +692,11 @@ impl TuiApp {
                     // Open Recent); one that wasn't open opens as the newest installed.
                     let closed_by_kumi = held.is_some();
                     let app = open.or(held);
+                    // (read before the DAW starts again and rewrites its settings)
+                    let note = after_restart(&live);
                     let (opened, with_set) = reopen(&live, app.clone(), set).await;
                     if closed_by_kumi && !with_set {
-                        self.setup_show(|s| s.set_note = Some(open_recent()));
+                        self.setup_show(|s| s.set_note = note);
                     }
                     self.setup_show(|s| s.holding = false);
                     let connecting = live.clone();
@@ -809,8 +827,10 @@ impl TuiApp {
         });
         let Some(app) = held else { return LiveStep::Later(None) };
         if live.open_live().await.is_none() {
+            // (read before the DAW starts again and rewrites its settings)
+            let note = after_restart(live);
             let (opened, with_set) = reopen(live, Some(app), set).await;
-            let recent = if with_set { String::new() } else { format!(" {}", open_recent()) };
+            let recent = note.filter(|_| !with_set).map_or(String::new(), |note| format!(" {note}"));
             let app = crate::daw::words().app;
             return LiveStep::Later(Some(if opened {
                 format!("{app} is opening again.{recent}")
@@ -835,42 +855,75 @@ impl TuiApp {
 
     /// Live connects through the bridge once it has it as a Control Surface: Kumi watches for that. Still not
     /// chosen a while later, Kumi adds where Live's Settings are, and that a dialog in Live comes first: still
-    /// one instruction, carried out in Live by the producer, never by Kumi.
-    async fn setup_surface(&self, live: Rc<dyn DawSetup>, app: Option<String>, enable: EnableStep) -> bool {
+    /// one instruction, carried out in Live by the producer, never by Kumi. Chosen already, but the bridge couldn't
+    /// start (Live's log says why), Kumi says why and what fixes it in place of the instruction, until it connects or
+    /// the reason changes. Put off or closed: Err, with the reason it was showing then.
+    async fn setup_surface(&self, live: Rc<dyn DawSetup>, app: Option<String>, enable: EnableStep) -> Result<(), Option<String>> {
         let stop = self.setup_wait();
         let note = self.0.state.borrow().setup.as_ref().and_then(|s| s.set_note.clone());
         let hint = self.keys_hint(LATER_HINT);
+        // What the step says: the instruction, or why the bridge couldn't start; where the Settings are, once said; and
+        // the Set's note.
+        let say = move |first: &str, more: Option<&str>| -> Vec<String> {
+            std::iter::once(first.to_string()).chain(more.map(str::to_string)).chain(note.clone()).collect()
+        };
+        let said = say(enable.say, None);
         self.setup_show(move |s| {
             s.step = Step::Surface;
             s.status = enable.waiting.into();
-            s.say = std::iter::once(enable.say.to_string()).chain(note).collect();
+            s.say = said;
             s.hint = hint;
             s.waiting = true;
         });
-        let mut more = live.settings_menu().map(|menu| format!("{menu} If {} shows a dialog, answer it first.", crate::daw::words().app));
+        let more = live.settings_menu().map(|menu| format!("{menu} If {} shows a dialog, answer it first.", crate::daw::words().app));
         let more_at = std::time::Instant::now() + live.surface_wait();
+        let (mut more_said, mut failure, mut looked) = (false, None::<String>, None::<std::time::Instant>);
         while !self.connected() {
             if self.closing() {
-                return false;
+                return Err(failure);
             }
-            if let Some(more) = more.take_if(|_| std::time::Instant::now() >= more_at) {
-                self.setup_show(move |s| s.say.insert(1, more));
+            if looked.is_none_or(|at| at.elapsed() >= FAILURE_LOOK) {
+                looked = Some(std::time::Instant::now());
+                let now = tokio::select! {
+                    now = live.start_failure() => now,
+                    _ = stop.cancelled() => return Err(failure),
+                };
+                if now != failure {
+                    failure = now;
+                    let said = say(failure.as_deref().unwrap_or(enable.say), more.as_deref().filter(|_| more_said && failure.is_none()));
+                    let failing = failure.is_some();
+                    self.setup_show(move |s| {
+                        s.say = said;
+                        s.status = if failing { "didn't start".into() } else { enable.waiting.into() };
+                        s.warn = failing;
+                    });
+                }
+            }
+            // Where the Settings are helps choose the Control Surface: not once it's chosen and failed to start.
+            if !more_said && failure.is_none() && std::time::Instant::now() >= more_at {
+                if let Some(more) = more.as_deref() {
+                    more_said = true;
+                    let said = say(enable.say, Some(more));
+                    self.setup_show(move |s| s.say = said);
+                }
             }
             tokio::select! {
                 _ = tokio::time::sleep(Duration::from_millis(200)) => {}
-                _ = stop.cancelled() => return false,
+                _ = stop.cancelled() => return Err(failure),
             }
         }
         let version = live.version(app).await;
         self.setup_show(|s| {
             s.problem = None;
+            s.warn = false;
             s.live = Some(version.map(|v| format!("{} {v}", crate::daw::words().app)).unwrap_or_else(|| crate::daw::words().app.into()));
         });
-        true
+        Ok(())
     }
 
-    /// Setup ends: done ("You're set.", then the session), or put off at `later` (with `also` to say), or
-    /// the quit put off while Live and its bridge were busy.
+    /// Setup ends: done ("You're set.", then the session), or put off at `later` (with `also` to say: for the Control
+    /// Surface, the reason the bridge couldn't start that it was showing), or the quit put off while Live and its bridge
+    /// were busy.
     async fn end_setup(&self, later: Option<Step>, also: Option<String>) {
         if self.closing() {
             return;
@@ -923,7 +976,13 @@ impl TuiApp {
                 ),
                 NoticeTone::Info,
             ),
-            // The bridge is current, so no setup shows next time: the session connects as soon as Live answers.
+            // The bridge is current, so no setup shows next time: the session connects as soon as Live answers. Put off
+            // while the bridge couldn't start, the reason is the session's to say (its watch says it), and the instruction
+            // to choose the Control Surface, which is chosen, isn't said.
+            Some(Step::Surface) if also.is_some() => {
+                let app = crate::daw::words().app;
+                self.notice(&format!("Kumi connects to {app} by itself once {app} answers."), NoticeTone::Info);
+            }
             Some(Step::Surface) => {
                 if let Some(enable) = crate::daw::current().enable_step() {
                     self.notice(enable.put_off, NoticeTone::Info);

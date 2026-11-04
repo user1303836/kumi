@@ -372,7 +372,7 @@ stops there and says to update; `kumi update` or `kumi bridge` does it.
 The Willington tools appear whenever the bridge offers them: with Willington's
 bindings on (`/willington`) and a Live build they cover.
 
-Each Kumi release ships with a bridge: Kumi 1.24.36 to 1.24.40 with bridge 1.0.102, 1.24.10 to 1.24.35 with 1.0.101, 1.24.9 with 1.0.100, 1.24.8 with 1.0.99, 1.24.4 to 1.24.7 with 1.0.98, 1.24.0 to 1.24.3 with 1.0.97, 1.23.3 with 1.0.96, 1.23.1 to 1.23.2 with 1.0.95, 1.21.2 to 1.23.0 with 1.0.94, 1.19.2 to 1.21.1 with 1.0.93, 1.13.0 to 1.19.1 with 1.0.92, 1.11.3 to 1.12.1 with 1.0.91, 1.11.0 to 1.11.2 with 1.0.90, 1.10.0 to 1.10.1 with 1.0.89, 1.9.7 with 1.0.88, 1.9.6 with 1.0.87, 1.9.4 to 1.9.5 with 1.0.86, 1.9.0 to 1.9.3 with 1.0.85, 1.8.11 with 1.0.84, 1.8.10 with 1.0.83, 1.8.9 with 1.0.82, 1.8.7 to 1.8.8 with 1.0.81, 1.8.6 with 1.0.80, 1.8.5 with 1.0.79, 1.8.4 with 1.0.78, 1.8.3 with 1.0.77, 1.8.2 with 1.0.76, 1.7.5 to 1.8.1 with 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
+Each Kumi release ships with a bridge: Kumi 1.24.61 to 1.24.64 with bridge 1.0.103, 1.24.36 to 1.24.60 with 1.0.102, 1.24.10 to 1.24.35 with 1.0.101, 1.24.9 with 1.0.100, 1.24.8 with 1.0.99, 1.24.4 to 1.24.7 with 1.0.98, 1.24.0 to 1.24.3 with 1.0.97, 1.23.3 with 1.0.96, 1.23.1 to 1.23.2 with 1.0.95, 1.21.2 to 1.23.0 with 1.0.94, 1.19.2 to 1.21.1 with 1.0.93, 1.13.0 to 1.19.1 with 1.0.92, 1.11.3 to 1.12.1 with 1.0.91, 1.11.0 to 1.11.2 with 1.0.90, 1.10.0 to 1.10.1 with 1.0.89, 1.9.7 with 1.0.88, 1.9.6 with 1.0.87, 1.9.4 to 1.9.5 with 1.0.86, 1.9.0 to 1.9.3 with 1.0.85, 1.8.11 with 1.0.84, 1.8.10 with 1.0.83, 1.8.9 with 1.0.82, 1.8.7 to 1.8.8 with 1.0.81, 1.8.6 with 1.0.80, 1.8.5 with 1.0.79, 1.8.4 with 1.0.78, 1.8.3 with 1.0.77, 1.8.2 with 1.0.76, 1.7.5 to 1.8.1 with 1.0.74, 1.7.0 to 1.7.4 with 1.0.73, 1.6.1 with 1.0.72, 1.6.0 with 1.0.71, 1.5 with
 1.0.70, 1.4 with 1.0.69, 1.3 with 1.0.68, 1.2 with 1.0.66, 1.1 with 1.0.53 and
 1.0 with 1.0.52.
 
@@ -413,8 +413,7 @@ picture. What differs:
   so. REAPER: repeat, the metronome switch, a ReaEQ band's type or switch, the
   automation override, the project's notes, title, author, grid and timebase,
   and parameter modulation with nothing on. Renoise: mute, solo, the loop, the
-  pattern loop, the metronome switch, editing settings and a plug-in's
-  auto-suspend.
+  pattern loop, the metronome switch and editing settings.
 - **What only the DAW's undo takes back:** Lua (`run_lua`), REAPER's API
   (`api_call`) and REAPER's actions (`run_action`, when REAPER makes an undo
   point of it). Saving a project, song, template, chain, instrument or preset
@@ -488,22 +487,37 @@ sample FX chains.
 
 HISTORY stays honest in each case: Kumi refuses, or says what it can't do.
 
-- **Renoise:** after Renoise's own undo and redo of line edits (`notes_write`,
+- **Renoise:** after you undo and redo line edits (`notes_write`,
   `notes_clear`, `notes_transpose`, `notes_humanize`, `lines_copy`,
-  `phrase_write`, `phrase_clear`), Kumi's undo of them is refused: Kumi can't
-  tell Renoise's redo from your own identical lines. The row says "Renoise may
-  have redone it"; Renoise's undo can take it back.
-- **Renoise:** in long sessions its undo history has sometimes emptied after
-  AU plug-in instruments were loaded and unloaded (the cause isn't known); then
-  Renoise's undo can't take back `plugin_load`, `plugin_param` or `plugin_set`.
-  `plugin_preset` is untested with plug-ins that have more than one program.
+  `phrase_write`, `phrase_clear`) in Renoise, Kumi's undo of them works for the
+  newest change only: nothing edited after it, and nothing left to redo. In any
+  other case Kumi can't tell Renoise's redo from your own identical lines, and
+  its undo is refused. The row says "Renoise may have redone it"; Renoise's undo
+  can take it back.
+- **Renoise:** after an AU plug-in instrument loads, Renoise sometimes holds its
+  undo step open until you switch to another app. Until then its undo has
+  nothing to take back, and afterwards one undo takes back the load and the
+  changes made since, together. Kumi's undo still works change by change.
 - **REAPER:** a project whose tracks are all replaced at once stays the same
   project when the change made an undo point (an action that removes every
   track and inserts others). It reads as another project when nothing shows it
   was an edit: a script that makes no undo point, REAPER's undo or redo of such
   a change, REAPER before 7.79, or an undo history at its limit. Kumi's
   references to it then go stale and the model reads again.
-- **REAPER:** Kumi's undo of parameter modulation turns its switches off but
-  leaves the modulation settings, which REAPER keeps once made; the row says so.
+- **REAPER:** after Kumi's undo of parameter modulation, its settings are back
+  at REAPER's defaults and switched off, and none of them is saved with the
+  project; REAPER still lists them until it next loads the track. An undone MIDI
+  learn leaves an empty entry on the FX, saved with it, that listens to nothing.
+  The row says so.
+- **REAPER:** a change to a pooled MIDI take lands on every item in its pool, as
+  REAPER's own editor does: the answer and the row say so, with how many, and
+  Kumi's undo puts them all back. A variation of a pooled item leaves the pool.
+  A looped MIDI item with notes hidden by its trimmed start can't be varied yet:
+  those notes play from its second pass, and a take can't hold them.
+- **REAPER:** a MIDI take that reads other than Kumi kept it counts as edited,
+  and a change or "drop the rest" leaves it (naming it drops it). Kumi can't
+  tell an edit from REAPER's placing where a take ignores the project tempo and
+  a tempo change falls under it, and says so. Takes of a MIDI item made before
+  Kumi read MIDI items as MIDI read as edited.
 - **REAPER:** `track_midi_out` needs a MIDI output device in REAPER's
   preferences.

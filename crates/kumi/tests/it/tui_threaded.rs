@@ -189,8 +189,9 @@ async fn until(what: &str, done: impl Fn() -> bool) {
 }
 
 /// A session whose answer waits until it's told to go on (`go`), then says a burst of words all at once and works on
-/// until Kumi closes. It takes what the producer says meanwhile only once the burst is said (`steers` counts each ask),
-/// and moves a step to the background each time it's asked (`moves` counts them).
+/// until Kumi closes, saying a word every 20 ms as a real session does while it works. It takes what the producer says
+/// meanwhile only once the burst is said (`steers` counts each ask), and moves a step to the background each time it's
+/// asked (`moves` counts them).
 struct Steers {
     emit: Rc<dyn Fn(SessionEvent)>,
     status: RefCell<SessionStatus>,
@@ -217,8 +218,15 @@ impl Steers {
             (self.emit)(SessionEvent::Kernel(KernelEvent::Text { text: "w".into() }));
         }
         self.said.set(true);
+        // Then on working, and saying so now and then, as a real session does. The screen asks again only on an event
+        // that comes after an ask's answer. When that answer and the whole burst reach the screen in one drain (a slow
+        // runner can line them up), the burst holds no such event, and without more words the second ask never came
+        // (#897).
         while !self.closed.get() {
-            tokio::time::sleep(Duration::from_millis(1)).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            if !self.closed.get() {
+                (self.emit)(SessionEvent::Kernel(KernelEvent::Text { text: "w".into() }));
+            }
         }
         Ok(())
     }
@@ -736,6 +744,178 @@ async fn a_message_sent_while_the_session_starts_waits_for_it() {
                 until("the answer", || has(&h.screen(), "Lowered the bass by 3 dB.")).await;
                 assert_eq!(submits.load(Ordering::SeqCst), 1, "typed ahead: {ahead}");
                 assert!(!has(&h.screen(), "Session is"), "typed ahead: {ahead}\n{}", h.screen().join("\n"));
+                h.close().await;
+            }
+        })
+        .await;
+}
+
+/// A session that counts the warm-ups it's told: one each time the producer begins a message.
+struct Warms {
+    warms: Arc<AtomicUsize>,
+}
+
+/// What the session does, asked through its handle below.
+impl Warms {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        idle()
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Ok(None)
+    }
+    fn warm(&self) {
+        self.warms.fetch_add(1, Ordering::SeqCst);
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for Warms {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::default()
+    }
+    fn status(&self) -> SessionStatus {
+        Warms::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, { Op::Warm(_) => Reply::Warm(self.warm()), })
+    }
+    alike!();
+}
+
+/// The first character of a message tells the session to ready its model, once: typing on, a `/` command and a search
+/// tell it nothing.
+#[tokio::test(flavor = "current_thread")]
+async fn a_message_begun_tells_the_session_to_ready_its_model_once_and_a_command_or_a_search_doesnt() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let warms = Arc::new(AtomicUsize::new(0));
+            let counted = warms.clone();
+            let build: Build = Box::new(move |_| async move { Ok(Built::new(Rc::new(Warms { warms: counted }))) }.boxed_local());
+            let threaded = Threaded::spawn(build).await.unwrap();
+            let h = Harness::on(120, 36, threaded.clone(), |_| {});
+            h.start().await;
+            h.input.write("m");
+            until("the warm-up", || warms.load(Ordering::SeqCst) == 1).await;
+            h.input.write("ake the bass darker");
+            delay(100).await;
+            assert_eq!(warms.load(Ordering::SeqCst), 1, "typing on tells nothing more");
+            // Sent, the box is empty again: a command begun tells nothing.
+            h.input.write("\r");
+            delay(100).await;
+            h.input.write("/model");
+            delay(100).await;
+            h.input.write(&"\x7f".repeat(6));
+            // Nor does looking back through what was sent.
+            h.input.write("\x12");
+            h.input.write("dark");
+            delay(100).await;
+            assert_eq!(warms.load(Ordering::SeqCst), 1);
+            h.close().await;
+        })
+        .await;
+}
+
+/// A session busy starting (its status says so from the first look) until its start answers, a while later.
+struct SlowStart {
+    emit: Rc<dyn Fn(SessionEvent)>,
+    status: RefCell<SessionStatus>,
+}
+
+/// What the session does, asked through its handle below.
+impl SlowStart {
+    async fn start(&self) -> Result<(), RuntimeError> {
+        tokio::time::sleep(Duration::from_secs(2)).await;
+        self.status.borrow_mut().state = TurnState::Idle;
+        (self.emit)(SessionEvent::State { state: TurnState::Idle });
+        Ok(())
+    }
+    async fn submit(&self, _: &str, _: Option<PinnedNode>) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn refresh(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn new_conversation(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn cancel(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn status(&self) -> SessionStatus {
+        self.status.borrow().clone()
+    }
+    async fn undo(&self, _: Option<&str>) -> Result<Option<ChangeRecord>, RuntimeError> {
+        Ok(None)
+    }
+}
+
+#[async_trait(?Send)]
+impl SessionHandle for SlowStart {
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::default()
+    }
+    fn status(&self) -> SessionStatus {
+        SlowStart::status(self)
+    }
+    fn jobs(&self) -> Vec<JobStatus> {
+        vec![]
+    }
+    fn job(&self, _: u32) -> Option<JobDetail> {
+        None
+    }
+    async fn send(&self, op: Op) -> Result<Reply, RuntimeError> {
+        answered!(self, op, {})
+    }
+    alike!();
+}
+
+/// While the session starts, the screen says what it does: connecting to Live, or, chatting without a DAW
+/// (`--inference-only`, no bridge yet), getting ready, never connecting to a DAW it won't connect to.
+#[tokio::test(flavor = "current_thread")]
+async fn a_start_without_a_daw_says_kumi_is_getting_ready_not_connecting_to_live() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (mode, said, not) in [("inference-only", "getting ready", "connecting to"), ("live", "connecting to Live", "getting ready")]
+            {
+                let build: Build = Box::new(move |emit| {
+                    async move {
+                        let mut status = idle();
+                        status.state = TurnState::Running;
+                        Ok(Built::new(Rc::new(SlowStart { emit, status: RefCell::new(status) })))
+                    }
+                    .boxed_local()
+                });
+                let h = Harness::on(120, 36, Threaded::spawn(build).await.unwrap(), |options| options.mode = mode.into());
+                h.start().await;
+                until("the start's activity", || has(&h.screen(), said)).await;
+                assert!(!has(&h.screen(), not), "{mode}:\n{}", h.screen().join("\n"));
                 h.close().await;
             }
         })

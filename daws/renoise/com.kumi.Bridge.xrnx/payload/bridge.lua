@@ -470,8 +470,17 @@ local function watch_instrument(song, i)
   token.slog, token.phlog = places.new(b.run .. "s" .. b.ids), places.new(b.run .. "ph" .. b.ids)
   token.mlog, token.clog = places.new(b.run .. "ms" .. b.ids), places.new(b.run .. "cs" .. b.ids)
   token.modsets, token.chains = {}, {}
+  -- (a plug-in's program: Renoise's undo takes it back and fires this, lab 2026-11-01. The instrument's name tells only while
+  -- Renoise names it after the program)
+  local function watch_program()
+    local device = instrument.plugin_properties.plugin_device
+    if device then observers:owned(token, nil, function() observers:watch_changes(device.active_preset_observable) end) end
+  end
+  watch_program()
   observers:owned(token, nil, function()
+    observers:watch_undo_with(instrument.plugin_properties.plugin_device_observable, guard("notifier an instrument's plug-in program", watch_program))
     observers:watch_changes(instrument.name_observable)
+    observers:watch_changes(instrument.plugin_properties.auto_suspend_observable)
     for k = 1, #instrument.macros do
       local macro = instrument:macro(k)
       observers:watch_changes(macro.value_observable)
@@ -694,7 +703,54 @@ end
 -- before is refused), and what was made gets its watchers. What was deleted loses its group, and a swap moves the groups
 -- with their objects (Renoise keeps an object's notifiers through a swap: measured). Only an operation the lists can't follow
 -- asks for the whole song to be watched anew.
+-- Instruments or phrases made, moved or deleted: Renoise renumbers the notes and 0Z commands that name them, which tells the
+-- patterns' line notifiers (lab 2026-11-01). That isn't an edit: it moves no rows. The list tells first and its lines follow in
+-- the same call, each read already renumbered: as long as they read so, they don't count, until the next tick. A line that doesn't
+-- is an edit (a script's, in the same callback), and ends that. An edit naming a later instrument still reads as one: nothing tells
+-- them apart. (A note deleted with its instrument is told before the list, and counts: it did change.) Only Renoise's undo tells the
+-- lines first: what this tick counted since the last mark handed out goes back (never past a mark: an edit after it would look like
+-- none; an edit just before it would be what the undo takes back).
+local function renumbering(kind, op)
+  local song = renoise.song()
+  local undoing = song and song:is_undo_redoing()
+  local window = b.renumbering or {}
+  b.renumbering = window
+  if kind == "phrases" then
+    window.phrases = true
+  else
+    local first, second = op and (op.index or op.index1), op and op.index2
+    -- (instruments count from 0 in a note. A new one's own number is no renumbering: a note written to play it is an edit. Renoise's
+    -- undo of a delete brings back what played the one it brings back)
+    local from = (first or 1) - 1
+    if second and second - 1 < from then from = second - 1 end
+    if op and op.type == "insert" and not undoing then from = first end
+    window.from = math.min(window.from or from, from)
+  end
+  if not undoing then return end
+  for _, token in pairs(b.groups and b.groups.patterns or {}) do
+    if token.recent_tick == b.ticks and token.recent then
+      token.touches, token.recent = token.touches - token.recent, 0
+    end
+  end
+end
+
+-- Whether a line told while something renumbers reads as what that writes: an instrument from the first it moved, or a 0Z. A line
+-- as `tostring` gives it (9.5 us, lab 2026-11-01): 12 note columns of 15 characters, the instrument the 4th and 5th, " | " between.
+local function reads_renumbered(window, pos)
+  local ok, text = pcall(function() return tostring(renoise.song():pattern(pos.pattern):track(pos.track):line(pos.line)) end)
+  if not ok then return false end
+  if window.phrases and text:find("0Z", 1, true) then return true end
+  if window.from then
+    for c = 0, 11 do
+      local value = tonumber(text:sub(18 * c + 4, 18 * c + 5), 16)
+      if value and value >= window.from then return true end
+    end
+  end
+  return false
+end
+
 local function on_structural(reason, kind, op, owner, token)
+  if kind == "instruments" or kind == "phrases" then renumbering(kind, op) end
   -- (n-instruments: a modulation set's devices notifier names each place one higher than the list has it, and tells of a
   -- device at 1 that the list doesn't show as a set is copied: lab 2026-10-19. That one is no change to the list.)
   if kind == "moddevices" and op then
@@ -1122,6 +1178,7 @@ local place_env = {
   -- mark is of another pattern or watch)
   pattern_touch_mark = function(p)
     local token = b.groups and b.groups.patterns[p]
+    if token then token.recent = 0 end
     return token and token.pid and (token.pid .. "=" .. token.touches) or nil
   end,
   pattern_touched_since = function(p, mark)
@@ -1520,7 +1577,14 @@ local function say_kept(result, from)
   return result
 end
 
+-- The requests that never write to the song (the reads, and what is answered at once). A message that asked anything else
+-- doesn't start a read in its own callback (M.on_message): what a write sets off in Renoise is seen first, as before.
+local READ_ONLY = { ping = true, status = true, focus = true, read = true, snapshot = true, focus_body = true, digest = true }
+-- The reads whose job may take its first slice in the callback of the message that asked for it.
+local EARLY = { read = true, snapshot = true, focus_body = true, digest = true }
+
 function M.handle(_, request)
+  if not READ_ONLY[request.method] then b.asked_write = true end
   local handler = handlers[request.method]
   if not handler then error({ code = "unknown-method", message = "no method " .. request.method }) end
   -- (M5 m5-renoise: while Kumi's render runs, only the requests that read its state are answered)
@@ -1664,7 +1728,7 @@ function M.start(h, reloading)
   observers = sync.new(guard, b, {
     structural = on_structural,
     tracks = on_tracks,
-    -- (every changed line counts for its pattern: the producer's edits, Renoise's undo and redo, Kumi's own writes. A notes
+    -- (every changed line but a renumbering's, `renumbering()`, counts for its pattern: the producer's edits, Renoise's undo and redo, Kumi's own writes. A notes
     -- change's undo goes through only if none came since its step; see changes_notes.lua)
     lines = function(pos, owner)
       -- (n-instruments: a phrase's lines count for the phrase)
@@ -1673,7 +1737,12 @@ function M.start(h, reloading)
         return
       end
       local token = type(pos) == "table" and type(pos.pattern) == "number" and b.groups and b.groups.patterns[pos.pattern]
-      if token and token.touches then token.touches = token.touches + 1 end
+      if token and token.touches and b.renumbering and not reads_renumbered(b.renumbering, pos) then b.renumbering = nil end
+      if token and token.touches and not b.renumbering then
+        token.touches = token.touches + 1
+        token.recent = (token.recent_tick == b.ticks and token.recent or 0) + 1
+        token.recent_tick = b.ticks
+      end
     end,
     -- (a track of the pattern made an alias or not: what its lines are changed)
     alias = function(token)
@@ -1697,6 +1766,12 @@ function M.start(h, reloading)
       conns:finish_job(job.record, job.request, ok, value)
     end,
     on_active = function(active) if host.set_fast then host.set_fast(active) end end,
+    background = function(request) return request ~= nil and server.BACKGROUND[request.method] == true end,
+    playing = function()
+      local ok, playing = pcall(function() return renoise.song().transport.playing end)
+      if ok then return playing end
+      return nil
+    end,
   })
   status.cache = b
   if b.cfg and b.cfg.log_dir then configure_log(b.cfg.log_dir) end
@@ -1747,6 +1822,7 @@ local function tick_listening()
 end
 
 function M.tick()
+  b.ticks, b.renumbering = (b.ticks or 0) + 1, nil
   b.alive_ms = M.now_ms()
   unix_ms()
   if not b.cfg then
@@ -1770,12 +1846,14 @@ function M.tick()
   if not ok then M.log_error("events", err) end
   ok, err = xpcall(tick_listening, debug.traceback)
   if not ok then M.log_error("listening", err) end
-  jobs:run()
+  -- (While a read is pending its slices run on the fast timer, which Renoise fires in the same frames as this one: a run
+  -- here too gave those frames two slices. This tick still says the timers run, which a message's stale check waits for.
+  -- A loader without the fast timer runs them here.)
+  if host.set_fast then jobs:timers_ran() else jobs:run() end
   conns:tick()
   -- (the auditions whose time is up end: a note never hangs on)
   local ended, audition_err = pcall(actions.tick, M.now_ms())
   if not ended then M.log_error("auditions", audition_err) end
-  b.ticks = (b.ticks or 0) + 1
   if b.ticks % 20 == 0 then log.flush() end
 end
 
@@ -1783,14 +1861,26 @@ function M.on_accept(client)
   conns:accept(client)
 end
 
--- (Every message also gives the reads in progress a slice if the timers haven't: see jobs.lua.)
+-- (Every message also gives the reads in progress a slice if the timers haven't: see jobs.lua.) A read this message
+-- asked for takes its first slice here, once the message is handled, rather than on the next timer, which Renoise fires
+-- once a frame (3.5.4: about every 20 ms, whatever the interval; a snapshot waited 8-16 ms for it, a digest 18-25 ms):
+-- only a read (EARLY), only when nothing this message asked can write, and only one slice, within what is left of a
+-- slice's budget once the message was handled.
 function M.on_message(client, data)
-  b.work_ms = M.now_ms()
+  local started = M.now_ms()
+  b.work_ms, b.asked_write = started, false
   local ok, err = pcall(function()
+    local made = jobs.made
     conns:receive(client, data)
-    jobs:run_if_stale(M.STALE_JOBS_MS, M.STALE_SLICE_MS)
+    if not jobs:run_if_stale(M.STALE_JOBS_MS, M.STALE_SLICE_MS) and not b.asked_write then
+      local left = jobs.BUDGET_MS - (M.now_ms() - started)
+      if left > 0 then
+        local function early(job) return job.request ~= nil and EARLY[job.request.method] and not job.wrote end
+        jobs:run_first(made, early, left)
+      end
+    end
   end)
-  b.work_ms = nil
+  b.work_ms, b.asked_write = nil, false
   if not ok then error(err, 0) end
 end
 

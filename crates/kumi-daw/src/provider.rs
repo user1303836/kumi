@@ -196,6 +196,13 @@ pub trait DawProvider {
         false
     }
     fn watch_words(&self) -> WatchWords;
+    /// Why the open DAW couldn't start Kumi's bridge the last time it tried, and what fixes it, in words, from what the
+    /// DAW keeps (Live: its log, when AbletonMcpBridge is chosen but failed to start). Said in place of
+    /// [`WatchWords::unreachable`]; None when it started, the DAW isn't open, or nothing says.
+    fn start_failure(&self, env: &Env) -> LocalBoxFuture<'static, Option<String>> {
+        let _ = env;
+        Box::pin(async { None })
+    }
     /// The step setup shows for the producer to tell the DAW to use Kumi's bridge; None when it needs none.
     fn enable_step(&self) -> Option<EnableStep>;
     /// The oldest version of the DAW Kumi works with, as people write it ("12", "3.5").

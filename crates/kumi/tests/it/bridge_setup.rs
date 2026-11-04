@@ -85,6 +85,12 @@ impl World {
             )
             .unwrap();
             fs::write(scripts.join("AbletonMcpBridge/bridge-reference.json"), json!({"config":config}).to_string()).unwrap();
+            // Yours alone, as Kumi's installer makes them: the Remote Script checks that before it starts.
+            #[cfg(unix)]
+            for file in [scripts.join("AbletonMcpBridge/bridge-reference.json"), config] {
+                use std::os::unix::fs::PermissionsExt;
+                fs::set_permissions(file, fs::Permissions::from_mode(0o600)).unwrap();
+            }
         }
         let prepared = root.path().join("prepared");
         package(&prepared.join("package"), "1.0.34");
@@ -118,6 +124,8 @@ impl World {
         io.wait_ms = Some(0);
         io.yes = true;
         io.live_running = Some(Rc::new(|| async { false }.boxed_local()));
+        io.owner_only = Some(Rc::new(|_| true));
+        io.make_owner_only = Some(Rc::new(|_| Ok(())));
         io.remote_script_answers = Some(Rc::new(|_| async { true }.boxed_local()));
         io.sleep = Some(Rc::new(|_| async {}.boxed_local()));
         io.run = Some(Rc::new({
@@ -516,28 +524,27 @@ async fn extension_installs_updates_or_stays_unchanged_and_missing_live_folder_i
     assert!(missing.out.0.borrow().contains("Kumi couldn't add its extension to Live (Live's folder isn't there"));
 }
 #[tokio::test(flavor = "current_thread")]
-async fn windows_live_detection_uses_powershell_and_falls_back_only_after_failure() {
-    for (powershell, tasklist, want, calls_want) in [
-        (Ran { stdout: "1138176\r\n".into(), ..Default::default() }, Ran::default(), true, 1),
-        (Ran::default(), Ran { stdout: "Ableton Live 12 Suite.exe".into(), ..Default::default() }, false, 1),
-        (
-            Ran { code: 1, ..Default::default() },
-            Ran { stdout: "Ableton Live 12 Suite.exe 4242 Console".into(), ..Default::default() },
-            true,
-            2,
-        ),
+async fn windows_live_detection_reads_the_process_list_and_runs_nothing() {
+    // The process list as Kumi's detection gives it on Windows (a Toolhelp snapshot's image names), stood in for here,
+    // matched as Get-Process -Name 'Ableton Live*' did: in any case, `.exe` or not.
+    for (listing, want) in [
+        ("1138176 Ableton Live 12 Suite.exe", true),
+        ("4242 ABLETON LIVE 11 LITE.EXE", true),
+        ("4242 C:\\ProgramData\\Ableton\\Live 12 Beta\\Program\\Ableton Live 12 Beta.exe", true),
+        ("7 explorer.exe\n8 Ableton Index.exe", false),
+        ("none", false),
     ] {
         let asked = Rc::new(RefCell::new(vec![]));
         let run: Run = Rc::new({
             let asked = asked.clone();
             move |command, _, _| {
                 asked.borrow_mut().push(command.clone());
-                let result = if command.to_lowercase().ends_with("powershell.exe") { powershell.clone() } else { tasklist.clone() };
-                async move { result }.boxed_local()
+                async { Ran::default() }.boxed_local()
             }
         });
-        assert_eq!(is_live_running_on(run, "win32", &Env::new()).await, want);
-        assert_eq!(asked.borrow().len(), calls_want);
+        let env = Env::from([("KUMI_PROCESSES".to_string(), listing.to_string())]);
+        assert_eq!(is_live_running_on(run, "win32", &env).await, want, "{listing}");
+        assert!(asked.borrow().is_empty(), "no PowerShell, no tasklist: {:?}", asked.borrow());
     }
 }
 #[tokio::test]
@@ -604,6 +611,91 @@ async fn discoverable_owner_receipt_preserves_custom_config_secret_and_state_pat
         assert_eq!(flag(call, "--secret"), secret.to_str().unwrap());
         assert_eq!(flag(call, "--remote-scripts-dir"), w.scripts.to_str().unwrap());
     }
+}
+#[cfg(unix)]
+#[tokio::test(flavor = "current_thread")]
+async fn a_current_bridge_whose_files_others_can_read_has_them_made_yours_alone_again() {
+    use std::os::unix::fs::PermissionsExt;
+    let w = World::new(Some("1.0.34"));
+    let files = [w.scripts.join("AbletonMcpBridge/bridge-reference.json"), w.state.join("bridge-config.json")];
+    for file in &files {
+        fs::set_permissions(file, fs::Permissions::from_mode(0o644)).unwrap();
+    }
+    assert_eq!(setup_bridge(w.io()).await.unwrap(), 0);
+    let said = w.out.0.borrow().clone();
+    assert!(
+        said.contains("Others could read bridge-reference.json and bridge-config.json, so Live's bridge wouldn't start: they're yours alone again. Restart Live to start it."),
+        "{said}"
+    );
+    for file in &files {
+        assert_eq!(fs::metadata(file).unwrap().permissions().mode() & 0o777, 0o600, "{}", file.display());
+    }
+    assert!(w.calls.borrow().is_empty(), "nothing for the lifecycle");
+    assert_eq!(setup_bridge(w.io()).await.unwrap(), 0);
+    assert_eq!(w.out.0.borrow().matches("Others could read").count(), 1, "put back: nothing more to say");
+}
+#[tokio::test(flavor = "current_thread")]
+async fn a_current_bridge_whose_remote_script_differs_from_its_package_is_put_back_with_live_closed() {
+    let w = World::new(Some("1.0.34"));
+    let receipt = w.state.join("install-receipt.json");
+    let installed = w.root.path().join("installed");
+    fs::write(&receipt, json!({"version":1,"stateDirectory":w.state,"configPath":w.state.join("bridge-config.json"),"secretPath":w.state.join("bridge.secret"),"remoteScriptsDirectory":w.scripts,"packageRoot":installed}).to_string()).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&receipt, fs::Permissions::from_mode(0o600)).unwrap();
+    }
+    fs::create_dir_all(installed.join("remote-script/AbletonMcpBridge")).unwrap();
+    fs::write(installed.join("remote-script/AbletonMcpBridge/ableton_mcp_remote_script.py"), "the whole bridge\n").unwrap();
+    // Cut short in Live's Remote Scripts folder.
+    fs::write(w.scripts.join("AbletonMcpBridge/ableton_mcp_remote_script.py"), "the whole").unwrap();
+    let mut io = w.io();
+    io.live_running = Some(Rc::new(|| async { true }.boxed_local()));
+    assert_eq!(setup_bridge(io).await.unwrap(), 1);
+    assert!(
+        w.out.0.borrow().contains(
+            "The Remote Script's files in Live differ from the bridge's. Quit Live, then run kumi bridge again to put them back."
+        ),
+        "{}",
+        w.out.0.borrow()
+    );
+    assert!(w.calls.borrow().is_empty(), "Live open: nothing changes");
+    assert_eq!(setup_bridge(w.io()).await.unwrap(), 0);
+    let calls = w.calls.borrow().clone();
+    assert_eq!(calls.len(), 1, "{calls:?}");
+    assert_eq!(calls[0].args[..2], ["lifecycle", "repair"]);
+    assert_eq!(flag(&calls[0], "--state-dir"), w.state.to_str().unwrap());
+    assert_eq!(flag(&calls[0], "--secret"), w.state.join("bridge.secret").to_str().unwrap());
+    assert_eq!(flag(&calls[0], "--package-root"), installed.to_str().unwrap());
+    assert_eq!(flag(&calls[0], "--remote-scripts-dir"), w.scripts.to_str().unwrap());
+    assert!(calls[0].args.iter().any(|arg| arg == "--confirm-live-stopped"), "{:?}", calls[0].args);
+    assert!(w
+        .out
+        .0
+        .borrow()
+        .contains("The Remote Script's files in Live differ from the bridge's: Kumi put them back. Open Live to start it."));
+}
+/// On Windows the package's `manifest.json` ends in `\r\n` (the release's build writes it as text) and the installed one in
+/// `\n` (the lifecycle writes it). Only that differing, a current bridge is left as it is, Live open or closed.
+#[tokio::test(flavor = "current_thread")]
+async fn a_current_bridge_whose_manifest_differs_only_in_its_line_ends_is_left_alone() {
+    let w = World::new(Some("1.0.34"));
+    let (package, live) = (w.root.path().join("installed/remote-script/AbletonMcpBridge"), w.scripts.join("AbletonMcpBridge"));
+    fs::create_dir_all(&package).unwrap();
+    for folder in [&package, &live] {
+        fs::write(folder.join("ableton_mcp_remote_script.py"), "the whole bridge\n").unwrap();
+    }
+    fs::write(package.join("manifest.json"), "{\"package\":\"AbletonMcpBridge\"}\r\n").unwrap();
+    fs::write(live.join("manifest.json"), "{\"package\":\"AbletonMcpBridge\"}\n").unwrap();
+    for live_open in [true, false] {
+        let mut io = w.io();
+        io.live_running = Some(Rc::new(move || async move { live_open }.boxed_local()));
+        assert_eq!(setup_bridge(io).await.unwrap(), 0, "Live open: {live_open}");
+    }
+    let said = w.out.0.borrow().clone();
+    assert_eq!(said.matches("The Ableton bridge 1.0.34 is installed, the same as Kumi's.").count(), 2, "{said}");
+    assert!(!said.contains("differ"), "{said}");
+    assert!(w.calls.borrow().is_empty(), "nothing for the lifecycle: {:?}", w.calls.borrow());
 }
 /// After an app rollback: a newer Kumi's bridge (1.0.35) in Live and its extension, with a receipt keeping `kept` (a
 /// bridge's version) to go back to, installed from this Kumi's bundled artifact or, when `ours` is false, another.

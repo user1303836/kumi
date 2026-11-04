@@ -122,12 +122,35 @@ def _config_paths(reference: Path) -> list[Path]:
     return paths
 
 
+def _refused_because(path: Path) -> str:
+    """What the owner checks found wrong with `path`, said after the message that names it (": others can read it
+    (mode 644)"). Nothing on Windows, where one ACL check decides it all (and can't tell why when PowerShell fails)."""
+    if os.name == "nt":
+        return ""
+    try:
+        if path.is_symlink():
+            return ": it's a link"
+        if not path.exists():
+            return ": it isn't there"
+        if not path.is_file():
+            return ": it isn't a file"
+        entry = path.stat()
+        if entry.st_uid != os.getuid():
+            return ": another account owns it"
+        mode = stat.S_IMODE(entry.st_mode)
+        if mode & 0o077:
+            return f": others can read it (mode {mode:o})"
+    except OSError as error:
+        return f": it can't be read ({error.strerror or error})"
+    return ""
+
+
 def _read_config() -> dict[str, Any]:
     reference = Path(__file__).with_name("bridge-reference.json")
     if os.name == "nt":
         _prefetch_acl_verdicts(_config_paths(reference))
     if reference.is_symlink() or not reference.is_file() or not _owner_controlled(reference) or not _mode_owner_only(reference):
-        raise ValueError("bridge configuration reference is missing or unsafe")
+        raise ValueError("bridge configuration reference is missing or unsafe" + _refused_because(reference))
     try:
         reference_value = json.loads(reference.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -136,9 +159,9 @@ def _read_config() -> dict[str, Any]:
         raise ValueError("bridge configuration reference is invalid")
     path = Path(reference_value["config"])
     if not path.is_absolute() or path.is_symlink() or not path.is_file() or not _owner_controlled(path):
-        raise ValueError("bridge configuration must be an existing regular file")
+        raise ValueError("bridge configuration must be an existing regular file" + _refused_because(path))
     if not _mode_owner_only(path):
-        raise ValueError("bridge configuration must be owner-readable")
+        raise ValueError("bridge configuration must be owner-readable" + _refused_because(path))
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as error:
@@ -152,9 +175,9 @@ def _read_config() -> dict[str, Any]:
         raise ValueError("realtime port is invalid")
     secret_path = Path(secret_file)
     if not secret_path.is_absolute() or secret_path.is_symlink() or not secret_path.is_file() or not _owner_controlled(secret_path):
-        raise ValueError("bridge secret must be an existing regular file")
+        raise ValueError("bridge secret must be an existing regular file" + _refused_because(secret_path))
     if not _mode_owner_only(secret_path):
-        raise ValueError("bridge secret must be owner-readable")
+        raise ValueError("bridge secret must be owner-readable" + _refused_because(secret_path))
     secret = secret_path.read_text(encoding="utf-8")
     if secret.endswith("\n"):
         secret = secret[:-1]
@@ -615,13 +638,52 @@ def _willington_switch() -> tuple[int, int, int] | None:
     return entry.st_mtime_ns, entry.st_size, entry.st_ino
 
 
+# Beside this script while its last start in a running Live failed: that Live's process, when, and the exception, for Kumi
+# to say (it reads Live's log too). A start that succeeds removes it.
+_START_FAILURE = "start-failure.json"
+
+
+def _say_start_failure(surface: Any, c_instance: Any, error: BaseException) -> None:
+    """A failed start, said where the producer and Kumi see it: Live's status bar (show_message, never a dialog), Live's
+    log, and _START_FAILURE. Best effort: none of it may hide the failure itself, which Live goes on to report."""
+    exception = f"{type(error).__name__}: {error}"
+    words = "AbletonMcpBridge couldn't start: " + exception
+    # (the status bar is one short line: where the fix is comes before the exception, which it may cut off)
+    shown = "AbletonMcpBridge couldn't start (kumi doctor says how to fix it): " + exception
+    for say, said in ((getattr(c_instance, "show_message", None), shown), (getattr(surface, "log_message", None), words)):
+        if callable(say):
+            try:
+                say(said)
+            except Exception:
+                pass
+    # (written in place: a file cut short is no JSON to Kumi, which then reads Live's log alone; a temporary one left by a
+    # Live that died meanwhile would be one more file in this folder)
+    try:
+        record = {"version": 1, "pid": os.getpid(), "at": time.time(), "exception": exception[:2000]}
+        Path(__file__).with_name(_START_FAILURE).write_text(json.dumps(record), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _start_failure_gone() -> None:
+    try:
+        Path(__file__).with_name(_START_FAILURE).unlink()
+    except Exception:
+        pass
+
+
 class AbletonMcpBridge(_ControlSurface):
     """Control Surface lifecycle wrapper around the dependency-free bridge."""
 
     def __init__(self, c_instance: Any) -> None:
         super().__init__(c_instance)
         accessor = getattr(self, "song", None)
-        self._bridge = _Bridge(c_instance, _read_config(), song=accessor() if callable(accessor) else None, provenance="real-live", diagnostics_validator=_diagnostics_path_safe)
+        try:
+            self._bridge = _Bridge(c_instance, _read_config(), song=accessor() if callable(accessor) else None, provenance="real-live", diagnostics_validator=_diagnostics_path_safe)
+        except Exception as error:
+            _say_start_failure(self, c_instance, error)
+            raise
+        _start_failure_gone()
         self._disconnected = False
         self._willington = None
         self._timer = None

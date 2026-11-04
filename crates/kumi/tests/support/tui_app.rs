@@ -116,6 +116,8 @@ pub struct Control {
     pub own: RefCell<Option<FocusBody>>,
     /// The DAW refuses its own bodies (Renoise while Kumi renders): they read as nothing, though it can show them.
     pub own_refused: Cell<bool>,
+    /// The mixer's meters alone; nothing is what an extension without that read answers.
+    pub levels: RefCell<Option<Vec<TrackLevel>>>,
     /// What /export and /share get as the conversation going on now.
     pub export: RefCell<Option<ConversationToExport>>,
     /// The session's palette (with "palette" set, the session keeps palettes).
@@ -126,6 +128,8 @@ pub struct Control {
     pub slots: RefCell<Option<Rc<kumi_listening::slots::SlotsContext>>>,
     /// What /map reads its data with.
     pub map: RefCell<Option<kumi::map::LoadMap>>,
+    /// The key /map's data would be read under now (none: the session doesn't say, and no map is kept).
+    pub map_key: RefCell<Option<String>>,
     /// The models to talk to, and the sign-ins.
     pub models: RefCell<Option<Rc<dyn kumi::models::ModelController>>>,
     /// Itself, once the harness hands it to the screen: what a request told carries on with after `tell` returns.
@@ -156,11 +160,13 @@ impl Default for Control {
             arrangement: RefCell::default(),
             own: RefCell::default(),
             own_refused: Cell::default(),
+            levels: RefCell::default(),
             export: RefCell::default(),
             palette: RefCell::default(),
             music: RefCell::default(),
             slots: RefCell::default(),
             map: RefCell::default(),
+            map_key: RefCell::default(),
             models: RefCell::default(),
             this: RefCell::default(),
             side: HandleSide::new(),
@@ -578,6 +584,10 @@ impl Control {
             BodyRequest::Notes { item_ref } => self.clip_view(item_ref).await?.map(FocusBody::Notes),
             BodyRequest::Grid { track_ref, index } => self.session_strip(track_ref, *index).await?.map(FocusBody::Grid),
             BodyRequest::Timeline => self.arrangement_strip().await?.map(FocusBody::Timeline),
+            BodyRequest::Levels { .. } => {
+                self.call("own:levels");
+                self.levels.borrow().clone().map(FocusBody::Levels)
+            }
             other => {
                 self.call(format!("own:{other:?}"));
                 self.own.borrow().clone().filter(|own| own_kind(own) == other.kind() && !self.own_refused.get())
@@ -688,6 +698,7 @@ impl Control {
                 let load = part(self.map_loader())?;
                 Reply::Map(load().await)
             }
+            Op::MapKey(op::MapKey {}) => Reply::MapKey(part(self.map_key.borrow().clone())?),
             Op::Slots(op::Slots { id, words }) => Reply::Slots(self.side.slots(id, &words, &*part(self.slots_context())?).await),
             Op::StopSlots(op::StopSlots { id }) => Reply::StopSlots(self.side.stop_slots(id)),
             Op::StopSignIn(op::StopSignIn { id }) => Reply::StopSignIn(self.side.stop_sign_in(id)),

@@ -22,8 +22,11 @@ closes, crashes or is stopped.
   words ("looked at your Set"), each with its timing. A step at work animates by
   kind (searching, reading, building a device, changing, listening, playing);
   the same step done several times folds into one line ("read a page ×3").
-  What Kumi heard shows as a small spectrum, and what it keeps as a line of its
-  own: ✎ a note, ◆ a technique, ↻ a recipe, ✦ a lesson from matching. While the
+  A file Kumi heard shows as a spectrum: its ten bands to scale on a frequency
+  axis, each as high as its energy per octave (dB under the loudest band), and
+  the balance's tilt (0 is pink noise, below it darker); against a reference,
+  each band's difference. What Kumi keeps shows as a line of its own: ✎ a note,
+  ◆ a technique, ↻ a recipe, ✦ a lesson from matching. While the
   model thinks between steps, the headline of its reasoning shows on a row of its
   own, as a step at work. Each finished answer ends with one quiet line: its
   time, its changes, and its tokens on an API key or its share of the plan on a
@@ -89,7 +92,9 @@ needs; a mint waveform under the wordmark moves while Kumi waits (for the
 browser, the install, or Live). ↑↓ and Enter choose, Esc leaves the step for
 later, and the session follows in the same window. While ChatGPT's sign-in waits,
 **c** copies its link (or code), **d** uses a code instead of the browser, and **b**
-the browser again. On
+the browser again. When Live has AbletonMcpBridge as a Control Surface but couldn't
+start it, the Control Surface step says why, from Live's log (its port held by another
+program, say), and what fixes it, instead of asking for it again; so does the session. On
 Linux, setup only signs in. A Kumi that's set up starts straight into the session.
 
 Below 100 columns (a window beside your DAW) the pane is a **drawer** under the
@@ -137,7 +142,7 @@ words and views.
     their levels, and its MIDI hardware output;
   - the **mixer** window, undocked (a docked mixer can't be told apart): the
     master and the tracks around the selected one, with volume, pan, mute, solo,
-    arm and a peak meter.
+    arm and a peak meter that moves as the track sounds.
 - **FOCUS in Renoise** follows its middle frame and panels (Renoise doesn't say
   which has the keyboard, so FOCUS goes by what changes):
   - the **Pattern Editor**: the lines around the cursor (or the playhead,

@@ -140,7 +140,7 @@ async fn a_setting_heard_at_full_length_is_a_better_best_than_one_heard_on_the_s
 }
 
 fn knob(device: &str, name: &str, min: f64, max: f64, value: f64) -> Knob {
-    Knob { r#ref: format!("{device}/{name}"), device: device.into(), name: name.into(), min, max, step: None, value }
+    Knob { r#ref: format!("{device}/{name}"), device: device.into(), name: name.into(), min, max, step: None, value, device_id: None }
 }
 
 #[test]

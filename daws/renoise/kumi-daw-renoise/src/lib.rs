@@ -12,6 +12,7 @@ mod lines;
 mod listening;
 mod mapping;
 mod provider;
+pub mod songs;
 mod variations;
 
 use kumi_agent::core::{
@@ -272,7 +273,7 @@ fn fill_focus(focus: &Value) -> DawFocus {
 fn body_request(request: &BodyRequest) -> Option<JsonObject> {
     Some(match request {
         BodyRequest::Tree { track_ref } => body_args("dsp", Some(track_ref)),
-        BodyRequest::Tracker { item_ref } => {
+        BodyRequest::Tracker { item_ref, .. } => {
             let phrase = item_ref.as_deref().and_then(|r| RenoiseRefs.kind_of(r)) == Some("phrase");
             body_args(if phrase { "phrase" } else { "pattern" }, item_ref.as_deref())
         }
@@ -287,7 +288,7 @@ fn body_request(request: &BodyRequest) -> Option<JsonObject> {
 fn to_body(request: &BodyRequest, body: &Value) -> Option<FocusBody> {
     Some(match request {
         BodyRequest::Tree { track_ref } => FocusBody::Tree(own_views::tree(track_ref, body)),
-        BodyRequest::Tracker { item_ref } => {
+        BodyRequest::Tracker { item_ref, .. } => {
             let mut grid = own_views::tracker(body);
             // A phrase: the phrase editor's own words, and how it plays.
             if item_ref.as_deref().and_then(|r| RenoiseRefs.kind_of(r)) == Some("phrase") || body.get("instrumentRef").is_some() {

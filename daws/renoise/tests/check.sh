@@ -18,7 +18,8 @@ if [ -z "$defs" ] || [ ! -d "$defs" ]; then
   exit 2
 fi
 tmp=$(mktemp -d "${TMPDIR:-/tmp}/kumi-renoise-luals.XXXXXX")
-trap 'rm -rf "$tmp"' EXIT
+. "$here/children.sh"
+trap 'stop_child; rm -rf "$tmp"' EXIT
 cat > "$tmp/luarc.json" <<JSON
 {
   "runtime.version": "LuaJIT",
@@ -27,8 +28,9 @@ cat > "$tmp/luarc.json" <<JSON
   "diagnostics.globals": ["KUMI_BRIDGE"]
 }
 JSON
-out=$(lua-language-server --check="$here/../com.kumi.Bridge.xrnx" --configpath="$tmp/luarc.json" \
-  --checklevel=Information --logpath="$tmp/log" 2>&1) || true
+run lua-language-server --check="$here/../com.kumi.Bridge.xrnx" --configpath="$tmp/luarc.json" \
+  --checklevel=Information --logpath="$tmp/log" >"$tmp/out" 2>&1 || true
+out=$(cat "$tmp/out")
 case "$out" in
   *"no problems found"*) echo "lua-language-server: no problems found" ;;
   *) printf '%s\n' "$out" | tr '\r' '\n' | grep -v '^ *$' | grep -v '^>' >&2; exit 1 ;;

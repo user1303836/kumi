@@ -932,3 +932,38 @@ case!(keys_json_gives_the_maps_actions_other_keys, async {
     h.wait_until_hidden("Songs 24").await;
     h.close().await;
 });
+
+// /map again while what it reads stays the same (the same key) shows the map kept from before, without reading it again;
+// under another key it's read afresh.
+case!(a_map_opened_again_under_the_same_key_is_the_one_kept_and_another_key_reads_it_afresh, async {
+    let reads = Rc::new(std::cell::Cell::new(0));
+    let control = Rc::new(Control::default());
+    let (counted, data) = (reads.clone(), fixture(12, 8));
+    *control.map.borrow_mut() = Some(Rc::new(move || {
+        counted.set(counted.get() + 1);
+        let data = data.clone();
+        async move { data }.boxed_local()
+    }));
+    *control.map_key.borrow_mut() = Some("one".into());
+    let h = Harness::with(160, 40, control.clone(), |_| {});
+    h.start().await;
+    h.connect();
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    let first = text(&h.screen());
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Sounds 72").await;
+    // The same key: the kept map, drawn as it was, read once.
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    assert_eq!(text(&h.screen()), first);
+    assert_eq!(reads.get(), 1);
+    h.type_text("\x1b").await;
+    h.wait_until_hidden("Sounds 72").await;
+    // Another key (a learn, the map made again, another DAW): read afresh.
+    *control.map_key.borrow_mut() = Some("two".into());
+    h.type_text("/map\r").await;
+    h.wait_for("Sounds 72").await;
+    assert_eq!(reads.get(), 2);
+    h.close().await;
+});

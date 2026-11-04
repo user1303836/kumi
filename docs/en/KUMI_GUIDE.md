@@ -265,8 +265,14 @@ its extension (or tool) in place and opens the DAW.
 
 - **The DAW is open:** it loads Kumi's bridge only as it starts, and Kumi never
   quits it for you. Choose **I'll quit it** and quit it yourself (it asks to
-  save first); Kumi puts the bridge in and opens it again. A project or song
-  you saved is in the DAW's list of recent ones.
+  save first); Kumi puts the bridge in and opens it again. What comes back is
+  the DAW's own start-up setting:
+  - REAPER, as it's set at first: every project tab you had open.
+  - REAPER set to open the last project: the project you had in front. Others
+    are in its list of recent projects.
+  - REAPER set to start with a new project: a new project, as you chose. Saved
+    ones are in its list of recent projects.
+  - Renoise: a song you saved is in its list of recent songs.
 - **It isn't installed:** Kumi says where to get it (reaper.fm, renoise.com);
   **Look again** checks once it's there. An older REAPER or Renoise that's open
   is named, and stays open.
@@ -324,8 +330,8 @@ Kumi about this**), Live's own commands and Live's manual.
 
 **Versions.** Each Kumi release ships with an extension and a tool, which
 `kumi update` brings up to date ([updating](#updating-reporting-and-uninstalling)).
-Kumi 1.24.35 to 1.24.40 with REAPER extension 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
-Kumi 1.24.35 to 1.24.40 with Renoise tool 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
+Kumi 1.24.64 with REAPER extension 0.1.11, 1.24.50 to 1.24.63 with 0.1.10, 1.24.45 to 1.24.49 with 0.1.9, 1.24.35 to 1.24.44 with 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
+Kumi 1.24.61 to 1.24.64 with Renoise tool 1.0.18, 1.24.60 with 1.0.17, 1.24.54 to 1.24.59 with 1.0.16, 1.24.53 with 1.0.15, 1.24.51 to 1.24.52 with 1.0.14, 1.24.50 with 1.0.13, 1.24.49 with 1.0.12, 1.24.47 to 1.24.48 with 1.0.11, 1.24.46 with 1.0.10, 1.24.44 to 1.24.45 with 1.0.9, 1.24.43 with 1.0.8, 1.24.35 to 1.24.42 with 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
 
 ## Working with Kumi
 
@@ -754,9 +760,20 @@ its own fast knob search and with the model's bigger ideas every few
 generations, until the score reaches 95, you stop it, or four hours pass. The
 GOAL tab shows how it's going. With Max for Live, Kumi holds the candidates back
 while it tries them, so you hear the Set without them; the best goes on
-"Kumi · Goal best" when the search pauses or ends. Esc pauses the search,
-`/loop` alone picks it up again (even after a restart), and `/loop stop` ends
-it.
+"Kumi · Goal best" when the search pauses or ends. A paused goal's best waits
+muted beside its candidates. In Live, each candidate then goes back as the goal
+found it, without Kumi's limiter, apart from a knob you turned during the search.
+Esc pauses the search, `/loop` alone picks it up again (even after a restart),
+and `/loop stop` ends it.
+
+The next best replaces the last one only if Kumi can show it's unchanged.
+Otherwise the last one stays, the new one goes beside it, and Kumi says why there
+are two. In Live, Kumi reads the track's devices, clips, notes, mixer and Session
+clips' automation. It can't see a plug-in's own state that isn't a parameter,
+data inside a Max for Live device, or a change to automation already drawn in the
+Arrangement. An edit only there is replaced with the best. Live's own undo brought
+back a replaced best with its notes and a device setting no parameter shows; we
+expect the same for plug-ins and Max devices, but haven't seen it.
 
 What Kumi learns from each match is kept as a lesson (✦) for the next one;
 `/memory` lists them.

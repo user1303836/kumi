@@ -241,6 +241,7 @@ impl TuiApp {
             self.search_type(&clean);
             return;
         }
+        let began = state.editor.is_empty();
         if typed {
             state.editor.type_text(&clean);
         } else {
@@ -248,6 +249,12 @@ impl TuiApp {
             state.editor.paste(&clean);
         }
         state.menu_dismissed = false;
+        // A message begun (not a / command): its model gets ready while the producer types.
+        let warm = began && !state.editor.is_empty() && !clean.starts_with('/');
+        drop(state);
+        if warm {
+            self.session().tell(op::Warm {}.into());
+        }
     }
     /// Plain dragging selects text even when mouse reporting is needed for scrolling and buttons.
     fn selection_input(&self, event: &InputEvent) -> bool {

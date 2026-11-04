@@ -493,7 +493,7 @@ fn device_with<'a>(rows: &'a [JsonObject], identity: &str) -> Option<&'a JsonObj
 }
 
 /// A device row's identity in Live (empty when the bridge doesn't say).
-fn object_identity(row: &JsonObject) -> String {
+pub(super) fn object_identity(row: &JsonObject) -> String {
     match row.get("objectIdentity") {
         Some(Value::String(text)) => text.clone(),
         Some(Value::Number(number)) => number.to_string(),

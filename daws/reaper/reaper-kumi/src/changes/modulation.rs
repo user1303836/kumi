@@ -325,7 +325,9 @@ fn sourced(ctx: &Ctx, fx: Fx, param: i32) -> bool {
 }
 
 fn write_all(ctx: &Ctx, fx: Fx, writes: &[(String, String)]) {
-    for (key, text) in writes {
+    // (an LFO's tempo sync first: REAPER converts its speed when the switch flips, so a speed written before it doesn't stay)
+    let sync_first = writes.iter().filter(|(key, _)| key.ends_with(".lfo.temposync"));
+    for (key, text) in sync_first.chain(writes.iter().filter(|(key, _)| !key.ends_with(".lfo.temposync"))) {
         ctx.reaper.fx_set_config(fx, key, text);
     }
     mark_fx(ctx.reaper, fx);
@@ -408,7 +410,14 @@ pub fn restore(ctx: &Ctx, family: &Family, restore: &Restore) -> Done<Restored> 
     let mut display =
         json!({"title": format!("{} {name} {}: {} put back", fx_label(ctx, at.fx), place_phrase(ctx, at.holder), family.noun)});
     if prior.as_object().is_some_and(|p| p.values().all(Value::is_null)) {
-        display["note"] = "REAPER keeps the parameter's modulation settings once made; they are turned off, as before.".into();
+        // (lab, 7.82: REAPER writes no PROGRAMENV for modulation that's off, in the track's chunk or the saved project; a learn's
+        // PARMLEARN line stays, empty)
+        display["note"] = if family.kind == "fx-param-learn" {
+            "An empty MIDI learn entry stays on the FX, and is saved with it: it listens to nothing."
+        } else {
+            "Its settings are back at REAPER's defaults and switched off, and none of them is saved with the project; REAPER still lists them until it next loads the track."
+        }
+        .into();
     }
     Ok(Restored { restored: json!({"state": after}), display, unwritten: false })
 }

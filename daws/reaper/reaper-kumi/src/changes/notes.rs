@@ -6,7 +6,7 @@ use std::collections::HashMap;
 
 use serde_json::{json, Value};
 
-use super::{Applied, Ctx, Done, Fault, Preview, Restore, Restored};
+use super::{pool, Applied, Ctx, Done, Fault, Preview, Restore, Restored};
 use crate::midi::Event;
 use crate::read::{bad, failed, take_start_qn};
 use crate::reaper::{MidiNote, Take};
@@ -435,6 +435,7 @@ pub fn preview(ctx: &Ctx, input: &Value, mode: Mode) -> Done<Preview> {
         display["unchanged"] = (difference(&plan.add, &was).is_empty() && difference(&was, &plan.add).is_empty()).into();
     }
     let prior = json!({"notes": plan.before.len(), "fence": fence.clone(), "removed": rows_of(ctx, plan.take, plan.item_qn, gone)});
+    let display = pool::said(ctx, plan.take, pool::WILL_APPLY, display);
     Ok(Preview { target: target(ctx, plan.take), prior, fence, display })
 }
 
@@ -457,7 +458,12 @@ pub fn apply(ctx: &Ctx, input: &Value, fence: &Value, mode: Mode) -> Done<Applie
         applied: json!({"added": added.iter().map(Note::json).collect::<Vec<_>>(), "removed": removed.iter().map(Note::json).collect::<Vec<_>>(), "notes": after.len()}),
         created: None,
         material: None,
-        display: json!({"title": title(mode.verb(), count, &label), "notes": after.len(), "written": rows_of(ctx, take, plan.item_qn, added.iter().copied().enumerate())}),
+        display: pool::said(
+            ctx,
+            take,
+            pool::APPLIED,
+            json!({"title": title(mode.verb(), count, &label), "notes": after.len(), "written": rows_of(ctx, take, plan.item_qn, added.iter().copied().enumerate())}),
+        ),
         unwritten: removed.is_empty() && added.is_empty(),
     })
 }
@@ -514,7 +520,12 @@ pub fn restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
     let label = take_label(ctx, take);
     Ok(Restored {
         restored: json!({"notes": after.len()}),
-        display: json!({"title": format!("Notes in {label} put back ({} removed, {} written again)", found.len(), to_insert.len())}),
+        display: pool::said(
+            ctx,
+            take,
+            pool::PUT_BACK,
+            json!({"title": format!("Notes in {label} put back ({} removed, {} written again)", found.len(), to_insert.len())}),
+        ),
         unwritten: found.is_empty() && to_insert.is_empty(),
     })
 }

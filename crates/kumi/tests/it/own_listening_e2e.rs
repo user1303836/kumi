@@ -344,6 +344,157 @@ async fn renoise_renders_each_track_through_its_master_and_offers_no_render_of_a
         .await;
 }
 
+/// The tool's first two answers to `method` (with `action`, if it's named) refuse it, in the words Renoise's tool does while it
+/// reads a dense song's tempo commands: how many times it was asked.
+fn busy_twice(config: &mut SimulatorConfig, method: &'static str, action: Option<&'static str>) -> Arc<std::sync::atomic::AtomicUsize> {
+    let inner = config.respond.take().unwrap();
+    let asked = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let counted = asked.clone();
+    config.respond = Some(Arc::new(move |called: &str, params: &Value| {
+        use std::sync::atomic::Ordering::SeqCst;
+        if called == method && action.is_none_or(|action| params["action"] == action) && counted.fetch_add(1, SeqCst) < 2 {
+            let why =
+                "The DAW is still reading the song's tempo commands for Kumi (pattern 3 of 90 in the sequence): ask again in a moment";
+            return Some(Err(("busy".to_string(), why.to_string())));
+        }
+        inner(called, params)
+    }));
+    asked
+}
+
+/// What a busy answer that was waited out leaves: asked again, the wait said once on the status line, and no word to ask again.
+fn waited_it_out(asked: &std::sync::atomic::AtomicUsize, told: &RefCell<Vec<String>>, answered: &str) {
+    assert_eq!(asked.load(std::sync::atomic::Ordering::SeqCst), 3);
+    assert!(!answered.contains("ask again"), "{answered}");
+    let told = told.borrow();
+    let waits: Vec<&String> = told.iter().filter(|title| title.contains("still reading")).collect();
+    assert_eq!(waits.len(), 1, "{waits:?}");
+    assert_eq!(
+        waits[0],
+        "The DAW is still reading the song's tempo commands for Kumi (pattern 3 of 90 in the sequence): Kumi is waiting for it"
+    );
+}
+
+/// A listen in a dense song waits while Renoise reads it: an audition, in Renoise.
+#[tokio::test(flavor = "current_thread")]
+async fn an_audition_renoise_answers_busy_is_asked_again() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = RenoiseScript::new();
+            let paths = BridgePaths::new(home.path(), Daw::Renoise);
+            let secret = ensure_secret(&paths.secret()).unwrap();
+            script.listening().set_folder(&paths.root.join("listening"));
+            let mut config = script.config(secret, "/lab/Renoise");
+            config.discovery_dir = Some(paths.discovery());
+            let asked = busy_twice(&mut config, "render_start", None);
+            let simulator = Simulator::start(config).await.unwrap();
+            let (renoise, told) = integration(Daw::Renoise, home.path(), create_renoise_integration);
+            renoise.start(Signal::new()).await.unwrap();
+            let observed = renoise.observe(Signal::new(), None).await.unwrap();
+            let context: Value = serde_json::from_str(&observed.context).unwrap();
+            let first = context["tracks"][0]["ref"].as_str().unwrap().to_owned();
+            let audition = tool(&observed, "audition")
+                .execute(object(json!({"candidates": [{"track": first, "label": "kick"}], "from_beat": 0, "beats": 4})), Signal::new())
+                .await
+                .unwrap();
+            assert!(!audition.is_error, "{}", audition.text);
+            waited_it_out(&asked, &told, &audition.text);
+            assert_eq!(script.listening().previews().len(), 1, "played out loud");
+            renoise.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
+/// A pattern's audio is a render in Renoise, asked in a call of its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_patterns_audio_renoise_answers_busy_is_asked_again() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = RenoiseScript::new();
+            let paths = BridgePaths::new(home.path(), Daw::Renoise);
+            let secret = ensure_secret(&paths.secret()).unwrap();
+            script.listening().set_folder(&paths.root.join("listening"));
+            let mut config = script.config(secret, "/lab/Renoise");
+            config.discovery_dir = Some(paths.discovery());
+            let asked = busy_twice(&mut config, "audio_file", None);
+            let simulator = Simulator::start(config).await.unwrap();
+            let (renoise, told) = integration(Daw::Renoise, home.path(), create_renoise_integration);
+            renoise.start(Signal::new()).await.unwrap();
+            renoise.observe(Signal::new(), None).await.unwrap();
+            let file = renoise.audio_file("1:pattern:2", Signal::new()).await.unwrap();
+            assert!(file.is_some(), "the pattern's render");
+            waited_it_out(&asked, &told, "");
+            renoise.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
+/// The render tool's request: a track's own items.
+#[tokio::test(flavor = "current_thread")]
+async fn a_tracks_items_the_daw_answers_busy_for_are_asked_again() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            let asked = RefCell::new(None);
+            let simulator =
+                reaper_lab(&script, home.path(), |config| *asked.borrow_mut() = Some(busy_twice(config, "render_start", None))).await;
+            let asked = asked.into_inner().unwrap();
+            let (reaper, told) = integration(Daw::Reaper, home.path(), create_reaper_integration);
+            reaper.start(Signal::new()).await.unwrap();
+            let observed = reaper.observe(Signal::new(), None).await.unwrap();
+            let context: Value = serde_json::from_str(&observed.context).unwrap();
+            let track = context["tracks"][1]["ref"].as_str().unwrap().to_owned();
+            let render = tool(&observed, "render")
+                .execute(object(json!({"track": track, "from_beat": 0, "beats": 4})), Signal::new())
+                .await
+                .unwrap();
+            assert!(!render.is_error, "{}", render.text);
+            waited_it_out(&asked, &told, &render.text);
+            assert_eq!(script.listening().renders().last().unwrap()["sources"][0]["stage"], "items");
+            reaper.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
+/// A first tune's scratch copies read the tempo commands too.
+#[tokio::test(flavor = "current_thread")]
+async fn scratch_copies_the_daw_answers_busy_for_are_asked_again() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            let eq = script.add_fx("r:track:{T0002}", "ReaEQ");
+            script.listening().set_steps(0);
+            let asked = RefCell::new(None);
+            let simulator =
+                reaper_lab(&script, home.path(), |config| *asked.borrow_mut() = Some(busy_twice(config, "scratch", Some("make")))).await;
+            let asked = asked.into_inner().unwrap();
+            let (reaper, told) = integration(Daw::Reaper, home.path(), create_reaper_integration);
+            reaper.start(Signal::new()).await.unwrap();
+            let observed = reaper.observe(Signal::new(), None).await.unwrap();
+            let goal = json!({"goal": {"loudness": -14, "problems": false}, "track": "Track 2", "from_beat": 0, "beats": 2});
+            assert!(!tool(&observed, "judge").execute(object(goal), Signal::new()).await.unwrap().is_error);
+            let tuned = tool(&observed, "tune")
+                .execute(
+                    object(json!({"device": eq, "how": "search", "knobs": ["Gain-Band 2", "Gain-Band 3"], "from_beat": 0, "beats": 2})),
+                    Signal::new(),
+                )
+                .await
+                .unwrap();
+            assert!(!tuned.is_error, "{}", tuned.text);
+            waited_it_out(&asked, &told, &tuned.text);
+            reaper.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn the_renoise_demo_and_an_older_bridge_offer_no_listening_and_say_why() {
     tokio::task::LocalSet::new()
@@ -537,11 +688,20 @@ async fn a_goal_searches_scratch_copies_of_its_candidates_and_settles_the_winner
 /// A goal over Track 2 and Track 3, each with a ReaEQ, toward four seconds of noise: the integration, the rig and its
 /// slots. Track 3 renders silence, so what each slot is told shows which render it was heard from.
 async fn two_slot_goal(home: &Path, script: &ReaperScript) -> (Rc<dyn Integration>, Rc<dyn GoalRig>, Vec<GoalSlotInfo>) {
+    let (reaper, rig, slots, _) = two_slot_goal_told(home, script).await;
+    (reaper, rig, slots)
+}
+
+/// `two_slot_goal`, with what the app is told.
+async fn two_slot_goal_told(
+    home: &Path,
+    script: &ReaperScript,
+) -> (Rc<dyn Integration>, Rc<dyn GoalRig>, Vec<GoalSlotInfo>, Rc<RefCell<Vec<String>>>) {
     script.add_fx("r:track:{T0002}", "ReaEQ");
     script.add_fx("r:track:{T0003}", "ReaEQ");
     script.listening().set_level("r:track:{T0002}", 0.4);
     script.listening().set_level("r:track:{T0003}", 0.);
-    let (reaper, _) = integration(Daw::Reaper, home, create_reaper_integration);
+    let (reaper, told) = integration(Daw::Reaper, home, create_reaper_integration);
     reaper.start(Signal::new()).await.unwrap();
     reaper.observe(Signal::new(), None).await.unwrap();
     let reference = home.join("reference.wav");
@@ -558,13 +718,70 @@ async fn two_slot_goal(home: &Path, script: &ReaperScript) -> (Rc<dyn Integratio
     };
     let rig = reaper.goal(&request, Signal::new()).await.unwrap().unwrap();
     let slots = rig.slots();
-    (reaper, rig, slots)
+    (reaper, rig, slots, told)
 }
 
 /// A slot's trial at `value` on its ReaEQ's band 2 gain.
 fn gain_trial(slot: &GoalSlotInfo, value: f64, fresh: bool) -> GenerationTrial {
     let knobs: Vec<Knob> = slot.knobs.iter().filter(|knob| knob.name == "Gain-Band 2").cloned().collect();
     GenerationTrial { slot: slot.name.clone(), knobs, values: vec![value], fresh: fresh.then_some(true) }
+}
+
+/// The best of a goal is kept whole; when the whole track is too much to copy at once, from what the goal listened to, and that's
+/// said: on a finished goal, with what its A/B's mute leaves silent.
+#[tokio::test(flavor = "current_thread")]
+async fn a_goals_best_too_big_to_copy_whole_is_kept_from_what_it_listened_to() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (too_big, finished) in [(false, true), (true, false), (true, true)] {
+                let case = format!("too big {too_big}, finished {finished}");
+                let home = tempfile::tempdir().unwrap();
+                let script = ReaperScript::new(3, 0);
+                let asked: Arc<std::sync::Mutex<Vec<Value>>> = Arc::default();
+                let simulator = reaper_lab(&script, home.path(), |config| {
+                    let inner = config.respond.take().unwrap();
+                    let into = asked.clone();
+                    config.respond = Some(Arc::new(move |method: &str, params: &Value| {
+                        if method == "scratch" && params["action"] == "make" && params["label"] == "Kumi: goal best" {
+                            into.lock().unwrap().push(params.clone());
+                            if too_big && params.get("range").is_none() {
+                                let why = "one copy of Track 2 would hold Renoise about 6.6 s: give a range, a few bars of it";
+                                return Some(Err(("too-big".to_string(), why.to_string())));
+                            }
+                        }
+                        inner(method, params)
+                    }));
+                })
+                .await;
+                let (reaper, rig, slots, told) = two_slot_goal_told(home.path(), &script).await;
+                if finished {
+                    rig.tidy(&[slots[0].name.clone()], Signal::new()).await.unwrap();
+                }
+                let knobs: Vec<Knob> = slots[0].knobs.iter().filter(|knob| knob.name == "Gain-Band 2").cloned().collect();
+                assert_eq!(rig.keep_best(&slots[0].name, &knobs, &[0.7], Signal::new()).await.unwrap(), "Kumi · Goal best", "{case}");
+                let asked = asked.lock().unwrap();
+                let said: Vec<String> = told.borrow().iter().filter(|title| title.contains("holds only")).cloned().collect();
+                let kept_only = rig.kept_only();
+                if too_big {
+                    assert_eq!(asked.len(), 2, "{case}: {asked:?}");
+                    assert!(
+                        asked[0].get("range").is_none() && asked[1]["range"] == json!({"fromBeat": 0.0, "beats": 4.0}),
+                        "{case}: {asked:?}"
+                    );
+                    assert_eq!(said.len(), 1, "{case}: {said:?}");
+                    assert_eq!(kept_only.as_ref(), said.first(), "{case}: what the model is told is what's said");
+                    assert!(said[0].contains("the patterns of beats 0 to 4 of"), "{case}: {said:?}");
+                    assert_eq!(said[0].contains("silent until you unmute it"), finished, "{case}: {said:?}");
+                } else {
+                    assert_eq!(asked.len(), 1, "{case}: the whole copy, once: {asked:?}");
+                    assert!(asked[0].get("range").is_none(), "{case}: {asked:?}");
+                    assert!(said.is_empty() && kept_only.is_none(), "{case}: {said:?}");
+                }
+                reaper.close().await.unwrap();
+                simulator.stop();
+            }
+        })
+        .await;
 }
 
 /// #399 (K29, D4): a generation's trials are heard together, as Live's goal hears them, and each slot is told from its

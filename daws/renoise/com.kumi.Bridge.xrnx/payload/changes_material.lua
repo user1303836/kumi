@@ -449,11 +449,21 @@ end
 -- shows or monitors, where a plug-in's editor sits): what the journal compares to tell Renoise's undo and redo of a Doofer's,
 -- a Splitter's or a Notepad's contents, and what a change's fence of them holds.
 M.VIEW_STATE = { "IsMaximized", "ShowDevices", "CurrentlyVisibleChain", "MonitorVisibleChain", "PluginEditorWindowPosition" }
+-- Whether preset data holds a meta device aimed at something: only what's inside a container says that (a device's own data keeps no
+-- aim, lab 3.5.4). What it aims at moves on its own, and that device's value in the data with it, stopped or playing (lab 2026-11-01).
+function M.aims_inside(xml)
+  for value in xml:gmatch("DestEffect>%s*<Value>(-?[%d%.]+)</Value>") do
+    if tonumber(value) >= 0 then return true end
+  end
+  return false
+end
+
 function M.content_of(xml)
   local kept = M.prints_of(xml)
   local printed = kept.content
   if printed == nil then
-    local content = xml:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
+    local source = M.aims_inside(xml) and xml:gsub("<Value>[^<]*</Value>", "<Value/>") or xml
+    local content = source:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
     content = content:gsub("<IsSelected>[^<]*</IsSelected>", "<IsSelected/>")
     for _, tag in ipairs(M.VIEW_STATE) do
       content = content:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
@@ -472,17 +482,73 @@ function M.is_deep(device)
   return DEEP[path] == true or not path:find("^Audio/Effects/Native/")
 end
 -- (`data`: the device's preset data as the caller read it a moment ago, else it is read here)
-function M.content_fence(device, data)
-  if M.is_deep(device) then return M.content_of(data or device.active_preset_data) end
-  return nil
+-- `moving`, as for `device_state`: a parameter that moves on its own moves what's inside too (a Doofer's macro, what it's mapped to; a
+-- plug-in's state, lab 2026-11-01), so with one the fence is of what's there, not of its values.
+function M.content_fence(device, data, moving)
+  if not M.is_deep(device) then return nil end
+  return M.content_of(M.settled_data(device, data, moving))
+end
+
+-- A device's preset data, without what moves on its own when something does.
+function M.settled_data(device, data, moving)
+  local text = data or device.active_preset_data
+  if M.moves_on_its_own(device, moving) then
+    text = text:gsub("<Value>[^<]*</Value>", "<Value/>"):gsub("<ParameterChunk>.-</ParameterChunk>", "<ParameterChunk/>")
+  end
+  return text
+end
+
+-- Whether anything but the producer moves one of the device's parameters: what a meta device aims at (`moving`), or automation.
+function M.moves_on_its_own(device, moving)
+  if moving and next(moving) then return true end
+  for k = 1, #device.parameters do
+    if device:parameter(k).is_automated then return true end
+  end
+  return false
+end
+
+-- What meta devices move on the track numbered `t`: moving[device's number][parameter's number] = true. Any track's can aim at it:
+-- Dest. Track is the track's number less one, or -1 for the meta device's own; Dest. Effect counts the devices from the mixer as 0;
+-- Dest. Parameter is the parameter's own number, from 1 (lab 3.5.4, 2026-11-01).
+function M.moving_on(song, t)
+  local moving = {}
+  for on = 1, rows.track_count(song) do
+    local track = song:track(on)
+    for d = 2, #track.devices do
+      for _, destination in ipairs(M.destinations(track:device(d))) do
+        local to, effect = destination.track.value, destination.effect.value
+        local parameter = destination.parameter and destination.parameter.value or -1
+        if parameter >= 1 and effect >= 0 and (to == t - 1 or (to == -1 and on == t)) then
+          moving[effect + 1] = moving[effect + 1] or {}
+          moving[effect + 1][parameter] = true
+        end
+      end
+    end
+  end
+  return moving
+end
+
+-- A track's device's state and content fence, as they read with what moves on their own left out. (`moving`: `moving_on`, when
+-- the caller reads several of the track's devices.)
+function M.state_at(song, t, d, moving)
+  return M.device_state(song:track(t):device(d), (moving or M.moving_on(song, t))[d])
+end
+
+function M.content_at(song, t, d, data, moving)
+  return M.content_fence(song:track(t):device(d), data, (moving or M.moving_on(song, t))[d])
 end
 
 -- A device told apart from another by what it is and how it is set: a state that two reads of a device that nobody touched
--- agree on (its parameters' values, not the preset text, which can be megabytes).
-function M.device_state(device)
+-- agree on (its parameters' values, not the preset text, which can be megabytes). Not those two reads when something else moves a
+-- parameter, stopped or playing: `moving`, the parameters a meta device aims at by their numbers, and any with automation. A knob
+-- there is no fence anyway: what moves it writes over the producer's hand.
+function M.device_state(device, moving)
   local count = #device.parameters
   local values = {}
-  for k = 1, count do values[k] = format("%.9g|", device:parameter(k).value) end
+  for k = 1, count do
+    local parameter = device:parameter(k)
+    values[k] = ((moving and moving[k]) or parameter.is_automated) and "~|" or format("%.9g|", parameter.value)
+  end
   return {
     path = device.device_path, display = device.display_name, active = device.is_active, parameters = count,
     state = base.hash(table.concat(values)),
@@ -533,7 +599,8 @@ function M.read_routes(song, victim, device_at, env)
           end
           -- (destinations count every track: sequencer, group, send, master)
           for _, destination in ipairs(M.destinations(device)) do
-            if destination.track.value == victim - 1 then
+            -- (a meta device aimed on its own track may say -1 for it: lab 2026-11-01)
+            if destination.track.value == victim - 1 or (device_at and t == victim and destination.track.value == -1) then
               local effect, parameter = destination.effect, destination.parameter
               if not device_at or effect.value == device_at - 1 then
                 route = route or {}
@@ -610,7 +677,7 @@ function M.write_routes(song, routes, now, moved, tally, env)
                   put(parameter_p, saved.parameter)
                   set = true
                 end
-              elseif track_p.value == now.on - 1 and effect_p.value == -1 then
+              elseif (track_p.value == now.on - 1 or (track_p.value == -1 and t == now.on)) and effect_p.value == -1 then
                 put(effect_p, now.device - 1)
                 put(parameter_p, saved.parameter)
                 set = true

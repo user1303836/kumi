@@ -81,6 +81,7 @@ pub fn answer(op: Op) -> Result<Reply, RuntimeError> {
         | Op::HoldMusic(_)
         | Op::ForgetMusic(_)
         | Op::Map(_)
+        | Op::MapKey(_)
         | Op::Slots(_)
         | Op::Providers(_)
         | Op::LocalModels(_)
@@ -93,7 +94,8 @@ pub fn answer(op: Op) -> Result<Reply, RuntimeError> {
         | Op::SaveKey(_)
         | Op::SignOut(_)
         | Op::SignInChatgpt(_)
-        | Op::MissingModel(_) => return Err(absent()),
+        | Op::MissingModel(_)
+        | Op::Warm(_) => return Err(absent()),
         Op::StopSlots(_) => Reply::StopSlots(()),
         Op::StopSignIn(_) => Reply::StopSignIn(()),
         Op::FocusBody(_) => Reply::FocusBody(None),

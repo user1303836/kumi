@@ -239,9 +239,10 @@ local function line(data, ctx)
     end
     return true
   end
-  return object("renoise.PatternLine", {
+  local proxy = object("renoise.PatternLine", {
     note_column = function(_, c)
       if type(c) ~= "number" or c < 1 or c > 12 then out_of_range("note column", c) end
+      M.column_reads = (M.column_reads or 0) + 1
       local w = ctx and {
         peek = function() return ((ctx.current() or {}).notes or {})[c] or empty_note() end,
         cell = function()
@@ -256,6 +257,7 @@ local function line(data, ctx)
     end,
     effect_column = function(_, c)
       if type(c) ~= "number" or c < 1 or c > 8 then out_of_range("effect column", c) end
+      M.column_reads = (M.column_reads or 0) + 1
       local w = ctx and {
         peek = function() return ((ctx.current() or {}).effects or {})[c] or { number = 0, amount = 0 } end,
         cell = function()
@@ -269,6 +271,21 @@ local function line(data, ctx)
       return effect_column((now().effects or {})[c] or { number = 0, amount = 0 }, w)
     end,
   }, { is_empty = empty })
+  -- As Renoise 3.5.4 writes one (lab 2026-11-01): all 12 note columns and all 8 effect columns, hidden ones too, between " | ".
+  getmetatable(proxy).__tostring = function()
+    local d, cells = now(), {}
+    for c = 1, 12 do
+      local n = note_column((d.notes or {})[c] or empty_note())
+      cells[c] = n.note_string .. n.instrument_string .. n.volume_string .. n.panning_string .. n.delay_string
+        .. n.effect_number_string .. n.effect_amount_string
+    end
+    for c = 1, 8 do
+      local e = effect_column((d.effects or {})[c] or { number = 0, amount = 0 })
+      cells[12 + c] = e.number_string .. e.amount_string
+    end
+    return table.concat(cells, " | ")
+  end
+  return proxy
 end
 
 -- Devices
@@ -485,7 +502,11 @@ local function device(data)
     end
     -- (M4 n-devices: a device with an XML slot type takes preset data as Renoise does, and a preset choice sets its values)
     if data.slot then setters.active_preset_data = function(text) write_preset_xml(data, text) end end
-    setters.active_preset = function(n) choose_preset(data, n) end
+    setters.active_preset = function(n)
+      -- (a test's Renoise that doesn't take a preset, as a plug-in may not)
+      if M.presets_refused then return end
+      choose_preset(data, n)
+    end
     return setters
   end)())
   return proxy
@@ -725,6 +746,7 @@ function M.make_song(options)
         if type(a) ~= "number" or type(b) ~= "number" or not t.devices[a] or not t.devices[b] then out_of_range("device", a) end
         if d.options.mixer_device and (a == 1 or b == 1) then error("the mixer device must stay first", 2) end
         local function swap()
+          M.swap_device_routes(t, a, b)
           t.devices[a], t.devices[b] = t.devices[b], t.devices[a]
           M.fire(t.devices_observable, { type = "swap", index1 = a, index2 = b })
         end
@@ -1380,8 +1402,14 @@ function M.make_song(options)
       if v == p then return nil end
     end
     if not pattern_object(p).is_empty then return nil end
-    -- (measured: Renoise removes the last pattern of the pool, whatever its name or length, and keeps an earlier one)
+    -- (measured: Renoise removes the last pattern of the pool, whatever its name or length, and keeps an earlier one, and one
+    -- another pattern's track aliases: lab 2026-11-01)
     if p ~= #d.patterns then return nil end
+    for _, other in ipairs(d.patterns) do
+      for _, pattern_track in pairs(other.tracks) do
+        if pattern_track.alias == p then return nil end
+      end
+    end
     local data = table.remove(d.patterns, p)
     for k, v in ipairs(d.sequence) do
       if v > p then d.sequence[k] = v - 1 end
@@ -1878,6 +1906,8 @@ local function destinations_of(device)
   return out
 end
 
+M.destinations_of = destinations_of
+
 local function follow_routes(removed, index)
   local tracks = M.data.tracks
   local target = tracks[index]
@@ -1915,7 +1945,8 @@ local function follow_routes(removed, index)
   end
 end
 
--- The same for a destination's Effect (the device's number less one), aimed at a device of `track`.
+-- The same for a destination's Effect (the device's number less one), aimed at a device of `track`: by its number, or by -1 from
+-- that track itself (lab 2026-11-01).
 function M.follow_device_routes(track, device_index, removed)
   local at
   for i, t in ipairs(M.data.tracks) do
@@ -1925,7 +1956,7 @@ function M.follow_device_routes(track, device_index, removed)
     for _, device in ipairs(other.devices or {}) do
       for _, destination in ipairs(destinations_of(device)) do
         local dtrack, deffect, dparameter = destination.track, destination.effect, destination.parameter
-        if dtrack.value == at - 1 then
+        if dtrack.value == at - 1 or (dtrack.value == -1 and other == track) then
           if removed then
             if deffect.value == device_index - 1 then
               deffect.value = -1
@@ -1936,6 +1967,24 @@ function M.follow_device_routes(track, device_index, removed)
           elseif deffect.value >= device_index - 1 then
             deffect.value = deffect.value + 1
           end
+        end
+      end
+    end
+  end
+end
+
+-- And a destination's Effect follows its device as two of `track`'s swap.
+function M.swap_device_routes(track, a, b)
+  local at
+  for i, t in ipairs(M.data.tracks) do
+    if t == track then at = i end
+  end
+  for _, other in ipairs(M.data.tracks) do
+    for _, device in ipairs(other.devices or {}) do
+      for _, destination in ipairs(destinations_of(device)) do
+        if destination.track.value == at - 1 or (destination.track.value == -1 and other == track) then
+          if destination.effect.value == a - 1 then destination.effect.value = b - 1
+          elseif destination.effect.value == b - 1 then destination.effect.value = a - 1 end
         end
       end
     end

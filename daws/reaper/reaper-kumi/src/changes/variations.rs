@@ -12,7 +12,7 @@ use super::items::{
     changed, drawn, drawn_items, find, find_for_apply, gone, guid_of_ref, item_by_guid, label, label_opening, put_chunk, remake,
     settle_lanes, target,
 };
-use super::{chunks, marks, notes, Applied, Ctx, Done, Preview, Restore, Restored};
+use super::{chunks, marks, notes, pool, Applied, Ctx, Done, Preview, Restore, Restored};
 use crate::read::{bad, failed, take_start_qn};
 use crate::reaper::{Item, Take};
 use crate::refs;
@@ -161,8 +161,11 @@ pub fn add_apply(ctx: &Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     }
     reaper.set_item_value(item, "D_POSITION", position);
     reaper.set_item_value(item, "B_UISEL", 0.0);
-    // (a take is one sound: looped, its source's attack would play again inside it past the sound's end)
-    reaper.set_item_value(item, "B_LOOPSRC", 0.0);
+    // (an audio take is one sound: looped, its source's attack would play again inside it past the sound's end; a MIDI take
+    // loops as its source does, or a looped pattern would play once, then nothing)
+    if !reaper.active_take(item).is_some_and(|take| reaper.take_is_midi(take)) {
+        reaper.set_item_value(item, "B_LOOPSRC", 0.0);
+    }
     if let Err(fault) = write(ctx, item, reaper.active_take(item), &settings) {
         // Nothing half-made stays.
         reaper.delete_item(found.track, item);
@@ -190,11 +193,15 @@ pub fn set_preview(ctx: &Ctx, input: &Value) -> Done<Preview> {
     let found = find(ctx, &input["ref"], "item-variation-set")?;
     settings_of(input)?;
     let print = chunks::item_print(ctx.reaper, found.item).ok_or_else(|| failed("REAPER wouldn't give the item's state"))?;
+    let display = json!({"title": format!("Rewrote {}", label(ctx, found.item))});
     Ok(Preview {
         target: target(&found.guid),
         prior: json!({"print": print}),
         fence: json!({"print": print}),
-        display: json!({"title": format!("Rewrote {}", label(ctx, found.item))}),
+        display: match ctx.reaper.active_take(found.item) {
+            Some(take) => pool::said(ctx, take, pool::WILL_APPLY, display),
+            None => display,
+        },
     })
 }
 
@@ -217,13 +224,17 @@ pub fn set_apply(ctx: &Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     }
     let print = chunks::item_print(reaper, found.item).ok_or_else(|| failed("REAPER wouldn't give the take's state"))?;
     let unwritten = Some(print.as_str()) == fence["print"].as_str();
+    let display = json!({
+        "title": format!("Rewrote {}", label(ctx, found.item)),
+        "items": drawn_items(vec![before], vec![drawn(ctx, found.item)]),
+    });
     Ok(Applied {
         applied: json!({"print": print}),
         material: Some(json!({"chunk": chunk})),
-        display: json!({
-            "title": format!("Rewrote {}", label(ctx, found.item)),
-            "items": drawn_items(vec![before], vec![drawn(ctx, found.item)]),
-        }),
+        display: match reaper.active_take(found.item) {
+            Some(take) => pool::said(ctx, take, pool::APPLIED, display),
+            None => display,
+        },
         unwritten,
         ..Default::default()
     })
@@ -247,7 +258,13 @@ pub fn set_restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
     put_chunk(ctx, item, chunk)?;
     Ok(Restored {
         restored: json!({"ref": refs::item_ref(&guid)}),
-        display: json!({"title": format!("{} put back as it was", label_opening(ctx, item))}),
+        display: {
+            let display = json!({"title": format!("{} put back as it was", label_opening(ctx, item))});
+            match ctx.reaper.active_take(item) {
+                Some(take) => pool::said(ctx, take, pool::PUT_BACK, display),
+                None => display,
+            }
+        },
         unwritten: false,
     })
 }

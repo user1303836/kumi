@@ -48,6 +48,7 @@ mod own_catchup_e2e;
 mod own_changes;
 mod own_daw_places;
 mod own_ears;
+mod own_field_reads;
 mod own_listening_e2e;
 mod own_providers;
 mod own_session_catchup;

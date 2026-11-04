@@ -617,6 +617,46 @@ case!(failure_disconnect_focus, async {
     assert!(h.screen()[0].ends_with("● Live not connected  "));
     h.close().await;
 });
+// The DAW answers before the session's first look names its project (the focus poll goes once the look answers, and the
+// session names the project after its kernel is ready): FOCUS says it's still connecting meanwhile, never that the DAW
+// isn't connected, busy or not. (app_sessions' full-screen REAPER session caught it on a slow runner.)
+case!(connected_before_the_first_look_names_the_project_focus_says_connecting, async {
+    for (w, rows) in [(120, 36), (80, 23)] {
+        let h = Harness::new(w, rows);
+        h.start().await;
+        h.emit(json!({"type":"connection","state":"connected"}));
+        let lines = h.screen();
+        assert!(has(&lines, "Connecting to Live…") && !has(&lines, "isn't connected"), "{}", lines.join("\n"));
+        h.emit(json!({"type":"focus","focus":{"view":"Session","busy":"a dialog is open"}}));
+        let lines = h.screen();
+        assert!(!has(&lines, "isn't connected") && !has(&lines, "not connected"), "busy: {}", lines.join("\n"));
+        h.emit(json!({"type":"observation","label":"Current open Set: Night Drive — Remote Script · real-live"}));
+        h.emit(json!({"type":"focus","focus":null}));
+        let lines = h.screen();
+        assert!(has(&lines, "Night Drive") && !has(&lines, "Connecting to Live…"), "{}", lines.join("\n"));
+        // Gone, and back before the next look: the project it knew is named, as before.
+        h.emit(json!({"type":"connection","state":"disconnected"}));
+        h.has("Live isn't connected");
+        h.emit(json!({"type":"connection","state":"connected"}));
+        let lines = h.screen();
+        assert!(has(&lines, "Night Drive") && !has(&lines, "Connecting to Live…"), "{}", lines.join("\n"));
+        h.close().await;
+    }
+    // Kumi started before the DAW: the start's look found nothing to read, and says so. The DAW opens: FOCUS says it's
+    // connecting until a look made now names the project.
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.emit(json!({"type":"connection","state":"disconnected"}));
+    h.emit(json!({"type":"observation","label":"Live isn't open"}));
+    h.emit(json!({"type":"connection","state":"connected"}));
+    h.emit(json!({"type":"focus","focus":null}));
+    let lines = h.screen();
+    assert!(has(&lines, "Connecting to Live…") && !has(&lines, "isn't connected"), "{}", lines.join("\n"));
+    h.emit(json!({"type":"observation","label":"Current open Set: Night Drive — Remote Script · real-live"}));
+    let lines = h.screen();
+    assert!(has(&lines, "Night Drive") && !has(&lines, "Connecting to Live…"), "{}", lines.join("\n"));
+    h.close().await;
+});
 case!(a_fixed_phrase_changes_live_at_once_and_undoes_from_history, async {
     let h = Harness::new(120, 36);
     h.control.set("instant", json!(true));
@@ -898,10 +938,14 @@ case!(heard_spectrum_comparison_above_answer, async {
     h.emit(json!({"type":"heard","file":"mix.wav","summary":"−12.1 LUFS","bands":[-8,-5,-7,-6,-10,-12,-15,-17,-19,-22],"compared":{"reference":"ref.wav","summary":"−8.4 LUFS","differences":[0.2,0.4,-0.3,2.8,0,-1.1,-2,-1.5,-0.8,0.5],"headlines":["low mids +2.8 dB"]}}));
     let lines = h.screen();
     h.has("Heard ref.wav · −8.4 LUFS · 128 BPM · F minor");
-    assert!(lines.iter().any(|s| s.contains("████") && s.contains("▄▄▄▄")));
+    // One file draws as an octave analyzer: what it measures, its dB, its Hz scale and its tilt.
+    h.has("energy per octave, dB under the loudest band");
+    assert!(lines.iter().any(|s| s.trim_start().starts_with("−10 ") && s.contains('█')), "{lines:#?}");
+    assert!(lines.iter().any(|s| s.contains("50") && s.contains("1k") && s.contains("10k Hz")), "{lines:#?}");
+    h.has("tilt −1.4 dB per octave · pink noise is 0, darker is below");
     h.has("Heard mix.wav against ref.wav, loudness matched");
     assert!(lines.iter().any(|s| s.contains("+2.8") && s.contains("−2.0")));
-    assert_eq!(lines.iter().filter(|s| s.contains("l.mid") && s.contains("air")).count(), 2);
+    assert_eq!(lines.iter().filter(|s| s.contains("l.mid") && s.contains("air")).count(), 1);
     h.close().await;
     let h = Harness::new(120, 36);
     h.start().await;
@@ -1370,10 +1414,15 @@ case!(whole_screens_match_source, async {
             h.emit(event.clone());
         }
         let actual = h.screen();
+        // One file heard draws as an octave analyzer, where the source drew a strip a row high: those screens changed
+        // on purpose too, and are goldens of their own.
+        let analyzer = case["events"].as_array().unwrap().iter().any(|event| event["type"] == "heard" && event["compared"].is_null());
         // W6-2 changed these on purpose: below 100 columns with 24 rows or more, the pane is the drawer under the
         // conversation, where the source drew a two-line strip. The same events' screens are goldens of their own.
         if width < 100 && height >= 24 {
             drawer_golden(&format!("{}.{width}x{height}.txt", case["name"].as_str().unwrap()), &actual);
+        } else if analyzer {
+            source_golden("analyzer-source", &format!("{}.{width}x{height}.txt", case["name"].as_str().unwrap()), &actual);
         } else {
             let expected: Vec<String> = serde_json::from_value(case["expected"].clone()).unwrap();
             assert_eq!(actual, expected, "{} {}×{}", case["name"], case["width"], case["height"]);
@@ -1382,10 +1431,15 @@ case!(whole_screens_match_source, async {
     }
 });
 
-/// A source screen the drawer draws in place of the strip, kept in tests/goldens/tui/drawer-source (trailing spaces
-/// trimmed; `KUMI_BLESS=1` writes it again).
+/// A source screen the drawer draws in place of the strip, kept in tests/goldens/tui/drawer-source.
 fn drawer_golden(name: &str, lines: &[String]) {
-    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/tui/drawer-source").join(name);
+    source_golden("drawer-source", name, lines);
+}
+
+/// A source screen drawn differently on purpose, kept in tests/goldens/tui/`folder` (trailing spaces trimmed;
+/// `KUMI_BLESS=1` writes it again).
+fn source_golden(folder: &str, name: &str, lines: &[String]) {
+    let file = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/goldens/tui").join(folder).join(name);
     let actual = lines.iter().map(|line| line.trim_end()).collect::<Vec<_>>().join("\n") + "\n";
     if std::env::var_os("KUMI_BLESS").is_some() {
         std::fs::create_dir_all(file.parent().unwrap()).unwrap();
@@ -1622,4 +1676,43 @@ case!(the_technique_offer_with_another_list_in_its_place_lets_kumi_follow_a_daw,
     assert!(h.app.follow_daw(DawId::Renoise), "answered, nothing is open");
     assert_eq!(*followed.borrow(), [DawId::Renoise]);
     assert_eq!(done.await, 0);
+});
+// (A4-3) What the DAW tells once (connected or gone, the project read, where the producer is, what they point at, what
+// changed while Kumi was away) is drawn within the 16 ms floor, not at the animation's pace, which is 2 s here; words as
+// they stream still wait for that pace.
+case!(what_the_daw_tells_once_is_drawn_without_waiting_for_the_animation, async {
+    let h = Harness::with(120, 36, Rc::new(Control::default()), |opts| {
+        opts.frame_ms = Some(16.0);
+        opts.animation_ms = Some(2_000.0);
+    });
+    h.start().await;
+    h.connect();
+    // Whether the event is drawn within 80 ms (the frames and reads before it come and go first).
+    async fn drawn(h: &Harness, event: &serde_json::Value) -> bool {
+        delay(300).await;
+        let before = h.output.text.borrow().len();
+        h.emit(event.clone());
+        delay(80).await;
+        h.output.text.borrow().len() > before
+    }
+    let last = kumi_common::time::now_ms() - 86400000;
+    let device = json!({"track":{"name":"Bass","color":"#f59a3c","kind":"midi"},"device":"Operator","detail":"Device","view":"Session"});
+    let mut touched = device.clone();
+    touched["parameter"] = json!({"name":"Filter Freq","value":"1.20 kHz","owner":"Operator"});
+    let told = [
+        json!({"type":"observation","label":"Current open Set: Moon Garden — Remote Script · real-live"}),
+        json!({"type":"focus","focus":device}),
+        // (the same device, a parameter touched: no body is read for it, so only the event asks for its frame)
+        json!({"type":"focus","focus":touched}),
+        json!({"type":"pointed","pin":{"trackRef":"3:track:1","ref":"3:track:1","node":"selection","name":"Bass","trail":[],"siblings":["Drums"],"live":true,"track":"Bass","time":{"fromBeat":64,"toBeat":80}}}),
+        json!({"type":"catch-up","catchUp":{"set":"Moon Garden","lastSeenAt":last,"lines":["Tempo 120 → 124 BPM"],"more":0}}),
+        json!({"type":"connection","state":"disconnected"}),
+    ];
+    for event in &told {
+        assert!(drawn(&h, event).await, "drawn within 80 ms: {event}");
+    }
+    // An answer under way: its words wait for the next frame of the animation, 2 s after the last.
+    h.emit(json!({"type":"state","state":"running"}));
+    assert!(!drawn(&h, &json!({"type":"text","text":"Words as they stream"})).await, "streamed words wait for the animation's pace");
+    h.close().await;
 });

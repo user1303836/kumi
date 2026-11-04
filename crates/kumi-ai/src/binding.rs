@@ -11,6 +11,11 @@ use crate::types::{CallOptions, FunctionTool, Prompt, StreamParts};
 #[async_trait(?Send)]
 pub trait LanguageModel {
     async fn do_stream(&self, options: CallOptions) -> Result<StreamParts, LanguageModelError>;
+    /// The producer began a message: whatever connection a request with `options`' headers would go on is readied
+    /// meanwhile (see `Fetch::warm`). Nothing is sent; most models do nothing.
+    async fn warm(&self, options: CallOptions) {
+        let _ = options;
+    }
 }
 
 pub struct ModelRequest {

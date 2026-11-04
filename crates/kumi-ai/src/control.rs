@@ -83,6 +83,11 @@ pub trait ModelController {
     }
     async fn choose_default(&self) -> Result<Option<DefaultModel>, RuntimeError>;
     async fn models(&self, provider: &str, refresh: bool) -> Result<Vec<ModelInfo>, RuntimeError>;
+    /// The provider's list as it gives it this run, never one kept from an earlier run: what a saved model is checked
+    /// against.
+    async fn listed_now(&self, provider: &str) -> Result<Vec<ModelInfo>, RuntimeError> {
+        self.models(provider, false).await
+    }
     /// The tokens `model` reads at once, as its provider's list (or its server) says: the context meter's whole.
     fn context_window(&self, _model: &str) -> Option<f64> {
         None
@@ -114,6 +119,9 @@ pub trait ModelController {
     fn server_names(&self) -> Vec<(String, String)> {
         Vec::new()
     }
+    /// The producer began a message: what it will wait on (the chosen model's sign-in, its connection) is made ready
+    /// meanwhile. Nothing is said, whatever comes of it.
+    async fn warm(&self) {}
 }
 
 /// The saved model, when its provider's own list (the one /model shows, read once a session) no longer shows it:
@@ -126,7 +134,7 @@ pub async fn missing_model(models: &dyn ModelController) -> Option<String> {
     }
     let (model, provider) = (current.model.filter(|_| !current.pinned)?, current.provider?);
     ProviderId::parse(&provider)?;
-    let listed = models.models(&provider, false).await.ok()?;
+    let listed = models.listed_now(&provider).await.ok()?;
     if listed.is_empty() || listed.iter().any(|info| info.id == model) {
         return None;
     }

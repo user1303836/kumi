@@ -55,6 +55,8 @@ const CLOSING: &str = "REAPER is closing; nothing changed";
 
 /// Methods served off the main thread: they answer even while REAPER shows a dialog.
 const SOCKET_METHODS: [&str; 3] = ["ping", "status", "focus"];
+/// The longest a `focus` waits for the main thread to poll it after nobody was connected (a few ticks).
+const WAKE_WAIT: Duration = Duration::from_millis(250);
 const MAIN_METHODS: [&str; 19] = [
     "action",
     "quit",
@@ -173,6 +175,10 @@ impl Hub {
 }
 
 impl Outbox for Hub {
+    fn attended(&self) -> bool {
+        self.counts().1 > 0
+    }
+
     fn event(&self, name: &str, data: Value) {
         if !wire::nests_within(&data, wire::MAX_PAYLOAD_DEPTH) {
             log::line(&format!("event {name} isn't sent: its data nests deeper than {} levels", wire::MAX_PAYLOAD_DEPTH));
@@ -531,6 +537,17 @@ impl Shared {
         status
     }
 
+    /// With nobody connected, the main thread stopped polling the focus: the first `focus` after waits for the tick that
+    /// polls it (this connection counts now), so it's as fresh as ever; that takes a tick (~15 ms). A busy REAPER (a dialog,
+    /// a render, a main thread that stopped ticking) polls nothing, as before: the last focus polled is answered at once,
+    /// with its age and why.
+    fn awake(&self) {
+        let until = Instant::now() + WAKE_WAIT;
+        while lock(&self.snapshot).dormant && Instant::now() < until && self.busy().is_none() {
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
     /// `focus`: what the main thread last polled, with how old that is. Answered here, so it never waits for REAPER.
     fn focus(&self, id: u64) -> Frame {
         let (focus, polled) = {
@@ -597,7 +614,10 @@ impl Shared {
         match request.method.as_str() {
             "ping" => return Frame::ok(id, json!({})),
             "status" => return Frame::ok(id, self.status()),
-            "focus" => return self.focus(id),
+            "focus" => {
+                self.awake();
+                return self.focus(id);
+            }
             // M5 listening (m5-reaper).
             "listen_status" | "listen_cancel" | "audition_stop" => {
                 let board = self.listening();
@@ -928,6 +948,7 @@ mod tests {
                 status: json!({"tracks": 3}),
                 focus: Arc::new(Value::Null),
                 focus_at: None,
+                dormant: false,
                 working: None,
                 listening: Default::default(),
             }));
@@ -1123,6 +1144,52 @@ mod tests {
         assert_eq!(request(&mut stream, &mut reader, 1, "read")["result"], json!({"method": "read"}));
         assert_eq!(request(&mut stream, &mut reader, 2, "snapshot")["result"], json!({"method": "snapshot"}));
         main.join().unwrap();
+    }
+
+    // (A9-3) With nobody connected the main thread stops polling the focus: the first `focus` after a client connects waits
+    // for the tick that polls it, and answers that poll, never what was there before.
+    #[test]
+    fn a_focus_asked_after_nobody_was_connected_waits_for_a_fresh_poll() {
+        let mut lab = Lab::start(VECTOR_SECRET, ServerConnection::new);
+        {
+            // As the main thread leaves it with nobody connected: ticking, the focus not polled, nothing kept.
+            let mut snapshot = lab.snapshot.lock().unwrap();
+            (snapshot.dormant, snapshot.focus, snapshot.last_tick) = (true, Arc::new(Value::Null), Some(Instant::now()));
+        }
+        let (mut stream, mut reader, _) = lab.authenticated();
+        // The main thread's next tick (this connection counts now) polls it.
+        let snapshot = lab.snapshot.clone();
+        let main = thread::spawn(move || {
+            thread::sleep(Duration::from_millis(40));
+            let mut snapshot = snapshot.lock().unwrap();
+            snapshot.focus = Arc::new(json!({"epoch": "e-2", "view": "mixer", "changed": 9}));
+            (snapshot.focus_at, snapshot.last_tick, snapshot.dormant) = (Some(Instant::now()), Some(Instant::now()), false);
+        });
+        let asked = Instant::now();
+        let focus = request(&mut stream, &mut reader, 1, "focus");
+        main.join().unwrap();
+        assert_eq!(focus["result"]["view"], "mixer", "the poll after it connected: {focus}");
+        assert!(asked.elapsed() >= Duration::from_millis(30), "it waited for the poll");
+    }
+
+    // (A9-3) A REAPER busy when a client connects (a dialog) polls nothing, as before: the first `focus` is answered at once,
+    // the last focus polled with its age and why it may be stale, as when a dialog opened with someone connected.
+    #[test]
+    fn a_focus_asked_after_nobody_was_connected_while_reaper_is_busy_answers_the_last_poll_at_once() {
+        let mut lab = Lab::start(VECTOR_SECRET, ServerConnection::new);
+        {
+            let mut snapshot = lab.snapshot.lock().unwrap();
+            snapshot.focus = Arc::new(json!({"epoch": "e-1", "view": "arrange", "changed": 4}));
+            (snapshot.focus_at, snapshot.last_tick) = (Some(Instant::now() - Duration::from_secs(60)), Some(Instant::now()));
+            (snapshot.dormant, snapshot.busy) = (true, Some(Busy::Modal));
+        }
+        let (mut stream, mut reader, _) = lab.authenticated();
+        let asked = Instant::now();
+        let focus = request(&mut stream, &mut reader, 1, "focus");
+        assert!(asked.elapsed() < WAKE_WAIT, "not held for a poll that can't come");
+        assert_eq!(focus["result"]["view"], "arrange", "{focus}");
+        assert_eq!(focus["result"]["busy"], Busy::Modal.code());
+        assert!(focus["result"]["ageMs"].as_u64().unwrap() >= 60_000);
     }
 
     #[test]

@@ -140,6 +140,8 @@ pub struct SessionOptions {
     pub slots: Option<Rc<kumi_listening::slots::SlotsContext>>,
     /// /map: what reads the producer's sounds and songs on their maps, each time it opens.
     pub map: Option<kumi_library::map::LoadMap>,
+    /// /map: the key its maps would be read under now, to know a map kept from before is still the same.
+    pub map_key: Option<kumi_library::map::MapKey>,
     /// The models to talk to and the sign-ins, which /model, /effort, /fast, /login and /logout ask the session about.
     pub models: Option<Rc<dyn kumi_ai::control::ModelController>>,
     pub matching: bool,
@@ -193,6 +195,7 @@ impl SessionOptions {
             music: None,
             slots: None,
             map: None,
+            map_key: None,
             models: None,
             matching: true,
             match_budget: None,
@@ -3579,8 +3582,29 @@ impl Session {
     pub fn map_loader(&self) -> Option<kumi_library::map::LoadMap> {
         self.0.options.map.clone()
     }
+    pub fn map_keyer(&self) -> Option<kumi_library::map::MapKey> {
+        self.0.options.map_key.clone()
+    }
     pub fn model_controls(&self) -> Option<Rc<dyn kumi_ai::control::ModelController>> {
         self.0.options.models.clone()
+    }
+    /// The producer began a message: the model controls ready its model (`ModelController::warm`), and the conversation's
+    /// kernel, once there is one, readies the connection its next request goes on (`Kernel::warm`). Nothing is said.
+    pub async fn warm(&self) {
+        let (models, kernel) = (self.model_controls(), self.0.state.borrow().kernel.as_ref().map(|held| held.value.clone()));
+        // Together: the kernel's connection needn't wait on the model controls' own.
+        futures::join!(
+            async {
+                if let Some(models) = models {
+                    models.warm().await;
+                }
+            },
+            async {
+                if let Some(kernel) = kernel {
+                    kernel.warm().await;
+                }
+            }
+        );
     }
     pub fn open_set(&self) -> Option<String> {
         self.0.state.borrow().integration.as_ref().and_then(|integration| integration.open_set())

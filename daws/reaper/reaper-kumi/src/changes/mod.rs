@@ -21,7 +21,7 @@ mod lanes;
 mod lua;
 mod marks;
 mod midi_events;
-pub(crate) use midi_events::{events_of as midi_events_of, row as midi_event_row};
+pub(crate) use midi_events::{events_of as midi_events_of, row as midi_event_row, source_end};
 mod notes;
 mod pins;
 mod project;
@@ -44,6 +44,7 @@ mod fx_params;
 mod fxchain;
 mod fxkinds;
 mod modulation;
+mod pool;
 // (r-tracks) M4: track properties, routing, project items, actions; NIT-7.
 mod actions;
 mod groups;

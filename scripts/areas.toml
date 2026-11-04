@@ -41,13 +41,16 @@ feeds = ["ableton-mcp-server", "kumi"]
 [renoise-tool]
 paths = ["daws/renoise/com.kumi.Bridge.xrnx/**", "daws/renoise/tests/**"]
 
-# What Kumi reads of the tool: its entry, manifest, version and change kinds (Kumi's list of them is checked against
-# them), and the folder as it's installed.
+# What Kumi reads of the tool: its entry, manifest, version, change kinds and actions (Kumi's list of them, and the fields
+# each offers, are checked against them), and the folder as it's installed.
 [renoise-tool-read]
 paths = [
   "daws/renoise/com.kumi.Bridge.xrnx/main.lua",
   "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
+  "daws/renoise/com.kumi.Bridge.xrnx/payload/actions.lua",
+  "daws/renoise/com.kumi.Bridge.xrnx/payload/bridge.lua",
   "daws/renoise/com.kumi.Bridge.xrnx/payload/changes*.lua",
+  "daws/renoise/com.kumi.Bridge.xrnx/payload/instruments.lua",
   "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua",
 ]
 layout = ["daws/renoise/com.kumi.Bridge.xrnx/**"]

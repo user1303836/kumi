@@ -364,6 +364,8 @@ struct Strip {
 struct OwnBody {
     body: Option<FocusBody>,
     key: Option<String>,
+    /// The most tracks the body was read for (a tracker's), None for all: a wider FOCUS reads it again for more.
+    tracks: Option<usize>,
     reading: bool,
     again: bool,
 }
@@ -379,6 +381,9 @@ struct State {
     used: Used,
     connection: ConnectionState,
     set_name: Option<String>,
+    /// A look made while connected has read the project, so a session still without a name to show is connected to one
+    /// that has none: until then, a connected DAW is still being read.
+    observed: bool,
     focus: Option<DawFocus>,
     catch_up: Option<CatchUp>,
     newer: Option<String>,
@@ -406,6 +411,10 @@ struct State {
     /// /map while it's open, in place of the conversation, and the key of the image it has up.
     map: Option<super::map::MapView>,
     map_image: Option<String>,
+    /// The key the open map's data was read under (`op::MapKey`), and the map kept from the last one open with its key:
+    /// /map again under the same key shows it as it was made ready, without reading or fitting it again.
+    map_key: Option<String>,
+    map_kept: Option<(String, super::map::KeptMap)>,
     /// /map open: the map served to the browser, until /map close or Kumi quits.
     map_page: Option<crate::map_server::MapServer>,
     /// Counts /map open and what stops one (/map close, the music changing): a map read for an older one doesn't open;
@@ -533,6 +542,8 @@ struct State {
     pasting: bool,
     refreshing: Option<BodyKind>,
     tree_refresh: Option<JoinHandle<()>>,
+    /// Reading the meters of the mixer FOCUS shows.
+    levels_refresh: Option<JoinHandle<()>>,
     wake_timer: Option<JoinHandle<()>>,
     wake_time: Option<f64>,
     beat_timer: Option<JoinHandle<()>>,
@@ -619,6 +630,7 @@ impl State {
             used: Used::default(),
             connection: if options.mode == "inference-only" { ConnectionState::Disconnected } else { ConnectionState::Connecting },
             set_name: None,
+            observed: false,
             focus: None,
             catch_up: None,
             newer: None,
@@ -636,6 +648,8 @@ impl State {
             images: shown::Images::default(),
             map: None,
             map_image: None,
+            map_key: None,
+            map_kept: None,
             map_page: None,
             map_page_asked: 0,
             map_page_opening: false,
@@ -679,7 +693,13 @@ impl State {
             next_sign_in: 1,
             sign_ins: std::collections::HashMap::new(),
             transport: None,
-            activity: format!("connecting to {}", crate::daw::words().app),
+            // What the session's start is doing, said while it runs: connecting to the DAW, or getting ready without one
+            // (`--inference-only`, or no bridge in the DAW yet).
+            activity: if options.mode == "inference-only" {
+                "getting ready".into()
+            } else {
+                format!("connecting to {}", crate::daw::words().app)
+            },
             overlays: Overlays::default(),
             offer: None,
             set_ask: None,
@@ -721,6 +741,7 @@ impl State {
             pasting: false,
             refreshing: None,
             tree_refresh: None,
+            levels_refresh: None,
             wake_timer: None,
             wake_time: None,
             beat_timer: None,
@@ -912,6 +933,8 @@ impl TuiApp {
                     if let Some(a) = resize.upgrade() {
                         a.renderer.borrow_mut().invalidate();
                         a.scheduler.request();
+                        // (FOCUS wider: a tracker's body is read again for the tracks it can draw now)
+                        TuiApp(a).read_own(false);
                     }
                 }),
             });
@@ -1123,7 +1146,13 @@ impl TuiApp {
             // The producer quitting, not Kumi closing to open again (with another DAW, or updated) or failing to start.
             printing = self.0.options.transcript_on_quit && message.is_none() && !state.reopening;
             let flashes = std::mem::take(&mut state.flash_timers);
-            let timers = [state.tree_refresh.take(), state.wake_timer.take(), state.beat_timer.take(), state.status_timer.take()];
+            let timers = [
+                state.tree_refresh.take(),
+                state.levels_refresh.take(),
+                state.wake_timer.take(),
+                state.beat_timer.take(),
+                state.status_timer.take(),
+            ];
             let alerting = [state.alert_timer.take(), state.answer_countdown.take()];
             for task in timers.into_iter().chain(alerting).flatten().chain(flashes) {
                 task.abort();
@@ -1380,7 +1409,9 @@ impl Drop for Inner {
     fn drop(&mut self) {
         self.scheduler.dispose();
         let state = self.state.get_mut();
-        for timer in [state.tree_refresh.take(), state.wake_timer.take(), state.beat_timer.take()].into_iter().flatten() {
+        for timer in
+            [state.tree_refresh.take(), state.levels_refresh.take(), state.wake_timer.take(), state.beat_timer.take()].into_iter().flatten()
+        {
             timer.abort();
         }
     }

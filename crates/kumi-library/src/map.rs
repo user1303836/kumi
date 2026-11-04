@@ -110,6 +110,9 @@ pub enum Kind {
 
 /// How /map reads its data, each time it opens (the app makes it, from the library and the producer's music).
 pub type LoadMap = Rc<dyn Fn() -> LocalBoxFuture<'static, MapData>>;
+/// What the maps would be read from now, as a key: the same key, the same maps (`/map` keeps one it made ready while the
+/// key holds). Cheap: what files are there and when they changed, not what's in them.
+pub type MapKey = Rc<dyn Fn() -> LocalBoxFuture<'static, String>>;
 
 /// Both maps, as read when /map opened.
 #[derive(Clone, Debug)]

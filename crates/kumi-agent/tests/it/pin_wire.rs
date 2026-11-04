@@ -1754,6 +1754,7 @@ pub(crate) fn requests() -> Vec<Op> {
         op::HoldMusic { held: true }.into(),
         op::ForgetMusic {}.into(),
         op::Map {}.into(),
+        op::MapKey {}.into(),
         op::Slots { id: 3, words: "listening off".into() }.into(),
         op::StopSlots { id: 3 }.into(),
         op::Providers {}.into(),
@@ -1771,6 +1772,7 @@ pub(crate) fn requests() -> Vec<Op> {
         op::SignInChatgpt { id: 4, by_code: false }.into(),
         op::StopSignIn { id: 4 }.into(),
         op::MissingModel {}.into(),
+        op::Warm {}.into(),
     ];
     requests.extend([SetChoice::Open, SetChoice::Copy, SetChoice::Cancel].map(|choice| op::AnswerSet { choice }.into()));
     requests.extend(
@@ -1779,13 +1781,15 @@ pub(crate) fn requests() -> Vec<Op> {
             BodyRequest::Notes { item_ref: "7:clip_slot:0:2".into() },
             BodyRequest::Grid { track_ref: "7:track:0".into(), index: 2.0 },
             BodyRequest::Timeline,
-            BodyRequest::Tracker { item_ref: Some("pattern:3".into()) },
-            BodyRequest::Tracker { item_ref: None },
+            BodyRequest::Tracker { item_ref: Some("pattern:3".into()), tracks: None },
+            BodyRequest::Tracker { item_ref: None, tracks: None },
             BodyRequest::Matrix,
             BodyRequest::Keyzones { item_ref: "instrument:1".into() },
             BodyRequest::Routing { track_ref: "track:2".into() },
             BodyRequest::Mixer { track_ref: Some("track:2".into()) },
             BodyRequest::Mixer { track_ref: None },
+            BodyRequest::Levels { track_ref: Some("track:2".into()) },
+            BodyRequest::Levels { track_ref: None },
         ]
         .map(|request| op::FocusBody { request }.into()),
     );

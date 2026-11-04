@@ -543,3 +543,41 @@ async fn gemini_keeps_its_thought_signature_and_deepseek_its_reasoning_across_a_
         })
         .await;
 }
+
+/// A step that adds more blocks than Anthropic looks back over for a cached prefix (20: here twelve calls and their
+/// results) still finds the conversation cached: the message that ended the last request is a breakpoint too, beside the
+/// instructions' and the last message's, three of the four allowed.
+#[tokio::test(flavor = "current_thread")]
+async fn anthropic_marks_where_the_last_request_ended_so_a_step_of_many_calls_still_finds_its_cache() {
+    let (_dir, store) = store();
+    let (fetch, requests) = recorder(|_, _| rejection());
+    let mut opts = options("anthropic/claude-sonnet-5", store, fetch);
+    opts.env = Some([("ANTHROPIC_API_KEY".into(), "key-fixture-value".into())].into());
+    let calls: Vec<String> = (0..12).map(|n| format!("call_{n}")).collect();
+    let answer: Message = serde_json::from_value(json!({"role": "assistant", "content": calls.iter().map(|id| json!({
+        "type": "tool-call", "toolCallId": id, "toolName": "read", "input": {}
+    })).collect::<Vec<_>>()}))
+    .unwrap();
+    let results: Message = serde_json::from_value(json!({"role": "tool", "content": calls.iter().map(|id| json!({
+        "type": "tool-result", "toolCallId": id, "toolName": "read", "output": {"type": "text", "value": "read"}
+    })).collect::<Vec<_>>()}))
+    .unwrap();
+    rejected(resolve_model(opts).await.unwrap(), vec![Message::user_text("read everything"), answer, results]).await;
+    let body = &requests.borrow()[0].body;
+    let marked: Vec<String> = body["messages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .flat_map(|(at, message)| {
+            message["content"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .enumerate()
+                .filter_map(move |(part, block)| block.get("cache_control").map(|cache| format!("{at}.{part} {cache}")))
+        })
+        .collect();
+    assert_eq!(marked, [r#"0.0 {"type":"ephemeral"}"#, r#"2.11 {"type":"ephemeral"}"#], "the last request's end, and this one's");
+    assert_eq!(body["system"][0]["cache_control"], json!({"type": "ephemeral", "ttl": "1h"}));
+}

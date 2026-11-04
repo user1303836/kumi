@@ -303,15 +303,33 @@ test("scratch: drop after the producer's own undo took the copies: nothing to re
   H.no_dialogs()
 end)
 
-test("scratch: a copy's cost counts its patterns' lines, and one copy too big for a callback is refused before anything is made (#361 N-S18)", function()
-  local sequence = {}
-  for p = 1, 100 do sequence[p] = p end
-  local env, peer = setup({}, { patterns = 100, sequence_length = 100, sequence = sequence, pattern_lines = 512 })
-  for p = 1, 100 do mock.ops.set_note(p, 3, 1, 1, { note = 36, instrument = 0 }) end -- a long song's bass: 100 patterns of 512 lines
-  mock.data.undo.stack = {}
+test("scratch: a copy's cost counts its patterns' lines, and one copy too big for a callback is refused by its own code before anything is made (#361 N-S18)", function()
+  -- A long song's bass, in patterns of 512 lines.
+  local function song_of(patterns)
+    local sequence = {}
+    for p = 1, patterns do sequence[p] = p end
+    local _, peer = setup({}, { patterns = patterns, sequence_length = patterns, sequence = sequence, pattern_lines = 512 })
+    for p = 1, patterns do mock.ops.set_note(p, 3, 1, 1, { note = 36, instrument = 0 }) end
+    mock.data.undo.stack = {}
+    return peer
+  end
+  -- About 3.2 s by the model: made (Renoise took 2.6 s for this many lines, every column full; lab 2026-11-01).
+  result(make(song_of(100), "s8", 1), "make")
+  -- A make of several is held to the host's wait in all: seven of those, about 22 s, are made, and seven at 4 s each, about 28 s,
+  -- though one is allowed, are refused with nothing made.
+  result(make(song_of(100), "s10", 7), "make")
+  result(make(song_of(125), "s11", 1), "make")
+  local peer = song_of(125)
+  local before = #mock.data.tracks
+  local refused_all = make(peer, "s12", 7)
+  ok(refused_all.error and refused_all.error.code == "too-big", json.encode(refused_all.result or refused_all.error))
+  ok(refused_all.error.message:find("in all", 1, true), refused_all.error.message)
+  eq(#mock.data.tracks, before, "no copy made")
+  -- About 6.4 s: refused.
+  local peer = song_of(200)
   local tracks = #mock.data.tracks
-  local refused = make(peer, "s8", 1)
-  ok(refused.error and refused.error.code == "bad-params", json.encode(refused.result or refused.error))
+  local refused = make(peer, "s9", 1)
+  ok(refused.error and refused.error.code == "too-big", json.encode(refused.result or refused.error))
   ok(refused.error.message:find("give a range", 1, true), refused.error.message)
   eq(#mock.data.tracks, tracks, "no copy made")
   eq(steps(), 0)
@@ -618,4 +636,53 @@ test("scratch: players of phrases are empty tracks, each playing the instrument'
   eq(names(), "Kick,Hat,Bass,Pad,Bus,Master,Send 1")
   failure(call(peer, "scratch", { action = "make", scratchId = "s9p1b", count = 1, label = "v", epoch = epoch, layout = layout,
     range = { fromBeat = 2, beats = 4 }, phrases = { instrument = epoch .. ":instrument:1", phrases = { 1 } } }), "bad-params")
+end)
+
+-- A meta device on Bass aimed at its Compressor (the devices count from the mixer as 0), which has a second knob and preset data.
+local function aimed_bass(dest_track)
+  local bass = track(3)
+  bass.devices[3].params[2] = { name = "Ratio", value = 1, min = 0, max = 10 }
+  bass.devices[3].preset_data = "<c><Value>0.5</Value></c>"
+  bass.devices[#bass.devices + 1] = { name = "*LFO", path = "Audio/Effects/Native/*LFO", params = {
+    { name = "Dest. Track", value = dest_track, min = -1, max = 255 }, { name = "Dest. Effect", value = 2, min = -1, max = 255 },
+    { name = "Dest. Parameter", value = 1, min = -1, max = 255 }, { name = "Amplitude", value = 0.5, min = 0, max = 1 },
+  } }
+  mock.device_catalog["Audio/Effects/Native/*LFO"] = {
+    { name = "Dest. Track", value = -1, min = -1, max = 255 }, { name = "Dest. Effect", value = -1, min = -1, max = 255 },
+    { name = "Dest. Parameter", value = -1, min = -1, max = 255 }, { name = "Amplitude", value = 0.5, min = 0, max = 1 },
+  }
+  mock.device_catalog["Audio/Effects/Native/Compressor"][2] = { name = "Ratio", value = 1, min = 0, max = 10 }
+end
+
+test("scratch: a meta device moving its own track moves the copy's, aimed by the track's number or by -1", function()
+  for _, dest_track in ipairs({ 2, -1 }) do
+    local _, peer = setup()
+    aimed_bass(dest_track)
+    result(make(peer, "s1a2b", 1), "make")
+    local aimed = track(6).devices[4].params
+    eq(aimed[1].value, 5, "the copy's track")
+    eq(aimed[2].value, 2, "its Compressor")
+    eq(aimed[3].value, 1, "its first parameter")
+  end
+end)
+
+test("scratch-keep: what a kept copy's meta device moves doesn't stop Kumi's undo; a knob beside it does", function()
+  for _, knob in ipairs({ false, true }) do
+    local _, peer = setup()
+    aimed_bass(-1)
+    local made = result(make(peer, "s16", 1))
+    local done = keep(peer, { ref = made.copies[1].ref, name = "Best" })
+    ok(type(done.material.print) == "string" and done.material.print ~= "unread", "printed")
+    local compressor = track(6).devices[3]
+    -- (as Renoise moves it: the parameter, and its value in the preset data)
+    compressor.params[1].value = 3.25
+    compressor.preset_data = "<c><Value>0.7</Value></c>"
+    if knob then
+      compressor.params[2].value = 4
+      failure(undo(peer, done), "changed", "changed in Renoise")
+    else
+      local undone = undo(peer, done)
+      ok(undone.result, "Kumi's undo: " .. tostring((undone.error or {}).message))
+    end
+  end
 end)

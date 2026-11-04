@@ -464,6 +464,7 @@ fn goal_state() -> GoalState {
         max: 1.0,
         step: None,
         value,
+        device_id: None,
     };
     GoalState {
         version: 1,
@@ -827,6 +828,7 @@ fn set_entry() -> SetEntry {
             live: Some("12.2".into()),
             daw: None,
             made_in: None,
+            instruments: None,
         }),
         error: None,
     }

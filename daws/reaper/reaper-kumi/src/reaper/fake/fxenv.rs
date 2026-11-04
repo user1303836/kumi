@@ -1143,6 +1143,7 @@ fn clamped(field: &str, value: &str) -> String {
 fn set_config(owner: u64, index: c_int, key: *const c_char, value: *const c_char) -> bool {
     let (key, value) = (name_of(key), name_of(value));
     counted(|s| {
+        let beats_a_second = s.bpm / 60.0;
         let Some(fx) = fx_mut(s, owner, index) else { return false };
         match key.as_str() {
             "parallel" => {
@@ -1222,6 +1223,13 @@ fn set_config(owner: u64, index: c_int, key: *const c_char, value: *const c_char
                             .any(|k| fx.config.get(&format!("param.{param}.{k}")).is_some_and(|v| v == "1"))
                     };
                     let had = sourced(fx);
+                    // An LFO's tempo sync flipped converts its speed, either way (lab, 7.82: 3 became 0.6667 at 120 BPM).
+                    if field == "lfo.temposync" && fx.config.get(other).map_or("0", String::as_str) != value {
+                        let speed = format!("param.{param}.lfo.speed");
+                        if let Some(now) = fx.config.get(&speed).and_then(|now| now.parse::<f64>().ok()) {
+                            fx.config.insert(speed, (beats_a_second / now).to_string());
+                        }
+                    }
                     fx.config.insert(other.to_string(), clamped(field, &value));
                     let held = had || sourced(fx) || field.starts_with("learn.");
                     // An LFO or a link turned on makes the block and turns the modulation on with it; REAPER marks only those.

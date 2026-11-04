@@ -66,6 +66,11 @@ const SAVE_PROJECT: i32 = 40026;
 pub trait Outbox {
     fn event(&self, name: &str, data: Value);
     fn heartbeat(&self);
+    /// Whether anyone is connected to hear what REAPER says: with no one, the focus isn't polled, and it's polled afresh
+    /// before the first `focus` is answered.
+    fn attended(&self) -> bool {
+        true
+    }
 }
 
 /// Clears the flag when dropped.
@@ -122,6 +127,9 @@ pub struct Snapshot {
     pub working: Option<Instant>,
     /// M5 listening (m5-reaper): the jobs and the preview, which the socket threads answer for themselves.
     pub listening: Arc<crate::listening::Board>,
+    /// Nobody was connected at the last tick, so the focus wasn't polled: a socket thread waits for a tick that polls it
+    /// before it answers `focus`.
+    pub dormant: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -287,6 +295,10 @@ pub struct Extension {
     modal_since: Cell<Option<Instant>>,
     modal_check: bool,
     rates: RefCell<Rates>,
+    /// Whether anyone was connected at the last tick (`Outbox::attended`).
+    attended: Cell<bool>,
+    /// The focus wasn't polled since someone connected: the next poll is made at once and reads the selection too.
+    afresh: Cell<bool>,
     in_tick: Cell<bool>,
     quit: Cell<Quit>,
     last_heartbeat: Cell<Option<Instant>>,
@@ -328,6 +340,8 @@ impl Extension {
             modal_since: Cell::new(None),
             modal_check: std::env::var(MODAL_CHECK_ENV).map_or(true, |value| value != "0"),
             rates: RefCell::default(),
+            attended: Cell::new(false),
+            afresh: Cell::new(true),
             in_tick: Cell::new(false),
             quit: Cell::new(Quit::No),
             last_heartbeat: Cell::new(None),
@@ -338,7 +352,7 @@ impl Extension {
             status_static,
             listening: crate::listening::Listening::new(board),
         };
-        extension.refresh_snapshot(None, None);
+        extension.refresh_snapshot(None, None, false);
         extension
     }
 
@@ -442,8 +456,18 @@ impl Extension {
         // M5 listening (m5-reaper): a preview's end and a capture's drain each tick; a track's items, a planned render (held
         // inside REAPER's render until it ends) and the first scratch sweep only while REAPER is free.
         self.listening.tick(&reaper, &self.reads, busy.is_none() && !blocked, &self.snapshot, &*self.out);
+        // With nobody connected, the focus (what the producer is on, polled 20 times a second) isn't read: it's polled
+        // afresh, the selection with it, on the first tick someone is and REAPER is free. (A selection change meanwhile
+        // asked for a read nobody made, and the last one may still be younger than its interval.)
+        let attended = self.out.attended();
+        if attended && !self.attended.get() {
+            self.afresh.set(true);
+        }
+        self.attended.set(attended);
         if busy.is_none() {
-            self.poll_focus(project.as_ref());
+            if attended {
+                self.poll_focus(project.as_ref());
+            }
             // The producer's undo of Kumi's changes; a plan left open. An undo or redo may bring back scratch copies Kumi
             // dropped (they were bare edits inside the producer's points): they're swept again.
             if self.changes.tick(&reaper, &self.reads, project.as_ref(), &*self.out) {
@@ -451,7 +475,7 @@ impl Extension {
             }
         }
         self.flush_events(project.as_ref());
-        self.refresh_snapshot(busy, project.as_ref());
+        self.refresh_snapshot(busy, project.as_ref(), attended);
         let now = Instant::now();
         if self.last_heartbeat.get().is_none_or(|last| now.duration_since(last) >= HEARTBEAT) {
             self.last_heartbeat.set(Some(now));
@@ -777,6 +801,8 @@ impl Extension {
             let pending = self.pending.borrow();
             (pending.focus, pending.selection)
         };
+        let afresh = self.afresh.replace(false);
+        let (urgent, selection) = (urgent || afresh, selection || afresh);
         let due = urgent || self.focus_at.get().is_none_or(|at| at.elapsed() >= FOCUS_EVERY);
         if !due {
             return;
@@ -817,7 +843,7 @@ impl Extension {
         }
     }
 
-    fn refresh_snapshot(&self, busy: Option<Busy>, project: Option<&ProjectInfo>) {
+    fn refresh_snapshot(&self, busy: Option<Busy>, project: Option<&ProjectInfo>, attended: bool) {
         let reaper = self.reaper();
         let status = self.status(project);
         let mut snapshot = self.snapshot.lock().unwrap_or_else(|e| e.into_inner());
@@ -828,6 +854,7 @@ impl Extension {
         snapshot.project = project.map(|p| ProjectSummary { name: p.name.clone(), path: p.path.clone() });
         snapshot.busy = busy;
         snapshot.status = status;
+        snapshot.dormant = !attended || self.afresh.get();
         snapshot.focus = Arc::clone(&self.focus_value.borrow());
         snapshot.focus_at = self.focus_at.get();
         snapshot.last_tick = Some(Instant::now());
@@ -1051,6 +1078,53 @@ mod tests {
         assert_eq!(capture(&extension), true, "the last answer stands inside the throttle");
         tick_with_throttles(&extension, Duration::ZERO);
         assert_eq!(capture(&extension), false);
+    }
+
+    /// The outbox of a test that says when someone is connected.
+    struct Door(Rc<Cell<bool>>);
+
+    impl Outbox for Door {
+        fn event(&self, _: &str, _: Value) {}
+        fn heartbeat(&self) {}
+        fn attended(&self) -> bool {
+            self.0.get()
+        }
+    }
+
+    // (A9-3) With nobody connected the focus isn't polled (REAPER's main thread spends nothing on it); the first tick with
+    // someone polls it afresh, the selection with it, so what changed while nobody was connected is in the first answer.
+    #[test]
+    fn with_nobody_connected_the_focus_isnt_polled_and_the_first_tick_with_someone_polls_it_afresh() {
+        fake::lab_project();
+        let (_tx, rx) = queue::channel();
+        let door = Rc::new(Cell::new(true));
+        let extension = Extension::new(fake::api(), rx, Box::new(Door(door.clone())), Arc::new(Mutex::new(Snapshot::default())));
+        let track = |i: usize| json!(format!("r:track:{}", fake::with(|s| s.tracks[i].guid.clone())));
+        fake::select_tracks(&[0]);
+        extension.tick(Driver::Timer);
+        let first = extension.snapshot();
+        assert!(!first.dormant);
+        assert_eq!(first.focus["selection"]["trackRef"], track(0));
+        // Kumi goes: nobody is connected, and nothing is polled for nobody.
+        door.set(false);
+        extension.tick(Driver::Timer);
+        assert!(extension.snapshot().dormant);
+        // The producer selects another track meanwhile (the surface says so, as REAPER does, which with someone connected
+        // polls at once); ticks go on, polling nothing.
+        fake::select_tracks(&[1]);
+        extension.on_surface(Call::TrackSelection(fake::track_ptr(1)));
+        extension.tick(Driver::Timer);
+        let alone = extension.snapshot();
+        assert!(alone.dormant);
+        assert_eq!(alone.focus["selection"]["trackRef"], track(0), "not polled for nobody");
+        // Kumi is back within the poll's 50 ms, the surface's call long taken: the first tick polls the focus afresh, the
+        // selection too.
+        door.set(true);
+        extension.tick(Driver::Timer);
+        let back = extension.snapshot();
+        assert!(!back.dormant);
+        assert_eq!(back.focus["selection"]["trackRef"], track(1), "what changed while nobody was connected");
+        assert_eq!(back.status["tracks"], first.status["tracks"], "status is read every tick, connected or not");
     }
 
     #[test]

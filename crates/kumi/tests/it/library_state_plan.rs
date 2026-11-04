@@ -3,7 +3,7 @@ use kumi_library::{
     learn::{plugin_preset_folders, set_folders, Counts, LearnPhase, LearnProgress},
     plan::{kumi_sets, plan_learning, remembered_folders, PlanOptions},
     sources::SourceOptions,
-    state::{acquire_lock, alive, read_state, write_state},
+    state::{acquire_lock, alive, read_state, release_ended, write_state},
 };
 use serde_json::json;
 use std::path::Path;
@@ -80,7 +80,7 @@ async fn locks_exclude_other_processes_but_replace_same_process_dead_and_day_old
     let mut there: Vec<_> = std::fs::read_dir(dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
     there.sort();
     assert_eq!(there, [".settings.json"]);
-    for body in ["half-written", "{\"pid\":2147483647,\"at\":9999999999999}", "{\"pid\":\"1\",\"at\":1}"] {
+    for body in ["", "half-written", "{\"pid\":2147483647,\"at\":9999999999999}", "{\"pid\":\"1\",\"at\":1}"] {
         put(&lock, body);
         acquire_lock(dir).await.unwrap().unwrap().release().await.unwrap();
     }
@@ -91,6 +91,21 @@ async fn locks_exclude_other_processes_but_replace_same_process_dead_and_day_old
         assert_eq!(std::fs::metadata(&lock).unwrap().permissions().mode() & 0o777, 0o600);
         holder.release().await.unwrap();
     }
+}
+/// A learner ended between making its lock and writing to it leaves a file that names nobody (#778).
+#[tokio::test]
+async fn an_ended_learners_lock_is_let_go_of_when_it_names_it_or_nobody_but_not_another() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path().join("library");
+    let lock = dir.join("learning.lock");
+    let dir = dir.to_str().unwrap();
+    for (body, kept) in [("{\"pid\":41,\"at\":1}", false), ("", false), ("{\"pi", false), ("{\"pid\":42,\"at\":1}", true)] {
+        put(&lock, body);
+        release_ended(dir, 41).await.unwrap();
+        assert_eq!(lock.exists(), kept, "{body:?}");
+    }
+    std::fs::remove_file(&lock).unwrap();
+    release_ended(dir, 41).await.unwrap();
 }
 #[tokio::test]
 async fn a_held_lock_says_so_again_and_a_release_leaves_one_another_took() {

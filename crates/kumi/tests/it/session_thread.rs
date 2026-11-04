@@ -322,3 +322,119 @@ async fn plain_mode_answers_a_line_read_before_its_session_was_asked_to_start() 
         })
         .await;
 }
+
+/// A terminal that answers what Kumi asks it first (DA1, the last question) with `answer`, as typed into `input`, once.
+struct Answering {
+    written: RefCell<String>,
+    input: Rc<Input>,
+    answer: &'static str,
+    answered: Cell<bool>,
+}
+impl TtyOutput for Answering {
+    fn is_tty(&self) -> bool {
+        true
+    }
+    fn columns(&self) -> Option<i32> {
+        Some(120)
+    }
+    fn rows(&self) -> Option<i32> {
+        Some(40)
+    }
+    fn write(&self, text: &str) {
+        self.written.borrow_mut().push_str(text);
+        if text.contains("\u{1b}[c") && !self.answer.is_empty() && !self.answered.replace(true) {
+            self.input.write(self.answer);
+        }
+    }
+}
+
+/// Kumi made as the app makes it, asking its terminal what it is as the app's own terminal is asked.
+fn asking_kumi(
+    env: Env,
+    input: Rc<Input>,
+    out: Rc<dyn TtyOutput>,
+    err: Rc<Output>,
+    args: &[&str],
+) -> impl std::future::Future<Output = i32> {
+    let mut io = CliIo::new(input, out, err, env);
+    io.args = args.iter().map(|arg| arg.to_string()).collect();
+    io.threaded = true;
+    io.probe = true;
+    run(io, Answers::default())
+}
+
+/// A terminal Kumi asks what it is (named, so it is asked on every system).
+fn named_terminal(env: &mut Env) {
+    env.insert("TERM".into(), "xterm-256color".into());
+    env.insert("TERM_PROGRAM".into(), "ghostty".into());
+}
+
+/// The full screen asks the terminal what it is while its session builds: a message typed before the terminal's last
+/// answer is kept, and answered once the session has started, and the terminal is given back as it was once Kumi ends.
+#[tokio::test(flavor = "current_thread")]
+async fn the_full_screen_asks_its_terminal_while_the_session_builds_and_keeps_what_was_typed() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let asked = Arc::new(AtomicUsize::new(0));
+            let (folder, mut env) = home(&noting_server(asked.clone()).await);
+            named_terminal(&mut env);
+            let input = Rc::new(Input { tty: true, ..Default::default() });
+            let out = Rc::new(Answering {
+                written: RefCell::default(),
+                input: input.clone(),
+                answer: "Note how I start a track.\r\u{1b}P>|ghostty 1.1.3\u{1b}\\\u{1b}[?62;22c",
+                answered: Cell::new(false),
+            });
+            let err = Rc::new(Output::default());
+            let running = tokio::task::spawn_local(asking_kumi(env, input.clone(), out.clone(), err.clone(), &["--inference-only", "-c"]));
+            let term = RefCell::new(vt::VirtualTerminal::new(120, 40));
+            let consumed = Cell::new(0);
+            let screen = || {
+                let written = out.written.borrow();
+                term.borrow_mut().write(&written[consumed.get()..]);
+                consumed.set(written.len());
+                term.borrow().lines().join("\n")
+            };
+            until("the answer", || asked.load(Ordering::SeqCst) == 2 && screen().contains("Kept it.")).await;
+            until("Kumi idle", || screen().contains("Ready")).await;
+            input.write("\x03\x03");
+            let code = tokio::time::timeout(Duration::from_secs(30), running).await.expect("Kumi ends").unwrap();
+            assert_eq!(code, 0, "{}\nstderr: {}", screen(), err.0.borrow());
+            assert_eq!(out.written.borrow().matches(kumi::tui::probe::QUERIES).count(), 1, "asked once");
+            assert!(!input.raw.get(), "the terminal is given back as it was");
+            assert_eq!(left(folder.path()).0, [NOTE]);
+        })
+        .await;
+}
+
+/// A session that can't start is said first, whatever else went wrong at the start (the input history's file here), as
+/// when the session was built before anything else, and the terminal it asked is given back as it was.
+#[tokio::test(flavor = "current_thread")]
+async fn a_session_that_cant_start_is_said_before_the_rest_of_the_start() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for references in [true, false] {
+                let (_folder, mut env) = home("http://127.0.0.1:9/v1");
+                named_terminal(&mut env);
+                env.insert("KUMI_INPUT_HISTORY_FILE".into(), "relative/input-history".into());
+                if references {
+                    env.insert("KUMI_REFERENCES_DIR".into(), "relative/references".into());
+                }
+                let input = Rc::new(Input { tty: true, ..Default::default() });
+                // A terminal that never answers.
+                let out = Rc::new(Answering { written: RefCell::default(), input: input.clone(), answer: "", answered: Cell::new(false) });
+                let err = Rc::new(Output::default());
+                let code =
+                    tokio::time::timeout(Duration::from_secs(30), asking_kumi(env, input.clone(), out, err.clone(), &["--inference-only"]))
+                        .await
+                        .expect("Kumi ends");
+                let said = err.0.borrow().clone();
+                assert_eq!(code, 1, "{said}");
+                let first = if references { "KUMI_REFERENCES_DIR" } else { "KUMI_INPUT_HISTORY_FILE" };
+                assert!(said.contains(first), "{said}");
+                assert!(!references || !said.contains("KUMI_INPUT_HISTORY_FILE"), "{said}");
+                assert!(!input.raw.get(), "the terminal is given back as it was");
+            }
+        })
+        .await;
+}

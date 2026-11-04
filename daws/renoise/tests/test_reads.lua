@@ -535,6 +535,41 @@ test("reads: the pattern body is a window of lines around the cursor", function(
   H.no_dialogs()
 end)
 
+-- (A4-2) FOCUS draws the producer's track first, then the song's in order until its pane is full: Kumi asks for that many
+-- with `limit`, and every track it gets is the one the whole body has.
+test("reads: a pattern body with a limit reads the first tracks and the producer's past them, as the whole body has them", function()
+  local env, peer = setup()
+  fill_demo()
+  local E = epoch_of(peer)
+  local whole = call(peer, "focus_body", { kind = "pattern" }).result
+  eq(#whole.tracks, 7)
+  local function same(body, picked, why)
+    eq(#body.tracks, #picked, why)
+    for k, t in ipairs(picked) do eq(json.encode(body.tracks[k]), json.encode(whole.tracks[t]), why .. ": track " .. t) end
+    for _, key in ipairs({ "ref", "name", "lines", "from", "lpb", "cursor", "playing" }) do eq(body[key], whole[key], why .. ": " .. key) end
+    eq(body.window.from, whole.window.from, why)
+    eq(body.window.to, whole.window.to, why)
+    eq(body.truncated, whole.truncated, why)
+  end
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:4" }).result, { 1, 2, 4 }, "the producer's track past the first two")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 3, around = E .. ":track:2" }).result, { 1, 2, 3 }, "the producer's among the first")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 3 }).result, { 1, 2, 3 }, "no track of the producer's: the first")
+  -- A track past the limit named as the producer's comes too: FOCUS draws the first of that name.
+  mock.ops.rename_track(5, "Bass")
+  E = epoch_of(peer)
+  whole = call(peer, "focus_body", { kind = "pattern" }).result
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:4" }).result, { 1, 2, 4, 5 }, "a name past the limit")
+  -- What can't be kept exactly reads every track, as a Kumi that asks for no limit does.
+  local all = { 1, 2, 3, 4, 5, 6, 7 }
+  same(call(peer, "focus_body", { kind = "pattern" }).result, all, "no limit")
+  same(call(peer, "focus_body", { kind = "pattern", around = E .. ":track:4" }).result, all, "no limit, a track named")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 7, around = E .. ":track:4" }).result, all, "a limit of every track")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = "0:track:4" }).result, all, "a track of another epoch")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:40" }).result, all, "no such track")
+  same(call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":pattern:1" }).result, all, "not a track")
+  H.no_dialogs()
+end)
+
 test("reads: the matrix, phrase, instrument and dsp bodies", function()
   local env, peer = setup()
   fill_demo()
@@ -616,6 +651,51 @@ local function fill_cells(tracks, lines)
   end
 end
 
+-- (A4-2) A song too dense for every track's lines to fit a page: the whole body cuts its window short, as it always did; a
+-- body of the tracks FOCUS can draw gets the window FOCUS asks for, each row as the whole body has it; and tracks too many for
+-- a page even then are still cut to it, marked truncated.
+test("reads: a pattern body of the tracks FOCUS draws keeps the page bound and gets a dense song's whole window", function()
+  local env, peer = setup(nil, heavy({ tracks = 12, lines = 128 }))
+  fill_cells(12, 40)
+  local E = epoch_of(peer)
+  local function same(a, b)
+    if type(a) ~= type(b) then return false end
+    if type(a) ~= "table" then return a == b end
+    for k, v in pairs(a) do if not same(v, b[k]) then return false end end
+    for k in pairs(b) do if a[k] == nil then return false end end
+    return true
+  end
+  local response, _, longest = call(peer, "focus_body", { kind = "pattern" })
+  local whole = response.result
+  ok(longest <= MAX_LINE, "the whole body is a page: " .. longest)
+  eq(whole.truncated, true, "every track's lines don't fit a page")
+  ok(whole.window.to < 33, "so its window is cut short: " .. whole.window.to)
+  response, _, longest = call(peer, "focus_body", { kind = "pattern", limit = 2, around = E .. ":track:5" })
+  local drawn = response.result
+  ok(longest <= MAX_LINE, "a page: " .. longest)
+  eq(drawn.truncated, nil, "the drawable tracks' lines fit")
+  eq(drawn.window.from, 1)
+  eq(drawn.window.to, 33, "the window FOCUS asks for")
+  eq(#drawn.tracks, 3)
+  for k, t in ipairs({ 1, 2, 5 }) do
+    local mine, theirs = drawn.tracks[k], whole.tracks[t]
+    eq(mine.ref, theirs.ref)
+    local shared = {}
+    for _, row in ipairs(mine.lines) do
+      if row.line <= whole.window.to then shared[#shared + 1] = row end
+    end
+    ok(same(shared, theirs.lines), "track " .. t .. ": the rows both windows hold are the same")
+    eq(#mine.lines, 40 < 33 and 40 or 33, "track " .. t .. ": a row for each filled line in the window")
+  end
+  -- Every track is one FOCUS might draw (a limit just under them all, the last one the producer's): cut to the page again.
+  response, _, longest = call(peer, "focus_body", { kind = "pattern", limit = 11, around = E .. ":track:12" })
+  ok(longest <= MAX_LINE, "still a page: " .. longest)
+  eq(#response.result.tracks, 12)
+  eq(response.result.truncated, true, "marked truncated")
+  eq(response.result.window.to, whole.window.to, "cut where the whole body is")
+  H.no_dialogs()
+end)
+
 test("reads: a page never goes over 256 KiB, and the pages together are every row", function()
   local env, peer = setup(nil, heavy({ tracks = 1, lines = 300 }))
   fill_cells(1, 300)
@@ -689,6 +769,71 @@ test("reads: the fast timer runs only while a read is pending", function()
   mock.clock_step_ms = 0
   local got = H.frames(peer)
   eq(got[#got].id, 1)
+  H.no_dialogs()
+end)
+
+-- A4-8: Renoise fires the timers once a frame (about every 20 ms): a slice takes STOPPED_BUDGET_MS while the transport
+-- is stopped, PLAYING_BUDGET_MS while it plays; and a frame where the main tick comes too runs the jobs once.
+local BUDGETS = T.load_payload_module("jobs")
+local function one_slice(peer)
+  local before = mock.time
+  KUMI_BRIDGE.payload.tick_jobs()
+  return mock.time - before
+end
+
+test("reads: a slice takes its stopped budget while Renoise is stopped and its playing budget while it plays", function()
+  local env, peer = setup(nil, heavy({ tracks = 60, lines = 32 }))
+  mock.clock_step_ms = 1 -- every look at the clock costs a millisecond
+  H.send(peer, { type = "request", id = 1, method = "read", params = { kind = "track", limit = 60 } })
+  local stopped = one_slice(peer)
+  mock.data.transport_fields.playing = true
+  local playing = one_slice(peer)
+  mock.data.transport_fields.playing = false
+  local again = one_slice(peer)
+  mock.clock_step_ms = 0
+  local STOPPED, PLAYING = BUDGETS.STOPPED_BUDGET_MS, BUDGETS.PLAYING_BUDGET_MS
+  ok(STOPPED ~= PLAYING, "two budgets")
+  -- (a slice ends a few looks at the clock past its budget, each look 1 ms here)
+  local function about(spent, budget) return spent > budget and spent <= budget + 3 end
+  ok(about(stopped, STOPPED), "stopped: " .. stopped .. " ms")
+  ok(about(playing, PLAYING), "playing: " .. playing .. " ms")
+  ok(about(again, STOPPED), "stopped again: " .. again .. " ms")
+  for _ = 1, 400 do
+    mock.advance(10)
+    local got = H.frames(peer)
+    if got[1] then eq(got[#got].id, 1) break end
+  end
+  H.no_dialogs()
+end)
+
+-- (a slice is at least STOPPED_BUDGET_MS here, the song stopped, and a stale run STALE_SLICE_MS: "no slice" is under both)
+local SLICE_MS = T.load_payload_module("jobs").STOPPED_BUDGET_MS
+
+test("reads: the main tick leaves a pending read to the fast timer and still counts as the timers running", function()
+  local env, peer = setup(nil, heavy({ tracks = 60, lines = 32 }))
+  mock.clock_step_ms = 1
+  H.send(peer, { type = "request", id = 1, method = "read", params = { kind = "track", limit = 60 } })
+  local before = mock.time
+  KUMI_BRIDGE.payload.tick()
+  local spent = mock.time - before
+  ok(spent < SLICE_MS, "no slice in the main tick: " .. spent .. " ms")
+  -- (a message more than 100 ms after the last slice but soon after the main tick: the timers run, so the message runs no
+  -- slice; the read, 60 tracks, is still pending)
+  KUMI_BRIDGE.payload.tick_jobs()
+  mock.time = mock.time + 50
+  KUMI_BRIDGE.payload.tick()
+  mock.time = mock.time + 55
+  before = mock.time
+  H.send(peer, { type = "request", id = 2, method = "ping" })
+  spent = mock.time - before
+  mock.clock_step_ms = 0
+  ok(spent < SLICE_MS, "no slice in the message's callback: " .. spent .. " ms")
+  for _ = 1, 400 do
+    mock.advance(10)
+    local done = false
+    for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == 1 then done = true end end
+    if done then break end
+  end
   H.no_dialogs()
 end)
 
@@ -1318,30 +1463,104 @@ test("reads: a cursor made before a track was inserted or removed is refused, ne
   H.no_dialogs()
 end)
 
+-- Two requests in one message: the first is a read that takes its first slice in the message's callback and ends there;
+-- the second, made as the first ends, waits for the timer (A4-8: one job, one slice in a callback).
+local function behind_a_read(peer, request)
+  peer:send(json.encode({ type = "request", id = request.id - 100, method = "read", params = { kind = "song" } }) .. "\n"
+    .. json.encode(request) .. "\n")
+end
+
+local function answer_to(peer, id)
+  for _ = 1, 50 do
+    for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == id then return f end end
+    mock.advance(10)
+  end
+end
+
 test("reads: a read waiting for its first turn is ended if the song changed before it", function()
   local env, peer = setup()
   fill_demo()
   local E = epoch_of(peer)
-  H.send(peer, { type = "request", id = 900, method = "read", params = { ref = E .. ":instrument:1" } })
+  behind_a_read(peer, { type = "request", id = 900, method = "read", params = { ref = E .. ":instrument:1" } })
   mock.ops.remove_instrument(1) -- before the timer has run the job
-  local response
-  for _ = 1, 50 do
-    mock.advance(10)
-    for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == 900 then response = f end end
-    if response then break end
-  end
-  ok(response, "answered")
-  failure(response, "epoch-changed")
+  failure(answer_to(peer, 900), "epoch-changed")
   -- and the same for a track inserted
-  H.send(peer, { type = "request", id = 901, method = "read", params = { kind = "track" } })
+  behind_a_read(peer, { type = "request", id = 901, method = "read", params = { kind = "track" } })
   mock.ops.insert_track(1, { name = "New" })
-  response = nil
-  for _ = 1, 50 do
-    mock.advance(10)
-    for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == 901 then response = f end end
-    if response then break end
+  failure(answer_to(peer, 901), "changed")
+  H.no_dialogs()
+end)
+
+-- A4-8: Renoise fires its timers once a frame (about every 20 ms): a read takes its first slice in the callback of the
+-- message that asked for it, rather than waiting for one.
+local function answered_now(peer, id)
+  for _, f in ipairs(H.frames(peer)) do if f.type == "response" and f.id == id then return f end end
+end
+
+test("reads: a read is answered in the callback of the message that asked for it", function()
+  local env, peer = setup()
+  fill_demo()
+  local timers = #mock.timers
+  for i, method in ipairs({ "snapshot", "read", "digest" }) do
+    local params = method == "read" and { kind = "track" } or json.object()
+    H.send(peer, { type = "request", id = 910 + i, method = method, params = params })
+    local response = answered_now(peer, 910 + i)
+    ok(response and response.result, method .. " answered before any timer ran")
+    eq(#mock.timers, timers, "no fast timer left behind")
   end
-  failure(response, "changed")
+  H.no_dialogs()
+end)
+
+test("reads: of two reads in one message, only the first takes a slice in its callback", function()
+  local env, peer = setup()
+  fill_demo()
+  behind_a_read(peer, { type = "request", id = 920, method = "snapshot", params = json.object() })
+  ok(answered_now(peer, 820), "the first read answered in the callback")
+  local waiting = answered_now(peer, 920)
+  ok(not waiting, "the second waits for the timer")
+  local response = answer_to(peer, 920)
+  ok(response and response.result, "and is answered on it")
+  H.no_dialogs()
+end)
+
+test("reads: a message that asked for more than reads leaves its read to the timer", function()
+  local env, peer = setup()
+  fill_demo()
+  peer:send(json.encode({ type = "request", id = 930, method = "show_status", params = { text = "x" } }) .. "\n"
+    .. json.encode({ type = "request", id = 931, method = "snapshot", params = json.object() }) .. "\n")
+  ok(not answered_now(peer, 931), "the read waits for the timer")
+  local response = answer_to(peer, 931)
+  ok(response and response.result, "and is answered on it")
+  H.no_dialogs()
+end)
+
+-- (the slice's budget at 60 ms, so what is left after the message is a slice's worth: every look at the clock costs 1 ms)
+local function budget(ms)
+  return function(env)
+    local path = env.bundle .. "payload/jobs.lua"
+    local f = assert(io.open(path, "rb"))
+    local text = f:read("*a")
+    f:close()
+    local patched, n = text:gsub("M%.BUDGET_MS = %d+", "M.BUDGET_MS = " .. ms, 1)
+    assert(n == 1, "BUDGET_MS was not found to set")
+    f = assert(io.open(path, "wb"))
+    f:write(patched)
+    f:close()
+  end
+end
+
+test("reads: a read's slice in its callback is what is left of a slice's budget after the message", function()
+  local env, peer = setup({ patch = budget(60) }, heavy({ tracks = 60, lines = 32 }))
+  mock.clock_step_ms = 1
+  local before = mock.time
+  H.send(peer, { type = "request", id = 940, method = "read", params = { kind = "track", limit = 60 } })
+  local spent = mock.time - before
+  mock.clock_step_ms = 0
+  ok(not answered_now(peer, 940), "60 tracks are more than one slice")
+  ok(spent >= 60 and spent <= 64, "the callback took the budget and no more: " .. spent .. " ms")
+  local response = answer_to(peer, 940)
+  ok(response and response.result, "the rest on the timers")
+  eq(#response.result.items, 60)
   H.no_dialogs()
 end)
 
@@ -1824,6 +2043,9 @@ test("reads: a lines read that waits between every line looks the pattern up aga
     f:close()
     local patched, n = text:gsub("\nM%.BUDGET_MS = 8\n", "\nM.BUDGET_MS = -1\n")
     assert(n == 1, "BUDGET_MS")
+    -- (and the budget while the transport is stopped, as it is here)
+    patched, n = patched:gsub("\nM%.STOPPED_BUDGET_MS = 14\n", "\nM.STOPPED_BUDGET_MS = -1\n")
+    assert(n == 1, "STOPPED_BUDGET_MS")
     f = assert(io.open(path, "wb"))
     f:write(patched)
     f:close()
@@ -1844,4 +2066,31 @@ test("reads: a lines read that waits between every line looks the pattern up aga
     eq(rows_of(sliced_body.result.tracks[t].lines), rows_of(track.lines), "track " .. t .. "'s lines, slice by slice")
   end
   H.no_dialogs()
+end)
+
+test("reads: a pattern track's automations come in the track's order, with none no parameter is read, and the walk ends at the last", function()
+  local walk = T.load_payload_module("rows").each_automation
+  local reads = 0
+  local function device_of(parameters)
+    return { parameters = parameters, parameter = function(self, k) reads = reads + 1; return self.parameters[k] end }
+  end
+  local a, b = { is_automated = true, lane = "a" }, { is_automated = true, lane = "b" }
+  local devices = { device_of({ { is_automated = false }, a }), device_of({ b, { is_automated = true } }), device_of({ { is_automated = true } }) }
+  local track = { devices = devices, device = function(self, d) return self.devices[d] end }
+  local function pattern_track(lanes)
+    return { automation = lanes, find_automation = function(_, parameter) return parameter.lane end }
+  end
+  local seen = {}
+  walk(track, pattern_track({ "a", "b" }), function(d, k, _, _, automation) seen[#seen + 1] = table.concat({ d, k, automation }, ":") end)
+  eq(table.concat(seen, " "), "1:2:a 2:1:b")
+  eq(reads, 3, "the last parameter read is the last automation's")
+  reads = 0
+  walk(track, pattern_track({}), function() error("no automation to give") end)
+  eq(reads, 0, "with none, no parameter is read")
+  -- An alias is walked whole, whatever its own list says.
+  seen = {}
+  local alias = pattern_track({})
+  alias.is_alias = true
+  walk(track, alias, function(_, _, _, _, automation) seen[#seen + 1] = automation end)
+  eq(table.concat(seen, " "), "a b")
 end)

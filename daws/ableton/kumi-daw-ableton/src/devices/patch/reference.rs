@@ -16,7 +16,7 @@ use serde_json::Value;
 
 use super::catalog::catalog;
 use super::page::{self, Element, LOOKS};
-use crate::app::live_app::{OPEN_LIVE_PROGRAM, RUNNING_PROGRAMS};
+use crate::app::live_app::RUNNING_PROGRAMS;
 
 /// How many of an object's inlets or outlets there are, for the arguments it's given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -668,16 +668,13 @@ fn chosen_c74(
     open().and_then(|root| c74_within(&root, 4)).or_else(|| installed().into_iter().find_map(|root| c74_within(&root, 4)))
 }
 
-/// The open Live's own Max: from the app `ps` names on a Mac, or the program PowerShell names on Windows.
+/// The open Live's own Max: from the app `ps` names on a Mac, or the program of the Live in Windows' process list.
 fn open_live_max() -> Option<PathBuf> {
-    // A cold PowerShell takes seconds, and one that's slower only means the installed Maxes are looked at instead.
-    let within = std::time::Duration::from_secs(5);
     if cfg!(target_os = "macos") {
-        live_max_in(&bounded("/bin/ps", &RUNNING_PROGRAMS, within)?)
+        live_max_in(&bounded("/bin/ps", &RUNNING_PROGRAMS, std::time::Duration::from_secs(5))?)
     } else if cfg!(windows) {
-        use kumi_types::system::{process_env, system_program, SystemProgram};
-        let powershell = system_program(SystemProgram::Powershell, &process_env(), "win32");
-        windows_live_max(&bounded(&powershell, &["-NoProfile", "-NonInteractive", "-Command", OPEN_LIVE_PROGRAM], within)?)
+        let env = kumi_types::system::process_env();
+        windows_live_max(&crate::app::live_app::windows_live(&crate::app::live_app::processes(&env))?)
     } else {
         None
     }

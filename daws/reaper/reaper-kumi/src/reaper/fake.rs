@@ -2952,7 +2952,7 @@ unsafe extern "C" fn get_set_envelope_info_string(envelope: *mut TrackEnvelope, 
 
 unsafe extern "C" fn midi_count_evts(take: *mut MediaItem_Take, notes: *mut c_int, ccs: *mut c_int, texts: *mut c_int) -> c_int {
     counted(|s| match take_of(s, take as u64) {
-        Some(t) if t.source.as_deref() == Some("MIDI") => {
+        Some(t) if matches!(t.source.as_deref(), Some("MIDI" | "MIDIPOOL")) => {
             unsafe {
                 *notes = t.notes.len() as c_int;
                 *ccs = t.ccs.len() as c_int;

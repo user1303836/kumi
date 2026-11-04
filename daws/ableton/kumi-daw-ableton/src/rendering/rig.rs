@@ -46,6 +46,8 @@ pub(super) struct BeforeMainTap {
 pub(super) const BEFORE_MAIN: &str = "Kumi · before Main";
 pub(super) struct Rig {
     pub tag: String,
+    /// The Set's tempo as the rig opened: what a pass records at when a look since can't say what it is now.
+    pub tempo: Option<f64>,
     pub sources: Vec<Source>,
     pub clips: bool,
     pub hold: Option<Held>,
@@ -71,6 +73,15 @@ impl Rig {
     }
 }
 impl LiveRenderer {
+    /// The tempo a pass records at: the Set's as it is now, else as the rig opened; refused when neither can say.
+    pub(super) fn pass_tempo(&self, rig: &Rig) -> Result<f64, RuntimeError> {
+        self.observer
+            .tempo
+            .get()
+            .filter(|tempo| *tempo > 0.)
+            .or(rig.tempo)
+            .ok_or_else(|| observation("Kumi doesn't know the Set's tempo yet; try again."))
+    }
     /// The bars `window` covers, as said while Live plays them: "bars 17–24", or "bar 17".
     pub(super) fn bars_of(&self, window: Window) -> String {
         kumi_listening::renderer::bars_of(self.observer.beats_per_bar.get(), window)
@@ -103,6 +114,7 @@ impl LiveRenderer {
     ) -> Result<Rig, RuntimeError> {
         let mut rig = Rig {
             tag: uuid::Uuid::new_v4().to_string()[..4].into(),
+            tempo: self.observer.tempo.get().filter(|tempo| *tempo > 0.),
             sources: vec![],
             from: from.unwrap_or(0.),
             beats: beats.unwrap_or(8.),

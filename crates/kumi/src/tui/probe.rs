@@ -3,7 +3,7 @@
 //! last, so its answer says the others have come. Over SSH, where `TERM_PROGRAM` doesn't arrive, the answers are what
 //! turn on kitty's pictures and the terminal's own notifications; the environment stays the fallback.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -61,10 +61,59 @@ pub struct Probed {
 /// Asks, and waits for DA1's answer or `budget`, whichever comes first. The terminal is raw meanwhile, and put back as
 /// it was. A terminal that can't be made raw isn't asked.
 pub async fn probe(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>, budget: Duration) -> Probed {
-    let was_raw = input.is_raw();
-    if input.set_raw_mode(true).is_err() {
-        return Probed::default();
+    let Some(asking) = ask(input, output) else { return Probed::default() };
+    asking.answered(budget, &Signal::new()).await;
+    asking.end()
+}
+
+/// The terminal asked what it is ([`ask`]): raw, and what it says (and any key typed meanwhile) read. Once DA1 has come
+/// it's given back as it was at once, so ctrl+c stops a slow start again. A terminal that hasn't answered by the end of
+/// the wait stays raw and read until [`Asking::end`], so answers that come late are read, never echoed onto the screen;
+/// held so, it's given back the moment DA1 does come. A ctrl+c, ctrl+\ or ctrl+z typed while it's held, during the wait
+/// or past it, does what the terminal would have done with it (Unix: Windows' terminals that are asked answer at once).
+/// Dropped without being ended (a start that fails), it's given back all the same.
+pub struct Asking {
+    hold: Rc<Hold>,
+    answers: Rc<RefCell<Answers>>,
+    read: Rc<RefCell<Vec<u8>>>,
+    done: Signal,
+    parser: InputParser,
+}
+
+/// The terminal as the probe holds it: shared with its reader, which gives it back too.
+struct Hold {
+    input: Rc<dyn TtyInput>,
+    was_raw: bool,
+    /// The wait ended without DA1: the terminal is held past it.
+    past: Cell<bool>,
+    ended: Cell<bool>,
+}
+
+impl Hold {
+    fn give_back(&self) {
+        if !self.ended.replace(true) {
+            self.input.pause();
+            let _ = self.input.set_raw_mode(self.was_raw);
+        }
     }
+}
+
+/// The signal a key raw mode keeps from the terminal stands for: ctrl+c, ctrl+\ and ctrl+z.
+#[cfg(unix)]
+fn signal_of(byte: u8) -> Option<libc::c_int> {
+    match byte {
+        0x03 => Some(libc::SIGINT),
+        0x1c => Some(libc::SIGQUIT),
+        0x1a => Some(libc::SIGTSTP),
+        _ => None,
+    }
+}
+
+/// Makes the terminal raw, reads it, and asks: None when it can't be made raw (then it isn't asked).
+pub fn ask(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>) -> Option<Asking> {
+    let was_raw = input.is_raw();
+    input.set_raw_mode(true).ok()?;
+    let hold = Rc::new(Hold { input: input.clone(), was_raw, past: Cell::new(false), ended: Cell::new(false) });
     let answers = Rc::new(RefCell::new(Answers::default()));
     let read = Rc::new(RefCell::new(Vec::new()));
     let done = Signal::new();
@@ -82,19 +131,69 @@ pub async fn probe(input: &Rc<dyn TtyInput>, output: &Rc<dyn TtyOutput>, budget:
     }));
     let decoder = Rc::new(RefCell::new(Utf8Decoder::new()));
     input.resume(Rc::new({
-        let (read, parser) = (read.clone(), parser.clone());
+        let (hold, answers, read, parser) = (Rc::downgrade(&hold), answers.clone(), read.clone(), parser.clone());
         move |chunk| {
+            let held = hold.upgrade().filter(|hold| !hold.ended.get());
+            // Held (the session builds meanwhile): a ctrl+c (or ctrl+\, ctrl+z) is what the producer meant by it, as the
+            // terminal would have taken it. The terminal is given back first, then the signal goes with its usual effect.
+            #[cfg(unix)]
+            if let Some((at, signal)) =
+                held.as_ref().and_then(|_| chunk.iter().enumerate().find_map(|(at, byte)| signal_of(*byte).map(|signal| (at, signal))))
+            {
+                read.borrow_mut().extend_from_slice(&chunk[..at]);
+                parser.push(&decoder.borrow_mut().write(&chunk[..at]));
+                if let Some(hold) = &held {
+                    hold.give_back();
+                }
+                // SAFETY: raising a signal at this process; its handler (none is set yet as Kumi starts) or its default
+                // action runs as for a key the terminal itself turned into a signal.
+                unsafe {
+                    libc::raise(signal);
+                }
+                return;
+            }
             read.borrow_mut().extend_from_slice(chunk);
             let text = decoder.borrow_mut().write(chunk);
             parser.push(&text);
+            // Held past the wait, its DA1 has come: everything asked is answered, so the terminal is given back now.
+            if let Some(hold) = held.filter(|hold| hold.past.get() && answers.borrow().complete) {
+                hold.give_back();
+            }
         }
     }));
     output.write(QUERIES);
-    let _ = tokio::time::timeout(budget, done.cancelled()).await;
-    input.pause();
-    parser.dispose();
-    let _ = input.set_raw_mode(was_raw);
-    let answers = answers.borrow().clone();
-    let read = std::mem::take(&mut *read.borrow_mut());
-    Probed { answers, read }
+    Some(Asking { hold, answers, read, done, parser })
+}
+
+impl Asking {
+    /// Until DA1's answer (what was asked before it has been answered, or won't be), `budget`, or `stop`. With DA1 in,
+    /// the terminal is given back now; without, it's held past the wait.
+    pub async fn answered(&self, budget: Duration, stop: &Signal) {
+        tokio::select! {
+            _ = tokio::time::timeout(budget, self.done.cancelled()) => {}
+            _ = stop.cancelled() => {}
+        }
+        if self.answers.borrow().complete {
+            self.hold.give_back();
+        } else {
+            self.hold.past.set(true);
+        }
+    }
+
+    /// Gives the terminal back as it was: what it said, and every byte read (keys typed meanwhile among them, for the
+    /// screen's own reader to read again, which also takes the answers there as answers).
+    pub fn end(self) -> Probed {
+        self.hold.give_back();
+        self.parser.dispose();
+        let answers = self.answers.borrow().clone();
+        let read = std::mem::take(&mut *self.read.borrow_mut());
+        Probed { answers, read }
+    }
+}
+
+impl Drop for Asking {
+    fn drop(&mut self) {
+        self.hold.give_back();
+        self.parser.dispose();
+    }
 }
