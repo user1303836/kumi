@@ -7,7 +7,7 @@ use super::read::{misplaced, plugins, recorded};
 use super::vectors::vectors;
 use serde_json::{json, Value};
 use soundcraft_kumi::control::Control;
-use soundcraft_kumi::read::Reads;
+use soundcraft_kumi::read::{content, Reads};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -50,6 +50,11 @@ impl App {
 
     fn asked(&self) -> usize {
         self.fake.requests().len()
+    }
+
+    /// How often the app was asked for `method`.
+    fn asked_for(&self, method: &str) -> usize {
+        self.fake.requests().iter().filter(|request| request["method"] == method).count()
     }
 }
 
@@ -94,10 +99,7 @@ async fn the_edit_body_is_the_edit_window_in_quarter_notes() {
         ])
     );
     let keys = &body["tracks"][5];
-    assert_eq!(
-        (&keys["type"], &keys["items"][0]["position"], &keys["items"][0]["length"]),
-        (&json!("instrument"), &json!(16.0), &json!(80.0))
-    );
+    assert_eq!((&keys["type"], &keys["items"][0]["position"], &keys["items"][0]["length"]), (&json!("midi"), &json!(16.0), &json!(80.0)));
     // The playhead (the app's, as the last look saw it), and no selected time: the insertion point alone.
     assert_eq!((&body["playhead"], &body["playing"], &body["timeSelection"]), (&json!(quarters(443072.0)), &json!(false), &Value::Null));
     // The Edit window shows its timeline's 1046 pixels from the scroll, at the session's zoom.
@@ -118,6 +120,51 @@ async fn the_edit_body_is_the_edit_window_in_quarter_notes() {
     assert_eq!(body["regions"], json!([]));
     assert_eq!(body["meter"], json!([{"position": 0.0, "bar": 1, "beat": 0.0, "beatsPerBar": 4.0}]));
     assert!(body.get("loop").is_none(), "SoundCraft's session shows no loop");
+    assert!(body["tracks"].as_array().unwrap().iter().all(|track| track["shown"] == true), "the Edit window draws every track");
+    // Drawn from the summary, which holds all a view reads, never the full inspection.
+    let inspections: Vec<Value> = app
+        .fake
+        .requests()
+        .into_iter()
+        .filter(|request| request["method"] == "session.inspect")
+        .map(|request| request["params"].clone())
+        .collect();
+    assert_eq!(inspections, [json!({})]);
+}
+
+#[tokio::test]
+async fn a_view_is_drawn_from_the_last_looks_summary_while_it_is_fresh() {
+    let mut app = App::new(json!([])).await;
+    let summary = Arc::new(app.session.lock().unwrap().clone());
+    app.reads.looked_at(summary.clone(), content(&summary));
+    for kind in ["edit", "mixer", "fx"] {
+        app.body(json!({"kind": kind, "ref": if kind == "fx" { json!("s:track:3") } else { Value::Null }})).await.unwrap();
+    }
+    assert_eq!(app.asked_for("session.inspect"), 0, "the look's summary served them");
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    app.body(json!({"kind": "mixer"})).await.unwrap();
+    assert_eq!(app.asked_for("session.inspect"), 1, "a summary a second old is asked for again");
+}
+
+#[tokio::test]
+async fn a_track_inside_a_closed_folder_is_not_shown() {
+    let mut app = App::new(json!([])).await;
+    // The Edit window draws its rows: Snare (6) is inside a folder the producer closed.
+    app.ui["edit_layout"]["rows"].as_array_mut().unwrap().retain(|row| row[0] != 6);
+    let body = app.body(json!({"kind": "edit"})).await.unwrap();
+    let shown: Vec<(&Value, &Value)> = body["tracks"].as_array().unwrap().iter().map(|track| (&track["ref"], &track["shown"])).collect();
+    assert_eq!(
+        (shown[0], shown[1], shown[2]),
+        ((&json!("s:track:3"), &json!(true)), (&json!("s:track:6"), &json!(false)), (&json!("s:track:9"), &json!(true)))
+    );
+    assert_eq!(body["tracks"][1]["depth"], 0, "inspect names no folder");
+    // A hidden track isn't shown, whatever the rows; no rows at all (a window never drawn) leave the hidden flag alone.
+    app.ui["edit_layout"]["rows"] = json!([]);
+    app.shows(|session| session["tracks"][2]["hidden"] = json!(true));
+    let body = app.body(json!({"kind": "edit"})).await.unwrap();
+    let hidden: Vec<&Value> =
+        body["tracks"].as_array().unwrap().iter().filter(|track| track["shown"] == false).map(|track| &track["ref"]).collect();
+    assert_eq!(hidden, [&json!("s:track:9")]);
 }
 
 #[tokio::test]
@@ -126,6 +173,9 @@ async fn the_edit_body_shows_the_window_asked_for_with_its_regions_and_the_selec
     app.shows(|session| {
         // (a memory location of a selection: a region from bar 9 to bar 13)
         session["markers"][1]["end"] = json!(886154);
+        session["markers"][1]["kind"] = json!("Selection");
+        // (a plain marker given an end, as `markers.add {start, end}` makes one: still a point on the ruler)
+        session["markers"][2]["end"] = json!(1772308);
         session["selection"] = json!({"tracks": [3], "clips": [4], "start": 443077, "end": 886154});
         session["meter"] = json!([{"denominator": 4, "numerator": 4, "tick": 0}, {"denominator": 4, "numerator": 3, "tick": 48 * 960}]);
     });
@@ -135,7 +185,8 @@ async fn the_edit_body_shows_the_window_asked_for_with_its_regions_and_the_selec
     assert_eq!(body["tracks"][0]["items"][0]["selected"], true);
     assert_eq!(body["timeSelection"], json!({"start": 16.0, "end": 32.0}));
     assert_eq!(body["regions"], json!([{"ref": "s:marker:30", "number": 2, "name": "Verse", "position": 16.0, "end": 32.0}]));
-    assert_eq!(refs(&body["markers"]), ["s:marker:31"], "Chorus, at 48");
+    assert_eq!(refs(&body["markers"]), ["s:marker:31"], "Chorus, at 48, a point");
+    assert!(body["markers"][0].get("end").is_none());
     assert_eq!(
         body["meter"],
         json!([{"position": 10.0, "bar": 3, "beat": 2.0, "beatsPerBar": 4.0}, {"position": 48.0, "bar": 13, "beat": 0.0, "beatsPerBar": 3.0}])
@@ -144,6 +195,34 @@ async fn the_edit_body_shows_the_window_asked_for_with_its_regions_and_the_selec
         let refused = app.body(json!({"kind": "edit", "window": window})).await.unwrap_err();
         assert_eq!(refused.0, "bad-params", "{window}: {refused:?}");
     }
+}
+
+#[tokio::test]
+async fn the_meter_marks_past_the_cap_are_counted() {
+    let mut app = App::new(json!([])).await;
+    // A 4/4 bar, 205 times over: 204 changes after the first.
+    let meters: Vec<Value> = (0..205).map(|bar| json!({"denominator": 4, "numerator": 4, "tick": bar * 3840})).collect();
+    app.shows(|session| session["meter"] = meters.into());
+    let body = app.body(json!({"kind": "edit", "window": {"from": 0.0, "to": 1000.0}})).await.unwrap();
+    assert_eq!((body["meter"].as_array().unwrap().len(), &body["meterOmitted"]), (200, &json!(5)));
+}
+
+#[tokio::test]
+async fn the_midi_editors_clip_is_found_among_thousands_of_selected_clips_at_once() {
+    let mut app = App::new(json!([])).await;
+    // 12,800 audio clips on Hats, every one selected, and Keys' MIDI clip selected last.
+    let clips: Vec<Value> = (0..12_800)
+        .map(|n| json!({"id": 100_000 + n, "name": "Hat", "start": n * 100, "length": 100, "source": 8, "offset": 0, "muted": false}))
+        .collect();
+    let mut selected: Vec<Value> = (0..12_800).map(|n| json!(100_000 + n)).collect();
+    selected.push(json!(25));
+    app.shows(|session| {
+        session["tracks"][2]["clips"] = clips.into();
+        session["selection"]["clips"] = selected.into();
+    });
+    let began = Instant::now();
+    assert_eq!(app.reads.midi_editor_clip(&app.session.lock().unwrap()), Some("s:clip:25".to_string()));
+    assert!(began.elapsed() < Duration::from_secs(1), "{:?}", began.elapsed());
 }
 
 #[tokio::test]
@@ -279,8 +358,8 @@ async fn the_mixer_body_is_the_mix_windows_strips_with_the_master_faders_first()
     let strip = |at: usize| (body["strips"][at]["name"].clone(), body["strips"][at]["type"].clone(), body["strips"][at]["pan"].clone());
     assert_eq!(strip(3), (json!("Hats"), json!("audio"), json!(0.35)), "a mono track's one pan");
     assert_eq!(strip(5), (json!("Pad"), json!("audio"), json!(0.0)), "the middle of a stereo track's two");
-    assert_eq!(strip(6).1, json!("instrument"), "SoundCraft's own kinds: Kumi gives them its chips");
-    assert_eq!(strip(8).1, json!("aux"));
+    assert_eq!(strip(6).1, json!("midi"), "in Kumi's chip words: an instrument track plays MIDI");
+    assert_eq!(strip(8).1, json!("send"), "an aux track is a return");
     assert!(body["strips"].as_array().unwrap().iter().all(|strip| strip.get("peakDb").is_none()), "SoundCraft shows no meters");
     // A page of four around Keys, the master fader still first; then the rest by cursor.
     let around = app.body(json!({"kind": "mixer", "around": "s:track:23", "limit": 4})).await.unwrap();
@@ -294,6 +373,15 @@ async fn the_mixer_body_is_the_mix_windows_strips_with_the_master_faders_first()
     assert_eq!(hidden["trackCount"], 7);
     assert!(!refs(&hidden["strips"]).contains(&"s:track:9"));
     assert_eq!(app.body(json!({"kind": "mixer", "limit": 65})).await.unwrap_err().0, "bad-params");
+    // Master faders past the 64th are counted.
+    app.shows(|session| {
+        for n in 0..65 {
+            let master = json!({"id": 1000 + n, "kind": "master", "format": "Stereo", "name": format!("Master {n}"), "instrument": null, "inserts": [], "clips": [], "pan": [-1.0, 1.0]});
+            session["tracks"].as_array_mut().unwrap().push(master);
+        }
+    });
+    let masters = app.body(json!({"kind": "mixer", "limit": 1})).await.unwrap();
+    assert_eq!((masters["strips"].as_array().unwrap().len(), &masters["mastersOmitted"]), (65, &json!(2)));
 }
 
 #[tokio::test]

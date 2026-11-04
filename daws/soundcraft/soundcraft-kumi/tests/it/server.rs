@@ -424,6 +424,36 @@ async fn focus_answers_with_the_window_the_selection_and_the_playhead() {
 }
 
 #[tokio::test]
+async fn a_bodys_ref_from_before_another_session_opened_is_stale_though_the_body_sees_the_new_session_first() {
+    let lab = Lab::new().await;
+    lab.shown.lock().unwrap().tracks = kick_and_keys();
+    // Looks four seconds apart: a body's own look at the session sees the switch before the look loop does.
+    let config = Config { look: ms(4000), ..lab.config(std::process::id()) };
+    let _serving = tokio::spawn(server::serve(config, std::future::pending()));
+    let client = lab.connect().await;
+    let focus = asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
+    // FOCUS sends a body's refs with no epoch: they're read in the last look's.
+    let kick = client.request("focus_body", json!({"kind": "fx", "ref": "s:track:3"}), WAIT).await.unwrap();
+    assert_eq!((&kick["epoch"], &kick["name"]), (&focus["epoch"], &json!("Kick")));
+    // Another song, with Pad on Kick's id; the look's summary grows old.
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        shown.name = "Next Song".into();
+        shown.tracks =
+            json!([{"id": 3, "kind": "audio", "format": "Stereo", "name": "Pad", "instrument": null, "inserts": [], "clips": []}]);
+    }
+    tokio::time::sleep(ms(1100)).await;
+    for params in [json!({"kind": "fx", "ref": "s:track:3"}), json!({"kind": "mixer", "around": "s:track:3"})] {
+        let refused = client.request("focus_body", params.clone(), WAIT).await.unwrap_err();
+        assert!(matches!(&refused, RequestError::Bridge { code, .. } if code == "stale"), "{params}: {refused:?}");
+    }
+    // A body that names no ref is drawn in the new session.
+    let mixer = client.request("focus_body", json!({"kind": "mixer"}), WAIT).await.unwrap();
+    assert_ne!(mixer["epoch"], focus["epoch"]);
+    assert_eq!(mixer["strips"][0]["name"], "Pad");
+}
+
+#[tokio::test]
 async fn in_the_midi_editor_focus_names_the_clip_it_shows() {
     let lab = Lab::new().await;
     {

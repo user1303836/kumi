@@ -59,14 +59,17 @@ struct Look {
     held: HashSet<(Kind, u64, u64)>,
 }
 
-/// The bridge's reads of one copy of SoundCraft: the lives of its objects (and their epoch), the last look, and the last
-/// full inspection.
+/// The bridge's reads of one copy of SoundCraft: the lives of its objects (and their epoch), the last look, the last
+/// full inspection, and the session the last look of either kind saw.
 pub struct Reads {
     control: Control,
     lives: Lives,
     looked: Option<Look>,
     /// The last full inspection, when it came, and its content ([`content`]).
     inspected: Option<(Instant, Arc<Value>, u64)>,
+    /// The session the last look saw (a summary, or a full inspection), and when it came: what FOCUS's bodies are drawn
+    /// from, as they read nothing only the full inspection has.
+    summary: Option<(Instant, Arc<Value>)>,
     /// The epoch as it changes, for whoever can't wait for a read to end.
     told: watch::Sender<String>,
     /// The built-in plug-ins as `engine.plugins` describes them, asked once: they come with the app's version.
@@ -82,7 +85,7 @@ impl Reads {
     pub fn new(control: Control, version: Option<String>) -> Self {
         let lives = Lives::new();
         let (told, _) = watch::channel(lives.epoch().to_string());
-        Self { control, lives, looked: None, inspected: None, told, plugins: None, commands: None, version }
+        Self { control, lives, looked: None, inspected: None, summary: None, told, plugins: None, commands: None, version }
     }
 
     /// The epoch as it changes, readable while a read holds the reads.
@@ -169,6 +172,7 @@ impl Reads {
         }
         self.looked = Some(now);
         self.inspected = None;
+        self.summary = None;
     }
 
     /// A look at the session's summary, whose content the look took ([`content`]): the lives learn from it as from any
@@ -179,6 +183,12 @@ impl Reads {
         self.saw(summary);
         let same = self.lives.epoch() == epoch;
         self.inspected = kept.filter(|(_, _, held)| same && *held == content);
+    }
+
+    /// A look at the session's summary, as [`Reads::looked`], which FOCUS's bodies are drawn from while it's fresh.
+    pub fn looked_at(&mut self, summary: Arc<Value>, content: u64) {
+        self.looked(&summary, content);
+        self.summary = Some((Instant::now(), summary));
     }
 
     /// One `read`: `{kind, parent?, cursor?, limit?}` for a list, `{ref}` for one object, or `{kind: "call", command,
@@ -288,6 +298,7 @@ impl Reads {
         let held = content(&session);
         let session = Arc::new(session);
         self.inspected = Some((Instant::now(), Arc::clone(&session), held));
+        self.summary = Some((Instant::now(), Arc::clone(&session)));
         Ok(session)
     }
 

@@ -1,18 +1,22 @@
-//! `focus_body`: what FOCUS draws for the view the producer is in, from the session as a read sees it: the Edit window's
-//! tracks and clips (`edit`), a MIDI clip's notes (`midi`), a track's plug-ins (`fx`) and the Mix window's strips
-//! (`mixer`). Every position is in quarter notes, through the session's tempo map ([`Timebase`]): a session whose map
-//! holds what 0.17.0's step maps don't has no beats, and its Edit window and MIDI clips are refused rather than drawn in
-//! seconds. The Edit window and the mixer page by track, a clip's notes by note, with the cursors `read` pages by; refs
-//! are `read`'s, in the epoch the body carries. SoundCraft has no routing window of a track's (its I/O and sends are
-//! sections of the Mix window), so there's no routing body: `read` reads a track's routing.
+//! `focus_body`: what FOCUS draws for the view the producer is in, from the session's summary (`session.inspect {}`, the
+//! look loop's while it's fresh), which holds all a view reads: the Edit window's tracks and clips (`edit`), a MIDI
+//! clip's notes (`midi`), a track's plug-ins (`fx`) and the Mix window's strips (`mixer`). Every position is in quarter
+//! notes, through the session's tempo map ([`Timebase`]): a session whose map holds what 0.17.0's step maps don't has no
+//! beats, and its Edit window and MIDI clips are refused rather than drawn in seconds. The Edit window and the mixer page
+//! by track, a clip's notes by note, with the cursors `read` pages by; refs are `read`'s, in the epoch the body carries,
+//! and a track's `type` is in Kumi's chip words, as `focus` gives the selected track's. SoundCraft has no routing window
+//! of a track's (its I/O and sends are sections of the Mix window), so there's no routing body: `read` reads a track's
+//! routing.
 use super::{
-    bad, fill, gone, insert_rows, limit, list, now, text, thousandths, tracks, Cursor, Reads, Refusal, ANSWER_BYTES, DEFAULT_LIMIT,
-    MAX_LIMIT,
+    asked, bad, chip, content, fill, gone, insert_rows, limit, list, now, text, thousandths, tracks, wait_within, Cursor, Reads, Refusal,
+    ANSWER_BYTES, DEFAULT_LIMIT, FRESH, MAX_LIMIT,
 };
 use crate::refs::{Id, Kind, Lives, Missing, Ref};
 use crate::timebase::{Timebase, PPQ};
 use daw_bridge::wire::code;
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::time::Instant;
 
 /// The bodies SoundCraft's bridge draws.
@@ -79,7 +83,7 @@ impl Reads {
         };
         let cursor = text(params, "cursor")?.as_deref().map(Cursor::parse).transpose()?;
         let epoch = text(params, "epoch")?;
-        let session = self.inspect(until).await?;
+        let session = self.summary(until).await?;
         self.same_epoch(epoch)?;
         let mut body = match asked {
             Asked::Edit { around, window } => self.edit_body(&session, ui, window, around, cursor.as_ref(), most)?,
@@ -90,6 +94,19 @@ impl Reads {
         body["epoch"] = self.epoch().into();
         body["kind"] = kind.into();
         Ok(body)
+    }
+
+    /// The session's summary: the last look's while it's fresh, else asked for (the lives learn from it as from any look).
+    async fn summary(&mut self, until: Instant) -> Result<Arc<Value>, Refusal> {
+        if let Some((at, summary)) = &self.summary {
+            if at.elapsed() < FRESH {
+                return Ok(Arc::clone(summary));
+            }
+        }
+        let summary = Arc::new(self.control.call("session.inspect", json!({}), wait_within(until)?).await.map_err(asked)?);
+        let held = content(&summary);
+        self.looked_at(Arc::clone(&summary), held);
+        Ok(summary)
     }
 
     /// The clip SoundCraft's MIDI Editor shows of `session` (a look's, in the refs of the epoch now), as the app chooses
@@ -120,7 +137,20 @@ impl Reads {
         let start = self.page_start(session, &keyed, cursor, around, most)?;
         let first_page = cursor.is_none();
         let budget = if first_page { ANSWER_BYTES - EDIT_EXTRAS_BYTES } else { ANSWER_BYTES };
-        let rows = keyed[start..].iter().map(|(key, track)| edit_track(session, &timebase, &self.lives, key, track, from, to));
+        let ids = |of: &Value, key: &str| list(of, key).iter().filter_map(Value::as_u64).collect::<HashSet<u64>>();
+        let drawing = Drawing {
+            timebase: &timebase,
+            lives: &self.lives,
+            window: (from, to),
+            // (the tracks the Edit window draws, as `ui.inspect` lists its rows: none inside a closed folder)
+            drawn: ui
+                .and_then(|ui| ui["edit_layout"]["rows"].as_array())
+                .filter(|rows| !rows.is_empty())
+                .map(|rows| rows.iter().filter_map(|row| row[0].as_u64()).collect()),
+            tracks: ids(&session["selection"], "tracks"),
+            clips: ids(&session["selection"], "clips"),
+        };
+        let rows = keyed[start..].iter().map(|(key, track)| drawing.track(key, track));
         let (rows, more) = fill(rows, most, budget);
         let next = more.then(|| Cursor::at(self.epoch(), &keyed, start + rows.len()).to_string());
         let mut body = json!({
@@ -149,11 +179,12 @@ impl Reads {
         if let Some((shown_from, shown_to)) = ui.and_then(|ui| shown(session, ui, &timebase)) {
             body["view"] = json!({"from": thousandths(shown_from), "to": thousandths(shown_to)});
         }
-        // (a marker with an end is a region: a memory location of a selection)
+        // (a range is a memory location of a selection, SoundCraft's `Selection` kind: the ruler draws only those from
+        // start to end)
         let (mut markers, mut regions, mut bytes, mut left_out) = (vec![], vec![], 0, 0);
         for marker in list(session, "markers") {
             let (Some(start), Some(key)) = (beats(&marker["start"]), now(&self.lives, Kind::Marker, marker)) else { continue };
-            let end = beats(&marker["end"]).filter(|end| *end > start);
+            let end = (marker["kind"] == "Selection").then(|| beats(&marker["end"])).flatten().filter(|end| *end > start);
             if end.unwrap_or(start) < from || start > to {
                 continue;
             }
@@ -174,7 +205,11 @@ impl Reads {
         if left_out > 0 {
             body["markersOmitted"] = left_out.into();
         }
-        let meter = timebase.meter_marks(from, to).into_iter().take(WINDOW_METERS).map(|mark| {
+        let marks = timebase.meter_marks(from, to);
+        if marks.len() > WINDOW_METERS {
+            body["meterOmitted"] = (marks.len() - WINDOW_METERS).into();
+        }
+        let meter = marks.into_iter().take(WINDOW_METERS).map(|mark| {
             json!({"position": thousandths(mark.position), "bar": mark.bar, "beat": thousandths(mark.beat), "beatsPerBar": mark.beats_per_bar})
         });
         body["meter"] = meter.collect::<Vec<_>>().into();
@@ -292,7 +327,7 @@ impl Reads {
             let mut row = json!({
                 "ref": key,
                 "name": track["name"],
-                "type": track["kind"],
+                "type": chip(&track["kind"]),
                 "volumeDb": track["volume_db"],
                 "pan": pan(&track["pan"]),
                 "mute": track["mute"],
@@ -306,11 +341,15 @@ impl Reads {
             row
         };
         let masters = self.keyed(tracks(session).iter().filter(shown).filter(master));
-        let (mut strips, _) = fill(masters.iter().map(|(key, track)| strip(key, track)), MAX_MIXER_STRIPS, MASTERS_BYTES);
+        let (mut strips, cut) = fill(masters.iter().map(|(key, track)| strip(key, track)), MAX_MIXER_STRIPS, MASTERS_BYTES);
+        let left_out = if cut { masters.len() - strips.len() } else { 0 };
         let (page, more) = fill(keyed[start..].iter().map(|(key, track)| strip(key, track)), most, ANSWER_BYTES - MASTERS_BYTES);
         let next = more.then(|| Cursor::at(self.epoch(), &keyed, start + page.len()).to_string());
         strips.extend(page);
         let mut body = json!({"strips": strips, "trackCount": keyed.len(), "from": start, "levels": false});
+        if left_out > 0 {
+            body["mastersOmitted"] = left_out.into();
+        }
         if let Some(next) = next {
             body["nextCursor"] = next.into();
         }
@@ -385,64 +424,84 @@ fn shown(session: &Value, ui: &Value, timebase: &Timebase) -> Option<(f64, f64)>
     (width > 0.0).then(|| (timebase.beats(scroll), timebase.beats(scroll + width * per_pixel)))
 }
 
-/// A track in the Edit window: the clips that touch `from` to `to` (quarter notes), each where it starts and how long it
-/// is in quarter notes; up to a track's share of the page, the rest counted.
-fn edit_track(session: &Value, timebase: &Timebase, lives: &Lives, key: &str, track: &Value, from: f64, to: f64) -> Value {
-    let selected = |key: &str, id: &Value| list(&session["selection"], key).contains(id);
-    let (mut items, mut bytes, mut omitted) = (vec![], 0, 0);
-    for clip in list(track, "clips") {
-        let (Some(start), Some(length), Some(id)) = (clip["start"].as_f64(), clip["length"].as_f64(), now(lives, Kind::Clip, clip)) else {
-            continue;
-        };
-        let (position, end) = (timebase.beats(start), timebase.beats(start + length));
-        if end <= from || position >= to {
-            continue;
+/// What an Edit page's tracks are drawn with: the stretch of the timeline (`from`, `to`, quarter notes), the tracks the
+/// Edit window draws (when `ui.inspect` says), and the selected tracks and clips.
+struct Drawing<'a> {
+    timebase: &'a Timebase,
+    lives: &'a Lives,
+    window: (f64, f64),
+    drawn: Option<HashSet<u64>>,
+    tracks: HashSet<u64>,
+    clips: HashSet<u64>,
+}
+
+impl Drawing<'_> {
+    /// A track in the Edit window: the clips that touch the window, each where it starts and how long it is in quarter
+    /// notes; up to a track's share of the page, the rest counted.
+    fn track(&self, key: &str, track: &Value) -> Value {
+        let (from, to) = self.window;
+        let selected = |of: &HashSet<u64>, item: &Value| item["id"].as_u64().is_some_and(|id| of.contains(&id));
+        let (mut items, mut bytes, mut omitted) = (vec![], 0, 0);
+        for clip in list(track, "clips") {
+            let (Some(start), Some(length), Some(id)) =
+                (clip["start"].as_f64(), clip["length"].as_f64(), now(self.lives, Kind::Clip, clip))
+            else {
+                continue;
+            };
+            let (position, end) = (self.timebase.beats(start), self.timebase.beats(start + length));
+            if end <= from || position >= to {
+                continue;
+            }
+            if items.len() >= ITEMS_PER_TRACK || bytes >= ITEMS_BYTES_PER_TRACK {
+                omitted += 1;
+                continue;
+            }
+            let item = json!({
+                "ref": Ref::Object(id).to_string(),
+                "position": thousandths(position),
+                "length": thousandths(end - position),
+                "name": clip["name"],
+                "muted": clip["muted"],
+                "selected": selected(&self.clips, clip),
+            });
+            bytes += item.to_string().len() + 1;
+            items.push(item);
         }
-        if items.len() >= ITEMS_PER_TRACK || bytes >= ITEMS_BYTES_PER_TRACK {
-            omitted += 1;
-            continue;
-        }
-        let item = json!({
-            "ref": Ref::Object(id).to_string(),
-            "position": thousandths(position),
-            "length": thousandths(end - position),
-            "name": clip["name"],
-            "muted": clip["muted"],
-            "selected": selected("clips", &clip["id"]),
+        let drawn = self.drawn.as_ref().is_none_or(|drawn| selected(drawn, track));
+        let mut row = json!({
+            "ref": key,
+            "name": track["name"],
+            "type": chip(&track["kind"]),
+            // (SoundCraft indents a folder's tracks, but `session.inspect` doesn't name a track's folder)
+            "depth": 0,
+            "shown": track["hidden"] != true && drawn,
+            "selected": selected(&self.tracks, track),
+            "items": items,
         });
-        bytes += item.to_string().len() + 1;
-        items.push(item);
+        if omitted > 0 {
+            row["itemsOmitted"] = omitted.into();
+        }
+        row
     }
-    let mut row = json!({
-        "ref": key,
-        "name": track["name"],
-        "type": track["kind"],
-        // (SoundCraft's folders don't nest tracks in the Edit window: every track is at the top)
-        "depth": 0,
-        "shown": track["hidden"] != true,
-        "selected": selected("tracks", &track["id"]),
-        "items": items,
-    });
-    if omitted > 0 {
-        row["itemsOmitted"] = omitted.into();
-    }
-    row
 }
 
 /// The clip the MIDI Editor shows, by SoundCraft's own rule (`target_clip` in its MIDI Editor).
 fn midi_editor_clip(session: &Value, lives: &Lives) -> Option<Id> {
     let selection = &session["selection"];
-    let clips = || tracks(session).iter().flat_map(|track| list(track, "clips"));
-    let midi =
-        list(selection, "clips").iter().find_map(|id| clips().find(|clip| clip["id"] == *id).filter(|clip| clip.get("notes").is_some()));
+    let by_id: HashMap<u64, &Value> =
+        tracks(session).iter().flat_map(|track| list(track, "clips")).filter_map(|clip| Some((clip["id"].as_u64()?, clip))).collect();
+    let midi = list(selection, "clips").iter().filter_map(|id| by_id.get(&id.as_u64()?)).find(|clip| clip.get("notes").is_some());
     if let Some(clip) = midi {
         return now(lives, Kind::Clip, clip);
     }
-    let selected = list(selection, "tracks");
+    let selected: HashSet<u64> = list(selection, "tracks").iter().filter_map(Value::as_u64).collect();
     let on_midi_tracks = || {
         tracks(session)
             .iter()
-            .filter(|track| selected.contains(&track["id"]) && matches!(track["kind"].as_str(), Some("midi" | "instrument")))
+            .filter(|track| {
+                track["id"].as_u64().is_some_and(|id| selected.contains(&id))
+                    && matches!(track["kind"].as_str(), Some("midi" | "instrument"))
+            })
             .flat_map(|track| list(track, "clips"))
     };
     let at = |key: &str| selection[key].as_i64().unwrap_or_default();

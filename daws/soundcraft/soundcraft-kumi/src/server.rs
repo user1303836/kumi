@@ -210,20 +210,20 @@ async fn look_at_session(
     deadline: Duration,
     naming: Duration,
 ) -> Option<Looked> {
-    let session = control.call("session.inspect", json!({}), deadline).await.ok()?;
+    let session = Arc::new(control.call("session.inspect", json!({}), deadline).await.ok()?);
     let content = crate::read::content(&session);
     let text = |key: &str| session.get(key).and_then(Value::as_str).map(str::to_string);
     let (name, path) = (text("name"), text("path"));
     let glance = match reads.try_lock() {
         Ok(mut reads) => {
-            reads.looked(&session, content);
+            reads.looked_at(Arc::clone(&session), content);
             let plugin = match window {
                 Some(window) => reads.plugin_window(&session, &window, Instant::now() + naming).await.map(|named| (window, named)),
                 None => None,
             };
             let midi_clip = reads.midi_editor_clip(&session);
             let (epoch, selection) = (reads.epoch().into(), reads.selection(&session));
-            Some(Glance { epoch, selection, plugin, midi_clip, session: Arc::new(session) })
+            Some(Glance { epoch, selection, plugin, midi_clip, session })
         }
         Err(_) => None,
     };
@@ -556,15 +556,27 @@ async fn connection(
 
 /// A `read`, a `snapshot` or a `focus_body`: answered when the app has, in a task of its own (one read at a time), so the
 /// connection goes on meanwhile. While the app is busy it's refused at once, nothing read, and one whose deadline has
-/// passed isn't started. A body is drawn with the app's windows as the last look saw them.
-fn read_request(request: Request, serving: &Serving, answers: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> Option<Vec<u8>> {
+/// passed isn't started. A body is drawn with the app's windows as the last look saw them, and its refs, which come with
+/// no epoch from FOCUS (it takes them from `focus`), are read in the epoch the last look saw: a ref from before another
+/// session opened is stale, not read as the new session's.
+fn read_request(mut request: Request, serving: &Serving, answers: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> Option<Vec<u8>> {
     if let Some((_, reason)) = &lock(&serving.seen).busy {
         return Some(Frame::error(request.id, code::BUSY, format!("{reason}; nothing was read")).encode());
     }
     let Some(until) = deadline(request.deadline_ms) else {
         return Some(Frame::error(request.id, code::DEADLINE, "the request's deadline passed before the read started").encode());
     };
-    let ui = (request.method == "focus_body").then(|| lock(&serving.seen).ui.as_ref().map(|(ui, _)| ui.clone())).flatten();
+    let mut ui = None;
+    if request.method == "focus_body" {
+        let seen = lock(&serving.seen);
+        ui = seen.ui.as_ref().map(|(ui, _)| ui.clone());
+        let given = |key: &str| request.params.get(key).is_some_and(|value| !value.is_null());
+        if !given("epoch") && (given("ref") || given("around")) {
+            if let Some(glance) = &seen.glance {
+                request.params["epoch"] = glance.epoch.as_str().into();
+            }
+        }
+    }
     let reads = serving.reads.clone();
     tokio::spawn(async move {
         let mut reads = reads.lock().await;
