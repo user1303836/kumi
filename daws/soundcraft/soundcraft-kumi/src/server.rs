@@ -50,12 +50,15 @@ pub struct Config {
     pub resource: String,
     pub look: Duration,
     pub heartbeat_ms: u64,
+    /// What makes this bridge the copy's only one (`serving-<pid>.lock`, held): let go with the discovery file, so the
+    /// bridge a host starts once that file has gone finds the copy free, though this one is still saying bye.
+    pub serving: Option<std::fs::File>,
 }
 
 impl Config {
     /// A look each second, a heartbeat each second.
     pub fn new(secret_file: PathBuf, discovery_dir: PathBuf, launched: Launched, resource: String) -> Self {
-        Self { secret_file, discovery_dir, launched, resource, look: LOOK, heartbeat_ms: HEARTBEAT_MS }
+        Self { secret_file, discovery_dir, launched, resource, look: LOOK, heartbeat_ms: HEARTBEAT_MS, serving: None }
     }
 }
 
@@ -128,8 +131,10 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
         () = stop => End::Stopped,
         end = look(&control, &seen, &events, &rewrite, config.look) => end,
     };
-    // The file goes and the listener closes first, so no host finds a bridge that's ending; then the connections say bye.
+    // The file and the lock go and the listener closes first, so no host finds a bridge that's ending, and the next one
+    // finds the copy free; then the connections say bye.
     let _ = std::fs::remove_file(&file);
+    drop(config.serving);
     accepting.abort();
     let _ = ending.send(Some(match end {
         End::Stopped => "the bridge stopped",

@@ -342,6 +342,26 @@ async fn the_program_serves_one_copy_per_bridge_and_ends_with_its_stdin() {
 }
 
 #[tokio::test]
+async fn a_bridge_started_as_the_last_one_ends_serves_the_copy() {
+    let lab = Lab::new().await;
+    let (app, port) = lab.soundcraft();
+    lab.record(&Launched { port, ..lab.launched(app.id()) });
+    let mut first = bridge(&lab);
+    lab.discovery().await;
+    // Its host lets go: it removes its file, then says bye for a moment. A host that finds no file starts another at once.
+    drop(first.stdin.take());
+    let until = Instant::now() + WAIT;
+    while !lab.discovery_files().is_empty() && Instant::now() < until {
+        tokio::time::sleep(ms(5)).await;
+    }
+    let mut second = bridge(&lab);
+    let served = lab.discovery().await;
+    assert_eq!(served["pid"], app.id(), "{served}");
+    assert_eq!(second.try_wait().unwrap(), None, "serving, not turned away as another bridge's copy");
+    assert_eq!(first.wait().unwrap().code(), Some(0));
+}
+
+#[tokio::test]
 async fn the_program_ends_by_itself_when_soundcraft_quits_while_its_host_still_holds_its_stdin() {
     let lab = Lab::new().await;
     let (mut app, port) = lab.soundcraft();

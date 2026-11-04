@@ -65,7 +65,13 @@ fn serve_command(args: &[String]) -> ExitCode {
     let var = |name: &str| std::env::var(name).ok();
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("a runtime");
     let Some(found) = runtime.block_on(launch::attach(&folder, launch::Waits::USUAL.answer)) else {
-        return failed(&match launch::running(&var).first() {
+        let recorded = launch::recorded(&folder);
+        let app = recorded.as_ref().map(|launched| launched.app.clone()).or_else(|| launch::find(&var).map(|app| app.path));
+        return failed(&match launch::running(&var, app.as_deref()).first().copied() {
+            Some(pid) if recorded.as_ref().is_some_and(|launched| launched.pid == pid) => format!(
+                "the SoundCraft Kumi started (pid {pid}) no longer takes Kumi's requests on its control channel: save, quit it, and \
+                 Kumi starts it again"
+            ),
             Some(pid) => {
                 format!("SoundCraft is open without its control channel (pid {pid}): save, quit it, and Kumi opens your session again")
             }
@@ -73,8 +79,9 @@ fn serve_command(args: &[String]) -> ExitCode {
         });
     };
     let launched = found.launched;
-    // One bridge for one copy: the one that holds the lock serves it. (The lock goes with this process, however it ends.)
-    let _serving = match serving_lock(&folder, launched.pid) {
+    // One bridge for one copy: the one that holds the lock serves it. (The lock goes with the bridge's discovery file, or
+    // with this process, however it ends.)
+    let serving = match serving_lock(&folder, launched.pid) {
         Ok(Some(lock)) => lock,
         Ok(None) => return failed(&format!("another bridge serves this SoundCraft (pid {}) already", launched.pid)),
         Err(error) => {
@@ -82,7 +89,8 @@ fn serve_command(args: &[String]) -> ExitCode {
         }
     };
     let resource = launch::settings_folder(&var, Some(&launched.app)).map(|folder| folder.display().to_string()).unwrap_or_default();
-    let config = server::Config::new(secret_file, folder.join("discovery"), launched, resource);
+    let config =
+        server::Config { serving: Some(serving), ..server::Config::new(secret_file, folder.join("discovery"), launched, resource) };
     let ended = runtime.block_on(server::serve(config, stdin_ends()));
     // (stdin's reader is a blocking read, which a runtime's own shutdown would wait for: ended by SoundCraft quitting, the
     // bridge doesn't wait for its host to let go of its stdin)
@@ -98,17 +106,24 @@ fn serve_command(args: &[String]) -> ExitCode {
 }
 
 /// The lock on `serving-<pid>.lock` in the bridge's folder: None while another bridge holds it, and an error when it
-/// can't be taken at all (a file system without locks), which is no other bridge's doing.
+/// can't be taken at all (a file system without locks), which is no other bridge's doing. It waits a moment for a bridge
+/// that is letting go (Windows lets a dead process's lock go late) before saying another one serves.
 fn serving_lock(folder: &Path, pid: u32) -> std::io::Result<Option<std::fs::File>> {
     let mut options = std::fs::OpenOptions::new();
     options.create(true).truncate(false).write(true);
     #[cfg(unix)]
     std::os::unix::fs::OpenOptionsExt::mode(&mut options, 0o600);
     let file = options.open(folder.join(format!("serving-{pid}.lock")))?;
-    match file.try_lock() {
-        Ok(()) => Ok(Some(file)),
-        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
-        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    let until = std::time::Instant::now() + std::time::Duration::from_secs(1);
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(Some(file)),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < until => {
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
     }
 }
 
