@@ -538,6 +538,32 @@ fn something_changing_brings_the_session_look_forward_as_far_as_its_cost_allows(
     assert!(!costly.session_due(start + ms(2999)) && costly.session_due(start + ms(3000)));
 }
 
+#[test]
+fn a_look_at_the_session_may_take_ten_times_its_last_cost_from_a_look_to_five() {
+    let (every, start) = (Duration::from_secs(1), Instant::now());
+    assert_eq!(Schedule::new(every, start).session_deadline(), ms(5000), "five looks before any cost is known");
+    for (cost, deadline) in [(5, 1000), (300, 3000), (700, 5000)] {
+        let mut schedule = Schedule::new(every, start);
+        schedule.looked_at_session(start, start + ms(cost));
+        assert_eq!(schedule.session_deadline(), ms(deadline), "after a {cost} ms look");
+    }
+}
+
+#[tokio::test]
+async fn while_a_dialog_is_open_soundcraft_is_asked_only_ui_inspect() {
+    let lab = Lab::new().await;
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    asked_until(&client, "focus", |focus| focus["view"].is_string()).await;
+    lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
+    asked_until(&client, "status", |status| status["busy"] == "modal").await;
+    let before = lab.fake.requests().len();
+    looked(&lab, "ui.inspect").await;
+    looked(&lab, "ui.inspect").await;
+    let asked: Vec<Value> = lab.fake.requests()[before..].iter().map(|request| request["method"].clone()).collect();
+    assert!(asked.len() >= 4 && asked.iter().all(|method| method == "ui.inspect"), "{asked:?}");
+}
+
 #[tokio::test]
 async fn a_dialog_or_an_app_that_does_not_answer_makes_the_bridge_busy_until_it_clears() {
     let lab = Lab::new().await;

@@ -289,9 +289,12 @@ impl Schedule {
         self.session = self.session.min(allowed);
     }
 
-    /// How long a look at the session may take.
+    /// How long a look at the session may take: ten times what the last one cost, from a look to five (five before any
+    /// cost is known). So a stall a look at the session meets first is given up on within a look, as a `ui.inspect` is,
+    /// and a summary slower than a look is still seen from its second try.
     pub fn session_deadline(&self) -> Duration {
-        self.every * SESSION_LOOKS
+        let wait = |cost: Duration| (cost * SESSION_WAIT_PER_COST).clamp(self.every, self.every * SESSION_LOOKS);
+        self.last.map_or(self.every * SESSION_LOOKS, |(_, cost)| wait(cost))
     }
 }
 
