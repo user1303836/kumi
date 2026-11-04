@@ -16,7 +16,7 @@ use super::super::{
     wrap::Span,
 };
 use super::draw_live::{change_marks, FocusRoom};
-use super::drawing::{sp, spans, st, NowLine};
+use super::drawing::{sp, spans, st, Keyboard, NowLine};
 use super::*;
 
 /// The columns the side pane needs: below them, the drawer or the strip.
@@ -217,7 +217,8 @@ impl TuiApp {
     }
 
     /// The drawer at `area`: open, a frame with its row of tabs set into the top edge and the tab it shows inside;
-    /// folded, the row of tabs set into a rule.
+    /// folded, the row of tabs set into a rule. Its line is lit while the keyboard is in it (its tabs, FOCUS's tree), as
+    /// the side pane's is, and a drag copies the tab's rows, never the frame's lines.
     pub(super) fn draw_drawer(&self, screen: &mut Screen, area: Rect) {
         self.0.state.borrow_mut().drawer.area = Some(area);
         let (x, width) = (area.x + frame::SNUG, area.width - 2 * frame::SNUG);
@@ -252,10 +253,14 @@ impl TuiApp {
                 self.0.state.borrow_mut().hits.extend(hits);
             }
         }
+        let line = self.frame_line(self.keyboard() == Keyboard::Pane);
         if open && area.height > 1 {
-            frame::outline(screen, area, &frame::LINE, self.corners());
+            frame::outline(screen, area, &line, self.corners());
+            if body.height > 0 {
+                self.0.state.borrow_mut().select_areas.push(body);
+            }
         } else {
-            frame::rule(screen, area, &frame::LINE);
+            frame::rule(screen, area, &line);
         }
         self.draw_drawer_strip(screen, area, tab, open, heading, &now);
     }

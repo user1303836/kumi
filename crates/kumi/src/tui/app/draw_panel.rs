@@ -32,15 +32,15 @@ pub(super) fn say(lines: &mut Vec<Line>, text: &str, style: Style, width: i32) {
         lines.push(Line::new(string::trim_end(&text), style));
     }
 }
-/// How many columns there are inside the frame of what opens over the conversation, in a conversation `left` columns
-/// wide (the input box's): `most` at most. Where the box is only a little wider, it takes the box's width, so their
-/// frames' sides line up rather than miss by a column or two.
-pub(super) fn panel_width(most: i32, left: i32) -> i32 {
+/// How many columns there are inside the frame of what opens over the conversation, over an input box `boxed` columns
+/// wide: `most` at most. Where the box is only a little wider, it takes the box's width, so their frames' sides line up
+/// rather than miss by a column or two.
+pub(super) fn panel_width(most: i32, boxed: i32) -> i32 {
     /// How much narrower than the box a panel can be before it's drawn as wide as the box.
     const SNAP: i32 = 8;
-    let boxed = left - 2;
-    if boxed - most <= SNAP {
-        boxed
+    let inside = boxed - 2;
+    if inside - most <= SNAP {
+        inside
     } else {
         most
     }
@@ -49,7 +49,7 @@ impl TuiApp {
     /// A list to choose from, in its box: its title (with its tabs, or what's typed to filter it), then the rows that
     /// fit around the one chosen.
     pub(super) fn draw_pick(&self, screen: &mut Screen, area: Area, picker: &Picker) -> Option<Cursor> {
-        let width = panel_width(76, area.left);
+        let width = panel_width(76, area.boxed);
         let space = area.box_top - 5;
         let mut lines: Vec<Line> = vec![];
         let visible = picker.visible();
@@ -138,8 +138,9 @@ impl TuiApp {
         self.draw_lines(screen, area.box_top, width, &lines, None)
     }
     /// A panel's `lines` in a frame `width` wide inside, over the conversation, down to the input box, whose top row is
-    /// `box_top`: the first line, its title, is set into the frame's top edge, with what it says at its right. The
-    /// cursor where `cursor_at` puts it, when that line shows.
+    /// `box_top`: the first line, its title, is set into the frame's top edge, with what it says at its right (what's
+    /// typed to filter it, which answer it shows, a job's state), which keeps its room: the title is cut short first.
+    /// The cursor where `cursor_at` puts it, when that line shows.
     pub(super) fn draw_lines(
         &self,
         screen: &mut Screen,
@@ -155,14 +156,17 @@ impl TuiApp {
         let top = (box_top - 1 - height).max(1);
         let area = Rect::new(0, top, width + 2, height.min(box_top - 1 - top));
         let bottom = area.y + area.height - 1;
-        frame::border(screen, area, &frame::LIT, self.corners());
+        frame::border(screen, area, &self.frame_line(true), self.corners());
         self.cover(area);
-        // A drag over it copies what's inside its frame.
-        self.0.state.borrow_mut().select_areas.insert(0, Rect::new(1, top + 1, width, (area.height - 2).max(0)));
+        // A drag over it copies what's inside its frame, from where its rows start.
+        self.0.state.borrow_mut().select_areas.insert(0, Rect::new(x, top + 1, inner, (area.height - 2).max(0)));
         if let Some(title) = lines.first() {
             let words = title.spans.clone().unwrap_or_else(|| vec![sp(&title.text, title.style)]);
-            let after = frame::left_words(screen, area, top, &words);
-            if let Some(right) = &title.right {
+            // As much of what's at its right as the edge holds beside a title cut to nothing, and the title in what's left.
+            let right = title.right.as_ref().map(|right| sp(truncate(&right.text, area.width - 2 * frame::INSET - 2), *right.style));
+            let kept = right.as_ref().map_or(0, |right| text_width(&right.text) + 2);
+            let after = frame::left_words(screen, Rect { width: area.width - kept, ..area }, top, &words);
+            if let Some(right) = &right {
                 frame::right_words(screen, area, top, std::slice::from_ref(right), after);
             }
         }

@@ -5,13 +5,20 @@
 //! their fonts have the box drawing every console has, and not its arcs.
 
 use super::screen::{Rect, Screen};
-use super::style::{palette, Style};
+use super::style::{palette, ColorDepth, Style};
 use super::width::{text_width, truncate};
 use super::wrap::Span;
 
-/// A frame's line; the frame the keyboard is in has its line lit.
-pub const LINE: Style = Style::fg(palette::RULE);
-pub const LIT: Style = Style::fg(palette::TRACK);
+/// A frame's line in `depth`: the frame the keyboard is in has its line lit, a step brighter. In 16 colours both greys
+/// are the terminal's dark grey, so a lit line is its light grey there; without colour, a lit line is bold.
+pub fn line(lit: bool, depth: ColorDepth) -> Style {
+    match (lit, depth) {
+        (false, _) => Style::fg(palette::RULE),
+        (true, ColorDepth::Colors16) => Style::fg(palette::TEXT),
+        (true, ColorDepth::None) => Style { bold: true, ..Style::fg(palette::TRACK) },
+        (true, _) => Style::fg(palette::TRACK),
+    }
+}
 
 /// The cells from a frame's side to the words in its edges and to what it holds: its line and two blanks.
 pub const INSET: i32 = 3;
@@ -125,6 +132,11 @@ pub fn right_room(rect: Rect, after: i32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tui::style::{
+        to16, to256,
+        ColorDepth::{Colors16, Colors256, Truecolor},
+        THEMES,
+    };
 
     fn words(text: &str) -> Vec<Span> {
         vec![Span::styled(text, Style::default())]
@@ -133,15 +145,16 @@ mod tests {
     #[test]
     fn words_in_an_edge_keep_a_rule_between_them_or_give_way() {
         let rect = Rect::new(0, 0, 20, 2);
+        let plain = line(false, Truecolor);
         let mut screen = Screen::new(20, 2);
-        border(&mut screen, rect, &LINE, Corners::Rounded);
+        border(&mut screen, rect, &plain, Corners::Rounded);
         // A title too long for the edge ends in an ellipsis three cells from the corner, and leaves no room at its right.
         let after = left_words(&mut screen, rect, 0, &words("A long title, cut"));
         assert_eq!(screen.lines()[0], "╭─ A long title,… ─╮");
         assert_eq!(right_words(&mut screen, rect, 0, &words("x"), after), None);
         // With room, a rule between the two; short of it, the rule goes, and two blanks keep them apart.
         let mut screen = Screen::new(20, 2);
-        border(&mut screen, rect, &LINE, Corners::Rounded);
+        border(&mut screen, rect, &plain, Corners::Rounded);
         let after = left_words(&mut screen, rect, 0, &words("ab"));
         assert_eq!(right_words(&mut screen, rect, 0, &words("hint"), after), Some(12));
         assert_eq!(screen.lines()[0], format!("╭─ ab {} hint ─╮", "─".repeat(6)));
@@ -151,10 +164,23 @@ mod tests {
         assert_eq!(screen.lines()[0], format!("╭─ ab  {} ─╮", "y".repeat(10)));
         // With nothing at its left, the words at its right have the whole edge. Square corners where arcs may not show.
         let mut screen = Screen::new(20, 2);
-        border(&mut screen, rect, &LINE, Corners::Square);
+        border(&mut screen, rect, &plain, Corners::Square);
         let after = left_words(&mut screen, rect, 0, &[]);
         assert_eq!(right_words(&mut screen, rect, 0, &words(&"x".repeat(14)), after), Some(2));
         assert_eq!(screen.lines()[0], format!("┌─ {} ─┐", "x".repeat(14)));
         assert_eq!(screen.lines()[1], format!("└{}┘", "─".repeat(18)));
+    }
+
+    #[test]
+    fn the_frame_with_the_keyboard_stands_apart_at_every_colour_depth_and_in_every_theme() {
+        // As the renderer writes them: in the theme's colours, then in the terminal's.
+        for theme in THEMES {
+            let fg = |lit: bool, depth| theme.of(line(lit, depth).fg.unwrap());
+            assert_ne!(fg(true, Truecolor), fg(false, Truecolor), "{}", theme.name);
+            assert_ne!(to256(fg(true, Colors256)), to256(fg(false, Colors256)), "{}", theme.name);
+            assert_ne!(to16(fg(true, Colors16)), to16(fg(false, Colors16)), "{}", theme.name);
+        }
+        // Without colour, only bold is left to tell them apart.
+        assert!(line(true, ColorDepth::None).bold && !line(false, ColorDepth::None).bold);
     }
 }

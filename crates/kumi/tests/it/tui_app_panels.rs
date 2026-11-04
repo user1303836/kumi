@@ -525,6 +525,26 @@ case!(goal_dashboard_and_aside_panel, async {
     h.has("up to a minute");
     h.close().await;
 });
+case!(a_panels_long_title_is_cut_short_before_what_it_says_at_its_right, async {
+    let c = Rc::new(Control::default());
+    c.set("aside", json!("About a minute."));
+    let h = Harness::with(120, 36, c, |_| {});
+    h.start().await;
+    h.connect();
+    let question = "how long can the tail of a reverb like the Erbe-Verb run before it smears the whole mix";
+    for _ in 0..2 {
+        h.type_text(&format!("/btw {question}\r")).await;
+        h.wait_for("About a minute.").await;
+        h.type_text("\x1b").await;
+        h.wait_until_hidden("btw ·").await;
+    }
+    // The second of two side answers: which one it is stays in the frame's edge, and the question gives way.
+    h.type_text("/btw\r").await;
+    let lines = h.screen();
+    let title = lines.iter().find(|line| line.contains("btw · how long")).unwrap_or_else(|| panic!("{}", lines.join("\n")));
+    assert!(title.contains("…") && title.contains(" 2 of 2 · ←→ ─╮"), "{title}");
+    h.close().await;
+});
 struct Stub;
 impl kumi::tui::tabs::Tab for Stub {
     fn id(&self) -> &str {

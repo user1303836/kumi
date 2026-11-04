@@ -56,6 +56,13 @@ pub(super) struct NowLine {
     pub style: Style,
     pub activity: Option<(Activity, f64)>,
 }
+/// Where the keyboard is, as the frames show it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Keyboard {
+    Overlay,
+    Pane,
+    Box,
+}
 impl TuiApp {
     pub(super) fn draw(&self) {
         // A panic caught on this thread (one of its tasks') gave the terminal back: take it again, and draw all of it.
@@ -139,23 +146,20 @@ impl TuiApp {
         {
             let mut state = self.0.state.borrow_mut();
             state.page = (area.height - 2).max(1);
-            // Where a drag selects: the conversation side down to the composer, the composer, and the pane. The drawer
-            // keeps its own, as the pane does, so the conversation side stops above it and goes on under it. In the
-            // drawer, the box and the pane, what's inside their frames: a copy doesn't take their lines.
-            let inside =
-                |x: i32, y: i32, width: i32, height: i32| Rect::new(x + frame::INSET - 1, y, width - 2 * (frame::INSET - 1), height);
+            // Where a drag selects: the conversation side, and the box's rows inside its frame, so a copy doesn't take
+            // its lines. The conversation side stops above the drawer and goes on under it, and stops above the strip;
+            // they and the pane say where their own words are as they're drawn.
             state.select_areas = if drawer {
-                vec![
-                    Rect::new(0, 0, left, docked),
-                    inside(0, docked, columns, dock),
-                    Rect::new(0, docked + dock, left, box_top - docked - dock),
-                ]
+                vec![Rect::new(0, 0, left, docked), Rect::new(0, docked + dock, left, box_top - docked - dock)]
+            } else if dock != 0 {
+                vec![Rect::new(0, 0, left, docked)]
             } else {
                 vec![Rect::new(0, 0, left, box_top)]
             };
-            state.select_areas.push(inside(0, box_top + 1, boxed, visible));
+            state.select_areas.push(Rect::new(frame::INSET, box_top + 1, text + 1, visible));
             if pane != 0 {
-                state.select_areas.push(inside(left, 0, pane, rows));
+                // (the header's words over the pane)
+                state.select_areas.push(Rect::new(left, 0, pane, 1));
             }
         }
         self.draw_conversation(&mut screen, area);
@@ -189,7 +193,7 @@ impl TuiApp {
         }
         // What's open over the conversation, bottom first: the top one's cursor is the one that shows.
         for overlay in open {
-            cursor = overlay.borrow_mut().draw(self, &mut screen, Area { box_top, left: boxed });
+            cursor = overlay.borrow_mut().draw(self, &mut screen, Area { box_top, left, boxed });
         }
         if self.0.state.borrow().closing {
             cursor = None;
@@ -515,6 +519,22 @@ impl TuiApp {
             frame::Corners::Rounded
         }
     }
+    /// Which frame has the keyboard: what's open over the conversation (a list, the help), the pane (its tabs or FOCUS's
+    /// tree, at its side or in the drawer), or the box. Its frame is the one lit.
+    pub(super) fn keyboard(&self) -> Keyboard {
+        let state = self.0.state.borrow();
+        if state.overlays.top().is_some() {
+            Keyboard::Overlay
+        } else if self.0.tabs.inside() || state.tree_cursor.is_some() {
+            Keyboard::Pane
+        } else {
+            Keyboard::Box
+        }
+    }
+    /// A frame's line, lit while the keyboard is in it, in this terminal's colours.
+    pub(super) fn frame_line(&self, lit: bool) -> Style {
+        frame::line(lit, self.0.depth)
+    }
     pub(super) fn now_line(&self) -> NowLine {
         self.now_said(true)
     }
@@ -721,8 +741,8 @@ impl TuiApp {
         let overlay_hint = opened.as_ref().map(|opened| opened.borrow().hint(self));
         let toast = toast.filter(|_| !opened.is_some_and(|opened| opened.borrow().hint_stays(self)));
         // The box has the keyboard unless what's open over the conversation, or the pane, has it.
-        let lit = overlay_hint.is_none() && !self.0.tabs.inside() && self.0.state.borrow().tree_cursor.is_none();
-        frame::border(screen, box_, if lit { &frame::LIT } else { &frame::LINE }, self.corners());
+        let lit = self.keyboard() == Keyboard::Box;
+        frame::border(screen, box_, &self.frame_line(lit), self.corners());
         screen.fill(Rect::new(box_.x + 2, bottom, box_.width - 4, 1), &st::GROUND);
         let state = self.0.state.borrow();
         // A message past what the session takes at once says so in the box's edge, before enter would.
@@ -840,11 +860,11 @@ impl TuiApp {
         };
         let about = frame::INSET + marks + longest + 2;
         let area = Rect::new(0, box_top - 3 - shown as i32, width + 2, shown as i32 + 2);
-        frame::border(screen, area, &frame::LIT, self.corners());
+        frame::border(screen, area, &self.frame_line(true), self.corners());
         self.cover(area);
         let (top, bottom) = (area.y, area.y + area.height - 1);
-        // A drag over it copies what's inside its frame.
-        self.0.state.borrow_mut().select_areas.insert(0, Rect::new(1, top + 1, width, shown as i32));
+        // A drag over it copies what's inside its frame, from where its rows start.
+        self.0.state.borrow_mut().select_areas.insert(0, Rect::new(frame::INSET, top + 1, width - frame::INSET, shown as i32));
         if first > 0 {
             frame::right_words(screen, area, top, &[sp(format!("↑ {first} more"), st::FAINT)], area.x + 2);
         }
@@ -862,9 +882,10 @@ impl TuiApp {
             if let Some(icon) = icon {
                 x = screen.put(x, y, &icon.text, &icon.style);
             }
-            screen.put(x, y, &truncate(label, (about - x - 2).max(1)), &if chosen { st::ACCENT } else { st::TEXT });
-            if let Some(said) = said.as_ref().filter(|_| chosen || words) {
-                screen.put(about, y, &truncate(said, (width - 1 - about).max(1)), &if chosen { st::BRIGHT } else { st::FAINT });
+            // In a narrow window the label and what it says stop two cells inside the frame, as the rows start.
+            screen.put(x, y, &truncate(label, (about - x - 2).min(width - 1 - x).max(1)), &if chosen { st::ACCENT } else { st::TEXT });
+            if let Some(said) = said.as_ref().filter(|_| (chosen || words) && about < width - 1) {
+                screen.put(about, y, &truncate(said, width - 1 - about), &if chosen { st::BRIGHT } else { st::FAINT });
             }
         }
     }

@@ -9,7 +9,7 @@ use super::super::{
     width::{text_width, truncate, truncate_with},
     wrap::wrap,
 };
-use super::drawing::{sp, spans, st};
+use super::drawing::{sp, spans, st, Keyboard};
 use super::live::LEVELS_SILENT_DB;
 use super::records::Shown;
 use super::*;
@@ -102,60 +102,84 @@ impl TuiApp {
         Some(column)
     }
     /// The side pane, in a frame from under the header's blank row down to the input box's bottom edge: FOCUS in its top
-    /// edge with its heading, NOW and the tabs on rules across it. Its line is lit while the keyboard is in it.
+    /// edge with its heading, NOW and the tabs on rules across it, each only where it lands inside the frame (a very short
+    /// window has room for FOCUS and NOW alone). Its line is lit while the keyboard is in it, and a drag copies one part's
+    /// rows at a time, never the frame's lines.
     pub(super) fn draw_pane(&self, screen: &mut Screen, area: Rect) {
         let framed = Rect::new(area.x, area.y + 1, area.width, area.height - 2);
-        let keys = self.0.tabs.inside() || self.0.state.borrow().tree_cursor.is_some();
-        let line = if keys { frame::LIT } else { frame::LINE };
+        // Its bottom edge: what's drawn in it stops above.
+        let edge = framed.y + framed.height - 1;
+        let line = self.frame_line(self.keyboard() == Keyboard::Pane);
         frame::border(screen, framed, &line, self.corners());
         let x = area.x + frame::SNUG;
         let width = area.width - 2 * frame::SNUG;
         let bottom = Self::bottom_height(area.height);
         let room = FocusRoom::Pane { tree: (area.height - bottom - 10).clamp(2, 12), own: (area.height - bottom - 8).clamp(3, 16) };
-        let focus = self.draw_focus(screen, x, area.y + 2, width, room);
+        let focus = self.draw_focus(screen, x, framed.y + 1, width, room);
+        // A body taller than a short window has room for stops at the frame's edge, and what ran past it is painted over.
+        let below = Rect::new(area.x, edge + 1, area.width, (area.y + area.height - edge - 1).max(0));
+        screen.fill(below, &st::GROUND);
+        self.cover(below);
+        frame::outline(screen, framed, &line, self.corners());
         let heading = focus.busy.map(|said| sp(said, st::WARN)).or(focus.heading.map(|heading| sp(heading, st::FAINT)));
         frame::left_words(screen, framed, framed.y, &std::iter::once(sp("FOCUS", st::LABEL)).chain(heading).collect::<Vec<_>>());
         let now_at = area.y + focus.rows.map_or(6, |rows| 4 + rows);
-        frame::divider(screen, framed, now_at, &line);
-        let after = frame::left_words(screen, framed, now_at, &[sp("NOW", st::LABEL)]);
-        let now = self.now_line();
-        if let Some(dot) = now.dot {
-            dot_words(screen, framed, now_at, dot, &now.label, after);
-        }
-        if let Some((kind, since)) = now.activity {
-            // One glyph turning beside steady words, as on a step's row: enough to show Kumi is at work.
-            let glyph = activity_glyph(kind, perf_now() - since, self.0.icons == IconStyle::Badges);
-            screen.put(x, now_at + 1, &glyph.text, &glyph.style);
-            screen.put(x + 2, now_at + 1, &truncate(&now.detail, (width - 2).max(1)), &now.style);
-        } else {
-            screen.put(x, now_at + 1, &truncate(&now.detail, width), &now.style);
-        }
-        if let Some(change) = self.flashing() {
-            // A new clip, a device's place and a colour keep their own pictures; curves, lanes, values and levels are
-            // drawn from the change's picture.
-            let own = change.clip.is_some() || change.devices.is_some() || change.colors.is_some();
-            let drawn = (!own).then(|| self.change_drawn(&change, width.max(4) as usize, 2)).flatten().map(|(drawn, _)| {
-                if drawn.rows.is_empty() {
-                    drawn.lines
+        // The tabs' rule, where it's inside the frame with a row for the tabs above the bottom edge; NOW's rows end there.
+        // Where the window is short, the tabs come first, as they always have: NOW keeps what's left above them.
+        let top = area.y + area.height - bottom;
+        let tabs = top > framed.y && top + 1 < edge;
+        let now_end = if tabs { top } else { edge };
+        // The parts' rows, from and to, that a drag copies.
+        let mut parts = vec![(framed.y + 1, now_at.min(now_end))];
+        if now_at < now_end {
+            frame::divider(screen, framed, now_at, &line);
+            let after = frame::left_words(screen, framed, now_at, &[sp("NOW", st::LABEL)]);
+            let now = self.now_line();
+            if let Some(dot) = now.dot {
+                dot_words(screen, framed, now_at, dot, &now.label, after);
+            }
+            if now_at + 1 < now_end {
+                if let Some((kind, since)) = now.activity {
+                    // One glyph turning beside steady words, as on a step's row: enough to show Kumi is at work.
+                    let glyph = activity_glyph(kind, perf_now() - since, self.0.icons == IconStyle::Badges);
+                    screen.put(x, now_at + 1, &glyph.text, &glyph.style);
+                    screen.put(x + 2, now_at + 1, &truncate(&now.detail, (width - 2).max(1)), &now.style);
                 } else {
-                    drawn.rows
-                }
-            });
-            let cells = || (self.0.graphics != Graphics::Words).then(|| change_picture(&change, width, self.0.depth)).flatten();
-            if let Some(picture) = drawn.filter(|rows| !rows.is_empty()).or_else(cells) {
-                for (row, line) in picture.iter().take(2).enumerate() {
-                    spans(screen, x, now_at + 2 + row as i32, line, None);
+                    screen.put(x, now_at + 1, &truncate(&now.detail, width), &now.style);
                 }
             }
+            if let Some(change) = self.flashing() {
+                // A new clip, a device's place and a colour keep their own pictures; curves, lanes, values and levels are
+                // drawn from the change's picture.
+                let own = change.clip.is_some() || change.devices.is_some() || change.colors.is_some();
+                let drawn = (!own).then(|| self.change_drawn(&change, width.max(4) as usize, 2)).flatten().map(|(drawn, _)| {
+                    if drawn.rows.is_empty() {
+                        drawn.lines
+                    } else {
+                        drawn.rows
+                    }
+                });
+                let cells = || (self.0.graphics != Graphics::Words).then(|| change_picture(&change, width, self.0.depth)).flatten();
+                if let Some(picture) = drawn.filter(|rows| !rows.is_empty()).or_else(cells) {
+                    for (row, line) in picture.iter().take(2).enumerate().filter(|(row, _)| now_at + 2 + (*row as i32) < now_end) {
+                        spans(screen, x, now_at + 2 + row as i32, line, None);
+                    }
+                }
+            }
+            parts.push((now_at + 1, now_end));
         }
-        // The tabs' strip is set into a rule of the frame's, their rows down to its bottom edge.
-        let top = area.y + area.height - bottom;
-        frame::divider(screen, framed, top, &line);
-        let tabs_area = Rect::new(x, top, width, bottom - 2);
-        self.0.state.borrow_mut().tabs_area = Some(tabs_area);
-        let mut hits = vec![];
-        self.0.tabs.draw(screen, tabs_area, &mut hits);
-        self.0.state.borrow_mut().hits.extend(hits);
+        if tabs {
+            // The tabs' strip is set into a rule of the frame's, their rows down to its bottom edge.
+            frame::divider(screen, framed, top, &line);
+            let tabs_area = Rect::new(x, top, width, edge - top);
+            self.0.state.borrow_mut().tabs_area = Some(tabs_area);
+            let mut hits = vec![];
+            self.0.tabs.draw(screen, tabs_area, &mut hits);
+            self.0.state.borrow_mut().hits.extend(hits);
+            parts.push((top + 1, edge));
+        }
+        let mut state = self.0.state.borrow_mut();
+        state.select_areas.extend(parts.into_iter().filter(|(from, to)| to > from).map(|(from, to)| Rect::new(x, from, width, to - from)));
     }
     /// FOCUS's body, as the pane and the drawer show it: drawn at (x, y) in `width`, as tall as `room` lets the device
     /// tree and a DAW's own body be, and read again as the DAW changes while it shows.
@@ -1095,12 +1119,13 @@ impl TuiApp {
         row - y
     }
     /// The two-line strip under 24 rows, framed as the input box is: where the producer is and what Kumi is at in its top
-    /// edge, then on its bottom edge the last change with its undo, or what Kumi is doing.
+    /// edge, then on its bottom edge the last change with its undo, or what Kumi is doing. A drag copies the words on
+    /// one edge or the other, never the frame's lines.
     pub(super) fn draw_dock(&self, screen: &mut Screen, area: Rect) {
         if area.height <= 0 {
             return;
         }
-        frame::border(screen, area, &frame::LINE, self.corners());
+        frame::border(screen, area, &self.frame_line(false), self.corners());
         let (x, bottom) = (area.x + frame::INSET, area.y + area.height - 1);
         // Where its words end on the bottom edge, before ` ─╯`.
         let end = area.x + area.width - frame::INSET;
@@ -1117,9 +1142,11 @@ impl TuiApp {
         if let Some(dot) = now.dot {
             dot_words(screen, area, area.y, dot, &now.label, after + 1);
         }
+        self.0.state.borrow_mut().select_areas.push(Rect::new(x, area.y, after - x, 1));
         if bottom == area.y {
             return;
         }
+        self.0.state.borrow_mut().select_areas.push(Rect::new(x, bottom, end - x, 1));
         let last = self.0.state.borrow().records.changes().last().cloned();
         if let Some(last) = last.filter(|c| !self.busy() && c.state == ChangeState::Applied) {
             let at = end - 4;

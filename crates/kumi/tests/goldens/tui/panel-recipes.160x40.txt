@@ -29,7 +29,7 @@
                                                                                                                   │                                            │
                                                                                                                   │                                            │
                                                                                                                   │                                            │
-╭─ Your recipes · ways of working Kumi replays without planning again ───────╮                                    │                                            │
+╭─ Your recipes · ways of working Kumi replays without pla…  type to filter ─╮                                    │                                            │
 │                                                                            │                                    │                                            │
 │    Drum bus        Glue, saturation and a short room on …  used 1 day ago  │                                    │                                            │
 │    Resample twice  OTT and Saturator, then Grain Delay            6 steps  │                                    │                                            │

@@ -1460,6 +1460,40 @@ scene!(drawer_waiting, DRAWER_SIZES, |width, height| {
     finish_steady(h, &["thinking"]).await
 });
 
+// The strip: below 24 rows, with no room for the drawer, the pane is two rows above the box, framed as it is.
+
+const STRIP_SIZES: [(i32, i32); 1] = [(90, 20)];
+
+fn keys_focus() -> Value {
+    json!({"type":"focus","focus":{"track":{"name":"Keys","color":"#5ec1f7","kind":"midi"},"trackRef":"3:track:2","device":"Operator","detail":"Device","view":"Session","parameter":{"name":"Filter Freq","value":"1.20 kHz","owner":"Operator"}}})
+}
+
+scene!(strip_change, STRIP_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    h.emit(keys_focus());
+    let note = |start: f64, pitch: f64, duration: f64| json!([start, pitch, duration, 100.0]);
+    h.emit(change(
+        "c1",
+        "clip",
+        "Chords · 3 notes moved, 1 added",
+        json!({"track":{"name":"Keys","color":"#5ec1f7"},"picture":{"kind":"notes","length":8.0,
+            "before":[note(0.,60.,2.),note(2.,62.,2.),note(4.,64.,2.)],
+            "after":[note(0.,60.,1.),note(1.,67.,1.),note(2.,65.,2.),note(4.,64.,4.)]}}),
+    ));
+    finish_styled(h).await
+});
+
+scene!(strip_working, STRIP_SIZES, |width, height| {
+    let h = open(width, height, Rc::new(Control::default())).await;
+    h.emit(keys_focus());
+    h.type_text("open up the chords\r").await;
+    h.wait_for_call("submit:open up the chords").await;
+    h.emit(json!({"type":"state","state":"running"}));
+    h.emit(json!({"type":"tool-start","id":"t1","name":"live_discover"}));
+    let shot = finish_steady(h, &["looking at your Set"]).await;
+    still(shot, &["▾ working", "looking at your Set"])
+});
+
 /// The conversation scrolled up, at the widths its layout changes at: the side pane, a wider window, the drawer.
 const VIEW_SIZES: [(i32, i32); 3] = [(120, 36), (160, 40), (80, 30)];
 

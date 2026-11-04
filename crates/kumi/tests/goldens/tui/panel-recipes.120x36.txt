@@ -25,7 +25,7 @@
       Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
                                                                                 │                                      │
                                                                                 │                                      │
-╭─ Your recipes · ways of working Kumi replays without planning again ────────╮ │                                      │
+╭─ Your recipes · ways of working Kumi replays without plan…  type to filter ─╮ │                                      │
 │                                                                             │ │                                      │
 │    Drum bus        Glue, saturation and a short room on a…  used 1 day ago  │ │                                      │
 │    Resample twice  OTT and Saturator, then Grain Delay             6 steps  │ │                                      │

@@ -558,7 +558,7 @@ impl Overlay<TuiApp> for JobPanel {
         app.session().unwatch_job();
     }
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
-        let width = super::draw_panel::panel_width(76, area.left);
+        let width = super::draw_panel::panel_width(76, area.boxed);
         let (inner, space) = (width - 4, area.box_top - 5);
         let mut lines: Vec<Line> = vec![];
         let (id, scroll) = (self.id, &mut self.scroll);

@@ -441,10 +441,76 @@ case!(a_drag_stays_above_the_drawer_or_in_it, async {
     h.type_text("\x03").await;
     let text = copied.borrow().last().cloned().unwrap_or_default();
     assert!(text.starts_with("Words in the conversation") && !text.contains("Chords") && !text.contains("NOW"), "{text:?}");
-    // From past the drawer's change up into the conversation: the drawer's rows only.
+    // From past the drawer's change up into the conversation: the drawer's rows only, inside its frame (its row of
+    // tabs is its top edge).
     h.type_text(&drag((30, changed), (0, said))).await;
     h.type_text("\x03").await;
     let text = copied.borrow().last().cloned().unwrap_or_default();
-    assert!(text.contains("NOW   FOCUS") && text.contains("Chords") && !text.contains("Words in the conversation"), "{text:?}");
+    assert!(text.starts_with("Ready") && text.contains("Chords") && !text.contains("Words in the conversation"), "{text:?}");
+    assert!(!text.contains(FRAME), "{text:?}");
+    h.close().await;
+});
+
+/// What a frame is drawn with, none of which a copy takes.
+const FRAME: [char; 9] = ['─', '│', '╭', '╮', '╰', '╯', '├', '┤', '┬'];
+
+/// Whether each frame's top-left corner, top to bottom, is drawn in the lit line.
+fn lit(h: &Harness) -> Vec<bool> {
+    let [r, g, b] = kumi::tui::style::palette::TRACK;
+    h.styles_of("╭").iter().map(|style| style.split('|').next() == Some(format!("{r},{g},{b}").as_str())).collect()
+}
+
+case!(the_drawers_frame_is_lit_while_the_keyboard_is_in_it, async {
+    let h = Harness::new(80, 30);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    // The drawer, then the box: the box has the keyboard.
+    assert_eq!(lit(&h), [false, true]);
+    // Shift-Tab, into the tabs: the drawer has it.
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some(), "{}", h.screen().join("\n"));
+    assert_eq!(lit(&h), [true, false]);
+    // Esc gives it back to the box.
+    h.escape().await;
+    assert_eq!(lit(&h), [false, true]);
+    h.close().await;
+});
+
+case!(a_drag_in_the_side_pane_copies_one_parts_rows_and_never_the_frames_lines, async {
+    use std::cell::RefCell;
+    let copied = Rc::new(RefCell::new(Vec::<String>::new()));
+    let copy = copied.clone();
+    let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }));
+    });
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    let lines = h.screen();
+    let drag = |from: (usize, usize), to: (usize, usize)| {
+        format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", from.0 + 1, from.1 + 1, to.0 + 1, to.1 + 1, to.0 + 1, to.1 + 1)
+    };
+    // Where `text` starts on `row`.
+    let at = |row: usize, text: &str| (lines[row][..lines[row].find(text).unwrap()].chars().count(), row);
+    let history = lines.iter().position(|line| line.contains("HISTORY 1")).unwrap() + 1;
+    let focus = lines.iter().position(|line| line.contains("Your selection will show here")).unwrap() - 1;
+    // At 120 columns the pane's rows run from column 82 to 117, and its frame's last row inside is the third from the
+    // bottom. From there (a press on a change is a click, so the drag starts under it) up past HISTORY's rule, and to
+    // the frame's left side: the tab's rows.
+    h.type_text(&drag((117, lines.len() - 3), (80, history - 2))).await;
+    h.type_text("\x03").await;
+    let text = copied.borrow().last().cloned().unwrap_or_default();
+    assert!(text.contains("Chords · 3 notes moved") && text.contains("undo") && !text.contains("HISTORY"), "{text:?}");
+    assert!(!text.contains(FRAME), "{text:?}");
+    // From FOCUS down across NOW's rule to HISTORY: FOCUS's rows.
+    h.type_text(&drag(at(focus, "Night Drive"), (119, history))).await;
+    h.type_text("\x03").await;
+    let text = copied.borrow().last().cloned().unwrap_or_default();
+    assert!(text.starts_with("Night Drive") && text.ends_with("Your selection will show here"), "{text:?}");
+    assert!(!text.contains(FRAME), "{text:?}");
     h.close().await;
 });

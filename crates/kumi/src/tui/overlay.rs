@@ -17,11 +17,14 @@ pub enum Handled {
     Pass(InputEvent),
 }
 
-/// Where overlays draw: above the input box, whose top row is `box_top`, in the `left` columns the conversation has.
+/// Where overlays draw: above the input box, whose top row is `box_top`, in the `left` columns the conversation has. The
+/// framed ones (a list, the help, a side answer) take their width from the input box's `boxed` columns, so their frames
+/// line up with its.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Area {
     pub box_top: i32,
     pub left: i32,
+    pub boxed: i32,
 }
 
 /// One overlay, for an app of type `App`.
@@ -198,7 +201,7 @@ mod tests {
         assert_eq!(top.borrow().hint(&app), "help's hint");
         let mut screen = Screen::new(10, 4);
         for open in overlays.all() {
-            open.borrow_mut().draw(&app, &mut screen, Area { box_top: 3, left: 10 });
+            open.borrow_mut().draw(&app, &mut screen, Area { box_top: 3, left: 10, boxed: 9 });
         }
         assert_eq!(*app.said.borrow(), ["help took Text { text: \"x\" }", "list drawn", "help drawn"]);
     }
