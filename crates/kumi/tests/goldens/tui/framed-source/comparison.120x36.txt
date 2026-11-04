@@ -1,0 +1,36 @@
+  Kumi  ·  Night Drive                                                                                          ● Live
+
+   Heard mix.wav against ref.wav, loudness matched                              ╭─ FOCUS ──────────────────────────────╮
+   +0.2  +0.4  −0.3  +2.8   0.0  −1.1  −2.0  −1.5  −0.8  +0.5                   │ Night Drive                          │
+   sub   bass  u.bas l.mid mids  u.mid pres  bite  brill air                    │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ HISTORY ────────────────────────────┤
+                                                                                │ Nothing changed yet                  │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
+

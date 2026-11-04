@@ -1420,16 +1420,22 @@ case!(whole_screens_match_source, async {
             h.emit(event.clone());
         }
         let actual = h.screen();
+        let name = format!("{}.{width}x{height}.txt", case["name"].as_str().unwrap());
         // One file heard draws as an octave analyzer, where the source drew a strip a row high: those screens changed
         // on purpose too, and are goldens of their own.
         let analyzer = case["events"].as_array().unwrap().iter().any(|event| event["type"] == "heard" && event["compared"].is_null());
         // W6-2 changed these on purpose: below 100 columns with 24 rows or more, the pane is the drawer under the
         // conversation, where the source drew a two-line strip. The same events' screens are goldens of their own.
         if width < 100 && height >= 24 {
-            drawer_golden(&format!("{}.{width}x{height}.txt", case["name"].as_str().unwrap()), &actual);
+            drawer_golden(&name, &actual);
         } else if analyzer {
-            source_golden("analyzer-source", &format!("{}.{width}x{height}.txt", case["name"].as_str().unwrap()), &actual);
+            source_golden("analyzer-source", &name, &actual);
+        } else if width >= 24 && height >= 8 {
+            // #902 set the input box, the side pane and what opens over the conversation in frames: every screen Kumi
+            // draws in changed on purpose, and is a golden of its own.
+            source_golden("framed-source", &name, &actual);
         } else {
+            // Too small to draw in, Kumi says so as the source did.
             let expected: Vec<String> = serde_json::from_value(case["expected"].clone()).unwrap();
             assert_eq!(actual, expected, "{} {}×{}", case["name"], case["width"], case["height"]);
         }

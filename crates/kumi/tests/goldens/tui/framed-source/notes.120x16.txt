@@ -1,0 +1,16 @@
+  Kumi  ·  Night Drive                                                                                          ● Live
+
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                            Kumi can see Night Drive.                           │ Your selection will show here        │
+                                                                                │                                      │
+                                       Try                                      │                                      │
+                             “What's on this track?”                            ├─ NOW ────────────────────────────────┤
+                             “Set the tempo to 124”                             │ ✓ Changed the bass                   │
+                       “Why might my low end sound muddy?”                      ├─ HISTORY 1 ──────────────────────────┤
+                                                                                │ ✓ Changed the bass              undo │
+      Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
+
