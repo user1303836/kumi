@@ -575,6 +575,32 @@ class MainCI(unittest.TestCase):
         no_windows = [job for job in self.GREEN if not job["name"].startswith("Rust / Windows")]
         self.assertEqual(release.ci_problems(self.ran(), no_windows), [f"CI's Rust / Windows didn't pass on it: {self.URL}"])
 
+    def test_the_gate_reads_the_commits_push_run_and_its_jobs(self):
+        calls = []
+
+        def gh(args, cwd=None):
+            calls.append(args)
+            if args[:3] == ["gh", "run", "list"]:
+                return json.dumps([self.ran()]) if "abc123" in args else "[]"
+            return json.dumps({"jobs": self.GREEN})
+
+        with patch.object(release, "run", side_effect=gh):
+            self.assertEqual(release.main_ci("o/r", "abc123"), [])
+            self.assertEqual(release.main_ci("o/r", "def456"), ["CI hasn't run on it"])
+        listed = calls[0]
+        for flag, value in (("--repo", "o/r"), ("--workflow", "ci.yml"), ("--commit", "abc123"), ("--event", "push")):
+            self.assertEqual(listed[listed.index(flag) + 1], value, flag)
+        self.assertEqual(calls[1][:4], ["gh", "run", "view", "1"])
+        self.assertEqual(len(calls), 3, "no run, so no jobs asked for")
+
+    def test_go_refuses_until_main_is_green_and_a_dry_run_only_says_so(self):
+        with patch.object(release, "main_ci", return_value=["CI is still running on it: u"]), patch("builtins.print") as said:
+            with self.assertRaises(release.Refused):
+                release.ci_gate("o/r", "abc12345", go=True)
+            release.ci_gate("o/r", "abc12345", go=False)
+        self.assertIn("still running", said.call_args.args[0])
+        with patch.object(release, "main_ci", return_value=[]), patch("builtins.print"):
+            release.ci_gate("o/r", "abc12345", go=True)
 
 
 if __name__ == "__main__":

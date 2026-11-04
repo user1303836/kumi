@@ -118,7 +118,7 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
 - Releasing is for the owner, or an agent asked to (`gh` signed in as a repository admin), once main's CI on the commit to release is green on Linux, macOS and Windows (pull requests test on Linux alone):
   - `python3 scripts/release.py`: the dry run (version, CHANGELOG entry, notes, checks, and how main's CI stands).
   - `python3 scripts/release.py --go` (`--minor`, `--version X.Y.Z`, `--summary "…"`): refuses until main's CI on that commit is green on all three systems, then bumps the versions, writes CHANGELOG.md and the READMEs, merges "Kumi X.Y.Z (#N)", tags `vX.Y.Z` and creates a draft release.
-- The tag's Installer run builds the six bundles (macOS, Linux, Windows; Intel and ARM) with the `release` profile, tests installing, updating and migrating, attaches them and publishes the release. Nobody gets it before then.
+- The tag's Installer run builds the six bundles (macOS, Linux, Windows; Intel and ARM) with the `release` profile, tests installing, updating and migrating, attaches them and publishes the release. Nobody gets it before then. Nothing waits for CI on the release's own commit (versions and notes only): this run, on all six systems, is its check.
 - If that run fails, the release stays a draft: fix main and release the next patch (1.21.1 did this for 1.21.0). Never move, delete or re-push a `v*` tag.
 - More: DEVELOPER_GUIDE.md "Releasing", DISTRIBUTION_POLICY.md.
 

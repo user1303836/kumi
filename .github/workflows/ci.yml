@@ -487,6 +487,10 @@ jobs:
     if: failure() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    # One at a time, so two red runs close together comment on one issue instead of opening two.
+    concurrency:
+      group: main-ci-failed
+      cancel-in-progress: false
     permissions:
       issues: write
     steps:
@@ -504,5 +508,5 @@ jobs:
           if [ -n "$open" ]; then
             gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"
           else
-            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+            gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body" --label bug --label critical
           fi

@@ -705,6 +705,15 @@ def main_ci(repo: str, head: str) -> list[str]:
     return ci_problems(runs[0], jobs)
 
 
+def ci_gate(repo: str, head: str, go: bool) -> None:
+    """Says how main's CI on `head` stands; with --go, refuses unless it's green on every one of CI_SYSTEMS."""
+    ci = main_ci(repo, head)
+    print(f"main's CI on {head[:8]}: " + ("green on " + ", ".join(CI_SYSTEMS) if not ci else "; ".join(ci)))
+    if go and ci:
+        raise Refused(f"main's CI on {head[:8]} isn't green on {', '.join(CI_SYSTEMS)} yet, and a release waits for it: "
+                      + "; ".join(ci))
+
+
 def release(args: argparse.Namespace) -> None:
     repo = run(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])
     run(["git", "fetch", "--quiet", "--tags", args.remote, "main"])
@@ -747,14 +756,10 @@ def release(args: argparse.Namespace) -> None:
             moved += [f"- {name} {version}" for name, version in sorted(before - after)]
             advice = "it gets a new version anyway" if not same else f"if its build uses them, cut with {flag}"
             print(f"LOOK: {whose} dependencies changed since {tag} ({advice}):\n  " + "\n  ".join(moved), file=sys.stderr)
-    ci = main_ci(repo, head)
-    print(f"main's CI on {head[:8]}: " + ("green on " + ", ".join(CI_SYSTEMS) if not ci else "; ".join(ci)))
     if args.go:  # admin before anything is pushed: the merge goes through the admin bypass, and tags are admin-only
         if run(["gh", "api", f"repos/{repo}", "--jq", ".permissions.admin"]) != "true":
             raise Refused(f"gh isn't signed in as an admin of {repo}, which the merge and the tag need")
-        if ci:
-            raise Refused(f"main's CI on {head[:8]} isn't green on {', '.join(CI_SYSTEMS)} yet, and a release waits for it: "
-                          + "; ".join(ci))
+    ci_gate(repo, head, args.go)
 
     scratch = Path(tempfile.mkdtemp(prefix=f"kumi-release-{plan.new}-"))
     work = scratch / "worktree"
