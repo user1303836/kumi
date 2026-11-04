@@ -161,9 +161,9 @@ impl MaxBox {
             _ => return None,
         };
         // An mc.gen~'s wrapper keeps its patcher in its data, which keeps its place as a null too.
-        let wrapper = fields.get("text").and_then(Value::as_str).and_then(|text| text.split_whitespace().next()) == Some("mc.gen~");
-        let embedded = if wrapper { fields.get_mut("data").and_then(|data| data.get_mut("patcher")) } else { fields.get_mut("patcher") };
-        let patcher = embedded.filter(|inner| inner.is_object()).map(|inner| Patcher::read_within(&inner.take(), files, reading));
+        let patcher = embedded_patcher(&mut fields)
+            .filter(|inner| inner.is_object())
+            .map(|inner| Patcher::read_within(&inner.take(), files, reading));
         let mut item = MaxBox { fields, patcher, file: None, code: None };
         item.code = match Code::file_of(&item) {
             Some(script) => reading.scripts.entry(script).or_insert_with(|| Code::read(&item, files).map(Arc::new)).clone(),
@@ -401,10 +401,33 @@ fn points(value: &Value) -> Vec<[f64; 2]> {
     numbers.chunks_exact(2).map(|pair| [pair[0], pair[1]]).collect()
 }
 
-/// How many boxes a patcher's JSON holds, its subpatchers' too.
+/// How many boxes a patcher's JSON holds, its subpatchers' too (an mc.gen~'s in its data).
 fn boxes_in(value: &Value) -> usize {
     let patcher = value.get("patcher").filter(|inner| inner.is_object()).unwrap_or(value);
-    patcher.get("boxes").and_then(Value::as_array).map_or(0, |boxes| boxes.iter().map(|entry| 1 + boxes_in(&entry["box"]["patcher"])).sum())
+    let Some(boxes) = patcher.get("boxes").and_then(Value::as_array) else { return 0 };
+    boxes
+        .iter()
+        .map(|entry| {
+            let item = &entry["box"];
+            1 + boxes_in(if item.as_object().is_some_and(keeps_patcher_in_data) { &item["data"]["patcher"] } else { &item["patcher"] })
+        })
+        .sum()
+}
+
+/// Whether a box, as Max's JSON, keeps the patcher embedded in it in its data, as an mc.gen~'s wrapper does, not in a
+/// field of its own as every other box does. Another object's data (a dict's, say) is its own.
+pub(crate) fn keeps_patcher_in_data(fields: &Map<String, Value>) -> bool {
+    fields.get("text").and_then(Value::as_str).and_then(|text| text.split_whitespace().next()) == Some("mc.gen~")
+}
+
+/// Where a box, as Max's JSON, keeps the patcher embedded in it: an mc.gen~'s wrapper in its data, every other box in a
+/// field of its own.
+pub(crate) fn embedded_patcher(fields: &mut Map<String, Value>) -> Option<&mut Value> {
+    if keeps_patcher_in_data(fields) {
+        fields.get_mut("data").and_then(|data| data.get_mut("patcher"))
+    } else {
+        fields.get_mut("patcher")
+    }
 }
 
 fn with_extension(name: &str, extension: &str) -> String {
@@ -521,6 +544,27 @@ mod tests {
         assert!(read <= MOST_FILE_BOXES + 1, "{read} boxes read");
         assert!(patcher.boxes[0].inner().is_some(), "the first files are read");
         assert!(started.elapsed() < std::time::Duration::from_secs(10), "{:?}", started.elapsed());
+    }
+
+    #[test]
+    fn an_mc_gens_patcher_in_a_file_counts_toward_the_bound_as_any_embedded_patcher_does() {
+        // A file of one mc.gen~ whose wrapper's data holds 100 boxes, used by 1,000 boxes: 101,000 boxes to walk, were
+        // the file counted as one box.
+        let gen: Vec<Value> =
+            (1..=100).map(|n| json!({ "box": { "id": format!("obj-{n}"), "maxclass": "comment", "text": "x" } })).collect();
+        let wrapped = json!({ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "newobj", "text": "mc.gen~ @chans 2",
+            "data": { "patcher": { "classnamespace": "dsp.gen", "boxes": gen, "lines": [] } } } }], "lines": [] } });
+        let users: Vec<Value> =
+            (1..=1_000).map(|n| json!({ "box": { "id": format!("obj-{n}"), "maxclass": "newobj", "text": "wrapped" } })).collect();
+        let device = json!({ "patcher": { "boxes": users, "lines": [] } });
+        let patcher = Patcher::read(&device, &Library(HashMap::from([("wrapped.maxpat".to_string(), wrapped)])));
+        fn boxes(patcher: &Patcher) -> usize {
+            patcher.boxes.iter().map(|item| 1 + item.inner().map_or(0, boxes)).sum()
+        }
+        let gen = patcher.boxes[0].inner().and_then(|file| file.boxes[0].inner()).map(|gen| gen.boxes.len());
+        assert_eq!(gen, Some(100), "the wrapper's patcher is read");
+        let read = boxes(&patcher);
+        assert!(read <= MOST_FILE_BOXES + 1_000, "{read} boxes read");
     }
 
     #[test]

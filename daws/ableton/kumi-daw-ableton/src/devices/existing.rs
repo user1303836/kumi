@@ -23,7 +23,7 @@ use super::patch::layout::{arrange, text_width};
 use super::patch::notation::{expand, parse_beside, ports_had, Outside, OUTSIDE};
 use super::patch::reference::Reference;
 use super::patch::standard::{standard, Level};
-use super::patch::{Cord, Files, MaxBox, NoFiles, Patcher};
+use super::patch::{embedded_patcher, keeps_patcher_in_data, Cord, Files, MaxBox, NoFiles, Patcher};
 use super::spec::Control;
 use super::tool::kind_folder;
 use kumi_agent::core::plugin_tools::local_path;
@@ -434,7 +434,7 @@ fn written(item: &MaxBox) -> Result<String, String> {
                 return Err("an object whose text the notation can't hold".into());
             }
             match (item.class(), &item.patcher) {
-                ("gen~" | "gen" | "mc.gen~", Some(inner)) => {
+                ("gen~" | "gen" | "mc.gen~" | "mcs.gen~", Some(inner)) => {
                     gen_code(inner).map(|code| block(text, &code)).ok_or_else(|| "a gen patch of gen's operators, not code".into())
                 }
                 ("p" | "patcher", Some(_)) if item.args().first().is_some_and(|name| name.starts_with("kumi.")) => {
@@ -694,24 +694,27 @@ impl Ids {
     }
 }
 
-/// A box as Max's JSON, its own patcher read back in (its place in the fields kept as a null).
+/// A box as Max's JSON, its own patcher read back in from where Max keeps it (its place kept as a null).
 fn max_box(mut fields: Map<String, Value>) -> MaxBox {
-    let patcher = match fields.get_mut("patcher") {
-        Some(inner) if inner.is_object() => Some(Patcher::read(&inner.take(), &NoFiles)),
-        _ => None,
-    };
+    let patcher = embedded_patcher(&mut fields).filter(|inner| inner.is_object()).map(|inner| Patcher::read(&inner.take(), &NoFiles));
     MaxBox { fields, patcher, file: None, code: None }
 }
 
 /// A box's fields after it's given again: what it is from the new one, where it sits and how it looks from the old.
 fn retyped(old: &MaxBox, new: Map<String, Value>) -> MaxBox {
     let Value::Object(mut fields) = old.to_value() else { return old.clone() };
-    for key in WHAT_IT_IS {
-        fields.shift_remove(key);
+    // An mc.gen~'s wrapper keeps its patcher in its data, beside the key Max knows the wrapper by: both go with what it
+    // is, so one given again, or in place of another box, is made as Kumi makes one, with no key. Another object's data
+    // (a dict's, say) is its own, and stays.
+    let wrapper: &[&str] =
+        if keeps_patcher_in_data(&old.fields) || keeps_patcher_in_data(&new) { &["data", "wrapper_uniquekey"] } else { &[] };
+    let what_it_is = |key: &str| WHAT_IT_IS.contains(&key) || wrapper.contains(&key);
+    for key in WHAT_IT_IS.iter().chain(wrapper) {
+        fields.shift_remove(*key);
     }
     let same_class = MaxBox { fields: new.clone(), ..MaxBox::default() }.class() == old.class();
     for (key, value) in new {
-        if WHAT_IT_IS.contains(&key.as_str()) {
+        if what_it_is(&key) {
             fields.insert(key, value);
         }
     }
