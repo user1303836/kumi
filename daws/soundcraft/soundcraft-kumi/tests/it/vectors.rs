@@ -7,7 +7,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-fn vectors(name: &str) -> Vec<Value> {
+/// The recorded exchanges in a vectors file, each `{method, params, reply}`.
+pub fn vectors(name: &str) -> Vec<Value> {
     let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/vectors").join(name);
     let text = std::fs::read_to_string(&path).unwrap_or_else(|error| panic!("{}: {error}", path.display()));
     text.lines().map(|line| serde_json::from_str(line).unwrap()).collect()
