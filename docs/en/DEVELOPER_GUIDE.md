@@ -328,7 +328,9 @@ python3 scripts/release.py --go     # the release
   on in the three `KUMI_GUIDE.md`. One the last release didn't have ships at its
   version, and its line names this release already. `scripts/daws.toml` lists
   these bridges for the release and packaging scripts: a DAW added there gets
-  its own flags, heading and ships-with line.
+  its own flags, heading and ships-with line. A `program` there (SoundCraft's
+  `soundcraft-kumi`) gets none: it ships beside `kumi` and takes Kumi's version,
+  in its `Cargo.toml` and `Cargo.lock` with Kumi's crates.
 - **The version** is the next patch; `--minor` or `--version X.Y.Z` choose
   another.
 - **With `--go`** it commits "Kumi X.Y.Z: the changelog, READMEs and versions"

@@ -42,10 +42,11 @@ def build(inputs: list[Path], out: Path, node: str, timestamp: int = 0, release_
         releases[target] = (value, path.parent / bundle)
     if not releases:
         raise ValueError("at least one target release is required")
-    # One commit's bundles: the same Kumi, Live's bridge and other DAWs' bridges (scripts/daws.toml) on every target.
-    versions = {tuple(value[0].get(key) for key in ("kumi", "bridge", *native.DAW_BRIDGES)) for value in releases.values()}
+    # One commit's bundles: the same Kumi, Live's bridge and other DAWs' versioned bridges (scripts/daws.toml) on every
+    # target. A DAW's program takes Kumi's version, and no manifest names it.
+    versions = {tuple(value[0].get(key) for key in ("kumi", "bridge", *native.VERSIONED_BRIDGES)) for value in releases.values()}
     if len(versions) != 1:
-        names = ["Kumi", "bridge", *(f"{daw['name']} {daw['bridge']}" for daw in native.DAW_BRIDGES.values())]
+        names = ["Kumi", "bridge", *(f"{daw['name']} {daw['bridge']}" for daw in native.VERSIONED_BRIDGES.values())]
         raise ValueError(f"all targets must have the same {', '.join(names[:-1])} and {names[-1]} versions")
     version, bridge, *_ = versions.pop()
     targets = {target: item[0] for target, item in sorted(releases.items())}

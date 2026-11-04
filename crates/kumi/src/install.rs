@@ -716,27 +716,37 @@ impl Unpacking {
     }
 }
 
-/// The new bridge host's first start (`daw-mcp-server --version`, which only says its version), beside the new Kumi's
-/// probe. macOS checks a new program once, at its first launch (50-80 ms for the host, 0.4-0.7 s for Kumi), and side by
-/// side the two checks take as long as the longer: done here, REAPER's and Renoise's first connect after an update
-/// doesn't wait for it. Whatever it answers is ignored.
+/// The new bridge host's and the DAWs' programs' first starts (`daw-mcp-server --version` and
+/// `soundcraft-kumi --version`, which only say their versions), beside the new Kumi's probe. macOS checks a new program
+/// once, at its first launch (50-80 ms for the host, 0.4-0.7 s for Kumi), and side by side the checks take as long as the
+/// longest: done here, REAPER's, Renoise's and SoundCraft's first connect after an update doesn't wait for them. Whatever
+/// they answer is ignored.
 async fn first_launches(fresh: &str) {
-    let host = join(fresh, &executable_name("daw-mcp-server"));
-    if !Path::new(&host).is_file() {
-        return;
+    let mut children = Vec::new();
+    for name in ["daw-mcp-server", "soundcraft-kumi"] {
+        let program = join(fresh, &executable_name(name));
+        if !Path::new(&program).is_file() {
+            continue;
+        }
+        let mut command = tokio::process::Command::new(&program);
+        command
+            .arg("--version")
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000);
+        if let Ok(child) = command.spawn() {
+            children.push(child);
+        }
     }
-    let mut command = tokio::process::Command::new(&host);
-    command
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .kill_on_drop(true);
-    #[cfg(windows)]
-    command.creation_flags(0x0800_0000);
-    if let Ok(mut child) = command.spawn() {
-        let _ = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
-    }
+    let _ = tokio::time::timeout(Duration::from_secs(10), async {
+        for child in &mut children {
+            let _ = child.wait().await;
+        }
+    })
+    .await;
 }
 /// Downloads `url` into `file` as it arrives, and gives what it got's SHA-256: the bundle is never held whole, nor
 /// read back to check it. With `unpacking`, tar gets each piece too, as it arrives.

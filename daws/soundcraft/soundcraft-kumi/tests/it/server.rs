@@ -499,3 +499,13 @@ async fn the_program_with_no_soundcraft_to_serve_says_how_to_open_it() {
     assert_eq!(code, Some(1));
     assert!(said.contains("SoundCraft isn't running with its control channel: Kumi opens it with `kumi --daw soundcraft`"), "{said}");
 }
+
+/// What the installers and Kumi's update run once beside a new bundle (macOS checks a new program at its first launch):
+/// it says its version, Kumi's, and ends, reading nothing and needing no home folder.
+#[test]
+fn the_program_says_its_version() {
+    let said =
+        Command::new(env!("CARGO_BIN_EXE_soundcraft-kumi")).arg("--version").env_remove("KUMI_HOME").stdin(Stdio::null()).output().unwrap();
+    assert!(said.status.success(), "{said:?}");
+    assert_eq!(String::from_utf8(said.stdout).unwrap(), format!("soundcraft-kumi {}\n", server::VERSION));
+}
