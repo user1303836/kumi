@@ -20,6 +20,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{json, Value};
 
+use super::check::LIVE_PARAMETERS;
 use super::code::{declared_ports, syntax_problem};
 use super::reference::{atoms, Reference, MOST_PORTS};
 use crate::devices::findings::Findings;
@@ -532,7 +533,13 @@ enum Ref {
 /// A patch written in the notation, read the nearest way it can be, and what was found reading it: each line that
 /// can't be read is left out, and said with its number.
 pub fn parse(text: &str) -> (Notation, Findings) {
-    parse_from(text, 1, true, 0)
+    parse_from(text, 1, true, 0, &HashSet::new())
+}
+
+/// A patch written beside boxes that are already there (a device being changed): a name of one of `existing` that the
+/// patch doesn't give a box of its own is that box, outside the patch, as in and out are.
+pub fn parse_beside(text: &str, existing: &HashSet<String>) -> (Notation, Findings) {
+    parse_from(text, 1, true, 0, existing)
 }
 
 /// Reads a patch's lines: `first_line` is its first line in the whole notation; `top` is the device's own patch,
@@ -598,7 +605,7 @@ impl Reader<'_> {
                         What::Patcher { text, inner: Notation::default() }
                     }
                     (Some((inner, from)), Some(_)) => {
-                        let (inner, found) = parse_from(&inner, from, false, self.depth + 1);
+                        let (inner, found) = parse_from(&inner, from, false, self.depth + 1, &HashSet::new());
                         self.found.append(found);
                         What::Patcher { text, inner }
                     }
@@ -631,7 +638,7 @@ impl Reader<'_> {
                     (None, None) if class.starts_with("kumi.") => match crate::devices::kit::expand(&text, line) {
                         // One of Kumi's building blocks: a subpatcher of Max's own objects, made the way it's tested.
                         Ok((head, patch)) => {
-                            let (inner, found) = parse_from(&patch, line, false, self.depth + 1);
+                            let (inner, found) = parse_from(&patch, line, false, self.depth + 1, &HashSet::new());
                             self.found.append(found);
                             What::Patcher { text: head, inner }
                         }
@@ -788,7 +795,7 @@ impl Reader<'_> {
     }
 }
 
-fn parse_from(text: &str, first_line: usize, top: bool, depth: usize) -> (Notation, Findings) {
+fn parse_from(text: &str, first_line: usize, top: bool, depth: usize, existing: &HashSet<String>) -> (Notation, Findings) {
     let (tokens, unread) = tokens(text, first_line);
     let mut reader = Reader {
         tokens: &tokens,
@@ -814,7 +821,7 @@ fn parse_from(text: &str, first_line: usize, top: bool, depth: usize) -> (Notati
             Ref::Control(name) => Some(End::Control(name)),
             Ref::Name(name) => match names.get(&name) {
                 Some((at, _)) => Some(End::Box(*at)),
-                None if OUTSIDE.contains(&name.as_str()) && top => Some(End::Outside(name)),
+                None if (OUTSIDE.contains(&name.as_str()) || existing.contains(&name)) && top => Some(End::Outside(name)),
                 None if OUTSIDE.contains(&name.as_str()) => {
                     found.wrong.push(format!("line {line}: {name} is the device's own, so the cord was left out: inside a [p], take what comes in from an [inlet] and send it on through an [outlet]."));
                     None
@@ -946,6 +953,15 @@ fn expand_within(notation: &Notation, outside: &Outside, top: bool) -> Expanded 
             What::Object(_) if matches!(class.as_str(), "inlet" | "outlet") && top => {
                 found.wrong.push(format!(
                     "line {}: [{class}] belongs in a [p] {{ … }}, so Kumi left it and its cords out: the device's own patch takes what it receives from in and sends it to out.",
+                    item.line
+                ));
+                continue;
+            }
+            // A Live parameter typed into an object box is none of the face's controls, which Kumi places and names: in real
+            // Live one was named for its scripting name, not its @parameter_longname (#772's live test).
+            What::Object(_) if LIVE_PARAMETERS.contains(&class.as_str()) => {
+                found.wrong.push(format!(
+                    "line {}: {label} is a Live parameter, which a patch can't put on the device's face or name in Live, so Kumi left it and its cords out: give it in controls (its name, range and default), which places it on the face and names it, then wire it by its name in quotes (\"Name\" -> …).",
                     item.line
                 ));
                 continue;
@@ -1639,5 +1655,36 @@ mod tests {
             ["line 1: [inlet] belongs in a [p] { … }, so Kumi left it and its cords out: the device's own patch takes what it receives from in and sends it to out."]
         );
         assert!(loose.boxes.is_empty() && loose.lines.is_empty());
+    }
+
+    /// #772: a Live parameter typed into an object box, at the top or in a [p], is left out with its cords, and controls
+    /// is named as what makes one.
+    #[test]
+    fn a_live_parameter_in_a_patch_is_left_out_with_its_cords_for_controls_to_make() {
+        let outside = Outside { boxes: HashMap::from([("out".to_string(), "obj-out".to_string())]), ..Outside::default() };
+        let notation = parse(concat!(
+            "mix_dial = [live.dial @parameter_longname Mix @presentation 1 @presentation_rect 570 10 44 60]\n",
+            "mix_dial -> [* 2] -> out\n",
+            "v = [p v] {\n",
+            "  [live.toggle] -> [outlet]\n",
+            "}\n",
+        ))
+        .0;
+        let made = expand(&notation, &outside);
+        assert_eq!(
+            made.found.wrong,
+            [
+                "line 1: [live.dial @parameter_longname Mix @presentation 1 @presentation_rect 570 10 44 60] is a Live parameter, which a patch can't put on the device's face or name in Live, so Kumi left it and its cords out: give it in controls (its name, range and default), which places it on the face and names it, then wire it by its name in quotes (\"Name\" -> …).",
+                "line 4: [live.toggle] is a Live parameter, which a patch can't put on the device's face or name in Live, so Kumi left it and its cords out: give it in controls (its name, range and default), which places it on the face and names it, then wire it by its name in quotes (\"Name\" -> …).",
+            ]
+        );
+        let texts = |boxes: &[Value]| boxes.iter().map(|item| item["box"]["text"].as_str().unwrap_or("").to_string()).collect::<Vec<_>>();
+        assert_eq!(texts(&made.boxes), ["* 2", "p v"]);
+        let inner: Vec<&Value> =
+            made.boxes[1]["box"]["patcher"]["boxes"].as_array().unwrap().iter().map(|item| &item["box"]["maxclass"]).collect();
+        assert_eq!(inner, [&json!("outlet")], "the toggle in the [p] is left out too");
+        let cords: Vec<Value> =
+            made.lines.iter().map(|(line, _)| json!([line["patchline"]["source"], line["patchline"]["destination"]])).collect();
+        assert_eq!(cords, [json!([["obj-2", 0], ["obj-out", 0]])], "the cord from the dial goes with it");
     }
 }
