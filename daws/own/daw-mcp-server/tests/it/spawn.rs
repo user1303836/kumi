@@ -178,6 +178,25 @@ impl Lab {
         let Ok(entries) = std::fs::read_dir(self.paths().discovery()) else { return vec![] };
         entries.flatten().map(|entry| entry.path()).collect()
     }
+
+    /// A gone bridge's discovery file: its DAW (this test's process) runs on, and nothing listens on its port.
+    fn gone_file(&self) -> PathBuf {
+        let closed = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+        let gone = Discovery {
+            schema: DISCOVERY_SCHEMA.into(),
+            daw: "renoise".into(),
+            pid: std::process::id(),
+            host: "127.0.0.1".into(),
+            port: closed,
+            protocol: daw_bridge::wire::PROTOCOL.into(),
+            version: "0.1.0".into(),
+            daw_version: "3.5.4".into(),
+            resource: "/lab/Renoise-before".into(),
+            project: None,
+            started_ms: 1,
+        };
+        write_discovery(&self.paths().discovery(), &gone).unwrap()
+    }
 }
 
 fn reason(status: &Value) -> &str {
@@ -300,14 +319,12 @@ async fn a_bridge_goes_with_its_daw_and_a_reopened_daw_gets_a_new_one() {
     assert_eq!(lab.world.starts(), 2);
 }
 
-/// Asks for `status` until it says `reason` (the first call after a change may be the one that finds the connection
-/// closed, or the one that starts a bridge).
+/// Asks for `status` until it says `reason`, for a few seconds (the first call after a change may be the one that finds
+/// the connection closed, or the one that starts a bridge).
 async fn status_saying(host: &Host, reason_said: &str) -> Value {
+    let until = Instant::now() + Duration::from_secs(5);
     let mut status = host.status(&anyone()).await;
-    for _ in 0..40 {
-        if reason(&status) == reason_said {
-            break;
-        }
+    while reason(&status) != reason_said && Instant::now() < until {
         tokio::time::sleep(ms(50)).await;
         status = host.status(&anyone()).await;
     }
@@ -317,22 +334,7 @@ async fn status_saying(host: &Host, reason_said: &str) -> Value {
 #[tokio::test]
 async fn a_gone_bridges_file_is_removed_and_one_bridge_is_started_in_its_place() {
     let lab = Lab::new(How::Serve(ms(50)));
-    // A gone bridge's file: its DAW (this test's process) runs on, and nothing listens on its port.
-    let closed = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
-    let gone = Discovery {
-        schema: DISCOVERY_SCHEMA.into(),
-        daw: "renoise".into(),
-        pid: std::process::id(),
-        host: "127.0.0.1".into(),
-        port: closed,
-        protocol: daw_bridge::wire::PROTOCOL.into(),
-        version: "0.1.0".into(),
-        daw_version: "3.5.4".into(),
-        resource: "/lab/Renoise-before".into(),
-        project: None,
-        started_ms: 1,
-    };
-    let file = write_discovery(&lab.paths().discovery(), &gone).unwrap();
+    let file = lab.gone_file();
     let host = lab.host(Times::default());
     // (on Windows the refused connect takes its 2 s, the call's whole wait: then the next call connects)
     let mut status = host.status(&anyone()).await;
@@ -341,6 +343,20 @@ async fn a_gone_bridges_file_is_removed_and_one_bridge_is_started_in_its_place()
     }
     assert_eq!(status["connected"], true, "{status}");
     assert!(!file.exists(), "the gone bridge's file was removed");
+    assert_eq!(lab.world.starts(), 1, "one bridge started in its place");
+}
+
+#[tokio::test]
+async fn discover_removes_a_gone_bridges_file_and_starts_one_bridge_in_its_place() {
+    let lab = Lab::new(How::Serve(ms(50)));
+    let file = lab.gone_file();
+    let host = lab.host(Times::default());
+    let found = host.discover().await;
+    assert_eq!(found["staleRemoved"], 1, "{found}");
+    assert!(!file.exists(), "the gone bridge's file was removed");
+    // (the new bridge is listed when it serves within the call's wait; on Windows the refused connect takes that wait)
+    let listed = found["instances"].as_array().map_or(0, Vec::len);
+    assert!(listed == 1 || found["hint"] == STARTING, "{found}");
     assert_eq!(lab.world.starts(), 1, "one bridge started in its place");
 }
 
