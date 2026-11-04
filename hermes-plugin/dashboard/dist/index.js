@@ -50,6 +50,10 @@
     if (value && typeof value === "object" && typeof value.name === "string") return value.name.trim() || void 0;
     return void 0;
   }
+  function focusPath(focus) {
+    const parts = focus?.focus;
+    return [nameOf(parts?.track), nameOf(parts?.device) ?? nameOf(parts?.clip)].filter((part) => Boolean(part)).map((part) => clean(part, 40));
+  }
   function colorOf(value) {
     const color = value && typeof value === "object" ? value.color : void 0;
     return typeof color === "string" && /^#[0-9a-f]{6}$/i.test(color) ? color : void 0;
@@ -305,12 +309,9 @@
     if (!focus || !focus.focus && !focus.project) {
       return /* @__PURE__ */ jsx("span", { style: S.muted, children: "Nothing in focus yet. Kumi shows what you select in your DAW once it's connected." });
     }
-    const track = nameOf(focus.focus?.track);
-    const device = nameOf(focus.focus?.device);
-    const clip = nameOf(focus.focus?.clip);
     const view = typeof focus.focus?.view === "string" ? focus.focus.view : void 0;
     const transport = focus.transport;
-    const path = [track, device ?? clip].filter(Boolean).map((part) => clean(part, 40));
+    const path = focusPath(focus);
     const catchUp = Array.isArray(focus.catch_up) ? focus.catch_up.filter((line) => typeof line === "string") : [];
     return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 6, opacity: focus.stale ? 0.6 : 1 }, children: [
       /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 7 }, children: [

@@ -22,6 +22,7 @@ import { Audition } from '../shared/hooks.ts'
 import { foundSounds, KumiStore } from '../shared/store.ts'
 import { ask } from './actions.ts'
 import { ListenCard } from './card.tsx'
+import { FocusHint } from './composer.tsx'
 import { StatusChip } from './chip.tsx'
 import { MapWorkspace } from './map.tsx'
 import { KumiPane, ownerSession } from './pane.tsx'
@@ -162,6 +163,9 @@ const plugin: HermesPlugin = {
           render: (props: ToolMediaRendererProps) => <ListenCard audition={audition} media={props} />
         }
       })
+    }
+    if (typeof sdk.COMPOSER_AREAS?.underside === 'string') {
+      contributions.push({ id: 'focus-hint', area: sdk.COMPOSER_AREAS.underside, render: () => <FocusHint store={store} /> })
     }
     ctx.registerMany(contributions)
     ctx.registerSettingsPage?.({

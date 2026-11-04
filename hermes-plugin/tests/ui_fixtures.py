@@ -312,7 +312,10 @@ def main(argv: list[str]) -> int:
     parser.add_argument("library", type=Path, help="a folder for the map's samples (an approved sample folder)")
     parser.add_argument("--audio", choices=["all", "some", "none"], default="all")
     parser.add_argument("--live", action="store_true", help="keep the heartbeat fresh until stopped")
+    parser.add_argument("--session-id", help="the stored id of the chat that owns the runtime (default: a made-up one)")
     args = parser.parse_args(argv)
+    if args.session_id:
+        OWNER["session_id"] = args.session_id
     state = write_state(args.plugin_data, args.library, audio=args.audio)
     print(state)
     if args.live:

@@ -114,3 +114,25 @@ test('"Last heard" counts from when the runtime was last heard, so it keeps movi
   assert.ok(at(heardAt + 60_000).includes('Last heard 1 min ago.'))
   assert.ok(at(heardAt + 3 * 3_600_000).includes('Last heard 3 h ago.'))
 })
+
+test("under the composer, the FOCUS hint shows what Kumi sees only in Kumi's own chat", async () => {
+  const { FocusHint } = await load('src/desktop/composer.tsx', { react: 'real' })
+  const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
+  const focus = { focus: { track: { name: 'Drums', color: '#f59e0b' }, device: { name: 'Drum Rack' } }, transport: { tempo: 124, playing: true } }
+  const store = new KumiStore(async path => {
+    if (path.startsWith('/status')) return { connected: true, daw: 'ableton', owner: { session_id: 's1' }, revisions: { focus: 3 } }
+    if (path.startsWith('/focus')) return focus
+    throw Object.assign(new Error('not here'), { status: 404 })
+  })
+  store.want('focus')
+  await store.refreshStatus()
+  await new Promise(resolve => setTimeout(resolve, 20))
+  const hint = chat => {
+    globalThis.__kumiTestHost = { state: { focusedStoredSessionId: { get: () => chat, subscribe: () => () => {}, listen: () => () => {} } } }
+    return renderToStaticMarkup(createElement(FocusHint, { store }))
+  }
+  const shown = hint('s1')
+  for (const text of ['Kumi sees ', 'Drums › Drum Rack', '124 BPM']) assert.ok(shown.includes(text), `${text} in ${shown}`)
+  assert.equal(hint('another-chat'), '')
+  assert.equal(hint(null), '')
+})

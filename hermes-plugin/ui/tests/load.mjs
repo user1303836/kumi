@@ -11,8 +11,8 @@ export const plugin = fileURLToPath(new URL('../..', import.meta.url))
 
 let loads = 0
 
-/** A stub `@hermes/plugin-sdk`. Every newer export is optional: `{ toolMedia: false }` makes an older Desktop. */
-export function sdkStub({ toolMedia = true, settingsHref = true } = {}) {
+/** A stub `@hermes/plugin-sdk`. Every newer export is optional: `{ toolMedia: false, composer: false }` makes an older Desktop. */
+export function sdkStub({ toolMedia = true, settingsHref = true, composer = true } = {}) {
   return `
     // Read at use, not at import: each test installs its own host after loading the bundle.
     export const host = new Proxy({}, { get: (_target, key) => globalThis.__kumiTestHost?.[key] })
@@ -20,6 +20,7 @@ export function sdkStub({ toolMedia = true, settingsHref = true } = {}) {
     export const PALETTE_AREA = 'palette'
     export const STATUSBAR_AREAS = { left: 'statusBar.left', right: 'statusBar.right' }
     ${toolMedia ? "export const TOOL_MEDIA_RENDERER_AREA = 'transcript.toolMedia'" : ''}
+    ${composer ? "export const COMPOSER_AREAS = { top: 'composer.top', bottom: 'composer.bottom', underside: 'composer.underside' }" : ''}
     ${settingsHref ? "export const pluginSettingsHref = (id, page) => '/settings?tab=plugins&plugin=' + id + (page ? '&ppage=' + page : '')" : ''}
     export const useValue = atom => atom.get()
     const Pass = props => props.children ?? null
