@@ -10,7 +10,7 @@ use crate::provider::{
     answers, bridge_log, closed, detected, host_check, kumi_home, open_now, probe_host, running_app, unknown_to, OwnHosts,
 };
 use async_trait::async_trait;
-use daw_bridge::{daw::Daw, detect, install::min_version};
+use daw_bridge::{daw::Daw, detect, files, install::min_version, paths::BridgePaths};
 use futures::{future::LocalBoxFuture, FutureExt};
 use kumi_agent::core::{
     context::IntegrationContext,
@@ -67,11 +67,9 @@ pub struct Beside {
     /// The variable the program takes for the app to open ("KUMI_SOUNDCRAFT_APP"): Kumi sets it to the app it found, so
     /// the program opens that one.
     pub app_variable: &'static str,
-    /// Kumi's folder of the bridge's state, under Kumi's home: "bridges/soundcraft".
+    /// Kumi's folder of the bridge's state, under Kumi's home, as the app names it: "bridges/soundcraft". (Its files are
+    /// [`BridgePaths`]'.)
     pub bridge_folder: &'static str,
-    /// The file there that says Kumi has opened the DAW for its bridge: the program's launch record, which names the copy
-    /// it opened by its `pid`.
-    pub launch_record: &'static str,
     pub create: fn(OwnOptions) -> Rc<dyn Integration>,
     /// What chatting without the DAW says it is.
     pub instructions: &'static str,
@@ -99,13 +97,12 @@ pub fn program_beside(name: &str, beside: &Path) -> Option<PathBuf> {
     program.is_file().then_some(program)
 }
 
-/// Whether Kumi has opened the DAW for its bridge: the program's launch record (`record`) is in the bridge's `folder`
-/// under Kumi's `home`.
-pub fn opened_by_kumi(home: &Path, folder: &str, record: &str) -> bool {
-    home.join(folder).join(record).is_file()
+/// Whether Kumi has opened the DAW for its bridge: the program's launch record is in the bridge's folder.
+pub fn opened_by_kumi(paths: &BridgePaths) -> bool {
+    paths.launch_record().is_file()
 }
 
-/// The most a launch record holds, as the program keeps it; and the most of what a launch said that Kumi reads.
+/// The most of what a launch said that Kumi reads.
 const READ_MOST: u64 = 64 * 1024;
 
 /// Up to [`READ_MOST`] bytes of a file.
@@ -116,14 +113,12 @@ fn read_capped(path: &Path) -> Option<Vec<u8>> {
     Some(bytes)
 }
 
-/// Whether the copy Kumi opened runs: the launch record's `pid` is, in `listing` (pid and program), a copy of `daw`. The
-/// record is read only as the program keeps it: a file of its own (not a link, a pipe or a folder) of at most 64 KiB.
-pub fn open_as_launched(home: &Path, folder: &str, record: &str, daw: Daw, listing: &[(u32, String)]) -> bool {
-    let path = home.join(folder).join(record);
-    let kept = std::fs::symlink_metadata(&path).is_ok_and(|meta| meta.is_file() && meta.len() <= READ_MOST);
-    let read = kept.then(|| read_capped(&path)).flatten();
-    let pid = read.and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok()?.get("pid")?.as_u64());
-    pid.is_some_and(|pid| listing.iter().any(|(running, name)| u64::from(*running) == pid && detect::process_is(daw, name)))
+/// Whether the copy Kumi opened runs: the launch record's `pid` is, in `listing` (pid and program), a copy of the DAW,
+/// under its usual names or as the app the record names. The record is read only as the program keeps it
+/// ([`files::Launched::read`]).
+pub fn open_as_launched(paths: &BridgePaths, listing: &[(u32, String)]) -> bool {
+    let Some(launched) = files::Launched::read(&paths.launch_record()) else { return false };
+    listing.iter().any(|(pid, name)| *pid == launched.pid && detect::process_is_app(paths.daw, name, Some(&launched.app)))
 }
 
 /// What the program's `launch` came to: whether the DAW opened (or the copy Kumi opened was open still), and what it
@@ -196,15 +191,15 @@ fn said_by(program: &Path, stderr: &[u8]) -> Vec<String> {
 /// A log of launches that has grown past this starts again.
 const LAUNCH_LOG_MOST: u64 = 64 * 1024;
 
-/// Keeps what a launch came to in the bridge's `logs` (`folder`'s, where `kumi report` reads the bridge's logs), a line a
-/// launch: a failure, or a recovery the DAW offered, is still there once setup has moved on. Only in a folder the program
+/// Keeps what a launch came to in the bridge's `logs` (where `kumi report` reads the bridge's logs), a line a launch: a
+/// failure, or a recovery the DAW offered, is still there once setup has moved on. Only in a bridge folder the program
 /// made (owner-only, for the record it keeps there): Kumi never makes that folder itself.
-fn keep_said(folder: &Path, launched: &Launched) {
+fn keep_said(paths: &BridgePaths, launched: &Launched) {
     use std::io::Write;
-    if !folder.is_dir() {
+    if !paths.root.is_dir() {
         return;
     }
-    let logs = folder.join("logs");
+    let logs = paths.logs();
     if std::fs::create_dir_all(&logs).is_err() {
         return;
     }
@@ -242,8 +237,13 @@ impl Beside {
         program_beside(self.program, exe.parent()?)
     }
 
+    /// The bridge's files in Kumi's folder.
+    fn paths(&self, env: &Env) -> BridgePaths {
+        BridgePaths::new(&kumi_home(env), self.daw)
+    }
+
     fn opened(&self, env: &Env) -> bool {
-        opened_by_kumi(&kumi_home(env), self.bridge_folder, self.launch_record)
+        opened_by_kumi(&self.paths(env))
     }
 
     /// The bridge, once the DAW is set up for Kumi: the program beside this Kumi, once Kumi has opened the DAW through it.
@@ -255,7 +255,7 @@ impl Beside {
     /// session's environment stands in for it): only that copy can be reached.
     fn open_through_kumi(&self, env: &Env) -> bool {
         let listing = detected(env, |found| detect::list_processes(found.var));
-        open_as_launched(&kumi_home(env), self.bridge_folder, self.launch_record, self.daw, &listing)
+        open_as_launched(&self.paths(env), &listing)
     }
 
     /// Whether this user has used the DAW, or Kumi has opened it: else the doctor has nothing to say of it.
@@ -492,7 +492,7 @@ impl DawProvider for Beside {
             })
             .await
             .unwrap_or_else(|_| Launched { opened: false, said: vec![] });
-            keep_said(&kumi_home(&io.env).join(beside.bridge_folder), &launched);
+            keep_said(&beside.paths(&io.env), &launched);
             if !launched.opened {
                 let why = launched.said.last().map_or(String::new(), |why| format!(": {}", sentence(why)));
                 io.out.write(&format!("Kumi couldn't open {app}{}\n", if why.is_empty() { ".".into() } else { why }));
@@ -629,7 +629,7 @@ impl DawSetup for BesideSetup {
             tokio::task::spawn_blocking(move || launch(&program, &home, app.as_deref().map(|app| (variable, app)), set.as_deref()))
                 .await
                 .unwrap_or_else(|_| Launched { opened: false, said: vec![] });
-        keep_said(&kumi_home(&self.env).join(self.beside.bridge_folder), &launched);
+        keep_said(&self.beside.paths(&self.env), &launched);
         let opened = launched.opened;
         *self.launched.borrow_mut() = Some(launched);
         opened
@@ -739,7 +739,6 @@ mod tests {
         program: "program",
         app_variable: "TEST_APP",
         bridge_folder: "bridges/renoise",
-        launch_record: "launched.json",
         create: no_integration,
         instructions: "",
         not_found: "",
@@ -763,36 +762,43 @@ mod tests {
         let program = kumi.path().join(format!("soundcraft-kumi{}", std::env::consts::EXE_SUFFIX));
         std::fs::write(&program, b"").unwrap();
         assert_eq!(program_beside("soundcraft-kumi", kumi.path()), Some(program));
-        assert!(!opened_by_kumi(home.path(), "bridges/soundcraft", "launched.json"), "Kumi hasn't opened the DAW yet");
-        std::fs::create_dir_all(home.path().join("bridges/soundcraft")).unwrap();
-        std::fs::write(home.path().join("bridges/soundcraft/launched.json"), b"{}").unwrap();
-        assert!(opened_by_kumi(home.path(), "bridges/soundcraft", "launched.json"));
+        let paths = BridgePaths::new(home.path(), Daw::SoundCraft);
+        assert!(!opened_by_kumi(&paths), "Kumi hasn't opened the DAW yet");
+        std::fs::create_dir_all(&paths.root).unwrap();
+        std::fs::write(paths.launch_record(), b"{}").unwrap();
+        assert!(opened_by_kumi(&paths));
     }
 
     #[test]
     fn the_copy_kumi_opened_is_the_launch_records_pid_running_as_the_daw() {
         let home = tempfile::tempdir().unwrap();
+        let paths = BridgePaths::new(home.path(), Daw::Renoise);
         let renoise = "/Applications/Renoise.app/Contents/MacOS/Renoise";
-        let open =
-            |pid: u32, name: &str| open_as_launched(home.path(), "bridges/renoise", "launched.json", Daw::Renoise, &[(pid, name.into())]);
+        let open = |pid: u32, name: &str| open_as_launched(&paths, &[(pid, name.into())]);
         assert!(!open(4242, renoise), "no launch record");
-        std::fs::create_dir_all(home.path().join("bridges/renoise")).unwrap();
-        std::fs::write(home.path().join("bridges/renoise/launched.json"), br#"{"pid":4242,"port":51234}"#).unwrap();
+        daw_bridge::owner::create_owner_only_dir(&paths.root).unwrap();
+        let record = |app: &str| {
+            let launched = files::Launched { pid: 4242, started_ms: 1, port: 51234, token: "t".into(), app: app.into(), version: None };
+            daw_bridge::owner::write_owner_only(&paths.launch_record(), &serde_json::to_vec(&launched).unwrap()).unwrap();
+        };
+        record("/Applications/Renoise.app");
         assert!(open(4242, renoise));
         assert!(!open(4243, renoise), "another copy, opened another way");
         assert!(!open(4242, "/bin/zsh"), "its pid, another program's now");
+        // The app the program opened, under another name.
+        record("/opt/studio/Tracker");
+        assert!(open(4242, "/opt/studio/Tracker"));
         // Read only as the program keeps it: a file of its own, of at most 64 KiB.
-        let record = home.path().join("bridges/renoise/launched.json");
-        let mut big = br#"{"pid":4242}"#.to_vec();
+        let mut big = std::fs::read(paths.launch_record()).unwrap();
         big.resize(65 * 1024, b' ');
-        std::fs::write(&record, &big).unwrap();
-        assert!(!open(4242, renoise), "a record bigger than the program writes");
+        daw_bridge::owner::write_owner_only(&paths.launch_record(), &big).unwrap();
+        assert!(!open(4242, "/opt/studio/Tracker"), "a record bigger than the program writes");
         #[cfg(unix)]
         {
             let elsewhere = home.path().join("elsewhere.json");
             std::fs::write(&elsewhere, br#"{"pid":4242}"#).unwrap();
-            std::fs::remove_file(&record).unwrap();
-            std::os::unix::fs::symlink(&elsewhere, &record).unwrap();
+            std::fs::remove_file(paths.launch_record()).unwrap();
+            std::os::unix::fs::symlink(&elsewhere, paths.launch_record()).unwrap();
             assert!(!open(4242, renoise), "a link in the record's place");
         }
     }
@@ -843,12 +849,12 @@ mod tests {
         );
         // Kept where `kumi report` reads the bridge's logs, once the program has made the bridge's folder: Kumi never
         // makes it.
-        let folder = home.join("bridges/renoise");
-        keep_said(&folder, &failed);
-        assert!(!folder.exists(), "no folder made for the log");
-        std::fs::create_dir_all(&folder).unwrap();
-        keep_said(&folder, &failed);
-        let log = std::fs::read_to_string(folder.join("logs/launch.log")).unwrap();
+        let paths = BridgePaths::new(&home, Daw::Renoise);
+        keep_said(&paths, &failed);
+        assert!(!paths.root.exists(), "no folder made for the log");
+        std::fs::create_dir_all(&paths.root).unwrap();
+        keep_said(&paths, &failed);
+        let log = std::fs::read_to_string(paths.logs().join("launch.log")).unwrap();
         assert!(log.contains("launch didn't open: Renoise is open without its control channel"), "{log}");
     }
 
