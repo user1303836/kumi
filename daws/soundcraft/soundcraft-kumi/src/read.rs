@@ -5,9 +5,10 @@
 //! `engine.plugins`, asked once. Automation lanes are named as SoundCraft's automation commands name them. The lives of the
 //! objects learn from every look at the session:
 //! a read's, and the look loop's every few seconds. Every answer carries the epoch of the table of lives its refs are
-//! from. A new one starts when the bridge starts again, and when a look sees another session open: by its name or path,
-//! by an undo history emptied with nothing to redo (only a session opened, made or closed does that), or by none of the
-//! objects it saw before. SoundCraft gives ids out again, so a ref or parent comes with the epoch it came from, and one
+//! from. A new one starts when the bridge starts again, and when a look sees another session open ([`Reads::saw`]): by
+//! another name or path unless its objects hold what they held (a save, a Save As, a rename), by an undo history emptied
+//! with nothing to redo (only a session opened, made or closed does that), or by none of the objects it saw before with no
+//! step to take them. SoundCraft gives ids out again, so a ref or parent comes with the epoch it came from, and one
 //! from another epoch is stale. What a read can be refused for without the app is refused before it's asked. A page ends
 //! at the limit asked for (50, at most 200) or at the bytes an answer may take. Its cursor names the object it starts at,
 //! so a list that changed between pages says so rather than skipping or repeating rows.
@@ -45,11 +46,12 @@ const SELECTED_CLIPS: usize = 20;
 pub type Refusal = (&'static str, String);
 
 /// What a look saw of the session, to tell another session from it: its name and path, the tops of its undo and redo
-/// histories, and who its objects were.
+/// histories, who its objects were, and what they held (a source by who it is, as a save rewrites where its file is).
 struct Look {
     named: (Value, Value),
     history: (Value, Value),
     who: HashSet<(Kind, u64, u64)>,
+    held: HashSet<(Kind, u64, u64)>,
 }
 
 /// The bridge's reads of one copy of SoundCraft: the lives of its objects (and their epoch), the last look, and the last
@@ -83,22 +85,30 @@ impl Reads {
     }
 
     /// What a look saw of the session (`session.inspect`, in full or not): the lives learn from it, and another session
-    /// starts a new epoch, with new lives. Another session is one under another name or path (a save or Save As, which names
-    /// the session after its file and changes nothing else, is the same one), one whose undo history was emptied, or one
-    /// with none of the objects before though no step took them (File > New on a session with nothing to undo). A save the
-    /// looks see only after an edit that followed it counts as another session. The last full inspection serves no more
-    /// reads, so their rows and the lives come from one look.
+    /// starts a new epoch, with new lives. Another session is:
+    /// - one under another name or path, unless its objects hold all they held and either its history reads as it did (a
+    ///   save or Save As, which names the session after its file) or its path is the same (Setup > Session's rename);
+    /// - one whose undo history was emptied;
+    /// - one with none of the objects before though no step took them (File > New on a session with nothing to undo).
+    ///
+    /// A save the looks see only after an edit that followed it counts as another session. The last full inspection
+    /// serves no more reads, so their rows and the lives come from one look.
     pub fn saw(&mut self, session: &Value) {
         let prints = fingerprints(session);
+        let each = |print: fn(Kind, &crate::refs::Print) -> u64| {
+            prints.iter().flat_map(|(kind, objects)| objects.iter().map(move |(id, held)| (*kind, *id, print(*kind, held)))).collect()
+        };
         let now = Look {
             named: (session["name"].clone(), session["path"].clone()),
             history: (session["undo"].clone(), session["redo"].clone()),
-            who: prints.iter().flat_map(|(kind, objects)| objects.iter().map(|(id, print)| (*kind, *id, print.who))).collect(),
+            who: each(|_, print| print.who),
+            held: each(|kind, print| if kind == Kind::Source { print.who } else { print.all }),
         };
         let emptied = |history: &(Value, Value)| history.0.is_null() && history.1.is_null();
         let another = self.looked.as_ref().is_some_and(|before| {
-            let (kept_history, kept_objects) = (before.history == now.history, before.who == now.who);
-            (before.named != now.named && !(kept_history && kept_objects))
+            let (kept_history, kept_objects) = (before.history == now.history, before.held == now.held);
+            let (saved, renamed) = (kept_objects && kept_history, kept_objects && before.named.1 == now.named.1);
+            (before.named != now.named && !(saved || renamed))
                 // (an undo leaves something to redo, and a redo or a step something to undo: only another session empties
                 // a history)
                 || (!emptied(&before.history) && emptied(&now.history))

@@ -642,6 +642,41 @@ async fn a_save_or_a_save_as_is_the_same_session_with_its_refs_and_identity() {
 }
 
 #[tokio::test]
+async fn another_file_whose_objects_are_who_they_were_but_hold_other_things_is_another_session() {
+    // A "v2" of the song, opened with nothing to undo in either: every object who it was, but its audio clips moved and
+    // Kick's first insert another plug-in.
+    let mut app = App::new(json!([])).await;
+    let epoch = snapshot(&mut app).await["epoch"].clone();
+    {
+        let mut session = app.session.lock().unwrap();
+        (session["name"], session["path"]) = (json!("Groove v2"), json!("/sessions/Groove v2.scraft"));
+        let tracks = session["tracks"].as_array_mut().unwrap();
+        for clip in tracks.iter_mut().flat_map(|track| track["clips"].as_array_mut().into_iter().flatten()) {
+            if clip.get("source").is_some() {
+                clip["start"] = json!(clip["start"].as_i64().unwrap() + 48000);
+            }
+        }
+        tracks[0]["inserts"][0]["plugin"] = json!("compressor");
+    }
+    tokio::time::sleep(STALE_AFTER).await;
+    assert_ne!(snapshot(&mut app).await["epoch"], epoch);
+}
+
+#[tokio::test]
+async fn a_session_renamed_on_the_same_path_is_the_same_session() {
+    // Setup > Session renames it as a step of its own: the history moves, the file and the objects stay.
+    let mut app = App::new(json!([])).await;
+    app.session.lock().unwrap()["path"] = json!("/sessions/Groove.scraft");
+    let epoch = snapshot(&mut app).await["epoch"].clone();
+    {
+        let mut session = app.session.lock().unwrap();
+        (session["name"], session["undo"]) = (json!("Groove (final)"), json!("Session Setup"));
+    }
+    tokio::time::sleep(STALE_AFTER).await;
+    assert_eq!(snapshot(&mut app).await["epoch"], epoch);
+}
+
+#[tokio::test]
 async fn deleting_every_object_in_one_step_is_the_same_session() {
     let mut app = App::new(json!([])).await;
     let epoch = snapshot(&mut app).await["epoch"].clone();
