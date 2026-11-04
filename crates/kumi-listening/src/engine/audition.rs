@@ -171,6 +171,7 @@ impl Listening {
                 devices: None,
                 note: None,
                 picture: None,
+                batch: None,
             });
             if let Some(tell) = &self.on_audition {
                 let event = AuditionEvent {

@@ -84,6 +84,11 @@ struct State {
     capture_marks: Option<Value>,
     /// What part of its source an item plays (REAPER): offset and length in the file, its play rate, reversed.
     item_part: Option<(f64, f64, f64, bool)>,
+    /// Renders' files don't say how long they are (a bridge that leaves `seconds` out).
+    renders_unmeasured: bool,
+    /// A copy's parameters (its device's place, the parameter's) whose scratch set is refused, and why: a batch holding
+    /// one is refused whole, nothing in it set.
+    refused_params: Vec<(u64, u64, String)>,
 }
 
 /// A scratch copy: its ref, name, the source's ref and the values set on it.
@@ -162,6 +167,8 @@ impl SimListening {
                 refused_copies: vec![],
                 capture_marks: None,
                 item_part: None,
+                renders_unmeasured: false,
+                refused_params: vec![],
             })),
         }
     }
@@ -198,6 +205,16 @@ impl SimListening {
     /// A track the bridge won't make scratch copies of (by ref, or a Renoise track's place: "track:3"), and why.
     pub fn refuse_copies_of(&self, track: &str, why: &str) {
         self.state.lock().unwrap().refused_copies.push((track.into(), why.into()));
+    }
+
+    /// A parameter of every scratch copy the bridge won't set (by its device's place in the chain and its own), and why.
+    pub fn refuse_param(&self, device: u64, param: u64, why: &str) {
+        self.state.lock().unwrap().refused_params.push((device, param, why.into()));
+    }
+
+    /// Renders' files leave out how long they are, so Kumi measures them by the tempo.
+    pub fn leave_out_render_seconds(&self) {
+        self.state.lock().unwrap().renders_unmeasured = true;
     }
 
     /// What the next render tells of the tempo it played into the transport ({before: {bpm, lpb}, bpm, lpb}): Renoise's
@@ -643,6 +660,9 @@ impl SimListening {
                 .iter()
                 .map(|(source, path, start, seconds, _, stage)| {
                     let mut file = json!({"id": source, "file": path, "start": start, "seconds": seconds, "channels": 2, "sampleRate": RATE, "stage": stage, "throughMaster": daw == Daw::Renoise && *stage == "post-fader"});
+                    if state.renders_unmeasured {
+                        file.as_object_mut().map(|file| file.remove("seconds"));
+                    }
                     if job.kind == "capture" {
                         file["partial"] = false.into();
                     }
@@ -811,6 +831,13 @@ impl SimListening {
                 Ok(answer)
             }
             Some("set") => {
+                let refused = params["values"].as_array().into_iter().flatten().find_map(|value| {
+                    let at = (value["device"].as_u64()?, value["param"].as_u64()?);
+                    state.refused_params.iter().find(|(device, param, _)| (*device, *param) == at).map(|(.., why)| why.clone())
+                });
+                if let Some(why) = refused {
+                    return Err(("failed".into(), why));
+                }
                 let Some(copies) = state.scratch.get_mut(&id) else { return Err(bad(format!("no scratch copies {id}"))) };
                 let mut set = 0;
                 for value in params["values"].as_array().into_iter().flatten() {

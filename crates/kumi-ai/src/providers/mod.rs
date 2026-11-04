@@ -19,6 +19,7 @@ use crate::{
     http::{default_fetch, Fetch, FetchInit, Response},
     openai_compatible::{openai_compatible, CompatibleSettings},
     openai_responses::{openai_responses, ResponsesSettings},
+    socket::SocketFetch,
     types::*,
 };
 use async_trait::async_trait;
@@ -197,6 +198,11 @@ impl Fetch for IdentifiedFetch {
         usage::record(self.provider.as_str(), &response.headers);
         Ok(response)
     }
+    async fn warm(&self, url: &str, mut headers: crate::http::Headers) {
+        let agent = headers.get("user-agent").cloned().unwrap_or_default();
+        headers.insert("user-agent".into(), format!("{} {agent}", *USER_AGENT).trim().into());
+        self.fetch.warm(url, headers).await
+    }
 }
 struct CodexFetch {
     fetch: Rc<dyn Fetch>,
@@ -214,6 +220,15 @@ impl Fetch for CodexFetch {
         init.headers.insert("originator".into(), "kumi".into());
         init.headers.insert("openai-beta".into(), "responses=experimental".into());
         self.fetch.fetch(url, init).await
+    }
+    async fn warm(&self, url: &str, mut headers: crate::http::Headers) {
+        // A sign-in that can't be read now (or refreshed) leaves the request to say so.
+        let Ok(token) = (self.token)().await else { return };
+        headers.insert("authorization".into(), format!("Bearer {}", token.access));
+        headers.insert("chatgpt-account-id".into(), token.account_id);
+        headers.insert("originator".into(), "kumi".into());
+        headers.insert("openai-beta".into(), "responses=experimental".into());
+        self.fetch.warm(url, headers).await
     }
 }
 /// The headers a provider's requests carry beside the format's own: the conversation's ID, where it takes one.
@@ -237,12 +252,16 @@ pub async fn resolve_model(options: ResolveModelOptions) -> Result<ModelBinding,
     let provider = parsed.provider;
     let model = parsed.model;
     let row = provider.row();
+    let own_fetch = options.fetch.as_ref().is_none_or(|fetch| fetch.is_kumis_own());
     let base = options.fetch.unwrap_or_else(default_fetch);
     let identified: Rc<dyn Fetch> = Rc::new(IdentifiedFetch { fetch: base.clone(), provider });
     let (key, fetch): (String, Rc<dyn Fetch>) = match row.sign_in {
         SignIn::Chatgpt => {
-            let token = codex_token_source(options.store, TokenOptions { fetch: Some(base), now: None });
+            let token = codex_token_source(options.store, TokenOptions { fetch: Some(base.clone()), now: None });
             token().await?;
+            // Kumi's own HTTP (not a fetch given for a test or a probe): its Responses go over a WebSocket.
+            let identified: Rc<dyn Fetch> =
+                if own_fetch { Rc::new(IdentifiedFetch { fetch: Rc::new(SocketFetch::new(base)), provider }) } else { identified };
             ("kumi-oauth".into(), Rc::new(CodexFetch { fetch: identified, token }))
         }
         SignIn::ApiKey => {
@@ -425,6 +444,13 @@ fn anthropic_request(request: ModelRequest, effort: Option<Effort>) -> CallOptio
     let lasting = Map::from_iter([("anthropic".into(), json!({"cacheControl":{"type":"ephemeral","ttl":"1h"}}))]);
     let cache = Map::from_iter([("anthropic".into(), json!({"cacheControl":{"type":"ephemeral"}}))]);
     let mut messages = request.messages;
+    // The message before the model's latest answer ended the last request, whose breakpoint was there: marked again, so a
+    // step that adds more than Anthropic looks back over (20 blocks: ten calls and their results) still finds what's
+    // cached. Three breakpoints of the four allowed.
+    let before_answer = messages.iter().rposition(|message| matches!(message, Message::Assistant { .. })).and_then(|at| at.checked_sub(1));
+    if let Some(at) = before_answer {
+        messages[at].provider_options_mut().get_or_insert_with(Map::new).extend(cache.clone());
+    }
     if let Some(last) = messages.last_mut() {
         last.provider_options_mut().get_or_insert_with(Map::new).extend(cache);
     }

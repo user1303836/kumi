@@ -237,3 +237,48 @@ pub fn restore(ctx: &Ctx, restore: &Restore) -> Done<Restored> {
         ..Default::default()
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::reaper::fake;
+
+    fn hash_of(at: i32) -> String {
+        let api = fake::api();
+        let reaper = Reaper::new(&api);
+        let proj = reaper.current_project().unwrap().ptr;
+        content_hash(&reaper, reaper.track_at(proj, at).unwrap())
+    }
+
+    /// The hash the kept track's undo checks moves with an edit of its MIDI or of its envelopes' points, and not with
+    /// what only selects them. (The track's print, the signature's other half, reads REAPER's own state text: its
+    /// selections are left out there, as `a_track_state_reads_the_same_selected_or_not_and_without_its_plug_ins_data`
+    /// shows.)
+    #[test]
+    fn the_content_hash_moves_with_a_midi_or_envelope_edit_and_not_with_a_selection() {
+        fake::lab_project();
+        // Drums (0) has a volume envelope, the snare (2) a MIDI take.
+        fake::with(|s| s.tracks[0].envelopes[0].pts = Some(vec![fake::FakePoint::at(0.0, 1.0), fake::FakePoint::at(2.0, 0.5)]));
+        let (drums, snare) = (hash_of(0), hash_of(2));
+        fake::with(|s| {
+            s.tracks[0].envelopes[0].pts.as_mut().unwrap()[1].selected = true;
+            s.tracks[2].items[0].takes[0].notes[0].selected = true;
+        });
+        assert_eq!((hash_of(0), hash_of(2)), (drums.clone(), snare.clone()), "selected");
+        type Edit = fn(&mut fake::State);
+        let edits: [(&str, usize, Edit); 5] = [
+            ("a note moved", 2, |s| s.tracks[2].items[0].takes[0].notes[0].start_ppq = 240.0),
+            ("a note's pitch", 2, |s| s.tracks[2].items[0].takes[0].notes[1].pitch = 41),
+            ("a controller's value", 2, |s| s.tracks[2].items[0].takes[0].ccs[1].data2 = 90),
+            ("a point moved", 0, |s| s.tracks[0].envelopes[0].pts.as_mut().unwrap()[1].time = 3.0),
+            ("a point's shape", 0, |s| s.tracks[0].envelopes[0].pts.as_mut().unwrap()[0].shape = 2),
+        ];
+        for (what, at, edit) in edits {
+            let was = fake::with(|s| s.tracks.clone());
+            fake::with(edit);
+            let before = if at == 0 { &drums } else { &snare };
+            assert_ne!(&hash_of(at as i32), before, "{what}");
+            fake::with(|s| s.tracks = was);
+        }
+    }
+}

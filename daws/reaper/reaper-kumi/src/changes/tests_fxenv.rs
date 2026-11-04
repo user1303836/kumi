@@ -1195,8 +1195,20 @@ fn kick_config(key: &str) -> Option<String> {
     state(|s| s.tracks[1].fx[0].config.get(key).cloned())
 }
 
+/// A tempo-synced LFO keeps the speed asked for and its undo puts it back: REAPER converts the speed when the switch flips (lab,
+/// 7.82: 3 became 0.6667 when the speed was written first, and the undo failed: "REAPER wouldn't put the parameter's LFO back").
 #[test]
-fn an_lfo_is_turned_on_with_the_modulation_and_undo_turns_both_off_and_says_reaper_keeps_the_settings() {
+fn a_tempo_synced_lfo_keeps_its_speed_and_is_put_back() {
+    let lab = chains_lab();
+    let input = json!({"ref": "r:param:{K-MAIN}:0", "active": true, "speed": 3, "tempoSync": true});
+    let (preview, applied) = lab.make("fx-param-lfo", input);
+    assert_eq!((kick_config("param.0.lfo.speed").as_deref(), kick_config("param.0.lfo.temposync").as_deref()), (Some("3"), Some("1")));
+    lab.undo("fx-param-lfo", &preview, &applied).unwrap();
+    assert_eq!((kick_config("param.0.lfo.speed").as_deref(), kick_config("param.0.lfo.temposync").as_deref()), (Some("1"), Some("0")));
+}
+
+#[test]
+fn an_lfo_is_turned_on_with_the_modulation_and_undo_turns_both_off_and_says_none_of_it_is_saved() {
     let lab = chains_lab();
     let input = json!({"ref": "r:param:{K-MAIN}:0", "active": true, "shape": "triangle", "speed": 2, "tempoSync": false, "strength": 0.4});
     let (preview, applied) = lab.make("fx-param-lfo", input.clone());
@@ -1206,7 +1218,7 @@ fn an_lfo_is_turned_on_with_the_modulation_and_undo_turns_both_off_and_says_reap
     assert_eq!(applied["undo"]["entry"], true);
     let undone = lab.undo("fx-param-lfo", &preview, &applied).unwrap();
     assert_eq!((kick_config("param.0.mod.active").as_deref(), kick_config("param.0.lfo.active").as_deref()), (Some("0"), Some("0")));
-    assert!(undone["display"]["note"].as_str().unwrap().contains("turned off"), "{}", undone["display"]);
+    assert!(undone["display"]["note"].as_str().unwrap().contains("none of them is saved with the project"), "{}", undone["display"]);
     let again = lab.undo("fx-param-lfo", &preview, &applied).unwrap();
     assert_eq!(again["undo"]["entry"], false);
     // The producer changed the speed since: refused; discard puts it back.
@@ -1320,8 +1332,9 @@ fn midi_learn_is_written_and_put_back() {
         (Some("176"), Some("/kumi/x"))
     );
     assert!(kick_config("param.1.mod.active").is_none(), "learn makes no modulation block");
-    lab.undo("fx-param-learn", &preview, &applied).unwrap();
+    let undone = lab.undo("fx-param-learn", &preview, &applied).unwrap();
     assert_eq!(kick_config("param.1.learn.midi1").as_deref(), Some("0"));
+    assert!(undone["display"]["note"].as_str().unwrap().contains("empty MIDI learn entry"), "{}", undone["display"]);
 }
 
 // ----- envelopes -----

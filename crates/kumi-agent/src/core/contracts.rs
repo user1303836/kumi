@@ -194,6 +194,9 @@ pub trait Kernel {
     fn set_profile(&self, profile: DawProfile) {
         let _ = profile;
     }
+    /// The producer began a message: the connection the next request will go on is readied meanwhile, with this
+    /// conversation's identity (ChatGPT's WebSocket). Nothing is sent, said or kept.
+    async fn warm(&self) {}
 }
 
 #[derive(Clone)]
@@ -806,12 +809,21 @@ pub trait GoalRig {
     ) -> Result<Generation, RuntimeError>;
     /// The best so far on a track of its own ("Kumi · Goal best"), replacing the last copy; its name, or why not.
     async fn keep_best(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<String, RuntimeError>;
+    /// What the best just kept leaves out, when it holds only a part of its track: said beside where the best is.
+    fn kept_only(&self) -> Option<String> {
+        None
+    }
     /// A slot left where it is at these values, its safety limiter's input back at 0 dB (a match's winner, tuned); why not, if it couldn't be.
     async fn settle(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<Option<String>, RuntimeError>;
     /// A finished goal's candidates: the top ones muted for the producer to A/B, the rest removed; what it did.
     async fn tidy(&self, top: &[String], signal: Signal) -> Result<Vec<String>, RuntimeError>;
     /// The rig's scratch tracks go and the transport comes back; anything the producer should know.
     async fn close(&self) -> Result<Vec<String>, RuntimeError>;
+    /// The goal's over: what its search left on the candidates' own tracks goes back, where a DAW's search moves them at all
+    /// (REAPER's and Renoise's try copies); anything the producer should know. A settled winner keeps its values.
+    async fn put_back(&self, _signal: Signal) -> Vec<String> {
+        vec![]
+    }
 }
 
 /// What kind of thing was pointed at.

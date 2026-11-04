@@ -5,6 +5,7 @@ use super::{
     store::read_json,
 };
 use indexmap::IndexSet;
+use kumi_types::{daw::DawId, place::Place};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -40,8 +41,9 @@ pub async fn remembered_folders(dir: &str) -> Vec<String> {
         .filter_map(|v| v.as_str().map(str::to_owned))
         .collect()
 }
-/// Only the record's first 2048 bytes are read, matching the bounded source lookup.
-pub async fn kumi_sets(projects_dir: Option<&str>) -> Vec<String> {
+/// The projects Kumi saw open, from each saved project's place: Live's Sets, and the projects of a DAW whose files the
+/// library reads. Only the record's first 2048 bytes are read, matching the bounded source lookup.
+pub async fn kumi_sets(projects_dir: Option<&str>, daws: Daws) -> Vec<String> {
     static PATH: LazyLock<Regex> = LazyLock::new(|| Regex::new(r#""path":"((?:[^"\\]|\\.)*)""#).unwrap());
     let Some(dir) = projects_dir.filter(|s| !s.is_empty()) else { return vec![] };
     let Ok(mut entries) = tokio::fs::read_dir(dir).await else { return vec![] };
@@ -52,7 +54,16 @@ pub async fn kumi_sets(projects_dir: Option<&str>) -> Vec<String> {
     // Node's readdir (unlike opendir) returns names in lexical order.
     names.sort();
     let mut found = vec![];
-    for name in names.into_iter().filter(|name| kumi_types::place::is_project_id(name)) {
+    for name in names {
+        // (a place's name says whose project it is)
+        let extension = match Place::parse(&name) {
+            Some(Place::Saved { daw: DawId::Ableton, .. }) => ".als",
+            Some(Place::Saved { daw, .. }) => match daws.projects_of(daw) {
+                Some(format) => format.extension,
+                None => continue,
+            },
+            _ => continue,
+        };
         let Ok(mut handle) = tokio::fs::File::open(join(&join(dir, &name), "last-seen.json")).await else { continue };
         let mut buffer = [0; 2048];
         let Ok(bytes) = handle.read(&mut buffer).await else { continue };
@@ -62,7 +73,7 @@ pub async fn kumi_sets(projects_dir: Option<&str>) -> Vec<String> {
             continue;
         }
         let Ok(value) = serde_json::from_str::<String>(&format!("\"{}\"", path.as_str())) else { continue };
-        if value.ends_with(".als") && Path::new(&value).exists() {
+        if value.to_lowercase().ends_with(extension) && Path::new(&value).exists() {
             found.push(value);
         }
     }
@@ -85,7 +96,7 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
     let recent: Vec<_> = if find_sets {
         recent_projects(options.daws, &original_sources)
             .into_iter()
-            .chain(kumi_sets(options.projects_dir.as_deref()).await)
+            .chain(kumi_sets(options.projects_dir.as_deref(), options.daws).await)
             .collect::<IndexSet<_>>()
             .into_iter()
             .filter(|path| !others.iter().any(|folder| below(path, folder).is_some()))

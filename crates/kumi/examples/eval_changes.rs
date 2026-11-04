@@ -1,5 +1,5 @@
 //! Opt-in eval of how the configured model uses Kumi's tools: changes, playing and recording
-//! (resampling), listening, watching a tutorial, recipes (watch_me included) and memory. It uses your
+//! (resampling), listening, watching a tutorial, recipes (watch_me included), arranging and memory. It uses your
 //! sign-in and model but never Live: a synthetic bridge with the real bridge's tool schemas (from the
 //! catalog of the bridge built with it) stands in for a small, unsaved Set, one of whose tracks is named
 //! like an instruction. Notes, recipes and audio go to a throwaway folder, never ~/.kumi.
@@ -416,6 +416,12 @@ impl SetState {
                         Value::Object(row)
                     })
                 })
+                .collect(),
+            // Two scenes: the loops, and an empty one.
+            "scene" => ["Loops", ""]
+                .iter()
+                .enumerate()
+                .map(|(index, name)| json!({"ref": format!("5:scene:{index}"), "parentRef": "5:set:song", "name": name, "index": index}))
                 .collect(),
             "routing-choice" => ["Ext. In", "Resampling"]
                 .into_iter()
@@ -1380,6 +1386,9 @@ fn every_case() -> Vec<Case> {
                     && mentions(run.last, &["technique", "neuro from a reese"])
             })
         },
+        // Arranging: the loops laid out as a track, by what arrange's guidance says of a form (a look first, named
+        // sections of whole bars at the length asked, tracks in and out) and as one call that ends the answer.
+        said("arrange", &["Arrange the loops in the first scene into a 2-minute track."], arranged),
         said("gap noted", &["Freeze the Bass track for me."], |run| {
             !run.gaps.is_empty() && mentions(&stringify(&Value::Array(run.gaps.to_vec())), &["freez"]) && run.changes.is_empty()
         }),
@@ -1409,6 +1418,49 @@ fn every_case() -> Vec<Case> {
             )
         },
     ]
+}
+
+/// Each arrange call's input, in order: called by its own name or through call_tool.
+fn arrange_calls(conversation: &str) -> Vec<JsonObject> {
+    let messages: Vec<Value> = serde_json::from_str(conversation).unwrap_or_default();
+    messages
+        .iter()
+        .filter_map(|message| message.get("content").and_then(Value::as_array))
+        .flatten()
+        .filter(|part| part.get("type").and_then(Value::as_str) == Some("tool-call"))
+        .filter_map(|part| {
+            let input = part.get("input").filter(|input| !input.is_null()).or(part.get("args"))?;
+            match part.get("toolName").and_then(Value::as_str)? {
+                "arrange" => input.as_object().cloned(),
+                "call_tool" if input.get("name").and_then(Value::as_str) == Some("arrange") => {
+                    input.get("input").and_then(Value::as_object).cloned()
+                }
+                _ => None,
+            }
+        })
+        .collect()
+}
+
+fn arranged(run: &Run<'_>) -> bool {
+    let calls = arrange_calls(run.conversation);
+    let has_sections = |call: &JsonObject| items(call.get("sections")).next().is_some();
+    let Some(looked) = calls.iter().position(|call| !has_sections(call)) else { return false };
+    let Some(built) = calls.iter().rposition(has_sections) else { return false };
+    let call = &calls[built];
+    let sections: Vec<&Value> = items(call.get("sections")).collect();
+    let bars: Vec<f64> = sections.iter().map(|section| number(section.get("bars"))).collect();
+    let total: f64 = bars.iter().sum();
+    let named = sections.iter().all(|section| !trim(&js_string(section.get("name"))).is_empty());
+    let playing: Vec<String> = sections.iter().map(|section| stringify(section.get("tracks").unwrap_or(&Value::Null))).collect();
+    let varied = playing.iter().any(|tracks| *tracks != playing[0])
+        || sections.iter().any(|section| section.get("gap").is_some() || items(section.get("fill")).next().is_some());
+    looked < built
+        && call.get("final") == Some(&Value::Bool(true))
+        && sections.len() >= 4
+        && named
+        && bars.iter().all(|bars| *bars > 0.0 && bars % 4.0 == 0.0)
+        && (52.0..=68.0).contains(&total)
+        && varied
 }
 
 fn resampled(run: &Run<'_>) -> bool {

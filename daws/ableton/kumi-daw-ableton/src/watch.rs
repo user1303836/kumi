@@ -25,6 +25,9 @@ use std::{
     panic::{catch_unwind, AssertUnwindSafe},
     rc::Rc,
 };
+/// save_recipe's input, given with what changed, so the routine is saved in the next call.
+const SAVE: &str = "save_recipe takes {name, about, params: [{name, about}] for each $blank, steps: [{tool, input, as?}]}, each \
+                    step one make_changes takes: call it straight away.";
 struct Watching {
     set: Option<String>,
     pages: Vec<JsonObject>,
@@ -200,6 +203,9 @@ impl Watch {
         }
         if described.changes.is_empty() {
             reply.insert("note".into(), json!("Nothing in the Set changed while Kumi watched."));
+        } else {
+            // save_recipe is deferred and its steps aren't plain fields: its input here saves a lookup before saving.
+            reply.insert("save".into(), json!(SAVE));
         }
         Ok(ToolResult::text(stringify(&json!(reply))))
     }

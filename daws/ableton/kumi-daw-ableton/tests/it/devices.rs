@@ -701,44 +701,52 @@ fn an_instrument_notes_shared_out_by_poly_to_one_gen_per_voice_bend_exactly_0_at
     assert_eq!(inner(&patcher, "obj-bendscale")["text"], "/ 32.");
     let voices = boxes_of(&patcher).into_iter().filter(|item| item["id"].as_str().unwrap().starts_with("obj-voice-")).count();
     assert_eq!(voices, 6);
-    // Each voice is a [p voice n]: its note in on the left, the Params, bend and mod wheel on the right, its sound out.
-    assert_eq!(inner(&patcher, "obj-voice-2")["text"], "p voice 2");
-    let voice = json!({ "patcher": inner(&patcher, "obj-voice-1")["patcher"] });
-    assert_eq!(inner(&voice, "obj-voice")["text"], "gen~");
-    assert_eq!(inner(&voice, "obj-voice")["numinlets"], 1, "no audio input, one inlet for its Params");
-    assert_eq!((inner(&voice, "obj-notes")["maxclass"].as_str(), inner(&voice, "obj-params")["index"].as_u64()), (Some("inlet"), Some(2)));
     let lines = wires(&patcher);
-    for voice in 1..=6 {
+    let first = code_of(&json!({ "patcher": inner(&patcher, "obj-voice-1")["patcher"] }), "obj-voice");
+    assert!(!first.is_empty());
+    // Each voice is a [p voice n]: its note in on the left, the Params, bend and mod wheel on the right, its sound out.
+    for n in 1..=6 {
+        let id = format!("obj-voice-{n}");
+        assert_eq!(inner(&patcher, &id)["text"], format!("p voice {n}"));
         for expected in [
-            format!("obj-route:{}>obj-voice-{voice}:0", voice - 1),
-            format!("obj-bend:0>obj-voice-{voice}:1"),
-            format!("obj-mod:0>obj-voice-{voice}:1"),
-            format!("obj-prepend-1:0>obj-voice-{voice}:1"),
-            format!("obj-voice-{voice}:0>obj-output:0"),
-            format!("obj-voice-{voice}:1>obj-output:1"),
+            format!("obj-route:{}>{id}:0", n - 1),
+            format!("obj-bend:0>{id}:1"),
+            format!("obj-mod:0>{id}:1"),
+            format!("obj-prepend-1:0>{id}:1"),
+            format!("{id}:0>obj-output:0"),
+            format!("{id}:1>obj-output:1"),
         ] {
             assert!(lines.contains(&expected), "{expected}");
         }
+        let voice = json!({ "patcher": inner(&patcher, &id)["patcher"] });
+        assert_eq!(inner(&voice, "obj-voice")["text"], "gen~", "voice {n}");
+        assert_eq!(inner(&voice, "obj-voice")["numinlets"], 1, "voice {n}: no audio input, one inlet for its Params");
+        assert_eq!(
+            (inner(&voice, "obj-notes")["maxclass"].as_str(), inner(&voice, "obj-params")["index"].as_u64()),
+            (Some("inlet"), Some(2)),
+            "voice {n}"
+        );
+        assert_eq!(code_of(&voice, "obj-voice"), first, "voice {n} plays the voice the model wrote");
+        let inside = wires(&voice);
+        for expected in [
+            "obj-notes:0>obj-order:0",
+            "obj-order:1>obj-unpack:0",
+            "obj-order:0>obj-heard:0",
+            "obj-note:0>obj-voice:0",
+            "obj-strike:0>obj-voice:0",
+            "obj-params:0>obj-voice:0",
+            "obj-voice:0>obj-left:0",
+            "obj-voice:1>obj-right:0",
+        ] {
+            assert!(inside.contains(&expected.to_string()), "voice {n}: {expected}");
+        }
+        assert!(
+            inside.contains(&"obj-heard:1>obj-played:0".to_string()) && inside.contains(&"obj-played:1>obj-bang:0".to_string()),
+            "voice {n}: a strike counts only notes played (velocity above 0)"
+        );
+        // On real Live, a bare counter (first count 0) left strike at 0, so no voice played its first note.
+        assert_eq!(inner(&voice, "obj-count")["text"], "counter 1 1000000", "voice {n}: its first note changes strike too");
     }
-    let inside = wires(&voice);
-    for expected in [
-        "obj-notes:0>obj-order:0",
-        "obj-order:1>obj-unpack:0",
-        "obj-order:0>obj-heard:0",
-        "obj-note:0>obj-voice:0",
-        "obj-strike:0>obj-voice:0",
-        "obj-params:0>obj-voice:0",
-        "obj-voice:0>obj-left:0",
-        "obj-voice:1>obj-right:0",
-    ] {
-        assert!(inside.contains(&expected.to_string()), "{expected}");
-    }
-    assert!(
-        inside.contains(&"obj-heard:1>obj-played:0".to_string()) && inside.contains(&"obj-played:1>obj-bang:0".to_string()),
-        "a strike counts only notes played (velocity above 0)"
-    );
-    // On real Live, a bare counter (first count 0) left strike at 0, so no voice played its first note.
-    assert_eq!(inner(&voice, "obj-count")["text"], "counter 1 1000000", "a voice's first note changes strike too");
     assert!(matches(&code_of(&patcher, "obj-output"), "Param kumi_output"));
     assert!(!matches(&code_of(&patcher, "obj-output"), "kumi_mix"), "an instrument has no dry signal to mix");
     assert_eq!(decode_amxd(&encode_amxd(DeviceType::Instrument, &patcher)).map(|decoded| decoded.kind), Some(DeviceType::Instrument));
@@ -1184,6 +1192,22 @@ async fn make_device_makes_audio_effect_and_instrument_with_kumis_knobs() {
         decode_amxd(&std::fs::read(folder.path().join("Kumi/Instruments/Pluck.amxd")).unwrap()).unwrap().kind,
         DeviceType::Instrument
     );
+}
+
+// Each test runs in a process of its own: the KUMI_MAX this one sets is its own.
+#[tokio::test(flavor = "current_thread")]
+async fn a_kumi_max_that_names_no_max_says_its_the_thing_to_fix() {
+    use kumi_common::abort::Signal;
+    std::env::set_var("KUMI_MAX", "/no/such/max");
+    let folder = tempfile::tempdir().unwrap();
+    let tool = tool_in(&folder.path().join("library"), Default::default());
+    let said = "KUMI_MAX names no Max (/no/such/max): point it at Max's C74 folder or a Max that holds one, or unset it.";
+    let answer = tool.execute(json!({"objects": ["metro"]}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
+    assert_eq!(answer.text, said);
+    // A patch is made without it, and says so among its notes.
+    let patch = with(grit(), json!({ "code": null, "patch": "in.0 -> out.0\nin.1 -> out.1\n" }));
+    let made: Value = serde_json::from_str(&tool.execute(patch, Signal::new()).await.unwrap().text).unwrap();
+    assert!(made["notes"].as_array().is_some_and(|notes| notes.iter().any(|note| note.as_str() == Some(said))), "{made}");
 }
 
 #[tokio::test(flavor = "current_thread")]

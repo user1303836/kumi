@@ -73,8 +73,8 @@ local function chain_plan(song, env, input)
     bad(string.format("%s has %d device%s: Renoise's chain load replaces them all. Give replace: true (Kumi keeps them to put back), or load the chain onto another track",
       q(base.named(index, track)), count, count == 1 and "" or "s"))
   end
-  local devices = {}
-  for d = 2, #track.devices do devices[#devices + 1] = material_.device_state(track:device(d)) end
+  local devices, moving = {}, material_.moving_on(song, index)
+  for d = 2, #track.devices do devices[#devices + 1] = material_.state_at(song, index, d, moving) end
   return { index = index, track = track, file = file, name = name, devices = devices, count = count }
 end
 
@@ -169,13 +169,14 @@ local function chain_apply(song, env, input, fence, desc)
     if k <= #mixer.parameters then pcall(function() mixer:parameter(k).value = value end) end
   end
   local kept, states, names, contents = {}, {}, {}, {}
+  local moving = material_.moving_on(song, index)
   for d = 2, #track.devices do
     local device = track:device(d)
     kept[#kept + 1] = devices_.device_kept(env, index, d, device)
-    states[#states + 1] = material_.device_state(device)
+    states[#states + 1] = material_.state_at(song, index, d, moving)
     names[#names + 1] = devices_.label(device)
     -- (a Doofer's or a Splitter's devices inside, a Notepad's text, a plug-in's state: false for a device with none)
-    contents[#contents + 1] = material_.content_fence(device) or false
+    contents[#contents + 1] = material_.content_at(song, index, d, nil, moving) or false
   end
   material.loaded = kept
   return {
@@ -196,10 +197,11 @@ local function replaced_back(track, replaced)
 end
 
 -- Whether the devices after the track's mixer are exactly those a chain load left (by kind, settings, name and bypass).
-local function loaded_again(track, states)
+local function loaded_again(song, index, track, states)
   if type(states) ~= "table" or #states == 0 or #track.devices - 1 ~= #states then return false end
+  local moving = material_.moving_on(song, index)
   for j, was in ipairs(states) do
-    local now = material_.device_state(track:device(j + 1))
+    local now = material_.state_at(song, index, j + 1, moving)
     if now.path ~= was.path or now.state ~= was.state or now.display ~= was.display or now.active ~= was.active then return false end
   end
   return true
@@ -223,7 +225,7 @@ local function chain_restore(song, env, restore, desc)
   local replaced = material.replaced or {}
   -- (Renoise's own undo and redo of the load take its devices off and make them again: the log sees them go, so none is
   -- found by its place; the track holding exactly what Kumi loaded, device for device, is the chain again)
-  if missing > 0 and missing == #material.loaded and loaded_again(track, applied.states) then
+  if missing > 0 and missing == #material.loaded and loaded_again(song, index, track, applied.states) then
     found, missing = {}, 0
     for j = 1, #material.loaded do found[j] = { d = j + 1, j = j } end
   end
@@ -236,12 +238,12 @@ local function chain_restore(song, env, restore, desc)
         name, why_missing == "unknown" and "moved in a way Kumi couldn't follow" or "aren't there any more", track_name))
   end
   if not restore.discard then
-    local moved = {}
+    local moved, moving = {}, material_.moving_on(song, index)
     for _, f in ipairs(found) do
-      local now, was = material_.device_state(track:device(f.d)), (applied.states or {})[f.j] or {}
+      local now, was = material_.state_at(song, index, f.d, moving), (applied.states or {})[f.j] or {}
       local content = (applied.contents or {})[f.j]
       if now.path ~= was.path or now.state ~= was.state or now.display ~= was.display or now.active ~= was.active
-        or (content and material_.content_fence(track:device(f.d)) ~= content) then
+        or (content and material_.content_at(song, index, f.d, nil, moving) ~= content) then
         moved[#moved + 1] = devices_.label(track:device(f.d))
       end
     end

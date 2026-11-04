@@ -2,6 +2,7 @@
 #[path = "../common/mod.rs"]
 mod common;
 
+use base64::Engine;
 use common::Session;
 use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
 use daw_mcp_server::simulator::{Simulator, SimulatorConfig};
@@ -10,6 +11,95 @@ use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc, Mutex,
 };
+
+#[tokio::test]
+async fn fabfilter_processor_and_controller_state_survives_each_guarded_daw_route() {
+    let equalizer = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/fabfilter-pro-q-4/format-1/fixtures/init.vstpreset"));
+    let synth = include_bytes!(concat!(env!("KUMI_WORKSPACE"), "/plugin-formats/fabfilter-twin-3/format-1/fixtures/init.vstpreset"));
+    for (daw, kind, bytes) in [
+        (Daw::Reaper, "fx-preset", equalizer.as_slice()),
+        (Daw::Reaper, "fx-preset", synth.as_slice()),
+        (Daw::Renoise, "device-preset-data", equalizer.as_slice()),
+        (Daw::Renoise, "plugin-preset-data", synth.as_slice()),
+    ] {
+        let expected = daw_bridge::vst3::read(bytes).unwrap();
+        assert!(expected.controller.is_some(), "the fixture must exercise the separate controller");
+        let home = tempfile::tempdir().unwrap();
+        let paths = BridgePaths::new(home.path(), daw);
+        let secret = ensure_secret(&paths.secret()).unwrap();
+        let requests = Arc::new(Mutex::new(Vec::new()));
+        let captured = requests.clone();
+        let target_kind = if kind == "plugin-preset-data" { "instrument" } else { "device" };
+        let target_ref = if kind == "plugin-preset-data" { "e1:instrument:1" } else { "e1:device:1.2" };
+        let respond = Arc::new(move |method: &str, params: &Value| {
+            if !matches!(method, "change_preview" | "change_apply" | "change_restore") {
+                return None;
+            }
+            captured.lock().unwrap().push((method.to_owned(), params.clone()));
+            Some(Ok(match method {
+                "change_preview" => json!({"epoch":"e1","target":{"kind":target_kind,"ref":target_ref},
+                    "prior":{"hash":"before","retained":"original processor and controller"},"fence":{"hash":"before"},
+                    "display":{"title":"Load FabFilter preset"}}),
+                "change_apply" => json!({"epoch":"e1","applied":{"hash":"after"},
+                    "display":{"title":"Loaded FabFilter preset"},"undo":{"entry":true}}),
+                _ => json!({"epoch":"e1","restored":{"hash":"before"},
+                    "display":{"title":"Restored FabFilter preset"},"undo":{"entry":true}}),
+            }))
+        });
+        let mut config = match daw {
+            Daw::Reaper => SimulatorConfig::reaper(secret, "/lab/reaper"),
+            _ => SimulatorConfig::renoise(secret, "/lab/renoise"),
+        }
+        .with_methods(&["change_preview", "change_apply", "change_restore"], respond);
+        config.status_more = Some(Arc::new(|| Map::from_iter([("presetFiles".into(), json!(["vst3"]))])));
+        config.discovery_dir = Some(paths.discovery());
+        let _simulator = Simulator::start(config).await.unwrap();
+        let mut session = Session::start(daw, home.path());
+        let source = home.path().join("FabFilter.vstpreset");
+        std::fs::write(&source, bytes).unwrap();
+        let (record, failed) =
+            session.tool_full(1, "change_preview", json!({"kind":kind,"input":{"ref":target_ref,"path":source}}), false).await;
+        assert!(!failed, "{daw}/{kind}: {record}");
+        // Apply must use the checked snapshot, even after the producer replaces
+        // the source file with unrelated bytes.
+        std::fs::write(&source, b"replaced after preview").unwrap();
+        let (applied, failed) = session
+            .tool_full(
+                2,
+                "change_apply",
+                json!({"transactionId":record["transactionId"],
+                "confirmation":record["confirmation"],"idempotencyKey":"apply"}),
+                false,
+            )
+            .await;
+        assert!(!failed && applied["state"] == "applied", "{daw}/{kind}: {applied}");
+        let (undone, failed) = session
+            .tool_full(
+                3,
+                "change_undo",
+                json!({"transactionId":record["transactionId"],
+                "confirmation":"undo","idempotencyKey":"undo"}),
+                false,
+            )
+            .await;
+        assert!(!failed && undone["state"] == "undone", "{daw}/{kind}: {undone}");
+        let requests = requests.lock().unwrap();
+        assert_eq!(requests.len(), 3, "preview, apply and guarded restore must reach the same bridge");
+        for (_, request) in requests.iter().take(2) {
+            assert_eq!(request["kind"], kind);
+            let input = &request["input"];
+            assert!(input.get("path").is_none());
+            let delivered = base64::engine::general_purpose::STANDARD.decode(input["vst3Data"].as_str().unwrap()).unwrap();
+            assert_eq!(delivered, bytes);
+            let actual = daw_bridge::vst3::read(&delivered).unwrap();
+            assert_eq!(actual.class_id, expected.class_id);
+            assert_eq!(actual.component, expected.component);
+            assert_eq!(actual.controller, expected.controller);
+        }
+        assert_eq!(requests[2].0, "change_restore");
+        assert_eq!(requests[2].1["prior"]["retained"], "original processor and controller");
+    }
+}
 
 #[tokio::test]
 async fn old_bridges_never_receive_preset_files_even_through_reapers_named_preset_field() {

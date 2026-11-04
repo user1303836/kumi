@@ -265,8 +265,14 @@ its extension (or tool) in place and opens the DAW.
 
 - **The DAW is open:** it loads Kumi's bridge only as it starts, and Kumi never
   quits it for you. Choose **I'll quit it** and quit it yourself (it asks to
-  save first); Kumi puts the bridge in and opens it again. A project or song
-  you saved is in the DAW's list of recent ones.
+  save first); Kumi puts the bridge in and opens it again. What comes back is
+  the DAW's own start-up setting:
+  - REAPER, as it's set at first: every project tab you had open.
+  - REAPER set to open the last project: the project you had in front. Others
+    are in its list of recent projects.
+  - REAPER set to start with a new project: a new project, as you chose. Saved
+    ones are in its list of recent projects.
+  - Renoise: a song you saved is in its list of recent songs.
 - **It isn't installed:** Kumi says where to get it (reaper.fm, renoise.com);
   **Look again** checks once it's there. An older REAPER or Renoise that's open
   is named, and stays open.
@@ -324,8 +330,8 @@ Kumi about this**), Live's own commands and Live's manual.
 
 **Versions.** Each Kumi release ships with an extension and a tool, which
 `kumi update` brings up to date ([updating](#updating-reporting-and-uninstalling)).
-Kumi 1.24.10 to 1.24.32 with REAPER extension 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
-Kumi 1.24.10 to 1.24.32 with Renoise tool 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
+Kumi 1.24.64 with REAPER extension 0.1.11, 1.24.50 to 1.24.63 with 0.1.10, 1.24.45 to 1.24.49 with 0.1.9, 1.24.35 to 1.24.44 with 0.1.8, 1.24.10 to 1.24.34 with 0.1.7, 1.24.0 to 1.24.9 with 0.1.6, 1.23.3 with 0.1.5, 1.23.2 with 0.1.4, 1.23.1 with 0.1.3, 1.21.2 to 1.23.0 with 0.1.2, 1.21.0 to 1.21.1 with 0.1.1, 1.20.0 with 0.1.0.
+Kumi 1.24.61 to 1.24.64 with Renoise tool 1.0.18, 1.24.60 with 1.0.17, 1.24.54 to 1.24.59 with 1.0.16, 1.24.53 with 1.0.15, 1.24.51 to 1.24.52 with 1.0.14, 1.24.50 with 1.0.13, 1.24.49 with 1.0.12, 1.24.47 to 1.24.48 with 1.0.11, 1.24.46 with 1.0.10, 1.24.44 to 1.24.45 with 1.0.9, 1.24.43 with 1.0.8, 1.24.35 to 1.24.42 with 1.0.7, 1.24.10 to 1.24.34 with 1.0.6, 1.24.0 to 1.24.9 with 1.0.5, 1.23.3 with 1.0.4, 1.23.2 with 1.0.3, 1.23.1 with 1.0.2, 1.21.0 to 1.23.0 with 1.0.1, 1.20.0 with 1.0.0.
 
 ## Working with Kumi
 
@@ -754,9 +760,20 @@ its own fast knob search and with the model's bigger ideas every few
 generations, until the score reaches 95, you stop it, or four hours pass. The
 GOAL tab shows how it's going. With Max for Live, Kumi holds the candidates back
 while it tries them, so you hear the Set without them; the best goes on
-"Kumi · Goal best" when the search pauses or ends. Esc pauses the search,
-`/loop` alone picks it up again (even after a restart), and `/loop stop` ends
-it.
+"Kumi · Goal best" when the search pauses or ends. A paused goal's best waits
+muted beside its candidates. In Live, each candidate then goes back as the goal
+found it, without Kumi's limiter, apart from a knob you turned during the search.
+Esc pauses the search, `/loop` alone picks it up again (even after a restart),
+and `/loop stop` ends it.
+
+The next best replaces the last one only if Kumi can show it's unchanged.
+Otherwise the last one stays, the new one goes beside it, and Kumi says why there
+are two. In Live, Kumi reads the track's devices, clips, notes, mixer and Session
+clips' automation. It can't see a plug-in's own state that isn't a parameter,
+data inside a Max for Live device, or a change to automation already drawn in the
+Arrangement. An edit only there is replaced with the best. Live's own undo brought
+back a replaced best with its notes and a device setting no parameter shows; we
+expect the same for plug-ins and Max devices, but haven't seen it.
 
 What Kumi learns from each match is kept as a lesson (✦) for the next one;
 `/memory` lists them.
@@ -792,6 +809,8 @@ See [how arranging works](KUMI_CHANGES.md#arrangements).
 
 - **Built-in VST3 presets.** Ask Kumi to create or edit a preset. It checks its local format catalog before external research, and can load supported presets with history and undo. Serum 2, Ozone 12 and its modules, Valhalla, Minimal Audio, Pulsar Modular and other catalogued products have versioned format support; see [capabilities and limits](../../plugin-formats/README.md).
 - **Installed processors first.** Mastering and reference mastering check Ozone 12, then other suitable installed VST3s, then native devices. Kumi measures and listens before and after; a reference is compared at matched loudness.
+- **FabFilter presets.** Kumi creates, inspects and edits VST3 presets for the 14 current FabFilter products and 11 legacy products, using verified installed versions. The same files work through Live, REAPER and Renoise's preset workflows. Older builds use their captured layouts; unknown versions stay read-only. The catalog explains each stored value's scale, which can differ from the number shown on a knob.
+- **Import a FabFilter preset.** Give Kumi a local `.ffp` file to convert or edit into a loadable `.vstpreset`. Its filename supplies the preset name unless you request another name; unsupported layouts or values are refused.
 - **Native file limits.** Softube and some Zynaptiq presets support inspection, template copies and renaming; unverified numeric controls remain read-only. VST3 state loading is not claimed for locally unverified products. Live loads a new preset instance from its browser; existing instances use exposed parameters.
 - **Verified writes.** The installed version must match a tested writer. Numeric edits need a verified write range; text and Boolean edits need verified semantics or an explicit allowlist. Resource paths stay read-only. New files stay in Kumi's preset folder; Live also saves a User Library copy, which remains when undo removes the loaded device.
 
@@ -1411,6 +1430,10 @@ and your provider's own retention are separate.
   checks that each address is public before it connects, and a proxy would look
   the name up again where Kumi can't check it. On a network that lets only a
   proxy out, they can't read pages.
+- **ChatGPT** answers over one WebSocket connection to chatgpt.com that Kumi
+  keeps open while you work, so each step of an answer sends only what's new.
+  With a proxy, or on a network that won't open one, Kumi asks over HTTPS as
+  before.
 
 ## Files and settings
 
@@ -1482,6 +1505,7 @@ Environment variables (paths must be absolute):
 | `KUMI_RENOISE_PREFS_DIR` | Renoise's preferences: a `V<x.y.z>` folder, or the folder that holds them |
 | `KUMI_REMOTE_SCRIPTS_DIR` | Live's Remote Scripts folder, when Kumi doesn't find it |
 | `KUMI_LIVE_EXTENSIONS_DIR` | Where `kumi bridge` puts Kumi's extension and `kumi doctor` looks for it, when Kumi doesn't find Live's Extensions folder |
+| `KUMI_MAX` | The Max whose objects Kumi reads when it makes a Max for Live device: its `C74` folder (`resources` on Windows), or a Max that holds one (`Max.app`, or the folder `Max.exe` is in). It's used alone: if it names no Max, Kumi says so and reads no other. Otherwise it's the Max of the Live that's open, then the newest Live's |
 | `KUMI_BRIDGE_WAIT_SECONDS` | How long `kumi bridge` waits for Live to connect; `0` doesn't wait |
 | `KUMI_NO_UPDATE_CHECK` | Any value turns off the check for a newer version at start |
 | `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` | The proxy Kumi goes through, and the addresses it doesn't ([proxies](#proxies-and-school-or-office-networks)) |

@@ -13,6 +13,8 @@ pub struct TakeMore {
     pub stretch: Vec<(f64, f64, f64)>,
     /// Take markers: source position, name, colour; in source order.
     pub markers: Vec<(f64, String, i32)>,
+    /// The MIDI pool it's in, when it's pooled (its chunk's `POOLEDEVTS`).
+    pub pool: Option<String>,
     /// The media file a take plays, and its length (seconds, or quarter notes for MIDI).
     pub file: Option<String>,
     pub length: f64,
@@ -392,10 +394,12 @@ pub(super) unsafe extern "C" fn get_item_state_chunk(item: *mut MediaItem, buf: 
                 text += if k == i.active { "TAKE SEL\n" } else { "TAKE\n" };
             }
             text += &format!("NAME \"{}\"\nGUID {}\n", take.name, take.guid);
-            if take.source.as_deref() == Some("MIDI") {
+            if matches!(take.source.as_deref(), Some("MIDI" | "MIDIPOOL")) {
+                let own = format!("{{POOL-{}}}", take.guid.trim_matches(|c| c == '{' || c == '}'));
                 text += &format!(
-                    "<SOURCE MIDI\nPOOLEDEVTS {{POOL-{}}}\nCFGEDITVIEW 0 0\n>\n",
-                    take.guid.trim_matches(|c| c == '{' || c == '}')
+                    "<SOURCE {}\nPOOLEDEVTS {}\nCFGEDITVIEW 0 0\n>\n",
+                    take.source.as_deref().unwrap_or_default(),
+                    take.more.pool.as_deref().unwrap_or(&own)
                 );
             }
             // The take's FX as m4-r-fxenv writes their entries (its take FX kinds read them back): one FXID line per FX,
@@ -1018,20 +1022,28 @@ pub(super) unsafe extern "C" fn midi_set_all_evts(take: *mut MediaItem_Take, buf
     })
 }
 
-/// 960 ticks to the quarter note; the take's source starts where its item does, less its start offset.
-fn source_start_qn(s: &State, take: u64) -> f64 {
+/// A take's ticks as REAPER 7.82 places them (lab, #606): 960 a quarter note times its playrate, from the tick at its item's
+/// start (its start offset's, which no playrate moves). The item's start in quarter notes, that tick, and the ticks a quarter
+/// note.
+fn ticks_of(s: &State, take: u64) -> (f64, f64, f64) {
     let (_, t, i, k) = unpack(take);
-    let Some(item) = s.tracks.get(t as usize).and_then(|t| t.items.get(i as usize)) else { return 0.0 };
-    let offs = item.takes.get(k as usize).and_then(|tk| tk.extra.get("D_STARTOFFS").copied()).unwrap_or(0.0);
-    (item.position - offs) * s.bpm / 60.0
+    let Some(item) = s.tracks.get(t as usize).and_then(|t| t.items.get(i as usize)) else { return (0.0, 0.0, 960.0) };
+    let value = |key: &str, default: f64| item.takes.get(k as usize).and_then(|tk| tk.extra.get(key).copied()).unwrap_or(default);
+    (item.position * s.bpm / 60.0, value("D_STARTOFFS", 0.0) * s.bpm / 60.0 * 960.0, 960.0 * value("D_PLAYRATE", 1.0))
 }
 
 pub(super) unsafe extern "C" fn midi_get_proj_qn_from_ppq_pos(take: *mut MediaItem_Take, ppq: f64) -> f64 {
-    counted(|s| source_start_qn(s, take as u64) + ppq / 960.0)
+    counted(|s| {
+        let (start, first, per_quarter) = ticks_of(s, take as u64);
+        start + (ppq - first) / per_quarter
+    })
 }
 
 pub(super) unsafe extern "C" fn midi_get_ppq_pos_from_proj_qn(take: *mut MediaItem_Take, qn: f64) -> f64 {
-    counted(|s| (qn - source_start_qn(s, take as u64)) * 960.0)
+    counted(|s| {
+        let (start, first, per_quarter) = ticks_of(s, take as u64);
+        first + (qn - start) * per_quarter
+    })
 }
 
 // ----- tracks: fixed lanes and razor areas -----

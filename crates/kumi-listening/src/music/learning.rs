@@ -25,7 +25,6 @@ use std::{
 };
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::Command,
     sync::{mpsc, watch},
     task::JoinHandle,
 };

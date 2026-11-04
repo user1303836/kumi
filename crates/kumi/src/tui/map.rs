@@ -50,6 +50,8 @@ const MOST_RADIUS: f64 = 5.;
 const TOUCHING: f64 = 0.45;
 /// How typical a point is: how many others have it among their nearest this many on the map.
 const NEAREST: usize = 8;
+/// From how many points a map's nearest are searched on more than one core.
+const PARALLEL_FROM: usize = 20_000;
 /// A map fitted to the screen: past this share of its points' distances from its middle, a stray's distance beyond it
 /// grows as a log, this part of that distance at a time; and a map at most this many times as wide as it's tall.
 const STRAYS: f64 = 0.985;
@@ -243,6 +245,14 @@ struct Fit {
     typical: Vec<f32>,
 }
 
+/// Both maps as they were made ready to draw, kept after /map closes (`MapView::kept`): their data (its colours as read,
+/// which the theme draws in its own as they show again), and each map's fit.
+pub struct KeptMap {
+    data: Rc<MapData>,
+    fits: Vec<Fit>,
+    colors_read: [Vec<Rgb>; 2],
+}
+
 /// Both maps made ready to draw: worked out once as /map opens, off Kumi's thread.
 pub struct Ready {
     data: MapData,
@@ -259,6 +269,11 @@ pub fn ready(mut data: MapData) -> Ready {
 
 /// One map turned, its strays brought in and fitted to its box (its points' places changed in place).
 fn fitted(layer: &mut Layer) -> Fit {
+    fitted_on(layer, None)
+}
+
+/// `fitted`, its nearest searched on `threads` (None: as many as a map that big takes).
+fn fitted_on(layer: &mut Layer, threads: Option<usize>) -> Fit {
     let points = &mut layer.points;
     let count = points.len();
     if count == 0 {
@@ -306,7 +321,10 @@ fn fitted(layer: &mut Layer) -> Fit {
             if span > 0. { (((x - low.0) / span) as f32, ((y - low.1) / span + (1. - tall / span) / 2.) as f32) } else { (0.5, 0.5) };
     }
     let aspect = if span > 0. { (wide / span).max(1e-3) } else { 1. };
-    let (apart, named) = nearest_named(points, aspect);
+    let (apart, named) = match threads {
+        Some(threads) => nearest_named_on(points, aspect, threads),
+        None => nearest_named(points, aspect),
+    };
     let mut sorted = named.clone();
     sorted.sort_unstable();
     let median = sorted[count / 2] as f64;
@@ -317,6 +335,15 @@ fn fitted(layer: &mut Layer) -> Fit {
 /// Each point's distance to its nearest other on a map `aspect` wide, and how many others have it among their NEAREST
 /// nearest: a grid of about two points a cell, searched ring by ring out from each point's cell.
 fn nearest_named(points: &[Point], aspect: f64) -> (Vec<f32>, Vec<u32>) {
+    // A big map's points are searched on some of the cores: at most half, as a DAW playing beside Kumi keeps the rest.
+    let threads =
+        if points.len() < PARALLEL_FROM { 1 } else { std::thread::available_parallelism().map_or(1, |cores| (cores.get() / 2).max(1)) };
+    nearest_named_on(points, aspect, threads)
+}
+
+/// `nearest_named` on `threads` threads, each a run of the points: each point's search is the same wherever it runs, and
+/// the counts add up the same, so it gives the same on any number of them.
+fn nearest_named_on(points: &[Point], aspect: f64, threads: usize) -> (Vec<f32>, Vec<u32>) {
     let count = points.len();
     let across = ((count as f64 / 2. * aspect).sqrt().ceil() as usize).clamp(1, 4096);
     let down = ((count as f64 / 2. / aspect).sqrt().ceil() as usize).clamp(1, 4096);
@@ -339,42 +366,70 @@ fn nearest_named(points: &[Point], aspect: f64) -> (Vec<f32>, Vec<u32>) {
         next[y * across + x] += 1;
     }
     let (step, wanted) = (cell_width.min(cell_height), NEAREST.min(count - 1));
-    let (mut apart, mut named) = (vec![0f32; count], vec![0u32; count]);
-    let mut best: Vec<(f64, u32)> = Vec::with_capacity(NEAREST + 1);
-    for (at, point) in points.iter().enumerate() {
-        let (cx, cy) = cell(point);
-        let (cx, cy) = (cx as isize, cy as isize);
-        best.clear();
-        for ring in 0..across.max(down) as isize {
-            for y in (cy - ring).max(0)..=(cy + ring).min(down as isize - 1) {
-                for x in (cx - ring).max(0)..=(cx + ring).min(across as isize - 1) {
-                    // The ring's edge only: what's inside it was searched.
-                    if (x - cx).abs() != ring && (y - cy).abs() != ring {
-                        continue;
-                    }
-                    let c = y as usize * across + x as usize;
-                    for other in &order[starts[c]..starts[c + 1]] {
-                        if *other as usize == at {
+    // Each point's nearest, `from` to `to`: its distance to the nearest, and the counts it adds to those it names.
+    let search = |from: usize, to: usize| {
+        let mut apart = vec![0f32; to - from];
+        let mut named = vec![0u32; count];
+        let mut best: Vec<(f64, u32)> = Vec::with_capacity(NEAREST + 1);
+        for (at, point) in points.iter().enumerate().take(to).skip(from) {
+            let (cx, cy) = cell(point);
+            let (cx, cy) = (cx as isize, cy as isize);
+            best.clear();
+            for ring in 0..across.max(down) as isize {
+                for y in (cy - ring).max(0)..=(cy + ring).min(down as isize - 1) {
+                    for x in (cx - ring).max(0)..=(cx + ring).min(across as isize - 1) {
+                        // The ring's edge only: what's inside it was searched.
+                        if (x - cx).abs() != ring && (y - cy).abs() != ring {
                             continue;
                         }
-                        let there = &points[*other as usize];
-                        let d = (there.x as f64 - point.x as f64).powi(2) + (there.y as f64 - point.y as f64).powi(2);
-                        if best.len() < NEAREST || d < best[NEAREST - 1].0 {
-                            let place = best.partition_point(|(seen, _)| *seen <= d);
-                            best.insert(place, (d, *other));
-                            best.truncate(NEAREST);
+                        let c = y as usize * across + x as usize;
+                        for other in &order[starts[c]..starts[c + 1]] {
+                            if *other as usize == at {
+                                continue;
+                            }
+                            let there = &points[*other as usize];
+                            let d = (there.x as f64 - point.x as f64).powi(2) + (there.y as f64 - point.y as f64).powi(2);
+                            if best.len() < NEAREST || d < best[NEAREST - 1].0 {
+                                let place = best.partition_point(|(seen, _)| *seen <= d);
+                                best.insert(place, (d, *other));
+                                best.truncate(NEAREST);
+                            }
                         }
                     }
                 }
+                // Past this ring every point is at least `ring` cells away.
+                if best.len() == wanted && (wanted < NEAREST || best[wanted - 1].0.sqrt() <= ring as f64 * step) {
+                    break;
+                }
             }
-            // Past this ring every point is at least `ring` cells away.
-            if best.len() == wanted && (wanted < NEAREST || best[wanted - 1].0.sqrt() <= ring as f64 * step) {
-                break;
+            apart[at - from] = best.first().map_or(0., |(d, _)| d.sqrt() as f32);
+            for (_, other) in &best {
+                named[*other as usize] += 1;
             }
         }
-        apart[at] = best.first().map_or(0., |(d, _)| d.sqrt() as f32);
-        for (_, other) in &best {
-            named[*other as usize] += 1;
+        (apart, named)
+    };
+    let runs = threads.clamp(1, count);
+    let size = count.div_ceil(runs);
+    let parts: Vec<(Vec<f32>, Vec<u32>)> = if runs == 1 {
+        vec![search(0, count)]
+    } else {
+        std::thread::scope(|scope| {
+            let searching: Vec<_> = (0..runs)
+                .map(|run| {
+                    let search = &search;
+                    scope.spawn(move || search((run * size).min(count), ((run + 1) * size).min(count)))
+                })
+                .collect();
+            searching.into_iter().map(|run| run.join().expect("a map's search")).collect()
+        })
+    };
+    let mut apart = Vec::with_capacity(count);
+    let mut named = vec![0u32; count];
+    for (part_apart, part_named) in parts {
+        apart.extend(part_apart);
+        for (total, part) in named.iter_mut().zip(part_named) {
+            *total += part;
         }
     }
     (apart, named)
@@ -916,14 +971,32 @@ impl MapView {
     pub fn loaded(&mut self, ready: Ready) {
         let Ready { data, fits } = ready;
         // The classes' and styles' colours as read, for each theme's own (`rethemed`).
-        self.colors_read = [&data.sounds, &data.songs].map(|layer| layer.groups.iter().map(|group| group.color).collect());
+        let colors_read = [&data.sounds, &data.songs].map(|layer| layer.groups.iter().map(|group| group.color).collect());
+        self.shown_from(KeptMap { data: Rc::new(data), fits: fits.into(), colors_read });
+    }
+
+    /// A map kept from the last time /map was open, still the same (`KeptMap`): shown as it was first shown, without
+    /// reading or fitting it again.
+    pub fn reloaded(&mut self, kept: KeptMap) {
+        self.shown_from(kept);
+    }
+
+    fn shown_from(&mut self, kept: KeptMap) {
+        let KeptMap { data, fits, colors_read } = kept;
+        self.colors_read = colors_read;
         self.views = vec![View::new(&data.sounds, fits[0].aspect), View::new(&data.songs, fits[1].aspect)];
-        self.fits = fits.into();
+        self.fits = fits;
         self.tab = usize::from(data.sounds.points.is_empty() && !data.songs.points.is_empty());
-        self.data = Some(Rc::new(data));
+        self.data = Some(data);
         self.version += 1;
         self.mark_palette();
         self.rethemed();
+    }
+
+    /// What to keep of the map as it closes, for /map again while what it was read from stays the same: its data, its
+    /// fits and its colours as read. None when it never came.
+    pub fn kept(self) -> Option<KeptMap> {
+        Some(KeptMap { data: self.data?, fits: self.fits, colors_read: self.colors_read })
     }
 
     /// Each class's and style's colour as it reads on the theme's ground (on light, one too pale deepened), from the
@@ -2237,4 +2310,76 @@ mod tests {
         map.draw(&mut screen, &mut |_, _, _, _| 0);
         assert!(!screen.lines()[28].contains("Added"));
     }
+
+    /// A big map's nearest are searched on several threads and come out as on one: each point's distance to its nearest
+    /// and how many others name it, on a map with tight clusters and points on the very same spot.
+    #[test]
+    fn a_maps_nearest_are_the_same_on_one_thread_or_several() {
+        let mut points = vec![];
+        let mut seed = 7_u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as f32 / (1u64 << 31) as f32
+        };
+        for at in 0..25_000 {
+            let (x, y) = match at % 5 {
+                // The same spot as the point before.
+                0 if at > 0 => (points.last().map_or(0.5, |p: &(f32, f32, u16)| p.0), points.last().map_or(0.5, |p: &(f32, f32, u16)| p.1)),
+                // A tight cluster.
+                1 | 2 => (0.3 + next() * 0.01, 0.6 + next() * 0.01),
+                _ => (next(), next()),
+            };
+            points.push((x, y, (at % 7) as u16));
+        }
+        let layer = layer(&points);
+        let one = nearest_named_on(&layer.points, 1.4, 1);
+        for threads in [3, 8] {
+            assert_eq!(nearest_named_on(&layer.points, 1.4, threads), one, "{threads} threads");
+        }
+        assert_eq!(one.1.iter().map(|named| *named as usize).sum::<usize>(), 25_000 * NEAREST, "every point names its nearest");
+    }
+
+    /// A fixed map of 30,000 points (tight clusters, points on the same spot), fitted: every point's place, the map's
+    /// aspect, each point's distance to its nearest and how typical it is, as one digest of their exact bits.
+    fn fitted_digest(fit: impl Fn(&mut Layer) -> Fit) -> u64 {
+        let mut points = vec![];
+        let mut seed = 11_u64;
+        let mut next = || {
+            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            (seed >> 33) as f32 / (1u64 << 31) as f32
+        };
+        for at in 0..30_000 {
+            let (x, y) = match at % 6 {
+                0 if at > 0 => (points.last().map_or(0.5, |p: &(f32, f32, u16)| p.0), points.last().map_or(0.5, |p: &(f32, f32, u16)| p.1)),
+                1 | 2 => (0.2 + next() * 0.02, 0.7 + next() * 0.015),
+                _ => (next(), next() * 0.8),
+            };
+            points.push((x, y, (at % 9) as u16));
+        }
+        let mut layer = layer(&points);
+        let made = fit(&mut layer);
+        let mut digest = 0xcbf29ce484222325_u64;
+        let mut add = |bits: u64| {
+            for byte in bits.to_le_bytes() {
+                digest = (digest ^ byte as u64).wrapping_mul(0x100000001b3);
+            }
+        };
+        for point in &layer.points {
+            add(point.x.to_bits() as u64);
+            add(point.y.to_bits() as u64);
+        }
+        add(made.aspect.to_bits());
+        made.apart.iter().chain(&made.typical).for_each(|value| add(value.to_bits() as u64));
+        digest
+    }
+
+    /// The fit is main's, point for point, however many threads its search runs on.
+    #[test]
+    fn a_big_maps_fit_is_the_same_as_before_on_any_number_of_threads() {
+        for threads in [None, Some(1), Some(3), Some(8)] {
+            assert_eq!(fitted_digest(|layer| fitted_on(layer, threads)), MAINS_FIT, "{threads:?} threads");
+        }
+    }
+    /// What main's fit made of the fixed map (its digest, from main's tui/map.rs before this search ran on threads).
+    const MAINS_FIT: u64 = 13_404_431_125_891_730_567;
 }

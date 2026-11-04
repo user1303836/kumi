@@ -20,6 +20,10 @@ pub struct Knob {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub step: Option<f64>,
     pub value: f64,
+    /// Who its device is, where a DAW's refs are places and it can say (Live's identity for the device): the knob finds it by
+    /// this however the chain moves, and a search's knobs keep it across a leap.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -67,7 +71,7 @@ pub struct Trial {
     pub how: TrialHow,
 }
 static LEAVE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)^(device on|on|power|output|out|volume|gain|input|master|global volume|limiter.*|ceiling|macro [0-9]+|chain selector|pan|panorama)$").unwrap()
+    Regex::new(r"(?i)^(device on|on|power|output|out|volume|gain|input|master|global volume|global gain|adjustment \(db\)|output gain|.*makeup.*|limiter.*|ceiling|macro [0-9]+|chain selector|pan|panorama)$").unwrap()
 });
 static SHAPING: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)(filter|freq|cutoff|res(onance)?|q\b|attack|decay|sustain|release|\benv|shape|wave|tone|timbre|bright|color|colour|drive|dist|sat|detune|fine|coarse|level|mix|amount|depth|rate|spread|width|noise|body|decay|damp|stiff|mallet|feedback|morph|position|pw\b|pulse|glide)").unwrap()

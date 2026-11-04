@@ -1,0 +1,3 @@
+# Live's own log lines, as real starts of Live wrote them (each piece of a traceback ends in a space): no whitespace
+# checks.
+* -whitespace

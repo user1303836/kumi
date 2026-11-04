@@ -21,7 +21,7 @@ use kumi_agent::{
         session_log::SessionLog,
         store_backed::{SqliteMemoryStore, SqlitePlaybookStore, SqliteTechniqueStore},
         store_client::StoreClient,
-        threaded::{Build, Built, Threaded},
+        threaded::{Build, Built, Starting, Threaded},
     },
     *,
 };
@@ -55,16 +55,27 @@ impl Kernel for UnavailableKernel {
 }
 /// How the watch for Live paces itself: a look at Live's port every `look_ms`, and while it answers
 /// but the session isn't connected, a reconnect at once and then every `retry_ms`, at most `tries`
-/// times until it stops answering (then the count starts again). It ends after `looks`. A Live that's
-/// open but not answering yet gets `hold_ms` before Kumi says how to make it answer.
+/// times until it stops answering (then the count starts again). It ends after `looks` (quick ones aside). A Live
+/// that's open but not answering yet gets `hold_ms` before Kumi says how to make it answer.
+///
+/// For `quick_for_ms` from when the DAW is seen open (as the watch starts, or opening later among several DAWs) or its
+/// port begins to answer (a Live opened after Kumi), a look comes every `quick_ms`, and a reconnect that failed is tried
+/// again after `look_ms`, without counting against `tries`: the port opens as Live's Remote Script starts, about a
+/// second before Live answers through it. A look is a connect to that port on this computer, which sends nothing: a
+/// Remote Script not listening yet refuses it, and one listening drops it at once.
+///
+/// Why the DAW couldn't start Kumi's bridge is looked for every `look_ms` all the while: it's said once it has been seen
+/// a while, and a Live just opened may not have logged its own start yet, its log still ending with the start before.
 struct Pace {
     look_ms: u64,
+    quick_ms: u64,
+    quick_for_ms: u64,
     retry_ms: u64,
     tries: u32,
     looks: u32,
     hold_ms: u64,
 }
-const PACE: Pace = Pace { look_ms: 2_000, retry_ms: 20_000, tries: 10, looks: 1_800, hold_ms: 15_000 };
+const PACE: Pace = Pace { look_ms: 2_000, quick_ms: 250, quick_for_ms: 60_000, retry_ms: 20_000, tries: 10, looks: 1_800, hold_ms: 15_000 };
 
 /// What the watch says while the DAW isn't open and the producer works in several DAWs here (which to open), and
 /// whether this one is open now, from a listing made off the screen's thread.
@@ -152,9 +163,14 @@ async fn follow_the_daw<L, F>(
 /// With `absent` (the producer works in several DAWs here), a DAW that isn't open gets those words instead, which say
 /// to open one of them: Kumi follows the producer to the one they open. This one opening later is said as it starts,
 /// and the hold runs from then.
-async fn connect_when_daw_answers<F, A, O, B, S>(
+///
+/// When the open DAW couldn't start Kumi's bridge (`failure`: Live's log says why, with AbletonMcpBridge chosen), that
+/// is said in place of how to make it answer, at the look it's found: each reason once, and a new one when it changes.
+#[allow(clippy::too_many_arguments)]
+async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
     answers: F,
     live_open: O,
+    failure: W,
     words: WatchWords,
     absent: Option<Absent>,
     controller: Rc<RefCell<Option<Weak<S>>>>,
@@ -167,6 +183,8 @@ async fn connect_when_daw_answers<F, A, O, B, S>(
     A: std::future::Future<Output = bool>,
     O: FnOnce() -> B,
     B: std::future::Future<Output = bool>,
+    W: Fn() -> R,
+    R: std::future::Future<Output = Option<String>>,
     S: Reconnect + ?Sized,
 {
     let mut began = Some(std::time::Instant::now());
@@ -187,7 +205,20 @@ async fn connect_when_daw_answers<F, A, O, B, S>(
     }
     let mut tries = 0;
     let mut next: Option<std::time::Instant> = Some(std::time::Instant::now());
-    for _ in 0..pace.looks {
+    let mut failure_said: Option<String> = None;
+    // When a failed start is next looked for: at the usual pace, quick looks or not.
+    let mut next_failure = std::time::Instant::now();
+    // When the DAW was seen open, or its port began to answer: looks come quickly for a while from then.
+    let mut seen_open = open.then(std::time::Instant::now);
+    let quick_since =
+        |seen: Option<std::time::Instant>| seen.is_some_and(|at| at.elapsed() < std::time::Duration::from_millis(pace.quick_for_ms));
+    // (None until the first look: a port answering then is no Live starting, and a failure that persists there, a
+    // restart told or a stale secret, gets no quick tries)
+    let (mut looks, mut was_answering) = (0, None::<bool>);
+    while looks < pace.looks {
+        if !quick_since(seen_open) {
+            looks += 1;
+        }
         let Some(session) = controller.borrow().as_ref().and_then(Weak::upgrade) else { break };
         if session.connected() {
             break;
@@ -195,29 +226,50 @@ async fn connect_when_daw_answers<F, A, O, B, S>(
         if let Some(absent) = absent.as_ref().filter(|_| began.is_none()) {
             if (absent.opened)().await {
                 began = Some(std::time::Instant::now());
+                seen_open = began;
                 emit(SessionEvent::Notice { message: words.starting.into() });
+            }
+        }
+        if std::time::Instant::now() >= next_failure {
+            next_failure = std::time::Instant::now() + std::time::Duration::from_millis(pace.look_ms);
+            if let Some(failure) = failure().await.filter(|failure| failure_said.as_ref() != Some(failure)) {
+                said = true;
+                emit(SessionEvent::Notice { message: failure.clone() });
+                failure_said = Some(failure);
             }
         }
         if !said && began.is_some_and(|at| at.elapsed() >= std::time::Duration::from_millis(pace.hold_ms)) {
             said = true;
             emit(SessionEvent::Notice { message: words.unreachable.into() });
         }
-        if answers().await {
-            if tries < pace.tries && next.is_some_and(|at| std::time::Instant::now() >= at) {
-                tries += 1;
+        let answering = answers().await;
+        // Its port answering now and not before: Live is starting its Remote Script (opened after Kumi, say).
+        if answering && was_answering == Some(false) {
+            seen_open = Some(std::time::Instant::now());
+        }
+        was_answering = Some(answering);
+        let quick = quick_since(seen_open);
+        if answering {
+            if (quick || tries < pace.tries) && next.is_some_and(|at| std::time::Instant::now() >= at) {
+                // A quick try doesn't count against the tries: a Live that takes a while to answer after its port
+                // opens would otherwise use them all up within the minute.
+                if !quick {
+                    tries += 1;
+                }
                 // A turn under way makes this fail; it's tried again later.
                 if session.reconnect().await.is_ok() && session.connected() {
                     emit(SessionEvent::Notice { message: words.answered.into() });
                     break;
                 }
-                next = Some(std::time::Instant::now() + std::time::Duration::from_millis(pace.retry_ms));
+                let retry = if quick { pace.look_ms } else { pace.retry_ms };
+                next = Some(std::time::Instant::now() + std::time::Duration::from_millis(retry));
             }
         } else {
             tries = 0;
             next = Some(std::time::Instant::now());
         }
         drop(session);
-        tokio::time::sleep(std::time::Duration::from_millis(pace.look_ms)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(if quick { pace.quick_ms } else { pace.look_ms })).await;
     }
     watching.set(false);
 }
@@ -256,7 +308,7 @@ async fn connect_when_live_answers<F, A, O, B, S>(
     S: Reconnect + ?Sized,
 {
     let words = live_words();
-    connect_when_daw_answers(answers, live_open, words, None, controller, emit, watching, told, pace).await
+    connect_when_daw_answers(answers, live_open, || async { None }, words, None, controller, emit, watching, told, pace).await
 }
 /// Live's words for its watch, as the DAW table has them.
 #[cfg(test)]
@@ -308,6 +360,17 @@ struct Recipe {
     /// Where the session finds the DAW's bridge: first-run setup sets it once the bridge is in place.
     bridge: Arc<Mutex<Option<String>>>,
 }
+
+/// Where the session is being built: on a thread of its own, started already (with what its database said as it opened,
+/// to come), or here, from its recipe, once this thread gets to it (a test's stand-ins).
+enum Building {
+    Thread(Starting, tokio::sync::oneshot::Receiver<Option<String>>),
+    Here(Recipe),
+}
+
+/// The session as the front end holds it: its handle, its thread (when it has one of its own), what it does as it ends
+/// (when built on this thread), and what its database said as it opened.
+type Started = (Rc<dyn SessionHandle>, Option<Rc<Threaded>>, Option<LocalBoxFuture<'static, ()>>, Option<String>);
 
 /// The session, built where it lives from `recipe` (and a test's `answers`), what it says going to `emit`: its stores,
 /// its models, the producer's library and music, the DAW's integration, and what it does as it ends. Also what its
@@ -408,6 +471,10 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
         }),
         fetch: None,
         installed: None,
+        // The providers' lists, kept beside models.dev's catalog: a start reads them at once.
+        lists: Some(crate::model_lists::KeptLists::new(
+            std::path::Path::new(&crate::config::kumi_dir(&env)).join("cache").join("model-lists.json"),
+        )),
     }));
     // models.dev's catalog of models: the copy Kumi kept, then a newer one at most once a day, never in the way (a slow
     // answer ends with the session, so Kumi's exit doesn't wait on it).
@@ -656,7 +723,7 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
                     } else if !watching_live.replace(true) {
                         // Said once, by the watch: its own retries fall back here too, quietly.
                         let config = bridge_config.clone();
-                        let (env, answers_env, listed_env) = (env.clone(), env.clone(), env.clone());
+                        let (env, answers_env, listed_env, failure_env) = (env.clone(), env.clone(), env.clone(), env.clone());
                         let absent = absent_words.clone().map(|words| Absent {
                             words,
                             opened: Rc::new(move || {
@@ -675,6 +742,7 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
                         *live_watch.borrow_mut() = Some(tokio::task::spawn_local(connect_when_daw_answers(
                             move || provider.bridge_answers(&config, &answers_env),
                             move || provider.app_open(&env),
+                            move || provider.start_failure(&failure_env),
                             provider.watch_words(),
                             absent,
                             controller.clone(),
@@ -748,6 +816,7 @@ async fn build_session(recipe: Recipe, answers: Answers, emit: Rc<dyn Fn(Session
     // the songs on their maps, read each time /map opens.
     options.slots = Some(slots_context);
     options.map = Some(crate::map::loader(library.clone(), load_library_dir(&env)?.into(), music.clone()));
+    options.map_key = Some(crate::map::keyer(library.clone(), load_library_dir(&env)?.into(), music.clone()));
     options.jobs = Some(JobsOptions {
         worker_factory,
         max: settings.max_jobs.map(|n| n as usize).unwrap_or(DEFAULT_MAX_JOBS),
@@ -931,12 +1000,7 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         absent_words,
         bridge: session_bridge.clone(),
     };
-    let (session, threaded, mut ending, database_notice): (
-        Rc<dyn SessionHandle>,
-        Option<Rc<Threaded>>,
-        Option<LocalBoxFuture<'static, ()>>,
-        Option<String>,
-    ) = if io.threaded && answers.is_empty() {
+    let building = if io.threaded && answers.is_empty() {
         let (said, heard) = tokio::sync::oneshot::channel();
         let build: Build = Box::new(move |emit| {
             async move {
@@ -946,13 +1010,55 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             }
             .boxed_local()
         });
-        let threaded = Threaded::spawn(build).await?;
-        let notice = heard.await.ok().flatten();
-        (threaded.clone(), Some(threaded), None, notice)
+        Building::Thread(Threaded::start(build)?, heard)
     } else {
-        let (Built { session, ending }, notice) = build_session(recipe, answers.clone(), to_screen).await?;
-        (session, None, ending, notice)
+        Building::Here(recipe)
     };
+    // While the session's thread builds it, this one does what needs no session. It asks the terminal what it is (a
+    // terminal its environment keeps quiet, the Linux console or a dumb one, isn't asked, nor one whose producer said not
+    // to, `KUMI_PROBE=off`): the answer crosses the terminal meanwhile. It's given back once its last answer (DA1) is in,
+    // so ctrl+c still stops a slow start; one that hasn't answered within the wait stays raw, read by the probe, until
+    // the screen takes it, so answers that come late are read rather than echoed. And it reads the input history,
+    // each line redacted again with the keys known now. A session that can't start ends the wait for the terminal, and is
+    // said first, as before.
+    let platform = kumi_types::system::platform();
+    let profile = (print.is_none() && full_screen && io.probe).then(|| crate::tui::alerts::detect_terminal_profile(&io.env, platform));
+    let probes = profile.as_ref().is_some_and(|profile| profile.status) && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off");
+    // (Unix: a ctrl+c the held terminal keeps from the producer is raised as its signal. Windows' console has no such
+    // way back, so there the terminal is asked once the session is built, just before the screen, as before.)
+    let asking = if probes && cfg!(unix) { crate::tui::probe::ask(&io.input, &io.out) } else { None };
+    let failed = Signal::new();
+    // (`biased`: the questions are out already; the history is read while they're answered and the session builds)
+    let (_, history, built) = tokio::join!(
+        biased;
+        async {
+            if let Some(asking) = &asking {
+                asking.answered(crate::tui::probe::BUDGET, &failed).await;
+            }
+        },
+        async {
+            load_input_history_file(&io.env)
+                .map(|file| Rc::new(RefCell::new(open_input_history(Some(file.into()), secrets.clone()))))
+        },
+        async {
+            let built: Result<Started, RuntimeError> =
+                match building {
+                    Building::Thread(starting, heard) => match starting.ready().await {
+                        Ok(threaded) => Ok((threaded.clone(), Some(threaded), None, heard.await.ok().flatten())),
+                        Err(error) => Err(error),
+                    },
+                    Building::Here(recipe) => build_session(recipe, answers.clone(), to_screen)
+                        .await
+                        .map(|(Built { session, ending }, notice)| (session, None, ending, notice)),
+                };
+            if built.is_err() {
+                failed.cancel();
+            }
+            built
+        },
+    );
+    let (session, threaded, mut ending, database_notice) = built?;
+    let history = history?;
     // The DAW's first-run setup reaches the session as one of its own, on this thread.
     let setup_session: Rc<dyn SetupSession> =
         Rc::new(SessionForSetup { session: Rc::downgrade(&session), bridge: live_config.clone(), shared: session_bridge });
@@ -1047,7 +1153,6 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
             Rc::new(move || update_after.set(true))
         },
     };
-    let history = Rc::new(RefCell::new(open_input_history(Some(load_input_history_file(&io.env)?.into()), secrets.clone())));
     // What's new is for someone reading it: the full screen, or plain lines at a terminal (a screen reader).
     // A script piping Kumi neither sees it nor uses it up.
     let whats_new = if full_screen || io.input.is_tty() {
@@ -1074,13 +1179,20 @@ pub(super) async fn run_session(io: CliIo, config: AppConfig, secrets: &mut Vec<
         Rc::new(front)
     } else if full_screen {
         let mut options = TuiOptions::new(session.clone(), io.input.clone(), io.out.clone(), mode);
-        // What the terminal is, asked once as the screen starts: its answers come before what its environment says of
-        // it, which stays the fallback. A terminal its environment keeps quiet (the Linux console, a dumb one) isn't asked,
-        // nor one whose producer said not to (`KUMI_PROBE=off`).
-        let platform = kumi_types::system::platform();
-        let profile = crate::tui::alerts::detect_terminal_profile(&io.env, platform);
-        if io.probe && profile.status && io.env.get("KUMI_PROBE").map(String::as_str) != Some("off") {
-            let probed = crate::tui::probe::probe(&io.input, &io.out, crate::tui::probe::BUDGET).await;
+        // What the terminal said of itself, asked once as the screen starts: its answers come before what its environment
+        // says of it, which stays the fallback. It's given back as it was now, before the screen takes it (and notes how
+        // to leave it).
+        let asking = match asking {
+            None if probes => {
+                let asking = crate::tui::probe::ask(&io.input, &io.out);
+                if let Some(asking) = &asking {
+                    asking.answered(crate::tui::probe::BUDGET, &Signal::new()).await;
+                }
+                asking
+            }
+            asking => asking,
+        };
+        if let (Some(probed), Some(profile)) = (asking.map(crate::tui::probe::Asking::end), profile) {
             let version = probed.answers.version.clone();
             options.terminal = Some(profile.answered(&probed.answers, &io.env, platform));
             let depth = crate::tui::style::detect_color_depth_here();
@@ -1552,7 +1664,7 @@ mod watch_tests {
             })
         };
         let watching = Rc::new(Cell::new(true));
-        let pace = Pace { look_ms: 1, retry_ms: 0, tries: 10, looks: 200, hold_ms };
+        let pace = Pace { look_ms: 1, quick_ms: 1, quick_for_ms: 0, retry_ms: 0, tries: 10, looks: 200, hold_ms };
         connect_when_live_answers(
             move || async move { answers },
             move || async move { live_open },
@@ -1590,11 +1702,12 @@ mod watch_tests {
                 async move { open }.boxed_local()
             }),
         };
-        let pace = Pace { look_ms: 1, retry_ms: 0, tries: 10, looks: 60, hold_ms: 5 };
+        let pace = Pace { look_ms: 1, quick_ms: 1, quick_for_ms: 0, retry_ms: 0, tries: 10, looks: 60, hold_ms: 5 };
         let watching = Rc::new(Cell::new(true));
         connect_when_daw_answers(
             || async { false },
             move || async move { open },
+            || async { None },
             live_words(),
             Some(absent),
             controller,
@@ -1608,6 +1721,77 @@ mod watch_tests {
         notices
     }
 
+    /// The watch at `pace`, with Live open as it starts or not (`open`), its port answering from its `answers_from`th look
+    /// on, and the session connecting at its `connect_on`th reconnect: how many looks it had made at each of `at_ms`
+    /// (from its start), and the reconnects in all.
+    async fn watched(pace: Pace, open: bool, answers_from: usize, connect_on: u32, at_ms: &[u64]) -> (Vec<usize>, u32) {
+        let fake = Fake::new(connect_on);
+        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&fake))));
+        let emit: Rc<dyn Fn(SessionEvent)> = Rc::new(|_| {});
+        let looked = Rc::new(Cell::new(0usize));
+        let counter = looked.clone();
+        let watch = connect_when_live_answers(
+            move || {
+                counter.set(counter.get() + 1);
+                let answering = counter.get() >= answers_from;
+                async move { answering }
+            },
+            move || async move { open },
+            controller,
+            emit,
+            Rc::new(Cell::new(true)),
+            false,
+            pace,
+        );
+        tokio::pin!(watch);
+        let (start, mut counts) = (tokio::time::Instant::now(), vec![]);
+        for at in at_ms {
+            let _ = tokio::time::timeout_at(start + std::time::Duration::from_millis(*at), &mut watch).await;
+            counts.push(looked.get());
+        }
+        (counts, fake.reconnects.get())
+    }
+    fn pace(look_ms: u64, quick_ms: u64, quick_for_ms: u64, tries: u32) -> Pace {
+        Pace { look_ms, quick_ms, quick_for_ms, retry_ms: 60_000, tries, looks: 10_000, hold_ms: 60_000 }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn an_open_live_not_answering_yet_is_looked_at_quickly_for_a_while_then_at_the_usual_pace() {
+        // Open as Kumi starts: every 20 ms for its first 600 ms (about 30 looks), then every 500 ms.
+        let (counts, _) = watched(pace(500, 20, 600, 10), true, usize::MAX, u32::MAX, &[550, 1550]).await;
+        assert!(counts[0] >= 10, "quickly at first: {} looks in 550 ms", counts[0]);
+        assert!(counts[1] - counts[0] <= 4, "then the usual pace: {} more in the next second", counts[1] - counts[0]);
+        // Not open, its port not answering: the usual pace from the start.
+        let (counts, _) = watched(pace(500, 20, 600, 10), false, usize::MAX, u32::MAX, &[550]).await;
+        assert!(counts[0] <= 3, "the usual pace: {} looks in 550 ms", counts[0]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_failed_reconnect_while_looking_quickly_is_tried_again_at_the_look_pace_and_not_against_the_tries() {
+        // Its port answers before Live serves through it: three reconnects fail. While looking quickly each next one
+        // comes a look's pace later (300 ms), not the retry's (a minute), and one try in all doesn't stop them.
+        let (_, reconnects) = watched(pace(300, 20, 5_000, 1), true, 0, 4, &[2_500]).await;
+        assert_eq!(reconnects, 4, "connected at the fourth, within the quick looks");
+        // No quick looks: as before, one try and then the retry's pace.
+        let (_, reconnects) = watched(pace(300, 20, 0, 1), true, 0, 4, &[2_500]).await;
+        assert_eq!(reconnects, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_port_answering_from_the_first_look_with_live_not_seen_open_gets_no_quick_tries() {
+        // A failure that persists there (a restart told, a stale secret): the retry's pace and the tries, as before.
+        let (_, reconnects) = watched(pace(300, 20, 5_000, 1), false, 0, 4, &[2_500]).await;
+        assert_eq!(reconnects, 1);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_live_opened_after_kumi_is_looked_at_quickly_once_its_port_begins_to_answer() {
+        // Closed as Kumi starts (one DAW here, so no process check meanwhile): its port answers from the third look,
+        // the first reconnect fails (Live not serving yet), and the next comes a look's pace later, not a minute.
+        let (_, reconnects) = watched(pace(300, 20, 5_000, 10), false, 3, 2, &[2_500]).await;
+        assert_eq!(reconnects, 2, "connected at the second try");
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn with_several_daws_here_one_not_open_is_said_as_which_to_open() {
         assert_eq!(watch_absent(false, u32::MAX).await, ["open one of yours"], "never opened: nothing more");
@@ -1617,6 +1801,97 @@ mod watch_tests {
             "opened later: said as it starts, and how to make it answer once the hold is over"
         );
         assert_eq!(watch_absent(true, 0).await, [live_words().starting, live_words().unreachable], "open as Kumi starts: as before");
+    }
+
+    /// What the watch says when the DAW, open as Kumi starts or not (`open`), couldn't start Kumi's bridge: at each
+    /// look, the next of `failures` (the last one staying), with a hold of `hold_ms` and Live never answering.
+    async fn watch_failing(open: bool, failures: &[Option<&'static str>], hold_ms: u64) -> Vec<String> {
+        let fake = Fake::new(u32::MAX);
+        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&fake))));
+        let notices = Rc::new(RefCell::new(Vec::new()));
+        let emit: Rc<dyn Fn(SessionEvent)> = {
+            let notices = notices.clone();
+            Rc::new(move |event| {
+                if let SessionEvent::Notice { message } = event {
+                    notices.borrow_mut().push(message)
+                }
+            })
+        };
+        let looks = Rc::new(Cell::new(0usize));
+        let failures = failures.to_vec();
+        let failure = move || {
+            let look = looks.replace(looks.get() + 1);
+            let now = failures.get(look).or(failures.last()).copied().flatten().map(str::to_string);
+            async move { now }
+        };
+        let pace = Pace { look_ms: 1, quick_ms: 1, quick_for_ms: 0, retry_ms: 0, tries: 10, looks: 30, hold_ms };
+        let watching = Rc::new(Cell::new(true));
+        connect_when_daw_answers(
+            || async { false },
+            move || async move { open },
+            failure,
+            live_words(),
+            None,
+            controller,
+            emit,
+            watching,
+            false,
+            pace,
+        )
+        .await;
+        let notices = notices.borrow().clone();
+        notices
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_bridge_live_couldnt_start_is_said_in_place_of_how_to_make_it_answer_each_reason_once() {
+        let (held, unsafe_files) = (Some("the port is held"), Some("its files are unsafe"));
+        // Found at the third look, before the hold is over: in place of how to make it answer, not beside it.
+        assert_eq!(watch_failing(true, &[None, None, held], 60_000).await, [live_words().starting, "the port is held"]);
+        assert_eq!(watch_failing(true, &[held], 5).await, [live_words().starting, "the port is held"], "nor after the hold");
+        // Each reason once: gone a while (Live starting it again) and back, it isn't said again; a new reason is.
+        assert_eq!(
+            watch_failing(true, &[held, held, None, held, unsafe_files], 60_000).await,
+            [live_words().starting, "the port is held", "its files are unsafe"]
+        );
+        // Live closed as Kumi starts: how to make it answer at once, as before; then, once it opens, why its bridge
+        // couldn't start.
+        assert_eq!(watch_failing(false, &[None, None, None, held], 60_000).await, [live_words().unreachable, "the port is held"]);
+        // Nothing found: as before.
+        assert_eq!(watch_failing(true, &[None], 5).await, [live_words().starting, live_words().unreachable]);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn while_looking_quickly_a_failed_start_is_looked_for_at_the_usual_pace() {
+        // Open as Kumi starts and not answering: a look every 10 ms for its first 600 ms, but why Live couldn't start the
+        // bridge is looked for every 200 ms, the usual pace. A failure is said once it's been seen a while, and a Live
+        // just opened may not have logged its own start yet, so quick looks don't make that while shorter.
+        let fake = Fake::new(u32::MAX);
+        let controller = Rc::new(RefCell::new(Some(Rc::downgrade(&fake))));
+        let emit: Rc<dyn Fn(SessionEvent)> = Rc::new(|_| {});
+        let (looks, reads) = (Rc::new(Cell::new(0u32)), Rc::new(Cell::new(0u32)));
+        let (looked, read) = (looks.clone(), reads.clone());
+        let watch = connect_when_daw_answers(
+            move || {
+                looked.set(looked.get() + 1);
+                async { false }
+            },
+            || async { true },
+            move || {
+                read.set(read.get() + 1);
+                async { None::<String> }
+            },
+            live_words(),
+            None,
+            controller,
+            emit,
+            Rc::new(Cell::new(true)),
+            false,
+            Pace { look_ms: 200, quick_ms: 10, quick_for_ms: 600, retry_ms: 60_000, tries: 10, looks: 10_000, hold_ms: 60_000 },
+        );
+        let _ = tokio::time::timeout(std::time::Duration::from_millis(550), watch).await;
+        assert!(looks.get() >= 15, "quick looks: {} in 550 ms", looks.get());
+        assert!((1..=3).contains(&reads.get()), "looked for at the usual pace: {} times in 550 ms", reads.get());
     }
 
     /// A screen that takes the DAW handed to it the `takes`th time (busy before that).

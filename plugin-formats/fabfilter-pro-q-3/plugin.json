@@ -1,0 +1,19 @@
+{
+  "plugin": "fabfilter-pro-q-3",
+  "name": "FabFilter Pro-Q 3",
+  "vendor": "FabFilter",
+  "kind": "effect",
+  "ids": {
+    "vst3": [{"id":"72C4DB717A4D459AB97E51745D84B39D","name":"Pro-Q 3","status":"verified","parameters":519}]
+  },
+  "presets": {
+    "extensions": [".ffp",".vstpreset"],
+    "windows": [{"path":"~/Documents/FabFilter/Presets/Pro-Q 3","holds":"native user and installed presets","status":"guessed"}],
+    "mac": [{"path":"~/Documents/FabFilter/Presets/Pro-Q 3","holds":"native presets; path not tested on this Windows capture","status":"guessed"}]
+  },
+  "formats": ["format-1"],
+  "family": "fabfilter",
+  "roles": ["mastering","eq"],
+  "binaries": ["FabFilter Pro-Q 3.vst3","Pro-Q 3.vst3"],
+  "notes": ["VST3 only. Processor class identity and versions were enumerated through the public VST3 factory.","Kumi creates from initialized component/controller state and preserves unrelated bytes. No manufacturer presets, samples or executable code are bundled.","Edit values use stored VST3 plain values. These may be logarithmic frequencies or normalized internal controls, not the displayed Hz, milliseconds or dB. Consult field ranges and captured display examples.","Only measured numeric controls are writable. Native .ffp schemas and conversion support are explicitly gated; historical factory schemas are not guessed."]
+}

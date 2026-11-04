@@ -5,20 +5,25 @@
 use crate::listening::{DeviceRow, OwnRenderer};
 use async_trait::async_trait;
 use indexmap::IndexMap;
-use kumi_agent::core::{contracts::*, evolve::Knob, refs::RefScheme};
+use kumi_agent::core::{
+    contracts::*,
+    evolve::Knob,
+    goal_rig::{
+        best_plays_beside, best_waits_muted, check_slots, device_label, device_of, given_values, knob_key as key, last_best_stays,
+        limiter_stays, moved, moved_or_went, near, not_in_the_search, tell_generation, you_turned, GoalDaw,
+    },
+    refs::RefScheme,
+};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
-    js::number::to_fixed,
+    time::now_ms,
 };
 use kumi_listening::{
-    engine::{heard_options, silent_render, Listening},
+    engine::Listening,
+    goal::{hear, screen_pick, tell, tell_timing, trial_key, HeardCache, Told},
     renderer::{Renderer, Window},
 };
-use kumi_media::audio::{
-    self,
-    analyze::Analysis,
-    matching::{closeness, Focus},
-};
+use kumi_media::audio::{analyze::Analysis, matching::Focus};
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
@@ -33,11 +38,6 @@ const KNOBS_PER_DEVICE: usize = 128;
 const KNOBS_PER_SLOT: usize = 512;
 /// The name the best goes by.
 const BEST: &str = "Kumi · Goal best";
-/// Knobs a search never moves in an own DAW, besides the shared ones: gain a plug-in adds after its sound (a louder trial
-/// would score closer), by name (exact) or by a word in it.
-const LEAVE_NAMES: [&str; 3] = ["global gain", "adjustment (db)", "output gain"];
-const LEAVE_WORDS: [&str; 1] = ["makeup"];
-
 /// One searched candidate: its track, and the scratch copy its trials are set on and heard from.
 struct Slot {
     info: GoalSlotInfo,
@@ -58,9 +58,7 @@ struct Slot {
 /// What a trial scored, kept so the same values aren't heard twice.
 #[derive(Clone)]
 struct Cached {
-    score: f64,
-    gaps: Vec<String>,
-    structural: Option<StructuralMove>,
+    told: Told,
     /// The render it was heard from, to play the winner out loud.
     render: Render,
 }
@@ -90,19 +88,21 @@ pub struct OwnGoalRig<S: RefScheme + 'static> {
     window: Window,
     /// The request's from_beat: where a candidate added later is heard when it names no part.
     from_given: Option<f64>,
+    /// The tempo the windows were measured in, read as the goal opened: a render whose file doesn't say how long it is
+    /// is heard over its window at this tempo. (A look meanwhile may read another: Renoise's render leaves the transport
+    /// where the song's tempo commands took it, until the goal puts it back.)
+    tempo: f64,
     reference: Analysis,
     focus: Option<Focus>,
     screen: Option<Screen>,
-    heard: RefCell<IndexMap<String, Cached>>,
+    heard: RefCell<HeardCache<Cached>>,
     /// The finished goal's candidates were tidied (the top ones muted for an A/B): its best plays on its own.
     tidied: Cell<bool>,
+    /// What the best last kept leaves out: it holds only a part of its track.
+    kept_only: RefCell<Option<String>>,
     /// The safety limiters this rig put on candidates: taken back if the goal never opens (or a candidate never joins), and
     /// only these are put back at unity when a slot settles.
     limiters: RefCell<Vec<Limiter>>,
-}
-
-fn key(knob: &Knob) -> String {
-    format!("{}|{}", knob.device, knob.name)
 }
 
 fn text(value: &Value, key: &str) -> Option<String> {
@@ -147,11 +147,13 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             current: RefCell::new(IndexMap::new()),
             window,
             from_given: request.from_beat,
+            tempo,
             reference,
             focus: request.focus,
             screen: None,
-            heard: RefCell::new(IndexMap::new()),
+            heard: RefCell::new(HeardCache::default()),
             tidied: Cell::new(false),
+            kept_only: RefCell::new(None),
             limiters: RefCell::new(vec![]),
         };
         renderer.tell_app(&format!(
@@ -172,28 +174,9 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             }
         }
         // A long part is screened on its most characteristic three seconds while the search is young.
-        if window.beats * 60. / tempo >= 6. {
-            let beats = (3. * tempo / 60.).round().max(2.);
-            let lufs = &rig.reference.over_time.lufs;
-            let slice = rig.reference.seconds / lufs.len().max(1) as f64;
-            let across = (beats * 60. / tempo / slice).round().max(1.) as usize;
-            let mut best = (0, f64::NEG_INFINITY);
-            if across <= lufs.len() {
-                for at in 0..=lufs.len() - across {
-                    let part: Vec<f64> = lufs[at..at + across].iter().map(|v| v.unwrap_or(-70.)).collect();
-                    let mean = part.iter().sum::<f64>() / part.len() as f64;
-                    let change: f64 = part.windows(2).map(|v| (v[1] - v[0]).abs()).sum();
-                    if mean + change > best.1 {
-                        best = (at, mean + change);
-                    }
-                }
-            }
-            let offset = (best.0 as f64 * slice * tempo / 60.).round().min(window.beats - beats).max(0.);
-            let mut snippet = request.clone();
-            snippet.reference_from = Some(request.reference_from.unwrap_or(0.) + offset * 60. / tempo);
-            snippet.reference_seconds = Some(beats * 60. / tempo);
-            match listening.heard_reference(named, &snippet, signal).await {
-                Ok(reference) => rig.screen = Some(Screen { offset, beats, reference }),
+        if let Some(pick) = screen_pick(&rig.reference.over_time.lufs, rig.reference.seconds, tempo, window.beats) {
+            match listening.heard_reference(named, &pick.request(request, tempo), signal).await {
+                Ok(reference) => rig.screen = Some(Screen { offset: pick.offset, beats: pick.beats, reference }),
                 Err(error) => {
                     rig.abandon().await;
                     return Err(error);
@@ -276,8 +259,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         }
         let chain = devices.iter().map(|device| device.name.clone()).collect::<Vec<_>>().join(" → ");
         // Who each knob's device is, by the knobs' word for it (as `knobs_of` names them), for what Kumi remembers.
-        let identities =
-            devices.iter().enumerate().map(|(at, device)| (format!("{at}:{}", device.name), device.identity.clone())).collect();
+        let identities = devices.iter().enumerate().map(|(at, device)| (device_label(at, &device.name), device.identity.clone())).collect();
         let info = GoalSlotInfo {
             name: name.clone(),
             label: label.into(),
@@ -320,10 +302,6 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
                 .count();
             for row in rows[..rows.len() - pseudo].iter().take(KNOBS_PER_DEVICE) {
                 let (Some(reference), Some(name)) = (text(row, "ref"), text(row, "name")) else { continue };
-                let lower = name.to_lowercase();
-                if LEAVE_NAMES.contains(&lower.as_str()) || LEAVE_WORDS.iter().any(|word| lower.contains(word)) {
-                    continue;
-                }
                 // (where a device aims, not how it sounds: kept on a copy, it would aim the copy at the producer's tracks)
                 if (r.table.aims)(&device.own_name, &name) {
                     continue;
@@ -334,12 +312,13 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
                     row.get("index").and_then(Value::as_u64).or_else(|| reference.rsplit([':', '.']).next()?.parse().ok()).unwrap_or(0);
                 let knob = Knob {
                     r#ref: reference,
-                    device: format!("{at}:{}", device.name),
+                    device: device_label(at, &device.name),
                     name,
                     min,
                     max,
                     step: crate::listening::steps_of(row).map(|steps| (max - min) / (steps - 1) as f64),
                     value: number("value").unwrap_or(min),
+                    device_id: None,
                 };
                 places.insert(key(&knob), (device.index, index));
                 knobs.push(knob);
@@ -351,41 +330,56 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         Ok(Ok((knobs, places)))
     }
 
-    /// Sets a slot's trial values on its copy; the knobs the DAW refused, by key.
-    async fn set_copy(&self, slot: &str, moved: &[(Knob, f64)], signal: &Signal) -> Result<Result<(), String>, RuntimeError> {
+    /// Sets a slot's trial values on its copy: the knobs the DAW refused, by key. A batch it refuses is set again a value
+    /// at a time, so a knob it won't take doesn't keep the others from moving (as Live's goal sets them). Err: the slot or
+    /// its copy is gone.
+    async fn set_copy(&self, slot: &str, moved: &[(Knob, f64)], signal: &Signal) -> Result<Result<HashSet<String>, String>, RuntimeError> {
         let r = &self.renderer;
         let (scratch, copy, places) = {
             let slots = self.slots.borrow();
             let Some(found) = slots.iter().find(|found| found.info.name == slot) else {
-                return Ok(Err(format!("“{slot}” isn't in the search")));
+                return Ok(Err(not_in_the_search(slot)));
             };
             let Some(copy) = r.copy_ref(&found.copy_name) else { return Ok(Err(format!("“{slot}”'s copy is gone"))) };
             (found.scratch.clone(), copy, found.places.clone())
         };
-        let values: Vec<Value> = moved
+        let values: Vec<(String, Value)> = moved
             .iter()
             .filter_map(|(knob, value)| {
                 let (device, param) = places.get(&key(knob))?;
                 let mut set = json!({"ref": copy, "device": device, "param": param});
                 set[r.table.scratch_field] = json!(value);
-                Some(set)
+                Some((key(knob), set))
             })
             .collect();
-        if values.is_empty() {
-            return Ok(Ok(()));
-        }
+        let mut refused = HashSet::new();
         for chunk in values.chunks(256) {
-            match r.ask("scratch", json!({"action": "set", "scratchId": scratch, "values": chunk}), signal.clone()).await? {
-                Ok(done) => {
-                    let steps = done.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0);
-                    if let Some(found) = self.slots.borrow_mut().iter_mut().find(|found| found.info.name == slot) {
-                        found.steps += steps;
-                    }
+            if self.set_on_copy(slot, &scratch, chunk.iter().map(|(_, set)| set.clone()).collect(), signal).await? {
+                continue;
+            }
+            // (refused because the search was stopped: nothing is asked again)
+            signal.check()?;
+            for (key, set) in chunk {
+                if !self.set_on_copy(slot, &scratch, vec![set.clone()], signal).await? {
+                    refused.insert(key.clone());
                 }
-                Err(refused) => return Ok(Err(refused.why)),
             }
         }
-        Ok(Ok(()))
+        Ok(Ok(refused))
+    }
+
+    /// One scratch `set` of these values on a slot's copy, the steps it left in the DAW's undo counted: whether it took them.
+    async fn set_on_copy(&self, slot: &str, scratch: &str, values: Vec<Value>, signal: &Signal) -> Result<bool, RuntimeError> {
+        match self.renderer.ask("scratch", json!({"action": "set", "scratchId": scratch, "values": values}), signal.clone()).await? {
+            Ok(done) => {
+                let steps = done.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0);
+                if let Some(found) = self.slots.borrow_mut().iter_mut().find(|found| found.info.name == slot) {
+                    found.steps += steps;
+                }
+                Ok(true)
+            }
+            Err(_) => Ok(false),
+        }
     }
 
     /// A goal that never opened: its copies go, and the safety limiters it put on candidates are taken off again, each
@@ -421,7 +415,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
                 None => false,
             };
             if !gone {
-                let note = format!("Kumi's safety {limiter} stays last on “{name}”: delete it if you don't want it there.");
+                let note = limiter_stays(limiter, &name);
                 r.tell_app(&note);
                 stays.push(note);
             }
@@ -445,7 +439,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
     async fn track_now(&self, slot: &str, signal: &Signal) -> Result<String, String> {
         let found =
             self.slots.borrow().iter().find(|found| found.info.name == slot).map(|found| (found.track.clone(), found.short.clone()));
-        let Some((stored, short)) = found else { return Err(format!("“{slot}” isn't in the search")) };
+        let Some((stored, short)) = found else { return Err(not_in_the_search(slot)) };
         let followed = {
             let book = self.renderer.link.book.borrow();
             if !book.scheme.positional() {
@@ -508,9 +502,9 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
     /// devices): only those whose winner differs from where the search began (none when nothing won: the track stays as it
     /// is), and never one the producer turned on the track since (said, and left as they set it).
     async fn set_track(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<(), String> {
-        let near = |knob: &Knob, a: f64, b: f64| (a - b).abs() <= 1e-5 * (knob.max - knob.min).abs().max(1e-9);
+        let given = given_values(knobs, values);
         let won: Vec<(&Knob, f64)> =
-            knobs.iter().zip(values).filter(|(knob, value)| !near(knob, **value, knob.value)).map(|(knob, value)| (knob, *value)).collect();
+            given.iter().filter(|(knob, value)| !near(knob, *value, knob.value)).map(|(knob, value)| (knob, *value)).collect();
         if won.is_empty() {
             return Ok(());
         }
@@ -521,17 +515,14 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             Err(error) => return Err(error.to_string()),
         };
         let places = self.slots.borrow().iter().find(|found| found.info.name == slot).map(|found| found.places.clone()).unwrap_or_default();
-        let named = |knob: &Knob| knob.device.split_once(':').map_or(knob.device.as_str(), |(_, name)| name).to_owned();
         // (by device as it is now: one change for each, as a device's knobs are set; nothing when one moved or went)
         let mut by_device: IndexMap<String, Vec<(&str, f64)>> = IndexMap::new();
-        let mut moved: Vec<String> = vec![];
+        let mut moved: Vec<Knob> = vec![];
         let mut turned: Vec<String> = vec![];
         let mut read: IndexMap<String, Vec<Value>> = IndexMap::new();
         for (knob, value) in won {
             let Some((_, row)) = self.device_now(knob, &chain) else {
-                if !moved.contains(&named(knob)) {
-                    moved.push(named(knob));
-                }
+                moved.push(knob.clone());
                 continue;
             };
             if !read.contains_key(&row.reference) {
@@ -551,13 +542,13 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
                 })
                 .and_then(|p| p.get("value").and_then(Value::as_f64));
             if now.is_some_and(|now| !near(knob, now, knob.value)) {
-                turned.push(format!("{} {}", named(knob), knob.name));
+                turned.push(format!("{} {}", device_of(knob), knob.name));
                 continue;
             }
             by_device.entry(row.reference.clone()).or_default().push((knob.r#ref.as_str(), value));
         }
         if !moved.is_empty() {
-            return Err(self.moved_words(slot, &moved));
+            return Err(moved_or_went(slot, &moved));
         }
         let mark = self.renderer.applied();
         let set: usize = by_device.values().map(Vec::len).sum();
@@ -569,11 +560,7 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
             self.renderer.plan.history.grouped(&format!("“{slot}”: {set} knobs the goal set"), &made, &[]);
         }
         if !turned.is_empty() {
-            let them = if turned.len() == 1 { "it" } else { "them" };
-            return Err(format!(
-                "you turned {} on “{slot}” since the search began, so Kumi left {them} as you set {them}",
-                turned.join(", ")
-            ));
+            return Err(you_turned(slot, &turned));
         }
         Ok(())
     }
@@ -590,15 +577,6 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         let (at, name) = knob.device.split_once(':')?;
         let at: usize = at.parse().ok()?;
         chain.get(at).filter(|row| row.name == name).map(|row| (at, row))
-    }
-
-    /// Why nothing was set: devices the search moved knobs of moved or went meanwhile.
-    fn moved_words(&self, slot: &str, moved: &[String]) -> String {
-        let named: Vec<String> = moved.iter().map(|name| format!("“{name}”")).collect();
-        format!(
-            "{} moved or went on “{slot}” since the search began, so Kumi set nothing there: start the goal again to search the chain as it is now",
-            named.join(", ")
-        )
     }
 }
 
@@ -638,57 +616,45 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
         given: Signal,
         options: Option<GenerationOptions>,
     ) -> Result<Generation, RuntimeError> {
+        check_slots(trials, |slot| self.current.borrow().contains_key(slot))?;
         let r = &self.renderer;
         let signal = abort::any([given, r.lifetime()]);
         let screened = options.and_then(|options| options.screen) == Some(true) && self.screen.is_some();
-        let cache_key = |trial: &GenerationTrial| {
-            format!(
-                "{}|{}|{}",
-                trial.slot,
-                if screened { "screen" } else { "full" },
-                trial.values.iter().map(|value| to_fixed(*value, 4)).collect::<Vec<_>>().join(",")
-            )
-        };
+        let cache_key = |trial: &GenerationTrial| trial_key(&trial.slot, screened, &trial.values);
         if r.flag().is_on() {
             return Err(RuntimeError::Observation("Another render is running.".into()));
         }
         let _rendering = r.flag().begin();
+        let set_from = now_ms();
         let mut generation = Generation { screened, ..Default::default() };
         // Each trial's values on its slot's copy (only what moved).
         for trial in trials {
-            let moved: Vec<(Knob, f64)> = {
-                let current = self.current.borrow();
-                let last = current.get(&trial.slot);
-                trial
-                    .knobs
-                    .iter()
-                    .enumerate()
-                    .map(|(at, knob)| (knob.clone(), trial.values.get(at).copied().unwrap_or(f64::NAN)))
-                    .filter(|(knob, value)| {
-                        value.is_finite() && last.and_then(|last| last.get(&key(knob))).is_none_or(|last| (last - value).abs() > 1e-6)
-                    })
-                    .collect()
-            };
+            let moved = moved(trial, self.current.borrow().get(&trial.slot));
             if moved.is_empty() {
                 continue;
             }
             match self.set_copy(&trial.slot, &moved, &signal).await? {
-                Ok(()) => {
+                // (what the DAW took is the copy's now; the knobs it refused, the search leaves be)
+                Ok(refused) => {
                     let mut current = self.current.borrow_mut();
                     let last = current.entry(trial.slot.clone()).or_default();
-                    for (knob, value) in &moved {
+                    for (knob, value) in moved.iter().filter(|(knob, _)| !refused.contains(&key(knob))) {
                         last.insert(key(knob), *value);
                     }
+                    if !refused.is_empty() {
+                        generation.frozen.insert(trial.slot.clone(), refused);
+                    }
                 }
-                // (the DAW refused them: the search leaves them be)
+                // (the slot or its copy is gone: none of its knobs can move)
                 Err(_) => {
                     generation.frozen.insert(trial.slot.clone(), moved.iter().map(|(knob, _)| key(knob)).collect::<HashSet<_>>());
                 }
             }
         }
+        let render_from = now_ms();
         // Rendered unless every trial was heard before at these values.
         let fresh: Vec<&GenerationTrial> =
-            trials.iter().filter(|trial| trial.fresh == Some(true) || !self.heard.borrow().contains_key(&cache_key(trial))).collect();
+            trials.iter().filter(|trial| trial.fresh == Some(true) || !self.heard.borrow().contains(&cache_key(trial))).collect();
         // Each slot's copy heard over its own stretch (or the screen's slice of it): one render for each stretch.
         let window_of = |slot: &Slot| match self.screen.as_ref().filter(|_| screened) {
             Some(screen) => Window { from: slot.window.from + screen.offset, beats: screen.beats },
@@ -728,45 +694,41 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 }
             }
         }
-        let tempo = r.tempo().unwrap_or(120.);
+        let heard_from = now_ms();
         let against = if screened { &self.screen.as_ref().unwrap().reference } else { &self.reference };
-        for trial in trials {
-            let cache_key = cache_key(trial);
-            let known = if trial.fresh != Some(true) { self.heard.borrow().get(&cache_key).cloned() } else { None };
+        // Each trial heard before is told from what was heard; the rest are heard together, as Live's goal hears them.
+        let told: Vec<(&GenerationTrial, String, Option<Cached>)> = trials
+            .iter()
+            .map(|trial| {
+                let cache_key = cache_key(trial);
+                let known = if trial.fresh != Some(true) { self.heard.borrow().get(&cache_key) } else { None };
+                (trial, cache_key, known)
+            })
+            .collect();
+        let hearing = told
+            .iter()
+            .filter(|(_, _, known)| known.is_none())
+            .filter_map(|(trial, _, _)| files.get(&trial.slot))
+            .map(|rendered| hear(rendered, beats, self.tempo, self.focus, signal.clone()));
+        let mut heard = futures::future::try_join_all(hearing).await.map_err(|error| RuntimeError::plain(error.to_string()))?.into_iter();
+        for (trial, cache_key, known) in told {
             if let Some(known) = known {
-                generation.cached += 1;
-                generation.scores.insert(trial.slot.clone(), known.score);
-                generation.gaps.insert(trial.slot.clone(), known.gaps);
-                if let Some(structural) = known.structural {
-                    generation.structural.insert(trial.slot.clone(), structural);
-                }
+                tell_generation(&mut generation, &trial.slot, known.told, true);
                 continue;
             }
             let Some(rendered) = files.get(&trial.slot) else {
                 generation.silent.push(trial.slot.clone());
                 continue;
             };
-            let seconds = rendered.seconds.unwrap_or(beats * 60. / tempo);
-            let heard = audio::hear(&rendered.file, heard_options(rendered.start, seconds, self.focus, signal.clone()))
-                .await
-                .map_err(|error| RuntimeError::plain(error.to_string()))?;
-            if silent_render(&heard) {
+            let Some(heard) = heard.next() else { break };
+            let Some(told) = tell(&heard, against, self.focus) else {
                 generation.silent.push(trial.slot.clone());
                 continue;
-            }
-            let close = closeness(&heard, against, self.focus);
-            let structural = close.structural.map(|found| StructuralMove { gap: found.gap, r#move: found.r#move });
-            generation.scores.insert(trial.slot.clone(), close.score);
-            generation.gaps.insert(trial.slot.clone(), close.gaps.clone());
-            if let Some(structural) = &structural {
-                generation.structural.insert(trial.slot.clone(), structural.clone());
-            }
-            let mut cache = self.heard.borrow_mut();
-            cache.insert(cache_key, Cached { score: close.score, gaps: close.gaps, structural, render: rendered.clone() });
-            if cache.len() > 2000 {
-                cache.shift_remove_index(0);
-            }
+            };
+            tell_generation(&mut generation, &trial.slot, told.clone(), false);
+            self.heard.borrow_mut().insert(cache_key, Cached { told, render: rendered.clone() });
         }
+        tell_timing(trials.len(), render_from - set_from, heard_from - render_from, now_ms() - heard_from);
         Ok(generation)
     }
     async fn keep_best(&self, slot: &str, knobs: &[Knob], values: &[f64], given: Signal) -> Result<String, RuntimeError> {
@@ -788,16 +750,15 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
             let places =
                 self.slots.borrow().iter().find(|found| found.info.name == slot).map(|found| found.places.clone()).unwrap_or_default();
             let mut set_at: Vec<(u64, u64, f64)> = vec![];
-            let mut moved: Vec<String> = vec![];
-            for (knob, value) in knobs.iter().zip(values) {
+            let mut moved: Vec<Knob> = vec![];
+            for (knob, value) in &given_values(knobs, values) {
                 match (self.device_now(knob, &chain), places.get(&key(knob))) {
                     (Some((_, row)), Some((_, param))) => set_at.push((row.index, *param, *value)),
-                    _ => moved.push(knob.device.split_once(':').map_or(knob.device.as_str(), |(_, name)| name).to_owned()),
+                    _ => moved.push(knob.clone()),
                 }
             }
-            moved.dedup();
             if !moved.is_empty() {
-                return Ok(Err(self.moved_words(slot, &moved)));
+                return Ok(Err(moved_or_went(slot, &moved)));
             }
             // The last best goes (Kumi's undo of keeping it, whichever goal kept it), then a fresh copy of the slot at these
             // values is kept. One the producer worked on since stays theirs (the bridge refuses the undo): muted again when
@@ -816,14 +777,30 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                         None => !unmuted,
                     };
                     let after = if muted { "" } else { " and plays now: mute it to hear the new best alone" };
-                    r.tell_app(&format!("The last “{BEST}” stays where it is ({why}){after}; the new best goes on a track of its own"));
+                    r.tell_app(&last_best_stays(BEST, why, after));
                     break;
                 }
                 unmuted |= at > 0;
             }
             let args = json!({"action": "make", "ref": track, "count": 1, "label": "Kumi: goal best"});
+            let mut only_part = None;
             let made = match r.ask("scratch", args, r.cleanup_signal()).await? {
                 Ok(made) => made,
+                // A whole track too big to copy at once (a long dense song): a search's result isn't thrown away at its last
+                // step. The best is kept from what the goal listened to, and the rest stays on the track.
+                Err(refused) if refused.code.as_deref() == Some("too-big") => {
+                    let Some(window) = self.slots.borrow().iter().find(|found| found.info.name == slot).map(|found| found.window) else {
+                        return Ok(Err(refused.why));
+                    };
+                    let args = json!({"action": "make", "ref": track, "count": 1, "label": "Kumi: goal best", "range": {"fromBeat": window.from, "beats": window.beats}});
+                    match r.ask("scratch", args, r.cleanup_signal()).await? {
+                        Ok(made) => {
+                            only_part = Some(window);
+                            made
+                        }
+                        Err(refused) => return Ok(Err(refused.why)),
+                    }
+                }
                 Err(refused) => return Ok(Err(refused.why)),
             };
             let (Some(scratch), Some(copy)) =
@@ -857,24 +834,35 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
                 Ok((id, _)) => vec![id],
                 Err(why) => return Ok(Err(why)),
             };
+            *self.kept_only.borrow_mut() = only_part.map(|window| {
+                // (Whole patterns: what the range plays, wherever else the song plays them. A finished goal has muted its
+                // leader for an A/B, which a whole copy stands in for and a part doesn't.)
+                let muted = if self.tidied.get() { format!(" “{slot}” is muted for the A/B, so the rest of it is silent until you unmute it.") } else { String::new() };
+                let said = format!(
+                    "“{BEST}” holds only the patterns of beats {} to {} of “{slot}”, what the goal listened to (the whole track is too much to copy at once).{muted}",
+                    window.from,
+                    window.from + window.beats
+                );
+                r.tell_app(&said);
+                said
+            });
             // A paused goal's candidates weren't tidied: the producer's track still plays as it was, so the best waits
             // muted beside it rather than playing the part twice. (A finished goal muted its candidates for an A/B.)
             if !self.tidied.get() {
                 match r.change("track_mute", json!({"ref": copy, "mute": true}), signal.clone()).await {
                     Ok((id, _)) => {
                         kept.push(id);
-                        r.tell_app(&format!("“{BEST}” waits muted beside “{slot}”, which plays as it was: unmute it to hear the best"));
+                        r.tell_app(&best_waits_muted(BEST, slot));
                     }
-                    Err(_) => r.tell_app(&format!("“{BEST}” plays beside “{slot}”: mute one of them to hear the other alone")),
+                    Err(_) => r.tell_app(&best_plays_beside(BEST, slot)),
                 }
             }
             *r.goal_best.borrow_mut() = kept;
             *r.goal_best_track.borrow_mut() = Some(r.link.book.borrow_mut().short_ref(&copy));
             // The winner is heard: the render it scored from at these very values, out loud.
-            let values_key = values.iter().map(|value| to_fixed(*value, 4)).collect::<Vec<_>>().join(",");
             let heard = {
                 let cache = self.heard.borrow();
-                ["full", "screen"].iter().find_map(|how| cache.get(&format!("{slot}|{how}|{values_key}"))).map(|found| found.render.clone())
+                [false, true].into_iter().find_map(|screened| cache.get(&trial_key(slot, screened, values))).map(|found| found.render)
             };
             let (played, said) = match heard {
                 Some(render) => r.play(&render, Some(&track)).await,
@@ -896,6 +884,9 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
             }
         }
     }
+    fn kept_only(&self) -> Option<String> {
+        self.kept_only.borrow().clone()
+    }
     async fn settle(&self, slot: &str, knobs: &[Knob], values: &[f64], given: Signal) -> Result<Option<String>, RuntimeError> {
         let signal = abort::any([given, self.renderer.lifetime()]);
         match self.set_track(slot, knobs, values, signal.clone()).await {
@@ -913,48 +904,48 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
     }
     async fn tidy(&self, top: &[String], given: Signal) -> Result<Vec<String>, RuntimeError> {
         self.tidied.set(true);
-        let r = &self.renderer;
-        let signal = abort::any([given, r.lifetime()]);
-        let mut said = vec![];
-        // Last in the song first, each found again by its name: taking one away moves the refs of those after it.
-        let names: Vec<String> = self.slots.borrow().iter().map(|slot| slot.info.name.clone()).collect();
-        let order = match r.track_rows(&signal).await {
-            Ok(Ok(rows)) => {
-                let mut named: Vec<(usize, String)> =
-                    names.iter().map(|name| (rows.iter().position(|row| row.name == *name).unwrap_or(0), name.clone())).collect();
-                named.sort_by(|a, b| b.0.cmp(&a.0));
-                named.into_iter().map(|(_, name)| name).collect()
-            }
-            _ => names.into_iter().rev().collect::<Vec<_>>(),
-        };
-        for name in order {
-            r.forget_tracks();
-            let Ok(track) = self.track_now(&name, &signal).await else { continue };
-            if top.contains(&name) {
-                let _ = r.change("track_mute", json!({"ref": track, "mute": true}), signal.clone()).await;
-                continue;
-            }
-            // A candidate the model made goes again (its add undone); one of the producer's stays, muted.
-            let made = r.plan.history.entries.borrow().values().rev().find_map(|entry| {
-                let entry = entry.borrow();
-                (entry.tool.as_deref() == Some("track_add")
-                    && entry.record.state == ChangeState::Applied
-                    && entry.record.title.contains(&format!("“{name}”")))
-                .then(|| entry.record.id.clone())
-            });
-            let undone = match made {
-                Some(id) => r.plan.history.undo(&id, signal.clone(), true).await.ok(),
-                None => None,
-            };
-            if undone.is_none_or(|undone| undone.is_error) {
-                let _ = r.change("track_mute", json!({"ref": track, "mute": true}), signal.clone()).await;
-                said.push(format!("“{name}” stays, muted."));
-            }
-        }
-        Ok(said)
+        let tidy = OwnTidy { rig: self, signal: abort::any([given, self.renderer.lifetime()]) };
+        let slots = self.slots.borrow().iter().map(|slot| slot.info.name.clone()).collect();
+        Ok(kumi_agent::core::goal_rig::tidy(&tidy, slots, top).await)
     }
     async fn close(&self) -> Result<Vec<String>, RuntimeError> {
         self.drop_copies().await;
         Ok(self.renderer.put_tempo_back().await.into_iter().collect())
+    }
+}
+
+/// A finished goal's candidates tidied in REAPER or Renoise: each found as the book follows it (by its name when the book
+/// lost it), a candidate the model made (its `track_add`) taken back.
+struct OwnTidy<'a, S: RefScheme + 'static> {
+    rig: &'a OwnGoalRig<S>,
+    signal: Signal,
+}
+
+#[async_trait(?Send)]
+impl<S: RefScheme + 'static> GoalDaw for OwnTidy<'_, S> {
+    async fn track_names(&self) -> Option<Vec<String>> {
+        match self.rig.renderer.track_rows(&self.signal).await {
+            Ok(Ok(rows)) => Some(rows.iter().map(|row| row.name.clone()).collect()),
+            _ => None,
+        }
+    }
+    async fn track_of(&self, slot: &str) -> Option<String> {
+        self.rig.renderer.forget_tracks();
+        self.rig.track_now(slot, &self.signal).await.ok()
+    }
+    async fn mute(&self, track: &str) {
+        let _ = self.rig.renderer.change("track_mute", json!({"ref": track, "mute": true}), self.signal.clone()).await;
+    }
+    fn made_by_kumi(&self, slot: &str) -> Option<String> {
+        self.rig.renderer.plan.history.entries.borrow().values().rev().find_map(|entry| {
+            let entry = entry.borrow();
+            (entry.tool.as_deref() == Some("track_add")
+                && entry.record.state == ChangeState::Applied
+                && entry.record.title.contains(&format!("“{slot}”")))
+            .then(|| entry.record.id.clone())
+        })
+    }
+    async fn take_back(&self, id: &str) -> bool {
+        self.rig.renderer.plan.history.undo(id, self.signal.clone(), true).await.is_ok_and(|undone| !undone.is_error)
     }
 }

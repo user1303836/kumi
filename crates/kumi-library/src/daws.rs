@@ -1,13 +1,17 @@
 //! What each DAW Kumi integrates tells the library: where it keeps the producer's sounds, presets and projects, the
-//! projects it opened lately, and its manual as a tool. Each DAW's integration implements [`LibrarySources`], and the
-//! app gives the library one for each DAW it registers ([`Daws`]), in its registry's order.
+//! projects it opened lately, how its project files read, and its manual as a tool. Each DAW's integration implements
+//! [`LibrarySources`], and the app gives the library one for each DAW it registers ([`Daws`]), in its registry's order.
 
+use std::path::Path;
 use std::rc::Rc;
 
+use kumi_common::abort::Signal;
 use kumi_net::web::WebClient;
 use kumi_types::contracts::KernelTool;
-use kumi_types::daw::DawProfile;
+use kumi_types::daw::{DawId, DawProfile};
+use kumi_types::errors::RuntimeError;
 
+use crate::sets::SetSummary;
 use crate::sources::{Source, SourceKind, SourceOptions};
 use crate::tools::OnEvent;
 
@@ -44,6 +48,19 @@ impl Layout {
     pub const NONE: Layout = Layout { folders: &[], sounds: &[], formats: &[] };
 }
 
+/// A DAW's own project files, which the library learns as the producer's projects beside Live's Sets (whose reading is
+/// the library's own): their extension, which of them are copies or backups it leaves out, and how one reads.
+#[derive(Debug)]
+pub struct ProjectFormat {
+    /// The extension, lower case with its dot (".rpp").
+    pub extension: &'static str,
+    /// Whether a file of it (its whole path: a DAW may keep backups in a folder of their own) is a copy or backup
+    /// rather than the producer's project.
+    pub skip: fn(&Path) -> bool,
+    /// Reads one, off Kumi's thread: what `my_sets` shows of it. Its `daw` is set by the library.
+    pub read: fn(&Path, &Signal) -> Result<SetSummary, RuntimeError>,
+}
+
 /// What a DAW tells the library about itself.
 pub trait LibrarySources: Sync {
     /// The DAW's profile.
@@ -69,6 +86,10 @@ pub trait LibrarySources: Sync {
     fn layout(&self) -> &'static Layout {
         &Layout::NONE
     }
+    /// Its project files, for a DAW whose projects Kumi reads (Live's Sets are the library's own).
+    fn projects(&self) -> Option<&'static ProjectFormat> {
+        None
+    }
 }
 
 /// The DAWs the library hears from, in the app's registry's order. None: only the folders the producer names.
@@ -84,6 +105,16 @@ impl Daws {
     pub fn layout(self, source: &Source) -> &'static Layout {
         let SourceKind::Daw(id) = source.kind else { return &Layout::NONE };
         self.iter().find(|daw| daw.profile().id == Some(id)).map_or(&Layout::NONE, |daw| daw.layout())
+    }
+
+    /// The project files of `daw`, when Kumi reads them.
+    pub fn projects_of(self, daw: DawId) -> Option<&'static ProjectFormat> {
+        self.iter().find(|own| own.profile().id == Some(daw)).and_then(|own| own.projects())
+    }
+
+    /// The DAW whose project files have this extension (lower case, with its dot), and how they read.
+    pub fn project_format(self, extension: &str) -> Option<(DawId, &'static ProjectFormat)> {
+        self.iter().find_map(|own| Some((own.profile().id?, own.projects().filter(|format| format.extension == extension)?)))
     }
 }
 

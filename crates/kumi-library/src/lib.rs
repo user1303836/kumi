@@ -54,12 +54,11 @@ use std::{
     rc::{Rc, Weak},
     time::Duration,
 };
-use store::{read_json, write_json, LogReader};
+use store::{read_json, write_json, Held, LogReader};
 use taste::Taste;
 pub use taste::TasteLine;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    process::Command,
     sync::{mpsc, watch, Mutex, MutexGuard},
     task::JoinHandle,
 };
@@ -115,7 +114,7 @@ pub struct Library {
     options: LibraryOptions,
     dir: String,
     weak: Weak<Self>,
-    sounds: Mutex<LogReader<SoundEntry>>,
+    sounds: Mutex<LogReader<Held<SoundEntry>>>,
     presets: Mutex<LogReader<PresetEntry>>,
     sets: Mutex<LogReader<SetEntry>>,
     counts: Cell<(usize, usize, usize)>,
@@ -534,7 +533,8 @@ impl Library {
                 .entries
                 .values()
                 .filter(|entry| !hidden.iter().any(|library| daw_sources::owns(library, self.options.daws.layout(library), &entry.path)))
-                .cloned()
+                // The reader's own entries, shared: not copies.
+                .map(|entry| Rc::clone(&entry.0))
                 .collect::<Vec<_>>();
             drop(reader);
             // The index before, unless something still holds it: what it prepared for a sound as it was is kept.
@@ -576,7 +576,7 @@ impl Library {
     }
     /// The sounds' log, read as far as it goes now: their count kept for the status, and the index held marked stale when
     /// there's more (the next ask builds it again).
-    async fn sounds_now(&self) -> Result<MutexGuard<'_, LogReader<SoundEntry>>, RuntimeError> {
+    async fn sounds_now(&self) -> Result<MutexGuard<'_, LogReader<Held<SoundEntry>>>, RuntimeError> {
         let mut reader = self.sounds.lock().await;
         if reader.refresh().await.map_err(io_error)?.changed {
             self.stale.set(true);
@@ -649,6 +649,9 @@ impl Library {
     }
     /// The library's tools in the DAW's words; the DAW's manual only for a DAW whose manual Kumi reads (Live's).
     pub fn tools_for(self: &Rc<Self>, profile: &DawProfile, options: LibraryToolsOptions) -> Vec<Rc<dyn KernelTool>> {
+        // `my_sets` finds the DAW's own projects where Kumi reads its files.
+        let projects = options.projects.or_else(|| profile.id.and_then(|daw| self.options.daws.projects_of(daw)));
+        let options = LibraryToolsOptions { projects, ..options };
         let mut tools = tools::library_tools_for(profile, self.clone(), options.clone());
         if let Some(daw) = profile.id.filter(|_| profile.caps.manual) {
             let manual = self.options.daws.iter().find(|own| own.profile().id == Some(daw)).and_then(|own| {
@@ -818,6 +821,73 @@ mod tests {
                 assert_eq!(library.sound_index().await.unwrap().entries.len(), 1, "while it learns");
                 library.progress.borrow_mut().as_mut().unwrap().phase = LearnPhase::Done;
                 assert_eq!(library.sound_index().await.unwrap().entries.len(), 2, "once it's done");
+                library.close().await;
+            })
+            .await;
+    }
+
+    /// The index takes the library's own sound entries, shared with its log's reader, not copies: it holds the same
+    /// sounds and finds the same, whatever is asked, as an index made from copies of them.
+    #[tokio::test(flavor = "current_thread")]
+    async fn the_index_shares_the_logs_sounds_and_finds_what_an_index_of_copies_finds() {
+        use crate::classify::{SoundClass, SoundKind};
+        use crate::search::{SoundIndex, SoundQuery};
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let dir = tempfile::tempdir().unwrap();
+                let samples = dir.path().join("Samples");
+                std::fs::create_dir_all(&samples).unwrap();
+                let library = create_library(LibraryOptions {
+                    dir: dir.path().join("library").to_string_lossy().into(),
+                    folders: Some(vec![samples.to_string_lossy().into()]),
+                    sources: Some(SourceOptions { home: Some(dir.path().to_string_lossy().into()), ..Default::default() }),
+                    fork: Some(false),
+                    find_sets: Some(false),
+                    delay_ms: Some(3_600_000),
+                    ..Default::default()
+                });
+                let folder = library.sources().await.into_iter().next().unwrap().path;
+                let classes = [SoundClass::Kick, SoundClass::Snare, SoundClass::Hat, SoundClass::Pad];
+                let sounds: Vec<SoundEntry> = (0..400)
+                    .map(|n| SoundEntry {
+                        file: Entry {
+                            path: format!("{folder}/Pack {}/{} {n}.wav", n % 7, ["Dark Kick", "Snare", "Hat", "Pad"][n % 4]),
+                            size: n as u64,
+                            mtime: 1,
+                            gone: None,
+                        },
+                        class: Some(classes[n % 4]),
+                        kind: Some(if n % 3 == 0 { SoundKind::Loop } else { SoundKind::OneShot }),
+                        seconds: Some(0.2 + (n % 11) as f64),
+                        bpm: (n % 3 == 0).then_some(90. + (n % 5) as f64 * 10.),
+                        brightness: Some((n * 37 % 1000) as f64),
+                        loudness: Some(-((n % 30) as f64)),
+                        ..Default::default()
+                    })
+                    .collect();
+                library_logs(&library.dir).sounds.append(&sounds).await.unwrap();
+                let shared = library.sound_index().await.unwrap();
+                let sources = library.sources().await;
+                let copied = SoundIndex::build(sounds.clone(), &sources).await;
+                assert_eq!(shared.entries.len(), sounds.len());
+                // The same entries the log's reader holds, not copies.
+                let reader = library.sounds_now().await.unwrap();
+                for entry in &shared.entries {
+                    assert!(Rc::ptr_eq(entry, &reader.entries[entry.path.as_str()].0), "{} is a copy", entry.path);
+                }
+                drop(reader);
+                let asked = [
+                    SoundQuery { words: vec!["kick".into()], limit: 20, ..Default::default() },
+                    SoundQuery { words: vec!["dark".into(), "pad".into()], limit: 20, ..Default::default() },
+                    SoundQuery { classes: vec![SoundClass::Snare], limit: 20, ..Default::default() },
+                    SoundQuery { kind: Some(SoundKind::Loop), bpm: Some(120.), limit: 20, ..Default::default() },
+                    SoundQuery { min_seconds: Some(3.), max_seconds: Some(6.), limit: 50, ..Default::default() },
+                ];
+                for query in &asked {
+                    let (one, other) = (shared.search(query), copied.search(query));
+                    assert_eq!(serde_json::to_value(&one.hits).unwrap(), serde_json::to_value(&other.hits).unwrap(), "{query:?}");
+                    assert!(!one.hits.is_empty(), "{query:?} found something");
+                }
                 library.close().await;
             })
             .await;

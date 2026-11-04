@@ -120,13 +120,19 @@ struct Song {
     loads: Vec<String>,
     work: PathBuf,
     saved: u32,
+    /// The tool can't remove the host's file, as Lua's `os.remove` can't on Windows in a folder whose name isn't in the
+    /// system's code page.
+    keeps_files: bool,
+    /// Renoise can't load the host's file.
+    refuses: bool,
 }
 
 struct Lab {
     _home: tempfile::TempDir,
     session: Session,
     song: Arc<Mutex<Song>>,
-    _simulator: Simulator,
+    config: SimulatorConfig,
+    simulator: Simulator,
     next: u64,
 }
 
@@ -141,12 +147,22 @@ fn load(song: &mut Song, file: &str, print: &Value, desc: &Value) -> Result<(), 
     if path.parent() != Some(song.work.as_path()) {
         return Err(("bad-params".into(), "file: an instrument file in Kumi's work folder".into()));
     }
+    if song.refuses {
+        if !song.keeps_files {
+            let _ = std::fs::remove_file(&path);
+        }
+        return Err(("failed".into(), "Renoise couldn't load the instrument file Kumi's host made".into()));
+    }
     if print.as_str() != Some(&print_of(&song.xml)) {
-        let _ = std::fs::remove_file(&path);
+        if !song.keeps_files {
+            let _ = std::fs::remove_file(&path);
+        }
         return Err(("changed".into(), "“Lead”'s macros changed in Renoise since Kumi read it: read it again".into()));
     }
     let bytes = std::fs::read(&path).unwrap();
-    std::fs::remove_file(&path).unwrap();
+    if !song.keeps_files {
+        std::fs::remove_file(&path).unwrap();
+    }
     let archive = Archive::read(&bytes).unwrap();
     let sample = archive.contents(archive.entry("SampleData/Sample01.flac").unwrap()).unwrap();
     assert_eq!(sample, SAMPLE, "the sample carried over as it was");
@@ -158,12 +174,17 @@ fn load(song: &mut Song, file: &str, print: &Value, desc: &Value) -> Result<(), 
 
 impl Lab {
     async fn start() -> Lab {
+        Lab::start_with(|_| {}).await
+    }
+
+    /// `start`, with the simulated Renoise's configuration changed first.
+    async fn start_with(configure: impl FnOnce(&mut SimulatorConfig)) -> Lab {
         let home = tempfile::tempdir().unwrap();
         let work = home.path().join("work");
         std::fs::create_dir_all(&work).unwrap();
         let paths = BridgePaths::new(home.path(), Daw::Renoise);
         let secret = ensure_secret(&paths.secret()).unwrap();
-        let song = Arc::new(Mutex::new(Song { xml: INSTRUMENT.into(), loads: vec![], work, saved: 0 }));
+        let song = Arc::new(Mutex::new(Song { xml: INSTRUMENT.into(), loads: vec![], work, saved: 0, keeps_files: false, refuses: false }));
         let state = song.clone();
         let respond: daw_mcp_server::simulator::Respond = Arc::new(move |method, params| {
             let mut song = state.lock().unwrap();
@@ -206,9 +227,17 @@ impl Lab {
         let mut config = SimulatorConfig::renoise(secret, "/lab/Renoise")
             .with_methods(&["instrument_export", "change_apply", "change_restore"], respond);
         config.discovery_dir = Some(paths.discovery());
-        let simulator = Simulator::start(config).await.unwrap();
+        configure(&mut config);
+        let simulator = Simulator::start(config.clone()).await.unwrap();
         let session = Session::start(Daw::Renoise, home.path());
-        Lab { _home: home, session, song, _simulator: simulator, next: 100 }
+        Lab { _home: home, session, song, config, simulator, next: 100 }
+    }
+
+    /// Renoise quit and opened again in the same folder, its song as it was: a new run of the tool, started later.
+    async fn reopen(&mut self) {
+        self.simulator.stop();
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+        self.simulator = Simulator::start(self.config.clone()).await.unwrap();
     }
 
     async fn tool(&mut self, name: &str, arguments: Value) -> (Value, bool) {
@@ -291,4 +320,75 @@ async fn a_mapping_change_is_refused_when_the_macro_moved_since_the_preview_and_
     assert!(is_error, "{refused}");
     assert_eq!(refused["code"], "changed", "{refused}");
     assert_eq!((lab.loads(), lab.left_in_work()), (1, 0));
+}
+
+/// #399 (N-N9): the host removes the instrument file it wrote once the tool has answered, loaded or refused, even when the
+/// tool couldn't (Lua's `os.remove` on Windows, in a folder whose name isn't in the system's code page).
+#[tokio::test]
+async fn the_host_removes_its_instrument_files_when_the_tool_cant() {
+    let mut lab = Lab::start().await;
+    lab.song.lock().unwrap().keeps_files = true;
+    let (preview, _) = lab.preview(json!({"ref": "e1:instrument:1", "macro": 2, "add": [{"fx": 1, "device": 2, "param": "Gain"}]})).await;
+    let (applied, is_error) = lab.apply(&preview, "k1").await;
+    assert!(!is_error, "{applied}");
+    assert_eq!((lab.loads(), lab.left_in_work()), (1, 0), "the host's file is gone once the tool loaded it");
+    let (undone, is_error) = lab.undo(&preview, "k2").await;
+    assert!(!is_error, "{undone}");
+    assert_eq!((lab.loads(), lab.left_in_work()), (2, 0), "and the restore's");
+    // Refused by the tool after the host made the file: the file goes too.
+    let (preview, _) = lab.preview(json!({"ref": "e1:instrument:1", "macro": 1, "remove": [1]})).await;
+    lab.song.lock().unwrap().refuses = true;
+    let (refused, is_error) = lab.apply(&preview, "k3").await;
+    assert!(is_error && refused["code"] == "failed", "{refused}");
+    assert_eq!((lab.loads(), lab.left_in_work()), (2, 0), "{refused}");
+}
+
+/// #399 (N-N9): instrument files left in Kumi's work folder an hour ago or more are removed as Renoise's host starts;
+/// newer ones (a change in flight in another Kumi) and anything else stay, and REAPER's host leaves the folder alone.
+#[test]
+fn renoises_host_sweeps_old_instrument_files_from_kumis_work_folder() {
+    let home = tempfile::tempdir().unwrap();
+    let work = BridgePaths::new(home.path(), Daw::Renoise).root.join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    let two_hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(7200);
+    let made = |name: &str, at: Option<std::time::SystemTime>| {
+        let file = std::fs::File::create(work.join(name)).unwrap();
+        if let Some(at) = at {
+            file.set_modified(at).unwrap();
+        }
+    };
+    made("instrument-1700000000-1.xrni", Some(two_hours_ago));
+    made("instrument-1700000000-1.kumi.xrni", Some(two_hours_ago));
+    made("instrument-1700007000-2.kumi.xrni", None);
+    made("notes.txt", Some(two_hours_ago));
+    let left = || {
+        let mut names: Vec<String> =
+            std::fs::read_dir(&work).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        names.sort();
+        names
+    };
+    let all = left();
+    let _reaper = daw_mcp_server::host::Host::new(Daw::Reaper, home.path());
+    assert_eq!(left(), all, "REAPER's host leaves Renoise's work folder alone");
+    let _renoise = daw_mcp_server::host::Host::new(Daw::Renoise, home.path());
+    assert_eq!(left(), ["instrument-1700007000-2.kumi.xrni", "notes.txt"]);
+}
+
+/// #399 (N-S10): Renoise on Windows can't say its pid (0), so a change previewed in it is bound to when its bridge
+/// started: the Renoise opened again in the same folder is another one, and the change isn't made there.
+#[tokio::test]
+async fn a_change_previewed_before_renoise_without_a_pid_was_opened_again_isnt_made_in_the_new_one() {
+    let mut lab = Lab::start_with(|config| config.identity.pid = 0).await;
+    let (preview, is_error) = lab.preview(json!({"ref": "e1:instrument:1", "macro": 1, "remove": [1]})).await;
+    assert!(!is_error, "{preview}");
+    lab.reopen().await;
+    let (refused, is_error) = lab.apply(&preview, "k1").await;
+    assert!(is_error && refused["code"] == "stale", "{refused}");
+    assert_eq!(refused["error"], "this change was made in Renoise before it was opened again (/lab/Renoise): preview it again");
+    assert_eq!(lab.loads(), 0, "nothing loaded in the Renoise opened again");
+    // Previewed in the Renoise running now, it's made there.
+    let (preview, _) = lab.preview(json!({"ref": "e1:instrument:1", "macro": 1, "remove": [1]})).await;
+    let (applied, is_error) = lab.apply(&preview, "k2").await;
+    assert!(!is_error, "{applied}");
+    assert_eq!(lab.loads(), 1);
 }

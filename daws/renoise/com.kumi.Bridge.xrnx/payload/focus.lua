@@ -251,6 +251,32 @@ function M.lanes(pattern_track, from, to)
   return array(out)
 end
 
+-- The tracks a pattern body reads, in the song's order. Every one, unless `limit` says how many from the first: then those,
+-- and past them the `around` track and any named as it is. FOCUS draws the track the producer is on first (the first of its
+-- name), then the song's in order until its pane is full, which a `limit` above that many keeps exactly; an `around` this song
+-- has no track for reads every one, as a body without a `limit` does.
+local function body_tracks(song, params, epoch, tracks)
+  local wanted, limit = {}, params.limit
+  local around
+  if limit ~= nil and params.around ~= nil then
+    local ok, n = pcall(refs.expect, params.around, "track", 1, epoch)
+    around = ok and n[1] <= tracks and n[1] or nil
+    if not around then limit = nil end
+  end
+  if type(limit) ~= "number" or limit < 1 or limit >= tracks then
+    for t = 1, tracks do wanted[t] = t end
+    return wanted
+  end
+  for t = 1, limit do wanted[t] = t end
+  if around then
+    local name = song:track(around).name
+    for t = limit + 1, tracks do
+      if t == around or song:track(t).name == name then wanted[#wanted + 1] = t end
+    end
+  end
+  return wanted
+end
+
 local function pattern_body(job, params, epoch)
   local song = the_song()
   local pattern_at = pattern_for_body(song, params, epoch)
@@ -260,26 +286,26 @@ local function pattern_body(job, params, epoch)
   local follows = transport.follow_player and transport.playing
   local center = follows and transport.playback_pos.line or song.selected_line_index
   local from, to = window_of(params, center, lines)
-  local tracks = track_count(song)
-  -- Lines are read across all the tracks, one at a time, and reading stops where what was read fills a page: the window is
+  local tracks = body_tracks(song, params, epoch, track_count(song))
+  -- Lines are read across the tracks, one at a time, and reading stops where what was read fills a page: the window is
   -- cut there (`truncated`), with nothing read that would be thrown away. A line is a slice, so a wide song doesn't hold
   -- Renoise's GUI for the whole body.
   local entries, shape = {}, {}
   local pattern = song:pattern(pattern_at)
   local bytes = 1024
-  for t = 1, tracks do
+  for k, t in ipairs(tracks) do
     local track = song:track(t)
     local pattern_track = pattern:track(t)
     local alias = pattern_track.alias_pattern_index
-    shape[t] = { track.visible_note_columns, track.visible_effect_columns }
-    entries[t] = {
+    shape[k] = { track.visible_note_columns, track.visible_effect_columns }
+    entries[k] = {
       ref = refs.make(epoch, "track", t), name = track.name, color = hex(track.color),
-      noteColumns = shape[t][1], effectColumns = shape[t][2], rows = {}, texts = {},
+      noteColumns = shape[k][1], effectColumns = shape[k][2], rows = {}, texts = {},
       aliasOf = alias > 0 and alias or nil, aliasRef = alias > 0 and refs.make(epoch, "pattern", alias) or nil,
     }
-    entries[t].mutedColumns = rows.column_state(track)
-    entries[t].automation = M.lanes(pattern_track, from, to)
-    bytes = bytes + 200 + #entries[t].name + (entries[t].automation and #json.encode(entries[t].automation) or 0)
+    entries[k].mutedColumns = rows.column_state(track)
+    entries[k].automation = M.lanes(pattern_track, from, to)
+    bytes = bytes + 200 + #entries[k].name + (entries[k].automation and #json.encode(entries[k].automation) or 0)
   end
   local hidden = params.hidden == true
   local cut = false
@@ -289,13 +315,13 @@ local function pattern_body(job, params, epoch)
     if job.slice() or not live_tracks then
       local live_pattern = the_song():pattern(pattern_at)
       live_tracks = {}
-      for t = 1, tracks do live_tracks[t] = live_pattern:track(t) end
+      for k, t in ipairs(tracks) do live_tracks[k] = live_pattern:track(t) end
     end
-    for t = 1, tracks do
-      local row = line_row(live_tracks[t]:line(i), i, shape[t][1], shape[t][2], hidden)
+    for k = 1, #tracks do
+      local row = line_row(live_tracks[k]:line(i), i, shape[k][1], shape[k][2], hidden)
       if row then
         -- (each row encoded once, here where it is measured: `fit` sends the texts)
-        local entry, text = entries[t], json.encode(row, { max_depth = json.ROW_DEPTH })
+        local entry, text = entries[k], json.encode(row, { max_depth = json.ROW_DEPTH })
         entry.rows[#entry.rows + 1] = row
         entry.texts[#entry.rows] = text or false
         bytes = bytes + #(text or json.encode(row) or "") + 1

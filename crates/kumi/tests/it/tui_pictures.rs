@@ -319,3 +319,33 @@ case!(a_fixed_phrases_change_opens_to_its_picture_like_any_other, async {
     assert!(lines[row + 1..].iter().any(|line| line.contains("Tempo 120 BPM → 124 BPM")), "{}", lines.join("\n"));
     h.close().await;
 });
+
+case!(a_plans_change_across_tracks_is_one_entry_with_one_picture_and_one_undo, async {
+    let h = Harness::new(160, 40);
+    h.start().await;
+    h.connect();
+    let muted = |id: &str, track: &str, at: i64| {
+        json!({"type":"change","change":{"id":id,"family":"mixer","title":format!("{track} muted"),"state":"applied","at":at,
+            "track":{"name":track},"batch":"p1:set_mixer",
+            "picture":{"kind":"mix","before":{"mute":false},"after":{"mute":true}}}})
+    };
+    h.emit(muted("c1", "Drums", 1));
+    h.emit(muted("c2", "Bass", 2));
+    h.emit(muted("c3", "Keys", 3));
+    h.type_text("\x1b[Z").await;
+    h.type_text("\r").await;
+    h.wait_for("Drums, Bass and Keys muted").await;
+    let lines = h.screen();
+    let strip = lines.iter().position(|line| line.contains("HISTORY")).expect("HISTORY");
+    assert!(!lines[strip..].iter().any(|line| line.contains("Bass muted") && !line.contains("Keys")), "one entry:\n{}", lines.join("\n"));
+    let row = history_row(&lines, "Drums, Bass and Keys muted");
+    for track in ["Drums", "Bass", "Keys"] {
+        assert!(lines[row + 1..].iter().any(|line| line.contains(&format!("{track} · Mute off → on"))), "{track}:\n{}", lines.join("\n"));
+    }
+    // Its undo takes back each change, newest first.
+    h.type_text("u").await;
+    h.wait_for_call("undo:c1").await;
+    let undone: Vec<String> = h.calls().into_iter().filter(|call| call.starts_with("undo:")).collect();
+    assert_eq!(undone, ["undo:c3", "undo:c2", "undo:c1"]);
+    h.close().await;
+});

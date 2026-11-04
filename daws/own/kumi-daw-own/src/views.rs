@@ -163,7 +163,25 @@ pub fn notes(item_ref: &str, body: &Value) -> NoteView {
     }
 }
 
-/// The timeline with each track's items as bars (REAPER's arrange view), in beats.
+/// The stretch a timeline body was read for, where the DAW said what its own view shows (REAPER's arrange view, whose
+/// `window` FOCUS asks for): its lanes and marks are that stretch's, not the whole project's. In beats.
+pub fn read_window(body: &Value) -> Option<[f64; 2]> {
+    let window = body.get("window")?;
+    body.get("view")?;
+    let (from, to) = (number(window, "from")?, number(window, "to")?);
+    (to > from).then_some([from, to])
+}
+
+/// What the DAW's own view of the timeline shows now (REAPER's arrange view, scrolled and zoomed as there), in beats,
+/// from the start at the earliest.
+pub fn view_of(body: &Value) -> Option<[f64; 2]> {
+    let view = body.get("view")?;
+    let (from, to) = (number(view, "from")?.max(0.), number(view, "to")?);
+    (to > from).then_some([from, to])
+}
+
+/// The timeline with each track's items as bars (REAPER's arrange view), in beats: the stretch its view shows when the
+/// body was read for it, with each fixed lane's items on their lane and the regions from start to end.
 pub fn timeline(body: &Value) -> TimelineStrip {
     // The depth of a folder collapsed all the way: the tracks under it are hidden, as REAPER hides them.
     let mut under: Option<u32> = None;
@@ -187,6 +205,7 @@ pub fn timeline(body: &Value) -> TimelineStrip {
             depth,
             hidden,
             collapsed,
+            fixed_lanes: number(track, "fixedLanes").filter(|lanes| *lanes >= 1.).map(|lanes| lanes as u32),
             items: list(track, "items")
                 .filter_map(|item| {
                     Some(TimelineItem {
@@ -195,14 +214,21 @@ pub fn timeline(body: &Value) -> TimelineStrip {
                         name: text(item, "name"),
                         muted: flag(item, "muted"),
                         selected: flag(item, "selected"),
+                        // (on a track with fixed lanes only: elsewhere every item is on lane 0)
+                        lane: number(track, "fixedLanes").and(number(item, "lane")).map(|lane| lane.max(0.) as u32),
+                        // REAPER's comping: a lane that plays alone or with others, or one that doesn't.
+                        silent: matches!(item.get("lanePlays").and_then(Value::as_str), Some("no" | "hidden")),
                     })
                 })
                 .collect(),
         })
         .collect::<Vec<_>>();
     let mut locators: Vec<Locator> = list(body, "markers")
-        .chain(list(body, "regions"))
-        .filter_map(|mark| Some(Locator { name: text(mark, "name"), position: number(mark, "position")? }))
+        .filter_map(|mark| Some(Locator { name: text(mark, "name"), position: number(mark, "position")?, end: None }))
+        .chain(list(body, "regions").filter_map(|region| {
+            let position = number(region, "position")?;
+            Some(Locator { name: text(region, "name"), position, end: number(region, "end").filter(|end| *end > position) })
+        }))
         .collect();
     locators.sort_by(|a, b| a.position.total_cmp(&b.position));
     let r#loop = body.get("loop").and_then(|span| {
@@ -233,6 +259,7 @@ pub fn timeline(body: &Value) -> TimelineStrip {
             let (start, end) = (number(span, "start")?, number(span, "end")?);
             (end > start).then_some([start, end])
         }),
+        window: read_window(body),
     }
 }
 
@@ -477,6 +504,18 @@ pub fn mixer(body: &Value) -> MixerView {
     }
 }
 
+/// The mixer's meters alone (REAPER's `levels` body).
+pub fn levels(body: &Value) -> Vec<TrackLevel> {
+    list(body, "levels")
+        .filter_map(|row| {
+            let both = row.get("peakDb")?;
+            let peak_db = [both.get(0)?.as_f64()?, both.get(1)?.as_f64()?];
+            Some(TrackLevel { track_ref: row.get("ref")?.as_str()?.to_owned(), peak_db })
+        })
+        .take(80)
+        .collect()
+}
+
 /// The track kind FOCUS's chip shows, from a focus's `track.type`.
 pub fn track_kind(kind: &str) -> Option<TrackKind> {
     Some(match kind {
@@ -592,6 +631,41 @@ mod tests {
     }
 
     #[test]
+    fn a_timeline_read_for_the_arrange_view_keeps_its_window_region_ends_and_fixed_lanes() {
+        // (#399 K35) REAPER's arrange view scrolled to bars 9–16: the body was read for that stretch.
+        let body = json!({"length": 256.0, "window": {"from": 32.0, "to": 64.0}, "view": {"from": 32.0, "to": 64.0},
+        "markers": [{"name": "Drop", "position": 40.0}],
+        "regions": [{"name": "Verse", "position": 24.0, "end": 48.0}, {"name": "Odd", "position": 50.0, "end": 50.0}],
+        "tracks": [
+            {"ref": "r:track:{V}", "name": "Vox", "depth": 0, "fixedLanes": 3, "items": [
+                {"position": 32.0, "length": 8.0, "name": "Take 1", "lane": 0, "lanePlays": "no"},
+                {"position": 32.0, "length": 8.0, "name": "Take 2", "lane": 1, "lanePlays": "only"},
+                {"position": 40.0, "length": 4.0, "name": "Take 3", "lane": 2, "lanePlays": "hidden"}
+            ]},
+            {"ref": "r:track:{B}", "name": "Bass", "depth": 0, "items": [{"position": 32.0, "length": 16.0, "name": "Bass", "lane": 0, "lanePlays": null}]}
+        ]});
+        let strip = timeline(&body);
+        assert_eq!(strip.window, Some([32., 64.]));
+        let marks: Vec<(&str, f64, Option<f64>)> = strip.locators.iter().map(|l| (l.name.as_str(), l.position, l.end)).collect();
+        assert_eq!(
+            marks,
+            [("Verse", 24., Some(48.)), ("Drop", 40., None), ("Odd", 50., None)],
+            "a region keeps its end, a marker has none"
+        );
+        let lanes = strip.lanes.unwrap();
+        assert_eq!((lanes[0].fixed_lanes, lanes[1].fixed_lanes), (Some(3), None));
+        let vox: Vec<(Option<u32>, bool)> = lanes[0].items.iter().map(|item| (item.lane, item.silent)).collect();
+        assert_eq!(vox, [(Some(0), true), (Some(1), false), (Some(2), true)], "a lane that doesn't play is silent");
+        assert_eq!((lanes[1].items[0].lane, lanes[1].items[0].silent), (None, false), "no lanes, no lane");
+
+        // A DAW that says nothing of its view draws all of the timeline; the view is read from the start at the earliest.
+        let whole = json!({"length": 64.0, "window": {"from": 0.0, "to": 64.0}, "view": {"from": -2.0, "to": 30.0}, "tracks": []});
+        assert_eq!(timeline(&json!({"window": {"from": 0.0, "to": 64.0}, "tracks": []})).window, None);
+        assert_eq!(view_of(&whole), Some([0., 30.]));
+        assert_eq!(view_of(&json!({"view": {"from": 8.0, "to": 8.0}})), None);
+    }
+
+    #[test]
     fn a_trackers_transport_says_the_line_playing_while_it_plays() {
         // (review U7) FOCUS moves a pattern's playing line between reads by it.
         let line = |playing: bool| transport(&json!({"transport": {"playing": playing, "line": 12, "lpb": 4}}), 0.).unwrap().line;
@@ -649,6 +723,19 @@ mod tests {
         let gainer = &lanes[0].devices.as_ref().unwrap()[0];
         assert_eq!((gainer.r#ref.as_str(), gainer.note.as_deref()), ("3:device:2.4#1.1", None));
         assert_eq!(lanes[0].devices.as_ref().unwrap()[1].note.as_deref(), Some("bypassed"));
+    }
+
+    #[test]
+    fn the_meters_alone_keep_what_names_a_track_and_says_both_sides() {
+        let body = json!({"levels": [
+            {"ref": "r:track:master", "peakDb": [-0.5, -0.8]},
+            {"ref": "r:track:{K}", "peakDb": [-150.0]},
+            {"peakDb": [-3.0, -3.0]},
+            {"ref": "r:track:{S}", "peakDb": [-6.0, -9.0]},
+        ], "trackCount": 2, "from": 0});
+        let read: Vec<(String, [f64; 2])> = levels(&body).into_iter().map(|level| (level.track_ref, level.peak_db)).collect();
+        assert_eq!(read, [("r:track:master".to_string(), [-0.5, -0.8]), ("r:track:{S}".to_string(), [-6.0, -9.0])]);
+        assert!(levels(&json!({})).is_empty());
     }
 
     #[test]

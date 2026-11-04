@@ -40,6 +40,16 @@ impl TuiApp {
         }
         // A turn's state or a job's may be when a job's request carries on, once it's handled.
         let carry_on = matches!(event, SessionEvent::State { .. } | SessionEvent::Job(_));
+        // What the DAW tells once, not as a stream (connected or gone, the project read, where the producer is in it, what
+        // they point at, what changed while Kumi was away): drawn within the 16 ms floor, as the producer's own input is.
+        let at_once = matches!(
+            event,
+            SessionEvent::Connection { .. }
+                | SessionEvent::Observation { .. }
+                | SessionEvent::Focus { .. }
+                | SessionEvent::Pointed { .. }
+                | SessionEvent::CatchUp { .. }
+        );
         match event {
             SessionEvent::Kernel(KernelEvent::Retry { reason, wait_ms, wait, cause, proxy_down }) => {
                 let reason = self.clean_line(&reason, 80);
@@ -155,9 +165,15 @@ impl TuiApp {
                     // (a DAW's own body is read anew once it's back)
                     state.own.key = None;
                     state.own.body = None;
+                    state.own.tracks = None;
                 }
             }
-            SessionEvent::Observation { label, name } => self.0.state.borrow_mut().set_name = observed_name(&label, name.as_deref()),
+            SessionEvent::Observation { label, name } => {
+                let mut state = self.0.state.borrow_mut();
+                state.set_name = observed_name(&label, name.as_deref());
+                // (a look that found no DAW, a start before it opened, says so too: only one made while connected read it)
+                state.observed = state.connection == ConnectionState::Connected;
+            }
             SessionEvent::Library(LibraryEvent { status: library }) => {
                 let tell = {
                     let mut state = self.0.state.borrow_mut();
@@ -298,6 +314,7 @@ impl TuiApp {
                 let change = kept(change);
                 let (new, refresh) = {
                     let mut state = self.0.state.borrow_mut();
+                    state.images.forget_runs();
                     if let Some(index) = state.records.changes().iter().position(|c| c.id == change.id) {
                         // A picture that came after the change (its curve) is drawn again.
                         if state.records.changes()[index].picture != change.picture {
@@ -921,9 +938,12 @@ impl TuiApp {
         if carry_on {
             self.maybe_carry_on();
         }
-        // What the session sends (words as they stream, state, the DAW's events) is drawn at the animation's pace;
-        // only the producer's own input is drawn within the 16 ms floor.
-        self.0.scheduler.request_animation();
+        // The rest of what the session sends (words as they stream, state, the transport) is drawn at the animation's pace.
+        if at_once {
+            self.0.scheduler.request();
+        } else {
+            self.0.scheduler.request_animation();
+        }
     }
     fn replaying(&self) -> bool {
         self.0.state.borrow().replaying

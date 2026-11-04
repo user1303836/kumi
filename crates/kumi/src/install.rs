@@ -164,11 +164,11 @@ pub async fn ask_release_at(base: &str, fetch: Option<Rc<dyn Fetch>>) -> AskedRe
         AskedRelease::Manifest(manifest)
     }
 }
-/// The newest release's own downloads, as GitHub's API names it. For a few minutes after a release,
+/// The newest release's own downloads, as GitHub's API names it, and its version. For a few minutes after a release,
 /// `releases/latest/download` can still lead to the one before, while the API already names the new one. The answer
 /// only chooses which release's own description (and checksum) to read. None when the API doesn't say (its rate
 /// limit, a network that blocks it). It's asked without a token.
-async fn newest_release_base(fetch: &Rc<dyn Fetch>) -> Option<String> {
+async fn newest_release(fetch: Rc<dyn Fetch>) -> Option<(String, String)> {
     let headers =
         Headers::from([("accept".into(), "application/vnd.github+json".into()), ("user-agent".into(), format!("kumi/{KUMI_VERSION}"))]);
     let init = FetchInit { headers, signal: Some(abort::timeout(3_000)), ..Default::default() };
@@ -179,24 +179,61 @@ async fn newest_release_base(fetch: &Rc<dyn Fetch>) -> Option<String> {
     let tag = response.json().await.ok()?.get("tag_name")?.as_str()?.to_string();
     let version = tag.strip_prefix('v')?;
     (crate::config::release_version(version).as_deref() == Some(version))
-        .then(|| format!("https://github.com/user1303836/kumi/releases/download/{tag}"))
+        .then(|| (format!("https://github.com/user1303836/kumi/releases/download/{tag}"), version.to_string()))
 }
 /// The newest release for `kumi update` and its checks: the one GitHub's API names, read from that release's own
 /// description, else the usual way. With KUMI_RELEASES, only there. The daily check doesn't come here, so it
 /// asks no more than once a day.
+///
+/// The usual description is asked beside the API, not after it. When the API answers, the release it names has its own
+/// description read, as before, unless the usual description has come and is that release: then it's that release's
+/// own description, and the answer. It's the answer too when it shows that release before the second read is in; the
+/// second read, already started, isn't waited on. Otherwise the second read decides as before; where the usual way
+/// would be asked, its answer is already on its way, under its own time limit.
 async fn ask_newest(env: &Env, fetch: Rc<dyn Fetch>) -> (String, AskedRelease) {
+    use futures::future::{select, Either};
     let usual = release_base(env);
-    if env.get("KUMI_RELEASES").is_none_or(|s| s.is_empty()) {
-        if let Some(base) = newest_release_base(&fetch).await {
-            match ask_release_at(&base, Some(fetch.clone())).await {
-                // The usual way goes over the same network: no second wait for the same failure.
-                asked @ (AskedRelease::Manifest(_) | AskedRelease::Offline(..)) => return (base, asked),
-                _ => {}
-            }
-        }
+    let asking = |base: &str| {
+        let (base, fetch) = (base.to_string(), fetch.clone());
+        Box::pin(async move { ask_release_at(&base, Some(fetch)).await })
+    };
+    if env.get("KUMI_RELEASES").is_some_and(|s| !s.is_empty()) {
+        return (usual.clone(), asking(&usual).await);
     }
-    let asked = ask_release_at(&usual, Some(fetch)).await;
-    (usual, asked)
+    // (the usual way polled first, so it's asked even where the API answers at once)
+    let (newest, latest) = match select(asking(&usual), Box::pin(newest_release(fetch.clone()))).await {
+        Either::Left((latest, api)) => (api.await, Either::Left(latest)),
+        Either::Right((newest, latest)) => (newest, Either::Right(latest)),
+    };
+    let Some((base, version)) = newest else {
+        let latest = match latest {
+            Either::Left(latest) => latest,
+            Either::Right(latest) => latest.await,
+        };
+        return (usual, latest);
+    };
+    let its = |asked: &AskedRelease| matches!(asked, AskedRelease::Manifest(manifest) if manifest.kumi == version);
+    // The usual way goes over the same network: no second wait for the same failure.
+    let decided = |own: AskedRelease| matches!(own, AskedRelease::Manifest(_) | AskedRelease::Offline(..)).then_some(own);
+    let own = asking(&base);
+    match latest {
+        Either::Left(latest) if its(&latest) => (base, latest),
+        Either::Left(latest) => match decided(own.await) {
+            Some(own) => (base, own),
+            None => (usual, latest),
+        },
+        Either::Right(latest) => match select(own, latest).await {
+            Either::Left((own, latest)) => match decided(own) {
+                Some(own) => (base, own),
+                None => (usual, latest.await),
+            },
+            Either::Right((latest, _)) if its(&latest) => (base, latest),
+            Either::Right((latest, own)) => match decided(own.await) {
+                Some(own) => (base, own),
+                None => (usual, latest),
+            },
+        },
+    }
 }
 pub async fn fetch_manifest(env: &Env, fetch: Option<Rc<dyn Fetch>>) -> Option<ReleaseManifest> {
     match ask_release(env, fetch).await {
@@ -595,9 +632,121 @@ fn tar_reads_xz(env: &Env) -> bool {
         _ => false,
     }
 }
+/// tar unpacking the bundle into `app.new` while it downloads, from what the download hands it on tar's stdin, so the
+/// unpacking (most of a second for an xz bundle) is done by the time the download is. Nothing it unpacks is used until
+/// the download's checksum has matched: the probe and the swap come after that, as before. When anything goes wrong
+/// here (tar didn't start, stalled, failed, or the download was stopped), the unpacking runs again from the downloaded
+/// file, as it always did.
+struct Unpacking {
+    child: tokio::process::Child,
+    stdin: Option<tokio::process::ChildStdin>,
+    /// tar stopped taking what it was given before it had ended well, or was given up on.
+    broke: bool,
+    /// How long tar may take to take one piece (UNPACK_PIECE).
+    piece_limit: Duration,
+}
+/// How long tar may take to take one piece of the download before it's given up on, and how long it may take to end.
+const UNPACK_PIECE: Duration = Duration::from_secs(30);
+const UNPACK_END: Duration = Duration::from_secs(600);
+thread_local! {
+    static FROM_FILE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+/// How many updates on this thread unpacked their bundle from the downloaded file (the streaming wasn't used), for tests.
+#[doc(hidden)]
+pub fn unpacks_from_file() -> usize {
+    FROM_FILE.with(std::cell::Cell::get)
+}
+impl Unpacking {
+    /// tar, reading its stdin into `fresh` (made empty first), run in `home` with the paths inside it, as the unpacking
+    /// from the file is. The compression is named, since a tar reading a pipe can't tell (GNU tar's can't).
+    fn start(home: &str, fresh: &str, xz: bool) -> Option<Self> {
+        remove(fresh).and_then(|()| fs::create_dir_all(fresh)).ok()?;
+        let inside = Path::new(fresh).strip_prefix(home).map_or_else(|_| fresh.to_string(), |inside| inside.display().to_string());
+        let mut command = tokio::process::Command::new(system::system_program_default(SystemProgram::Tar));
+        command
+            .args([if xz { "-xJf" } else { "-xzf" }, "-", "-C", &inside])
+            .current_dir(home)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true);
+        #[cfg(windows)]
+        command.creation_flags(0x0800_0000);
+        let mut child = command.spawn().ok()?;
+        Some(Self { stdin: child.stdin.take(), child, broke: false, piece_limit: UNPACK_PIECE })
+    }
+    /// Hands tar the next piece, within UNPACK_PIECE and until `signal` (the producer's Ctrl-C, the download's own
+    /// limit). One it doesn't take ends the handing: a tar that has read the archive's end takes no more (and ends
+    /// well, below); one that stalls or is stopped is given up on, and the unpacking from the file takes over.
+    async fn feed(&mut self, piece: &[u8], signal: &abort::Signal) {
+        use tokio::io::AsyncWriteExt;
+        let Some(stdin) = self.stdin.as_mut() else { return };
+        let taken = tokio::select! {
+            taken = tokio::time::timeout(self.piece_limit, stdin.write_all(piece)) => taken.map(|written| written.is_ok()).map_err(|_| ()),
+            _ = signal.cancelled() => Err(()),
+        };
+        match taken {
+            Ok(true) => {}
+            // tar no longer reads: done with the archive, or failed; how it ends says which.
+            Ok(false) => self.stdin = None,
+            // Stalled, or stopped: given up on.
+            Err(_) => {
+                self.stdin = None;
+                self.broke = true;
+                let _ = self.child.start_kill();
+            }
+        }
+    }
+    /// Whether tar unpacked the whole archive: it ended well within UNPACK_END, and wasn't given up on. A tar that read
+    /// the archive's end and so took no more of what followed it counts, as the unpacking from the file stops there too.
+    async fn finished(mut self) -> bool {
+        drop(self.stdin.take());
+        match tokio::time::timeout(UNPACK_END, self.child.wait()).await {
+            Ok(status) => status.is_ok_and(|status| status.success()) && !self.broke,
+            Err(_) => {
+                let _ = self.child.kill().await;
+                false
+            }
+        }
+    }
+    /// Stops tar, and waits for it to end, so nothing more lands in `app.new`.
+    async fn stop(mut self) {
+        drop(self.stdin.take());
+        let _ = self.child.kill().await;
+    }
+}
+
+/// The new bridge host's first start (`daw-mcp-server --version`, which only says its version), beside the new Kumi's
+/// probe. macOS checks a new program once, at its first launch (50-80 ms for the host, 0.4-0.7 s for Kumi), and side by
+/// side the two checks take as long as the longer: done here, REAPER's and Renoise's first connect after an update
+/// doesn't wait for it. Whatever it answers is ignored.
+async fn first_launches(fresh: &str) {
+    let host = join(fresh, &executable_name("daw-mcp-server"));
+    if !Path::new(&host).is_file() {
+        return;
+    }
+    let mut command = tokio::process::Command::new(&host);
+    command
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    command.creation_flags(0x0800_0000);
+    if let Ok(mut child) = command.spawn() {
+        let _ = tokio::time::timeout(Duration::from_secs(10), child.wait()).await;
+    }
+}
 /// Downloads `url` into `file` as it arrives, and gives what it got's SHA-256: the bundle is never held whole, nor
-/// read back to check it.
-async fn download(url: &str, file: &str, fetch: Rc<dyn Fetch>, cancel: Option<abort::Signal>) -> Result<String, Stopped> {
+/// read back to check it. With `unpacking`, tar gets each piece too, as it arrives.
+async fn download(
+    url: &str,
+    file: &str,
+    fetch: Rc<dyn Fetch>,
+    cancel: Option<abort::Signal>,
+    mut unpacking: Option<&mut Unpacking>,
+) -> Result<String, Stopped> {
     use tokio::io::AsyncWriteExt;
     let signal = abort::any(std::iter::once(abort::timeout(600000)).chain(cancel.clone()));
     let stopped = |error: &LanguageModelError| {
@@ -628,6 +777,9 @@ async fn download(url: &str, file: &str, fetch: Rc<dyn Fetch>, cancel: Option<ab
             let chunk = chunk.map_err(|e| stopped(&e))?;
             digest.update(&chunk);
             out.write_all(&chunk).await.map_err(Stopped::Disk)?;
+            if let Some(unpacking) = unpacking.as_deref_mut() {
+                unpacking.feed(&chunk, &signal).await;
+            }
         }
     }
     // A tokio file finishes its last write in the background: wait for it, so a full disk is the download's error.
@@ -744,12 +896,15 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
     let bundle = join(&downloads, &asset);
     let fresh = join(&home, "app.new");
     let cleanup = Cleanup(vec![fresh.clone(), bundle.clone()]);
+    // With this computer's own programs, tar unpacks the bundle as it downloads (a test's `run` sees the unpacking from
+    // the file, as it always was).
+    let mut unpacking = if io.run.is_none() { Unpacking::start(&home, &fresh, unpack == "-xf") } else { None };
     let result: Result<i32, RuntimeError> = async {
         let downloaded = step(
             io.out.clone(),
             &io.env,
             &format!("Downloading Kumi {}…", manifest.kumi),
-            download(&format!("{base}/{asset}"), &bundle, fetch, io.cancel.clone()),
+            download(&format!("{base}/{asset}"), &bundle, fetch, io.cancel.clone(), unpacking.as_mut()),
             true,
         )
         .await;
@@ -769,25 +924,37 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
             &io.env,
             &format!("Unpacking Kumi {}…", manifest.kumi),
             async {
-                if let Err(error) = remove(&fresh).and_then(|()| fs::create_dir_all(&fresh)) {
-                    return not_in_place(&home, &error).into();
-                }
-                // tar.exe reads its arguments in Windows' code page, which can't spell every folder name: run in
-                // KUMI_HOME, it's given the paths inside it, which are plain ASCII.
-                let inside = |path: &str| {
-                    Path::new(path).strip_prefix(&home).map_or_else(|_| path.to_string(), |inside| inside.display().to_string())
+                // Unpacked as it downloaded, now that the checksum matched; or else from the downloaded file. After a stream
+                // that didn't end well, that's over what tar wrote: the same archive rewrites each file it holds, where
+                // removing them could fail on a file a scanner holds.
+                let (streamed, tried) = match unpacking.take() {
+                    Some(unpacking) => (unpacking.finished().await, true),
+                    None => (false, false),
                 };
-                let unpacked = run(
-                    system::system_program_default(SystemProgram::Tar),
-                    vec![unpack.into(), inside(&bundle), "-C".into(), inside(&fresh)],
-                    Some(home.clone()),
-                )
-                .await;
-                if unpacked.code != 0 {
-                    let text = if unpacked.stderr.is_empty() { &unpacked.stdout } else { &unpacked.stderr };
-                    return Some(format!("Unpacking it failed: {}", trim(text).split('\n').next_back().unwrap_or("tar failed")));
+                if !streamed {
+                    FROM_FILE.with(|count| count.set(count.get() + 1));
+                    let made = if tried { fs::create_dir_all(&fresh) } else { remove(&fresh).and_then(|()| fs::create_dir_all(&fresh)) };
+                    if let Err(error) = made {
+                        return not_in_place(&home, &error).into();
+                    }
+                    // tar.exe reads its arguments in Windows' code page, which can't spell every folder name: run in
+                    // KUMI_HOME, it's given the paths inside it, which are plain ASCII.
+                    let inside = |path: &str| {
+                        Path::new(path).strip_prefix(&home).map_or_else(|_| path.to_string(), |inside| inside.display().to_string())
+                    };
+                    let unpacked = run(
+                        system::system_program_default(SystemProgram::Tar),
+                        vec![unpack.into(), inside(&bundle), "-C".into(), inside(&fresh)],
+                        Some(home.clone()),
+                    )
+                    .await;
+                    if unpacked.code != 0 {
+                        let text = if unpacked.stderr.is_empty() { &unpacked.stdout } else { &unpacked.stderr };
+                        return Some(format!("Unpacking it failed: {}", trim(text).split('\n').next_back().unwrap_or("tar failed")));
+                    }
                 }
-                let probe = run(join(&fresh, &executable_name("kumi")), vec!["--version".into()], None).await;
+                let (probe, ()) =
+                    futures::join!(run(join(&fresh, &executable_name("kumi")), vec!["--version".into()], None), first_launches(&fresh));
                 if probe.code != 0 || !probe.stdout.contains(&manifest.kumi) {
                     return Some(format!(
                         "The new Kumi didn't start, so this one stays. Try again, or run the installer again ({REINSTALL})."
@@ -846,6 +1013,10 @@ pub async fn update_installed(io: InstalledIo) -> Result<i32, RuntimeError> {
         Ok(0)
     }
     .await;
+    // A download that stopped or didn't match: tar stops before app.new goes.
+    if let Some(unpacking) = unpacking.take() {
+        unpacking.stop().await;
+    }
     drop(cleanup);
     // Only when it's empty: a file a scan still holds stays for the next update to clear.
     if made {
@@ -2495,5 +2666,29 @@ mod path_line_tests {
         assert_eq!((after.as_str(), left), ("export EDITOR=vim\nalias ll='ls -l'\n", vec![]));
         assert_eq!(by_hand(&removed), format!("lines 1–2: {PATH_MARKER} / {LINE}; lines 6–7: {PATH_MARKER} / {LINE}"));
         assert_eq!(by_hand(&numbered(&[(4, PATH_MARKER)])), format!("line 4: {PATH_MARKER}"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod unpacking_tests {
+    use super::*;
+
+    /// `sleep` never reads its stdin, as a tar stuck on a write or a stalled xz: the piece is given up on at its limit,
+    /// or at once when the download's signal fires, and the stream counts as not finished.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_tar_that_stops_reading_is_given_up_on_at_its_limit_or_at_a_cancel() {
+        for (limit_ms, cancel_ms) in [(200u64, 600_000u64), (600_000, 200)] {
+            let mut child =
+                tokio::process::Command::new("sleep").arg("60").stdin(std::process::Stdio::piped()).kill_on_drop(true).spawn().unwrap();
+            let mut unpacking = Unpacking { stdin: child.stdin.take(), child, broke: false, piece_limit: Duration::from_millis(limit_ms) };
+            let signal = abort::timeout(cancel_ms);
+            // More than any pipe holds.
+            let piece = vec![0u8; 4 * 1024 * 1024];
+            let started = std::time::Instant::now();
+            unpacking.feed(&piece, &signal).await;
+            assert!(started.elapsed() < Duration::from_secs(5), "limit {limit_ms} ms, cancel {cancel_ms} ms");
+            assert!(unpacking.broke && unpacking.stdin.is_none());
+            assert!(!unpacking.finished().await, "given up on, so not finished");
+        }
     }
 }

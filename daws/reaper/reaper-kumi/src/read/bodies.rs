@@ -12,7 +12,7 @@ use crate::reaper::{Fx, FxOwner, Item, Project, Reaper, Take, Track, INPUT_FX};
 use crate::refs::{self, Ref, TrackId};
 use crate::rows;
 
-pub const BODY_KINDS: [&str; 5] = ["arrange", "midi", "fx", "routing", "mixer"];
+pub const BODY_KINDS: [&str; 6] = ["arrange", "midi", "fx", "routing", "mixer", "levels"];
 /// Tracks in one arrange page, and items one track lists in the window.
 const ARRANGE_TRACKS: usize = 500;
 const ITEMS_PER_TRACK: usize = 400;
@@ -132,6 +132,7 @@ impl Reads {
             "fx" => self.fx_body(reaper, proj, reference)?,
             "routing" => self.routing_body(reaper, proj, reference)?,
             "mixer" => self.mixer_body(reaper, proj, params)?,
+            "levels" => self.levels_body(reaper, proj, params)?,
             other => return Err(bad(format!("REAPER has no {other:?} body: use one of {}", BODY_KINDS.join(", ")))),
         };
         body["epoch"] = self.epoch().into();
@@ -463,12 +464,7 @@ impl Reads {
     /// The mixer: the master's strip, then a page of the tracks' (`around` a track: centred on it), each with its volume,
     /// pan, mute, solo, arm and its peak level now (both channels, dB: REAPER's meters).
     fn mixer_body(&self, reaper: &Reaper, proj: Project, params: &Value) -> Answer {
-        let limit = limit_param(params, MIXER_STRIPS, MAX_MIXER_STRIPS)?;
-        let total = reaper.track_count(proj) as usize;
-        let start = match around_param(params)? {
-            Some(around) => self.around_start(reaper, proj, around, limit, total)?,
-            None => 0,
-        };
+        let (tracks, start, total) = self.mixer_tracks(reaper, proj, params)?;
         let strip = |track: Track| {
             let id = rows::track_id(reaper, track);
             let peak = |channel: i32| reaper.track_peak(track, channel).map(rows::db);
@@ -493,9 +489,35 @@ impl Reads {
             }
             row
         };
-        let mut strips: Vec<Value> = reaper.master_track(proj).map(strip).into_iter().collect();
-        strips.extend((start..total.min(start + limit)).filter_map(|n| reaper.track_at(proj, n as i32)).map(strip));
+        let strips: Vec<Value> = tracks.into_iter().map(strip).collect();
         Ok(json!({"strips": strips, "trackCount": total, "from": start}))
+    }
+
+    /// The meters alone of the strips `mixer_body` lists for the same `around` and `limit`, each by its ref (a track REAPER
+    /// has no meter for has none): little enough to read several times a second, for a mixer whose meters move.
+    fn levels_body(&self, reaper: &Reaper, proj: Project, params: &Value) -> Answer {
+        let (tracks, start, total) = self.mixer_tracks(reaper, proj, params)?;
+        let levels: Vec<Value> = tracks
+            .into_iter()
+            .filter_map(|track| {
+                let (left, right) = (reaper.track_peak(track, 0)?, reaper.track_peak(track, 1)?);
+                Some(json!({"ref": refs::track_ref(&rows::track_id(reaper, track)), "peakDb": [rows::db(left), rows::db(right)]}))
+            })
+            .collect();
+        Ok(json!({"levels": levels, "trackCount": total, "from": start}))
+    }
+
+    /// The tracks a mixer shows: the master, then a page of `limit` around the track `around` names (else from the top); with
+    /// where the page starts among all of them, and how many there are.
+    fn mixer_tracks(&self, reaper: &Reaper, proj: Project, params: &Value) -> Result<(Vec<Track>, usize, usize), (String, String)> {
+        let limit = limit_param(params, MIXER_STRIPS, MAX_MIXER_STRIPS)?;
+        let total = reaper.track_count(proj) as usize;
+        let start = match around_param(params)? {
+            Some(around) => self.around_start(reaper, proj, around, limit, total)?,
+            None => 0,
+        };
+        let page = (start..total.min(start + limit)).filter_map(|n| reaper.track_at(proj, n as i32));
+        Ok((reaper.master_track(proj).into_iter().chain(page).collect(), start, total))
     }
 
     // ----- a track's routing -----
@@ -1414,6 +1436,37 @@ mod tests {
         let names: Vec<&str> = page["strips"].as_array().unwrap().iter().map(|s| s["name"].as_str().unwrap()).collect();
         assert_eq!((names.len(), page["from"].clone()), (2, json!(2)));
         assert!(body(&reads, json!({"kind": "mixer", "limit": 100})).is_err(), "at most 64 strips");
+    }
+
+    /// #399 (K35): the meters alone, of the same strips as the mixer's, in far fewer of REAPER's calls.
+    #[test]
+    fn the_levels_body_is_the_mixers_meters_alone_in_fewer_calls() {
+        let reads = lab();
+        fake::with(|s| {
+            s.tracks[1].extra.insert("peak:0".into(), 0.5);
+            s.tracks[1].extra.insert("peak:1".into(), 0.25);
+        });
+        let levels = body(&reads, json!({"kind": "levels"})).unwrap();
+        let mixer = body(&reads, json!({"kind": "mixer"})).unwrap();
+        let refs = |rows: &Value| rows.as_array().unwrap().iter().map(|row| row["ref"].clone()).collect::<Vec<_>>();
+        assert_eq!(refs(&levels["levels"]), refs(&mixer["strips"]), "the same strips, the master's first");
+        assert_eq!((&levels["trackCount"], &levels["from"], &levels["kind"]), (&mixer["trackCount"], &mixer["from"], &json!("levels")));
+        let kick = levels["levels"].as_array().unwrap().iter().find(|row| row["ref"] == mixer["strips"][2]["ref"]).unwrap();
+        assert_eq!(kick["peakDb"], json!([-6.02, -12.04]), "REAPER's meter, both channels");
+        assert_eq!(kick.as_object().unwrap().len(), 2, "its ref and its meter: {kick}");
+        // Around a track, as the mixer's page; its bounds are the mixer's too.
+        let page = body(&reads, json!({"kind": "levels", "around": "r:track:{CCCC}", "limit": 1})).unwrap();
+        let strips = body(&reads, json!({"kind": "mixer", "around": "r:track:{CCCC}", "limit": 1})).unwrap();
+        assert_eq!(refs(&page["levels"]), refs(&strips["strips"]));
+        assert!(body(&reads, json!({"kind": "levels", "limit": 100})).is_err(), "at most 64 strips");
+        // Fewer of REAPER's calls than the mixer's body: that's what it's for.
+        let calls = |kind: &str| {
+            let before = fake::with(|s| s.calls);
+            body(&reads, json!({"kind": kind})).unwrap();
+            fake::with(|s| s.calls) - before
+        };
+        let (levels, mixer) = (calls("levels"), calls("mixer"));
+        assert!(levels * 2 < mixer, "levels {levels} calls, the mixer {mixer}");
     }
 
     #[test]

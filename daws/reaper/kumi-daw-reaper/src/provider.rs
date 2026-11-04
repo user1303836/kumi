@@ -6,13 +6,13 @@ use daw_bridge::{
     detect::{self, Os},
     install::{reaper_extension_name, reaper_install, reaper_target, unloadable},
 };
-use kumi_daw::provider::WatchWords;
+use kumi_daw::{provider::WatchWords, setup::Reopens};
 use kumi_daw_own::provider::{detected, Own};
 use kumi_types::{
     daw::{DawId, DawProfile},
     system::Env,
 };
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// REAPER, through Kumi's own bridge: its extension, a file in the UserPlugins folder of the REAPER it goes in.
 pub static PROVIDER: Own = Own {
@@ -44,6 +44,7 @@ pub static PROVIDER: Own = Own {
     version_file: |source| source.with_extension("version"),
     placed: |own, env| reaper_target(reaper_install(&reapers(own, env))?, Os::current()).map_err(Some),
     elsewhere: |_| vec![],
+    reopens: |target| reopens_in(&target.dir.parent().unwrap_or(&target.dir).join("reaper.ini")),
     unloadable: |own, env, source| reaper_install(&reapers(own, env)).ok().and_then(|install| unloadable(source, install)),
     used: |own, env| reapers(own, env).iter().any(|install| install.opened),
     here: |own, env| !reapers(own, env).is_empty(),
@@ -57,6 +58,43 @@ pub static PROVIDER: Own = Own {
         reapers(own, env).into_iter().filter(|install| install.app.as_deref().is_some_and(is)).find_map(|install| install.version)
     },
 };
+
+/// What REAPER opens by itself as it starts, from the reaper.ini beside its extension's folder. A file it can't read says
+/// nothing; one non-UTF-8 path elsewhere in it doesn't get in the way of the setting.
+fn reopens_in(ini: &Path) -> Reopens {
+    std::fs::read(ini).map_or(Reopens::Unknown, |bytes| reopens_from(&String::from_utf8_lossy(&bytes)))
+}
+
+/// REAPER's start-up setting as 7.82 keeps it (`loadlastproj` in `[REAPER]`, as measured):
+/// - no key, or 17: every project tab comes back, the same one in front;
+/// - 16: the project in front comes back, not the other tabs;
+/// - 18 and 19: a new project, and `lastproject` goes stale, so nothing says what was open.
+///
+/// REAPER rewrites its older values as it starts: 1 and 3 become 17, 0 becomes 19, 2 becomes 18. Anything else wasn't
+/// measured, so it says nothing. Neither does a file with no `[REAPER]`, which a REAPER that has quit always wrote: an
+/// empty one is a write cut short.
+fn reopens_from(ini: &str) -> Reopens {
+    let mut in_section = false;
+    let mut section = false;
+    let mut value = None;
+    for line in ini.lines().map(str::trim) {
+        if let Some(name) = line.strip_prefix('[').and_then(|line| line.strip_suffix(']')) {
+            in_section = name.eq_ignore_ascii_case("REAPER");
+            section |= in_section;
+        } else if let Some((key, found)) = line.split_once('=').filter(|_| in_section) {
+            if key.trim().eq_ignore_ascii_case("loadlastproj") {
+                value = Some(found.trim());
+                break;
+            }
+        }
+    }
+    match value {
+        None if section => Reopens::Everything,
+        Some("1" | "3" | "17") => Reopens::Everything,
+        Some("16") => Reopens::Front,
+        _ => Reopens::Unknown,
+    }
+}
 
 /// The REAPERs here, the one Kumi's extension was put in (a portable one Kumi doesn't find by itself), and the ones
 /// running now, first: the one the producer has open is the one the extension goes in, wherever it is.

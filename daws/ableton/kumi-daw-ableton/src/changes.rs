@@ -352,7 +352,7 @@ impl ChangeKind {
             .or_else(|| more_summaries::more(self, preview, input, track, applied))
             .expect("change catalog has a summary for every kind");
         if summary.picture.is_none() {
-            summary.picture = pictures::picture(self, preview, input, applied);
+            summary.picture = pictures::picture(self, preview, input, applied, summary.track.as_ref().map(|track| track.name.as_str()));
         }
         summary
     }

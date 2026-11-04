@@ -183,6 +183,18 @@ test("devices m4: a preset is named by number, name or the last part of a name; 
   failure(response, "bad-params", "mixer")
 end)
 
+test("devices m4: a preset Renoise doesn't take changes nothing, so no step stays (#361 N-N2)", function()
+  local _, peer = setup()
+  local epoch, layout = place(peer)
+  local input = { ref = epoch .. ":device:2.2", preset = "Bright" }
+  local previewed = preview(peer, "device-preset", input)
+  mock.presets_refused = true
+  local done = apply(peer, "device-preset", input, previewed, "Kumi: x (k1)", epoch, layout)
+  mock.presets_refused = nil
+  failure(done, "failed")
+  eq(steps(), 0, "nothing written back, so no step")
+end)
+
 test("devices m4: a preset choice refuses a device whose settings moved since the preview (its fence), writing nothing", function()
   local _, peer = setup()
   local epoch, layout = place(peer)
@@ -493,6 +505,55 @@ test("devices m4: Renoise's own undo and redo of a value inside a Doofer (no not
   mock.song:redo()
   eq(told(), "redo:Kumi: inside (k9)")
   eq(told(), "", "told once")
+end)
+
+-- (a host-made edit of the Doofer at `ref`: its text with `from` replaced by `to` once, applied as `kind`)
+local function doofer_edit(peer, epoch, layout, ref, kind, from, to, desc)
+  local read = call(peer, "preset_read", { ref = ref, epoch = epoch, layout = layout }).result
+  local edited, n = read.presetData:gsub(from, to, 1)
+  eq(n, 1)
+  local done = call(peer, "change_apply", { kind = kind, input = { ref = ref, presetData = edited, shape = read.shape }, fence = { id = read.id }, desc = desc, epoch = epoch, layout = layout })
+  ok(done.result, json.encode(done.error or {}))
+end
+
+test("devices m4: the journal's poll reads a Doofer once a round for all the changes it keeps of it, whatever their kind (#361 N-S16)", function()
+  local _, peer = setup()
+  local epoch, layout = place(peer)
+  local ref = epoch .. ":device:3.2"
+  doofer_edit(peer, epoch, layout, ref, "doofer-device-set", "<Value>1.0</Value>", "<Value>0.5</Value>", "Kumi: inside (kp1)")
+  doofer_edit(peer, epoch, layout, ref, "doofer-macro", "<Name>Macro 1</Name>", "<Name>Drive</Name>", "Kumi: macro (kp2)")
+  doofer_edit(peer, epoch, layout, ref, "doofer-macro", "<Name>Drive</Name>", "<Name>Tone</Name>", "Kumi: macro (kp3)")
+  mock.advance(1100)
+  mock.preset_reads = 0
+  for _ = 1, 5 do mock.advance(1000) end -- five rounds
+  ok(mock.preset_reads >= 4 and mock.preset_reads <= 5, "one read a round for its three changes: " .. mock.preset_reads)
+  -- (and Renoise's undo inside it is still told, for the change it took back)
+  mock.song:undo()
+  mock.advance(1100)
+  call(peer, "ping")
+  local told = {}
+  for _, event in ipairs(peer.events or {}) do
+    if event.name == "undone_in_daw" then told[#told + 1] = event.data.how .. ":" .. event.data.descs[1] end
+  end
+  eq(table.concat(told, ","), "undo:Kumi: macro (kp3)")
+end)
+
+test("devices m4: the journal's poll reads at most two devices a tick, and a round reads each of them (#361 N-S16)", function()
+  local _, peer = setup({ { name = "A", devices = { doofer() } }, { name = "B", devices = { doofer() } }, { name = "C", devices = { doofer() } } })
+  local epoch, layout = place(peer)
+  for t = 1, 3 do
+    doofer_edit(peer, epoch, layout, epoch .. ":device:" .. t .. ".2", "doofer-macro", "<Name>Macro 1</Name>", "<Name>Drive</Name>", "Kumi: macro (kq" .. t .. ")")
+  end
+  mock.advance(1100)
+  -- (a round, a tick (50 ms) at a time)
+  local most, total = 0, 0
+  for _ = 1, 20 do
+    mock.preset_reads = 0
+    mock.advance(50)
+    most, total = math.max(most, mock.preset_reads), total + mock.preset_reads
+  end
+  eq(most, 2, "two devices in a tick, the third in the next")
+  eq(total, 3, "each device once in the round")
 end)
 
 test("devices m4: host-made edits go only to the devices they are for, with their own device type's data", function()
@@ -1010,6 +1071,59 @@ test("devices m4: Kumi's records inside an instrument still find their places af
   end)
 end)
 
+test("devices m4: Renoise's undo of Kumi's change inside an instrument is still told after a macro map loads it again (#399 N-S5)", function()
+  local env, peer = mapped_song()
+  mock.song:instrument(1):insert_sample_at(1).name = "Saw"
+  with_instrument_files(function()
+    mock.data.song_fields.selected_instrument_index = 1
+    change(peer, "sample-set", { ref = place(peer) .. ":sample:1.1", transpose = 3 }, "Kumi: tune (ks52)")
+    local epoch, layout = place(peer)
+    local export = call(peer, "instrument_export", { ref = epoch .. ":instrument:1", epoch = epoch, layout = layout })
+    ok(export.result, json.encode(export.error or {}))
+    local mappings = { { param = "Cutoff", min = 0, max = 1, scaling = 3 }, { param = "Resonance", min = 0.2, max = 0.8, scaling = 3 }, { param = "Drive", min = 0, max = 0.5, scaling = 1 } }
+    local input = { ref = epoch .. ":instrument:1", macro = 1, file = host_edit(export.result.file, 1, mappings), print = export.result.print, display = { title = "Lead macro 1: mapped to Drive" } }
+    local done = call(peer, "change_apply", { kind = "instrument-macro-map", input = input, fence = {}, desc = "Kumi: map (ks53)", epoch = epoch, layout = layout })
+    ok(done.result, json.encode(done.error or {}))
+    H.tick(2)
+    call(peer, "ping")
+    peer.events = {}
+    mock.song:undo() -- (the load: the instrument as it was, told back in place)
+    H.tick(3)
+    mock.song:undo() -- (the sample's transpose)
+    H.tick(3)
+    eq(mock.song:instrument(1):sample(1).transpose, 0)
+    call(peer, "ping")
+    local told = {}
+    for _, event in ipairs(peer.events) do
+      if event.name == "undone_in_daw" then
+        for _, desc in ipairs(event.data.descs) do told[#told + 1] = event.data.how .. ":" .. desc end
+      end
+    end
+    ok(table.concat(told, ", "):find("undo:Kumi: tune (ks52)", 1, true), "the tune's undo is told: " .. table.concat(told, ", "))
+  end)
+end)
+
+test("devices m4: a macro map's undo says so when its instrument was deleted or can't be followed, as for a record of an older tool", function()
+  local _, peer = mapped_song()
+  local epoch = place(peer)
+  local record = change(peer, "instrument-macro-map", { ref = epoch .. ":instrument:1", macro = 1, set = { { mapping = 2, min = 0.25, max = 0.5 } } })
+  local kept = record.material.at
+  eq(kept.label, "Lead")
+  -- What an older tool kept: its own shape, which this one doesn't follow.
+  record.material.at = { n = 1, mark = kept.at[1].mark, label = "Lead" }
+  failure(restore(peer, "instrument-macro-map", record), "stale", "couldn't follow")
+  -- A mark from before what the tool remembers.
+  record.material.at = { of = kept.of, label = kept.label, at = { { n = 1, mark = "from another run" } } }
+  failure(restore(peer, "instrument-macro-map", record), "stale", "couldn't follow")
+  -- The instrument deleted since: named by what it was called.
+  record.material.at = kept
+  mock.song:insert_instrument_at(2)
+  mock.song:delete_instrument_at(1)
+  local before = steps()
+  failure(restore(peer, "instrument-macro-map", record), "gone", "\226\128\156Lead\226\128\157 isn't in the song any more")
+  eq(steps(), before, "nothing written")
+end)
+
 test("devices m4: a macro's mappings get their ranges and scaling in one step, and Kumi's undo writes back what they were", function()
   local _, peer = mapped_song()
   local epoch = place(peer)
@@ -1188,15 +1302,20 @@ test("devices m4: a native device's settings are saved as a preset in the user l
   end
   local done, err = pcall(function()
     local epoch, layout = place(peer)
-    local function save(d, name, replace)
-      return call(peer, "preset_save", { ref = epoch .. ":device:1." .. d, name = name, replace = replace, epoch = epoch, layout = layout })
+    local function save(d, name, replace, library)
+      return call(peer, "preset_save", { ref = epoch .. ":device:1." .. d, name = name, replace = replace, epoch = epoch, layout = layout, library = library })
     end
+    local moved = home .. "/OneDrive/Documents/Renoise/User Library"
     failure(save(2, "Bright"), "failed", "user library")
+    -- Neither there: it's the host's folder that's named.
+    failure(save(2, "Bright", nil, moved), "failed", "OneDrive")
     os.execute("mkdir -p '" .. home .. "/Documents/Renoise/User Library'")
     local saved = save(2, "Bright")
     ok(saved.result, json.encode(saved.error or {}))
     eq(saved.result.file, home .. "/Documents/Renoise/User Library/Effect Presets/EQ 5/Bright.xrdp")
-    ok(saved.result.note:find("Effect Presets/EQ 5", 1, true) and saved.result.note:find("preferences", 1, true), "where it went, said (#361 N-N8)")
+    ok(saved.result.note:find("Effect Presets/EQ 5", 1, true), "where it went, said (#361 N-N8)")
+    -- The host's folder isn't there (a Renoise that didn't follow Documents): the home folder's.
+    eq(save(2, "Fallback", nil, moved).result.file, home .. "/Documents/Renoise/User Library/Effect Presets/EQ 5/Fallback.xrdp")
     local f = assert(io.open(saved.result.file, "rb"))
     eq(f:read("*a"), mock.song:track(1):device(2).active_preset_data, "its preset data")
     f:close()
@@ -1208,6 +1327,11 @@ test("devices m4: a native device's settings are saved as a preset in the user l
     failure(save(4, "Long"), "bad-params", "plug%-in")
     failure(save(2, "../x"), "bad-params", "name")
     failure(save(2, "a:b"), "bad-params", "name")
+    -- The host's folder is there: it wins over the home folder's.
+    os.execute("mkdir -p '" .. moved .. "'")
+    eq(save(2, "Bright", nil, moved).result.file, moved .. "/Effect Presets/EQ 5/Bright.xrdp")
+    -- And a tool under an older host, which says nothing, still takes the home folder's.
+    eq(save(2, "Older").result.file, home .. "/Documents/Renoise/User Library/Effect Presets/EQ 5/Older.xrdp")
     eq(steps(), 0)
   end)
   os.getenv = real_getenv
@@ -2127,4 +2251,218 @@ test("devices m4: a container change prints each text once, and Renoise's undo o
   for _ = 1, 3 do mock.advance(1100) end
   eq(KUMI_PRINTS - before, 0, "prints made on Renoise's undo")
   KUMI_PRINTS = nil
+end)
+
+-- A meta device aimed at a device: Dest. Track (-1: its own), Dest. Effect (the mixer is 0), Dest. Parameter (from 1).
+local function aimed(track, effect, parameter)
+  local device = lfo()
+  device.params[1].value, device.params[2].value, device.params[3].value = track, effect, parameter
+  return device
+end
+
+local function moving_song()
+  return setup({
+    { name = "Kick", devices = { gainer(), aimed(-1, 1, 1) } },
+    { name = "Bass", devices = { gainer(), gainer() } },
+    { name = "Pad", devices = { aimed(1, 2, 2) } },
+  })
+end
+
+test("devices m4: a parameter a meta device moves, on its track or from another, is no fence; a knob beside it and an aim changed are (#804)", function()
+  local _, peer = moving_song()
+  local function fenced(ref, kind, input, between, code)
+    local epoch, layout = place(peer)
+    input.ref = epoch .. ":device:" .. ref
+    local previewed = preview(peer, kind, input)
+    between()
+    local response = apply(peer, kind, input, previewed, "Kumi: fenced", epoch, layout)
+    if code then failure(response, code) else ok(response.result, json.encode(response.error or {})) end
+  end
+  -- (the LFO on Kick moves its own Gainer's Gain; the LFO on Pad moves Bass's second Gainer's Panning)
+  local function kick_moves() device_data(1, 2).params[1].value = 0.37 end
+  local function bass_moves() device_data(2, 3).params[2].value = 0.11 end
+  -- A value of Kick's that only Bass's aim would leave out, a knob on the device moved, and the aim itself moved, are real changes.
+  fenced("1.2", "device-delete", {}, function() device_data(1, 2).params[2].value = 0.9 end, "changed")
+  fenced("2.2", "device-delete", {}, function() device_data(2, 2).params[2].value = 0.8 end, "changed")
+  fenced("2.3", "device-delete", {}, function() device_data(2, 3).params[1].value = 2 end, "changed")
+  fenced("1.2", "device-delete", {}, function() device_data(1, 3).params[3].value = 2 end, "changed")
+  device_data(1, 3).params[3].value = 1
+  -- What's moved goes through.
+  fenced("2.3", "device-move", { index = 2 }, bass_moves)
+  eq(device_data(2, 2).params[1].value, 2, "the moved Gainer's first")
+  fenced("1.2", "device-delete", {}, kick_moves)
+  eq(#mock.data.tracks[1].devices, 2, "gone")
+end)
+
+test("devices m4: Kumi's undo of a delete puts back a device a meta device moved, and aims it again (#804)", function()
+  local _, peer = moving_song()
+  local epoch = place(peer)
+  local record = change(peer, "device-delete", { ref = epoch .. ":device:1.2" })
+  local back = restore(peer, "device-delete", record)
+  ok(back.result, json.encode(back.error or {}))
+  eq(device_data(1, 3).params[2].value, 1, "it's aimed at again")
+end)
+
+test("devices m4: a preset on a device a meta device moves goes on, and Kumi's undo takes it off with the value elsewhere (#804)", function()
+  local _, peer = setup({ { name = "Kick", devices = { eq5(), aimed(-1, 1, 1) } } })
+  local epoch, layout = place(peer)
+  local input = { ref = epoch .. ":device:1.2", preset = "bright" }
+  local previewed = preview(peer, "device-preset", input)
+  device_data(1, 2).params[1].value = device_data(1, 2).params[1].value + 0.25
+  local done = apply(peer, "device-preset", input, previewed, "Kumi: bright", epoch, layout)
+  ok(done.result, json.encode(done.error or {}))
+  local record = done.result
+  record.prior = previewed.prior
+  device_data(1, 2).params[1].value = device_data(1, 2).params[1].value + 0.25
+  local undone = restore(peer, "device-preset", record)
+  ok(undone.result, json.encode(undone.error or {}))
+  -- Renoise's undo and redo of it reach HISTORY, as far as its other parameters tell.
+  record = change(peer, "device-preset", { ref = place(peer) .. ":device:1.2", preset = "bright" })
+  H.tick(3)
+  drain(peer)
+  device_data(1, 2).params[1].value = device_data(1, 2).params[1].value + 0.25
+  mock.song:undo()
+  H.tick(3)
+  drain(peer)
+  local told = H.events(peer, "undone_in_daw")
+  eq(#told, 1, "undone")
+  eq(told[1].data.how, "undo")
+  device_data(1, 2).params[1].value = device_data(1, 2).params[1].value + 0.25
+  mock.song:redo()
+  H.tick(3)
+  drain(peer)
+  told = H.events(peer, "undone_in_daw")
+  eq(#told, 1, "redone")
+  eq(told[1].data.how, "redo")
+  device_data(1, 2).params[1].value = device_data(1, 2).params[1].value + 0.25
+  ok(restore(peer, "device-preset", record).result, "Kumi's undo after them")
+  -- (a knob the meta device doesn't move still stops it)
+  record = change(peer, "device-preset", { ref = place(peer) .. ":device:1.2", preset = "bright" })
+  device_data(1, 2).params[2].value = device_data(1, 2).params[2].value + 0.25
+  failure(restore(peer, "device-preset", record), "changed")
+end)
+
+test("devices m4: a parameter with automation is no fence, stopped or playing; one without still is (#804)", function()
+  local _, peer = setup({ { name = "Kick", devices = { gainer() } } })
+  device_data(1, 2).params[1].automated = true
+  local epoch, layout = place(peer)
+  local input = { ref = epoch .. ":device:1.2" }
+  local previewed = preview(peer, "device-delete", input)
+  device_data(1, 2).params[2].value = 0.9
+  failure(apply(peer, "device-delete", input, previewed, "Kumi: a knob", epoch, layout), "changed")
+  previewed = preview(peer, "device-delete", input)
+  device_data(1, 2).params[1].value = 3.5
+  local done = apply(peer, "device-delete", input, previewed, "Kumi: automation", epoch, layout)
+  ok(done.result, json.encode(done.error or {}))
+end)
+
+test("devices m4: what's inside a Doofer whose macro moves on its own is fenced by what's there, not its values (#804)", function()
+  local _, peer = setup({ { name = "Kick", devices = { doofer(), aimed(-1, 1, 1) } } })
+  local data = device_data(1, 2)
+  -- (as Renoise moves it: the macro, and what's in the preset data)
+  local function macro_moves(to)
+    data.params[1].value = to
+    local replaced = function(text) return (text:gsub("(<Macro0>%s*<Value>)[^<]*", "%1" .. to, 1):gsub("(<Volume>%s*<Value>)[^<]*", "%1" .. (to / 100), 1)) end
+    if data.preset_data then data.preset_data = replaced(data.preset_data) else data.xml_body = replaced(data.xml_body) end
+  end
+  local epoch, layout = place(peer)
+  local current = mock.song:track(1):device(2).active_preset_data
+  local input = { ref = epoch .. ":device:1.2", presetData = (current:gsub("(<Macro1>%s*<Value>)[^<]*", "%175", 1)) }
+  local previewed = preview(peer, "device-preset-data", input)
+  macro_moves(37)
+  local done = apply(peer, "device-preset-data", input, previewed, "Kumi: a macro", epoch, layout)
+  ok(done.result, json.encode(done.error or {}))
+  eq(value(1, 2, 2), 75)
+  local record = done.result
+  record.prior = previewed.prior
+  macro_moves(61)
+  -- A device put inside is a change, whatever the macro does.
+  local inner = "<GainerDevice type=\"GainerDevice\">\n          <Volume>\n            <Value>1.0</Value>\n          </Volume>\n        </GainerDevice>"
+  local holds = data.preset_data
+  data.preset_data = holds:gsub("</Devices>", inner .. "\n      </Devices>", 1)
+  failure(restore(peer, "device-preset-data", record), "changed", "inside")
+  data.preset_data = holds
+  macro_moves(44)
+  local undone = restore(peer, "device-preset-data", record)
+  ok(undone.result, json.encode(undone.error or {}))
+  eq(value(1, 2, 2), 50)
+  H.no_dialogs()
+end)
+
+test("devices m4: a device chain load is fenced without what a meta device moves on the devices it replaces (#804)", function()
+  local env, peer = setup({ { name = "Kick", devices = { gainer(), aimed(-1, 1, 1) } } })
+  local file = library_file(env, "Bright Vox.xrnt", CHAIN)
+  local epoch, layout = place(peer)
+  local input = { trackRef = epoch .. ":track:1", file = file, fileName = "Bright Vox", replace = true }
+  local previewed = preview(peer, "device-chain-load", input)
+  device_data(1, 2).params[1].value = 0.37
+  local done = apply(peer, "device-chain-load", input, previewed, "Kumi: chain", epoch, layout)
+  ok(done.result, json.encode(done.error or {}))
+end)
+
+-- What a meta device inside a Doofer moves, as Renoise moves it: the inner device's value in the data.
+local INNER_LFO = "<LfoDevice type=\"LfoDevice\">\n          <DestEffect>\n            <Value>0.0</Value>\n          </DestEffect>\n        </LfoDevice>\n      </Devices>"
+local function inner_moves(data, to)
+  local replaced = function(text) return (text:gsub("(<Volume>%s*<Value>)[^<]*", "%1" .. to, 1)) end
+  if data.preset_data then data.preset_data = replaced(data.preset_data) else data.xml_body = replaced(data.xml_body) end
+end
+
+test("devices m4: what's inside a Doofer whose own meta device moves it is fenced by what's there, and Renoise's undo is told (#804)", function()
+  local inside = doofer()
+  inside.xml_body = inside.xml_body:gsub("</Devices>", INNER_LFO, 1)
+  local _, peer = setup({ { name = "Kick", devices = { inside } } })
+  local data = device_data(1, 2)
+  local epoch, layout = place(peer)
+  local current = mock.song:track(1):device(2).active_preset_data
+  local input = { ref = epoch .. ":device:1.2", presetData = (current:gsub("(<Macro1>%s*<Value>)[^<]*", "%175", 1)) }
+  local previewed = preview(peer, "device-preset-data", input)
+  inner_moves(data, 0.3)
+  local done = apply(peer, "device-preset-data", input, previewed, "Kumi: a macro", epoch, layout)
+  ok(done.result, json.encode(done.error or {}))
+  local record = done.result
+  record.prior = previewed.prior
+  inner_moves(data, 0.6)
+  H.tick(3)
+  drain(peer)
+  mock.song:undo()
+  inner_moves(data, 0.2)
+  H.tick(3)
+  drain(peer)
+  local told = H.events(peer, "undone_in_daw")
+  eq(#told, 1, "Renoise's undo told")
+  eq(told[1].data.how, "undo")
+  mock.song:redo()
+  inner_moves(data, 0.9)
+  H.tick(3)
+  drain(peer)
+  told = H.events(peer, "undone_in_daw")
+  eq(#told, 1, "Renoise's redo told")
+  eq(told[1].data.how, "redo")
+  -- A device put inside is a change, whatever the LFO does.
+  local holds = data.preset_data
+  local inner = "<GainerDevice type=\"GainerDevice\"/>\n      </Devices>"
+  data.preset_data = holds:gsub("</Devices>", inner, 1)
+  failure(restore(peer, "device-preset-data", record), "changed", "inside")
+  data.preset_data = holds
+  inner_moves(data, 0.4)
+  local undone = restore(peer, "device-preset-data", record)
+  ok(undone.result, json.encode(undone.error or {}))
+  eq(value(1, 2, 2), 50)
+end)
+
+test("devices m4: Kumi's undo of a Doofer it made with a meta device aimed inside isn't stopped by what that moves (#804)", function()
+  -- (*Hydra's and *XY Pad's outputs say OutNDestEffect, by Renoise's song schema)
+  for _, tag in ipairs({ "DestEffect", "Out1DestEffect" }) do
+    local _, peer = make_song()
+    local epoch = place(peer)
+    local xml = DOOFER_XML:gsub("<GainerDevice type=\"GainerDevice\"/>", "<GainerDevice type=\"GainerDevice\">\n          <Volume>\n            <Value>1.0</Value>\n          </Volume>\n        </GainerDevice>", 1)
+      :gsub("</Devices>", (INNER_LFO:gsub("DestEffect", tag)), 1)
+    local done = make(peer, { epoch .. ":device:2.2", epoch .. ":device:2.3" }, { presetData = xml })
+    ok(done.result, json.encode(done.error or {}))
+    inner_moves(device_data(2, 2), 0.3)
+    local back = restore(peer, "doofer-make", done.result)
+    ok(back.result, tag .. ": " .. json.encode(back.error or {}))
+    eq(paths(2), "EQ 5, Gainer, *LFO")
+  end
+  mock.device_slots = nil
 end)

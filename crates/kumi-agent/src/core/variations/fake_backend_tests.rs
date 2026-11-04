@@ -57,6 +57,8 @@ struct Daw {
     moved: RefCell<BTreeMap<String, String>>,
     /// Why a take stays out of a drop, by its id.
     undroppable: RefCell<BTreeMap<u64, Undroppable>>,
+    /// Why Kumi can't tell a take that holds other than it was kept from an edited one (the DAW moves what Kumi writes).
+    unsure: RefCell<Option<String>>,
 }
 
 impl Daw {
@@ -176,6 +178,10 @@ impl VariationsBackend for Fake {
 
     fn digest(&self, material: &Steps) -> String {
         format!("{:?}", material.0)
+    }
+
+    fn unsure(&self, _: &Steps) -> Option<String> {
+        self.0.unsure.borrow().clone()
     }
 
     /// Each step that plays a level lower (as low as 1).
@@ -436,6 +442,29 @@ async fn a_take_the_producer_edited_or_deleted_is_left_out_of_a_drop() {
     let named = run(&tool, json!({"action": "drop", "names": ["V1"]})).await.unwrap();
     assert_eq!((named["dropped"].clone(), named["edited"].clone()), (json!(["V1"]), json!(["V1"])), "{named}");
     assert!(daw.names().is_empty());
+}
+
+/// (#606) A take the DAW put where Kumi can't follow it (REAPER's ticks that bend) isn't called edited: Kumi says it can't
+/// tell, and why, and leaves it to a change or a drop of the rest as it does an edited one.
+#[tokio::test(flavor = "current_thread")]
+async fn a_take_kumi_cant_tell_from_an_edited_one_is_left_as_it_is_and_says_why() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = kumi(&daw, home.path());
+    run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "count": 2, "seed": 5, "listen": false})).await.unwrap();
+    daw.takes.borrow_mut().get_mut(&1).unwrap().1 .0[15] = 9;
+    *daw.unsure.borrow_mut() = Some("the fake moved its steps".into());
+    let changed = run(&tool, json!({"action": "change", "names": ["V1"], "listen": false})).await.unwrap();
+    assert_eq!(
+        changed["skipped"],
+        json!(["Kumi can't tell whether V1 was edited in Fake since it wrote it (the fake moved its steps): left as it is"]),
+        "{changed}"
+    );
+    let dropped = run(&tool, json!({"action": "drop"})).await.unwrap();
+    assert_eq!(dropped["dropped"], json!(["V2"]), "{dropped}");
+    assert!(dropped["skipped"][0].as_str().unwrap().ends_with("(the fake moved its steps): left as it is (name it to drop it anyway)"));
+    // (a take that holds what Kumi kept is never asked about)
+    assert_eq!(daw.names(), ["V1 \u{b7} Beat"]);
 }
 
 #[tokio::test(flavor = "current_thread")]

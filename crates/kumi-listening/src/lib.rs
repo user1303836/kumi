@@ -9,6 +9,7 @@ pub mod embed;
 pub mod engine;
 pub mod fit;
 pub mod form;
+pub mod goal;
 pub mod heard_settings;
 pub mod home;
 pub mod judging;

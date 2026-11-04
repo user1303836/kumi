@@ -488,7 +488,8 @@ impl Reaper<'_> {
     }
 
     pub fn take_is_midi(&self, take: Take) -> bool {
-        self.take_source_type(take).is_some_and(|t| t.eq_ignore_ascii_case("MIDI"))
+        // (a pooled one's source is MIDIPOOL: lab, 7.82)
+        self.take_source_type(take).is_some_and(|t| t.eq_ignore_ascii_case("MIDI") || t.eq_ignore_ascii_case("MIDIPOOL"))
     }
 
     // ----- FX -----

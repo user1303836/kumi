@@ -459,6 +459,10 @@ pub struct ChangeRecord {
     /// later Kumi drew one this one can't).
     #[serde(default, skip_serializing_if = "Option::is_none", deserialize_with = "crate::picture::lenient")]
     pub picture: Option<ChangePicture>,
+    /// The run of one kind of change a plan made that it's part of, the same for each change in the run: HISTORY shows
+    /// a run across several tracks as one entry, with one picture.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub batch: Option<String>,
 }
 
 /// A rack's chain, for NOW's picture: its name and its devices in order.

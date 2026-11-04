@@ -346,6 +346,97 @@ async fn with_nothing_drawing_the_focus_the_daw_is_asked_about_once_a_second() {
         .await;
 }
 
+/// A host that takes `snapshot_ms` over the project's snapshot (a big project) and answers the rest at once, noting when
+/// each tool was asked.
+struct Slow {
+    inner: Rc<Host>,
+    snapshot_ms: u64,
+    asked: RefCell<Vec<(String, tokio::time::Instant)>>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for Slow {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        None
+    }
+    async fn list(&self, cursor: Option<&str>, signal: Signal) -> Result<ListToolsResult, RuntimeError> {
+        self.inner.list(cursor, signal).await
+    }
+    async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
+        self.asked.borrow_mut().push((name.into(), tokio::time::Instant::now()));
+        if name == "snapshot" {
+            tokio::time::sleep(std::time::Duration::from_millis(self.snapshot_ms)).await;
+        }
+        self.inner.call(name, args, signal).await
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// FOCUS's first read goes as soon as the session's first look has answered, not a whole poll period after the start;
+/// a look slower than a period doesn't hold it back; the look's snapshot is the DAW's first request either way; and plain
+/// mode, which draws no FOCUS, keeps its once a second.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn focus_is_first_read_right_after_the_first_look_and_no_later_than_a_period() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let focus = json!({"epoch": "1", "view": "arrange", "selection": {}, "transport": {"playing": false}});
+            // (how long the snapshot takes, whether FOCUS is drawn, when the first focus read is due after the start)
+            for (snapshot_ms, drawn, due_ms) in [(5u64, true, 5u64), (400, true, 150), (5, false, 1_000)] {
+                let host = Rc::new(Host {
+                    answers: RefCell::new(vec![
+                        ("status", json!({"connected": true}), false),
+                        ("snapshot", reaper_snapshot(), false),
+                        ("focus", focus.clone(), false),
+                    ]),
+                    asked: RefCell::default(),
+                });
+                let slow = Rc::new(Slow { inner: host, snapshot_ms, asked: RefCell::default() });
+                let mut options = options(Rc::new(Host { answers: RefCell::default(), asked: RefCell::default() }), Rc::default());
+                let endpoint = slow.clone();
+                options.connect = Some(Rc::new(move |_| {
+                    let endpoint = endpoint.clone();
+                    async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+                }));
+                options.context.on_focus = Some(Rc::new(|_| {}));
+                options.context.focus_drawn = drawn;
+                let reaper = create_reaper_integration(options);
+                let began = tokio::time::Instant::now();
+                reaper.start(Signal::new()).await.unwrap();
+                // The session looks right after the start, as `reset` does.
+                let (seen, _) =
+                    tokio::join!(reaper.observe(Signal::new(), None), tokio::time::sleep(std::time::Duration::from_millis(1_100)));
+                assert_eq!(seen.unwrap().label, "REAPER — Night Drive");
+                reaper.close().await.unwrap();
+                let asked: Vec<(String, u64)> = slow
+                    .asked
+                    .borrow()
+                    .iter()
+                    .filter(|(tool, _)| matches!(tool.as_str(), "status" | "snapshot" | "focus"))
+                    .map(|(tool, at)| (tool.clone(), (*at - began).as_millis() as u64))
+                    .collect();
+                let case = format!("snapshot {snapshot_ms} ms, drawn {drawn}: {asked:?}");
+                let order: Vec<&str> = asked.iter().take(3).map(|(tool, _)| tool.as_str()).collect();
+                assert_eq!(order, ["status", "snapshot", "focus"], "the look's snapshot is the DAW's first request: {case}");
+                let first_focus = asked.iter().find(|(tool, _)| tool == "focus").map(|(_, at)| *at);
+                assert_eq!(first_focus, Some(due_ms), "{case}");
+            }
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_daw_gone_mid_playback_plays_nothing_any_more() {
     tokio::task::LocalSet::new()
@@ -449,6 +540,23 @@ async fn reapers_focus_is_read_while_focus_shows_and_its_bodies_come_neutral() {
             assert_eq!((routing.routes[1].kind, routing.routes[1].muted), (RouteKind::Receive, true));
             assert_eq!(routing.parent_send, Some(true));
 
+            // The meters alone, around the mixer's track. An extension without that read refuses it: nothing, not an error,
+            // so FOCUS goes on with the mixer's own read.
+            let meters = BodyRequest::Levels { track_ref: Some(BASS.into()) };
+            host.answers.borrow_mut().push((
+                "focus_body",
+                json!({"levels": [{"ref": BASS, "peakDb": [-6.0, -9.0]}], "trackCount": 1, "from": 0}),
+                false,
+            ));
+            let Some(FocusBody::Levels(levels)) = reaper.focus_body(&meters, Signal::new()).await.unwrap() else {
+                panic!("the meters")
+            };
+            assert_eq!((levels[0].track_ref.as_str(), levels[0].peak_db), (BASS, [-6.0, -9.0]));
+            let asked = host.asked.borrow().last().unwrap().1.clone();
+            assert_eq!((asked["kind"].as_str(), asked["around"].as_str()), (Some("levels"), Some(BASS)), "{asked}");
+            host.answers.borrow_mut().push(("focus_body", json!("REAPER has no body of that kind"), true));
+            assert_eq!(reaper.focus_body(&meters, Signal::new()).await.unwrap(), None);
+
             // The arrange view: a screenful of lanes asked for, never a page of every track, and how many there are.
             host.answers.borrow_mut().push((
                 "focus_body",
@@ -458,6 +566,33 @@ async fn reapers_focus_is_read_while_focus_shows_and_its_bodies_come_neutral() {
             let Some(FocusBody::Timeline(strip)) = reaper.focus_body(&BodyRequest::Timeline, Signal::new()).await.unwrap() else { panic!("the arrange view") };
             assert_eq!(host.asked.borrow().last().unwrap().1, json!({"kind": "arrange", "limit": 24, "around": BASS}), "centred on the selected track");
             assert_eq!((strip.lanes.as_ref().map(Vec::len), strip.track_count), (Some(1), Some(200)));
+
+            // (#399 K35) The stretch REAPER's arrange view shows, as the producer scrolled and zoomed it: read at once
+            // when REAPER first says what it shows, and from then on; a small scroll waits for the next read, and a far
+            // one is read again at once.
+            let arrange = |[from, to]: [f64; 2]| {
+                json!({"length": 256, "view": {"from": from, "to": to}, "window": {"from": from, "to": to}, "trackCount": 1,
+                    "tracks": [{"ref": BASS, "name": "Bass", "depth": 0, "items": []}]})
+            };
+            let windows = |view: [f64; 2]| {
+                host.answers.borrow_mut().push(("focus_body", arrange(view), false));
+                let before = host.asked.borrow().len();
+                let reaper = reaper.clone();
+                let host = host.clone();
+                async move {
+                    let Some(FocusBody::Timeline(strip)) = reaper.focus_body(&BodyRequest::Timeline, Signal::new()).await.unwrap() else {
+                        panic!("the arrange view")
+                    };
+                    let asked: Vec<Option<Value>> = host.asked.borrow()[before..].iter().map(|(_, args)| args.get("window").cloned()).collect();
+                    (asked, strip.window)
+                }
+            };
+            let window = |from: f64, to: f64| Some(json!({"from": from, "to": to}));
+            assert_eq!(windows([32., 64.]).await, (vec![None, window(32., 64.)], Some([32., 64.])), "the view, once REAPER says it");
+            assert_eq!(windows([32., 64.]).await, (vec![window(32., 64.)], Some([32., 64.])), "then that stretch only");
+            assert_eq!(windows([36., 68.]).await.0, vec![window(32., 64.)], "a small scroll: read next time");
+            assert_eq!(windows([36., 68.]).await.0, vec![window(36., 68.)]);
+            assert_eq!(windows([128., 160.]).await.0, vec![window(36., 68.), window(128., 160.)], "far: read again at once");
             reaper.close().await.unwrap();
         })
         .await;
@@ -481,15 +616,18 @@ async fn renoises_bodies_are_its_pattern_matrix_and_keyzones_in_its_own_notation
                 ]}),
                 false,
             ));
-            let Some(FocusBody::Tracker(grid)) = renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()) }, Signal::new()).await.unwrap() else {
+            let Some(FocusBody::Tracker(grid)) = renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()), tracks: None }, Signal::new()).await.unwrap() else {
                 panic!("a pattern")
             };
-            assert_eq!(host.asked.borrow().last().unwrap().1, json!({"kind": "pattern", "ref": "3:pattern:2"}));
+            // (A4-2) The tracks FOCUS can draw, not a big song's every one; a tool that takes no limit answers them all, and
+            // they draw as before.
+            assert_eq!(host.asked.borrow().last().unwrap().1, json!({"kind": "pattern", "ref": "3:pattern:2", "limit": 24}));
             assert_eq!((grid.from, grid.cursor, grid.playing), (0, Some(1), Some(0)), "lines from 1 in Renoise, from 0 in FOCUS");
             assert_eq!(grid.tracks[0].cells, ["C-4 01 .. .. .. 0A10", "OFF .. .. .. .. ...."], "each column kept in its place");
 
-            renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:phrase:1.2".into()) }, Signal::new()).await.unwrap();
+            renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:phrase:1.2".into()), tracks: None }, Signal::new()).await.unwrap();
             assert_eq!(host.asked.borrow().last().unwrap().1["kind"], "phrase", "a phrase is asked for as one");
+            assert_eq!(host.asked.borrow().last().unwrap().1.get("limit"), None, "a phrase is one track's");
 
             host.answers.borrow_mut().push((
                 "focus_body",
@@ -512,6 +650,105 @@ async fn renoises_bodies_are_its_pattern_matrix_and_keyzones_in_its_own_notation
             };
             assert_eq!((map.zones[0].notes, map.macros.len(), map.phrases.len()), ((60, 60), 1, 1));
             assert!(renoise.focus_body(&BodyRequest::Timeline, Signal::new()).await.unwrap().is_none(), "Renoise has no timeline strip");
+            renoise.close().await.unwrap();
+        })
+        .await;
+}
+
+/// A host that also tells its events to whoever listens (the bridge's `tracks` shifts here).
+struct Telling {
+    inner: Rc<Host>,
+    listeners: RefCell<Vec<Rc<dyn Fn(JsonObject)>>>,
+}
+#[async_trait(?Send)]
+impl McpEndpoint for Telling {
+    fn pid(&self) -> Option<u32> {
+        None
+    }
+    fn server_info(&self) -> Option<Implementation> {
+        None
+    }
+    async fn list(&self, cursor: Option<&str>, signal: Signal) -> Result<ListToolsResult, RuntimeError> {
+        self.inner.list(cursor, signal).await
+    }
+    async fn call(&self, name: &str, args: JsonObject, signal: Signal) -> Result<CallToolResult, RuntimeError> {
+        self.inner.call(name, args, signal).await
+    }
+    fn on_catalog_changed(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn on_live_event(&self, listener: Rc<dyn Fn(JsonObject)>) -> Box<dyn Fn()> {
+        self.listeners.borrow_mut().push(listener);
+        Box::new(|| {})
+    }
+    fn on_disconnect(&self, _: Rc<dyn Fn()>) -> Box<dyn Fn()> {
+        Box::new(|| {})
+    }
+    fn stderr_status(&self) -> StderrStatus {
+        StderrStatus { bytes: 0, truncated: false }
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// (A4-2) Renoise's pattern is read for the track the producer is on as well as the first ones: FOCUS draws that one first.
+/// That track's ref is a place, so after a track shift the focus hasn't caught up with yet, every track is read, as before.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn renoises_pattern_is_read_for_the_producers_track_and_the_first_ones() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use kumi_agent::core::view::BodyRequest;
+            // (a layout the book takes from the focus: a pattern's read names it only for refs of its own, which it has none of)
+            let focus = json!({"epoch": "3", "layout": 5, "view": "pattern", "selection": {"trackRef": "3:track:40"}, "transport": {"playing": false}});
+            let body = json!({"ref": "3:pattern:2", "name": "Drop", "lines": 64, "from": 1, "lpb": 4, "tracks": []});
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![
+                    ("status", json!({"connected": true}), false),
+                    ("focus", focus, false),
+                    ("focus_body", body, false),
+                ]),
+                asked: RefCell::default(),
+            });
+            let telling = Rc::new(Telling { inner: host.clone(), listeners: RefCell::default() });
+            let mut options = options(host.clone(), Rc::default());
+            let endpoint = telling.clone();
+            options.connect = Some(Rc::new(move |_| {
+                let endpoint = endpoint.clone();
+                async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+            }));
+            options.context.on_focus = Some(Rc::new(|_| {}));
+            let renoise = create_renoise_integration(options);
+            renoise.start(Signal::new()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            // The pattern's read, and what the host was asked for it.
+            async fn read(renoise: &dyn Integration, host: &Host) -> Value {
+                renoise.focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()), tracks: None }, Signal::new()).await.unwrap();
+                host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap()
+            }
+            let asked = read(&*renoise, &host).await;
+            assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
+            // FOCUS says how many it can draw where it shows: that many.
+            renoise
+                .focus_body(&BodyRequest::Tracker { item_ref: Some("3:pattern:2".into()), tracks: Some(9) }, Signal::new())
+                .await
+                .unwrap();
+            let narrow = host.asked.borrow().iter().rev().find(|(tool, _)| tool == "focus_body").map(|(_, args)| args.clone()).unwrap();
+            assert_eq!(narrow["limit"], json!(9), "{narrow}");
+            // A layout makes the bridge carry (or refuse as stale) the refs on tracks a read names: the track named only to
+            // read around it brings none, so the read is never refused for it.
+            assert_eq!(asked.get("layout"), None, "{asked}");
+            // A track is inserted above it: until the focus says where the producer is now, every track is read.
+            let shift = json!({"name": "tracks", "data": {"layout": 6, "made": [10], "gone": []}});
+            for listener in telling.listeners.borrow().iter() {
+                listener(shift.as_object().unwrap().clone());
+            }
+            let asked = read(&*renoise, &host).await;
+            assert_eq!((asked.get("limit"), asked.get("around")), (None, None), "{asked}");
+            // The focus's next read says it again, at the layout now.
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let asked = read(&*renoise, &host).await;
+            assert_eq!((asked["limit"].clone(), asked["around"].clone()), (json!(24), json!("3:track:40")), "{asked}");
             renoise.close().await.unwrap();
         })
         .await;
@@ -1027,6 +1264,130 @@ async fn a_busy_daw_is_looked_at_again_once_it_is_free_not_every_second() {
         .await;
 }
 
+/// Kumi started before the DAW: once the DAW opens and answers, the integration asks the session for a look, which nothing
+/// else does (the session never saw the DAW go, so it doesn't look because it came). It asks again a second later while no
+/// look has read the project (a turn under way refuses one), and stops once one has. A DAW that was there, went and came
+/// back asks for none: the session looks again by itself then.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_daw_opened_after_kumi_started_is_looked_at_once_it_answers() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let gone = json!({"error": "no REAPER with Kumi's bridge is running", "connected": false});
+            let there = json!({"epoch": "1", "view": "arrange", "selection": {}, "transport": {"playing": false}});
+            let second = || tokio::time::sleep(std::time::Duration::from_millis(1_000));
+            for at_start in [false, true] {
+                let host = Rc::new(Host {
+                    answers: RefCell::new(if at_start {
+                        vec![
+                            ("status", json!({"connected": true}), false),
+                            ("snapshot", reaper_snapshot(), false),
+                            ("focus", there.clone(), false),
+                        ]
+                    } else {
+                        vec![
+                            (
+                                "status",
+                                json!({"connected": false, "daw": "reaper", "reason": "no REAPER with Kumi's bridge is running"}),
+                                false,
+                            ),
+                            ("snapshot", gone.clone(), true),
+                            ("focus", gone.clone(), true),
+                        ]
+                    }),
+                    asked: RefCell::default(),
+                });
+                let looks_again = Rc::new(std::cell::Cell::new(0));
+                let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
+                let counted = looks_again.clone();
+                options.context.on_look_again = Some(Rc::new(move || counted.set(counted.get() + 1)));
+                options.context.on_focus = Some(Rc::new(|_| {}));
+                let reaper = create_reaper_integration(options);
+                reaper.start(Signal::new()).await.unwrap();
+                reaper.observe(Signal::new(), None).await.unwrap();
+                second().await;
+                if at_start {
+                    // REAPER quits.
+                    host.answers.borrow_mut().push(("focus", gone.clone(), true));
+                    second().await;
+                }
+                assert_eq!(looks_again.get(), 0, "no look asked for while the DAW is away (there at start: {at_start})");
+                // REAPER opens (again).
+                host.answers.borrow_mut().push(("focus", there.clone(), false));
+                host.answers.borrow_mut().push(("snapshot", reaper_snapshot(), false));
+                second().await;
+                if at_start {
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    assert_eq!(looks_again.get(), 0, "the session looks again by itself");
+                } else {
+                    assert_eq!(looks_again.get(), 1, "a look is asked for once it answers");
+                    // The session was busy with a turn, which refused it: another is asked for a second later.
+                    second().await;
+                    assert_eq!(looks_again.get(), 2, "asked again while no look has read the project");
+                    // A long turn refuses them all: a refused ask costs nothing, so they go on past LOOKS_AGAIN (20).
+                    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                    let asked = looks_again.get();
+                    assert!(asked > 20, "still asking after a 30 s turn: {asked}");
+                    // The session's look reads the project: nothing more is asked for.
+                    reaper.observe(Signal::new(), None).await.unwrap();
+                    tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+                    assert_eq!(looks_again.get(), asked, "none once a look has read it");
+                }
+                reaper.close().await.unwrap();
+            }
+        })
+        .await;
+}
+
+/// A DAW that answers but whose looks keep failing (connected, the snapshot refused) is asked about only so often: each look
+/// the session takes and that doesn't read the project counts, so the asks stop rather than come every second for ever.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_daw_whose_looks_keep_failing_is_asked_about_only_so_often() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let gone = json!({"error": "no REAPER with Kumi's bridge is running", "connected": false});
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![
+                    ("status", json!({"connected": false, "daw": "reaper", "reason": "no REAPER with Kumi's bridge is running"}), false),
+                    ("snapshot", gone.clone(), true),
+                    ("focus", gone, true),
+                ]),
+                asked: RefCell::default(),
+            });
+            let (looks_again, waiting) = (Rc::new(std::cell::Cell::new(0)), Rc::new(std::cell::Cell::new(0)));
+            let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
+            let (counted, asked) = (looks_again.clone(), waiting.clone());
+            options.context.on_look_again = Some(Rc::new(move || {
+                counted.set(counted.get() + 1);
+                asked.set(asked.get() + 1);
+            }));
+            options.context.on_focus = Some(Rc::new(|_| {}));
+            let reaper = create_reaper_integration(options);
+            reaper.start(Signal::new()).await.unwrap();
+            reaper.observe(Signal::new(), None).await.unwrap();
+            // REAPER opens, and answers, but its snapshot is refused every time.
+            host.answers.borrow_mut().push((
+                "focus",
+                json!({"epoch": "1", "view": "arrange", "selection": {}, "transport": {"playing": false}}),
+                false,
+            ));
+            host.answers.borrow_mut().push(("snapshot", json!({"error": "REAPER couldn't read the project", "connected": true}), true));
+            // The session takes every look it's asked for.
+            let mut at = std::collections::HashMap::new();
+            for tenth in 1..=500 {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                while waiting.get() > 0 {
+                    waiting.set(waiting.get() - 1);
+                    reaper.observe(Signal::new(), None).await.unwrap();
+                }
+                at.insert(tenth, looks_again.get());
+            }
+            reaper.close().await.unwrap();
+            assert!(at[&20] >= 1, "asked for looks once it answered: {:?}", at[&20]);
+            assert_eq!(at[&450], at[&500], "the asks stop: {} at 45 s, {} at 50 s", at[&450], at[&500]);
+        })
+        .await;
+}
+
 /// A host whose calls can fail (the caller stopped, a time limit) and that can go away (its pipe closed).
 struct Leaving {
     inner: Rc<Host>,
@@ -1532,6 +1893,93 @@ async fn renoises_at_offers_tracks_dsps_and_instruments_and_a_reference_is_carri
             let gone = told["gone"].as_str().unwrap();
             assert!(gone.starts_with("The producer named “808 Kit” with @, and Renoise has renumbered its instruments since"), "{gone}");
             assert!(told.get("ref").is_none(), "no ref that names another: {told}");
+        })
+        .await;
+}
+
+/// While the DAW is away (Kumi started before it, or it quit), FOCUS's poll looks for it every 50 ms, for two minutes
+/// after it went, then at the usual pace again; a DAW that's there is asked about at the usual pace, and plain mode keeps
+/// its once a second whatever happens.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn an_away_daw_is_looked_for_more_often_for_a_while() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let gone = json!({"error": "no REAPER with Kumi's bridge is running", "connected": false});
+            let there = json!({"epoch": "1", "view": "arrange", "selection": {}, "transport": {"playing": false}});
+            // (FOCUS drawn, REAPER there) → focus reads in the first second, and in a second three minutes on
+            for (drawn, present) in [(true, false), (false, false), (true, true)] {
+                let host = Rc::new(Host {
+                    answers: RefCell::new(if present {
+                        vec![("status", json!({"connected": true}), false), ("focus", there.clone(), false)]
+                    } else {
+                        vec![
+                            (
+                                "status",
+                                json!({"connected": false, "daw": "reaper", "reason": "no REAPER with Kumi's bridge is running"}),
+                                false,
+                            ),
+                            ("focus", gone.clone(), true),
+                        ]
+                    }),
+                    asked: RefCell::default(),
+                });
+                let reads = || host.asked.borrow().iter().filter(|(tool, _)| tool == "focus").count();
+                let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
+                options.context.on_focus = Some(Rc::new(|_| {}));
+                options.context.focus_drawn = drawn;
+                let reaper = create_reaper_integration(options);
+                reaper.start(Signal::new()).await.unwrap();
+                tokio::time::sleep(std::time::Duration::from_millis(1_010)).await;
+                let first = reads();
+                tokio::time::sleep(std::time::Duration::from_secs(180)).await;
+                let before = reads();
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                let later = reads() - before;
+                reaper.close().await.unwrap();
+                let case = format!("drawn {drawn}, there {present}: {first} in the first second, {later} a second three minutes on");
+                match (drawn, present) {
+                    (true, false) => assert!(first >= 18 && later <= 7, "{case}"),
+                    (false, false) => assert!(first == 1 && later == 1, "{case}"),
+                    _ => assert!(first <= 7, "{case}"),
+                }
+            }
+        })
+        .await;
+}
+
+/// A DAW that was there and quits is looked for every 50 ms; once it answers again, it's asked about at the usual pace, not
+/// every 50 ms for the rest of the two minutes.
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_daw_that_quits_is_looked_for_often_and_one_back_at_the_usual_pace() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let gone = json!({"error": "no REAPER with Kumi's bridge is running", "connected": false});
+            let there = json!({"epoch": "1", "view": "arrange", "selection": {}, "transport": {"playing": false}});
+            let host = Rc::new(Host {
+                answers: RefCell::new(vec![("status", json!({"connected": true}), false), ("focus", there.clone(), false)]),
+                asked: RefCell::default(),
+            });
+            let reads = || host.asked.borrow().iter().filter(|(tool, _)| tool == "focus").count();
+            let mut options = options(host.clone(), Rc::new(RefCell::new(vec![])));
+            options.context.on_focus = Some(Rc::new(|_| {}));
+            let reaper = create_reaper_integration(options);
+            reaper.start(Signal::new()).await.unwrap();
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            // REAPER quits.
+            host.answers.borrow_mut().push(("focus", gone, true));
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let before = reads();
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let away = reads() - before;
+            assert!(away >= 18, "looked for every 50 ms once it quit: {away} in a second");
+            // REAPER is back.
+            host.answers.borrow_mut().push(("focus", there, false));
+            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+            let before = reads();
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            let back = reads() - before;
+            reaper.close().await.unwrap();
+            assert!(back <= 7, "the usual pace once it answers: {back} in a second");
         })
         .await;
 }

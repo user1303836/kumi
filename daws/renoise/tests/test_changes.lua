@@ -1124,7 +1124,8 @@ test("changes: a device changed since the preview is not deleted", function()
   local epoch, layout = place(peer)
   local ref = epoch .. ":device:3.2"
   local previewed = preview(peer, "device-delete", { ref = ref })
-  devices_of(3)[2].params[1].value = 0.1
+  -- (not its one parameter, which has automation, which moves it anyway: #804)
+  devices_of(3)[2].active = true
   failure(apply(peer, "device-delete", { ref = ref }, "Kumi: delete device (kf21)", previewed.fence, epoch, layout), "changed")
   eq(paths_of(3), "Mixer,EQ 5,#Send")
   eq(steps(), 0)
@@ -1319,6 +1320,39 @@ test("changes: lines are written as the tracker's own text, the columns they nee
   eq(mock.data.tracks[3].volume_column or false, false)
   eq(steps(), 2)
   eq(newest(), "Kumi: undo notes (kn02)")
+  H.no_dialogs()
+end)
+
+-- (#399 N-N3) Kumi's lines back as they were while the tool's count of the pattern's changed lines hasn't moved: lines emptied
+-- in the mock's data with no line notifier told. No edit of the mock's reaches that state; a "back already" restore meets it.
+local function empty_quietly(p, t, k)
+  mock.data.patterns[p].tracks[t].lines[k] = nil
+end
+
+test("changes: lines back already, the columns Kumi showed still shown: Kumi's undo hides them in a step named as its own (#399 N-N3)", function()
+  local env, peer = setup()
+  local epoch, layout = place(peer)
+  local input = write_input(epoch)
+  local previewed = preview(peer, "notes-write", input)
+  local done = apply(peer, "notes-write", input, "Kumi: notes (kn03)", previewed.fence, epoch, layout).result
+  eq(mock.data.tracks[3].note_columns, 3)
+  empty_quietly(1, 3, 1)
+  empty_quietly(1, 3, 5)
+  eq(cell(1, 3, 1, 1), "--- .. .. .. .. 0000")
+  local undone = restore(peer, "notes-write", { target = previewed.target, prior = previewed.prior, applied = done.applied }, "Kumi: undo notes (kn04)", epoch, layout)
+  ok(undone.result, json.encode(undone.error or {}))
+  ok(undone.result.display.title:find("is back already: the columns Kumi showed are hidden again", 1, true), undone.result.display.title)
+  eq(undone.result.undo.entry, true)
+  eq(mock.data.tracks[3].note_columns, 2, "the columns Kumi showed are hidden again")
+  eq(mock.data.tracks[3].effect_columns, 1)
+  eq(mock.data.tracks[3].volume_column or false, false)
+  eq(steps(), 2, "the hiding is one step")
+  eq(newest(), "Kumi: undo notes (kn04)")
+  -- Asked again: back already, nothing to hide, nothing written.
+  local again = restore(peer, "notes-write", { target = previewed.target, prior = previewed.prior, applied = done.applied }, "Kumi: undo notes (kn05)", epoch, layout)
+  ok(again.result, json.encode(again.error or {}))
+  eq(again.result.undo.entry, false)
+  eq(steps(), 2)
   H.no_dialogs()
 end)
 
@@ -1525,12 +1559,13 @@ test("changes: a big restore is numbered steps, and the producer's undo of lines
   H.tick(3)
   drain(peer)
   told = H.events(peer, "undone_in_daw")
-  -- (lines back as Kumi wrote them may be Renoise's redo, or its undo of something older: Kumi can't tell)
-  eq(told[#told].data.how, "unsure")
-  -- and Kumi's undo refuses: Renoise's undo and redo changed the pattern since Kumi's step
-  local refused = restore(peer, "notes-write", { target = previewed.target, prior = previewed.prior, applied = done.result.applied }, "Kumi: undo many (kn72)", epoch, layout)
-  eq(refused.error and refused.error.code, "changed", json.encode(refused))
-  eq(cell(1, 2, 12, 1):sub(1, 3), "C-3")
+  -- (Kumi's step is the newest and nothing is left to redo, so the lines back are Renoise's redo of it, #393)
+  eq(told[#told].data.how, "redo")
+  -- and Kumi's undo takes them away again
+  local redone = restore(peer, "notes-write", { target = previewed.target, prior = previewed.prior, applied = done.result.applied }, "Kumi: undo many (kn72)", epoch, layout)
+  ok(redone.result, json.encode(redone.error or {}))
+  eq(cell(1, 2, 12, 1), "--- .. .. .. .. 0000")
+  eq(cell(1, 2, 1, 1), "--- .. .. .. .. 0000")
   -- restored in numbered steps (84 writes in slices of 30), in a pattern nothing changed since
   input.pattern = pattern_ref(epoch, 2)
   previewed = preview(peer, "notes-write", input)

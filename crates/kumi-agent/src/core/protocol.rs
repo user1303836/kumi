@@ -355,6 +355,8 @@ requests! {
     ForgetMusic {} -> Result<(), String>;
     /// /map: the producer's sounds and songs on their maps, read afresh.
     Map {} -> MapData;
+    /// /map: the key the maps would be read under now. The same key as a map read before: that map is the same.
+    MapKey {} -> String;
     /// /slots and its words: what it says. What's under way comes as `slots-progress` events with its `id`, and
     /// [`op::StopSlots`] stops it.
     Slots { id: u32, words: String } -> Said;
@@ -393,6 +395,9 @@ requests! {
     /// The saved model, when its provider's own list no longer shows it: what to say ("ChatGPT no longer offers
     /// gpt-5.5 to your sign-in"), or None.
     MissingModel {} -> Option<String>;
+    /// The producer began a message: the chosen model's sign-in and connection are made ready while they type
+    /// ([`ModelController::warm`]). Nothing comes of it that anyone sees.
+    Warm {} -> ();
     /// A body for FOCUS (while connected).
     FocusBody { request: BodyRequest } -> Option<FocusBody>;
 }
@@ -643,6 +648,7 @@ pub async fn models_answer(op: &Op, models: Option<Rc<dyn ModelController>>, sid
         Op::MissingModel(request) => {
             answered(request.clone(), |op::MissingModel {}| async move { Ok(kumi_ai::control::missing_model(&*controls()?).await) }).await
         }
+        Op::Warm(request) => answered(request.clone(), |op::Warm {}| async move { Ok(controls()?.warm().await) }).await,
         _ => return None,
     })
 }
@@ -821,6 +827,7 @@ impl Session {
                 answered(request, |op::ForgetMusic {}| async move { Ok(part(session.music())?.forget().await) }).await
             }
             Op::Map(request) => answered(request, |op::Map {}| async move { Ok(part(session.map_loader())?().await) }).await,
+            Op::MapKey(request) => answered(request, |op::MapKey {}| async move { Ok(part(session.map_keyer())?().await) }).await,
             Op::Slots(request) => {
                 answered(
                     request,
@@ -846,6 +853,7 @@ impl Session {
                 models_answer(&op, session.model_controls(), side).await.unwrap_or_else(|| Err(RuntimeError::plain("Not available")))
             }
             Op::StopSignIn(request) => answered(request, |op::StopSignIn { id }| async move { Ok(side.stop_sign_in(id)) }).await,
+            Op::Warm(request) => answered(request, |op::Warm {}| async move { Ok(session.warm().await) }).await,
             Op::FocusBody(request) => {
                 answered(request, |op::FocusBody { request }| async move { session.focus_body(&request).await }).await
             }

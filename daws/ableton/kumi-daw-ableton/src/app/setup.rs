@@ -83,6 +83,10 @@ impl DawSetup for LiveSide {
     fn settings_menu(&self) -> Option<String> {
         live_app::settings_menu(kumi_types::system::platform())
     }
+    async fn start_failure(&self) -> Option<String> {
+        let root = super::folders::live_preferences_dir(&self.env);
+        super::start_failure::start_failure(&self.env, &root, self.run.clone(), kumi_types::system::platform()).await
+    }
 }
 /// Live runs on macOS and Windows only: elsewhere Kumi chats without it, and setup only signs in.
 pub(crate) fn live_here() -> bool {

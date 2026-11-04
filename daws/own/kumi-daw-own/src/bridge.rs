@@ -20,7 +20,7 @@ use kumi_agent::{
         project::{decide_project_with, ProjectRules},
         references::{Candidate, CandidateKind},
         refs::{Book, Moved, RefScheme, Shift},
-        view::{BodyKind, BodyRequest, DawFocus, DeviceNode, FocusBody},
+        view::{BodyKind, BodyRequest, DawFocus, DeviceNode, FocusBody, TRACKER_TRACKS},
     },
     integrations::none::no_access,
     mcp::{
@@ -121,8 +121,21 @@ pub struct OwnIntegration<S: RefScheme + 'static> {
     connected: Rc<Cell<bool>>,
     closed: Rc<Cell<bool>>,
     watching: Cell<bool>,
+    /// Told when a look has answered, whatever it found: FOCUS's first read goes then, right after the project's
+    /// snapshot, rather than a whole poll period after the start.
+    looked_once: Rc<tokio::sync::Notify>,
+    /// A look has read the project since Kumi started.
+    read: Rc<Cell<bool>>,
+    /// Looks begun (the session's and turns'): an ask the session took begins one.
+    looks: Rc<Cell<u32>>,
     /// The track the producer has selected, as the last focus said: the timeline's page is centred on it.
     selected: Rc<RefCell<Option<String>>>,
+    /// The book's layout when `selected` was read: after a track shift since, a positional ref (Renoise's) may name
+    /// another track.
+    selected_at: Rc<Cell<Option<u64>>>,
+    /// What the DAW's own view of the timeline showed at the last read of it (REAPER's arrange view): the next read is
+    /// of that stretch.
+    timeline_view: Cell<Option<[f64; 2]>>,
     /// The project's identity as last observed: another one in the same tab (or another song) is another project.
     identity: Rc<RefCell<Option<String>>>,
     /// The layout the book's refs are at (Renoise's track shifts, each raising it): every request names it, so the
@@ -465,7 +478,12 @@ pub fn create_own_integration<S: RefScheme + 'static>(
         connected: link.connected.clone(),
         closed: Rc::new(Cell::new(false)),
         watching: Cell::new(false),
+        looked_once: Rc::default(),
+        read: Rc::default(),
+        looks: Rc::default(),
         selected: Rc::default(),
+        selected_at: Rc::default(),
+        timeline_view: Cell::new(None),
         identity: link.project.clone(),
         layout: link.layout.clone(),
         seen_in: link.seen_in.clone(),
@@ -515,6 +533,8 @@ const LOOK_TRIES: u32 = 20;
 const LOOK_GAP_MS: u64 = 250;
 /// A look that failed while the DAW was there asks the session for another this often, a second apart.
 const LOOKS_AGAIN: u32 = 20;
+/// How long the focus watch waits between the looks it asks for while none has read the project.
+const ASK_AGAIN: std::time::Duration = std::time::Duration::from_secs(1);
 /// The most a read's page can hold for the model: the kernel cuts a tool's result at 64 KB.
 const PAGE_TEXT_BYTES: usize = 60 * 1024;
 /// The most pages a fixed phrase reads of a list (tracks, the sequence, patterns) before it leaves the request to the
@@ -618,6 +638,19 @@ pub fn focus_pause(period: u64, quiet: u32, playing: bool) -> u64 {
 const FOCUS_QUIET_POLLS: u32 = 20;
 const FOCUS_QUIETER_POLLS: u32 = 110;
 const FOCUS_SLOWEST_MS: u64 = 600;
+/// While the DAW is away (it quit, or Kumi started before it), FOCUS's poll looks for it this often, for this long after it
+/// went: one opened again is seen within 50 ms rather than 150, and one left closed is asked about at the usual pace.
+const AWAY_MS: u64 = 50;
+const AWAY_FAST: std::time::Duration = std::time::Duration::from_secs(120);
+
+/// Tells whoever waits for a look that it has answered, however it ends (its future dropped included).
+struct Told<'a>(&'a tokio::sync::Notify);
+
+impl Drop for Told<'_> {
+    fn drop(&mut self) {
+        self.0.notify_one();
+    }
+}
 
 /// Why the DAW may answer late, in words: REAPER's `busy` code.
 fn busy_words(code: &str, profile: &DawProfile) -> String {
@@ -937,6 +970,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
             return;
         }
         let (endpoint, closed, daw, selected) = (self.endpoint.clone(), self.closed.clone(), self.daw, self.selected.clone());
+        let selected_at = self.selected_at.clone();
         let (connected, identity, on_connection) =
             (self.connected.clone(), self.identity.clone(), self.options.context.on_connection.clone());
         let back_at = self.back_at.clone();
@@ -946,7 +980,18 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         let heard = self.heard.clone();
         let drawn = if self.options.context.focus_drawn { FOCUS_MS } else { UNDRAWN_FOCUS_MS };
         let period = self.options.context.focus_interval_ms.unwrap_or(drawn).max(50);
+        // Where FOCUS is drawn, its first read goes as soon as the first look has answered (at most a period from now):
+        // the look's snapshot is still the DAW's first request, and FOCUS fills right after it. Plain mode keeps its pace.
+        let (looked_once, mut first) = (self.looked_once.clone(), self.options.context.focus_drawn);
+        let (project_read, looks) = (self.read.clone(), self.looks.clone());
+        // (where FOCUS is drawn: plain mode asks once a second whatever happens)
+        let (look_for_it, away_at_start) = (self.options.context.focus_drawn, !self.connected.get());
         tokio::task::spawn_local(async move {
+            // Since when the DAW has been away, while it is.
+            let mut away_since = away_at_start.then(tokio::time::Instant::now);
+            // The looks asked for because none had read the project yet that the session took, when the last ask was, and
+            // how many looks had begun then.
+            let (mut taken, mut asked_at, mut looks_then): (u32, Option<tokio::time::Instant>, u32) = (0, None, 0);
             let (mut last, mut last_transport, mut last_epoch): (Option<Value>, Option<Value>, Option<String>) = (None, None, None);
             // Polls in a row that found nothing moved, and whether the last answer had the DAW playing.
             let (mut quiet, mut was_playing) = (0u32, false);
@@ -967,7 +1012,20 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 }
             };
             while !closed.get() {
-                tokio::time::sleep(std::time::Duration::from_millis(focus_pause(period, quiet, was_playing))).await;
+                let away = look_for_it && away_since.is_some_and(|since| since.elapsed() < AWAY_FAST);
+                let pause = tokio::time::sleep(std::time::Duration::from_millis(if away {
+                    AWAY_MS.min(period)
+                } else {
+                    focus_pause(period, quiet, was_playing)
+                }));
+                if std::mem::take(&mut first) {
+                    tokio::select! {
+                        _ = looked_once.notified() => {}
+                        _ = pause => {}
+                    }
+                } else {
+                    pause.await;
+                }
                 let Some(host) = endpoint.borrow().clone() else { continue };
                 let read = host.call("focus", JsonObject::new(), abort::timeout(2_000)).await.ok().map(answer_of);
                 if closed.get() {
@@ -977,6 +1035,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     Some(Ok(focus)) if focus.is_object() => focus,
                     // The DAW went away (it quit, or its bridge did): the session says so, and FOCUS empties with it.
                     Some(Err(Refused { there: false, .. })) => {
+                        away_since.get_or_insert_with(tokio::time::Instant::now);
                         quiet = 0;
                         if connected.replace(false) {
                             on_connection(ConnectionState::Disconnected, Some(DisconnectCause::Live));
@@ -999,9 +1058,26 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 // The DAW's change counter: the project's snapshot is kept again once the edits settle.
                 remembered.noted(focus.get("changed"));
                 // Back after it went away: the session looks again, once the DAW has loaded what it opened.
+                away_since = None;
                 if !connected.replace(true) {
                     back_at.set(Some(tokio::time::Instant::now()));
                     on_connection(ConnectionState::Connected, None);
+                }
+                // Kumi started before the DAW: no look has read the project yet, and the session, which never saw the DAW
+                // go, doesn't look because it came. So the session is asked for one, as after a look that failed: once a
+                // second while the DAW answers and isn't busy (a dialog has its own wait), until a look reads the project.
+                // A turn under way refuses the look it's asked for, which costs nothing; only looks that began and still
+                // didn't read it count, LOOKS_AGAIN at most. A DAW that went and came back after a look read it is looked
+                // at by the session itself.
+                let free = focus.get("busy").is_none_or(Value::is_null);
+                if !project_read.get() && free && asked_at.is_none_or(|at| at.elapsed() >= ASK_AGAIN) {
+                    if asked_at.is_some() && looks.get() != looks_then {
+                        taken += 1;
+                    }
+                    if let Some(look_again) = look_again.as_ref().filter(|_| taken < LOOKS_AGAIN) {
+                        (asked_at, looks_then) = (Some(tokio::time::Instant::now()), looks.get());
+                        look_again();
+                    }
                 }
                 // Another project in the same tab, or another song: the epoch moved, and the project's identity with it.
                 // An epoch no event told of (a device or pattern edit in Renoise): the book follows it.
@@ -1027,6 +1103,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 }
                 last_epoch = epoch;
                 *selected.borrow_mut() = focus.pointer("/selection/trackRef").and_then(Value::as_str).map(str::to_owned);
+                selected_at.set(layout.get());
                 let seen = json!({"view": focus.get("view"), "selection": focus.get("selection"), "epoch": focus.get("epoch"), "busy": focus.get("busy")});
                 let transport = focus.get("transport").cloned();
                 let playing = transport.as_ref().and_then(|t| t.get("playing")) == Some(&Value::Bool(true));
@@ -1509,6 +1586,7 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
             trace(format!("look: {key}"));
         }
         self.looks_again.set(0);
+        self.read.set(true);
         *self.looked.borrow_mut() = Some(snapshot.clone());
         *self.printed.borrow_mut() = Some(fingerprint_of(snapshot));
         Observation {
@@ -1728,16 +1806,59 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         if let Some(layout) = self.layout.get().filter(|_| names_tracks(&self.book.borrow().scheme, &args)) {
             args.insert("layout".into(), layout.into());
         }
-        let args = Value::Object(args);
-        Ok(match self.call("focus_body", args, signal).await? {
-            Ok(body) => {
-                follow_epoch(&self.book, &self.epoch, &self.layout, &body);
-                (self.daw.to_body)(request, &body)
+        // A pattern's tracks (a tracker's): the first that FOCUS can draw and the producer's, not a big song's every one. A
+        // bridge that takes no `limit` here sends them all, as before. (Named after the layout: a track named only to read
+        // around it is never a reason for the bridge to refuse the read as stale.)
+        // A track shift since the focus said which track is selected may have moved it: then every track is read, as before.
+        if matches!(request, BodyRequest::Tracker { .. }) && args.get("kind").and_then(Value::as_str) == Some("pattern") {
+            let selected = self.selected.borrow().clone();
+            let shifted = self.book.borrow().scheme.positional() && self.selected_at.get() != self.layout.get();
+            match selected {
+                Some(_) if shifted => {}
+                Some(track) => {
+                    args.insert("limit".into(), request.tracks().unwrap_or(TRACKER_TRACKS).into());
+                    args.insert("around".into(), track.into());
+                }
+                None => {
+                    args.insert("limit".into(), request.tracks().unwrap_or(TRACKER_TRACKS).into());
+                }
             }
-            Err(_) => None,
-        })
+        }
+        // The stretch of the timeline the DAW's view showed last, as the producer scrolled and zoomed it there: its
+        // items and marks, not a whole long project's.
+        let timeline = matches!(request, BodyRequest::Timeline);
+        let asked = self.timeline_view.get().filter(|_| timeline);
+        if let Some([from, to]) = asked {
+            args.insert("window".into(), json!({"from": from, "to": to}));
+        }
+        let mut answer = self.call("focus_body", Value::Object(args.clone()), signal.clone()).await?;
+        if answer.is_err() && asked.is_some() {
+            // (a stretch the DAW won't read: the whole timeline, as before)
+            args.remove("window");
+            answer = self.call("focus_body", Value::Object(args.clone()), signal.clone()).await?;
+        }
+        let Ok(mut body) = answer else { return Ok(None) };
+        follow_epoch(&self.book, &self.epoch, &self.layout, &body);
+        if timeline {
+            let view = crate::views::view_of(&body);
+            self.timeline_view.set(view);
+            // The first read, or the view moved far since (another part of the song, another zoom): read again for
+            // what it shows now. A small scroll (REAPER following the playhead) waits for the next read.
+            if let Some([from, to]) = view.filter(|view| asked.is_none_or(|asked| !near(asked, *view))) {
+                args.insert("window".into(), json!({"from": from, "to": to}));
+                if let Ok(again) = self.call("focus_body", Value::Object(args), signal).await? {
+                    follow_epoch(&self.book, &self.epoch, &self.layout, &again);
+                    self.timeline_view.set(crate::views::view_of(&again).or(view));
+                    body = again;
+                }
+            }
+        }
+        Ok((self.daw.to_body)(request, &body))
     }
     async fn observe(&self, signal: Signal, hints: Option<ObserveHints>) -> Result<Observation, RuntimeError> {
+        // FOCUS's first read waits for this look, whatever it comes to: an answer, a refusal, an error or a stop.
+        let _told = Told(&self.looked_once);
+        self.looks.set(self.looks.get().wrapping_add(1));
         let pinned = hints.as_ref().and_then(|hints| hints.pinned.as_ref());
         let references = hints.as_ref().map(|hints| hints.references.as_slice()).unwrap_or_default();
         signal.check()?;
@@ -1945,6 +2066,13 @@ pub fn follow_epoch<S: RefScheme>(book: &RefCell<Book<S>>, epoch: &RefCell<Optio
     }
     *epoch.borrow_mut() = Some(now.to_owned());
     layout.set(answer.get("layout").and_then(Value::as_u64));
+}
+
+/// Two stretches of the timeline (in beats) close enough to draw one for the other: neither end moved by more than a
+/// quarter of the stretch.
+fn near([from, to]: [f64; 2], [now_from, now_to]: [f64; 2]) -> bool {
+    let room = (to - from).abs() / 4.;
+    (from - now_from).abs() <= room && (to - now_to).abs() <= room
 }
 
 /// Whether a request names something on a track (a track, a device or a parameter), the refs a track shift moves: only

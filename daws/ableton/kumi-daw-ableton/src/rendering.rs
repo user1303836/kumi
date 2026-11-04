@@ -38,7 +38,7 @@ use kumi_listening::{
     renderer::{ListenFlag, ListenNow},
     round::Round,
 };
-use kumi_media::audio::{self, matching::Focus, tools::ResolveAudio};
+use kumi_media::audio::{matching::Focus, tools::ResolveAudio};
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
@@ -81,6 +81,10 @@ pub struct LiveRenderer {
     /// back, closing a render, removing copies), and the next call, or the next answer, waits for it.
     busy: tokio::sync::Mutex<()>,
     best_steps: RefCell<Vec<String>>,
+    /// The last best as it was kept, which the next keep checks.
+    best_kept: RefCell<Option<goal::KeptBest>>,
+    /// What the goal running now has done to its candidates' own tracks.
+    goal_candidates: RefCell<IndexMap<String, goal::Candidate>>,
 }
 /// The listening tools over Live: the tools and their state are `Listening`'s (a judged run, a tune), Live is what they
 /// listen through. A tool call comes in here and goes to `Listening`; what only Live has is `LiveRenderer`'s.
@@ -163,6 +167,8 @@ impl LiveRenderer {
             rendering: ListenFlag::default(),
             busy: tokio::sync::Mutex::new(()),
             best_steps: RefCell::new(vec![]),
+            best_kept: RefCell::new(None),
+            goal_candidates: RefCell::new(IndexMap::new()),
         })
     }
     /// A restart of Live may make Max for Live available; bridge-only disconnects leave refusal intact.

@@ -1729,6 +1729,57 @@ fn kumis_undo_of_a_kept_copy_leaves_it_once_the_producer_turned_a_knob_on_it() {
 }
 
 #[test]
+fn kumis_undo_of_a_kept_copy_leaves_it_once_the_producer_edited_its_midi_or_moved_an_envelope_point() {
+    let (rig, kick) = Rig::copyable();
+    let made = make(&rig, "sm", &kick, 1);
+    let copy = made["copies"][0]["ref"].as_str().unwrap().to_string();
+    // The copy holds a MIDI take (two notes and a controller) and a volume envelope with two points.
+    fake::with(|s| {
+        let mut take = fake::FakeTake::midi("{TAKE-SM}", "keys.mid");
+        take.notes = vec![
+            fake::FakeNote { start_ppq: 0.0, end_ppq: 480.0, channel: 0, pitch: 60, velocity: 100, selected: false, muted: false },
+            fake::FakeNote { start_ppq: 960.0, end_ppq: 1440.0, channel: 0, pitch: 64, velocity: 90, selected: false, muted: false },
+        ];
+        take.ccs = vec![fake::FakeCc { ppq: 0.0, kind: 0xB0, channel: 0, data1: 1, data2: 20 }];
+        s.tracks[4].items[0].takes = vec![take];
+        let mut volume = fake::FakeEnvelope::own("Volume", "<VOLENV2", 2);
+        volume.pts = Some(vec![fake::FakePoint::at(0.0, 1.0), fake::FakePoint::at(2.0, 0.5)]);
+        s.tracks[4].envelopes = vec![volume];
+    });
+    let preview = change(&rig, "change_preview", json!({"kind": "scratch-keep", "input": keep_input(&copy)})).unwrap();
+    let applied = change(
+        &rig,
+        "change_apply",
+        json!({"kind": "scratch-keep", "input": keep_input(&copy), "fence": preview["fence"], "desc": "Kumi: Kept (k13)"}),
+    )
+    .unwrap();
+    let restore = json!({"kind": "scratch-keep", "target": preview["target"], "prior": preview["prior"], "applied": applied["applied"], "created": applied["created"], "desc": "Kumi: undo Kept (k14)"});
+    // What the producer does inside the kept track: its items, FX and fader stay as they were.
+    type Edit = fn(&mut fake::FakeTrack);
+    let edits: [(&str, Edit); 6] = [
+        ("a note moved", |t| t.items[0].takes[0].notes[1].start_ppq = 720.0),
+        ("a note made longer", |t| t.items[0].takes[0].notes[0].end_ppq = 960.0),
+        ("a note's velocity", |t| t.items[0].takes[0].notes[0].velocity = 64),
+        ("a controller's value", |t| t.items[0].takes[0].ccs[0].data2 = 90),
+        ("an envelope point moved", |t| t.envelopes[0].pts.as_mut().unwrap()[1].time = 3.0),
+        ("an envelope point's value", |t| t.envelopes[0].pts.as_mut().unwrap()[1].value = 0.25),
+    ];
+    for (what, edit) in edits {
+        let was = fake::with(|s| s.tracks[4].clone());
+        fake::with(|s| edit(&mut s.tracks[4]));
+        let refused = change(&rig, "change_restore", restore.clone()).unwrap_err();
+        assert_eq!(refused.0, "changed", "{what}: {refused:?}");
+        assert_eq!(fake::with(|s| s.tracks.len()), 5, "{what}: nothing was deleted");
+        fake::with(|s| s.tracks[4] = was);
+    }
+    // As Kumi left it, Kumi's undo takes it away. (Selecting a note or a point is no edit: `scratch_keep`'s tests show
+    // its hash, and `tests_actions` its print, leave selections out. The fake numbers a track's whole state, selections
+    // and all, so it can't show that here.)
+    change(&rig, "change_restore", restore).unwrap();
+    assert_eq!(fake::with(|s| s.tracks.len()), 4);
+}
+
+#[test]
 fn listening_answers_and_rows_name_refs_only_where_refs_go() {
     let (rig, kick) = Rig::copyable();
     let made = make(&rig, "sd", &kick, 1);

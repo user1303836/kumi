@@ -11,6 +11,7 @@ mod fake_daw;
 mod fake_daw_listening;
 mod file_sync;
 mod gaps;
+mod goal_rig;
 mod goal_store;
 mod hidden;
 mod kernel_turns;

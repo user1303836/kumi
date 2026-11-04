@@ -47,7 +47,7 @@ pub static PRO_Q4: LazyLock<PluginAdapter> = LazyLock::new(|| {
         PluginRecipe { name: "Vocal air and de-ess", how: "High Shelf at 10–12 kHz, +2 dB, Q 0.7. A dynamic Bell at 6–8 kHz, Range -3 to -6 dB." },
         PluginRecipe { name: "Mid/side on a master", how: "Low Cut on Side at 100–150 Hz (mono lows), Bell on Mid at 250–350 Hz -1 dB, High Shelf on Side at 8–10 kHz +1 to +1.5 dB. Natural or Linear Phase." },
     ],
-    beyond: "Not parameters: EQ Match (match a reference's spectrum), EQ Sketch, Spectrum Grab, the analyzer, the instance list (the Set's other Pro-Q 4s) and soloing a band to listen: in Pro-Q's window (Kumi can open it), or the producer's to do. The side-chain source is chosen in Live's plug-in device (its Sidechain section). Presets are .ffp files, saved from Pro-Q's preset menu.",
+    beyond: "Not parameters: EQ Match (match a reference's spectrum), EQ Sketch, Spectrum Grab, the analyzer, the instance list (the Set's other Pro-Q 4s) and soloing a band to listen: in Pro-Q's window (Kumi can open it), or the producer's to do. The side-chain source is chosen in Live's plug-in device (its Sidechain section). For presets, use vst3 catalog/inspect to find verified controls, create/edit to write a new .vstpreset, and the DAW's loading tools to apply it. Check the catalog for band creation and the installed version before writing.",
     folders: Some(PluginFolders { presets: Some(OsPaths { mac: Some("~/Documents/FabFilter/Presets/Pro-Q 4"), windows: Some("~/Documents/FabFilter/Presets/Pro-Q 4") }), wavetables: None }),
     wavetable: None,
 }

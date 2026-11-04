@@ -67,6 +67,11 @@ pub fn direct() -> reqwest::ClientBuilder {
     reqwest::Client::builder().use_preconfigured_tls(trust::guarded_config(false)).no_proxy()
 }
 
+/// The TLS of [`client`] for a connection that speaks HTTP/1.1 only, as a WebSocket's opening does: the same trust.
+pub fn http1_tls() -> rustls::ClientConfig {
+    trust::config(true)
+}
+
 /// [`direct`], speaking HTTP/1.1 only.
 pub fn direct_http1() -> reqwest::ClientBuilder {
     reqwest::Client::builder().use_preconfigured_tls(trust::guarded_config(true)).http1_only().no_proxy()

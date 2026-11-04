@@ -83,7 +83,9 @@ fn auth(message: impl Into<String>) -> RuntimeError {
 
 // On Windows the credential file is made owner-only as the bridge makes its own files: a protected DACL whose one rule
 // gives the current user full control, then checked. These are the twins of the bridge's lifecycle/delivery/acl.rs's WINDOWS_ACL_TARGET,
-// WINDOWS_ACL_CHECKS and SECURE_FILE (in ableton-mcp-server): keep them in step. KUMI_HOME or KUMI_AUTH_FILE can put
+// WINDOWS_ACL_CHECKS and SECURE_FILE (in ableton-mcp-server): keep them in step. windows_acl.rs reads and writes the
+// one shape SECURE_FILE makes with Windows' own calls, and passes it without these: a check made stricter here must be
+// made stricter there too, or the fast path goes on saying yes. KUMI_HOME or KUMI_AUTH_FILE can put
 // auth.json where other accounts read (D:\kumi), and login says it's owner-only.
 const ACL_TARGET: &str = "$p=[Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:KUMI_ACL_PATH));$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;";
 const ACL_CHECKS: &str = "$c=[System.IO.File]::GetAccessControl($p);if ($c.GetOwner([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 2 }if (-not $c.AreAccessRulesProtected) { exit 3 }$rules=@($c.Access); if ($rules.Count -ne 1) { exit 4 }$rule=$rules[0];if ($rule.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) { exit 5 }if ($rule.IsInherited) { exit 6 }if ($rule.AccessControlType.ToString() -ne 'Allow') { exit 7 }if (($rule.FileSystemRights -band [System.Security.AccessControl.FileSystemRights]::FullControl) -ne [System.Security.AccessControl.FileSystemRights]::FullControl) { exit 8 }exit 0";
@@ -149,13 +151,22 @@ fn run_acl(path: &Path, script: &str, timeout_ms: u64) -> Result<(), String> {
         None => Err("PowerShell stopped".to_string()),
     }
 }
-/// Gives the file a protected DACL with one rule, full control for you, and checks it took (Windows).
-fn make_owner_only(path: &Path) -> Result<(), String> {
+/// Gives the file a protected DACL with one rule, full control for you, and checks it took (Windows). Windows' own calls
+/// do it in a moment; when one of them fails, PowerShell's step runs, as it always did.
+pub fn make_owner_only(path: &Path) -> Result<(), String> {
+    #[cfg(windows)]
+    if super::windows_acl::make_kumis_shape(path).is_ok() {
+        return Ok(());
+    }
     run_acl(path, &format!("$ErrorActionPreference='Stop';{ACL_TARGET}{SECURE_FILE}{ACL_CHECKS}"), 30_000)
 }
 /// Whether the file is owner-only as Kumi makes it on Windows: you own it, and one rule, not inherited, gives you full
-/// control.
+/// control. Kumi's own shape is read with Windows' own calls; any other is the PowerShell check's to judge.
 pub fn windows_owner_only(path: &Path) -> bool {
+    #[cfg(windows)]
+    if super::windows_acl::is_kumis_shape(path) {
+        return true;
+    }
     run_acl(path, &format!("{ACL_TARGET}{ACL_CHECKS}"), 15_000).is_ok()
 }
 /// A new, empty credential file, readable and writable by you alone before anything is written to it, open for
@@ -451,4 +462,47 @@ impl CredentialStore for FileCredentialStore {
 /// An API key as providers issue them: one word of printable characters.
 pub fn valid_api_key(value: &str) -> bool {
     (8..=4096).contains(&value.len()) && value.bytes().all(|byte| (0x21..=0x7e).contains(&byte))
+}
+
+/// The PowerShell check and step, for kumi-ai's tests (tests/it/auth.rs): the Windows fast path is held to them. Not for
+/// Kumi itself.
+#[cfg(windows)]
+#[doc(hidden)]
+pub mod powershell {
+    use super::{acl_reason, run_acl, ACL_CHECKS, ACL_TARGET, SECURE_FILE};
+    use std::path::Path;
+
+    /// The check on one file, as `windows_owner_only` runs it when the fast path doesn't say: its exit code, 0 owner-only,
+    /// 2-8 why not (`acl_reason`), 1 anything else.
+    pub fn check(path: &Path) -> i32 {
+        match run_acl(path, &format!("{ACL_TARGET}{ACL_CHECKS}"), 60_000) {
+            Ok(()) => 0,
+            Err(why) => (2..=8).find(|code| acl_reason(*code) == Some(why.as_str())).unwrap_or(1),
+        }
+    }
+
+    /// The same check on many files in one PowerShell, its `exit`s made a function's `return`s: one code per file, as
+    /// `check` gives it.
+    pub fn checks(paths: &[&Path]) -> Vec<i32> {
+        use base64::{engine::general_purpose::STANDARD, Engine};
+        let function = ACL_CHECKS.replace("exit ", "return ");
+        let script = format!(
+            "$sid=[System.Security.Principal.WindowsIdentity]::GetCurrent().User;function Check($p) {{ {function} }};foreach ($p in ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($env:KUMI_ACL_PATHS)) -split \"`n\")) {{ Check $p }}"
+        );
+        let joined = paths.iter().map(|path| path.display().to_string()).collect::<Vec<_>>().join("\n");
+        let mut command =
+            std::process::Command::new(kumi_types::system::system_program_default(kumi_types::system::SystemProgram::Powershell));
+        command
+            .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", &script])
+            .env("KUMI_ACL_PATHS", STANDARD.encode(joined.as_bytes()))
+            .env_remove("PSModulePath")
+            .stdin(std::process::Stdio::null());
+        let said = command.output().expect("PowerShell starts");
+        String::from_utf8_lossy(&said.stdout).lines().filter_map(|line| line.trim().parse().ok()).collect()
+    }
+
+    /// PowerShell's own step of `make_owner_only`: SECURE_FILE, then the check.
+    pub fn secure(path: &Path) -> Result<(), String> {
+        run_acl(path, &format!("$ErrorActionPreference='Stop';{ACL_TARGET}{SECURE_FILE}{ACL_CHECKS}"), 60_000)
+    }
 }

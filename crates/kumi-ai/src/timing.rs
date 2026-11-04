@@ -269,6 +269,11 @@ pub fn sent(bytes: usize) {
     with(|timing| timing.sent_bytes += bytes as u64);
 }
 
+/// A request counted as `counted` bytes went as `bytes` (only what was new, over a WebSocket).
+pub fn sent_instead(counted: usize, bytes: usize) {
+    with(|timing| timing.sent_bytes = (timing.sent_bytes + bytes as u64).saturating_sub(counted as u64));
+}
+
 /// The turn being timed, for work it starts beside it that may end after it does.
 pub fn current() -> Option<Turn> {
     ACTIVE.with(|active| active.borrow().clone()).map(Turn)

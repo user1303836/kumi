@@ -15,6 +15,19 @@ fn embedded_file(path: &Path) -> Vec<u8> {
     std::fs::read(path).unwrap_or_else(|error| panic!("{}: {error}", path.display()))
 }
 
+fn compress_template(path: &Path, out: &Path, filename: &str) {
+    assert!(
+        std::fs::metadata(path).expect("template metadata").len() <= MAX_TEMPLATE_BYTES as u64,
+        "{} exceeds the initialized-state byte limit",
+        path.display()
+    );
+    let bytes = embedded_file(path);
+    assert!(bytes.len() <= MAX_TEMPLATE_BYTES, "{} grew beyond the initialized-state byte limit", path.display());
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+    encoder.write_all(&bytes).expect("compress initialized state");
+    std::fs::write(out.join(filename), encoder.finish().expect("finish initialized state")).expect("write compressed state");
+}
+
 fn main() {
     let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest directory")).join("../../plugin-formats");
     let out = PathBuf::from(std::env::var("OUT_DIR").expect("OUT_DIR"));
@@ -27,6 +40,7 @@ fn main() {
     let mut entries = Vec::new();
     let mut templates =
         format!("pub const MAX_TEMPLATE_BYTES: usize = {MAX_TEMPLATE_BYTES};\npub const COMPRESSED_TEMPLATES: &[(&str, &[u8])] = &[\n");
+    let mut version_templates = String::from("pub const COMPRESSED_VERSION_TEMPLATES: &[(&str, &str, &[u8])] = &[\n");
     for folder in products {
         assert!(
             Path::new(&folder).components().count() == 1
@@ -47,10 +61,13 @@ fn main() {
             let index = *resources.entry(relative.clone()).or_insert(next);
             if index == next {
                 let value: Value = serde_json::from_slice(&embedded_file(&root.join(&relative))).expect("format JSON");
-                let filename = format!("plugin-format-{index}.min.json");
-                std::fs::write(out.join(&filename), serde_json::to_vec(&value).expect("compact format JSON"))
-                    .expect("write compact format");
-                catalog.push_str(&format!("const FORMAT_{index}: &str = include_str!(concat!(env!(\"OUT_DIR\"), \"/{filename}\"));\n"));
+                let filename = format!("plugin-format-{index}.json.zlib");
+                let compact = serde_json::to_vec(&value).expect("compact format JSON");
+                assert!(compact.len() <= MAX_TEMPLATE_BYTES, "{} exceeds the format resource limit", relative);
+                let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
+                encoder.write_all(&compact).expect("compress format JSON");
+                std::fs::write(out.join(&filename), encoder.finish().expect("finish format JSON")).expect("write compressed format");
+                catalog.push_str(&format!("const FORMAT_{index}: &[u8] = include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{filename}\"));\n"));
             }
             names.push(format!("FORMAT_{index}"));
         }
@@ -65,24 +82,32 @@ fn main() {
             .map(|name| root.join(&source).join("fixtures").join(name))
             .find(|path| path.is_file());
         if let Some(fixture) = fixture {
-            assert!(
-                std::fs::metadata(&fixture).expect("template metadata").len() <= MAX_TEMPLATE_BYTES as u64,
-                "{} exceeds the initialized-state byte limit",
-                fixture.display()
-            );
-            let bytes = embedded_file(&fixture);
-            assert!(bytes.len() <= MAX_TEMPLATE_BYTES, "{} grew beyond the initialized-state byte limit", fixture.display());
-            let mut encoder = ZlibEncoder::new(Vec::new(), Compression::best());
-            encoder.write_all(&bytes).expect("compress initialized state");
             let filename = format!("plugin-init-{id}.zlib");
-            std::fs::write(out.join(&filename), encoder.finish().expect("finish initialized state")).expect("write compressed state");
+            compress_template(&fixture, &out, &filename);
             templates.push_str(&format!("    ({id:?}, include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{filename}\"))),\n"));
         }
+        let evidence: Value = serde_json::from_slice(&embedded_file(&root.join(&source).join("verified.json"))).expect("verification JSON");
+        let mut versions = BTreeSet::new();
+        for (index, record) in evidence["writes"].as_array().into_iter().flatten().enumerate() {
+            let Some(relative) = record.get("template").and_then(Value::as_str) else { continue };
+            let version = record["version"].as_str().expect("template version");
+            assert!(versions.insert(version), "duplicate template version for {id}");
+            assert!(
+                !relative.is_empty() && Path::new(relative).components().all(|part| matches!(part, Component::Normal(_))),
+                "version template must stay in its format folder"
+            );
+            let filename = format!("plugin-init-{id}-version-{index}.zlib");
+            compress_template(&root.join(&source).join(relative), &out, &filename);
+            version_templates
+                .push_str(&format!("    ({id:?}, {version:?}, include_bytes!(concat!(env!(\"OUT_DIR\"), \"/{filename}\"))),\n"));
+        }
     }
-    catalog.push_str("pub const BUILTIN_FILES: &[(&str, &str, &str, &str)] = &[\n");
+    catalog.push_str("const BUILTIN_FILES: &[(&str, &[u8], &[u8], &[u8])] = &[\n");
     catalog.push_str(&entries.join("\n"));
     catalog.push_str("\n];\n");
     templates.push_str("];\n");
+    version_templates.push_str("];\n");
+    templates.push_str(&version_templates);
     std::fs::write(out.join("plugin_formats.rs"), catalog).expect("write format registry");
     std::fs::write(out.join("plugin_templates.rs"), templates).expect("write template registry");
 }

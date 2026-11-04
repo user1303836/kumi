@@ -1,0 +1,168 @@
+//! What every DAW's goal rig does alike with a goal's own types (#399, K29): how a knob and its device are named, which of
+//! a trial's knobs moved, what a generation is told of a heard trial, and how a finished goal's candidates are tidied. The
+//! listening half (screening, keying and hearing a trial) is `kumi_listening::goal`; each DAW's rig sets, renders and
+//! keeps the best in its own way.
+use crate::core::{
+    contracts::{Generation, GenerationTrial},
+    evolve::Knob,
+};
+use async_trait::async_trait;
+use indexmap::IndexMap;
+use kumi_listening::goal::Told;
+use kumi_types::errors::RuntimeError;
+
+/// A knob as a search knows it: its device (as [`device_label`] names it) and its own name.
+pub fn knob_key(knob: &Knob) -> String {
+    format!("{}|{}", knob.device, knob.name)
+}
+
+/// A device as a knob names it: its place in the chain and its name.
+pub fn device_label(at: usize, name: &str) -> String {
+    format!("{at}:{name}")
+}
+
+/// What's said of a slot the goal doesn't hold: a caller's bug, never the producer's.
+pub fn not_in_the_search(slot: &str) -> String {
+    format!("“{slot}” isn't in the search")
+}
+
+/// A generation's trials are all for slots the goal holds (`holds`): a trial for another is refused in plain words, before
+/// anything is set.
+pub fn check_slots(trials: &[GenerationTrial], holds: impl Fn(&str) -> bool) -> Result<(), RuntimeError> {
+    match trials.iter().find(|trial| !holds(&trial.slot)) {
+        Some(trial) => Err(RuntimeError::plain(not_in_the_search(&trial.slot))),
+        None => Ok(()),
+    }
+}
+
+/// Knobs at their values: what may be sent to a DAW, so none where a value isn't given or isn't a number.
+pub fn given_values(knobs: &[Knob], values: &[f64]) -> Vec<(Knob, f64)> {
+    knobs.iter().zip(values).filter(|(_, value)| value.is_finite()).map(|(knob, value)| (knob.clone(), *value)).collect()
+}
+
+/// A knob's device by its name, without its place in the chain.
+pub fn device_of(knob: &Knob) -> &str {
+    knob.device.split_once(':').map_or(knob.device.as_str(), |(_, name)| name)
+}
+
+/// Whether these are one value of a knob: what a DAW reads back of a value it was given is close, not equal, and a stepped
+/// knob lands on its step.
+pub fn near(knob: &Knob, a: f64, b: f64) -> bool {
+    (a - b).abs() <= (1e-5 * (knob.max - knob.min).abs().max(1e-9)).max(knob.step.unwrap_or(0.) / 2.)
+}
+
+/// What's said of these knobs (each as “device knob”), which the producer turned on a track since the search began.
+pub fn you_turned(slot: &str, turned: &[String]) -> String {
+    let them = if turned.len() == 1 { "it" } else { "them" };
+    format!("you turned {} on “{slot}” since the search began, so Kumi left {them} as you set {them}", turned.join(", "))
+}
+
+/// A paused goal's best, muted beside its candidate, which plays as it was.
+pub fn best_waits_muted(best: &str, slot: &str) -> String {
+    format!("“{best}” waits muted beside “{slot}”, which plays as it was: unmute it to hear the best")
+}
+
+/// A paused goal's best that couldn't be muted.
+pub fn best_plays_beside(best: &str, slot: &str) -> String {
+    format!("“{best}” plays beside “{slot}”: mute one of them to hear the other alone")
+}
+
+/// A last best the producer worked on: it stays theirs, and why; `after` is anything more to say of it.
+pub fn last_best_stays(best: &str, why: &str, after: &str) -> String {
+    format!("The last “{best}” stays where it is ({why}){after}; the new best goes on a track of its own")
+}
+
+/// A last best left where it is, with why, and where the new one is: why there are two.
+pub fn last_best_beside(last: &str, why: &str, new: &str) -> String {
+    format!("The last “{last}” stays where it is ({why}), so the new best is beside it on “{new}”.")
+}
+
+/// A safety limiter that couldn't come off a candidate.
+pub fn limiter_stays(limiter: &str, track: &str) -> String {
+    format!("Kumi's safety {limiter} stays last on “{track}”: delete it if you don't want it there.")
+}
+
+/// Why nothing was set: these knobs of a slot, which the search moved, moved or went meanwhile. Each device is named once,
+/// first seen first.
+pub fn moved_or_went(slot: &str, knobs: &[Knob]) -> String {
+    let mut named: Vec<String> = vec![];
+    for knob in knobs {
+        let name = format!("“{}”", device_of(knob));
+        if !named.contains(&name) {
+            named.push(name);
+        }
+    }
+    format!(
+        "{} moved or went on “{slot}” since the search began, so Kumi set nothing there: start the goal again to search the chain as it is now",
+        named.join(", ")
+    )
+}
+
+/// A trial's knobs at its values, those that moved from `last` (the values last set on its slot, by key): one with no value
+/// set yet always moves.
+pub fn moved(trial: &GenerationTrial, last: Option<&IndexMap<String, f64>>) -> Vec<(Knob, f64)> {
+    given_values(&trial.knobs, &trial.values)
+        .into_iter()
+        .filter(|(knob, value)| last.and_then(|last| last.get(&knob_key(knob))).is_none_or(|last| (last - value).abs() > 1e-6))
+        .collect()
+}
+
+/// What the generation is told of a slot's trial, heard now or from what was heard before (`cached`).
+pub fn tell_generation(generation: &mut Generation, slot: &str, told: Told, cached: bool) {
+    if cached {
+        generation.cached += 1;
+    }
+    generation.scores.insert(slot.into(), told.score);
+    generation.gaps.insert(slot.into(), told.gaps);
+    if let Some(structural) = told.structural {
+        generation.structural.insert(slot.into(), structural);
+    }
+}
+
+/// What tidying a finished goal asks of a DAW's rig, slot by slot, by the slot's name.
+#[async_trait(?Send)]
+pub trait GoalDaw {
+    /// The project's tracks by name, first to last, as tidying begins; None when they can't be read.
+    async fn track_names(&self) -> Option<Vec<String>>;
+    /// The slot's track as it is now (read again for each slot); None when it can't be found.
+    async fn track_of(&self, slot: &str) -> Option<String>;
+    /// Mutes the track, whatever comes of it.
+    async fn mute(&self, track: &str);
+    /// The applied change that made the slot's track (the model added it for the search), by its id.
+    fn made_by_kumi(&self, slot: &str) -> Option<String>;
+    /// Takes that change back (dropping what it made); whether it went.
+    async fn take_back(&self, id: &str) -> bool;
+}
+
+/// The slots in the order they're tidied: last in the project first, as taking one away moves those after it, and one the
+/// project doesn't name now after them. When its tracks can't be read, the last to join goes first.
+fn tidy_order(mut slots: Vec<String>, tracks: Option<Vec<String>>) -> Vec<String> {
+    let Some(tracks) = tracks else {
+        slots.reverse();
+        return slots;
+    };
+    slots.sort_by_key(|slot| std::cmp::Reverse(tracks.iter().position(|name| name == slot).map_or(-1, |at| at as i64)));
+    slots
+}
+
+/// A finished goal's candidates tidied: the `top` ones muted for the producer to A/B, those the model made taken back,
+/// and the producer's own left muted (said). What it says.
+pub async fn tidy(daw: &dyn GoalDaw, slots: Vec<String>, top: &[String]) -> Vec<String> {
+    let mut said = vec![];
+    for slot in tidy_order(slots, daw.track_names().await) {
+        let Some(track) = daw.track_of(&slot).await else { continue };
+        if top.contains(&slot) {
+            daw.mute(&track).await;
+            continue;
+        }
+        let taken_back = match daw.made_by_kumi(&slot) {
+            Some(id) => daw.take_back(&id).await,
+            None => false,
+        };
+        if !taken_back {
+            daw.mute(&track).await;
+            said.push(format!("“{slot}” stays, muted."));
+        }
+    }
+    said
+}

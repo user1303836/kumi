@@ -160,7 +160,7 @@ enum Language {
 /// What a block after a box of `class` holds.
 fn language(class: &str) -> Language {
     match class {
-        "gen~" | "gen" => Language::GenExpr,
+        "gen~" | "gen" | "mc.gen~" | "mcs.gen~" => Language::GenExpr,
         "p" | "patcher" => Language::Notation,
         _ => Language::JavaScript,
     }
@@ -501,15 +501,24 @@ fn tokens(text: &str, first_line: usize) -> (Vec<(Token, usize)>, Vec<String>) {
     (out, unread)
 }
 
-/// The objects that hold what a block gives them: GenExpr for gen~ and gen, JavaScript for v8 and v8ui, a patch for a
-/// subpatcher.
+/// The objects that hold what a block gives them: GenExpr for gen~, its multichannel forms and gen, JavaScript for v8 and
+/// v8ui, a patch for a subpatcher.
 fn holds(class: &str) -> Option<&'static str> {
     match class {
-        "gen~" | "gen" => Some("GenExpr"),
+        "gen~" | "gen" | "mc.gen~" | "mcs.gen~" => Some("GenExpr"),
         "v8" | "v8ui" => Some("JavaScript"),
         "p" | "patcher" => Some("a patch"),
         _ => None,
     }
+}
+
+/// Whether a gen's text gives it its code: @expr, or a file named by @gen, @file or a first word that isn't an attribute.
+/// Max's own patchers have each ([mc.gen~ @expr out1 = in1 * exp(1/mc_channel) @chans 8], [gen~ @gen freeverb],
+/// [gen @file …], [mc.gen~ expdelay @chans 16]).
+fn names_its_code(text: &str) -> bool {
+    let words = atoms(text);
+    words.get(1).is_some_and(|first| !first.starts_with('@'))
+        || words.iter().skip(1).any(|word| matches!(word.as_str(), "@expr" | "@gen" | "@file"))
 }
 
 /// A cord's end before every name is known.
@@ -603,10 +612,12 @@ impl Reader<'_> {
                     }
                     (Some(_), None) => {
                         self.found.wrong.push(format!(
-                            "line {line}: only [gen~], [gen], [v8], [v8ui] and [p] hold a {{ … }} block, so [{class}] was made without what it was given: put that in one of them."
+                            "line {line}: only [gen~], [mc.gen~], [mcs.gen~], [gen], [v8], [v8ui] and [p] hold a {{ … }} block, so [{class}] was made without what it was given: put that in one of them."
                         ));
                         What::Object(text)
                     }
+                    // Its code is in its text, or in a file it names: made as written, its ports left to its cords.
+                    (None, Some("GenExpr")) if names_its_code(&text) => What::Object(text),
                     (None, Some(held)) => {
                         self.found.wrong.push(format!(
                             "line {line}: [{text}] holds {held}, and it was given none, so it's empty: write it in a {{ … }} block after the box."
@@ -978,9 +989,26 @@ fn expand_within(notation: &Notation, outside: &Outside, top: bool) -> Expanded 
             What::Message(text) => json!({ "maxclass": "message", "text": text, "numinlets": 2, "numoutlets": 1, "outlettype": [""] }),
             What::Gen { text, code } => {
                 let (ins, outs) = (inputs_read(code), outputs_written(code).max(1));
-                let kind = if class == "gen~" { "signal" } else { "" };
-                json!({ "maxclass": "newobj", "text": text, "numinlets": ins.max(1), "numoutlets": outs, "outlettype": vec![kind; outs],
-                    "patcher": gen_patcher(code, ins, outs) })
+                let patcher = gen_patcher(code, ins, outs);
+                // As Max saves each. mc.gen~ runs a gen~ per channel, a port for each in and out, the patcher they share in
+                // the wrapper's data. Max's wrapper_uniquekey is left out: without one, two in a device and two devices at once
+                // each ran their own code in real Live (device_sound_live). mcs.gen~ has one multichannel signal in and one out,
+                // its channels the in and out inside.
+                match class.as_str() {
+                    "mc.gen~" => {
+                        json!({ "maxclass": "newobj", "text": text, "numinlets": ins.max(1), "numoutlets": outs,
+                            "outlettype": vec!["multichannelsignal"; outs], "data": { "patcher": patcher } })
+                    }
+                    "mcs.gen~" => {
+                        json!({ "maxclass": "newobj", "text": text, "numinlets": 1, "numoutlets": 1, "outlettype": ["multichannelsignal"],
+                            "patcher": patcher })
+                    }
+                    _ => {
+                        let kind = if class == "gen~" { "signal" } else { "" };
+                        json!({ "maxclass": "newobj", "text": text, "numinlets": ins.max(1), "numoutlets": outs,
+                            "outlettype": vec![kind; outs], "patcher": patcher })
+                    }
+                }
             }
             What::Js { text, code } => {
                 if class == "v8ui" && !top {
@@ -1240,7 +1268,7 @@ mod tests {
                 "line 3: a box in the middle of a chain is entered at inlet 0 and left by outlet 0, so Kumi left the line out: write a cord to or from another of its ports on a line of its own.",
                 "line 5: [gen~] holds GenExpr, and it was given none, so it's empty: write it in a { … } block after the box.",
                 "line 6: out is the device's own (what it receives and sends), so the box was made without that name: name it something else.",
-                "line 7: only [gen~], [gen], [v8], [v8ui] and [p] hold a { … } block, so [print] was made without what it was given: put that in one of them.",
+                "line 7: only [gen~], [mc.gen~], [mcs.gen~], [gen], [v8], [v8ui] and [p] hold a { … } block, so [print] was made without what it was given: put that in one of them.",
                 "line 8: \"?\" isn't part of the notation (a box is [object] or (message), a cord is ->), so Kumi left the line out.",
             ]
         );
@@ -1374,6 +1402,111 @@ mod tests {
         // Subpatchers nest 16 deep at most.
         let deep = format!("{}{}", "[p x] {\n".repeat(20), "}\n".repeat(20));
         assert!(parse(&deep).1.wrong.iter().any(|said| said.contains("is inside 16 subpatchers, so Kumi made it empty")));
+    }
+
+    /// #310: mc.gen~ and mcs.gen~ hold GenExpr, each as Max saves it (Max's gen~.maxhelp has both).
+    #[test]
+    fn gens_multichannel_forms_hold_genexpr_as_max_saves_them() {
+        let (notation, found) = parse(concat!(
+            "each = [mc.gen~ @chans 4] {\n",
+            "  // JavaScript would read a / after the word new as a pattern's start, and the } after it as inside that.\n",
+            "  Param new(1);\n",
+            "  if (in1 > 0) { out1 = in1 * new / 2; } out2 = in2 / 2;\n",
+            "}\n",
+            "whole = [mcs.gen~] {\n",
+            "  Param new(1);\n",
+            "  if (in1 > 0) { out1 = in1 * new / 2; } out2 = in1 - in2 / 2;\n",
+            "}\n",
+            "each -> whole\n",
+            "each.1 -> whole.1\n",
+            "whole -> out\n",
+            "whole.1 -> out\n",
+        ));
+        assert!(found.is_empty(), "{found:?}");
+        let outside = Outside { boxes: HashMap::from([("out".to_string(), "obj-out".to_string())]), ..Outside::default() };
+        let Expanded { boxes, found, lines } = expand(&notation, &outside);
+        let code = |patcher: &Value| patcher["boxes"][0]["box"]["code"].as_str().unwrap().to_string();
+        // A gen~ for each channel: a port for each in and out, the patcher in the wrapper's data.
+        let each = &boxes[0]["box"];
+        assert_eq!(each["text"], "mc.gen~ @chans 4");
+        assert_eq!((each["numinlets"].clone(), each["numoutlets"].clone()), (json!(2), json!(2)));
+        assert_eq!(each["outlettype"], json!(["multichannelsignal", "multichannelsignal"]));
+        assert_eq!(each["patcher"], Value::Null, "not where a gen~ has it");
+        assert_eq!(each["data"]["patcher"]["classnamespace"], "dsp.gen");
+        assert!(code(&each["data"]["patcher"]).contains("} out2 = in2 / 2;"), "{each}");
+        // One multichannel signal in and one out, whatever its code reads and writes.
+        let whole = &boxes[1]["box"];
+        assert_eq!((whole["numinlets"].clone(), whole["numoutlets"].clone()), (json!(1), json!(1)));
+        assert_eq!(whole["outlettype"], json!(["multichannelsignal"]));
+        assert_eq!(whole["patcher"]["classnamespace"], "dsp.gen");
+        assert!(code(&whole["patcher"]).contains("} out2 = in1 - in2 / 2;"), "{whole}");
+        // Its in and outs are inside: cords past its one inlet and outlet are left out, as Max would.
+        assert_eq!(lines.len(), 2, "{lines:?}");
+        assert_eq!(
+            found.wrong,
+            [
+                "line 11: a cord enters inlet 1 of [mcs.gen~], which has only inlet 0, so Kumi left it out, as Max would.",
+                "line 13: a cord leaves outlet 1 of [mcs.gen~], which has only outlet 0, so Kumi left it out, as Max would.",
+            ]
+        );
+        // Given no code, they're made empty and said, as gen~ is.
+        let (empty, found) = parse("[mc.gen~]\n[mcs.gen~]\n");
+        assert_eq!(
+            found.wrong[0],
+            "line 1: [mc.gen~] holds GenExpr, and it was given none, so it's empty: write it in a { … } block after the box."
+        );
+        assert_eq!(
+            found.wrong[1],
+            "line 2: [mcs.gen~] holds GenExpr, and it was given none, so it's empty: write it in a { … } block after the box."
+        );
+        assert!(matches!(&empty.boxes[0].what, What::Gen { .. }));
+    }
+
+    /// #310: a gen whose text gives its code, or names the file holding it, isn't short of any: Max's own patchers write
+    /// each of these.
+    #[test]
+    fn a_gen_whose_text_gives_its_code_is_made_as_written() {
+        let outside = Outside { boxes: HashMap::from([("out".to_string(), "obj-out".to_string())]), ..Outside::default() };
+        for text in [
+            "gen~ @expr out1 = in1 * 0.5",
+            "gen~ @gen freeverb",
+            "gen~ crossover",
+            "gen @expr out1 = 0.54 - 0.46*cos(TWOPI * in1)",
+            "gen @gen gen-LFO @interval 20 @active 1",
+            "gen @file freeverb",
+            "mc.gen~ @expr out1 = in1 * exp(1/mc_channel) @chans 8",
+            "mc.gen~ @chans 8 @expr out1 = in1 * 0.5",
+            "mc.gen~ @gen shared @chans 4",
+            "mc.gen~ @file shared",
+            "mc.gen~ expdelay @chans 16",
+            "mcs.gen~ @expr out1 = in1 + in2",
+            "mcs.gen~ @gen shared",
+            "mcs.gen~ shared",
+        ] {
+            let (notation, found) = parse(&format!("fx = [{text}]\nfx.1 -> out\n"));
+            assert!(found.is_empty(), "{text}: {found:?}");
+            let Expanded { boxes, found, lines } = expand(&notation, &outside);
+            assert!(found.is_empty(), "{text}: {found:?}");
+            let made = &boxes[0]["box"];
+            assert_eq!(made["text"], text);
+            assert_eq!((made["patcher"].clone(), made["data"].clone()), (Value::Null, Value::Null), "{text}: its code isn't replaced");
+            assert_eq!((made["numoutlets"].clone(), lines.len()), (json!(2), 1), "{text}: its ports left to its cords");
+        }
+        // What only sets an attribute gives it no code, and it's said.
+        for text in ["gen~ @title tank", "mc.gen~ @chans 4", "mc.gen~ @chans 4 @values wet windy stormy dusty", "mcs.gen~ @title whole"] {
+            let (notation, found) = parse(&format!("[{text}]\n"));
+            assert_eq!(
+                found.wrong,
+                [format!(
+                    "line 1: [{text}] holds GenExpr, and it was given none, so it's empty: write it in a {{ … }} block after the box."
+                )]
+            );
+            assert!(matches!(&notation.boxes[0].what, What::Gen { .. }), "{text}");
+        }
+        // Given a block as well, it's the block that's made.
+        let (notation, found) = parse("fx = [mc.gen~ @gen shared] {\n  out1 = in1;\n}\nfx -> out\n");
+        assert!(found.is_empty(), "{found:?}");
+        assert!(matches!(&notation.boxes[0].what, What::Gen { code, .. } if code.contains("out1 = in1;")));
     }
 
     #[test]

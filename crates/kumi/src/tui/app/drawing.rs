@@ -679,7 +679,8 @@ impl TuiApp {
         let state = self.0.state.borrow();
         if state.connection == ConnectionState::Connected && state.set_name.as_ref().is_some_and(|s| !s.is_empty()) {
             vec![(state.set_name.clone().unwrap(), st::BRIGHT), ("Your selection will show here".into(), st::FAINT)]
-        } else if state.connection == ConnectionState::Connecting {
+        } else if state.connection == ConnectionState::Connecting || state.connection == ConnectionState::Connected && !state.observed {
+            // (connected, and the first look's name not here yet: the DAW answered, and the session is still reading it)
             vec![(format!("Connecting to {}…", crate::daw::words().app), st::DIM)]
         } else {
             vec![(format!("{} isn't connected", crate::daw::words().app), st::DIM)]

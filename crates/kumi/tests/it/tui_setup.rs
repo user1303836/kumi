@@ -12,7 +12,10 @@ use kumi::tui::{
     style::ColorDepth,
 };
 use kumi_common::abort::Signal;
-use kumi_daw::{provider::Installed as LiveInstalled, setup::DawSetup as LiveSetup};
+use kumi_daw::{
+    provider::Installed as LiveInstalled,
+    setup::{DawSetup as LiveSetup, Reopens},
+};
 use models::FakeModels;
 use serde_json::json;
 use std::{
@@ -50,6 +53,8 @@ struct FakeLive {
     looked: Cell<usize>,
     /// The saved Set open in Live, as the session read it.
     set: RefCell<Option<String>>,
+    /// What Live opens by itself as it starts.
+    reopens: Cell<Reopens>,
     /// Live runs on this computer (not Linux).
     here: Cell<bool>,
     /// The terminal macOS names when it asks whether Kumi may control Live.
@@ -61,6 +66,8 @@ struct FakeLive {
     live_version: RefCell<Option<String>>,
     /// A Set given to open with Live can't be opened (moved, or on a drive that's gone): Live stays closed.
     set_fails: Cell<bool>,
+    /// Why Live couldn't start Kumi's bridge, as its log says.
+    failure: RefCell<Option<String>>,
 }
 impl FakeLive {
     fn new(open: bool) -> Rc<Self> {
@@ -74,12 +81,14 @@ impl FakeLive {
             found: RefCell::new(vec![LiveInstalled::Ready]),
             looked: Cell::new(0),
             set: RefCell::default(),
+            reopens: Cell::new(Reopens::Unknown),
             here: Cell::new(true),
             permission: RefCell::default(),
             menu: RefCell::default(),
             surface_ms: Cell::new(45_000),
             live_version: RefCell::new(Some("12.4".into())),
             set_fails: Cell::new(false),
+            failure: RefCell::default(),
         })
     }
     fn calls(&self) -> Vec<String> {
@@ -170,6 +179,9 @@ impl LiveSetup for FakeLive {
     fn open_set(&self) -> Option<String> {
         self.set.borrow().clone()
     }
+    fn reopens(&self) -> Reopens {
+        self.reopens.get()
+    }
     fn here(&self) -> bool {
         self.here.get()
     }
@@ -184,6 +196,9 @@ impl LiveSetup for FakeLive {
     }
     fn surface_wait(&self) -> std::time::Duration {
         std::time::Duration::from_millis(self.surface_ms.get())
+    }
+    async fn start_failure(&self) -> Option<String> {
+        self.failure.borrow().clone()
     }
 }
 
@@ -590,6 +605,19 @@ case!(esc_at_the_control_surface_says_how_kumi_connects, async {
     h.close().await;
 });
 
+case!(esc_while_the_bridge_couldnt_start_doesnt_ask_for_the_control_surface, async {
+    let live = FakeLive::new(false);
+    *live.failure.borrow_mut() =
+        Some("Live has AbletonMcpBridge as a Control Surface but couldn't start it: Loopback holds port 9765.".into());
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.wait_for("didn't start").await;
+    h.type_text("\x1b").await;
+    wait_for_said(&h, "Kumi connects to Live by itself once Live answers.").await;
+    assert!(!said(&h).contains("set a Control Surface"), "{}", rows(&h));
+    h.close().await;
+});
+
 case!(a_default_model_is_looked_for_once, async {
     // Nothing to choose from: setup asks to sign in, having looked once.
     let models = unsigned();
@@ -884,6 +912,57 @@ case!(a_restart_opens_the_set_again_or_says_where_it_is, async {
     h.close().await;
 });
 
+case!(what_the_restart_says_goes_by_what_the_daw_opens_by_itself, async {
+    const FRONT: &str = "Live opens the Set you had in front, if you saved it; it lists any others with its recent Sets.";
+    // The DAW brings it all back: nothing to find, on the step or once setup ends.
+    let live = FakeLive::new(true);
+    live.reopens.set(Reopens::Everything);
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.wait_for("Restart Live now").await;
+    h.type_text("\r").await;
+    h.wait_for("waiting for Live").await;
+    h.connect();
+    h.wait_for("You're set.").await;
+    h.type_text("\r").await;
+    h.wait_until_hidden("You're set.").await;
+    assert!(!said(&h).contains("Open Recent"), "{}", said(&h));
+    assert!(!said(&h).contains("in front"), "{}", said(&h));
+    h.close().await;
+    // It brings back the project in front alone: where the others are, and it doesn't say the rest comes back.
+    let live = FakeLive::new(true);
+    live.reopens.set(Reopens::Front);
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    h.wait_for("Restart Live now").await;
+    h.type_text("\r").await;
+    h.wait_for("waiting for Live").await;
+    wait_for_said(&h, FRONT).await;
+    assert!(!said(&h).contains("Open Recent"), "{}", said(&h));
+    h.close().await;
+    // The same when the step is put off after the install failed, for each answer.
+    for (reopens, words) in [
+        (Reopens::Everything, "Live is opening again."),
+        (Reopens::Front, &*format!("Live is opening again. {FRONT}")),
+        (Reopens::Unknown, "Live is opening again. If you saved your Set, it's in Live's File › Open Recent Set."),
+    ] {
+        let live = FakeLive::new(true);
+        live.reopens.set(reopens);
+        live.installs.borrow_mut().push(Err("disk full".into()));
+        let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+        h.start().await;
+        h.wait_for("Restart Live now").await;
+        h.type_text("\r").await;
+        h.wait_for("Try again").await;
+        h.type_text("\x1b[B\r").await;
+        wait_for_said(&h, words).await;
+        if reopens == Reopens::Everything {
+            assert!(!said(&h).contains("Open Recent"), "{}", said(&h));
+        }
+        h.close().await;
+    }
+});
+
 case!(a_live_12_that_isnt_here_or_never_opened_is_said_before_anything_is_installed, async {
     // None here: what Kumi works with, and Look again once it is.
     let live = FakeLive::new(false);
@@ -970,6 +1049,34 @@ case!(the_control_surface_step_says_where_settings_are_after_a_while, async {
     println!("--- control surface, a while later ---\n{more}");
     // Still the one instruction, now with where to find it.
     assert!(said(&h).contains("set a Control Surface to AbletonMcpBridge. Kumi notices by itself."));
+    h.close().await;
+});
+
+case!(a_control_surface_live_couldnt_start_says_why_in_place_of_asking_for_it, async {
+    let live = FakeLive::new(false);
+    *live.menu.borrow_mut() = Some("Settings is in Live's Live menu (⌘,).".into());
+    live.surface_ms.set(300);
+    let why = "Live has AbletonMcpBridge as a Control Surface but couldn't start it: Loopback holds port 9765, which the bridge needs. Quit Loopback, then restart Live. Kumi connects by itself once Live answers.";
+    *live.failure.borrow_mut() = Some(why.into());
+    let h = setup(80, FakeModels::catalog(), Some((Some(MISSING), live.clone())), |_| {});
+    h.start().await;
+    wait_for_said(&h, why).await;
+    let failing = rows(&h);
+    println!("--- control surface, the bridge couldn't start ---\n{failing}");
+    assert!(failing.lines().any(|l| l == "  Control Surface     didn't start"), "{failing}");
+    assert!(!said(&h).contains("set a Control Surface to AbletonMcpBridge"), "it's chosen: not asked for");
+    // Past the wait for where Live's Settings are: not said, since it's chosen already.
+    delay(700).await;
+    assert!(!said(&h).contains("Settings is in"), "{}", rows(&h));
+    // Fixed, and Live not answering yet: the instruction again, and where the Settings are, its wait over.
+    *live.failure.borrow_mut() = None;
+    wait_for_said(&h, "set a Control Surface to AbletonMcpBridge. Kumi notices by itself.").await;
+    h.has("Control Surface     waiting for Live");
+    wait_for_said(&h, "Settings is in Live's Live menu (⌘,). If Live shows a dialog, answer it first.").await;
+    assert!(!said(&h).contains("Loopback"));
+    h.emit(json!({"type":"connection","state":"connected"}));
+    h.wait_for("You're set.").await;
+    h.has("Control Surface     Live 12.4 · connected");
     h.close().await;
 });
 

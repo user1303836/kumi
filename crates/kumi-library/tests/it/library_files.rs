@@ -4,7 +4,7 @@ use kumi_common::js::json::stringify;
 use kumi_library::{
     presets::{plugin_preset_facts, read_live_preset, read_max_device},
     sets::{device_name, read_set, time_signature},
-    xml::{attribute, scan_tags, scan_xml_file, xml_head, ScanOptions, TagHandler, XmlError},
+    xml::{attribute, decode, scan_tags, scan_xml_file, scan_xml_stream, xml_head, ScanOptions, TagHandler, XmlError},
 };
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -88,6 +88,71 @@ fn gzip(text: &str) -> Vec<u8> {
     let mut zip = flate2::write::GzEncoder::new(vec![], flate2::Compression::default());
     zip.write_all(text.as_bytes()).unwrap();
     zip.finish().unwrap()
+}
+/// Elements' values as text, whichever pieces a stream cuts them into.
+#[derive(Default)]
+struct Texts {
+    text: String,
+    values: Vec<(String, String)>,
+}
+impl TagHandler for Texts {
+    fn open(&mut self, _: &str, _: &str, _: bool) {
+        self.text.clear();
+    }
+    fn close(&mut self, name: &str) {
+        self.values.push((name.into(), decode(self.text.trim())));
+        self.text.clear();
+    }
+    fn text(&mut self, text: &str) {
+        self.text.push_str(text);
+    }
+}
+/// A stream that gives `size` bytes at a time.
+struct Pieces<'a>(&'a [u8], usize);
+impl std::io::Read for Pieces<'_> {
+    fn read(&mut self, into: &mut [u8]) -> std::io::Result<usize> {
+        let count = self.0.len().min(self.1).min(into.len());
+        into[..count].copy_from_slice(&self.0[..count]);
+        self.0 = &self.0[count..];
+        Ok(count)
+    }
+}
+#[test]
+fn a_stream_gives_its_text_whatever_cuts_it_within_the_same_bounds() {
+    let xml = "<?xml version=\"1.0\"?><Song><!-- not this --><Name>Caf\u{e9} &amp; Bar ☺</Name><Data><![CDATA[not this]]></Data><Empty/><Tempo> 120 </Tempo></Song>";
+    let want = [("Name", "Caf\u{e9} & Bar ☺"), ("Data", ""), ("Empty", ""), ("Tempo", "120"), ("Song", "")];
+    for size in [1, 2, 3, 7, 1024] {
+        let mut texts = Texts::default();
+        scan_xml_stream(Pieces(xml.as_bytes(), size), &mut texts, ScanOptions::default()).unwrap();
+        let values: Vec<_> = texts.values.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
+        assert_eq!(values, want, "{size} bytes at a time");
+    }
+    let bound = ScanOptions { max_bytes: Some(10), ..Default::default() };
+    assert!(matches!(scan_xml_stream(xml.as_bytes(), &mut Texts::default(), bound), Err(XmlError::TooLarge)));
+    let signal = kumi_common::abort::Signal::new();
+    signal.cancel();
+    let stopped = ScanOptions { signal: Some(signal), ..Default::default() };
+    assert!(matches!(scan_xml_stream(xml.as_bytes(), &mut Texts::default(), stopped), Err(XmlError::Aborted(_))));
+    // A CDATA section or a comment past a tag's bound, whatever cuts it: nothing holds it, and what follows it reads.
+    for (open, close) in [("<![CDATA[", "]]>"), ("<!--", "-->")] {
+        let long = format!("<A>1</A>{open}{}☺]{close}<B>2</B>", "x]".repeat(5 * 1024 * 1024));
+        for size in [64 * 1024 + 1, 256 * 1024] {
+            let mut texts = Texts::default();
+            scan_xml_stream(Pieces(long.as_bytes(), size), &mut texts, ScanOptions::default()).unwrap();
+            let values: Vec<_> = texts.values.iter().map(|(name, value)| (name.as_str(), value.as_str())).collect();
+            assert_eq!(values, [("A", "1"), ("B", "2")], "{open} {size} bytes at a time");
+        }
+        // The closer cut by every small piece.
+        let short = format!("<A>1</A>{open}a☺c{close}<B>2</B>");
+        let mut texts = Texts::default();
+        scan_xml_stream(Pieces(short.as_bytes(), 1), &mut texts, ScanOptions::default()).unwrap();
+        assert_eq!(texts.values.len(), 2, "{open}");
+    }
+    // Its read ends as the handler says.
+    let mut handler = Handler { stop: true, ..Default::default() };
+    let first = format!("<First/>{}<Last/>", " ".repeat(700_000));
+    scan_xml_stream(first.as_bytes(), &mut handler, ScanOptions::default()).unwrap();
+    assert_eq!(handler.seen, vec!["First:", "/First"]);
 }
 #[tokio::test]
 async fn streamed_files_limit_size_stop_cancel_and_keep_split_utf8() {

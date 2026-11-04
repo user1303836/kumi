@@ -368,17 +368,20 @@ async fn find_sounds_in_each_daw_holds_only_the_sounds_offered_there() {
         .await;
 }
 
-/// my_sets finds the producer's Live Sets (the library reads only .als): REAPER and Renoise aren't offered it as their own
-/// projects or songs.
+/// my_sets finds the producer's own projects where Kumi reads their files, as the registered DAWs say: Live's Sets and
+/// Renoise's songs. REAPER isn't offered it, nor Live's Sets as its own projects.
 #[test]
 fn my_sets_is_offered_only_where_kumi_reads_the_daws_projects() {
     let access = Rc::new(Learned { presets: vec![] });
     let offered = |profile: &DawProfile| {
-        library_tools_for(profile, access.clone(), LibraryToolsOptions::default()).iter().any(|tool| tool.name() == "my_sets")
+        let projects = profile.id.and_then(|daw| kumi::daw::registry::libraries().projects_of(daw));
+        library_tools_for(profile, access.clone(), LibraryToolsOptions { projects, ..Default::default() })
+            .iter()
+            .any(|tool| tool.name() == "my_sets")
     };
     assert!(offered(&DawProfile::ABLETON));
-    assert!(!offered(&DawProfile::REAPER));
-    assert!(!offered(&DawProfile::RENOISE));
+    assert!(offered(&DawProfile::REAPER));
+    assert!(offered(&DawProfile::RENOISE));
 }
 
 /// (#361 review K31) A DAW library inside a folder the producer named (or a Live Place): what the library's layout reads
@@ -399,7 +402,7 @@ async fn a_daws_library_inside_a_producers_folder_leaves_its_other_sounds_to_tha
             learn(LearnOptions { daws: kumi::daw::registry::libraries(), ..LearnOptions::new(plan, Signal::new()) }).await.unwrap();
             let logs = library_logs(home.dir.path().to_str().unwrap());
             let learned: Vec<String> =
-                logs.sounds.load().await.into_keys().map(|p| Path::new(&p).file_stem().unwrap().to_string_lossy().into_owned()).collect();
+                logs.sounds.load().await.keys().map(|p| Path::new(p).file_stem().unwrap().to_string_lossy().into_owned()).collect();
             for name in ["Kit Snare", "Loose Hat", "User Clap", "Renoise Kick"] {
                 assert_eq!(learned.iter().filter(|n| *n == name).count(), 1, "{name} learned once: {learned:?}");
             }
@@ -453,7 +456,7 @@ async fn a_palette_in_reaper_reaches_reapers_sounds_and_finds_a_moved_sound_amon
             learn(LearnOptions { daws: kumi::daw::registry::libraries(), ..LearnOptions::new(home.plan(), Signal::new()) }).await.unwrap();
             // Each as the library names it.
             let logs = library_logs(home.dir.path().to_str().unwrap());
-            let learned: Vec<String> = logs.sounds.load().await.into_keys().collect();
+            let learned: Vec<String> = logs.sounds.load().await.keys().map(str::to_owned).collect();
             let named = |name: &str| learned.iter().find(|path| Path::new(path).file_name().unwrap() == name).unwrap().clone();
             let (kick, packed) = (named("Kick.wav"), named("Pack Kick.wav"));
             // A Live Set that uses the kick.

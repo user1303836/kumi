@@ -25,7 +25,7 @@ M.BUFFER_PROBES = 256
 function M.buffer_print(buffer)
   if not buffer.has_sample_data then return { frames = 0 } end
   local frames, channels = buffer.number_of_frames, buffer.number_of_channels
-  local a, b = 5381, 0
+  local parts = {}
   for k = 0, M.BUFFER_PROBES do
     local frame = k == M.BUFFER_PROBES and frames or math.max(1, math.floor(frames * k / M.BUFFER_PROBES) + 1)
     -- (the definitions say a list, the guide a number: either is read)
@@ -33,14 +33,10 @@ function M.buffer_print(buffer)
       local value = buffer:sample_data(channel, math.min(frame, frames))
       local x = type(value) == "table" and value[1] or value
       local text = string.format("%.6f|", tonumber(x) or 0)
-      for i = 1, #text do
-        local byte = text:byte(i)
-        a = (a * 33 + byte) % 4294967296
-        b = (b * 65599 + byte) % 4294967296
-      end
+      parts[#parts + 1] = text
     end
   end
-  return { frames = frames, channels = channels, rate = buffer.sample_rate, bits = buffer.bit_depth, values = string.format("%08x%08x", a, b) }
+  return { frames = frames, channels = channels, rate = buffer.sample_rate, bits = buffer.bit_depth, values = base.hash(table.concat(parts)) }
 end
 
 -- Renoise leaves an instrument unnamed when its last sample goes (lab 2026-10-19): Kumi deletes the sample and keeps the
@@ -1052,7 +1048,6 @@ local function invert_apply(song, env, input, fence, desc)
   local sample = song:instrument(plan.n[1]):sample(plan.n[2])
   song:describe_undo(desc)
   invert_buffer(sample.sample_buffer)
-  if env.watch_undo then env.watch_undo(sample.sample_buffer_observable) end
   return {
     applied = { print = M.buffer_print(sample.sample_buffer) }, material = { at = places_.place_of(env, "sample", plan.n) },
     target = sample_target(env, plan.n), display = { title = "Flipped the polarity of " .. plan.label },
@@ -1089,6 +1084,8 @@ base.register({
   reread = places_.reread("sample"),
   read = function(sample) return { print = M.buffer_print(sample.sample_buffer) } end,
   same = function(a, b) return base.same_table(a.print, b.print) end,
+  -- (Renoise's undo takes it back and no notifier tells, lab 2026-11-01: read again now and then)
+  polled = true,
 })
 
 return M

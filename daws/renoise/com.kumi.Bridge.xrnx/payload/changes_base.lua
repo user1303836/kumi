@@ -503,6 +503,7 @@ function M.journal_reset(journal)
 end
 
 function M.remember(journal, entry)
+  entry.edits_made = journal.edits and journal.edits() or nil -- (#393: `redo_sure`)
   local entries = journal.entries
   entries[#entries + 1] = entry
   while #entries > M.JOURNAL_MAX do table.remove(entries, 1) end
@@ -807,6 +808,16 @@ function M.journal_check(journal)
   check_slots(journal, song)
 end
 
+-- (#393) Whether Renoise's last undo or redo was its redo of this change, for sure. Kumi's step was the newest when Renoise's
+-- undo took it: nothing was edited from the change to the undo, or that undo may have been of a later step of the producer's
+-- that left the lines as before the change, and its redo the producer's own lines. And nothing is left to redo: an undo always
+-- leaves the step it took back to redo, so an undo past Kumi's step would have left Kumi's step there.
+local function redo_sure(journal, entry, song)
+  if entry.edits_made == nil or entry.edits_made ~= entry.edits_at then return false end
+  local ok, sure = pcall(function() return song:can_undo() and not song:can_redo() end)
+  return ok and sure == true
+end
+
 -- An entry the journal reads again (its spec's `reread`, `read`, `same`): undone when it reads as before the change and not as
 -- the change left it, redone when it reads as the change left it again.
 check_read = function(journal, song, entry)
@@ -825,11 +836,13 @@ check_read = function(journal, song, entry)
     elseif entry.state == "undone" and spec.same(now, entry.applied) and redoable(journal, entry) then
       -- (what Kumi wrote is there again, from Renoise's redo: the lines' count of edits since Kumi's step starts again here,
       -- so Kumi's undo isn't refused for the redo's own writes; an edit after it still is. Not where the redo is unsure:
-      -- lines the producer had and Renoise's undo brought back read the same as Kumi's, review MUST 10)
-      if journal.retouched and not spec.unsure_redo and type(entry.applied) == "table" then journal.retouched(entry.applied) end
-      if spec.unsure_redo then
+      -- lines the producer had or typed read the same as Kumi's, review MUST 10)
+      local unsure = spec.unsure_redo and not redo_sure(journal, entry, song)
+      if journal.retouched and not unsure and type(entry.applied) == "table" then journal.retouched(entry.applied) end
+      if unsure then
         -- (Renoise doesn't say which step its undo or redo took: lines that read as Kumi wrote them again may be its redo
-        -- of Kumi's step, or its undo past it of an older row insert that put the producer's like lines there)
+        -- of Kumi's step, its undo past it of an older row insert that put the producer's like lines there, or its redo of
+        -- the producer's own later lines)
         entry.state = "unsure"
         queue(journal, entry.desc, "unsure")
       else
@@ -841,22 +854,60 @@ check_read = function(journal, song, entry)
   end
 end
 
+-- (#361 N-S16) The entries of one device, checked as `check_read` checks each, with one read of the device: each through its
+-- own spec, but for `read`, which gives them all the first entry's read.
+local function read_device(journal, song, entries)
+  local read = entries[1].spec.read
+  local done, value = false, nil
+  local function once(object, applied)
+    if not done then done, value = true, read(object, applied) end
+    return value
+  end
+  for _, entry in ipairs(entries) do
+    local spec = entry.spec
+    entry.spec = setmetatable({ read = once }, { __index = spec })
+    local ok, err = pcall(check_read, journal, song, entry)
+    entry.spec = spec
+    if not ok then error(err, 0) end
+  end
+end
+
 -- (accept round 2) What Renoise tells no notifier of when its undo or redo changes it (what a Doofer, Splitter or Notepad holds:
--- `spec.polled`) is read again now and then instead (the tool's timer, about once a second): at most `most` of the newest such
--- entries, each one read of the device's preset data.
-function M.journal_poll(journal, most)
+-- `spec.polled`) is read again now and then instead (the tool's timer, about once a second): the newest `most` such entries.
+-- (#361 N-S16) A device is read once for all its entries, and a call reads at most `each` devices, going on from where the
+-- last call stopped, so a round of reads is spread over the tool's ticks. True when the round is done. (Entries that come
+-- or go between calls are taken as the list is then: a device a round misses, the next one reads.)
+function M.journal_poll(journal, most, each)
   local song = renoise.song()
-  if not song then return 0 end
-  local read = 0
+  if not song then
+    journal.poll_next = nil
+    return true
+  end
+  local devices, by_read, count = {}, {}, 0
   for i = #journal.entries, 1, -1 do
     local entry = journal.entries[i]
-    if read >= (most or 8) then break end
-    if entry.spec and entry.spec.polled and entry.spec.reread and not entry.shape and (entry.state == "applied" or entry.state == "undone") then
-      check_read(journal, song, entry)
-      read = read + 1
+    if count >= (most or 8) then break end
+    local spec = entry.spec
+    if spec and spec.polled and spec.reread and not entry.shape and (entry.state == "applied" or entry.state == "undone") then
+      count = count + 1
+      -- (entries at one place that read alike read one device: a polled kind's `read` takes only the device)
+      local place = entry.place
+      local key = entry
+      if type(place) == "table" and type(place.track) == "number" and type(place.device) == "number" then key = place.track .. "." .. place.device end
+      local of = by_read[spec.read] or {}
+      by_read[spec.read] = of
+      if not of[key] then
+        of[key] = {}
+        devices[#devices + 1] = of[key]
+      end
+      table.insert(of[key], entry)
     end
   end
-  return read
+  local first = journal.poll_next or 1
+  local last = math.min(#devices, first + (each or 2) - 1)
+  for k = first, last do read_device(journal, song, devices[k]) end
+  journal.poll_next = last < #devices and last + 1 or nil
+  return journal.poll_next == nil
 end
 
 -- n-instruments: an operation on a list of instruments, or of what is in one (its samples, phrases, sets, chains, a set's or a

@@ -1,0 +1,19 @@
+{
+  "plugin": "fabfilter-micro",
+  "name": "FabFilter Micro",
+  "vendor": "FabFilter",
+  "kind": "effect",
+  "ids": {
+    "vst3": [{"id":"751AFC3415434CBCAA73672A109BE0FF","name":"Micro","status":"verified","parameters":146}]
+  },
+  "presets": {
+    "extensions": [".ffp",".vstpreset"],
+    "windows": [{"path":"~/Documents/FabFilter/Presets/Micro","holds":"native user and installed presets","status":"verified"}],
+    "mac": [{"path":"~/Documents/FabFilter/Presets/Micro","holds":"native presets; path not tested on this Windows capture","status":"guessed"}]
+  },
+  "formats": ["format-1"],
+  "family": "fabfilter",
+  "roles": ["filter"],
+  "binaries": ["FabFilter Micro.vst3","Micro.vst3"],
+  "notes": ["VST3 only. Processor class identity and versions were enumerated through the public VST3 factory.","Kumi creates from initialized component/controller state and preserves unrelated bytes. No manufacturer presets, samples or executable code are bundled.","Edit values use stored VST3 plain values. These may be logarithmic frequencies or normalized internal controls, not the displayed Hz, milliseconds or dB. Consult field ranges and captured display examples.","Only measured numeric controls are writable. Native .ffp schemas and conversion support are explicitly gated; historical factory schemas are not guessed."]
+}

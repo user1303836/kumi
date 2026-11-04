@@ -1,7 +1,7 @@
 use std::rc::Rc;
 
 use kumi::tui::markdown::{inline, render_markdown, render_markdown_with, set_terminal_opens_links, MarkdownCache, MarkdownRow};
-use kumi::tui::style::{link_url, palette, Style};
+use kumi::tui::style::{link_url, palette, Rgb, Style};
 
 fn base() -> Rc<Style> {
     Rc::new(Style::fg(palette::TEXT))
@@ -70,6 +70,67 @@ fn lists_get_bullets_and_hanging_indents_headings_quotes_and_code_render_without
     assert!(rows[0].spans[0].style.bold);
     assert_eq!(rows[7].bg, Some(palette::RAISED), "code blocks sit on a band");
     assert_eq!(rows[1].bg, None);
+}
+
+/// Each row's runs, by their words and their colour.
+fn colours(rows: &[MarkdownRow]) -> Vec<Vec<(String, Option<Rgb>)>> {
+    rows.iter().map(|row| row.spans.iter().map(|span| (span.text.clone(), span.style.fg)).collect()).collect()
+}
+
+#[test]
+fn code_is_coloured_by_the_language_its_fence_names_and_keeps_its_band() {
+    let rows = render_markdown("```py\ndef gain(x):  # dB\n    return x * 0.5 + \"db\"\n```\n```text\nreturn 1\n```", 60, &base());
+    let (bright, keyword, string, number, faint) =
+        (Some(palette::BRIGHT), Some(palette::CODE_KEYWORD), Some(palette::CODE_STRING), Some(palette::CODE_NUMBER), Some(palette::FAINT));
+    let run = |text: &str, colour| (text.to_string(), colour);
+    assert_eq!(
+        colours(&rows),
+        vec![
+            vec![run("def", keyword), run(" gain(x):  ", bright), run("# dB", faint)],
+            vec![
+                run("    ", bright),
+                run("return", keyword),
+                run(" x * ", bright),
+                run("0.5", number),
+                run(" + ", bright),
+                run("\"db\"", string)
+            ],
+            // A fence naming a language Kumi doesn't colour is bright, as all code was.
+            vec![run("return 1", bright)],
+        ]
+    );
+    // The band stays, under colours that are only the words'.
+    assert!(rows.iter().all(|row| row.bg == Some(palette::RAISED) && row.spans.iter().all(|span| span.style.bg.is_none())));
+}
+
+#[test]
+fn a_coloured_line_too_long_splits_between_characters_and_keeps_its_colours() {
+    let rows = render_markdown("```js\nlet abc = 1;\n```", 6, &base());
+    let (bright, keyword, number) = (Some(palette::BRIGHT), Some(palette::CODE_KEYWORD), Some(palette::CODE_NUMBER));
+    assert_eq!(
+        colours(&rows),
+        vec![
+            vec![("let".to_string(), keyword), (" ab".to_string(), bright)],
+            vec![("c = ".to_string(), bright), ("1".to_string(), number), (";".to_string(), bright)],
+        ]
+    );
+}
+
+#[test]
+fn an_open_code_block_reads_on_inside_what_its_kept_lines_left_open() {
+    // A docstring and a block comment that run across lines, streamed a byte at a time: only the line still coming is
+    // read again, and every line's colours are the ones the whole text so far gives.
+    for whole in [
+        "Here:\n\n```py\ndef f():\n    \"\"\"One\n    two\n    three\"\"\"\n    return 1\n```\nDone.",
+        "```js\n/* one\ntwo\nthree */ let x = 2;\n```",
+        "```lua\nlocal s = [[a\nb]] -- c\n--[==[ d\ne ]==] return nil\n```",
+    ] {
+        let mut cache = MarkdownCache::default();
+        for end in 1..=whole.len() {
+            let streamed = render_markdown_with(&whole[..end], 30, &base(), &mut cache, true);
+            assert_eq!(colours(&streamed), colours(&render_markdown(&whole[..end], 30, &base())), "at {end} bytes of {whole:?}");
+        }
+    }
 }
 
 #[test]

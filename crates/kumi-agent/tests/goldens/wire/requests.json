@@ -381,6 +381,9 @@
     "type": "map"
   },
   {
+    "type": "map-key"
+  },
+  {
     "type": "slots",
     "id": 3,
     "words": "listening off"
@@ -445,6 +448,9 @@
   },
   {
     "type": "missing-model"
+  },
+  {
+    "type": "warm"
   },
   {
     "type": "answer-set",
@@ -530,6 +536,19 @@
     "type": "focus-body",
     "request": {
       "type": "mixer"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "levels",
+      "trackRef": "track:2"
+    }
+  },
+  {
+    "type": "focus-body",
+    "request": {
+      "type": "levels"
     }
   }
 ]

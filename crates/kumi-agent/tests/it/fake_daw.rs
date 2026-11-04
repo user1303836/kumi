@@ -797,3 +797,30 @@ async fn the_tool_name_a_plans_refusal_says_back_is_cut_between_characters() {
         })
         .await;
 }
+
+/// Each change a plan makes is marked with its run of one kind of change, which HISTORY shows across tracks as one entry;
+/// another plan's runs, in this Kumi or another, are another's, and nothing outside a plan is marked.
+#[tokio::test]
+async fn a_plans_changes_are_marked_with_their_run_and_nothing_else_is() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let daw = FakeDaw::<false>::new(Answers { plan_steps: false, stops: false, reachable: true, batches: false, copies: false });
+            let plan = steps(json!([
+                {"tool":"add_track","input":{"name":"Keys"}},
+                {"tool":"add_track","input":{"name":"Pads"}},
+                {"tool":"set_tempo","input":{"bpm":90}},
+            ]));
+            make_changes(&daw, plan, Signal::new()).await.unwrap();
+            make_changes(&daw, steps(json!([{"tool":"set_tempo","input":{"bpm":100}}])), Signal::new()).await.unwrap();
+            daw.record("tempo", "Tempo by hand", "t-hand", None);
+            let batches: Vec<Option<String>> =
+                daw.history.entries.borrow().values().map(|entry| entry.borrow().record.batch.clone()).collect();
+            let [Some(keys), Some(pads), Some(tempo), Some(later), None] = batches.as_slice() else { panic!("{batches:?}") };
+            assert_eq!(keys, pads, "one run");
+            assert!(keys.ends_with(":add_track") && tempo.ends_with(":set_tempo"), "{batches:?}");
+            assert_eq!(keys.split(':').next(), tempo.split(':').next(), "one plan");
+            assert_ne!(tempo, later, "another plan's run is its own");
+            assert_eq!(*daw.history.batch.borrow(), None, "put back once the plan's done");
+        })
+        .await;
+}

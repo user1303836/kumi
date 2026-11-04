@@ -28,6 +28,34 @@ fn evidence(plugin: &str) -> Value {
 }
 
 #[test]
+fn every_fabfilter_write_version_has_its_own_or_explicitly_identical_template() {
+    for format in structure::builtins().iter().filter(|format| format.info.family == "fabfilter") {
+        let plugin = &format.info.plugin;
+        let proof = evidence(plugin);
+        let writes = proof["writes"].as_array().unwrap();
+        let primary = writes[0]["version"].as_str().unwrap();
+        let default = templates::initial(plugin).unwrap();
+        for write in writes {
+            let version = write["version"].as_str().unwrap();
+            if let Some(relative) = write["template"].as_str() {
+                let captured = std::fs::read(
+                    std::path::Path::new(env!("KUMI_WORKSPACE")).join("plugin-formats").join(format.info.format_directory()).join(relative),
+                )
+                .unwrap();
+                assert_eq!(templates::initial_for_version(plugin, version), Some(captured.as_slice()), "{plugin} {version}");
+                assert_ne!(captured, default, "identical defaults should share their template: {plugin} {version}");
+            } else {
+                assert!(
+                    version == primary || write["template_equivalent_to"].as_str() == Some(primary),
+                    "{plugin} {version} falls back to a newer template without captured equivalence"
+                );
+                assert!(templates::initial_for_version(plugin, version).is_none());
+            }
+        }
+    }
+}
+
+#[test]
 fn vendor_products_create_edit_and_keep_unrelated_chunks_through_one_api() {
     let mut count = 0;
     for format in structure::builtins().iter().filter(|f| matches!(f.info.family.as_str(), "valhalla" | "minimal-audio" | "pulsar-modular"))

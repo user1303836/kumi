@@ -170,6 +170,8 @@ impl TuiApp {
             self.0.tabs.leave();
             self.0.state.borrow_mut().tree_cursor = None;
         }
+        // (FOCUS back where it's wider: a tracker's body is read again for the tracks it can draw there)
+        self.read_own(false);
         self.0.scheduler.request();
     }
 

@@ -11,7 +11,7 @@
 use serde_json::{json, Value};
 
 use super::notes::{self, Note};
-use super::{Applied, Ctx, Done, Preview};
+use super::{pool, Applied, Ctx, Done, Preview};
 use crate::read::{bad, failed, take_start_qn};
 use crate::reaper::Take;
 
@@ -306,6 +306,7 @@ pub fn preview(ctx: &Ctx, input: &Value, which: Which) -> Done<Preview> {
         display["seed"] = seed.into();
     }
     let prior = json!({"notes": plan.before.len(), "fence": notes::fence_of(&plan.before), "removed": notes::rows_of(ctx, plan.take, plan.item_qn, gone.into_iter())});
+    let display = pool::said(ctx, plan.take, pool::WILL_APPLY, display);
     Ok(Preview { target: notes::target(ctx, plan.take), prior, fence, display })
 }
 
@@ -341,7 +342,7 @@ pub fn apply(ctx: &Ctx, input: &Value, fence: &Value, which: Which) -> Done<Appl
     }
     Ok(Applied {
         applied: json!({"added": added_now.iter().map(Note::json).collect::<Vec<_>>(), "removed": gone_now.iter().map(Note::json).collect::<Vec<_>>(), "notes": after.len()}),
-        display,
+        display: pool::said(ctx, take, pool::APPLIED, display),
         unwritten: gone_now.is_empty() && added_now.is_empty(),
         ..Default::default()
     })

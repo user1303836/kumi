@@ -503,10 +503,22 @@ impl Session {
             notes.extend(rig.tidy(&top, cleanup.clone()).await.unwrap_or_default());
         }
         if let Some(leader) = leader.as_ref().filter(|l| l.score.is_some()) {
-            let kept = rig.keep_best(&leader.name, &leader.knobs, &leader.elite, cleanup).await.unwrap_or_default();
+            let kept = rig.keep_best(&leader.name, &leader.knobs, &leader.elite, cleanup.clone()).await.unwrap_or_default();
             if kept.starts_with("Kumi · Goal best") {
                 state.best_track = Some(kept);
+                notes.extend(rig.kept_only());
+            } else if !kept.is_empty() {
+                // (its name, or why not: a long search's result doesn't go with no word)
+                notes.push(format!("Its best wasn't kept: {}.", kept.trim_end_matches('.')));
             }
+        }
+        notes.extend(rig.put_back(cleanup).await);
+        // (what the end of a goal has to say, the model's told too: the producer may well ask)
+        if !notes.is_empty() {
+            let how = if state.status == GoalRun::Paused { "paused" } else { "ended" };
+            let said = format!("\n\n[Kumi] As the last goal {how}: {}", notes.join(" "));
+            let mut s = self.0.state.borrow_mut();
+            s.next_note = Some(s.next_note.take().unwrap_or_default() + &said);
         }
         sync(&mut state, &evolution, started);
         self.persist_goal(&place, &state);

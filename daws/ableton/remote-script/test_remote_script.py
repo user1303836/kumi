@@ -511,6 +511,62 @@ class RemoteScriptTests(unittest.TestCase):
         for _ in range(3): surface.update_display()
         self.assertEqual((surface._bridge.served, scheduled), (3, []))
 
+    def test_a_failed_start_is_said_in_lives_status_bar_its_log_and_beside_the_script_and_a_good_one_clears_it(self):
+        """Live says nothing of a Control Surface that fails as it starts: the producer sees the reason in Live's status
+        bar (show_message, never a dialog), and Kumi reads it beside the script, with this Live's process. The failure
+        still reaches Live, which reports it as before."""
+        package = __import__("AbletonMcpBridge")
+        record = Path(package.__file__).with_name("start-failure.json")
+        said, logged = [], []
+
+        class Instance(FakeInstance):
+            def show_message(self, text): said.append(text)
+
+        def refused():
+            raise ValueError("bridge configuration reference is missing or unsafe: others can read it (mode 644)")
+
+        class Bridge:
+            def __init__(self, *args, **kwargs): pass
+
+        try:
+            with patch.object(package, "_read_config", refused), \
+                    patch.object(package.AbletonMcpBridge, "log_message", lambda self, text: logged.append(text), create=True):
+                with self.assertRaises(ValueError):
+                    package.AbletonMcpBridge(Instance())
+            exception = "ValueError: bridge configuration reference is missing or unsafe: others can read it (mode 644)"
+            self.assertEqual(said, ["AbletonMcpBridge couldn't start (kumi doctor says how to fix it): " + exception])
+            self.assertEqual(logged, ["AbletonMcpBridge couldn't start: " + exception], "Kumi reads the log's line as it was")
+            kept = json.loads(record.read_text(encoding="utf-8"))
+            self.assertEqual((kept["version"], kept["pid"], kept["exception"]), (1, os.getpid(), exception))
+            # A Live without show_message (or whose log refuses) still gets the record, and the failure.
+            record.unlink()
+            with patch.object(package, "_read_config", refused):
+                with self.assertRaises(ValueError):
+                    package.AbletonMcpBridge(FakeInstance())
+            self.assertTrue(record.exists())
+            # A start that succeeds removes it.
+            with patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
+                package.AbletonMcpBridge(FakeInstance())
+            self.assertFalse(record.exists())
+        finally:
+            record.unlink(missing_ok=True)
+
+    @unittest.skipIf(os.name == "nt", "POSIX owners and modes; on Windows one ACL check decides")
+    def test_a_refused_file_says_what_the_owner_checks_found(self):
+        package = __import__("AbletonMcpBridge")
+        with tempfile.TemporaryDirectory() as folder:
+            file = Path(folder) / "bridge-config.json"
+            file.write_text("{}")
+            os.chmod(file, 0o644)
+            self.assertEqual(package._refused_because(file), ": others can read it (mode 644)")
+            os.chmod(file, 0o600)
+            self.assertEqual(package._refused_because(file), "")
+            link = Path(folder) / "link.json"
+            link.symlink_to(file)
+            self.assertEqual(package._refused_because(link), ": it's a link")
+            self.assertEqual(package._refused_because(Path(folder) / "gone.json"), ": it isn't there")
+            self.assertEqual(package._refused_because(Path(folder)), ": it isn't a file")
+
     def test_authentication_and_replay_protection(self):
         remote = AuthenticatedRemoteScript("0123456789abcdef0123456789abcdef", lambda method, request: fake_status_result())
         unsigned = remote.bound({"version": PROTOCOL, "id": "one", "method": "status", "nonce": "0000000000000001", "sequence": 1})
@@ -7836,11 +7892,233 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
         client.sendall(self.frame(channel, 5, method="invoke", operation="track.create", args={})); self.answered_between_ticks(client)
         self.assertLess(self.bridge._window_spent, 0.05, "a change made through invoke doesn't")
 
+    def test_while_lives_timer_serves_a_tick_waits_4_ms_for_the_next_step_and_a_display_tick_alone_12(self):
+        # (A9-L1) each wait holds Live's UI thread; a fast timer comes back within about 10 ms anyway
+        client, channel = self.connect(); waits = []; self.bridge.timer_gap = 0.010
+        real = remote_module.selectors.DefaultSelector
+        class Recording:
+            def __init__(self): self.inner = real()
+            def __enter__(self): return self
+            def __exit__(self, *rest): self.inner.close()
+            def register(self, *args, **kwargs): return self.inner.register(*args, **kwargs)
+            def select(self, timeout=None): waits.append(timeout); return self.inner.select(timeout)
+        with patch.object(remote_module.selectors, "DefaultSelector", Recording):
+            self.bridge.between_ticks = True
+            client.sendall(self.frame(channel, 1)); time.sleep(0.05)
+            self.bridge.serve_between_ticks()
+            between, waits[:] = list(waits), []
+            self.bridge.between_ticks = False
+            client.sendall(self.frame(channel, 2)); time.sleep(0.05)
+            self.bridge.update_display()
+            alone = list(waits)
+        self.assertEqual(remote_module.PUMP_LINGER_BETWEEN_TICKS_SECONDS, 0.004)
+        self.assertTrue(between and max(between) <= remote_module.PUMP_LINGER_BETWEEN_TICKS_SECONDS, between)
+        self.assertTrue(alone and abs(alone[0] - remote_module.PUMP_LINGER_SECONDS) < 0.001, alone)
+        self.assertEqual([line["id"] for line in self.read_lines(client, 2)], ["status-1", "status-2"])
+
+    def test_a_timer_not_measured_yet_or_slower_than_12_ms_keeps_the_12_ms_wait(self):
+        # (Windows' timer comes back every 15.6 ms; a busy Live holds it back)
+        client, channel = self.connect(); waits = []; self.bridge.between_ticks = True
+        real = remote_module.selectors.DefaultSelector
+        class Recording:
+            def __init__(self): self.inner = real()
+            def __enter__(self): return self
+            def __exit__(self, *rest): self.inner.close()
+            def register(self, *args, **kwargs): return self.inner.register(*args, **kwargs)
+            def select(self, timeout=None): waits.append(timeout); return self.inner.select(timeout)
+        seen = {}
+        with patch.object(remote_module.selectors, "DefaultSelector", Recording):
+            for sequence, gap in enumerate((None, 0.0156, 0.013, 0.012, 0.010), 1):
+                self.bridge.timer_gap = gap; waits.clear()
+                with patch.object(self.bridge, "_timer_called"):
+                    client.sendall(self.frame(channel, sequence)); time.sleep(0.05)
+                    self.bridge._timer_last = time.perf_counter(); self.bridge.serve_between_ticks()
+                seen[gap] = max(waits)
+        self.assertEqual(seen, {None: 0.012, 0.0156: 0.012, 0.013: 0.012, 0.012: 0.004, 0.010: 0.004})
+
+    def test_a_timer_gone_quiet_leaves_the_display_ticks_their_12_ms_wait(self):
+        # (a timer Live paused without stopping: what's left serves on display ticks, about 100 ms apart)
+        client, channel = self.connect(); waits = []; self.bridge.between_ticks = True; self.bridge.timer_gap = 0.010
+        real = remote_module.selectors.DefaultSelector
+        class Recording:
+            def __init__(self): self.inner = real()
+            def __enter__(self): return self
+            def __exit__(self, *rest): self.inner.close()
+            def register(self, *args, **kwargs): return self.inner.register(*args, **kwargs)
+            def select(self, timeout=None): waits.append(timeout); return self.inner.select(timeout)
+        with patch.object(remote_module.selectors, "DefaultSelector", Recording):
+            client.sendall(self.frame(channel, 1)); time.sleep(0.05)
+            self.bridge._timer_last = time.perf_counter() - 0.2; self.bridge.update_display()
+            quiet, waits[:] = list(waits), []
+            client.sendall(self.frame(channel, 2)); time.sleep(0.05)
+            self.bridge._timer_last = time.perf_counter(); self.bridge.update_display()
+            calling = list(waits)
+        self.assertEqual((max(quiet), max(calling)), (0.012, 0.004))
+
+    def test_the_timers_gap_is_the_median_of_its_last_eight(self):
+        bridge = self.bridge
+        for at in range(8): bridge._timer_called(100.0 + at * 0.010)
+        self.assertIsNone(bridge.timer_gap, "seven gaps: not yet")
+        bridge._timer_called(100.08); self.assertAlmostEqual(bridge.timer_gap, 0.010)
+        # (a stall among them doesn't move the median; a run of slow calls does)
+        at = 100.08
+        for gap in (0.016, 0.016, 0.200, 0.016, 0.016, 0.016, 0.016, 0.016): at += gap; bridge._timer_called(at)
+        self.assertAlmostEqual(bridge.timer_gap, 0.016)
+        for gap in (0.010, 0.010, 0.010, 0.010, 0.010, 0.300, 0.010, 0.010): at += gap; bridge._timer_called(at)
+        self.assertAlmostEqual(bridge.timer_gap, 0.010)
+
     def test_a_tick_that_answered_no_one_doesnt_wait(self):
         self.connect()
         started = time.perf_counter()
         for _ in range(20): self.bridge.update_display()
         self.assertLess((time.perf_counter() - started) / 20, remote_module.PUMP_LINGER_SECONDS / 2)
+
+
+class IdlePumpTests(_BridgeSocketFixture, unittest.TestCase):
+    """Live's timer pumps the bridge about 100 times a second, Kumi open or not. One select that doesn't wait says
+    what has something to read, so a pump with nothing waiting accepts, reads and takes nothing: none of the calls that
+    raise when nothing came (A9-L2, A9-L3)."""
+
+    def counted(self):
+        """Counts the bridge's accepts, its connections' recvs and its queue's gets (the real ones run)."""
+        import socket as _socket
+        calls = {"accept": 0, "recv": 0, "get": 0}
+        real_accept, real_recv, real_get = _socket.socket.accept, _socket.socket.recv, self.bridge.queue.items.get_nowait
+        def accept(sock):
+            if sock is self.bridge._server: calls["accept"] += 1
+            return real_accept(sock)
+        def recv(sock, *args):
+            if sock in {connection.socket for connection in self.bridge._connections}: calls["recv"] += 1
+            return real_recv(sock, *args)
+        def get():
+            calls["get"] += 1
+            return real_get()
+        patches = [patch.object(_socket.socket, "accept", accept), patch.object(_socket.socket, "recv", recv), patch.object(self.bridge.queue.items, "get_nowait", get)]
+        for each in patches: each.start(); self.addCleanup(each.stop)
+        return calls
+
+    def test_with_nobody_connected_a_pump_raises_nothing(self):
+        calls = self.counted()
+        for _ in range(50): self.bridge.serve_between_ticks()
+        for _ in range(5): self.bridge.update_display()
+        self.assertEqual(calls, {"accept": 0, "recv": 0, "get": 0})
+
+    def test_a_connection_is_taken_and_greeted_at_the_first_pump_after_it_comes(self):
+        import socket as _socket
+        calls = self.counted()
+        client = _socket.create_connection(("127.0.0.1", self.port), timeout=5); self.clients.append(client)
+        time.sleep(0.05)
+        self.bridge.serve_between_ticks()
+        self.assertTrue(select_module.select([client], [], [], 1.0)[0], "the hello came after one pump")
+        self.assertIn(b"bridgeEpoch", client.recv(1 << 20))
+        self.assertEqual(calls["accept"], 2, "the one it took, and the one that found no more")
+
+    def test_an_idle_connection_isnt_read_and_what_it_sends_is_answered_at_the_next_pump(self):
+        client, channel = self.connect()
+        calls = self.counted()
+        for _ in range(50): self.bridge.serve_between_ticks()
+        self.assertEqual(calls["recv"], 0, "nothing came: nothing read")
+        client.sendall(self.frame(channel, 1)); time.sleep(0.05)
+        self.bridge.serve_between_ticks()
+        self.assertTrue(select_module.select([client], [], [], 1.0)[0], "answered at the next pump")
+        self.assertIn(b'"status-1"', client.recv(1 << 20))
+        self.assertGreaterEqual(calls["recv"], 1)
+
+    def test_what_a_connection_sent_before_is_answered_though_select_sees_nothing_new(self):
+        # (frames are taken from what was read, whatever the socket has now)
+        client, channel = self.connect()
+        def answers():
+            lines = b""
+            while select_module.select([client], [], [], 0.2)[0]:
+                chunk = client.recv(1 << 20)
+                if not chunk: break
+                lines += chunk
+            return [json.loads(line)["id"] for line in lines.splitlines() if line]
+        with patch.object(remote_module, "MAX_FRAMES_PER_PUMP", 1):
+            client.sendall(self.frame(channel, 1) + self.frame(channel, 2)); time.sleep(0.05)
+            self.bridge.serve_between_ticks()
+            self.assertEqual(answers(), ["status-1"], "one frame a pump")
+            self.assertIn(b"status-2", bytes(self.bridge._connections[0].inbound), "the other was read and waits")
+            self.assertFalse(select_module.select([self.bridge._connections[0].socket], [], [], 0)[0], "nothing new on the socket")
+            self.bridge.serve_between_ticks()
+            self.assertEqual(answers(), ["status-2"], "answered at the next pump all the same")
+
+    def test_a_connection_reset_between_the_check_and_the_read_is_closed_and_the_others_served(self):
+        import socket as _socket
+        first, first_channel = self.connect(); second, second_channel = self.connect()
+        target = self.bridge._connections[0].socket; real_recv = _socket.socket.recv
+        def recv(sock, *args):
+            if sock is target: raise ConnectionResetError("reset after select saw it")
+            return real_recv(sock, *args)
+        first.sendall(self.frame(first_channel, 1)); second.sendall(self.frame(second_channel, 1)); time.sleep(0.05)
+        with patch.object(_socket.socket, "recv", recv): self.bridge.serve_between_ticks()
+        self.assertEqual([connection.socket for connection in self.bridge._connections].count(target), 0, "the reset one is closed")
+        self.assertEqual(len(self.bridge._connections), 1)
+        self.assertEqual(self.read_lines(second, 1)[0]["id"], "status-1", "the other is answered")
+
+    def test_a_client_that_goes_is_closed_and_one_after_it_is_served(self):
+        client, _ = self.connect()
+        client.close(); self.clients.remove(client); time.sleep(0.05)
+        deadline = time.monotonic() + 5
+        while self.bridge._connections and time.monotonic() < deadline: self.bridge.serve_between_ticks(); time.sleep(0.001)
+        self.assertEqual(self.bridge._connections, [], "its end was read: closed")
+        again, channel = self.connect()
+        again.sendall(self.frame(channel, 1))
+        self.assertEqual(self.read_lines(again, 1)[0]["id"], "status-1")
+
+    def test_at_the_connection_cap_a_waiting_connection_isnt_accepted(self):
+        import socket as _socket
+        client, channel = self.connect()
+        with patch.object(remote_module, "MAX_BRIDGE_CONNECTIONS", 1):
+            waiting = _socket.create_connection(("127.0.0.1", self.port), timeout=5); self.clients.append(waiting); time.sleep(0.05)
+            calls = self.counted()
+            for _ in range(5): self.bridge.serve_between_ticks()
+            self.assertEqual((calls["accept"], len(self.bridge._connections)), (0, 1), "select sees it waiting; the cap holds it")
+            client.sendall(self.frame(channel, 1))
+            self.assertEqual(self.read_lines(client, 1)[0]["id"], "status-1", "the one taken is served")
+
+    def tried_as_before(self, error):
+        client, channel = self.connect()
+        calls = self.counted()
+        with patch.object(remote_module, "_select", types.SimpleNamespace(select=lambda *args: (_ for _ in ()).throw(error))):
+            for _ in range(5): self.bridge.serve_between_ticks()
+            self.assertEqual(calls["accept"], 5, "an accept a pump, as before")
+            self.assertGreaterEqual(calls["recv"], 5, "and a read of each connection")
+            client.sendall(self.frame(channel, 1))
+            self.assertEqual(self.read_lines(client, 1)[0]["id"], "status-1")
+
+    @unittest.skipIf(os.name == "nt", "POSIX's FD_SETSIZE; Windows has no such limit, and its socket handles come in no order")
+    def test_with_a_connection_past_select_s_limit_select_isnt_asked_and_once_it_goes_it_is(self):
+        # (POSIX's FD_SETSIZE, 1024; a big Set opens many files before Kumi connects. The limit is put just above the
+        # first connection's descriptor, so the second's must come after it: POSIX gives the lowest free one, but Windows'
+        # socket handles come in no order, and there _SELECT_FD_LIMIT is None anyway, #901.)
+        first, _ = self.connect()
+        asked = []
+        real = remote_module._select.select
+        def counting(*args): asked.append(1); return real(*args)
+        with patch.object(remote_module, "_select", types.SimpleNamespace(select=counting)), \
+                patch.object(remote_module, "_SELECT_FD_LIMIT", self.bridge._connections[0].socket.fileno() + 1):
+            second, channel = self.connect()
+            self.assertFalse(self.bridge._selectable)
+            calls = self.counted(); asked.clear()
+            for _ in range(5): self.bridge.serve_between_ticks()
+            self.assertEqual((len(asked), calls["accept"]), (0, 5), "not asked: each tried, as before")
+            second.sendall(self.frame(channel, 1))
+            self.assertEqual(self.read_lines(second, 1)[0]["id"], "status-1")
+            second.close(); self.clients.remove(second)
+            deadline = time.monotonic() + 5
+            while len(self.bridge._connections) > 1 and time.monotonic() < deadline: self.bridge.serve_between_ticks(); time.sleep(0.001)
+            self.assertTrue(self.bridge._selectable, "the one past the limit went")
+            asked.clear(); self.bridge.serve_between_ticks()
+            self.assertEqual(len(asked), 1)
+
+    def test_with_a_descriptor_past_fd_setsize_each_is_tried_as_before(self):
+        # (a Live with many files open can hand one out)
+        self.tried_as_before(ValueError("filedescriptor out of range in select()"))
+
+    def test_where_select_fails_each_is_tried_as_before(self):
+        # (Windows' select over a socket it calls closed)
+        self.tried_as_before(OSError(10038, "not a socket"))
 
 
 class LargeFrameTransportTests(_BridgeSocketFixture, unittest.TestCase):

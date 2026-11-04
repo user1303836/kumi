@@ -11,6 +11,10 @@ use crate::paths::BridgePaths;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
+#[cfg(windows)]
+#[doc(hidden)]
+pub mod native_acl;
+
 pub const RECEIPT_SCHEMA: &str = "kumi-daw-receipt/1";
 /// Earlier generations kept for rollback.
 pub const KEPT_GENERATIONS: usize = 3;
@@ -19,6 +23,69 @@ const HISTORY: usize = 20;
 pub const NOT_PAYLOAD: [&str; 2] = ["bridge-reference.json", "preferences.xml"];
 /// What a file browser leaves in any folder it shows (Finder's, Explorer's): never a change, never copied.
 pub const LITTER: [&str; 3] = [".DS_Store", "Thumbs.db", "desktop.ini"];
+
+// Kumi's own folders and files for a DAW's bridge, owner-only: owner.rs's steps, except that on Windows Kumi's own shapes
+// are written and read with Windows' own calls (`native_acl`), where owner.rs runs PowerShell (seconds each, with
+// Defender). Whatever those can't do goes to owner.rs's step as before, with its own words. Only Kumi uses these: REAPER's
+// extension, which loads owner.rs, never loads this file.
+
+/// Makes the folder and its missing parents, the folder itself owner-only, as `owner::create_owner_only_dir` does.
+fn owner_only_dir(path: &Path) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        match std::fs::create_dir(path) {
+            Ok(()) => match native_acl::make_kumis_folder_shape(path) {
+                Ok(()) => return Ok(()),
+                // Made but not owner-only: made again, and locked, by PowerShell's step.
+                Err(_) => std::fs::remove_dir(path)?,
+            },
+            // One made already (by an earlier action, which locked it then) is left as it is, as owner.rs leaves it.
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists && path.is_dir() => return Ok(()),
+            Err(error) => return Err(error),
+        }
+    }
+    owner::create_owner_only_dir(path)
+}
+
+/// Writes the file whole, owner-only from its first byte, as `owner::write_owner_only` does: a new file beside it, then
+/// renamed over it.
+fn write_owner_only(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    #[cfg(windows)]
+    {
+        use std::io::Write;
+        let temporary = owner::temporary_beside(path);
+        std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+        if native_acl::make_kumis_shape(&temporary).is_ok() {
+            let written = (|| {
+                let mut file = std::fs::OpenOptions::new().write(true).truncate(true).open(&temporary)?;
+                file.write_all(bytes)?;
+                file.sync_all()?;
+                drop(file);
+                std::fs::rename(&temporary, path)
+            })();
+            if written.is_err() {
+                let _ = std::fs::remove_file(&temporary);
+            }
+            return written;
+        }
+        // Not owner-only: PowerShell's step writes it, in a new file of its own.
+        let _ = std::fs::remove_file(&temporary);
+    }
+    owner::write_owner_only(path, bytes)
+}
+
+/// Whether only its owner, this account, can read the file or folder (the doctor asks it of the secret): Kumi's own
+/// shapes are read with Windows' own calls, and anything else is left to `owner::is_owner_only`.
+pub fn is_owner_only(path: &Path) -> bool {
+    #[cfg(windows)]
+    if native_acl::is_kumis_shape(path) {
+        return true;
+    }
+    owner::is_owner_only(path)
+}
 
 /// Where a DAW's bridge goes: one file (REAPER's extension) or one folder (Renoise's tool) in `dir`, and the
 /// reference file beside or inside it.
@@ -346,7 +413,7 @@ impl Lifecycle {
     fn write_receipt(&self, receipt: &Receipt) -> Result<(), LifecycleError> {
         let mut text = serde_json::to_string_pretty(receipt).expect("receipts serialize");
         text.push('\n');
-        owner::write_owner_only(&self.paths.receipt(), text.as_bytes())?;
+        write_owner_only(&self.paths.receipt(), text.as_bytes())?;
         Ok(())
     }
 
@@ -361,20 +428,19 @@ impl Lifecycle {
     }
 
     /// Makes Kumi's folder for this DAW when it isn't there. The lock is in it, so two actions starting at once both get
-    /// here before either waits. Unix makes a folder owner-only as it makes it. Windows sets its permissions after, in a
-    /// PowerShell run of seconds, and a folder's permissions, as they're set, spread to what's inside it and could undo
-    /// those another action was setting in there. So on Windows the folder is made owner-only beside its place
-    /// (`.<name>.tmp-<random>`), gets its lock file, and only then is renamed into place: no action works in it before
-    /// its permissions are set, and one in place is never empty, so another's rename can't replace it (a rename onto an
-    /// empty folder replaces it, while the action that put it there may be opening its lock in it). When another's got
-    /// there first, this one gives way. One there already is left as it is: it was locked as it was made.
+    /// here before either waits. Unix makes a folder owner-only as it makes it. Windows sets its permissions after (with
+    /// Windows' own calls, or a PowerShell run of seconds), and a folder's permissions, as they're set, spread to what's
+    /// inside it and could undo those another action was setting in there. So on Windows the folder is made owner-only
+    /// beside its place (`.<name>.tmp-<random>`), gets its lock file, and only then is renamed into place: no action works
+    /// in it before its permissions are set, and one in place is never empty, so another's rename can't replace it (a
+    /// rename onto an empty folder replaces it, while the action that put it there may be opening its lock in it). When
+    /// another's got there first, this one gives way. One there already is left as it is: it was locked as it was made.
     fn make_root(&self) -> Result<(), LifecycleError> {
         let root = &self.paths.root;
         if cfg!(windows) && !root.is_dir() {
             let aside = owner::temporary_beside(root);
             let lock = aside.join(self.paths.lock().file_name().expect("the lock file has a name"));
-            let made =
-                owner::create_owner_only_dir(&aside).and_then(|()| lock_file(&lock).map(drop)).and_then(|()| std::fs::rename(&aside, root));
+            let made = owner_only_dir(&aside).and_then(|()| lock_file(&lock).map(drop)).and_then(|()| std::fs::rename(&aside, root));
             if let Err(error) = made {
                 let _ = remove_tree(&aside);
                 // (another's, or this one taken away by its clean-up: see recover)
@@ -384,7 +450,7 @@ impl Lifecycle {
             }
         }
         // (unix also sets a folder that's there back to 0700, as before)
-        owner::create_owner_only_dir(root)?;
+        owner_only_dir(root)?;
         Ok(())
     }
 
@@ -394,7 +460,7 @@ impl Lifecycle {
             leftovers: leftovers.iter().map(|path| path.to_string_lossy().into_owned()).collect(),
             ms: now_ms(),
         };
-        owner::write_owner_only(&self.paths.journal(), serde_json::to_string(&journal).expect("journals serialize").as_bytes())?;
+        write_owner_only(&self.paths.journal(), serde_json::to_string(&journal).expect("journals serialize").as_bytes())?;
         Ok(())
     }
 
@@ -441,7 +507,7 @@ impl Lifecycle {
         if version.is_empty() || !version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
             return Err(LifecycleError::Invalid(format!("not a version: {version}")));
         }
-        owner::create_owner_only_dir(&self.paths.generations())?;
+        owner_only_dir(&self.paths.generations())?;
         // Named by version and time; two in the same millisecond take the next free one.
         let mut ms = now_ms();
         let (generation, dir) = loop {
@@ -637,8 +703,8 @@ impl Lifecycle {
     fn put(&self, source: &Path, version: &str, rollback: bool) -> Result<Receipt, LifecycleError> {
         let _lock = self.exclusive()?;
         // The bridge writes into these but may not be able to make them (Renoise's Lua can't make folders).
-        owner::create_owner_only_dir(&self.paths.discovery())?;
-        owner::create_owner_only_dir(&self.paths.logs())?;
+        owner_only_dir(&self.paths.discovery())?;
+        owner_only_dir(&self.paths.logs())?;
         self.recover()?;
         if version.is_empty() || !version.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '+')) {
             return Err(LifecycleError::Invalid(format!("not a version: {version}")));

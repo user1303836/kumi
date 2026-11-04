@@ -41,13 +41,16 @@ feeds = ["ableton-mcp-server", "kumi"]
 [renoise-tool]
 paths = ["daws/renoise/com.kumi.Bridge.xrnx/**", "daws/renoise/tests/**"]
 
-# What Kumi reads of the tool: its entry, manifest, version and change kinds (Kumi's list of them is checked against
-# them), and the folder as it's installed.
+# What Kumi reads of the tool: its entry, manifest, version, change kinds and actions (Kumi's list of them, and the fields
+# each offers, are checked against them), and the folder as it's installed.
 [renoise-tool-read]
 paths = [
   "daws/renoise/com.kumi.Bridge.xrnx/main.lua",
   "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml",
+  "daws/renoise/com.kumi.Bridge.xrnx/payload/actions.lua",
+  "daws/renoise/com.kumi.Bridge.xrnx/payload/bridge.lua",
   "daws/renoise/com.kumi.Bridge.xrnx/payload/changes*.lua",
+  "daws/renoise/com.kumi.Bridge.xrnx/payload/instruments.lua",
   "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua",
 ]
 layout = ["daws/renoise/com.kumi.Bridge.xrnx/**"]
@@ -58,10 +61,15 @@ feeds = ["kumi-agent", "kumi"]
 [reaper-extension]
 paths = ["daws/reaper/reaper-kumi/**", "scripts/build-native-release.py", "scripts/daws.toml"]
 
+# What Kumi reads of REAPER's extension: its change code (Kumi's kinds and their fields are checked against it).
+[reaper-extension-read]
+paths = ["daws/reaper/reaper-kumi/src/changes/**"]
+feeds = ["kumi"]
+
 # What Kumi builds in as data: the standard Max patchers are held to, and the plug-in formats it reads.
 [data]
 paths = ["daws/ableton/max-standard/**", "plugin-formats/**"]
-feeds = ["kumi-agent", "kumi-library", "kumi-daw-ableton"]
+feeds = ["kumi-agent", "kumi-library", "kumi-daw-ableton", "daw-mcp-server"]
 
 # The recorded oracles, which the tests of the crates their folders name read (through kumi-testkit), and the list of
 # those only Extended's tests read.

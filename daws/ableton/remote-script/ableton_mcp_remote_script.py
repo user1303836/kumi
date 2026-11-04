@@ -13,6 +13,7 @@ import hmac
 import io
 import json
 import secrets
+import select as _select
 import selectors
 import base64
 import re
@@ -13801,6 +13802,8 @@ class _MainThreadQueue:
     def drain(self, budget: int = MAX_QUEUE_ITEMS) -> int:
         count = 0
         while count < budget:
+            # (asked without raising: the timer finds it empty about 100 times a second)
+            if self.items.empty(): break
             try: callback, event, result, token, on_cancel = self.items.get_nowait()
             except queue.Empty: break
             if not token.claim():
@@ -13966,12 +13969,26 @@ class _ReadBudget:
 
 
 MAX_BRIDGE_CONNECTIONS = 64
+# select refuses a descriptor at or past FD_SETSIZE on POSIX; Windows' sockets are handles, which its select takes.
+_SELECT_FD_LIMIT: int | None = None if os.name == "nt" else 1024
 MAX_FRAMES_PER_PUMP = 1024
 PUMP_BUDGET_SECONDS = 0.05
 # How long a tick waits for a client it just answered to ask again (the next step of a change: read,
 # change, confirm), within the tick's budget: on loopback it asks within a few milliseconds, and serving
 # it now saves a whole display tick (about 100 ms) a step.
 PUMP_LINGER_SECONDS = 0.012
+# While Live's timer serves and comes back within FAST_TIMER_GAP_SECONDS (the median of its last TIMER_GAPS gaps: about
+# 10 ms on a Mac), a client's next step that doesn't come within this waits for the timer's next call rather than for a
+# display tick, so the tick waits less: each wait holds Live's UI thread, and after the last request of a burst (FOCUS's
+# reads as the producer clicks through tracks) there's nothing to wait for. A change's next step comes within 1 ms nearly
+# always, and within 4 ms for almost all the rest. A timer not measured yet, a slower one (Windows', at its 15.6 ms
+# granularity) and one a busy Live holds back keep PUMP_LINGER_SECONDS.
+PUMP_LINGER_BETWEEN_TICKS_SECONDS = 0.004
+FAST_TIMER_GAP_SECONDS = 0.012
+TIMER_GAPS = 8
+# The timer's median is kept only while it's calling: one quiet longer than this (paused, without stopping) leaves the
+# display ticks serving, and they wait PUMP_LINGER_SECONDS again.
+TIMER_RECENT_SECONDS = 0.05
 # Live's own timer (Live.Base.Timer, about every 10 ms) serves the socket between display ticks, where
 # this Live has one: a request waits for the timer rather than up to a tick. Reads (Kumi's looks at the
 # Set, its background reads, a big Set's catch-up) keep to PUMP_BUDGET_SECONDS of Live's main thread in
@@ -14060,6 +14077,9 @@ class AbletonMcpBridge:
         self._server.listen(MAX_BRIDGE_CONNECTIONS)
         self._server.setblocking(False)
         self.address = self._server.getsockname()
+        # Whether every socket the pump would ask select about can be asked (a Live with many files open can hand out a
+        # descriptor past the limit): when not, each is tried, as before, rather than asking first and failing.
+        self._selectable = _SELECT_FD_LIMIT is None or self._server.fileno() < _SELECT_FD_LIMIT
         try:
             self._realtime = _RealtimePlane(self, host, int(realtime_port or 0))
         except BaseException:
@@ -14073,8 +14093,11 @@ class AbletonMcpBridge:
         self._clients: set[socket.socket] = set()
         self._connections: list[_Connection] = []
         self._pump_turn = 0
-        # Set while Live's timer serves the socket between ticks (the Control Surface starts it).
+        # Set while Live's timer serves the socket between ticks (the Control Surface starts it); and the median gap
+        # between its calls lately, from the gaps since the last median.
         self.between_ticks = False
+        self.timer_gap: float | None = None
+        self._timer_gaps: list[float] = []; self._timer_last: float | None = None
         self._window_started = 0.0; self._window_spent = 0.0; self._change_seconds = 0.0
         self._secret_value = secret
         self._executed_mutations: dict[str, dict[str, Any]] = {}
@@ -14126,9 +14149,18 @@ class AbletonMcpBridge:
         """Live's timer callback, between display ticks: serve what's waiting now, within what's left of
         this tick's budget, then queued Live work."""
         if self._stop.is_set(): return
+        self._timer_called(time.perf_counter())
         left = self._budget_left()
         if left > 0: self._pump(left)
         self.queue.drain()
+
+    def _timer_called(self, now: float) -> None:
+        """Notes the gap since the timer's last call; every TIMER_GAPS gaps, their median becomes `timer_gap`."""
+        last, self._timer_last = self._timer_last, now
+        if last is None: return
+        gaps = self._timer_gaps; gaps.append(now - last)
+        if len(gaps) >= TIMER_GAPS:
+            gaps.sort(); self.timer_gap = gaps[len(gaps) // 2]; gaps.clear()
 
     def _budget_left(self) -> float:
         """What's left of the bridge's share of Live's main thread in this tick's worth of time."""
@@ -14150,12 +14182,16 @@ class AbletonMcpBridge:
         mapper = getattr(self, "mapper", None)
         if mapper is not None: mapper.tick_deadline = deadline
         try:
-            self._accept_pending()
+            ready = self._ready_now(); fresh: list["_Connection"] = []
+            if ready is None or self._server in ready:
+                before = len(self._connections); self._accept_pending(); fresh = self._connections[before:]
             # Each tick starts with the next connection and serves every one at least one request,
             # so a client with slow reads queued can't hold the others past their deadlines.
             connections = list(self._connections); self._pump_turn += 1
             start = self._pump_turn % len(connections) if connections else 0
-            served = sum(self._service(connection, deadline) for connection in connections[start:] + connections[:start])
+            # (read: what the system says has bytes or an end, and one accepted just now)
+            served = sum(self._service(connection, deadline, ready is None or connection.socket in ready or connection in fresh)
+                         for connection in connections[start:] + connections[:start])
             while served and time.perf_counter() < deadline:
                 waiting = [connection for connection in self._connections if not connection.closing]
                 if not waiting: break
@@ -14164,7 +14200,10 @@ class AbletonMcpBridge:
                 try:
                     with selectors.DefaultSelector() as selector:
                         for connection in waiting: selector.register(connection.socket, selectors.EVENT_READ, connection)
-                        ready = [key.data for key, _ in selector.select(min(PUMP_LINGER_SECONDS, max(0.0, deadline - time.perf_counter())))]
+                        fast = (self.between_ticks and self.timer_gap is not None and self.timer_gap <= FAST_TIMER_GAP_SECONDS
+                                and self._timer_last is not None and time.perf_counter() - self._timer_last <= TIMER_RECENT_SECONDS)
+                        linger = PUMP_LINGER_BETWEEN_TICKS_SECONDS if fast else PUMP_LINGER_SECONDS
+                        ready = [key.data for key, _ in selector.select(min(linger, max(0.0, deadline - time.perf_counter())))]
                 except (OSError, ValueError): break
                 served = sum(self._service(connection, deadline) for connection in ready)
         finally:
@@ -14178,6 +14217,21 @@ class AbletonMcpBridge:
         wire = getattr(payload, "wire", None)
         if wire is not None: return wire
         return json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8") + b"\n"
+
+    def _ready_now(self) -> list[Any] | None:
+        """The sockets with something to read now (a connection waiting to be accepted, a client's bytes or its end),
+        from one select that doesn't wait. Live's timer pumps about 100 times a second, Kumi open or not, and an accept
+        or a recv with nothing there raises. None where select can't be asked (a descriptor past FD_SETSIZE, which a
+        Live with many files open can hand out): then each is tried, as before."""
+        if not getattr(self, "_selectable", True): return None
+        try: return _select.select([self._server, *(connection.socket for connection in self._connections)], [], [], 0)[0]
+        except (OSError, ValueError): return None
+
+    def _note_selectable(self) -> None:
+        """Whether the listening socket and every connection can be asked of select (after a connection comes or goes)."""
+        if _SELECT_FD_LIMIT is not None:
+            sockets = [self._server, *(connection.socket for connection in self._connections)]
+            self._selectable = all(sock.fileno() < _SELECT_FD_LIMIT for sock in sockets)
 
     def _accept_pending(self) -> None:
         while len(self._connections) < MAX_BRIDGE_CONNECTIONS:
@@ -14195,9 +14249,11 @@ class AbletonMcpBridge:
             except BaseException:
                 client.close(); continue
             self._connections.append(connection); self._clients.add(client)
+            if _SELECT_FD_LIMIT is not None and client.fileno() >= _SELECT_FD_LIMIT: self._selectable = False
 
-    def _service(self, connection: "_Connection", deadline: float) -> int:
-        """Read, answer and send what a connection has: how many requests it answered."""
+    def _service(self, connection: "_Connection", deadline: float, readable: bool = True) -> int:
+        """Read, answer and send what a connection has: how many requests it answered. Not `readable` (select saw nothing
+        come), it isn't read; what it sent before is still answered, and its events and answers still go."""
         frames = 0
         try:
             subscription = connection.holder.get("subscription")
@@ -14207,7 +14263,7 @@ class AbletonMcpBridge:
                     frame: dict[str, Any] = {"version": PROTOCOL, "id": "event", "ok": True, "bridgeEpoch": connection.auth.bridge_epoch, "connectionChallenge": connection.auth.connection_challenge, "result": {"event": event}}
                     connection.outbound += connection.auth.signed_frame(frame)[1]
             inbound = connection.inbound
-            while not connection.closing:
+            while readable and not connection.closing:
                 # Before it says who it is, a connection gets no more than a first request's worth read (once
                 # it's signed in, the tick's lingering serves what it sent behind that request).
                 size = RECEIVE_CHUNK_BYTES
@@ -14276,6 +14332,7 @@ class AbletonMcpBridge:
         self._clients.discard(connection.socket)
         try: connection.socket.close()
         except OSError: pass
+        if not getattr(self, "_selectable", True): self._note_selectable()
 
     def _subscribe_main(self, request: dict[str, Any], holder: dict[str, Any]) -> Any:
         args = request.get("args", {})

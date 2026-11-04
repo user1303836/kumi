@@ -6,6 +6,8 @@ use kumi_common::{
 };
 use sha2::{Digest, Sha256};
 const MAX_SET_COLLECTION: usize = 10_000_000;
+/// The most points an apply returns of the lane it changed (a change's picture draws 128): past them, none.
+const MAX_ANSWERED_POINTS: usize = 1024;
 const ACTIONS: [&str; 6] = ["create-envelope", "delete-envelope", "insert", "insert-step", "delete-range", "clear-envelopes"];
 fn hash(value: &Value) -> Result<String, LiveError> {
     Ok(hex::encode(Sha256::digest(canonical_mutation_identity(value)?)))
@@ -56,6 +58,26 @@ fn exact_content(a: &Value, b: &Value) -> Result<bool, LiveError> {
 }
 
 impl McpHost {
+    /// The parameter a lane moves, as a preview names it for the change's picture: its name and range. A device's (or a
+    /// macro), else a track's fader, pan or send, on Live's ranges for them. None when the read doesn't hold it.
+    fn lane_parameter(&self, snapshot: &LiveSnapshot, reference: &str) -> Option<Value> {
+        if let Ok(row) = self.parameter_row(snapshot, reference) {
+            return Some(json!({"name":row["name"],"min":row["min"],"max":row["max"]}));
+        }
+        let tracks = serde_json::to_value(snapshot.tracks()).ok()?;
+        tracks.as_array()?.iter().find_map(|track| {
+            let mixer = &track["mixer"];
+            if mixer["volumeRef"] == reference {
+                return Some(json!({"name":"Track Volume","min":0.0,"max":1.0}));
+            }
+            if mixer["panRef"] == reference {
+                return Some(json!({"name":"Track Panning","min":-1.0,"max":1.0}));
+            }
+            let send = mixer["sendRefs"].as_array()?.iter().position(|send| send == reference)?;
+            Some(json!({"name":format!("Send {}", char::from(b'A' + send.min(25) as u8)),"min":0.0,"max":1.0}))
+        })
+    }
+
     /// Whether the clip has an envelope for each parameter its track's clear would clear, as Live reports it: the
     /// digest a clear fences on, and how many there are. Live walks every drum pad's chains, which a snapshot's rows
     /// don't all list, and a snapshot doesn't say which parameters have envelopes.
@@ -219,6 +241,7 @@ impl McpHost {
             }
             let points = point_array(&read["points"]);
             let fence = self.automation_fence(params, &read, json!(points), &json!(authority))?;
+            let parameter = self.lane_parameter(&before, parameter_ref);
             let mut payload = json!({
             "action":params["action"],
             "clipRef":params["clipRef"],
@@ -277,20 +300,22 @@ impl McpHost {
             "state":"previewed"}
             );
             self.retain_bounded_transaction(&self.clip_lifecycle_transactions, t.clone(), "automation")?;
-            Ok(success_text(
-                id,
-                &json!({
-                "transactionId":t["id"],
-                "epoch":t["epoch"],
-                "action":params["action"],
-                "clipRef":params["clipRef"],
-                "parameterRef":params["parameterRef"],
-                "current":prior,
-                "impact":"edits-clip-automation",
-                "confirmation":"apply",
-                "expiresAt":t["expiresAt"]}
-                ),
-            ))
+            let mut answer = json!({
+            "transactionId":t["id"],
+            "epoch":t["epoch"],
+            "action":params["action"],
+            "clipRef":params["clipRef"],
+            "parameterRef":params["parameterRef"],
+            "current":prior,
+            "impact":"edits-clip-automation",
+            "confirmation":"apply",
+            "expiresAt":t["expiresAt"]}
+            );
+            // The lane's parameter by name, with its range, for the change's picture.
+            if let Some(parameter) = parameter {
+                answer["parameter"] = parameter;
+            }
+            Ok(success_text(id, &answer))
         }
         .await;
         result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Automation preview requires fresh authoritative state."))
@@ -435,12 +460,18 @@ impl McpHost {
             created["authorityDigest"] = authority;
             record.borrow_mut()["created"] = created;
             record.borrow_mut()["state"] = json!("applied");
+            // The lane as Live has it now, for the change's picture: its points, when there aren't too many.
+            let mut envelope = copy_fields(&after, &["exists"]);
+            if after["points"].as_array().is_some_and(|points| points.len() <= MAX_ANSWERED_POINTS) {
+                envelope["points"] = after["points"].clone();
+            }
             Ok(success_text(
                 id,
                 &json!({
                 "transactionId":t["id"],
                 "state":"applied",
                 "result":result,
+                "envelope":envelope,
                 "idempotent":false}
                 ),
             ))

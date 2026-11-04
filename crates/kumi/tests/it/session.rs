@@ -347,6 +347,9 @@ impl Harness {
     }
 }
 macro_rules! local_test { ($name:ident,$body:block) => { #[tokio::test(flavor="current_thread")] async fn $name() { tokio::task::LocalSet::new().run_until(async $body).await; } }; }
+// On tokio's paused clock: time moves only to the next timer, once nothing else can run, so a busy machine's delays
+// can't eat into a test's margins (blocking work holds the clock still too).
+macro_rules! paused_test { ($name:ident,$body:block) => { #[tokio::test(flavor="current_thread",start_paused=true)] async fn $name() { tokio::task::LocalSet::new().run_until(async $body).await; } }; }
 fn hang_once() -> Run {
     let n = Rc::new(Cell::new(0));
     Rc::new(move |_, _, _| {
@@ -534,9 +537,10 @@ local_test!(uncooperative_timeout_is_bounded_and_quarantines_kernel, {
     assert_eq!(h.record.created.borrow().len(), 2);
     h.session.close().await.unwrap();
 });
-// Live's test as on main; on Windows, whose timer ticks every 15.6 ms, the same with wider margins (below).
-#[cfg(not(windows))]
-local_test!(progress_refreshes_quiet_timer_and_tool_work_suspends_it, {
+// The quiet timer (40 ms) runs from the turn's start, so on the real clock a loaded runner's late start could use it up
+// before the first progress came (#357). On the paused clock the gaps are exact: progress every 15 ms keeps it going,
+// tool work three times as long as the timer doesn't count, and a turn with no progress stops at 40 ms.
+paused_test!(progress_refreshes_quiet_timer_and_tool_work_suspends_it, {
     for tool in [false, true] {
         let h = harness(
             Some(Rc::new(move |_, _, emit| {
@@ -571,52 +575,6 @@ local_test!(progress_refreshes_quiet_timer_and_tool_work_suspends_it, {
             .boxed_local()
         })),
         |o| o.idle_timeout_ms = Some(40),
-    );
-    h.session.start().await.unwrap();
-    h.session.submit("think", None).await.unwrap();
-    assert!(h.error("Kumi stopped after 1 second without progress."));
-    assert_eq!(h.record.created.borrow().len(), 1);
-    h.session.close().await.unwrap();
-});
-// On Windows, the same test with wider margins.
-#[cfg(windows)]
-local_test!(progress_refreshes_quiet_timer_and_tool_work_suspends_it_with_windows_timer_margins, {
-    // The quiet timer (100 ms) is well past the gap between two pieces of progress (15 ms asked, about 31 ms on Windows,
-    // whose timer ticks every 15.6 ms), and the work outlasts it three times over, so only the refreshes keep it going.
-    for tool in [false, true] {
-        let h = harness(
-            Some(Rc::new(move |_, _, emit| {
-                async move {
-                    if tool {
-                        emit(KernelEvent::ToolStart { id: "t1".into(), name: "make_changes".into() })?;
-                        delay(300).await;
-                        emit(KernelEvent::ToolEnd { id: "t1".into(), name: "make_changes".into(), elapsed_ms: 300, is_error: false })?;
-                    } else {
-                        for _ in 0..20 {
-                            delay(15).await;
-                            emit(KernelEvent::Text { text: ".".into() })?;
-                        }
-                    }
-                    Ok(complete())
-                }
-                .boxed_local()
-            })),
-            |o| o.idle_timeout_ms = Some(100),
-        );
-        h.session.start().await.unwrap();
-        h.session.submit("work", None).await.unwrap();
-        assert!(!h.error(""), "{:?}", h.events.borrow());
-        h.session.close().await.unwrap();
-    }
-    let h = harness(
-        Some(Rc::new(|_, signal, _| {
-            async move {
-                signal.cancelled().await;
-                Ok(cancelled())
-            }
-            .boxed_local()
-        })),
-        |o| o.idle_timeout_ms = Some(100),
     );
     h.session.start().await.unwrap();
     h.session.submit("think", None).await.unwrap();
@@ -2288,6 +2246,13 @@ struct SearchRig {
     ms: u64,
     values_score: bool,
     settled: RefCell<Vec<f64>>,
+    /// What keeping the best answers: the best's name, unless the test says why not.
+    keep_says: &'static str,
+    /// What putting the candidates back says.
+    put_back_says: Option<&'static str>,
+    /// A generation fails.
+    fails: bool,
+    kept_only: Option<String>,
 }
 impl SearchRig {
     fn new(scores: Vec<f64>) -> Self {
@@ -2301,10 +2266,23 @@ impl SearchRig {
             ms: 1,
             values_score: false,
             settled: RefCell::new(vec![]),
+            keep_says: "Kumi · Goal best",
+            put_back_says: None,
+            fails: false,
+            kept_only: None,
         }
     }
     fn knob() -> Knob {
-        Knob { r#ref: "knob:1".into(), device: "1:Operator".into(), name: "Filter Freq".into(), min: 0., max: 1., step: None, value: 0.2 }
+        Knob {
+            r#ref: "knob:1".into(),
+            device: "1:Operator".into(),
+            name: "Filter Freq".into(),
+            min: 0.,
+            max: 1.,
+            step: None,
+            value: 0.2,
+            device_id: None,
+        }
     }
 }
 #[async_trait(?Send)]
@@ -2330,6 +2308,9 @@ impl GoalRig for SearchRig {
         signal: Signal,
         options: Option<GenerationOptions>,
     ) -> Result<Generation, RuntimeError> {
+        if self.fails {
+            return Err(RuntimeError::plain("Live went"));
+        }
         let at = self.calls.borrow().len();
         self.calls.borrow_mut().push((trials.to_vec(), options));
         tokio::select! {_=signal.cancelled()=>return Err(RuntimeError::Aborted),_=delay(self.ms)=>{}}
@@ -2353,7 +2334,10 @@ impl GoalRig for SearchRig {
     async fn keep_best(&self, slot: &str, _: &[Knob], _: &[f64], signal: Signal) -> Result<String, RuntimeError> {
         assert!(!signal.is_cancelled());
         self.cleanup.borrow_mut().push(format!("keep:{slot}"));
-        Ok("Kumi · Goal best".into())
+        Ok(self.keep_says.into())
+    }
+    fn kept_only(&self) -> Option<String> {
+        self.kept_only.clone()
     }
     async fn settle(&self, _: &str, _: &[Knob], values: &[f64], signal: Signal) -> Result<Option<String>, RuntimeError> {
         assert!(!signal.is_cancelled());
@@ -2369,6 +2353,11 @@ impl GoalRig for SearchRig {
     async fn close(&self) -> Result<Vec<String>, RuntimeError> {
         self.cleanup.borrow_mut().push("close".into());
         Ok(vec![])
+    }
+    async fn put_back(&self, signal: Signal) -> Vec<String> {
+        assert!(!signal.is_cancelled());
+        self.cleanup.borrow_mut().push("put back".into());
+        self.put_back_says.iter().map(|said| said.to_string()).collect()
     }
 }
 fn goal_harness(rig: Rc<SearchRig>, reference: bool, config: impl FnOnce(&mut SessionOptions)) -> Harness {
@@ -2421,11 +2410,54 @@ local_test!(goal_reaches_target_cleans_in_order_keeps_best_and_lesson, {
     assert_eq!(status.best.as_ref().unwrap().score, 96.);
     assert_eq!(status.generation, 3);
     assert_eq!(status.why.as_deref(), Some("reached 96%"));
-    assert_eq!(*rig.cleanup.borrow(), ["close", "tidy:Candidate", "keep:Candidate"]);
+    assert_eq!(*rig.cleanup.borrow(), ["close", "tidy:Candidate", "keep:Candidate", "put back"]);
     assert_eq!(h.record.calls.borrow().len(), 1);
     assert_eq!(h.session.lessons().await.unwrap().len(), 1);
     h.session.close().await.unwrap();
     assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Done);
+});
+local_test!(the_end_of_a_goal_is_told_to_the_next_turn_too, {
+    let mut raw = SearchRig::new(vec![96.]);
+    raw.put_back_says = Some("“Candidate” is back as it was, except that you turned Tone.");
+    let h = goal_harness(Rc::new(raw), true, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+    assert!(h.notice("“Candidate” is back as it was, except that you turned Tone."));
+    let asked = h.record.calls.borrow().len();
+    h.session.submit("why are there two?", None).await.unwrap();
+    let next = h.record.calls.borrow()[asked].clone();
+    assert!(next.contains("[Kumi] As the last goal ended: “Candidate” is back as it was, except that you turned Tone."), "{next}");
+    h.session.submit("and now?", None).await.unwrap();
+    let after = h.record.calls.borrow().last().unwrap().clone();
+    assert!(!after.contains("As the last goal"), "once: {after}");
+    h.session.close().await.unwrap();
+});
+local_test!(a_goal_says_why_its_best_wasnt_kept, {
+    let mut raw = SearchRig::new(vec![96.]);
+    raw.keep_says = "“EQ” moved or went on “Candidate” since the search began.";
+    let rig = Rc::new(raw);
+    let h = goal_harness(rig.clone(), true, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+    assert!(h.notice("Its best wasn't kept: “EQ” moved or went on “Candidate” since the search began."));
+    assert!(!h.notice("the best is on"), "no best is named");
+    h.session.close().await.unwrap();
+});
+local_test!(a_goals_end_says_when_its_best_holds_only_a_part_of_its_track, {
+    let mut raw = SearchRig::new(vec![96.]);
+    raw.kept_only = Some("“Kumi · Goal best” holds only the patterns of beats 0 to 4.".into());
+    let h = goal_harness(Rc::new(raw), true, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+    assert_eq!(h.session.goal_status().unwrap().state, GoalPhase::Done);
+    assert!(h.notice("Kumi · Goal best” holds only the patterns of beats 0 to 4."));
+    h.session.close().await.unwrap();
+    // A best kept whole has nothing to add.
+    let h = goal_harness(Rc::new(SearchRig::new(vec![96.])), true, |_| {});
+    h.session.start().await.unwrap();
+    h.session.submit("/loop make my pad sound like the reference", None).await.unwrap();
+    assert!(!h.notice("holds only"));
+    h.session.close().await.unwrap();
 });
 local_test!(a_sound_match_loop_without_a_reference_is_a_regular_request_and_other_loops_run_judged_rounds, {
     let rig = Rc::new(SearchRig::new(vec![]));
@@ -3647,6 +3679,21 @@ local_test!(loop_stop_stops_the_running_loop_before_a_paused_search_on_the_set, 
     h.session.close().await.unwrap();
     assert_eq!(store.load("unsaved").await.unwrap().unwrap().status, GoalRun::Paused, "the search is still there to pick up");
 });
+local_test!(a_match_whose_search_failed_still_says_what_putting_back_said, {
+    let mut raw = SearchRig::new(vec![50.]);
+    raw.fails = true;
+    raw.put_back_says = Some("Kumi couldn't put “Drift” back as the goal found it.");
+    let rig = Rc::new(raw);
+    let h = match_harness(vec![Some(("Drift", 50.)), None], |o| {
+        o.match_budget = Some(MatchBudget { rounds: 0, polish_ms: Some(50), ..MATCH_BUDGET });
+    });
+    *h.record.goal_rig.borrow_mut() = Some(rig.clone());
+    h.session.start().await.unwrap();
+    let _ = h.session.submit("match this reference", None).await;
+    assert_eq!(rig.cleanup.borrow().as_slice(), ["close", "settle", "put back"]);
+    assert!(h.notice("Kumi couldn't put “Drift” back as the goal found it."));
+    h.session.close().await.unwrap();
+});
 local_test!(match_polish_confirms_improvement_at_full_length_and_restores_if_not_better, {
     // Exercise the full search budget independently of the host timer resolution.
     tokio::time::pause();
@@ -3663,7 +3710,7 @@ local_test!(match_polish_confirms_improvement_at_full_length_and_restores_if_not
         h.session.start().await.unwrap();
         h.session.submit("match this reference", None).await.unwrap();
         assert_eq!(h.record.calls.borrow().len(), 2);
-        assert_eq!(rig.cleanup.borrow().as_slice(), ["close", "settle"]);
+        assert_eq!(rig.cleanup.borrow().as_slice(), ["close", "settle", "put back"]);
         if improves {
             assert!(h.record.calls.borrow()[1].contains("kept on the track"), "{}", h.record.calls.borrow()[1]);
             assert!(rig.settled.borrow()[0] > 0.2);

@@ -68,7 +68,7 @@ async fn lab(heartbeat_ms: u64) -> (tempfile::TempDir, Host, Simulator) {
 }
 
 fn anyone() -> Pick {
-    Pick { pid: None, resource: None }
+    Pick::default()
 }
 
 fn connections(simulator: &Simulator) -> usize {

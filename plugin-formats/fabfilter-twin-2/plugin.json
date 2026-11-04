@@ -1,0 +1,19 @@
+{
+  "plugin": "fabfilter-twin-2",
+  "name": "FabFilter Twin 2",
+  "vendor": "FabFilter",
+  "kind": "instrument",
+  "ids": {
+    "vst3": [{"id":"99725BEA837B4BDFB778CC6848C61F5A","name":"Twin 2","status":"verified","parameters":1020}]
+  },
+  "presets": {
+    "extensions": [".ffp",".vstpreset"],
+    "windows": [{"path":"~/Documents/FabFilter/Presets/Twin 2","holds":"native user and installed presets","status":"verified"}],
+    "mac": [{"path":"~/Documents/FabFilter/Presets/Twin 2","holds":"native presets; path not tested on this Windows capture","status":"guessed"}]
+  },
+  "formats": ["format-1"],
+  "family": "fabfilter",
+  "roles": ["instrument","synthesis"],
+  "binaries": ["FabFilter Twin 2.vst3","Twin 2.vst3"],
+  "notes": ["VST3 only. Processor class identity and versions were enumerated through the public VST3 factory.","Kumi creates from initialized component/controller state and preserves unrelated bytes. No manufacturer presets, samples or executable code are bundled.","Edit values use stored VST3 plain values. These may be logarithmic frequencies or normalized internal controls, not the displayed Hz, milliseconds or dB. Consult field ranges and captured display examples.","Only measured numeric controls are writable. Native .ffp schemas and conversion support are explicitly gated; historical factory schemas are not guessed."]
+}

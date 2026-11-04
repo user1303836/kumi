@@ -43,6 +43,13 @@ use tokio::time::sleep;
 
 /// How many changes of Live's playing a connection keeps.
 const HEARD_KEPT: usize = 512;
+/// How often a lost Live that still runs is looked for, and for how long, before the usual `reconnect_interval_ms`:
+/// opening another Set, or a busy spell, brings its Remote Script back within seconds, and a look is a status read
+/// through the bridge (or, with the bridge gone, a connect to the Remote Script's port that sends nothing).
+const QUICK_LOOK_MS: u64 = 250;
+const QUICK_LOOKS_MS: u64 = 60_000;
+/// A dropped link is looked for at once at most this often: a link that keeps dropping gets the usual pace.
+const AT_ONCE_EVERY_MS: u64 = 60_000;
 
 /// The first time at or after `since` in `heard` (each change of playing, oldest first) that Live played.
 pub fn first_heard(heard: &VecDeque<(i64, bool)>, since: i64) -> Option<i64> {
@@ -66,6 +73,9 @@ pub struct ConnectionOptions {
     pub on_transport: Option<Rc<dyn Fn(Option<LiveTransport>)>>,
     pub focus_interval_ms: Option<u64>,
     pub reconnect_interval_ms: Option<u64>,
+    /// A dropped link looked for at once, and a lost Live that still runs looked for every 250 ms for a minute
+    /// (`keep_looking`); on unless a test turns it off (the TypeScript Kumi the connection oracle records had neither).
+    pub quick_looks: Option<bool>,
     /// The owner retires HISTORY entries whose transactions belonged to the old bridge or Live epoch.
     pub on_retire: Option<Rc<dyn Fn(&str)>>,
     /// A Live restart lets the owner retry its Ears device setup.
@@ -89,6 +99,7 @@ impl ConnectionOptions {
             on_transport: None,
             focus_interval_ms: None,
             reconnect_interval_ms: None,
+            quick_looks: None,
             on_retire: None,
             on_live_lost: None,
             live_running: None,
@@ -165,6 +176,8 @@ pub struct LiveConnection {
     looking: Cell<bool>,
     watcher: RefCell<Option<Signal>>,
     last_fresh_bridge: Cell<i64>,
+    /// When a dropped link was last looked for at once (`look_at_once`).
+    looked_at_once: Cell<Option<std::time::Instant>>,
     closing: RefCell<Option<Closing>>,
     subscribed: Cell<bool>,
     transport_events: Cell<bool>,
@@ -209,6 +222,7 @@ impl LiveConnection {
             looking: Cell::new(false),
             watcher: RefCell::new(None),
             last_fresh_bridge: Cell::new(0),
+            looked_at_once: Cell::new(None),
             closing: RefCell::new(None),
             subscribed: Cell::new(false),
             transport_events: Cell::new(false),
@@ -449,7 +463,9 @@ impl LiveConnection {
             self.invalidate();
             (self.options.on_connection)(ConnectionState::Disconnected, Some(DisconnectCause::Bridge));
         }
-        self.keep_looking();
+        // Live is most likely still there when only the link dropped (the bridge's process ended): look now.
+        let at_once = self.options.quick_looks.unwrap_or(true) && self.look_at_once();
+        self.keep_looking(at_once, false);
     }
     /// Kumi is about to ask Live for another Set (a new one, or one to open): losing Live in the next
     /// `for_ms` with it still running is that switch, and the request that asked carries on.
@@ -475,7 +491,7 @@ impl LiveConnection {
         self.invalidate();
         Self::stop_timer(&self.transport_timer);
         self.report_transport(None);
-        self.keep_looking();
+        self.keep_looking(false, false);
         let Some(running) = self.options.live_running.clone() else {
             self.live_gone(DisconnectCause::Live);
             return;
@@ -502,6 +518,10 @@ impl LiveConnection {
             if !this.lost.get() || this.closed.get() {
                 return;
             }
+            // Still running: its Remote Script comes back once the other Set is open (or Live is less busy).
+            if running {
+                this.keep_looking(false, true);
+            }
             this.live_gone(cause);
         });
     }
@@ -512,17 +532,40 @@ impl LiveConnection {
             callback();
         }
     }
-    fn keep_looking(&self) {
+    /// Look for Live every `reconnect_interval_ms` until it's back. `at_once`: the first look now (a link that dropped,
+    /// with Live likely still there). `quickly`: every [`QUICK_LOOK_MS`] for [`QUICK_LOOKS_MS`] first (a Live still
+    /// running, whose Remote Script comes back within seconds once its other Set is open or it's less busy). Both only
+    /// with `quick_looks` on, as it is unless a test turns it off.
+    fn keep_looking(&self, at_once: bool, quickly: bool) {
         Self::stop_timer(&self.watcher);
         let stop = Signal::new();
         *self.watcher.borrow_mut() = Some(stop.clone());
         let weak = self.weak.clone();
         let interval = self.options.reconnect_interval_ms.unwrap_or(2000).max(1);
+        let quick = self.options.quick_looks.unwrap_or(true);
+        let quick_until = (quick && quickly).then(|| std::time::Instant::now() + Duration::from_millis(QUICK_LOOKS_MS));
+        let pace = move || match quick_until {
+            Some(until) if std::time::Instant::now() < until => QUICK_LOOK_MS.min(interval),
+            _ => interval,
+        };
+        let mut wait = if quick && at_once { 0 } else { pace() };
         tokio::task::spawn_local(async move {
             loop {
-                tokio::select! {biased;_=stop.cancelled()=>break,_=sleep(Duration::from_millis(interval))=>{let Some(this)=weak.upgrade() else{break};tokio::task::spawn_local(async move{this.look_for_live().await;});}}
+                tokio::select! {biased;_=stop.cancelled()=>break,_=sleep(Duration::from_millis(wait))=>{let Some(this)=weak.upgrade() else{break};tokio::task::spawn_local(async move{this.look_for_live().await;});}}
+                wait = pace();
             }
         });
+    }
+    /// Whether a dropped link gets its look at once: not when the last one that did was less than [`AT_ONCE_EVERY_MS`]
+    /// ago, so a link that keeps dropping is looked for at the usual pace rather than reconnected as fast as it drops.
+    fn look_at_once(&self) -> bool {
+        let now = std::time::Instant::now();
+        let last = self.looked_at_once.get();
+        if last.is_some_and(|last| now.duration_since(last) < Duration::from_millis(AT_ONCE_EVERY_MS)) {
+            return false;
+        }
+        self.looked_at_once.set(Some(now));
+        true
     }
     /// After a read Live didn't answer in time: whether Live is only busy (its Remote Script still listening), and
     /// if so, waits up to `for_ms` for it to answer again. True once it does (#256).

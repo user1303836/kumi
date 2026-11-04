@@ -36,7 +36,7 @@ pub static PRO_L2: LazyLock<PluginAdapter> = LazyLock::new(|| {
         PluginRecipe { name: "Bus peaks", how: "Style Bus or Punchy, Gain 1–3 dB, Lookahead 0–0.5 ms, Output Level -0.3 dB: only the peaks." },
         PluginRecipe { name: "Safety limiter", how: "Style Safe or Transparent, Gain 0 dB, Output Level -1.0 dB, True Peak on: only overs get touched." },
     ],
-    beyond: "Everything that shapes the sound is a parameter. In its window only: the loudness meters and their targets, display options, and presets (.ffp files, its preset menu).",
+    beyond: "Everything that shapes the sound is a parameter. The loudness meters and their targets and display options are in its window. For presets, use vst3 catalog/inspect to find verified controls, create/edit to write a new .vstpreset, and the DAW's loading tools to apply it. Confirm the installed version before writing.",
     folders: Some(PluginFolders { presets: Some(OsPaths { mac: Some("~/Documents/FabFilter/Presets/Pro-L 2"), windows: Some("~/Documents/FabFilter/Presets/Pro-L 2") }), wavetables: None }),
     wavetable: None,
 }

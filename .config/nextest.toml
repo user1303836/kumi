@@ -1,8 +1,12 @@
 # nextest runs many test binaries at once. Tests that hold work to a time bound run alone, so the
 # tests beside them can't make them late.
 [[profile.default.overrides]]
-# The Remote Script adapter's tests give each local connection 500 ms.
-filter = 'test(/bounded_latency|reads_in_a_moment|looks_at_each_byte_once|read_in_linear_time|analyzed_quickly_part_by_part|keeps_the_runtime_responsive|returns_promptly|maximum_duplicate_ambiguity/) | (binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/))'
+# The Remote Script adapter's tests give each local connection 500 ms. Two of kept conversations' tests look at a file
+# within 2 s and 3 s of writing it, as another Kumi would.
+filter = '''
+test(/bounded_latency|reads_in_a_moment|looks_at_each_byte_once|read_in_linear_time|analyzed_quickly_part_by_part|keeps_the_runtime_responsive|returns_promptly|maximum_duplicate_ambiguity/) | (binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/))
+  | (binary_id(kumi-agent::it) & test(/^conversations::(where_the_file_system_cant_lock_the_lock_file_names_the_kumi_that_has_it|two_changes_in_the_second_the_file_system_keeps_are_both_seen)$/))
+'''
 threads-required = "num-cpus"
 
 # CI's three sets (.github/workflows/ci.yml and extended.yml). A pull request and each push to main run `ci` on Linux and

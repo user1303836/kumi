@@ -159,7 +159,9 @@ mod tests {
         assert!(catalog.ends_messages("*~") && !catalog.ends_messages("snapshot~") && !catalog.ends_messages("prepend"));
         assert!(catalog.names_something("s") && catalog.names_something("buffer~") && !catalog.names_something("pv"));
         assert!(catalog.ports_from_contents("p") && catalog.ports_from_contents("gen~") && !catalog.ports_from_contents("route"));
+        assert!(catalog.ports_from_contents("mc.gen~") && !catalog.ports_from_contents("mcs.gen~"), "its one inlet and outlet are fixed");
         assert_eq!(catalog.role("buffer~"), Some(Role::Storage));
+        assert_eq!((catalog.role("mc.gen~"), catalog.role("mcs.gen~")), (Some(Role::Dsp), Some(Role::Dsp)));
         assert_eq!(catalog.role("prepend"), None);
         assert!(catalog.low_priority("deferlow") && catalog.low_priority("v8") && !catalog.low_priority("delay"));
         assert!(catalog.midi_out("midiout") && catalog.midi_out("noteout") && !catalog.midi_out("midiformat"));

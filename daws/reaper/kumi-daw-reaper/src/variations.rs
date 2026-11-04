@@ -15,7 +15,7 @@ use kumi_agent::core::{
             NOTE_DIRECTIONS,
         },
         tool::{names, names_to_find},
-        Material, Rng, TakeSet,
+        Material, Rng, TakeSet, TakeState,
     },
 };
 use kumi_common::abort::Signal;
@@ -30,7 +30,7 @@ pub static WORDS: Words = Words {
     app: "REAPER",
     sources: "an item (itemRef): an audio item (a footstep, an impact, a whoosh) or a MIDI item",
     anchors: "a MIDI take's notes every take keeps as they are (their index, from 0, as read); an audio take keeps its attack whatever the anchors",
-    ops: "pitch (semitones, up or down; a MIDI take's notes move), rate (its playrate: faster or slower, the whole sound still heard), offset (a later start in its source, a few milliseconds), length (shorter), fades, volume; a MIDI take's velocity, timing and thin (fewer notes); amount 0 to 1",
+    ops: "pitch (semitones, up or down; a MIDI take's notes move), rate (an audio take's playrate: faster or slower, the whole sound still heard), offset (a later start in its source, a few milliseconds), length (shorter), fades, volume; a MIDI take's velocity, timing and thin (fewer notes); amount 0 to 1",
     lines: "a MIDI take's notes as notes_add takes them ({pitch, start, length, velocity, channel}: quarter notes from the item's start; its anchor notes stay as they are: no need to write them)",
     places: "items (each take a copy of the source item after it on its track, gap seconds apart)",
     place_names: &["items"],
@@ -52,11 +52,13 @@ pub static WORDS: Words = Words {
 const GAP: f64 = 0.5;
 /// Pages of rows read (200 a page).
 const PAGES: usize = 20;
+/// The most notes of a MIDI take Kumi varies: as many as one change writes.
+const MOST_NOTES: u64 = 10_000;
 /// How far an audio take's start moves at most (seconds): past that its attack isn't the sound's any more.
 const ATTACK: f64 = 0.03;
 
-/// A take: its item's length and fades, its take's start offset, pitch, rate and volume, a MIDI take's notes, and the notes
-/// every take keeps (the anchors).
+/// A take: its item's length and fades, its take's start offset, pitch, rate and volume, a MIDI take's notes, the notes every
+/// take keeps (the anchors), and a MIDI take's ticks as REAPER's read says them (never kept: they're where the take is).
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct ItemTake {
     pub midi: bool,
@@ -69,6 +71,35 @@ pub struct ItemTake {
     pub fade_out: f64,
     pub notes: Vec<Note>,
     pub anchors: Vec<Note>,
+    pub ticks: Ticks,
+}
+
+/// The ticks REAPER puts a MIDI take's notes on (#606): so many a quarter note of the project at playrate 1, from the one at
+/// its item's start (`Even`); ones that bend across it (`Bent`: it ignores the project tempo across a tempo change, and
+/// follows time); or not said (an audio take, or REAPER's extension from before it said).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Ticks {
+    #[default]
+    Unsaid,
+    Even {
+        per_quarter: f64,
+        at_start: f64,
+    },
+    Bent,
+}
+
+impl Ticks {
+    /// A take row's: `ticksPerQuarter` and `tickAtStart`, both null when they bend.
+    fn of(row: &Value) -> Ticks {
+        match row.get("ticksPerQuarter") {
+            None => Ticks::Unsaid,
+            Some(Value::Null) => Ticks::Bent,
+            Some(per) => match (per.as_f64(), row.get("tickAtStart").and_then(Value::as_f64)) {
+                (Some(per_quarter), Some(at_start)) if per_quarter > 0. => Ticks::Even { per_quarter, at_start },
+                _ => Ticks::Unsaid,
+            },
+        }
+    }
 }
 
 impl Material for ItemTake {
@@ -123,20 +154,34 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
         answer.pointer("/items/0").cloned().ok_or_else(|| format!("{} isn't in the project any more", self.short(reference)))
     }
 
-    /// What an item holds now: its row, its take's, and a MIDI take's notes.
-    async fn material_now(&self, item: &Value, anchors: &[Note], signal: &Signal) -> Result<ItemTake, String> {
+    /// What an item holds now: its row, its take's, and a MIDI take's notes that play, with each one's index as REAPER reads it.
+    async fn material_now(&self, item: &Value, anchors: &[Note], signal: &Signal) -> Result<(ItemTake, Vec<usize>, bool), String> {
         let take_ref = item.get("takeRef").and_then(Value::as_str).ok_or("the item has no take")?;
         let take = self.one(take_ref, signal).await?;
-        let midi = item.get("source").and_then(Value::as_str) == Some("MIDI");
-        let notes = if midi {
-            let rows = self.plan.rows_through(json!({"kind": "note", "parent": take_ref, "limit": 200}), PAGES, signal).await?;
-            rows.iter().filter(|row| row.get("muted") != Some(&Value::Bool(true))).filter_map(Note::of).collect()
+        let midi = item.get("source").and_then(Value::as_str) == Some(daw_bridge::contract::MIDI_SOURCE);
+        let mut hidden = false;
+        let (indexes, notes) = if midi {
+            let count = take.get("noteCount").and_then(Value::as_u64).unwrap_or(0);
+            if count > MOST_NOTES {
+                return Err(format!("that take has {count} notes, and Kumi varies a MIDI take of at most {MOST_NOTES}"));
+            }
+            // (read to the end: a page holds what REAPER read in its time, a busy REAPER's fewer; every page holds one at least)
+            let rows =
+                self.plan.rows_through(json!({"kind": "note", "parent": take_ref, "limit": 200}), count as usize + 1, signal).await?;
+            if (rows.len() as u64) < count {
+                return Err(format!("Kumi read {} of that take's {count} notes: try again", rows.len()));
+            }
+            hidden = plays_again(item, &take)
+                && rows.iter().any(|row| {
+                    row.get("muted") != Some(&Value::Bool(true)) && row.get("start").and_then(Value::as_f64).is_some_and(|start| start < 0.)
+                });
+            played(&rows).into_iter().unzip()
         } else {
-            Vec::new()
+            Default::default()
         };
         let number = |row: &Value, key: &str, default: f64| row.get(key).and_then(Value::as_f64).unwrap_or(default);
         let fade = |side: &str| item.pointer(&format!("/{side}/length")).and_then(Value::as_f64).unwrap_or(0.);
-        Ok(ItemTake {
+        let material = ItemTake {
             midi,
             length: number(item, "length", 0.),
             offset: number(&take, "startOffset", 0.),
@@ -147,7 +192,9 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
             fade_out: fade("fadeOut"),
             notes,
             anchors: anchors.to_vec(),
-        })
+            ticks: if midi { Ticks::of(&take) } else { Ticks::Unsaid },
+        };
+        Ok((material, indexes, hidden))
     }
 
     async fn change(&self, tool: &str, input: Value, signal: &Signal) -> Result<(String, Value), (String, bool)> {
@@ -183,6 +230,69 @@ impl<S: RefScheme + 'static> ReaperVariations<S> {
     }
 }
 
+/// A MIDI take's notes that play, of its note rows, each with its index as read: not its muted ones, nor those a trimmed start
+/// hides (written, one would sound at the item's start); one held across the start plays from it.
+fn played(rows: &[Value]) -> Vec<(usize, Note)> {
+    rows.iter()
+        .enumerate()
+        .filter(|(_, row)| row.get("muted") != Some(&Value::Bool(true)))
+        .filter_map(|(at, row)| {
+            let mut note = Note::of(row)?;
+            let start = row.get("start").and_then(Value::as_f64).unwrap_or(0.);
+            if start < 0. {
+                note.length = round(start + note.length);
+                if note.length <= 0. {
+                    return None;
+                }
+            }
+            Some((row.get("index").and_then(Value::as_u64).map_or(at, |index| index as usize), note))
+        })
+        .collect()
+}
+
+/// The notes `wanted` by their index as read, of a take's notes that play and their indexes: which index isn't one of them.
+fn anchors_of(indexes: &[usize], notes: &[Note], wanted: &[usize]) -> Result<Vec<Note>, String> {
+    wanted
+        .iter()
+        .map(|n| {
+            let at = indexes.iter().position(|index| index == n);
+            at.map(|at| notes[at].clone()).ok_or_else(|| {
+                format!("anchor {n}: no note that plays has that index (the take plays {} notes; read their indexes)", indexes.len())
+            })
+        })
+        .collect()
+}
+
+/// Whether an item plays past its source's end, so its source again from its start: it loops, and from the tick at its start, at its
+/// playrate, its length runs past the tick its source ends on (ticks that bend can't say: taken to). An extension that doesn't say
+/// its source's end: no.
+fn plays_again(item: &Value, take: &Value) -> bool {
+    if item.get("loop") != Some(&Value::Bool(true)) {
+        return false;
+    }
+    let number = |key: &str| take.get(key).and_then(Value::as_f64);
+    match (Ticks::of(take), number("sourceEndTick"), item.get("lengthBeats").and_then(Value::as_f64)) {
+        (Ticks::Bent, ..) => true,
+        (Ticks::Even { per_quarter, at_start }, Some(end), Some(beats)) => {
+            // (past it by more than a tick: a left edge dragged leaves the item ending right on it, its row's numbers rounded)
+            at_start + beats * per_quarter * number("playrate").unwrap_or(1.) > end + 1.
+        }
+        _ => false,
+    }
+}
+
+/// Why an item can't be a source, in words: one that plays its source again, with notes its trimmed start hides. Those play from its second pass on,
+/// and a take can only write notes from its start, so it'd lose them there. Or a pooled one, by an extension that still says
+/// "midipool": it can't read that item's notes.
+fn refused_source(item: &Value, hidden: bool) -> Option<String> {
+    if item.get("source").and_then(Value::as_str) == Some("midipool") {
+        return Some("that MIDI item is pooled, and the extension REAPER has loaded can't read a pooled item's notes: restart REAPER to load the new one".into());
+    }
+    hidden.then(|| {
+        "that item loops, and its trimmed start hides notes that play from its second pass on, which a take can't hold yet: drag its start back over them, or vary it without the loop".to_string()
+    })
+}
+
 /// A take as REAPER holds it once written: its settings as `settings` writes them and REAPER's reads give them back (times,
 /// pitch and rate to the 10 000th, the volume to the 100th of a dB), so what Kumi reads back is what it kept and the take
 /// stays Kumi's (#407: a take drawn to more places read back as edited since Kumi wrote it).
@@ -210,6 +320,42 @@ fn applied(ops: &[Value], factor: f64, take: &mut ItemTake, source: &ItemTake, r
 /// A take whose render clipped, turned down by its take volume (#407): `db` quieter, the rest of it as it is.
 fn turned_down(take: &ItemTake, db: f64) -> ItemTake {
     as_held(&ItemTake { volume_db: take.volume_db - db, ..take.clone() })
+}
+
+/// A note on a take's ticks, `per` a quarter note from `at_start` (#606): its pitch, channel and velocity, and its first and
+/// last tick, as `item_variation` writes it (`written`: its start and its start plus its length, each to the 10 000th as
+/// `settings` sends them, to the nearest tick) or from REAPER's reads (its start to the nearest tick, its length whole ticks).
+fn on_ticks(note: &Note, per: f64, at_start: f64, written: bool) -> (i64, i64, i64, i64, i64) {
+    let start = round(note.start);
+    let first = (at_start + start * per).round();
+    let last = if written { (at_start + (start + round(note.length)) * per).round() } else { first + (note.length * per).round() };
+    (note.pitch, note.channel, note.velocity, first as i64, last as i64)
+}
+
+/// A found MIDI take as Kumi kept it when its notes are on the ticks REAPER writes the kept ones on there (#606): REAPER holds
+/// notes on whole ticks, which fall by where the take is (a start offset with the tempo there, an item that ignores the
+/// project tempo), and reads them back to the 10 000th of a quarter note, in its own order. Otherwise as it reads.
+fn as_kept(mut now: ItemTake, kept: &ItemTake) -> ItemTake {
+    let Ticks::Even { per_quarter, at_start } = now.ticks else { return now };
+    let per = per_quarter * now.playrate;
+    if !(now.midi && kept.midi && per > 0.) {
+        return now;
+    }
+    let ticks = |notes: &[Note], written: bool| {
+        let mut all: Vec<_> = notes.iter().map(|note| on_ticks(note, per, at_start, written)).collect();
+        all.sort_unstable();
+        all
+    };
+    if ticks(&kept.notes, true) == ticks(&now.notes, false) {
+        now.notes = kept.notes.clone();
+    }
+    now
+}
+
+/// Why Kumi can't tell a MIDI take that reads other than it was kept from an edited one: its ticks bend (#606).
+fn unsure_of(current: &ItemTake) -> Option<String> {
+    (current.midi && current.ticks == Ticks::Bent)
+        .then(|| "it ignores the project tempo across a tempo change, so REAPER puts its notes on ticks Kumi can't follow".into())
 }
 
 /// What a take holds, as kept between runs: what its digest is of.
@@ -314,7 +460,8 @@ fn apply_one(op: &Value, factor: f64, take: &mut ItemTake, source: &ItemTake, rn
 }
 
 const AUDIO_OPS: [&str; 6] = ["pitch", "rate", "offset", "length", "fades", "volume"];
-const MIDI_OPS: [&str; 7] = ["pitch", "rate", "length", "volume", "velocity", "timing", "thin"];
+// (no rate: REAPER writes notes at the project's beats whatever the playrate, so a MIDI take's rate moves nothing and shortens it)
+const MIDI_OPS: [&str; 6] = ["pitch", "length", "volume", "velocity", "timing", "thin"];
 
 #[async_trait(?Send)]
 impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
@@ -346,17 +493,17 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
             .ok()
             .and_then(|row| row.get("name").and_then(Value::as_str).map(str::to_owned))
             .unwrap_or_default();
-        let mut material = self.material_now(&item, &[], signal).await?;
-        // (the anchors: a MIDI take's notes by their index as read)
+        let (mut material, indexes, hidden) = self.material_now(&item, &[], signal).await?;
+        if let Some(why) = refused_source(&item, hidden) {
+            return Err(why);
+        }
+        // (the anchors: a MIDI take's notes by their index as read, which counts the ones that don't play)
         let anchors: Vec<usize> =
             input.get("anchors").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_u64).map(|n| n as usize).collect();
         if !anchors.is_empty() && !material.midi {
             return Err("anchors are a MIDI take's notes: an audio take keeps its attack anyway".into());
         }
-        if let Some(missing) = anchors.iter().find(|n| **n >= material.notes.len()) {
-            return Err(format!("anchor {missing}: the take has {} notes (from 0)", material.notes.len()));
-        }
-        material.anchors = anchors.iter().map(|n| material.notes[*n].clone()).collect();
+        material.anchors = anchors_of(&indexes, &material.notes, &anchors)?;
         let name = item.get("name").and_then(Value::as_str).unwrap_or("").to_string();
         let short = name.rsplit_once('.').map_or(name.as_str(), |(stem, _)| stem).trim().to_string();
         let short = if short.is_empty() { track_name.clone() } else { short };
@@ -452,6 +599,10 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
         digest_of(material)
     }
 
+    fn unsure(&self, current: &ItemTake) -> Option<String> {
+        unsure_of(current)
+    }
+
     fn quieter(&self, take: &ItemTake, db: f64) -> Result<ItemTake, String> {
         Ok(turned_down(take, db))
     }
@@ -523,8 +674,21 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
     }
 
     async fn current(&self, set: &ReaperSet, row: &Value, signal: &Signal) -> Result<ItemTake, String> {
-        let anchors = set.source.material.as_ref().map(|material| material.anchors.clone()).unwrap_or_default();
-        self.material_now(row, &anchors, signal).await
+        // (the take Kumi kept there: `find` gave it the row's ref. Its own anchors: a later make may ask for others)
+        let kept = set
+            .takes
+            .iter()
+            .filter(|take| take.state != TakeState::Dropped)
+            .find(|take| take.place.get("ref").is_some_and(|reference| Some(reference) == row.get("ref")));
+        let anchors = match kept {
+            Some(take) => take.material.anchors.clone(),
+            None => set.source.material.as_ref().map(|material| material.anchors.clone()).unwrap_or_default(),
+        };
+        let (now, ..) = self.material_now(row, &anchors, signal).await?;
+        Ok(match kept {
+            Some(take) => as_kept(now, &take.material),
+            None => now,
+        })
     }
 
     async fn rewrite(
@@ -646,6 +810,7 @@ impl<S: RefScheme + 'static> VariationsBackend for ReaperVariations<S> {
             fade_out: number("fadeOut")?,
             notes: notes("notes"),
             anchors: notes("anchors"),
+            ticks: Ticks::Unsaid,
         })
     }
 
@@ -764,6 +929,204 @@ mod tests {
                 assert_eq!(digest_of(&read_back(&quieter)), digest_of(&quieter), "{name}: {quieter:?}");
             }
         }
+    }
+
+    /// A take's notes that play, by REAPER's own indexes: not a muted one, nor one a trimmed start hides, which written would
+    /// sound at the item's start (lab, 7.82); one held across the start plays from it.
+    #[test]
+    fn the_notes_of_a_take_are_those_that_play_with_their_indexes_as_read() {
+        let row = |index: u64, start: f64, length: f64, muted: bool| json!({"index": index, "pitch": 60, "start": start, "length": length, "velocity": 90, "channel": 1, "selected": false, "muted": muted});
+        let rows = [row(0, -0.5, 0.25, false), row(1, -0.25, 0.75, false), row(2, 0.5, 0.25, true), row(3, 1., 0.25, false)];
+        let notes: Vec<(usize, f64, f64)> = played(&rows).into_iter().map(|(at, note)| (at, note.start, note.length)).collect();
+        assert_eq!(notes, [(1, 0., 0.5), (3, 1., 0.25)]);
+    }
+
+    /// Anchors go by REAPER's own index, which counts the notes that don't play: past a muted note, the old count named the next.
+    #[test]
+    fn anchors_are_by_the_index_reaper_reads_past_a_muted_note() {
+        let row = |index: u64, pitch: i64, muted: bool| json!({"index": index, "pitch": pitch, "start": index as f64, "length": 0.25, "velocity": 90, "channel": 1, "selected": false, "muted": muted});
+        let (indexes, notes): (Vec<usize>, Vec<Note>) =
+            played(&[row(0, 60, false), row(1, 61, true), row(2, 62, false), row(3, 63, false)]).into_iter().unzip();
+        let pitches =
+            |wanted: &[usize]| anchors_of(&indexes, &notes, wanted).map(|kept| kept.iter().map(|note| note.pitch).collect::<Vec<_>>());
+        assert_eq!(pitches(&[0, 3]).unwrap(), [60, 63], "index 3 is the note at 3, not the fourth that plays");
+        assert!(pitches(&[1]).unwrap_err().contains("anchor 1: no note that plays"), "a muted note can't be one");
+        assert!(pitches(&[9]).unwrap_err().contains("anchor 9"));
+    }
+
+    /// A looped item with notes behind its trim says why it can't be varied (they play from its second pass); hidden notes of an item
+    /// that doesn't loop never play, and a looped item with none hidden loses nothing.
+    #[test]
+    fn a_looped_item_with_hidden_notes_is_refused_in_words() {
+        let looped = json!({"source": "mid", "loop": true});
+        assert!(refused_source(&looped, true).unwrap().contains("second pass"));
+        assert_eq!(refused_source(&looped, false), None);
+        // Loop is on by default for a new MIDI item, so only an item that runs past its source's end plays it again.
+        let item = |beats: f64, on: bool| json!({"loop": on, "lengthBeats": beats});
+        let take = json!({"ticksPerQuarter": 960.0, "tickAtStart": 960.0, "sourceEndTick": 7680, "playrate": 1.0});
+        assert!(plays_again(&item(8., true), &take), "from tick 960 for 8 beats: past 7680");
+        assert!(!plays_again(&item(6., true), &take), "from tick 960 for 6 beats: inside it");
+        assert!(!plays_again(&item(8., false), &take), "it doesn't loop");
+        // A left edge dragged: the item ends on its source's end, and the row's numbers are rounded either way (124 BPM, 0.3722 s).
+        let dragged = json!({"ticksPerQuarter": 960.0, "tickAtStart": 738.4768, "sourceEndTick": 7680, "playrate": 1.0});
+        assert!(!plays_again(&item(7.2308, true), &dragged), "it reaches its source's end, and no further");
+        assert!(
+            plays_again(&item(6., true), &json!({"ticksPerQuarter": 960.0, "tickAtStart": 960.0, "sourceEndTick": 7680, "playrate": 1.5})),
+            "faster"
+        );
+        assert!(plays_again(&item(1., true), &json!({"ticksPerQuarter": null})), "bent ticks can't say");
+        assert!(!plays_again(&item(8., true), &json!({"ticksPerQuarter": 960.0, "tickAtStart": 960.0})), "an extension that doesn't say");
+        // (an extension not reloaded yet still says "midipool", and can't read its notes)
+        assert!(refused_source(&json!({"source": "midipool"}), false).unwrap().contains("restart REAPER"));
+    }
+
+    /// A MIDI take's operators are those that move something: REAPER writes notes at the project's beats whatever its playrate
+    /// (lab, 7.82), so a rate moves no note and only cuts the end off.
+    #[test]
+    fn a_midi_take_has_no_rate_and_an_audio_take_has() {
+        assert!(!MIDI_OPS.contains(&"rate") && AUDIO_OPS.contains(&"rate"));
+        for direction in NOTE_DIRECTIONS {
+            assert!(note_direction_ops(direction).iter().all(|op| op["op"] != "rate"), "{direction}");
+        }
+    }
+
+    /// What REAPER reads back of a MIDI take Kumi wrote (lab, 7.82): each note written at its start and its start plus its length as
+    /// `settings` sends them, onto the nearest tick, so many a quarter note times its playrate from the one at its item's start;
+    /// read back from the item's start to the 10 000th of a quarter note (a tie goes either way by where the item is, here 5.0246
+    /// quarter notes in), in tick order, notes on one tick in REAPER's own order.
+    fn read_back(take: &ItemTake, per_quarter: f64, at_start: f64) -> ItemTake {
+        let item = 5.0246;
+        let per = per_quarter * take.playrate;
+        let sent = settings(take, None);
+        let tick = |qn: f64| (at_start + ((item + qn) - item) * per).round();
+        let mut held: Vec<(f64, f64, &Value)> = sent["notes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|note| {
+                let (start, length) = (note["start"].as_f64().unwrap(), note["length"].as_f64().unwrap());
+                (tick(start), tick(start + length), note)
+            })
+            .collect();
+        held.sort_by(|a, b| a.0.total_cmp(&b.0).then(b.2["pitch"].as_i64().cmp(&a.2["pitch"].as_i64())));
+        let notes = held
+            .iter()
+            .map(|(first, last, note)| {
+                let (from, to) = (item + (first - at_start) / per, item + (last - at_start) / per);
+                let mut row = (*note).clone();
+                row["start"] = json!(round(from - item));
+                row["length"] = json!(round(to - from));
+                Note::of(&row).unwrap()
+            })
+            .collect();
+        ItemTake { notes, ticks: Ticks::Even { per_quarter, at_start }, ..take.clone() }
+    }
+
+    /// Takes of `played` drawn by `ops` over several seeds read back from those ticks as Kumi kept them, and at least one of them
+    /// reads other than Kumi drew it, so what's checked is the comparison on the take's own ticks.
+    fn reads_back_as_kept(played: Vec<Note>, ops: Vec<Value>, per_quarter: f64, at_start: f64) {
+        let source = ItemTake { midi: true, notes: played, ..audio() };
+        let mut told_apart = 0;
+        for seed in 1..=12 {
+            let mut take = source.clone();
+            applied(&ops, 1.35, &mut take, &source, &mut Rng::new(seed)).unwrap();
+            let now = read_back(&take, per_quarter, at_start);
+            told_apart += usize::from(digest_of(&now) != digest_of(&take));
+            assert_eq!(digest_of(&as_kept(now, &take)), digest_of(&take), "seed {seed}: {take:?}");
+        }
+        assert!(told_apart > 0, "as REAPER reads them, some takes' notes aren't as Kumi drew them");
+    }
+
+    fn a_note(pitch: i64, start: f64, length: f64) -> Note {
+        Note { pitch, start, length, velocity: 90, channel: 1 }
+    }
+
+    fn a_riff() -> Vec<Note> {
+        (0..8).map(|k| a_note(48 + k, k as f64 * 0.5, 0.25)).collect()
+    }
+
+    /// (#606) A take with its timing loosened: REAPER moved its notes onto whole ticks, and it read back as edited.
+    #[test]
+    fn a_midi_take_loosened_in_time_reads_back_from_reaper_as_kumi_kept_it() {
+        reads_back_as_kept(a_riff(), note_direction_ops("looser"), 960., 0.);
+    }
+
+    /// (lab: real REAPER) A loosened chord's notes part, and REAPER reads them in tick order, not the order Kumi drew.
+    #[test]
+    fn a_loosened_chord_reads_back_as_kept_in_reapers_order() {
+        let chords = (0..4).flat_map(|k| [60, 64, 67].map(|pitch| a_note(pitch + k, k as f64, 0.4))).collect();
+        reads_back_as_kept(chords, note_direction_ops("looser"), 960., 0.);
+    }
+
+    /// Notes on ticks exactly halfway at the 10 000th read back the other way where the take is (ticks 6 and 18 of 960 read 0.0063
+    /// and 0.0188 at the project's start, and 0.0062 and 0.0187 further in), though no operator moved them.
+    #[test]
+    fn notes_on_a_tie_read_back_as_kept_wherever_the_take_is() {
+        let ties = vec![a_note(48, 0.0063, 0.25), a_note(50, 0.0188, 0.25), a_note(52, 1., 0.25)];
+        reads_back_as_kept(ties, vec![json!({"op": "pitch", "semitones": 2})], 960., 0.);
+    }
+
+    /// A start offset puts the item's start between ticks: 23.616 for 0.0123 s at 120 BPM (lab).
+    #[test]
+    fn a_take_with_a_start_offset_reads_back_as_kept_on_its_ticks() {
+        reads_back_as_kept(a_riff(), note_direction_ops("looser"), 960., 23.616);
+    }
+
+    /// A MIDI file's own resolution stays with its take (`HASDATA 1 480 QN`, lab).
+    #[test]
+    fn a_take_of_another_resolution_reads_back_as_kept() {
+        reads_back_as_kept(a_riff(), note_direction_ops("looser"), 480., 0.);
+    }
+
+    /// An item that ignores the project tempo spaces its ticks by the tempo where it is: 960 × 100 / 90 under 90 BPM.
+    #[test]
+    fn a_take_that_ignores_the_tempo_reads_back_as_kept_on_the_ticks_where_it_is() {
+        reads_back_as_kept(a_riff(), note_direction_ops("looser"), 1066.666667, 0.);
+    }
+
+    /// A hat on every sixteenth, each as long as its step: loosened, its notes don't overlap (core parts them), and read back as kept.
+    #[test]
+    fn repeated_notes_of_one_pitch_read_back_as_kept() {
+        let hats = (0..16).map(|k| a_note(42, k as f64 * 0.25, 0.25)).collect();
+        reads_back_as_kept(hats, note_direction_ops("looser"), 960., 0.);
+    }
+
+    /// An edit since is one, on any ticks: a note a tick later, another velocity, a note gone. Where the ticks bend Kumi can't tell,
+    /// and says why; an audio take is compared as it reads.
+    #[test]
+    fn an_edit_since_still_reads_as_one_and_bent_ticks_say_they_cant_tell() {
+        let source = ItemTake { midi: true, notes: a_riff(), ..audio() };
+        let mut take = source.clone();
+        applied(&note_direction_ops("looser"), 1., &mut take, &source, &mut Rng::new(3)).unwrap();
+        let now = read_back(&take, 960., 0.);
+        assert_eq!(digest_of(&as_kept(now.clone(), &take)), digest_of(&take));
+        let mut later = now.clone();
+        later.notes[6].start = round(later.notes[6].start + 1. / 960.);
+        let mut softer = now.clone();
+        softer.notes[0].velocity -= 1;
+        let mut fewer = now.clone();
+        fewer.notes.pop();
+        for edited in [later, softer, fewer] {
+            assert_ne!(digest_of(&as_kept(edited.clone(), &take)), digest_of(&take), "{edited:?}");
+            assert_eq!(unsure_of(&edited), None);
+        }
+        let bent = ItemTake { ticks: Ticks::Bent, ..now.clone() };
+        assert_eq!(as_kept(bent.clone(), &take), bent);
+        assert!(unsure_of(&bent).unwrap().contains("ignores the project tempo"));
+        let unsaid = ItemTake { ticks: Ticks::Unsaid, ..now };
+        assert_eq!(as_kept(unsaid.clone(), &take), unsaid, "an extension from before it said: compared as it reads");
+        assert_eq!(unsure_of(&unsaid), None);
+        assert_eq!(unsure_of(&ItemTake { ticks: Ticks::Bent, ..audio() }), None);
+    }
+
+    #[test]
+    fn a_take_rows_ticks_are_said_bent_or_not_said() {
+        assert_eq!(
+            Ticks::of(&json!({"ticksPerQuarter": 960.0, "tickAtStart": 23.616})),
+            Ticks::Even { per_quarter: 960., at_start: 23.616 }
+        );
+        assert_eq!(Ticks::of(&json!({"ticksPerQuarter": null, "tickAtStart": null})), Ticks::Bent);
+        assert_eq!(Ticks::of(&json!({"noteCount": 2})), Ticks::Unsaid);
     }
 
     #[test]
