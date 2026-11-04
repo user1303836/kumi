@@ -94,13 +94,20 @@ Other rules every change follows:
 - Undo follows the object, not its contents. A track, scene, return, duplicate,
   device or clip a change made is removed even after it was renamed or got
   clips or devices; a parameter, fader or tempo goes back to its value before
-  the change, however it moved since. Undo is refused when the reference now
-  holds a different object, or the object is gone.
-- Two exceptions follow the contents. A Session MIDI clip made by
+  the change, however it moved since. Undo is refused when the object is gone,
+  or when the reference now holds a different object (but for an Arrangement
+  clip that moved, below).
+- Three exceptions follow the contents. A Session MIDI clip made by
   `live_midi_clip_apply` is removed only while its name, length and notes are
   as the change left them. An Arrangement MIDI clip written through Kumi's Live
-  extension stays once its notes, name or extent changed. Delete such a clip
-  yourself if it should go.
+  extension is found by its identity, at whatever reference it has now, and
+  stays once its notes, name or extent changed. And any other Arrangement clip a
+  change made that moved to another reference, because a clip before it on its
+  track was added or removed, is removed where it is now only while it's as it
+  was made: its settings unchanged, and a copied MIDI clip's notes too. An empty
+  MIDI clip made by `add_arrangement_clip` has no notes kept to compare, so once
+  it moved it stays. One that didn't move is removed by its identity, as above.
+  Delete such a clip yourself if it should go.
 - An undo refused by its checks before it touched Live leaves the change
   applied, and the next undo checks again.
 - Deletions and momentary actions (those in

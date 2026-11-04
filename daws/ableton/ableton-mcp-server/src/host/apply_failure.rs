@@ -99,6 +99,9 @@ impl AsyncLiveAdapter for FailureNotingAdapter {
     fn expect_state_digest(&self, id: &str, i: &LiveInvocation) {
         self.adapter.expect_state_digest(id, i)
     }
+    fn forget_cleanup_ownership(&self, id: &str, reference: &str) {
+        self.adapter.forget_cleanup_ownership(id, reference)
+    }
 }
 impl McpHost {
     /// Forgets the noted failure, so the slot holds only the Live calls of the tool call starting now.

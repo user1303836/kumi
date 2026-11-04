@@ -619,7 +619,9 @@ def scenario_a_large_clip_takes_its_notes_in_more_calls_and_the_last_checks_them
     track = {k: kept[k] for k in ("track", "trackName")}
     added = run(song, {}, dict(track, op="notes", clip=done["made"][0]["identity"], notes=rest, notesHash=kept["notesHash"]))
     clip = drums.arrangement_clips[0]
-    if added != {"added": 725, "exact": True} or sorted([n.pitch, n.start_time] for n in clip.notes) != sorted([n[0], n[1]] for n in notes):
+    # The last says what the clip is now, which a later undo checks in place of what it was.
+    now = run(song, {"r:hats": clip}, {"op": "capture", "clips": ["r:hats"]})["clips"][0]["hash"]
+    if added != {"added": 725, "exact": True, "hash": now} or sorted([n.pitch, n.start_time] for n in clip.notes) != sorted([n[0], n[1]] for n in notes):
         fail("notes: %r, %d" % (added, len(clip.notes)))
     # A note Live drops on the way is found by the last call.
     drums.delete_clip(clip)
@@ -640,6 +642,39 @@ def scenario_state_says_what_the_track_holds(fail):
     keys.arrangement_clips[0].notes.append(note(61, 1.0))
     if run(song, {}, ask) == before:
         fail("an edit didn't change the state")
+
+def scenario_a_piece_a_later_undo_made_again_passes_the_clears_check_by_the_hash_it_was_made_with(fail):
+    # A clear of 10 to 12 leaves two pieces of "Verse"; a later change deletes the left one, and Kumi's undo of that one
+    # makes it again, with an identity of its own and the hash restore answers. The clear's undo checks the pieces as they
+    # are now, the one made again by that hash, and "Verse" comes back whole. MIDI and audio.
+    for midi in (True, False):
+        kind = "MIDI" if midi else "audio"
+        track = Track("Keys" if midi else "Vox", midi=midi); song = make_song(track)
+        if midi:
+            verse = midi_clip(track, "Verse", 8.0, 8.0, [note(60 + i, float(i)) for i in range(8)])
+        else:
+            sample = audio_file(32.0)
+            verse = audio_clip(track, "Verse", sample, 8.0); verse.end_time = 16.0
+        kept = run(song, {"r:track": track}, {"op": "capture", "track": "r:track", "from": 10.0, "to": 12.0})["clips"]
+        # Live clears 10 to 12: the left piece keeps the clip, the right one is a new clip.
+        right = verse.copy(track, 12.0, 16.0); right.start_marker = verse.start_marker + 4.0
+        verse.end_time = 10.0; track.arrangement_clips.append(right)
+        pieces = run(song, {"r:track": track}, {"op": "capture", "track": "r:track", "from": 8.0, "to": 16.0, "except": []})["clips"]
+        left = [row for row in pieces if row["where"]["start"] == 8.0]
+        track.delete_clip(verse)
+        made = run(song, {}, restore_args(left))["made"]
+        followed = [{"identity": made[0]["identity"], "hash": made[0]["hash"], "name": "Verse"}]
+        followed += [{"identity": row["identity"], "hash": row["hash"], "name": "Verse"} for row in pieces if row["where"]["start"] != 8.0]
+        args = restore_args(kept, remnants=followed)
+        if run(song, {}, dict(args, check=True)) != {"checked": True}:
+            fail("%s: the check, with the piece made again" % kind)
+        done = run(song, {}, args)
+        # This Live has no fades to give back (as for any audio clip here).
+        short = [] if midi else [{"name": "Verse", "missing": ["its fades"]}]
+        if spans(track) != [("Verse", 8.0, 16.0)] or done["partial"] != short or (midi and len(track.arrangement_clips[0].notes) != 8):
+            fail("%s: not whole again: %r %r" % (kind, spans(track), done))
+        if not midi:
+            os.unlink(sample)
 
 failures = []
 for name, scenario in sorted((name, value) for name, value in list(globals().items()) if name.startswith("scenario_")):

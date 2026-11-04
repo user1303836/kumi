@@ -61,10 +61,11 @@ pub enum FastResult {
     Error { error: String, sent: bool },
 }
 
-/// What HISTORY asks of Live: its connection, and Kumi's memory of the Set.
+/// What HISTORY asks of Live: its connection, Kumi's memory of the Set, and the clips Kumi's undo made again.
 pub struct LiveChanges {
     pub connection: Rc<LiveConnection>,
     pub remember: Rc<Remember>,
+    pub remade: snapshots::Remade,
 }
 #[async_trait(?Send)]
 impl ChangeHost for LiveChanges {
@@ -219,7 +220,7 @@ impl LiveHistory for History {
         timeout_ms: Option<u64>,
         on_change: Option<Rc<dyn Fn(ChangeRecord)>>,
     ) -> Self {
-        Self::over(LiveChanges { connection, remember }, timeout_ms, on_change)
+        Self::over(LiveChanges { connection, remember, remade: Default::default() }, timeout_ms, on_change)
     }
     fn observed(&self) -> Vec<ObservedChange> {
         self.entries
@@ -385,9 +386,23 @@ impl LiveHistory for History {
             )));
         }
         let bound = || abort::any([self.connection.lifetime.clone(), abort::timeout(RESTORE_MS)]);
-        if let Err(why) = snapshots::check(self, &material, &leaves, &bound).await {
-            return Ok(self.refused(entry, &material, &names, &why));
-        }
+        // A piece Live left that a later change deleted, and Kumi's undo of that one made again, is that clip now. The
+        // pieces as the change left them come first: Live's own undo may have brought one back as it was. And only a
+        // piece's refusal is followed: one for the track or what's in the way stands, with its fix.
+        let material = match snapshots::check(self, &material, &leaves, &bound).await {
+            Ok(()) => material,
+            Err(why) if why.contains(snapshots::PIECE_CHANGED) => {
+                let followed = material.clone().followed(&self.remade);
+                if followed.remnants == material.remnants {
+                    return Ok(self.refused(entry, &material, &names, &why));
+                }
+                if let Err(why) = snapshots::check(self, &followed, &leaves, &bound).await {
+                    return Ok(self.refused(entry, &followed, &names, &why));
+                }
+                followed
+            }
+            Err(why) => return Ok(self.refused(entry, &material, &names, &why)),
+        };
         // What the track holds before: a rollback is only ever made back to it.
         let before = snapshots::state(self, &material, bound()).await;
         let Some(step) = self.open_undo_step(bound()).await else {
@@ -410,6 +425,7 @@ impl LiveHistory for History {
             // The change's own undo didn't happen, and nothing else did: its record says why.
             Err(stopped) => stopped,
             Ok(Ok(restored)) => {
+                self.remade.note(&material.clips, &restored.made);
                 let record = self.update(entry, ChangeState::Undone, None);
                 let mut text = json!({"undone":record.title,"change":record.id,"broughtBack":names});
                 if let Some(short) = restored.short_of() {
