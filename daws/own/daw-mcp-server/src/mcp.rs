@@ -29,9 +29,25 @@ fn tool_list(daw: Daw) -> Value {
         "pid": {"type": "integer", "minimum": 1, "description": format!("The {daw} process to use, from discover, when several run.")},
         "resource": {"type": "string", "description": format!("The {daw} resource or preferences folder to use, from discover, when several run.")},
     });
-    // (SoundCraft's bridge serves ping and status so far: its read, change and listening tools come as it learns them)
+    // (SoundCraft's bridge serves ping, status and read so far: its change and listening tools come as it learns them)
     if daw == Daw::SoundCraft {
-        return Value::Array(finding(daw, "session", &pick).into());
+        let [status, discover] = finding(daw, "session", &pick);
+        let epoch = json!({"epoch": {
+            "type": "string",
+            "description": "The epoch of the answer the ref or parent came from, needed with ref or parent: SoundCraft gives ids out again, so a ref means nothing without its epoch. If another session is open now, or the bridge started again, the call is refused as stale instead of reading something else.",
+        }});
+        let read = read_tool(
+            daw,
+            (
+                "session",
+                "a track's clips, inserts, sends or automation lanes, a clip's notes, an insert's parameters or a lane's points",
+                "The ref of what the rows are in: a track for its clips, inserts, sends or lanes (env), a clip for its notes, an insert for its parameters, a lane for its points.",
+            ),
+            &kinds(daw),
+            &pick,
+            epoch,
+        );
+        return json!([status, discover, read]);
     }
     let kinds = kinds(daw);
     // Each DAW's own words: what it opens, what a read's parent holds, what a view is about.
@@ -60,23 +76,14 @@ fn tool_list(daw: Daw) -> Value {
         Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
     };
     let [status, discover] = finding(daw, place, &pick);
+    let grid = json!({
+        "grid": {"type": "integer", "minimum": 2, "maximum": MAX_GRID, "description": "For kind param: each parameter's text read at this many points across its range (grid), or its steps' texts (items)."},
+    });
+    let read = read_tool(daw, (place, inside, parent), &kinds, &pick, grid);
     let mut list = json!([
         status,
         discover,
-        {
-            "name": "read",
-            "title": format!("Read {daw}"),
-            "description": format!("Rows of one kind from the open {daw} {place}, a page at a time: {{items, nextCursor?, epoch}}. Pass parent (a row's ref) to read what is inside it, such as {inside}; pass the previous page's nextCursor as cursor for the next page. Or pass ref alone for the one object it names. Refs hold until the epoch changes. With several {daw} instances running, pass pid or resource from discover."),
-            "inputSchema": {"type": "object", "properties": merged(&pick, json!({
-                "kind": {"type": "string", "enum": kinds.read, "description": format!("What to read in {daw}.")},
-                "parent": {"type": "string", "description": parent},
-                "ref": {"type": "string", "description": "The ref of one object to read instead of a page of rows."},
-                "cursor": {"type": "string", "description": "The nextCursor an earlier page gave, unchanged."},
-                "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": format!("Rows in a page ({DEFAULT_LIMIT} by default).")},
-                "grid": {"type": "integer", "minimum": 2, "maximum": MAX_GRID, "description": "For kind param: each parameter's text read at this many points across its range (grid), or its steps' texts (items)."},
-            })), "additionalProperties": false},
-            "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
-        },
+        read,
         {
             "name": "snapshot",
             "title": format!("{daw} snapshot"),
@@ -438,6 +445,25 @@ fn tool_list(daw: Daw) -> Value {
     ]);
     list.as_array_mut().expect("a list").extend(catchup.as_array().cloned().unwrap_or_default());
     list
+}
+
+/// The `read` tool, in the DAW's words: what it opens, what a read's parent holds and the words for `parent`; the kinds it
+/// reads; and properties of its own after the common ones.
+fn read_tool(daw: Daw, (place, inside, parent): (&str, &str, &str), kinds: &crate::tools::Kinds, pick: &Value, more: Value) -> Value {
+    let common = json!({
+        "kind": {"type": "string", "enum": kinds.read, "description": format!("What to read in {daw}.")},
+        "parent": {"type": "string", "description": parent},
+        "ref": {"type": "string", "description": "The ref of one object to read instead of a page of rows."},
+        "cursor": {"type": "string", "description": "The nextCursor an earlier page gave, unchanged."},
+        "limit": {"type": "integer", "minimum": 1, "maximum": MAX_LIMIT, "description": format!("Rows in a page ({DEFAULT_LIMIT} by default).")},
+    });
+    json!({
+        "name": "read",
+        "title": format!("Read {daw}"),
+        "description": format!("Rows of one kind from the open {daw} {place}, a page at a time: {{items, nextCursor?, epoch}}. Pass parent (a row's ref) to read what is inside it, such as {inside}; pass the previous page's nextCursor as cursor for the next page. Or pass ref alone for the one object it names. Refs hold until the epoch changes. With several {daw} instances running, pass pid or resource from discover."),
+        "inputSchema": {"type": "object", "properties": merged(pick, merged(&common, more)), "additionalProperties": false},
+        "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
+    })
 }
 
 /// The tools every DAW's host lists: whether its bridge is connected, and which copies of the DAW run with one.
