@@ -7,7 +7,7 @@ use super::fake::{ok, refused, Answer, Fake};
 use daw_bridge::auth::Secret;
 use daw_bridge::files::ensure_secret;
 use daw_bridge::handshake::{ClientHandshake, ClientStep};
-use daw_mcp_server::client::BridgeClient;
+use daw_mcp_server::client::{BridgeClient, RequestError};
 use serde_json::{json, Value};
 use soundcraft_kumi::launch::{Launched, LAUNCHED};
 use soundcraft_kumi::server::{self, Config, End};
@@ -198,7 +198,8 @@ async fn the_host_connects_through_the_discovery_file_and_status_answers_from_th
     let welcome = client.welcome();
     assert_eq!((welcome.identity.daw.as_str(), welcome.identity.pid), ("soundcraft", std::process::id()));
     assert_eq!(welcome.identity.project.as_ref().and_then(|project| project.name.as_deref()), Some("Midnight Groove"));
-    assert_eq!((welcome.methods.clone(), welcome.events.clone()), (vec!["ping".to_string(), "status".into()], vec!["project".to_string()]));
+    let offered = (welcome.methods.clone(), welcome.events.clone());
+    assert_eq!(offered, (vec!["ping".to_string(), "status".into(), "read".into()], vec!["project".to_string()]));
     assert_eq!(client.request("ping", json!({}), WAIT).await.unwrap(), json!({}));
     let status = client.request("status", json!({}), WAIT).await.unwrap();
     assert_eq!((&status["busy"], &status["project"]["name"]), (&json!(false), &json!("Midnight Groove")));
@@ -245,6 +246,25 @@ async fn a_connection_closed_for_a_bad_line_after_its_handshake_leaves_room_for_
     }
     let client = lab.connect().await;
     assert_eq!(client.request("ping", json!({}), WAIT).await.unwrap(), json!({}), "welcomed, and answered");
+}
+
+#[tokio::test]
+async fn the_host_reads_through_the_bridge_and_a_read_while_the_app_is_busy_is_refused_at_once() {
+    let lab = Lab::new().await;
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    assert!(client.welcome().methods.iter().any(|method| method == "read"), "{:?}", client.welcome().methods);
+    // (the lab's SoundCraft shows a session with no tracks)
+    let tracks = client.request("read", json!({"kind": "track"}), WAIT).await.unwrap();
+    assert_eq!((&tracks["items"], &tracks["total"]), (&json!([]), &json!(0)), "{tracks}");
+    assert!(tracks["epoch"].is_string());
+    lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
+    status_until(&client, |status| status["busy"] == "modal").await;
+    let began = Instant::now();
+    let refused = client.request("read", json!({"kind": "track"}), WAIT).await.unwrap_err();
+    let RequestError::Bridge { code, message } = refused else { panic!("{refused:?}") };
+    assert_eq!((code.as_str(), message.as_str()), ("busy", "a dialog is open in SoundCraft (Save Changes); nothing was read"));
+    assert!(began.elapsed() < ms(500), "at once: {:?}", began.elapsed());
 }
 
 #[tokio::test]

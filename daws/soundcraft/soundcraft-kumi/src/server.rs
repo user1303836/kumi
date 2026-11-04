@@ -7,6 +7,7 @@
 //! goes when the bridge ends: when the host that started it goes (its stdin ends), or when SoundCraft quits.
 use crate::control::{Control, Error};
 use crate::launch::Launched;
+use crate::read::Reads;
 use daw_bridge::auth::Secret;
 use daw_bridge::files::{process_alive, read_secret, write_discovery, Discovery, DISCOVERY_SCHEMA};
 use daw_bridge::handshake::{refuse_connection, Offer, ServerAction, ServerConnection};
@@ -118,12 +119,13 @@ pub async fn serve(config: Config, stop: impl Future<Output = ()>) -> Result<End
     let (events, _) = broadcast::channel::<(String, Value)>(64);
     let (ending, ended) = watch::channel(None::<&'static str>);
     let offer = Offer {
-        methods: vec!["ping".into(), "status".into()],
+        methods: vec!["ping".into(), "status".into(), "read".into()],
         events: vec![event::PROJECT.into()],
         heartbeat_ms: config.heartbeat_ms,
         credit_bytes: None,
     };
-    let accepting = tokio::spawn(accept(listener, config.secret_file.clone(), seen.clone(), offer, events.clone(), ended));
+    let serving = Serving { seen: seen.clone(), offer, reads: Arc::new(tokio::sync::Mutex::new(Reads::new(control.clone()))) };
+    let accepting = tokio::spawn(accept(listener, config.secret_file.clone(), serving, events.clone(), ended));
     let rewrite = |identity: &Identity| {
         let _ = write_discovery(&config.discovery_dir, &notice(identity));
     };
@@ -208,13 +210,20 @@ struct Counts {
     authenticated: AtomicUsize,
 }
 
+/// What every connection shares: what the bridge last saw, what it offers, and its reads of the app (one at a time).
+#[derive(Clone)]
+struct Serving {
+    seen: Arc<Mutex<Seen>>,
+    offer: Offer,
+    reads: Arc<tokio::sync::Mutex<Reads>>,
+}
+
 /// Takes connections from loopback only, as many as the protocol allows (the one past that is refused and closed). An
 /// accept that fails is one connection's failure, or a moment out of descriptors: the listener rests and goes on.
 async fn accept(
     listener: TcpListener,
     secret_file: PathBuf,
-    seen: Arc<Mutex<Seen>>,
-    offer: Offer,
+    serving: Serving,
     events: broadcast::Sender<(String, Value)>,
     ended: watch::Receiver<Option<&'static str>>,
 ) {
@@ -238,9 +247,9 @@ async fn accept(
         // (a secret that can't be read closes the connection, as REAPER's bridge does)
         let Ok(secret) = read_secret(&secret_file) else { continue };
         counts.waiting.fetch_add(1, Ordering::SeqCst);
-        let (seen, offer, events, ended, counts) = (seen.clone(), offer.clone(), events.subscribe(), ended.clone(), counts.clone());
+        let (serving, events, ended, counts) = (serving.clone(), events.subscribe(), ended.clone(), counts.clone());
         tokio::spawn(async move {
-            let authenticated = connection(stream, secret, &seen, offer, events, ended, &counts).await;
+            let authenticated = connection(stream, secret, &serving, events, ended, &counts).await;
             let count = if authenticated { &counts.authenticated } else { &counts.waiting };
             count.fetch_sub(1, Ordering::SeqCst);
         });
@@ -262,12 +271,12 @@ async fn turn_away(mut stream: TcpStream) {
 async fn connection(
     stream: TcpStream,
     secret: Secret,
-    seen: &Mutex<Seen>,
-    offer: Offer,
+    serving: &Serving,
     mut events: broadcast::Receiver<(String, Value)>,
     mut ended: watch::Receiver<Option<&'static str>>,
     counts: &Counts,
 ) -> bool {
+    let (seen, offer) = (&*serving.seen, &serving.offer);
     let (mut reader, mut writer) = stream.into_split();
     let clock = Instant::now();
     let now = || clock.elapsed().as_millis() as u64;
@@ -276,6 +285,8 @@ async fn connection(
     let mut chunk = vec![0u8; 64 * 1024];
     let mut heartbeat = tokio::time::interval(Duration::from_millis(offer.heartbeat_ms.max(1)));
     heartbeat.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    // (answers that come later, from work in a task of its own: reads)
+    let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<Vec<u8>>();
     loop {
         let (mut out, mut close) = (Vec::new(), false);
         tokio::select! {
@@ -294,10 +305,14 @@ async fn connection(
                             counts.waiting.fetch_sub(1, Ordering::SeqCst);
                             counts.authenticated.fetch_add(1, Ordering::SeqCst);
                         }
+                        ServerAction::Request(request) if request.method == "read" => {
+                            out.extend(read_request(request, serving, answers.clone()).unwrap_or_default());
+                        }
                         ServerAction::Request(request) => out.extend(answer(&request, seen).encode()),
                     }
                 }
             }
+            Some(bytes) = answered.recv() => out.extend(bytes),
             _ = heartbeat.tick() => {
                 for action in connection.on_tick(now()) {
                     match action {
@@ -334,6 +349,35 @@ async fn connection(
     // (not the connection's state: one closed for a bad line after its handshake is no longer "authenticated" there,
     // and it would be taken from the waiting ones a second time)
     authenticated
+}
+
+/// A `read`: answered when the app has, in a task of its own (one read at a time), so the connection goes on meanwhile.
+/// While the app is busy it's refused at once, nothing read, and one whose deadline has passed isn't started.
+fn read_request(request: Request, serving: &Serving, answers: tokio::sync::mpsc::UnboundedSender<Vec<u8>>) -> Option<Vec<u8>> {
+    if let Some((_, reason)) = &lock(&serving.seen).busy {
+        return Some(Frame::error(request.id, code::BUSY, format!("{reason}; nothing was read")).encode());
+    }
+    let Some(until) = deadline(request.deadline_ms) else {
+        return Some(Frame::error(request.id, code::DEADLINE, "the request's deadline passed before the read started").encode());
+    };
+    let reads = serving.reads.clone();
+    tokio::spawn(async move {
+        let read = reads.lock().await.read(&request.params, until).await;
+        let frame = match read {
+            Ok(result) => Frame::ok(request.id, result),
+            Err((code, why)) => Frame::error(request.id, code, why),
+        };
+        let _ = answers.send(frame.encode());
+    });
+    None
+}
+
+/// When a request's deadline (Unix milliseconds) falls: None once it has passed; a quarter of a minute on when it names
+/// none.
+fn deadline(deadline_ms: Option<u64>) -> Option<Instant> {
+    let Some(deadline_ms) = deadline_ms else { return Some(Instant::now() + Duration::from_secs(15)) };
+    let now_ms = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64);
+    (deadline_ms > now_ms).then(|| Instant::now() + Duration::from_millis(deadline_ms - now_ms))
 }
 
 /// A request's answer: `ping` and `status` from what the bridge last saw; nothing else yet.
