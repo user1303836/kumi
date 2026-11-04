@@ -3,6 +3,16 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.66 — 2026-11-04
+
+Ships with bridge 1.0.104, as 1.24.65 did.
+
+- After /map closes, the mouse works in Kumi again (clicks on the tabs and FOCUS, the wheel) in
+  Ghostty, tmux and other terminals that keep one mouse mode.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.65 — 2026-11-04
 
 Ships with bridge 1.0.104, which Live loads when it restarts. After updating, Kumi offers to quit Live
