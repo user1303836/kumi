@@ -42,8 +42,6 @@ SHA256 = re.compile(r"[0-9a-f]{64}")
 DAWS = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
 # A plan is approved for this long; after that, setup asks again.
 PLAN_TTL_MS = 10 * 60 * 1000
-# A setup step holds `<data>/setup/lock`; one this old was left by a setup that died.
-LOCK_STALE_MS = 15 * 60 * 1000
 DOWNLOAD_TIMEOUT_S = 60
 _ARCH = {"arm64": "aarch64", "aarch64": "aarch64", "x86_64": "x86_64", "amd64": "x86_64"}
 _OS = {"darwin": "apple-darwin", "windows": "pc-windows-msvc", "linux": "unknown-linux-gnu"}
@@ -411,28 +409,29 @@ def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -
 
 @contextlib.contextmanager
 def _setup_lock(data_dir: Path) -> Iterator[None]:
-    """One setup step at a time in this profile (two chats, or a chat and `hermes kumi setup`). A lock older than
-    LOCK_STALE_MS was left by a setup that died, and is taken over."""
-    lock = data_dir / "setup" / "lock"
-    lock.parent.mkdir(parents=True, exist_ok=True)
-    try:
-        lock.mkdir()
-    except FileExistsError:
+    """One setup step at a time in this profile (two chats, or a chat and `hermes kumi setup`): an exclusive OS lock
+    on `<data>/setup/lock` (flock, or msvcrt on Windows), which the OS releases if the process dies. Never waits."""
+    path = data_dir / "setup" / "lock"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "a+b") as handle:  # the file stays; only the lock on it comes and goes
         try:
-            stale = _now_ms() - int(lock.stat().st_mtime * 1000) > LOCK_STALE_MS
-        except FileNotFoundError:
-            stale = True
-        if not stale:
+            if os.name == "nt":
+                import msvcrt
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
             raise SetupError("busy", "Another Kumi setup step is running in this profile; try again when it ends.") from None
-        shutil.rmtree(lock, ignore_errors=True)
         try:
-            lock.mkdir()
-        except FileExistsError:
-            raise SetupError("busy", "Another Kumi setup step is running in this profile; try again when it ends.") from None
-    try:
-        yield
-    finally:
-        shutil.rmtree(lock, ignore_errors=True)
+            yield
+        finally:
+            if os.name == "nt":
+                handle.seek(0)
+                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
 
 
 def _unstamped(plan: Mapping[str, Any]) -> dict:

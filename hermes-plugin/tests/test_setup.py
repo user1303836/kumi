@@ -10,9 +10,10 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tarfile
 import tempfile
-import time
 import unittest
 from unittest import mock
 
@@ -22,6 +23,17 @@ SPEC.loader.exec_module(setup)
 
 TARGET, VERSION = "aarch64-apple-darwin", "1.24.67"
 URL = f"https://github.com/user1303836/kumi/releases/download/v{VERSION}/kumi-{TARGET}.tar.xz"
+# Another process's setup step: it takes setup's lock on a data folder, says so, and holds it until it is killed.
+HOLD_LOCK = """
+import importlib.util, sys, time
+from pathlib import Path
+spec = importlib.util.spec_from_file_location("kumi_setup", sys.argv[1])
+setup = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(setup)
+with setup._setup_lock(Path(sys.argv[2])):
+    print("locked", flush=True)
+    time.sleep(60)
+"""
 
 
 def tar_xz(files: dict[str, bytes], links: dict[str, str] | None = None) -> bytes:
@@ -193,15 +205,18 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(self.install(Served(b""), setup_daw=elsewhere)["error"]["code"], "plan_changed")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, elsewhere.calls, "nothing approved was installed")
 
-    def test_one_setup_step_runs_at_a_time_and_a_dead_ones_lock_is_taken_over(self) -> None:
+    def test_one_setup_step_runs_at_a_time_and_a_dead_setups_lock_frees_itself(self) -> None:
         self.plan()
-        lock = self.data / "setup" / "lock"
-        lock.mkdir()
+        holder = subprocess.Popen([sys.executable, "-c", HOLD_LOCK, SPEC.origin, str(self.data)],
+                                  stdout=subprocess.PIPE, text=True)
+        self.addCleanup(holder.wait)
+        self.addCleanup(holder.kill)
+        self.assertEqual(holder.stdout.readline().strip(), "locked")
         self.assertEqual(self.install(Served(BUNDLE))["error"]["code"], "busy")
-        long_ago = time.time() - setup.LOCK_STALE_MS / 1000 - 60
-        os.utime(lock, (long_ago, long_ago))
+        holder.kill()  # the setup holding the lock dies: the OS lets go of its lock
+        holder.wait()
+        holder.stdout.close()
         self.assertTrue(self.install(Served(BUNDLE))["ok"], "a busy refusal leaves the approved plan in place")
-        self.assertFalse(lock.exists())
 
     def test_a_connection_that_breaks_mid_download_installs_nothing(self) -> None:
         self.plan()
