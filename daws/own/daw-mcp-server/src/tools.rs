@@ -76,7 +76,7 @@ pub fn kinds(daw: Daw) -> Kinds {
         },
         // (what soundcraft-kumi's read takes: no bodies or changes yet)
         Daw::SoundCraft => Kinds {
-            read: &["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note"],
+            read: &["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"],
             bodies: &[],
             outside_undo: &[],
         },
