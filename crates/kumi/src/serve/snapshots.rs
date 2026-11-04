@@ -27,10 +27,15 @@ const TRIES: u32 = 25;
 /// How long [`Snapshots::flush`] waits for the writer.
 const FLUSH: Duration = Duration::from_secs(5);
 
+/// The writer's result for one write: whether its file is on disk.
+type Written = tokio::sync::oneshot::Sender<std::io::Result<()>>;
+
 enum Write {
     File {
         path: PathBuf,
         snapshot: Value,
+        /// Told once the file is on disk, or why it isn't.
+        done: Option<Written>,
     },
     /// Told once every write sent before it is done.
     Flush(Sender<()>),
@@ -84,6 +89,24 @@ impl Snapshots {
     /// [`Snapshots::write`] taking `body` itself: the envelope goes into it here, and it's serialized and written on the
     /// writer thread, in order with every other write, so the runtime's thread neither copies nor serializes it.
     pub fn write_owned(&self, name: &str, body: Value) -> std::io::Result<u64> {
+        let (seq, write) = self.stamped(name, body, None)?;
+        self.send(write)?;
+        Ok(seq)
+    }
+
+    /// [`Snapshots::write_owned`], then waits until the file is on disk (written, flushed and renamed into place), or
+    /// says why it isn't: for a file something else then relies on (an artifact's record, before its id is given out).
+    /// Writes land in the order they're made, so one made after this returns lands after it.
+    pub async fn write_durably(&self, name: &str, body: Value) -> std::io::Result<u64> {
+        let (done, written) = tokio::sync::oneshot::channel();
+        let (seq, write) = self.stamped(name, body, Some(done))?;
+        self.send(write)?;
+        written.await.map_err(|_| std::io::Error::other("the snapshot writer stopped"))??;
+        Ok(seq)
+    }
+
+    /// Snapshot `name`'s write: `body`'s fields in the envelope, with its `seq`.
+    fn stamped(&self, name: &str, body: Value, done: Option<Written>) -> std::io::Result<(u64, Write)> {
         let path = self.path(name)?;
         let seq = (self.seq.get() + 1).max(now_us());
         self.seq.set(seq);
@@ -96,17 +119,26 @@ impl Snapshots {
         snapshot.insert("seq".into(), json!(seq));
         snapshot.insert("at".into(), json!(kumi_common::time::now_ms()));
         snapshot.insert("owner".into(), json!({"profile": owner.profile_id, "session_id": owner.session_id, "pid": std::process::id()}));
-        drop(owner);
-        let write = Write::File { path, snapshot: Value::Object(snapshot) };
-        // Written in place only when there's no writer thread to take it.
+        Ok((seq, Write::File { path, snapshot: Value::Object(snapshot), done }))
+    }
+
+    /// To the writer thread; written in place only when there's none to take it.
+    fn send(&self, write: Write) -> std::io::Result<()> {
         let unsent = match &self.writer {
             Some(writer) => writer.send(write).err().map(|failed| failed.0),
             None => Some(write),
         };
-        if let Some(Write::File { path, snapshot }) = unsent {
-            replace(&path, &serialized(&snapshot)?)?;
+        if let Some(Write::File { path, snapshot, done }) = unsent {
+            let written = serialized(&snapshot).and_then(|bytes| replace(&path, &bytes));
+            let failed = written.as_ref().err().map(|error| std::io::Error::new(error.kind(), error.to_string()));
+            if let Some(done) = done {
+                let _ = done.send(written);
+            }
+            if let Some(error) = failed {
+                return Err(error);
+            }
         }
-        Ok(seq)
+        Ok(())
     }
 
     /// Waits (a few seconds at most) until every snapshot written so far is on disk.
@@ -161,7 +193,8 @@ fn newest_seq(dir: &Path) -> u64 {
     newest
 }
 
-/// The writer thread: the newest write of each file in what's waiting, in order; a flush is told once the writes
+/// The writer thread: the writes waiting, in the order they were made. A write followed at once by another of the same
+/// file is skipped (the next replaces it straight away) unless someone waits for it; a flush is told once the writes
 /// before it are done.
 fn write_files(writes: Receiver<Write>) {
     while let Ok(first) = writes.recv() {
@@ -169,24 +202,26 @@ fn write_files(writes: Receiver<Write>) {
         while let Ok(more) = writes.try_recv() {
             waiting.push(more);
         }
-        let mut files: Vec<(PathBuf, Value)> = Vec::new();
-        let mut flushed = Vec::new();
-        for write in waiting {
+        let mut waiting = waiting.into_iter().peekable();
+        while let Some(write) = waiting.next() {
             match write {
-                Write::File { path, snapshot } => match files.iter_mut().find(|(waiting, _)| *waiting == path) {
-                    Some(newer) => newer.1 = snapshot,
-                    None => files.push((path, snapshot)),
-                },
-                Write::Flush(done) => flushed.push(done),
+                Write::File { path, snapshot, done } => {
+                    let superseded = done.is_none() && matches!(waiting.peek(), Some(Write::File { path: next, .. }) if *next == path);
+                    if superseded {
+                        continue;
+                    }
+                    let written = serialized(&snapshot).and_then(|bytes| replace(&path, &bytes));
+                    if let Err(error) = &written {
+                        say(&format!("kumi serve: {} not written: {error}", path.display()));
+                    }
+                    if let Some(done) = done {
+                        let _ = done.send(written);
+                    }
+                }
+                Write::Flush(done) => {
+                    let _ = done.send(());
+                }
             }
-        }
-        for (path, snapshot) in files {
-            if let Err(error) = serialized(&snapshot).and_then(|bytes| replace(&path, &bytes)) {
-                say(&format!("kumi serve: {} not written: {error}", path.display()));
-            }
-        }
-        for done in flushed {
-            let _ = done.send(());
         }
     }
 }
@@ -251,6 +286,24 @@ mod tests {
             .collect();
         assert!(left.is_empty(), "nothing half-written is left beside them");
         assert!(snapshots.is_mine("status"));
+    }
+
+    #[tokio::test]
+    async fn a_write_waited_for_is_on_disk_when_it_returns_after_every_write_made_before_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        snapshots.write_owned("map/r7", json!({"revision": "r7"})).unwrap();
+        let seq = snapshots.write_durably("map/current", json!({"revision": "r7"})).await.unwrap();
+        assert_eq!(read(&dir.path().join("map/current.json"))["seq"], json!(seq), "on disk, without a flush");
+        assert_eq!(read(&dir.path().join("map/r7.json"))["revision"], "r7", "the map it points at landed first");
+    }
+
+    #[tokio::test]
+    async fn a_write_waited_for_that_fails_says_why() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("state"), b"a file, not a folder").unwrap();
+        let snapshots = Snapshots::new(dir.path().join("state"));
+        assert!(snapshots.write_durably("artifacts", json!({})).await.is_err());
     }
 
     #[test]
