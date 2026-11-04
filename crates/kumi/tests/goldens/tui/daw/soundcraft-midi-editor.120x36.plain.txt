@@ -19,7 +19,7 @@
 
                                        Try                                        HISTORY ────────────────────────────
                              “What's on this track?”                              Nothing changed yet
-                             “Set the tempo to 124”
+                            “Which tracks are muted?”
                        “Why might my low end sound muddy?”
 
     Kumi keeps each session's conversations: /conversations goes back to one.
