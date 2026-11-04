@@ -127,18 +127,20 @@ struct Pool {
     connections: usize,
     owed: Duration,
     idle: Mutex<Vec<Channel>>,
-    /// Connections open: idle, in use, or waiting for an answer the app owes. Each holds a [`Slot`] of it.
-    open: AtomicUsize,
+    /// Connections open: idle, in use, or waiting for an answer the app owes. Each holds a [`Slot`] of it: the count
+    /// alone, never the pool, which holds the idle ones.
+    open: Arc<AtomicUsize>,
     ids: AtomicU64,
 }
 
 /// One of the connections Kumi may open, held by a connection and given back when the connection closes, however the
-/// connection goes.
-struct Slot(Arc<Pool>);
+/// connection goes. It holds only the count, as SoundCraft's own server's slot does: an idle connection holding its pool
+/// would keep the pool, and every connection in it, open once the last `Control` has gone.
+struct Slot(Arc<AtomicUsize>);
 
 impl Drop for Slot {
     fn drop(&mut self) {
-        self.0.open.fetch_sub(1, Ordering::SeqCst);
+        self.0.fetch_sub(1, Ordering::SeqCst);
     }
 }
 
@@ -158,7 +160,7 @@ impl Control {
             connections,
             owed,
             idle: Mutex::default(),
-            open: AtomicUsize::new(0),
+            open: Arc::default(),
             ids: AtomicU64::new(0),
         }))
     }
@@ -188,7 +190,8 @@ impl Control {
         }
         let mut line = serde_json::to_vec(&request).expect("a request is JSON");
         line.push(b'\n');
-        if line.len() > MAX_REQUEST {
+        // (the app's limit is on the line without its newline)
+        if line.len() > MAX_REQUEST + 1 {
             return Err(Error::Protocol(format!("a request of {} MiB is longer than SoundCraft reads", line.len() >> 20)));
         }
         // (dropped before its request is sent whole, a connection closes and gives its slot back: the app runs nothing)
@@ -252,8 +255,8 @@ impl Control {
             return Err(Error::Busy);
         }
         // (from here a connect that fails, or is dropped, gives the slot back)
-        let slot = Slot(self.0.clone());
-        Channel::open(self.0.address, CONNECT.min(until.saturating_duration_since(Instant::now())), slot).await
+        let slot = Slot(self.0.open.clone());
+        Channel::open(self.0.address, until, slot).await
     }
 
     fn give_back(&self, channel: Channel) {
@@ -315,10 +318,12 @@ struct Channel {
 }
 
 impl Channel {
-    /// A new connection. An app that has as many connections as it takes refuses it at once and closes it without reading
-    /// it, so the refusal is read before any request is sent: on Windows, the reset that closing sends would throw it
-    /// away.
-    async fn open(address: SocketAddr, within: Duration, slot: Slot) -> Result<Self, Error> {
+    /// A new connection, made by `until`. An app that has as many connections as it takes refuses it at once and closes it
+    /// without reading it, so a refusal is read for a moment before any request is sent: on Windows, the reset that
+    /// closing sends would throw it away.
+    async fn open(address: SocketAddr, until: Instant, slot: Slot) -> Result<Self, Error> {
+        let left = || until.saturating_duration_since(Instant::now());
+        let within = CONNECT.min(left());
         let stream = match tokio::time::timeout(within, TcpStream::connect(address)).await {
             Ok(Ok(stream)) => stream,
             Ok(Err(error)) => return Err(Error::Unreachable(format!("nothing answers on {address}: {error}"))),
@@ -327,15 +332,22 @@ impl Channel {
         let _ = stream.set_nodelay(true);
         let (read, write) = stream.into_split();
         let mut channel = Self { reader: BufReader::new(read), writer: write, line: Vec::new(), _slot: slot };
-        if let Ok(Ok(())) = tokio::time::timeout(REFUSAL_WAIT, channel.reader.get_ref().readable()).await {
-            // (before any request, what comes is a refusal, or the connection closing)
-            let said = tokio::time::timeout(REFUSAL_WAIT, channel.read_line()).await;
-            let refused = |line: &[u8]| serde_json::from_slice::<Value>(line).ok()?.get("error")?.as_str().map(refusal);
-            return Err(match said {
-                Ok(Ok(Some(line))) => refused(&line)
-                    .unwrap_or_else(|| Error::Garbled(format!("a line before any request: {}", String::from_utf8_lossy(&line)))),
-                _ => Error::Unreachable(format!("{address} closed the connection at once")),
-            });
+        if let Ok(Ok(())) = tokio::time::timeout(REFUSAL_WAIT.min(left()), channel.reader.get_ref().readable()).await {
+            // Before any request, what comes is a refusal or the connection closing: nothing was sent, so nothing ran.
+            match tokio::time::timeout(REFUSAL_WAIT.min(left()), channel.read_line()).await {
+                Ok(Ok(Some(line))) => {
+                    let said =
+                        serde_json::from_slice::<Value>(&line).ok().and_then(|answer| answer.get("error")?.as_str().map(str::to_owned));
+                    return Err(match said.as_deref() {
+                        Some("too many control connections") => Error::Crowded,
+                        _ => Error::Protocol(format!("a line before any request: {}", String::from_utf8_lossy(&line))),
+                    });
+                }
+                Ok(Ok(None) | Err(_)) => return Err(Error::Unreachable(format!("{address} closed the connection at once"))),
+                // (readiness the socket didn't have, which tokio allows: nothing came, and the connection is used)
+                Err(_) if channel.line.is_empty() => {}
+                Err(_) => return Err(Error::Protocol("part of a line before any request".into())),
+            }
         }
         Ok(channel)
     }

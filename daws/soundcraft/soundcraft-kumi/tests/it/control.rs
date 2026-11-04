@@ -71,26 +71,63 @@ async fn a_missed_deadline_keeps_its_connection_until_the_owed_answer_comes_and_
     assert_eq!(fake.requests().iter().filter(|request| command(request) == "slow").count(), 1, "sent once");
 }
 
+/// Waits up to two seconds for `done`.
+async fn soon(done: impl Fn() -> bool) -> bool {
+    for _ in 0..80 {
+        if done() {
+            return true;
+        }
+        tokio::time::sleep(ms(25)).await;
+    }
+    done()
+}
+
 #[tokio::test]
-async fn a_request_whose_caller_stops_waiting_gives_its_connection_back_and_nothing_stays_busy() {
+async fn a_request_whose_caller_stops_waiting_once_it_is_sent_waits_for_its_answer_and_its_connection_works_on() {
+    let fake = Fake::start(16, |request| match command(request) {
+        "late" => Answer::After(ms(300), ok(json!("late"))),
+        _ => Answer::Now(ok(json!("quick"))),
+    })
+    .await;
+    let control = Control::with_limits(fake.port(), None, 2, SECOND);
+    // (the caller gives up once the request has gone, as an outer timeout or a stop does: its future is dropped)
+    assert!(tokio::time::timeout(ms(100), control.execute("late", json!({}), SECOND)).await.is_err(), "no answer yet");
+    assert_eq!(fake.requests().iter().map(command).collect::<Vec<_>>(), ["late"], "sent");
+    assert_eq!(control.open(), 1, "kept for the answer the app owes");
+    tokio::time::sleep(ms(600)).await;
+    assert_eq!(control.execute("quick", json!({}), SECOND).await, Ok(json!("quick")));
+    assert_eq!(fake.connections(), 1, "the owed answer came, and its connection took the next request");
+}
+
+#[tokio::test]
+async fn requests_whose_callers_stop_waiting_give_their_connections_back_and_nothing_stays_busy() {
     let fake = Fake::start(16, |request| match command(request) {
         "stuck" => Answer::Never,
         _ => Answer::Now(ok(json!("quick"))),
     })
     .await;
     let control = Control::with_limits(fake.port(), None, 2, ms(200));
-    // (each caller gives up first, as an outer timeout or a stop does: the request's future is dropped mid-flight)
     for _ in 0..3 {
-        let _ = tokio::time::timeout(ms(10), control.execute("stuck", json!({}), SECOND)).await;
+        let _ = tokio::time::timeout(ms(100), control.execute("stuck", json!({}), SECOND)).await;
     }
-    for _ in 0..40 {
-        if control.open() == 0 {
-            break;
-        }
-        tokio::time::sleep(ms(25)).await;
-    }
-    assert_eq!(control.open(), 0, "each connection waited its owed while, then closed");
+    assert_eq!(fake.requests().len(), 2, "two went, and the third found no connection to go on");
+    assert!(soon(|| control.open() == 0).await, "each connection waited its owed while, then closed");
     assert_eq!(control.execute("quick", json!({}), SECOND).await, Ok(json!("quick")), "and the slots came back");
+}
+
+#[tokio::test]
+async fn once_every_control_has_gone_its_idle_connections_close() {
+    let fake = Fake::start(16, |_| Answer::Now(ok(json!(1)))).await;
+    let control = Control::new(fake.port(), None);
+    let (a, b) = tokio::join!(control.execute("one", json!({}), SECOND), control.execute("two", json!({}), SECOND));
+    assert_eq!((a, b), (Ok(json!(1)), Ok(json!(1))));
+    assert_eq!((control.open(), fake.open()), (2, 2), "both connections idle");
+    let clone = control.clone();
+    drop(control);
+    tokio::time::sleep(ms(100)).await;
+    assert_eq!(fake.open(), 2, "a clone still has them");
+    drop(clone);
+    assert!(soon(|| fake.open() == 0).await, "closed with the last clone: {} open", fake.open());
 }
 
 #[tokio::test]
