@@ -1,6 +1,6 @@
 # nextest runs many test binaries at once. A few correctness tests still give a peer a real deadline, so they run
-# alone, and the tests beside them can't make them late. No test asserts how fast something is (AGENTS.md, "Minimal
-# CI"): a speed is measured on purpose, never in the suite.
+# alone, and the tests beside them can't make them late. A new test asserts no duration (AGENTS.md, "Minimal CI"); the
+# older ones that still do are debt, turned into waits on a state when they're next touched.
 [[profile.default.overrides]]
 # The Remote Script adapter's tests give each local connection 500 ms. Two of kept conversations' tests look at a file
 # within 2 s and 3 s of writing it, as another Kumi would. SoundCraft's control client's tests count connections around
@@ -21,8 +21,9 @@ threads-required = "num-cpus"
 # - the long listening, form and rendering simulations (whole songs analysed), the video tests (ffmpeg), and the music
 #   scans that hear half-minute songs through (music_scan's, taste's keep): a scan over songs too short to hear, and the
 #   tests that stop one inside a song, stay;
-# - the interoperability tests run beside the official MCP and model SDKs (npm), and the migration from the published
-#   1.7.5 (downloaded);
+# - the interoperability tests run beside the official MCP and model SDKs (npm), the bridge's benchmark harness (its
+#   recorded gates, and its analysis worker run with a full input), and the migration from the published 1.7.5
+#   (downloaded);
 # - the long sample-by-sample sweeps of the timing building blocks (kit::clock), each in every way Live and Max can differ:
 #   the short tests beside them, which stay, check the same rules, except tempo changes and jumps by whole beats, which
 #   only these sweeps check;
@@ -48,7 +49,7 @@ not (
   | (binary_id(kumi-listening::it) & test(/^music_scan::(the_scan_hears|a_stopped_scan|another_style_model|the_app_sees|a_song_away|songs_moved|while_hearing|a_pause)/))
   | (binary_id(kumi-listening::it) & test(/^music_taste::keep_hears/))
   | (binary_id(kumi-ai::it) & test(/^ai_sdk::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^lifecycle_migration::/))
+  | (binary_id(ableton-mcp-server::it) & test(/^(benchmark|lifecycle_migration)::/))
   | ((binary_id(kumi-agent::it) & test(/^mcp::/)) & not test(/the_bridges_read_buffer/))
   | ((binary_id(kumi-daw-ableton::it) & test(/^media_foundations::/)) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
   | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)
@@ -114,7 +115,7 @@ default-filter = '''
   | (binary_id(kumi-listening::it) & test(/^(effects|sound)::/))
   | (binary_id(kumi-listening::it) & test(/^style_references::/))
   | (binary_id(kumi-ai::it) & test(/^ai_sdk::/))
-  | (binary_id(ableton-mcp-server::it) & test(/^lifecycle_migration::/))
+  | (binary_id(ableton-mcp-server::it) & test(/^(benchmark|lifecycle_migration)::/))
   | ((binary_id(kumi-agent::it) & test(/^mcp::/)) & not test(/the_bridges_read_buffer/))
   | ((binary_id(kumi-daw-ableton::it) & test(/^media_foundations::/)) & test(/a_quiet_listen_is_one_stretch|a_songs_form_sections_where/))
   | (test(/match(es)?_(the_)?(source|typescript)|source_oracle|oracle|matches?_typescript/)

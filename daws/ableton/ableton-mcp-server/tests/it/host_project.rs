@@ -274,6 +274,46 @@ async fn live_export_cache_and_guarded_backup_lifecycle() {
     // Nothing was written: the transaction is as the preview left it, not left applying.
     assert_eq!(host.transaction_record(args["transactionId"].as_str().unwrap()).unwrap().borrow()["state"], "previewed");
 }
+/// A host whose Set is `tracks` copies of the simulator's first track.
+fn big_set(tracks: usize) -> (Rc<Adapter>, McpHost) {
+    let adapter = adapter(json!({}));
+    let mut whole = serde_json::to_value(adapter.sim.snapshot().unwrap()).unwrap();
+    let track = whole["tracks"][0].clone();
+    whole["tracks"] = json!((0..tracks)
+        .map(|i| {
+            let mut copy = track.clone();
+            copy["ref"] = json!(format!("track:big-{i}"));
+            copy["name"] = json!(format!("Track {i}"));
+            copy
+        })
+        .collect::<Vec<_>>());
+    *adapter.whole.borrow_mut() = Some(serde_json::from_value(whole).unwrap());
+    let host = pinned_host(adapter.clone());
+    (adapter, host)
+}
+#[tokio::test]
+async fn a_big_sets_export_yields_to_the_runtime_while_it_works() {
+    // 600 copies of the simulator's first track: the export is a second or more of work in a debug build. The bridge
+    // serves every request on one thread, and those waiting behind the export (FOCUS's poll comes twice a second) waited
+    // for all of it; the ticker here is one of them. An export that never yields leaves it a tick or two; one that does
+    // lets it tick throughout, even at Windows' 15.6 ms timer.
+    let (_adapter, host) = big_set(600);
+    let ticks = RefCell::new(0_usize);
+    let ticker = async {
+        loop {
+            *ticks.borrow_mut() += 1;
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    };
+    let first = tokio::select! {
+        first = call(&host, "live_project_snapshot_export", json!({"limit":200})) => first,
+        _ = ticker => unreachable!(),
+    };
+    assert_eq!(first["result"]["isError"], false, "{first}");
+    assert!(first["result"]["content"][0]["text"]["page"]["total"].as_u64().unwrap() > 600);
+    let ticks = ticks.into_inner();
+    assert!(ticks >= 5, "the ticker ran {ticks} times during the export");
+}
 fn normalize_backup(value: &Value, root: &str, id: &str, key: &str) -> Value {
     if key == "mtimeMs" || key == "expiresAt" {
         return json!(0);

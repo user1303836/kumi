@@ -211,6 +211,52 @@ async fn reaper_renders_a_part_to_hear_it_and_plays_what_it_heard_out_loud() {
         .await;
 }
 
+/// (#361 review K22) Esc stops what Kumi plays out loud, as it stops the answer: the listening call's signal, cancelled
+/// after the call answered while the play goes on. A play nobody stopped plays on.
+#[tokio::test(flavor = "current_thread")]
+async fn esc_stops_kumis_play_out_loud_and_a_play_nobody_stopped_plays_on() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            let (reaper, _) = integration(Daw::Reaper, home.path(), create_reaper_integration);
+            reaper.start(Signal::new()).await.unwrap();
+            let observed = reaper.observe(Signal::new(), None).await.unwrap();
+            let context: Value = serde_json::from_str(&observed.context).unwrap();
+            let track = context["tracks"][2]["ref"].as_str().unwrap().to_owned();
+            let audition = |signal: Signal| {
+                let tool = tool(&observed, "audition");
+                let input = object(json!({"candidates": [{"track": track}], "from_beat": 16, "beats": 8}));
+                async move { tool.execute(input, signal).await.unwrap() }
+            };
+            // (the simulator's play state is read with a bound: on a busy runner the play may start, or stop, a moment late)
+            let playing_is = |want: bool| {
+                let listening = script.listening();
+                async move {
+                    for _ in 0..250 {
+                        if listening.playing().is_some() == want {
+                            return true;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                    false
+                }
+            };
+            let answer = Signal::new();
+            assert!(!audition(answer.clone()).await.is_error);
+            assert!(playing_is(true).await, "Kumi plays what it heard");
+            answer.cancel();
+            assert!(playing_is(false).await, "Esc stopped it");
+            let answer = Signal::new();
+            assert!(!audition(answer.clone()).await.is_error);
+            assert!(playing_is(true).await, "plays on");
+            reaper.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
 #[tokio::test(flavor = "current_thread")]
 async fn a_listen_after_kumis_last_one_ended_by_itself_says_nothing_was_stopped() {
     tokio::task::LocalSet::new()

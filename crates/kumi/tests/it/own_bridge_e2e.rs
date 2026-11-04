@@ -956,7 +956,9 @@ async fn renoise_with_changes(
 
 /// (M7) Kumi (another run of it, when called again) on the Renoise the simulator plays.
 async fn kumi_on_renoise(home: &std::path::Path) -> (Rc<dyn Integration>, Observation, Rc<RefCell<Vec<ChangeRecord>>>) {
-    let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, home)), id: Cell::new(0) });
+    // (a busy runner's simulated bridge may answer a render's start or status late: the host gives each 30 s)
+    let host = Host::new(Daw::Renoise, home).with_listening_timeout(std::time::Duration::from_secs(30));
+    let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
     let connect: Connect = Rc::new(move |_| {
         let endpoint = endpoint.clone();
         async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
@@ -1229,6 +1231,60 @@ async fn variations_of_a_chop_are_slots_of_their_own_and_an_edited_take_is_never
                 ["V2 \u{b7} Pattern 01 \u{b7} kept", "V3 \u{b7} Pattern 01"]
             );
             assert_eq!(told.borrow().len(), 5, "the rename, then one change for the drop");
+            renoise.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
+}
+
+/// (M7, #407) Each pattern take is rendered before it's shown: one that clips where the source doesn't is turned down to the
+/// source's peak by its volume column (a change of its own), the source as it was, and its line says what was heard; a
+/// turn-down that didn't lower its peak isn't repeated. While Renoise plays, nothing is rendered.
+#[tokio::test(flavor = "current_thread")]
+async fn a_take_that_clips_where_the_source_doesnt_is_turned_down_and_nothing_renders_while_renoise_plays() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let (script, simulator, renoise, observed, told) = renoise_with_changes(home.path()).await;
+            script.set_lines(
+                2,
+                1,
+                json!([
+                    {"line": 0, "notes": [{"col": 1, "note": "C-4", "instrument": "00"}]},
+                    {"line": 2, "notes": [{"col": 1, "note": "D-4", "instrument": "00", "volume": "30"}]},
+                    {"line": 4, "notes": [{"col": 1, "note": "E-4", "instrument": "00"}]},
+                    {"line": 6, "notes": [{"col": 1, "note": "C-4", "instrument": "00"}]},
+                ]),
+            );
+            let variations = tool(&observed, "variations");
+            let source = json!({"patternRef": "pattern:2", "trackRef": "track:1", "first": 0, "last": 7});
+            run_tool(&tool(&observed, "renoise_read"), json!({"kind": "pattern"})).await;
+            let rolls = json!([{"direction": "rolls", "ops": [{"op": "retrig", "amount": 0.5}]}]);
+            let made = run_tool(&variations, json!({"action": "make", "source": source, "seed": 5, "takes": rolls})).await;
+            assert!(made["takes"][0]["line"].as_str().unwrap().contains(" · heard: peak −"), "{made}");
+            assert_eq!(told.borrow().len(), 1);
+            // (the song's end plays louder: the takes clip there, the source doesn't; the simulator's level there doesn't follow a
+            // take's volume column, as a plug-in that ignores velocity wouldn't: turned down once, it's not turned down again)
+            let lines = script.lines(2, 1);
+            script.listening().set_level_from("1:track:1", 32., 1.0);
+            let made = run_tool(&variations, json!({"action": "make", "source": source, "seed": 6, "takes": rolls})).await;
+            let line = made["takes"][0]["line"].as_str().unwrap();
+            let said = " · turned down 10.5 dB to the source's peak (c3): its render clipped (peak −0.0 dBFS) · heard: it clips (peak −0.0 dBFS) (turning it down didn't lower its peak)";
+            assert!(line.ends_with(said), "{made}");
+            assert!(!line.contains("drawn again"), "{made}");
+            assert_eq!(told.borrow().len(), 3, "the take, and one turn-down: {made}");
+            // (each note's level 10.5 dB down: full (80) to 26, D-4's 30 to 0E; the source as it was)
+            let take = script.variation_slots()[1].1;
+            let volumes: Vec<Value> =
+                script.lines(take, 1).as_array().unwrap().iter().map(|row| row["notes"][0]["volume"].clone()).collect();
+            assert_eq!(volumes, [json!("26"), json!("0E"), json!("26"), json!("26")], "{}", script.lines(take, 1));
+            assert_eq!(script.lines(2, 1), lines, "the source is as it was");
+            // (Renoise plays: a render would stop it)
+            script.set_transport_playing(true);
+            let renders = script.listening().renders().len();
+            let made = run_tool(&variations, json!({"action": "make", "source": source, "seed": 7, "takes": rolls})).await;
+            assert!(made["heard"][0].as_str().unwrap().starts_with("Renoise is playing"), "{made}");
+            assert_eq!(script.listening().renders().len(), renders, "nothing rendered");
             renoise.close().await.unwrap();
             simulator.stop();
         })

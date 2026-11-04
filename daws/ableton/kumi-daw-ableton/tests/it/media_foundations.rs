@@ -1203,6 +1203,28 @@ async fn a_sections_timing_counts_and_a_part_that_builds_against_one_that_doesnt
     assert!(level.gaps.join(" ").contains("the reference builds up over time"));
 }
 #[tokio::test]
+async fn a_song_length_file_is_analyzed_whole_and_part_by_part() {
+    use kumi_media::audio::analyze::*;
+    let dir = tempfile::tempdir().unwrap();
+    let samples = deterministic_noise(75 * 48000);
+    let file = dir.path().join("long.wav");
+    wav(&file, &[samples.clone(), samples], 16);
+    let r = analyze_file(file.to_str().unwrap(), Default::default()).await.unwrap();
+    assert_eq!(r.analyzed.focus, "mix");
+    assert_eq!(r.spectrogram.rows[0].cells.chars().count(), 24);
+    assert_eq!(r.over_time.lufs.len(), 16);
+    let part = analyze_file(file.to_str().unwrap(), AnalyzeOptions { start: Some(30.0), seconds: Some(30.0), ..Default::default() })
+        .await
+        .unwrap();
+    assert_eq!(part.analyzed.from, "0:30");
+    assert_eq!(part.analyzed.to, "1:00");
+    assert!(analyze_file(file.to_str().unwrap(), AnalyzeOptions { start: Some(90.0), ..Default::default() })
+        .await
+        .unwrap_err()
+        .0
+        .contains("no audio in that part of the file: it's 1:15 long"));
+}
+#[tokio::test]
 async fn native_analysis_and_matching_match_the_typescript_reference_for_seeded_signals() {
     use kumi_media::audio::matching::closeness;
     let reference: serde_json::Value = serde_json::from_str(include_str!("../support/media/analysis-reference.json")).unwrap();

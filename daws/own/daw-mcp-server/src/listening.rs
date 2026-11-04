@@ -380,6 +380,11 @@ impl Host {
         .flatten()
     }
 
+    /// A listening call's limit: its own, or the host's floor when that's longer ([`Host::with_listening_timeout`]).
+    fn limit(&self, own: Duration) -> Duration {
+        own.max(self.listening_floor)
+    }
+
     /// Asks the bridge, and answers with its JSON or the call's error. A bridge without the method is older than M5.
     async fn listening_call(&self, method: &str, params: Value, pick: &Pick, timeout: Duration) -> Result<Value, (Value, bool)> {
         match self.call(method, params, pick, timeout).await {
@@ -447,7 +452,7 @@ impl Host {
     /// or no longer has, are ended here too.
     async fn learn_ends(&self, pick: &Pick, all: bool) {
         for id in self.jobs().unasked(all) {
-            match self.call("listen_status", json!({"jobId": id}), pick, STATUS_TIMEOUT).await {
+            match self.call("listen_status", json!({"jobId": id}), pick, self.limit(STATUS_TIMEOUT)).await {
                 Ok(answer) if answer.get("state").and_then(Value::as_str).is_some_and(|state| TERMINAL.contains(&state)) => {
                     self.jobs().ended(&id)
                 }
@@ -467,13 +472,13 @@ impl Host {
         if let Some(free) = self.tidy_folder().await {
             params.insert("freeBytes".into(), free.into());
         }
-        let mut answer = match self.listening_call(method, Value::Object(params), pick, START_TIMEOUT).await {
+        let mut answer = match self.listening_call(method, Value::Object(params), pick, self.limit(START_TIMEOUT)).await {
             Ok(answer) => answer,
             Err(refused) => return refused,
         };
         if let Err(why) = self.jobs().add(&id, kind, files_of(&answer)) {
             // (the bridge has it running: it's let go of, so it doesn't render into a job nobody follows)
-            let _ = self.call("listen_cancel", json!({"jobId": id}), pick, STATUS_TIMEOUT).await;
+            let _ = self.call("listen_cancel", json!({"jobId": id}), pick, self.limit(STATUS_TIMEOUT)).await;
             return (json!({"error": why, "code": "busy", "busy": true, "connected": true, "daw": self.daw().id()}), true);
         }
         answer["jobId"] = id.into();
@@ -501,7 +506,7 @@ impl Host {
         let Some(job) = self.jobs().get(&id) else { return unknown_job(&id) };
         let began = Instant::now();
         loop {
-            let answer = match self.call("listen_status", json!({"jobId": id}), &pick, STATUS_TIMEOUT).await {
+            let answer = match self.call("listen_status", json!({"jobId": id}), &pick, self.limit(STATUS_TIMEOUT)).await {
                 Ok(mut answer) => {
                     answer["jobId"] = id.clone().into();
                     answer["kind"] = job.kind.into();
@@ -544,7 +549,7 @@ impl Host {
         if self.jobs().get(&id).is_none() {
             return unknown_job(&id);
         }
-        match self.listening_call("listen_cancel", json!({"jobId": id}), &pick, STATUS_TIMEOUT).await {
+        match self.listening_call("listen_cancel", json!({"jobId": id}), &pick, self.limit(STATUS_TIMEOUT)).await {
             Ok(mut answer) => {
                 if answer.get("state").and_then(Value::as_str).is_some_and(|state| TERMINAL.contains(&state)) {
                     self.jobs().ended(&id);
@@ -618,7 +623,7 @@ impl Host {
             Ok(None) => {}
             Err(why) => return bad(why),
         }
-        match self.listening_call("audition_stop", Value::Object(params), &pick, STATUS_TIMEOUT).await {
+        match self.listening_call("audition_stop", Value::Object(params), &pick, self.limit(STATUS_TIMEOUT)).await {
             Ok(answer) => (answer, false),
             Err(refused) => refused,
         }
@@ -648,7 +653,7 @@ impl Host {
             Ok(mut answer) => {
                 if answer.get("jobId").is_some() {
                     if let Err(why) = self.jobs().add(&id, "render", files_of(&answer)) {
-                        let _ = self.call("listen_cancel", json!({"jobId": id}), &pick, STATUS_TIMEOUT).await;
+                        let _ = self.call("listen_cancel", json!({"jobId": id}), &pick, self.limit(STATUS_TIMEOUT)).await;
                         return (json!({"error": why, "code": "busy", "busy": true, "connected": true, "daw": self.daw().id()}), true);
                     }
                     answer["jobId"] = id.into();
@@ -700,7 +705,7 @@ impl Host {
             Ok(params) => params,
             Err(why) => return bad(why),
         };
-        match self.listening_call("deliver_targets", Value::Object(params), &pick, START_TIMEOUT).await {
+        match self.listening_call("deliver_targets", Value::Object(params), &pick, self.limit(START_TIMEOUT)).await {
             Ok(answer) => (answer, false),
             Err(refused) => refused,
         }
@@ -826,7 +831,7 @@ impl Host {
     /// The jobs still running when the host goes: the bridge stops them and puts back what they changed.
     pub(crate) async fn cancel_running_jobs(&self) {
         for id in self.jobs().running() {
-            let answer = self.call("listen_cancel", json!({"jobId": id}), &Pick::default(), STATUS_TIMEOUT).await;
+            let answer = self.call("listen_cancel", json!({"jobId": id}), &Pick::default(), self.limit(STATUS_TIMEOUT)).await;
             if answer.is_ok_and(|answer| answer.get("state").and_then(Value::as_str).is_some_and(|state| TERMINAL.contains(&state))) {
                 self.jobs().ended(&id);
             }

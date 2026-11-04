@@ -5,6 +5,7 @@ mod analysis_runner;
 mod audio_diagnosis;
 mod audio_standards;
 mod batch;
+mod benchmark;
 mod cli;
 mod delivery;
 mod delivery_cli;

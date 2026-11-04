@@ -321,6 +321,10 @@ from = "daws/ableton/ableton-mcp-server/tests/fixtures/batch-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/batch-oracle.json"
 
 [[move]]
+from = "daws/ableton/ableton-mcp-server/tests/fixtures/benchmark-oracle.json"
+to = "testdata/oracles/ableton-mcp-server/benchmark-oracle.json"
+
+[[move]]
 from = "daws/ableton/ableton-mcp-server/tests/fixtures/delivery-oracle.json"
 to = "testdata/oracles/ableton-mcp-server/delivery-oracle.json"
 

@@ -1,10 +1,35 @@
-//! /music in the app: the words it reads, and the producer's music shown (a folder found before they add one, how
-//! learning goes, and that names reach the model).
+//! /music in the app: the producer's music shown (a folder found before they add one, how learning goes, and that
+//! names reach the model), a folder added, learning paused, and all of it forgotten after a confirm.
+#[path = "../support/tui_app.rs"]
+mod support;
+use async_trait::async_trait;
 use kumi::tui::app::{music_lines, parse_music, MusicAsked};
-use kumi_listening::music::{
-    folders::Found,
-    learning::{MusicState, MusicStatus},
+use kumi_common::abort::Signal;
+use kumi_listening::{
+    embed::Say,
+    music::{
+        folders::Found,
+        hear::Style,
+        learning::{create_music, MusicOptions, MusicState, MusicStatus},
+        vectors::DIMS,
+    },
 };
+use std::{path::Path, rc::Rc};
+use support::*;
+
+/// A style model of the test's own: the scan never reaches for Kumi's, which it would fetch (the runtime, its words
+/// model) over the network.
+struct Plain;
+
+#[async_trait(?Send)]
+impl Style for Plain {
+    fn model(&self) -> &str {
+        "test-model"
+    }
+    async fn embed(&self, _: &Path, _: &[f64], _: Option<f64>, _: Say<'_>, _: &Signal) -> Result<(Vec<f32>, String), String> {
+        Ok((vec![1. / (DIMS as f32).sqrt(); DIMS], "test-model".into()))
+    }
+}
 
 #[test]
 fn music_words_are_read_in_any_case() {
@@ -66,4 +91,47 @@ fn music_lines_say_the_folders_the_songs_and_how_learning_goes() {
             "Now: off (Kumi asks before it learns your music)"
         ]
     );
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn music_is_shown_added_paused_and_forgotten() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let folder = tempfile::tempdir().unwrap();
+            let songs = folder.path().join("Songs");
+            std::fs::create_dir_all(songs.join("Artist/Album")).unwrap();
+            std::fs::write(songs.join("Artist/Album/01 One.mp3"), b"tagless").unwrap();
+            let kept = folder.path().join("kumi/music");
+            let mut options = MusicOptions::new(kept.clone(), None, Default::default());
+            (options.places, options.fork, options.delay_ms) = (Some(vec![songs.clone()]), false, 3_600_000);
+            options.style = Some(Rc::new(Plain) as Rc<dyn Style>);
+            let music = create_music(options);
+            let control = Rc::new(Control::default());
+            *control.music.borrow_mut() = Some(music.clone());
+            let h = Harness::with(160, 40, control, |_| {});
+            h.start().await;
+            h.connect();
+            h.type_text("/mus").await;
+            h.has("Your own music, which Kumi learns your taste from");
+            h.type_text("\x15/music\r").await;
+            h.has("Your music");
+            h.has("(1 song): /music add");
+            h.has("Now: off (Kumi asks before it learns your music)");
+            h.has("Song and artist names reach the model when Kumi uses your taste.");
+            let path = songs.to_string_lossy().into_owned();
+            h.type_text(&format!("/music add {path}\r")).await;
+            h.has("Kumi learns your music in");
+            assert_eq!(music.folders(), [path]);
+            assert!(music.agreed() && music.offered());
+            h.type_text("/music pause\r").await;
+            h.has("Learning your music is paused: /music resume goes on.");
+            assert!(music.held());
+            h.type_text("/music forget\r").await;
+            h.has("Forget what Kumi learned of your music?");
+            h.type_text("\r").await;
+            h.wait_for("Forgot your music.").await;
+            assert!(!music.agreed() && !kept.exists());
+            h.close().await;
+        })
+        .await;
 }
