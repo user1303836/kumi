@@ -182,12 +182,14 @@ class PinTest(unittest.TestCase):
     def test_a_bundle_setup_would_not_extract_is_refused(self) -> None:
         target = "aarch64-apple-darwin"
         bad = {"no Kumi executable": tar_xz({"README.md": b"readme"}),
+               "only a lookalike of it": tar_xz({".kumi": b"k", "bin/kumi": b"k"}),
                "a symlink": tar_xz(files(target), links={"escape": "/etc/passwd"}),
                "a climbing path": tar_xz({**files(target), "../outside": b"x"}),
                "not an archive": b"plain bytes"}
         for problem, data in bad.items():
             with self.subTest(problem):
                 self.github = FakeGitHub()
+                self.out.unlink(missing_ok=True)
                 self.github.replace_bundle(target, data)
                 self.assertIn(f"kumi-{target}.tar.xz", self.refused())
 

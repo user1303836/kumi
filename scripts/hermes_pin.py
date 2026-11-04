@@ -185,7 +185,7 @@ def unpacked_bytes(path: Path, target: str) -> int:
         parts = Path(member.name).parts
         if member.name.startswith(("/", "\\")) or ".." in parts or not (member.isfile() or member.isdir()):
             raise Refused(f"{path.name} holds {member.name!r}, which setup won't extract")
-    if not any(member.isfile() and member.name.lstrip("./") == executable(target) for member in members):
+    if not any(member.isfile() and member.name.removeprefix("./") == executable(target) for member in members):
         raise Refused(f"{path.name} has no {executable(target)} at its root")
     return sum(member.size for member in members if member.isfile())
 
