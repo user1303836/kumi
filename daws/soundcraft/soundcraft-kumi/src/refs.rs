@@ -2,13 +2,23 @@
 //!
 //! A ref is `s:<kind>:<parts>`, with SoundCraft's own ids where it has them, and positional parts spelled out, to be
 //! resolved again at each write: `s:track:12`, `s:clip:40`, `s:insert:12:a`, `s:param:12:a:high_shelf_gain`,
-//! `s:note:40:480.60.0`. Undo puts SoundCraft's next id back, so an id can come back on another object (tracks "First"
-//! and "Second" both got id 1). The bridge keeps the lives of the ids it has seen in a session: an id that comes back
-//! with another fingerprint is a new life, and its ref takes the life's number, `s:track:1.2`. A ref from an earlier life
-//! is stale. A Kumi change's object that an undo crossed is retired at once: if its id comes back, it's a new life.
-use serde_json::Value;
+//! `s:note:40:480.60.0`. Each has one spelling.
+//!
+//! Undo puts SoundCraft's next id back, so an id can come back on another object (tracks "First" and "Second" both got
+//! id 1). The bridge keeps the lives of the ids it has seen, in a table of its own for each session and each run of the
+//! bridge, under an epoch that requests carry back. At each look an object keeps its life while it's the same object:
+//! while it's there, by who it is (a track's kind, format, name and instrument); back after a look without it, by all it
+//! holds (an undo put it back as it was). Otherwise its id starts a new life, and its ref takes the life's number,
+//! `s:track:1.2`: a ref from an earlier life is stale. A Kumi change's object that an undo crossed is retired at once.
+//!
+//! What no look can tell: between two looks, an undo and then a step that makes an object like the undone one (a track
+//! of the same kind, format, name and instrument) on the same id. Refs to the undone one find the new one. SoundCraft
+//! would have to count its undos where a look sees them, or never give an id out again, for the bridge to tell.
+use serde_json::{json, Value};
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The kinds of object with an id of SoundCraft's own, and so a life.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -61,7 +71,7 @@ impl Id {
 
     fn parse_part(kind: Kind, part: &str) -> Option<Id> {
         let (id, life) = match part.split_once('.') {
-            Some((id, life)) => (id, life.parse().ok().filter(|life: &u32| *life > 1)?),
+            Some((id, life)) => (id, number::<u32>(life).filter(|life| *life > 1)?),
             None => (part, 1),
         };
         Some(Id { kind, id: number(id)?, life })
@@ -108,7 +118,7 @@ pub enum Ref {
         track: Id,
         slot: Slot,
     },
-    /// A send, by its place in the track's sends (from 0).
+    /// A send, by its slot: 0 to 9, SoundCraft's sends A to J.
     Send {
         track: Id,
         slot: u32,
@@ -120,7 +130,7 @@ pub enum Ref {
         param: String,
     },
     /// An automation lane, by what it moves, as SoundCraft's automation commands name it: `volume`, `pan`, `pan2`, `mute`,
-    /// `send_a_level`, or a plug-in's parameter, `plugin:a:high_shelf_gain`.
+    /// `send_a_level`, a plug-in's parameter (`plugin:a:high_shelf_gain`), or the trim lane, `plugin:255:trim`.
     Lane {
         track: Id,
         param: String,
@@ -131,7 +141,8 @@ pub enum Ref {
         param: String,
         sample: i64,
     },
-    /// A note, by its start (ticks from its clip's start), pitch and channel.
+    /// A note, by its start (ticks from its clip's start), pitch and channel: by where it is. An edit that moves notes (a
+    /// transpose) can leave another note there, so a change to a note checks the clip's notes are those it read.
     Note {
         clip: Id,
         start: i64,
@@ -179,7 +190,7 @@ fn parse(text: &str) -> Option<Ref> {
         }
         "send" => {
             let (id, slot) = parts.split_once(':')?;
-            Some(Ref::Send { track: track(id)?, slot: number(slot)? })
+            Some(Ref::Send { track: track(id)?, slot: number(slot).filter(|slot: &u32| *slot < 10)? })
         }
         "param" => {
             let mut split = parts.splitn(3, ':');
@@ -215,15 +226,16 @@ fn parse(text: &str) -> Option<Ref> {
     }
 }
 
-/// A plain number: digits only, no sign, no leading `+`.
+/// A plain number, in its one spelling: digits only, no sign, and no leading zero but in `0`.
 fn number<T: std::str::FromStr>(text: &str) -> Option<T> {
-    (!text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit())).then(|| text.parse().ok()).flatten()
+    let plain = !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_digit()) && (text == "0" || !text.starts_with('0'));
+    plain.then(|| text.parse().ok()).flatten()
 }
 
-/// A number that may be negative.
+/// A number that may be negative (and never `-0`).
 fn signed(text: &str) -> Option<i64> {
     match text.strip_prefix('-') {
-        Some(digits) => number::<i64>(digits).map(|n| -n),
+        Some(digits) => number::<i64>(digits).filter(|magnitude| *magnitude != 0).map(|magnitude| -magnitude),
         None => number(text),
     }
 }
@@ -233,13 +245,18 @@ fn param_id(text: &str) -> bool {
     !text.is_empty() && text.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')
 }
 
-/// What a lane moves, in SoundCraft's automation ids: a word of the track's (`volume`, `pan2`, `send_a_level`), or
-/// `plugin:<slot>:<parameter>`.
+/// What a lane moves, as SoundCraft's own automation ids spell it (its UI's, which its automation commands take):
+/// `volume`, `pan`, `pan2`, `mute`, `send_<a-j>_level`, `_pan` or `_mute`, `plugin:<a-j>:<parameter>`, and the trim
+/// lane, `plugin:255:trim`. (The commands take other spellings too, `vol` or `send_A_level`: those aren't refs.)
 fn lane(text: &str) -> bool {
-    match text.strip_prefix("plugin:").and_then(|plugin| plugin.split_once(':')) {
-        Some((slot, param)) => matches!(Slot::parse(slot), Some(Slot::Insert(_))) && param_id(param),
-        None => param_id(text),
+    let slot = |letter: &str| matches!(letter.as_bytes(), [b'a'..=b'j']);
+    if matches!(text, "volume" | "pan" | "pan2" | "mute" | "plugin:255:trim") {
+        return true;
     }
+    if let Some(send) = text.strip_prefix("send_") {
+        return send.split_once('_').is_some_and(|(letter, what)| slot(letter) && matches!(what, "level" | "pan" | "mute"));
+    }
+    text.strip_prefix("plugin:").and_then(|plugin| plugin.split_once(':')).is_some_and(|(letter, param)| slot(letter) && param_id(param))
 }
 
 /// Why a ref names nothing there now.
@@ -250,44 +267,74 @@ pub enum Missing {
     Stale,
     /// Its object isn't in the session now.
     Gone,
-    /// Its id was never seen in this session (a ref from another session, or from before the bridge started).
+    /// It names a life this table hasn't seen: an id it never saw, or a later life than any it gave. (A ref from another
+    /// table can name a life this one has too: so a request carries the epoch its refs came from, for the bridge to
+    /// check against this table's.)
     Unknown,
+}
+
+/// What tells one object from another on the same id: who it is, compared at each look while it's there, and all it
+/// holds, compared when it's back after a look without it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Print {
+    pub who: u64,
+    pub all: u64,
 }
 
 /// One id's life now.
 #[derive(Debug, Clone, Copy)]
 struct Life {
     number: u32,
-    fingerprint: u64,
+    print: Print,
     present: bool,
     retired: bool,
 }
 
-/// The lives of the ids the bridge has seen in one session. A new session starts a new table.
-#[derive(Debug, Default)]
+/// The lives of the ids the bridge has seen in one session, in one run, under an epoch no other table has.
+#[derive(Debug)]
 pub struct Lives {
+    epoch: String,
     seen: HashMap<(Kind, u64), Life>,
 }
 
+impl Default for Lives {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Lives {
-    /// What a look saw of one kind: each id there now, with its fingerprint. An id that isn't there has gone (for now).
-    /// One there already keeps its life, however it changed. One back with the fingerprint it went with keeps its life
-    /// too (an undo put it back). One back with another, or retired, is a new life.
-    pub fn saw(&mut self, kind: Kind, now: impl IntoIterator<Item = (u64, u64)>) {
-        let now: HashMap<u64, u64> = now.into_iter().collect();
+    /// A new table, with a new epoch: the time, and a count of the run's tables.
+    pub fn new() -> Self {
+        static TABLES: AtomicU64 = AtomicU64::new(0);
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |since| since.as_millis() as u64);
+        Self { epoch: format!("{now:x}-{}", TABLES.fetch_add(1, Ordering::Relaxed) + 1), seen: HashMap::new() }
+    }
+
+    /// The table's epoch: its refs mean something only with it.
+    pub fn epoch(&self) -> &str {
+        &self.epoch
+    }
+
+    /// What a look saw of one kind: each id there now, with its print. An id that isn't there has gone (for now). One
+    /// still there keeps its life while it's who it was. One back keeps its life if it holds all it held when it went
+    /// (an undo put it back). Any other, or one retired, is a new life.
+    pub fn saw(&mut self, kind: Kind, now: impl IntoIterator<Item = (u64, Print)>) {
+        let now: HashMap<u64, Print> = now.into_iter().collect();
         for (&(seen_kind, id), life) in &mut self.seen {
             if seen_kind == kind && !now.contains_key(&id) {
                 life.present = false;
             }
         }
-        for (id, fingerprint) in now {
-            let fresh = Life { number: 1, fingerprint, present: true, retired: false };
+        for (id, print) in now {
+            let fresh = Life { number: 1, print, present: true, retired: false };
             let life = self.seen.entry((kind, id)).or_insert(fresh);
-            if life.retired || (!life.present && life.fingerprint != fingerprint) {
+            let same = if life.present { life.print.who == print.who } else { life.print.all == print.all };
+            if life.retired || !same {
                 *life = Life { number: life.number + 1, ..fresh };
             } else {
                 life.present = true;
-                life.fingerprint = fingerprint;
+                life.print = print;
             }
         }
     }
@@ -299,12 +346,11 @@ impl Lives {
         }
     }
 
-    /// Ends the life of a Kumi change's object that an undo crossed: refs to it are stale from now on, and its id, should it
-    /// come back, is a new life.
+    /// Ends the life of a Kumi change's object that an undo crossed, seen by a look or not (a change learns its ids from
+    /// its answer): refs to it are stale from now on, and its id, when a look shows it, is a new life.
     pub fn retire(&mut self, kind: Kind, id: u64) {
-        if let Some(life) = self.seen.get_mut(&(kind, id)) {
-            life.retired = true;
-        }
+        let unseen = Life { number: 1, print: Print::default(), present: false, retired: true };
+        self.seen.entry((kind, id)).or_insert(unseen).retired = true;
     }
 
     /// The id's ref now: its life, while it's there.
@@ -326,39 +372,68 @@ impl Lives {
     }
 }
 
-/// What tells objects apart on the same id, of each kind, from `session.inspect {"detail":"full"}`: a track's kind,
-/// format, name, clips and inserts; a clip's track, start, length and source (or note count); a bus's name and format;
-/// a group's name and members; a marker's name and start; a source's name, channels and frames.
-pub fn fingerprints(inspect: &Value) -> Vec<(Kind, Vec<(u64, u64)>)> {
-    let list = |key: &str| inspect.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
+/// The prints of each kind's objects in `session.inspect {"detail":"full"}`, with the ids they hold read as what those
+/// stand for, since SoundCraft gives ids out again together (an import's source, track and clip).
+///
+/// Who it is: a track's kind, format, name and instrument; a clip's name and what it plays (its source's name, channels
+/// and frames, or MIDI, or video), and a MIDI clip's start and length, which its notes are placed from; a bus's name and
+/// format; a group's name; a marker's name and kind; a source's name, channels and frames. All it holds: that, and a
+/// track's clips and inserts; a clip's track, place and notes; a group's members; a marker's place; a source's file.
+pub fn fingerprints(inspect: &Value) -> Vec<(Kind, Vec<(u64, Print)>)> {
+    fn list<'a>(of: &'a Value, key: &str) -> &'a [Value] {
+        of.get(key).and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default()
+    }
     let id = |item: &Value| item.get("id").and_then(Value::as_u64);
-    let of = |item: &Value, keys: &[&str]| hash(keys.iter().map(|key| item.get(*key).cloned().unwrap_or(Value::Null)).collect::<Vec<_>>());
+    let fields = |item: &Value, keys: &[&str]| keys.iter().map(|key| item.get(*key).cloned().unwrap_or(Value::Null)).collect::<Vec<_>>();
+    let print = |who: &Vec<Value>, more: Value| Print { who: hash(who), all: hash((who, more)) };
+    let sources: HashMap<u64, Vec<Value>> =
+        list(inspect, "sources").iter().filter_map(|source| Some((id(source)?, fields(source, &["name", "channels", "frames"])))).collect();
+    let who_tracks: HashMap<u64, Vec<Value>> = list(inspect, "tracks")
+        .iter()
+        .filter_map(|track| Some((id(track)?, fields(track, &["kind", "format", "name", "instrument"]))))
+        .collect();
     let mut tracks = vec![];
     let mut clips = vec![];
-    for track in list("tracks") {
-        let Some(track_id) = id(track) else { continue };
-        let track_clips = track.get("clips").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
-        let inserts = track.get("inserts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or_default();
-        let clip_shape: Vec<Value> =
-            track_clips.iter().map(|clip| Value::Array(vec![clip["id"].clone(), clip["start"].clone(), clip["length"].clone()])).collect();
-        let insert_shape: Vec<Value> =
-            inserts.iter().map(|insert| Value::Array(vec![insert["slot"].clone(), insert["plugin"].clone()])).collect();
-        tracks.push((track_id, hash((track["kind"].clone(), track["format"].clone(), track["name"].clone(), clip_shape, insert_shape))));
-        for clip in track_clips {
+    for track in list(inspect, "tracks") {
+        let Some((track_id, track_who)) = id(track).and_then(|track_id| Some((track_id, who_tracks.get(&track_id)?))) else { continue };
+        let clip_shapes: Vec<Vec<Value>> = list(track, "clips").iter().map(|clip| fields(clip, &["name", "start", "length"])).collect();
+        let insert_shapes: Vec<Vec<Value>> = list(track, "inserts").iter().map(|insert| fields(insert, &["slot", "plugin"])).collect();
+        tracks.push((track_id, print(track_who, json!([clip_shapes, insert_shapes]))));
+        for clip in list(track, "clips") {
             let Some(clip_id) = id(clip) else { continue };
-            let made_of =
-                clip.get("source").filter(|source| !source.is_null()).or_else(|| clip.get("notes")).cloned().unwrap_or(Value::Null);
-            clips.push((clip_id, hash((track_id, clip["start"].clone(), clip["length"].clone(), made_of))));
+            let midi = clip.get("notes").is_some();
+            let plays = match clip["source"].as_u64() {
+                Some(source) => json!(sources.get(&source)),
+                None if midi => json!("midi"),
+                None if clip.get("video").is_some() => json!("video"),
+                None => Value::Null,
+            };
+            let placed = fields(clip, &["start", "length"]);
+            let who = vec![clip["name"].clone(), plays, if midi { json!(placed) } else { Value::Null }];
+            clips.push((clip_id, print(&who, json!([track_who, placed, fields(clip, &["offset", "notes"])]))));
         }
     }
-    let each = |key: &str, keys: &[&str]| list(key).iter().filter_map(|item| Some((id(item)?, of(item, keys)))).collect::<Vec<_>>();
+    let groups = list(inspect, "groups")
+        .iter()
+        .filter_map(|group| {
+            let members: Vec<Option<&Vec<Value>>> =
+                list(group, "members").iter().map(|member| member.as_u64().and_then(|member| who_tracks.get(&member))).collect();
+            Some((id(group)?, print(&fields(group, &["name"]), json!(members))))
+        })
+        .collect();
+    let each = |key: &str, who: &[&str], more: &[&str]| {
+        list(inspect, key)
+            .iter()
+            .filter_map(|item| Some((id(item)?, print(&fields(item, who), json!(fields(item, more))))))
+            .collect::<Vec<_>>()
+    };
     vec![
         (Kind::Track, tracks),
         (Kind::Clip, clips),
-        (Kind::Bus, each("busses", &["name", "format"])),
-        (Kind::Group, each("groups", &["name", "members"])),
-        (Kind::Marker, each("markers", &["name", "start"])),
-        (Kind::Source, each("sources", &["name", "channels", "frames"])),
+        (Kind::Bus, each("busses", &["name", "format"], &[])),
+        (Kind::Group, groups),
+        (Kind::Marker, each("markers", &["name", "kind"], &["start", "end"])),
+        (Kind::Source, each("sources", &["name", "channels", "frames"], &["path"])),
     ]
 }
 
