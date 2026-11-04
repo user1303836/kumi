@@ -328,6 +328,26 @@ async fn the_host_reads_through_the_bridge_and_a_read_while_the_app_is_busy_is_r
     assert!(began.elapsed() < ms(500), "at once: {:?}", began.elapsed());
 }
 
+#[tokio::test]
+async fn the_host_calls_a_read_only_command_through_the_bridge_and_a_call_while_the_app_is_busy_is_refused_at_once() {
+    let lab = Lab::new().await;
+    let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
+    let client = lab.connect().await;
+    let history = client.request("read", json!({"kind": "call", "command": "engine.history"}), WAIT).await.unwrap();
+    assert_eq!((&history["command"], &history["result"]), (&json!("engine.history"), &json!({"undo": [], "can_redo": false})));
+    assert!(history["epoch"].is_string(), "{history}");
+    lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
+    asked_until(&client, "status", |status| status["busy"] == "modal").await;
+    let asked = lab.fake.requests().len();
+    let began = Instant::now();
+    let refused = client.request("read", json!({"kind": "call", "command": "engine.history"}), WAIT).await.unwrap_err();
+    let RequestError::Bridge { code, message } = refused else { panic!("{refused:?}") };
+    assert_eq!((code.as_str(), message.as_str()), ("busy", "a dialog is open in SoundCraft (Save Changes); nothing was read"));
+    assert!(began.elapsed() < ms(500), "at once: {:?}", began.elapsed());
+    let sent = lab.fake.requests()[asked..].iter().filter(|request| request["method"] == "engine.execute").count();
+    assert_eq!(sent, 0, "nothing sent to the app");
+}
+
 /// Kick, with an EQ in its slot a, and Keys, an instrument track.
 fn kick_and_keys() -> Value {
     json!([
