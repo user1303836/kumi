@@ -98,6 +98,8 @@ impl McpHost {
         "playback":playback}
         )))
     }
+    /// Deletes a clip a change made, found by its identity; answers the ref it deleted it at (when a retry finds it
+    /// already gone, where the lost call was sent, else the ref it was made at).
     pub(super) async fn delete_owned_clip_async(
         &self,
         adapter: &dyn AsyncLiveAdapter,
@@ -108,13 +110,18 @@ impl McpHost {
         recovery_record: Option<&TransactionRecord>,
         allow_absent: bool,
         expected_notes_revision: Option<&str>,
-    ) -> Result<(), LiveError> {
+    ) -> Result<String, LiveError> {
         let snapshot = self.views.view_for(Some(context), &[json!(reference)], None, &[]).await?;
         // Arrangement clip refs are positional: a clip added or deleted before it moves it to another ref, so it's
         // found by its identity (and a retry after it went finds nothing left to delete).
         let Some(at) = owned_clip_ref(&snapshot, identity) else {
             if allow_absent {
-                return Ok(());
+                // Live deleted it and its answer was lost: the cleanup ownership kept for it goes as the delete's would.
+                if let Some(transaction) = &context.transaction_id {
+                    adapter.forget_cleanup_ownership(transaction, reference);
+                }
+                let sent = recovery_record.and_then(|record| self.undo_recovery_delete_ref(record, identity));
+                return Ok(sent.unwrap_or_else(|| reference.to_string()));
             }
             self.clip_row(&snapshot, reference)?;
             return Err(LiveError::error("owned clip identity changed before cleanup"));
@@ -165,7 +172,7 @@ impl McpHost {
         if clip_remains(&after, identity) {
             return Err(LiveError::error("owned clip cleanup was not confirmed"));
         }
-        Ok(())
+        Ok(at)
     }
     /// Whether the Arrangement clip `clip`, found at `at`, is as it was made at `made_at`: its fingerprint there (a
     /// clip moving to another ref changes only its ref), and its notes as they were, when the change kept them. A

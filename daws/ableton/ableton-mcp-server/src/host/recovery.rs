@@ -254,6 +254,17 @@ helpers::js_string(reference)?)))
         }
         Ok((reconciliation, plans[index].steps.clone()))
     }
+    /// Where an undo's delete of the clip `identity` was sent, as its plan kept it: what a retry that finds the clip gone
+    /// says it deleted.
+    pub(super) fn undo_recovery_delete_ref(&self, record: &TransactionRecord, identity: &str) -> Option<String> {
+        let plans = self.undo_recovery_plans.borrow();
+        let plan = plans.iter().find(|plan| plan.record.upgrade().is_some_and(|r| Rc::ptr_eq(&r, record)))?;
+        plan.steps.iter().find_map(|step| {
+            let row = step.borrow();
+            let delete = row["operation"].as_str().is_some_and(|operation| operation.ends_with("clip.delete"));
+            (delete && row["args"]["expectedObjectIdentity"] == identity).then(|| row["args"]["ref"].as_str().map(str::to_owned)).flatten()
+        })
+    }
     pub(super) fn note_undo_refusal(&self, record: &TransactionRecord, cause: &LiveError, context: &LiveOperationContext) {
         if !matches!(cause, LiveError::MutationNotDispatched(_)) && !nothing_changed(cause) {
             return;

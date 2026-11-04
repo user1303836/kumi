@@ -390,24 +390,26 @@ impl McpHost {
                 self.replay_undo_recovery(&record, adapter.as_ref(), &context).await?;
             }
             record.borrow_mut()["state"] = json!("undoing");
-            self.delete_owned_clip_async(
-                adapter.as_ref(),
-                t["created"]["ref"].as_str().unwrap(),
-                t["created"]["objectIdentity"].as_str().unwrap(),
-                &context,
-                t["created"]["fingerprint"].as_str(),
-                Some(&record),
-                reconciliation,
-                t["created"]["notesRevision"].as_str(),
-            )
-            .await?;
+            // Where it was deleted: where it is now, which a clip added before it moves from the ref it was made at.
+            let deleted = self
+                .delete_owned_clip_async(
+                    adapter.as_ref(),
+                    t["created"]["ref"].as_str().unwrap(),
+                    t["created"]["objectIdentity"].as_str().unwrap(),
+                    &context,
+                    t["created"]["fingerprint"].as_str(),
+                    Some(&record),
+                    reconciliation,
+                    t["created"]["notesRevision"].as_str(),
+                )
+                .await?;
             record.borrow_mut()["state"] = json!("undone");
             Ok(success_text(
                 id,
                 &json!({
                 "transactionId":t["id"],
                 "state":"undone",
-                "deleted":t["created"]["ref"],
+                "deleted":deleted,
                 "idempotent":false}
                 ),
             ))

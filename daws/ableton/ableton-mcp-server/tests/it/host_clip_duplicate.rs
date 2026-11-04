@@ -360,8 +360,10 @@ async fn clip_duplicate_apply_and_exact_key_undo_match_source() {
 async fn undoing_an_arrangement_copy_a_clip_was_added_before_takes_it_from_where_it_is_now() {
     // Live's Arrangement clip refs are positional: a clip added before the copy on its track (Kumi's undo of a later
     // change making one again, say) takes the copy's ref, and the copy moves to the next. As it was made, the copy goes
-    // from there; edited since, it stays, and nothing is sent.
-    for edited in [false, true] {
+    // from there; edited since, it stays, and nothing is sent: renamed, or one note's velocity changed, which leaves its
+    // row (and so its fingerprint) as it was, so only its notes say so. Live deleting it with its answer lost, the retry
+    // with the same key finds it gone and settles it.
+    for case in ["as made", "renamed", "velocity", "answer lost"] {
         let adapter = Rc::new(Adapter::new());
         setup(&adapter.sim, "session-midi");
         let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
@@ -382,17 +384,36 @@ async fn undoing_an_arrangement_copy_a_clip_was_added_before_takes_it_from_where
             before["clip"]["name"] = json!("Kumi Arrangement");
             before["clip"]["start"] = json!(0);
             rows[at]["clip"]["ref"] = json!("arrangement-clip:track-1:moved");
-            if edited {
-                rows[at]["clip"]["name"] = json!("Manual");
+            match case {
+                "renamed" => rows[at]["clip"]["name"] = json!("Manual"),
+                "velocity" => {
+                    let notes = rows[at]["clip"]["notes"].as_array_mut().unwrap();
+                    assert!(!notes.is_empty(), "the copy has notes");
+                    let velocity = notes[0]["velocity"].as_f64().unwrap();
+                    notes[0]["velocity"] = json!(if velocity == 17.0 { 18.0 } else { 17.0 });
+                }
+                _ => {}
             }
             rows.insert(at, before);
         }
         adapter.calls.borrow_mut().clear();
+        if case == "answer lost" {
+            adapter.reset("undo-after");
+        }
         let undo = json!({"transactionId":body["transactionId"],"confirmation":"undo","idempotencyKey":"undo-key"});
-        let result = host
+        let mut result = host
             .with_undo_watch(&json!(3), &undo, async { Ok(host.undo_clip_duplicate_async(&json!(3), &undo, None).await) })
             .await
             .unwrap();
+        let forgotten = || adapter.calls.borrow().iter().filter(|call| call["method"] == "forget").cloned().collect::<Vec<Value>>();
+        if case == "answer lost" {
+            assert_eq!(record.borrow()["state"], "uncertain", "{result}");
+            assert!(forgotten().is_empty(), "{:?}", forgotten());
+            result = host
+                .with_undo_watch(&json!(4), &undo, async { Ok(host.undo_clip_duplicate_async(&json!(4), &undo, None).await) })
+                .await
+                .unwrap();
+        }
         let identities: Vec<Value> = adapter.sim.state.borrow()["arrangementClips"]
             .as_array()
             .unwrap()
@@ -407,26 +428,29 @@ async fn undoing_an_arrangement_copy_a_clip_was_added_before_takes_it_from_where
             .filter(|call| call["invocation"]["operation"] == "arrangement.clip.delete")
             .map(|call| call["invocation"]["args"].clone())
             .collect();
-        let forgotten: Vec<Value> = adapter.calls.borrow().iter().filter(|call| call["method"] == "forget").cloned().collect();
-        if edited {
+        if matches!(case, "renamed" | "velocity") {
             let text = result["result"]["content"][0]["text"].as_str().unwrap();
             assert!(
                 text.contains("the clip moved since it was made (a clip before it was added or removed): delete it in Live"),
-                "{result}"
+                "{case}: {result}"
             );
-            assert!(deletes.is_empty(), "{deletes:?}");
-            assert!(forgotten.is_empty(), "{forgotten:?}");
-            assert_eq!(record.borrow()["state"], "applied", "{result}");
-            assert!(identities.contains(&copy), "{identities:?}");
+            assert!(deletes.is_empty(), "{case}: {deletes:?}");
+            assert!(forgotten().is_empty(), "{case}: {:?}", forgotten());
+            assert_eq!(record.borrow()["state"], "applied", "{case}: {result}");
+            assert!(identities.contains(&copy), "{case}: {identities:?}");
         } else {
-            assert_eq!(record.borrow()["state"], "undone", "{result}");
-            assert_eq!(deletes.len(), 1, "{deletes:?}");
-            assert_eq!(deletes[0]["ref"], "arrangement-clip:track-1:moved");
+            assert_eq!(record.borrow()["state"], "undone", "{case}: {result}");
+            // Sent once, and once more where the retry replays what was lost.
+            assert_eq!(deletes.len(), if case == "answer lost" { 2 } else { 1 }, "{case}: {deletes:?}");
+            assert!(deletes.iter().all(|delete| delete["ref"] == "arrangement-clip:track-1:moved"), "{case}: {deletes:?}");
             assert_eq!(deletes[0]["expectedObjectIdentity"], copy);
             assert_eq!(deletes[0]["explicitDeletion"], true);
-            // The ownership kept for the copy at the ref it was made at goes with it.
-            assert_eq!(forgotten, vec![json!({"method":"forget","transactionId":body["transactionId"],"reference":made_at})]);
-            assert!(!identities.contains(&copy), "{identities:?}");
+            // The ownership kept for the copy at the ref it was made at goes with it, once.
+            assert_eq!(forgotten(), vec![json!({"method":"forget","transactionId":body["transactionId"],"reference":made_at})], "{case}");
+            assert!(!identities.contains(&copy), "{case}: {identities:?}");
+            // The answer names where it was deleted.
+            let answer: Value = serde_json::from_str(result["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+            assert_eq!(answer["deleted"], "arrangement-clip:track-1:moved", "{case}: {answer}");
         }
     }
 }
