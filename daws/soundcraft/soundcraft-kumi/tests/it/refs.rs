@@ -260,10 +260,13 @@ fn without(session: &Value, kind: Kind, id: u64) -> Value {
     gone
 }
 
+/// One change to try: what changes, the object, the change, and whether that's a new life while it's there, and back
+/// after a look without it.
+type Change = (&'static str, Kind, u64, fn(&mut Value), bool, bool);
+
 #[test]
 fn who_an_object_is_decides_its_life_while_its_there_and_all_it_holds_when_its_back() {
-    // (what changes, the object, the change, whether that's a new life while it's there, and back after a look without it)
-    let cases: &[(&str, Kind, u64, fn(&mut Value), bool, bool)] = &[
+    let cases: &[Change] = &[
         ("nothing", Kind::Track, 3, |_| {}, false, false),
         ("a track's kind", Kind::Track, 3, |s| s["tracks"][0]["kind"] = json!("midi"), true, true),
         ("a track's format", Kind::Track, 3, |s| s["tracks"][0]["format"] = json!("Stereo"), true, true),
