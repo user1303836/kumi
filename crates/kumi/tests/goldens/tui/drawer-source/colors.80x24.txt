@@ -11,14 +11,14 @@
 
       Kumi keeps each Set's conversations: /conversations goes back to one.
 
-  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
-  Ready
-  ✓ Changed the bass                                                      undo
-  ████ → ████
+╭─ NOW   FOCUS   HISTORY 1 ──────────────────────────────────── ctrl+\ closes ─╮
+│ Ready                                                                        │
+│ ✓ Changed the bass                                                      undo │
+│ ████ → ████                                                                  │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
-
-
-
-   Ask Kumi about your Set
-                                                                enter to send
+╭────────────────────────────────────────────────────────────── enter to send ─╮
+╰─ Ask Kumi about your Set                                                    ─╯
 
