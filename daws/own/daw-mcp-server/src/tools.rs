@@ -74,8 +74,12 @@ pub fn kinds(daw: Daw) -> Kinds {
                 "edit-settings",
             ],
         },
-        // (its bridge reads nothing yet: its kinds come with its reads, M2)
-        Daw::SoundCraft => Kinds { read: &[], bodies: &[], outside_undo: &[] },
+        // (what soundcraft-kumi's read takes: no bodies or changes yet)
+        Daw::SoundCraft => Kinds {
+            read: &["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note"],
+            bodies: &[],
+            outside_undo: &[],
+        },
     }
 }
 
