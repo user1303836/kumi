@@ -147,29 +147,30 @@ impl Code {
         code
     }
 
-    /// Adds `own`, and what it includes and requires: each name looked up once, and each script added once, however many
-    /// names reach it.
+    /// Adds `own`, and what it includes and requires: each script once for each scope it runs in (the box's own, by an
+    /// include; a module's own, by a require), however many names reach it, and each name looked up once for each.
     fn add(
         &mut self,
         own: Arc<Script>,
         top: bool,
         script: &mut dyn FnMut(&str) -> Option<Arc<Script>>,
-        names: &mut HashSet<String>,
-        added: &mut HashSet<*const Script>,
+        names: &mut HashSet<(String, bool)>,
+        added: &mut HashSet<(*const Script, bool)>,
         depth: usize,
     ) {
-        if !added.insert(Arc::as_ptr(&own)) {
+        if !added.insert((Arc::as_ptr(&own), top)) {
             return;
         }
         self.partial |= own.unread;
         self.scripts.push((Arc::clone(&own), top));
         for (include, name) in &own.uses {
-            if depth >= MAX_DEPTH || !names.insert(name.clone()) {
+            // An include runs in the box's own scope; a required module keeps its own.
+            let scope = top && *include;
+            if depth >= MAX_DEPTH || !names.insert((name.clone(), scope)) {
                 continue;
             }
             match script(name) {
-                // An include runs in the box's own scope; a required module keeps its own.
-                Some(used) => self.add(used, top && *include, script, names, added, depth + 1),
+                Some(used) => self.add(used, scope, script, names, added, depth + 1),
                 None => self.partial = true,
             }
         }
@@ -620,16 +621,20 @@ mod tests {
             }
 
             fn text(&self, name: &str) -> Option<String> {
-                name.starts_with("lib").then(|| "function tell(x) { post(x); }".to_string())
+                name.starts_with("lib").then(|| "function tell(x) { outlet(0, x); }".to_string())
             }
         }
         let including = |names: usize| {
             let includes: String = (0..names).map(|at| format!("include('lib{at}');\n")).collect();
             let code = Code::read(&held(format!("{includes}function bang() {{ tell(1); }}")), &Lib).unwrap();
-            assert_eq!(code.sends_at_once("bang"), Some(false));
+            assert_eq!(code.sends_at_once("bang"), Some(true));
             taken(&code)
         };
         assert_eq!(including(100), including(1));
+        // A file a box requires, and includes under another name, runs in the box's own scope by the include: its
+        // functions answer messages.
+        let both = Code::read(&held("const kept = require('lib0');\ninclude('lib1');".into()), &Lib).unwrap();
+        assert_eq!(both.sends_at_once("tell"), Some(true));
 
         // A hundred thousand characters, the most Kumi writes of a code box, are read whatever script they're in: here
         // three bytes each.

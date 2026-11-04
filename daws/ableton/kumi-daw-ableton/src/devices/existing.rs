@@ -1172,7 +1172,7 @@ pub fn change(original: &Original, asked: &Asked, reference: Option<&Reference>)
         }
     }
     place(&mut patcher, &new_ids);
-    record(&mut patcher, original, &mut ids);
+    record(&mut patcher, original, &base, &mut ids);
     if patcher.fields.contains_key("title") {
         patcher.fields.insert("title".into(), json!(asked.name));
     }
@@ -1184,6 +1184,8 @@ pub fn change(original: &Original, asked: &Asked, reference: Option<&Reference>)
     let reported = |finding: &&super::patch::check::Finding| REPORTED.iter().any(|family| finding.rule.starts_with(family));
     let mut before: Vec<String> =
         check_with(&base, standard(), reference).at_least(Level::Warn).filter(reported).map(ToString::to_string).collect();
+    // The original as read isn't needed past here: a big device's new document is made without it held too.
+    drop(base);
     for finding in check_with(&patcher, standard(), reference).at_least(Level::Warn).filter(reported) {
         let said = finding.to_string();
         if let Some(at) = before.iter().position(|old| *old == said) {
@@ -1260,15 +1262,15 @@ fn place(patcher: &mut Patcher, new_ids: &[String]) {
 }
 
 /// The comment in the new device that records what it was made from (the file and its hash), with what the original's
-/// own said, when Kumi made that one from another.
-fn record(patcher: &mut Patcher, original: &Original, ids: &mut Ids) {
+/// own said (`base` is the original as read), when Kumi made that one from another.
+fn record(patcher: &mut Patcher, original: &Original, base: &Patcher, ids: &mut Ids) {
     let mut text = format!(
         "Kumi made this device from {} ({}, SHA-256 {}).",
         original.name,
         original.known_as,
         &original.hash[..16.min(original.hash.len())]
     );
-    if let Some(earlier) = provenance(&original.patcher()) {
+    if let Some(earlier) = provenance(base) {
         let (earlier, _) = cut(&earlier.replace('\n', " "), 600);
         text = format!("{text} Before that: {earlier}");
     }

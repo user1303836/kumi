@@ -77,10 +77,12 @@ pub fn read_device(bytes: &[u8]) -> Result<DeviceFile, Unread> {
     }
 }
 
-/// JSON as Max saves it, a NUL at its end.
+/// JSON as Max saves it, a NUL at its end. Past [`MOST_PATCHER_BYTES`] it isn't read: too big when it's JSON (it opens
+/// with `{`), and no device's patcher when it isn't (a frozen container whose directory can't be read, say).
 fn parse(bytes: &[u8]) -> Result<Value, Unread> {
     if bytes.len() > MOST_PATCHER_BYTES {
-        return Err(Unread::TooBig(bytes.len()));
+        let json = bytes.iter().find(|byte| !byte.is_ascii_whitespace()) == Some(&b'{');
+        return Err(if json { Unread::TooBig(bytes.len()) } else { Unread::NotADevice });
     }
     let end = bytes.iter().rposition(|byte| *byte != 0).map_or(0, |at| at + 1);
     serde_json::from_slice(&bytes[..end]).map_err(|_| Unread::NotADevice)
@@ -383,5 +385,21 @@ pub(crate) mod tests {
         let mut overlapping = frozen.clone();
         overlapping.files[2].start = overlapping.files[1].start + 1;
         assert_eq!(overlapping.with_file(overlapping.main_file().unwrap(), longer), None);
+    }
+
+    /// #772: a device's own patcher past MOST_PATCHER_BYTES isn't parsed. It's too big when it's JSON, and no device's
+    /// patcher when it isn't: a frozen container whose directory can't be read, say.
+    #[test]
+    fn a_patcher_past_the_cap_is_too_big_only_when_its_json() {
+        let small = encode_amxd(DeviceType::MidiEffect, &json!({ "patcher": { "title": "x" } }));
+        let mut json = vec![b' '; MOST_PATCHER_BYTES + 1];
+        json[1] = b'{';
+        let big = crate::devices::amxd::with_patcher_chunk(&small, &json).unwrap();
+        assert!(matches!(read_device(&big), Err(Unread::TooBig(size)) if size > MOST_PATCHER_BYTES));
+        let mut damaged = vec![0; MOST_PATCHER_BYTES + 1];
+        damaged[..4].copy_from_slice(b"mx@c");
+        let damaged = crate::devices::amxd::with_patcher_chunk(&small, &damaged).unwrap();
+        assert!(matches!(read_device(&damaged), Err(Unread::NotADevice)));
+        assert!(read_device(&small).is_ok());
     }
 }
