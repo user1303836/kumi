@@ -34,7 +34,7 @@ fn tool_list(daw: Daw) -> Value {
         let [status, discover] = finding(daw, "session", &pick);
         let epoch = json!({"epoch": {
             "type": "string",
-            "description": "The epoch of the answer the ref, parent or cursor came from. If another session is open now, the call is refused as stale instead of reading the other one.",
+            "description": "The epoch of the answer the ref or parent came from, needed with ref or parent: SoundCraft gives ids out again, so a ref means nothing without its epoch. If another session is open now, or the bridge started again, the call is refused as stale instead of reading something else.",
         }});
         let read = read_tool(
             daw,
