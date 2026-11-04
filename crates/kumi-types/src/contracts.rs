@@ -4,6 +4,7 @@
 //! The rest of the agent's contracts (the kernel, the session and its events, the stores, the DAW integrations) are
 //! kumi-agent's `core::contracts`.
 
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use async_trait::async_trait;
@@ -212,6 +213,24 @@ pub struct HearRequest {
     /// The whole song, from the Arrangement's start to its end, in one listen.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub whole: Option<bool>,
+    /// Host-owned output for a restricted capture. Never accepted from or exposed on a tool's wire.
+    #[serde(skip)]
+    pub scratch_dir: Option<PathBuf>,
+}
+
+/// A read-only preflight for hearing a bounded part; it starts no capture and creates no files.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HearPreview {
+    pub label: String,
+    pub seconds: f64,
+    pub method: HearMethod,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HearMethod {
+    Ears,
+    Offline,
 }
 
 /// One thing heard: its name, its file, where the part starts in it, and whether it was heard as it played.

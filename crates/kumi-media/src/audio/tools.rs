@@ -305,6 +305,7 @@ impl KernelTool for ListenTool {
                 beats: number("beats"),
                 seconds: number("seconds"),
                 whole: yes("whole").then_some(true),
+                scratch_dir: None,
             };
             let takes = match hear_set(request, signal.clone()).await? {
                 Ok(takes) => takes,
