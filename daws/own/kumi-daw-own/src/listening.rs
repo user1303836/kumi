@@ -417,7 +417,7 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
         }
         let flags = self.flags.get();
         if !flags.known {
-            return Some(format!("This {app} bridge can't listen yet (it's older than Kumi): update Kumi's bridge and restart {app}."));
+            return Some(self.link.daw.bridge.cant_listen(app));
         }
         if flags.demo || !flags.render {
             return Some(if flags.demo {

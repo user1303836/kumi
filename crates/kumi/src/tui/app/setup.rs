@@ -610,7 +610,7 @@ impl TuiApp {
                     }
                     continue;
                 }
-                let mut say = vec![format!("{app} loads the bridge when it starts."), format!("{app} will ask to save first.")];
+                let mut say = vec![live.restart_why(app), format!("{app} will ask to save first.")];
                 // Asking Live to quit is an Apple Event: the first time, macOS asks whether this terminal may send it.
                 let permission = live.asks_permission();
                 if let Some(terminal) = &permission {
@@ -667,6 +667,19 @@ impl TuiApp {
                         continue;
                     }
                 }
+                // A DAW Kumi only opens, to reach it, opens once the producer says so: never unasked. Asked for by name
+                // (`--daw`, KUMI_DAW, `/daw`), it's been said.
+                let asked = self.0.options.connect_live.as_ref().is_some_and(|l| l.asked);
+                if live.asks_to_open() && !asked {
+                    let session = live.closed_set();
+                    let with = session.as_deref().and_then(|set| std::path::Path::new(set).file_name());
+                    let with = with.map_or(String::new(), |name| format!(" with {}", name.to_string_lossy()));
+                    let say = vec![why.clone(), format!("Kumi opens {app}{with}.")];
+                    let open = vec![choice(&format!("Open {app}"), "", "open"), later()];
+                    if self.setup_choose(&format!("{app} isn't open"), say, open).await.as_deref() != Some("open") {
+                        return LiveStep::Later(None);
+                    }
+                }
             }
             let said = why.clone();
             self.setup_show(move |s| {
@@ -689,20 +702,28 @@ impl TuiApp {
                         s.say.clear();
                     });
                     // The Live Kumi closed opens again, with its Set when Kumi knows it (else the producer finds it in
-                    // Open Recent); one that wasn't open opens as the newest installed.
+                    // Open Recent); one that wasn't open opens as the newest installed, with what the DAW says the
+                    // producer had open last where Kumi opens it so (`closed_set`).
                     let closed_by_kumi = held.is_some();
                     let app = open.or(held);
+                    let set = if closed_by_kumi { set } else { live.closed_set() };
                     // (read before the DAW starts again and rewrites its settings)
                     let note = after_restart(&live);
                     let (opened, with_set) = reopen(&live, app.clone(), set).await;
-                    if closed_by_kumi && !with_set {
-                        self.setup_show(|s| s.set_note = note);
+                    // Then what opened it says is worth knowing (a recovery it will offer).
+                    let notes: Vec<String> = [note.filter(|_| closed_by_kumi && !with_set), live.opened_note().filter(|_| opened)]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                    if !notes.is_empty() {
+                        self.setup_show(move |s| s.set_note = Some(notes.join(" ")));
                     }
                     self.setup_show(|s| s.holding = false);
                     let connecting = live.clone();
                     tokio::task::spawn_local(async move { connecting.connect().await });
                     if !opened {
-                        self.setup_failed(&format!("Kumi couldn't open {}; open it yourself.", crate::daw::words().app));
+                        let app = crate::daw::words().app;
+                        self.setup_failed(&live.open_failed().unwrap_or_else(|| format!("Kumi couldn't open {app}; open it yourself.")));
                     }
                     self.setup_show(|s| s.waiting = false);
                     return LiveStep::Done(app);
@@ -751,7 +772,7 @@ impl TuiApp {
             s.waiting = true;
         });
         if !live.start(Some(app), None).await {
-            self.setup_failed(&format!("Kumi couldn't open {daw}; open it yourself."));
+            self.setup_failed(&live.open_failed().unwrap_or_else(|| format!("Kumi couldn't open {daw}; open it yourself.")));
         }
         loop {
             if live.installed().await == LiveInstalled::Ready {
@@ -772,9 +793,7 @@ impl TuiApp {
         let stop = self.setup_wait();
         let app = crate::daw::words().app;
         loop {
-            let yourself = refused
-                .clone()
-                .unwrap_or_else(|| format!("Quit {app} when you're ready. Kumi then puts its bridge in place and opens {app} again."));
+            let yourself = refused.clone().unwrap_or_else(|| format!("Quit {app} when you're ready. {}", live.once_closed(app)));
             let hint = self.keys_hint(LATER_HINT);
             self.setup_show(move |s| {
                 s.status = if asked { format!("waiting for {app} to close") } else { format!("waiting for you to quit {app}") };
@@ -833,9 +852,13 @@ impl TuiApp {
             let recent = note.filter(|_| !with_set).map_or(String::new(), |note| format!(" {note}"));
             let app = crate::daw::words().app;
             return LiveStep::Later(Some(if opened {
-                format!("{app} is opening again.{recent}")
+                let said = live.opened_note().map_or(String::new(), |note| format!(" {note}"));
+                format!("{app} is opening again.{recent}{said}")
             } else {
-                format!("Kumi couldn't open {app} again; open it yourself.{recent}")
+                match live.open_failed() {
+                    Some(why) => format!("{why}{recent}"),
+                    None => format!("Kumi couldn't open {app} again; open it yourself.{recent}"),
+                }
             }));
         }
         if !asked {

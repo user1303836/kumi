@@ -50,6 +50,7 @@ pub const DAW: OwnDaw = OwnDaw {
     profile: &DawProfile::REAPER,
     descriptor: BridgeDescriptor::REAPER,
     host_flag: "reaper",
+    bridge: kumi_daw_own::bridge::OwnBridge::Loaded("extension"),
     instructions: INSTRUCTIONS,
     mechanical: "two equal routes to the master, a duplicated send, a send on the wrong channels, a muted or bypassed path",
     read_tool: "reaper_read",

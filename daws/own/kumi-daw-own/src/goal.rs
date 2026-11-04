@@ -736,7 +736,7 @@ impl<S: RefScheme + 'static> GoalRig for OwnGoalRig<S> {
         let signal = abort::any([given, r.lifetime()]);
         let result: Result<Result<String, String>, RuntimeError> = async {
             if !r.link.daw.changes.kinds.iter().any(|kind| kind.tool == "scratch_keep") {
-                return Ok(Err(format!("this {} bridge can't keep a copy as a track yet: update Kumi's bridge", r.app())));
+                return Ok(Err(r.link.daw.bridge.cant_keep(r.app())));
             }
             let track = match self.track_now(slot, &signal).await {
                 Ok(track) => track,
