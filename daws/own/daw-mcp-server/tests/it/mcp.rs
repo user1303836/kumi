@@ -232,8 +232,11 @@ async fn soundcrafts_host_lists_what_its_bridge_serves_and_starts_nothing_while_
     let said = tools[0]["description"].as_str().unwrap();
     assert!(said.starts_with("Whether Kumi's bridge beside SoundCraft is connected") && said.contains("the open session"), "{said}");
     let read = &tools[2]["inputSchema"]["properties"];
-    assert_eq!(read["kind"]["enum"], json!(["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note"]));
-    assert!(read["epoch"].is_object() && read["grid"].is_null(), "its refs carry an epoch, and it reads no parameters yet: {read}");
+    assert_eq!(
+        read["kind"]["enum"],
+        json!(["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"])
+    );
+    assert!(read["epoch"].is_object() && read["grid"].is_null(), "its refs carry an epoch, and it reads no parameter texts: {read}");
     let snapshot = session.call(json!({"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"snapshot","arguments":{}}})).await;
     assert_eq!(snapshot["error"]["message"], "Unknown tool: snapshot", "the other DAWs' tools aren't SoundCraft's yet");
     // (the isolated runner's process listing shows no SoundCraft running: no bridge is started for it)

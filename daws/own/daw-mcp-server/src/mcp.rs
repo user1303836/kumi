@@ -40,8 +40,8 @@ fn tool_list(daw: Daw) -> Value {
             daw,
             (
                 "session",
-                "a track's clips, inserts or sends, or a clip's notes",
-                "The ref of what the rows are in: a track for its clips, inserts or sends, a clip for its notes.",
+                "a track's clips, inserts, sends or automation lanes, a clip's notes, an insert's parameters or a lane's points",
+                "The ref of what the rows are in: a track for its clips, inserts, sends or lanes (env), a clip for its notes, an insert for its parameters, a lane for its points.",
             ),
             &kinds(daw),
             &pick,
