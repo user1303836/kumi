@@ -271,7 +271,14 @@ pub const COMMANDS: &[Command] = {
             can(|c| c.map),
         ),
         command("/login", "⇥", Models, "Sign in to a provider", &["key"], can(|c| c.models)),
-        command("/loop", "∞", Work, "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop", &[], can(|c| !c.reads_only)),
+        command(
+            "/loop",
+            "∞",
+            Work,
+            "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop",
+            &[],
+            can(|c| !c.reads_only),
+        ),
         command(
             "/goal",
             "◎",
