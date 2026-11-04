@@ -176,6 +176,17 @@ class SetupTest(unittest.TestCase):
         self.assertFalse((self.data / "runtime" / "current.json").exists())
         self.assertEqual([p.name for p in (self.data / "runtime").iterdir()], [])
 
+    def test_a_data_folder_setup_cannot_write_in_is_reported_not_raised(self) -> None:
+        self.data.mkdir()
+        (self.data / "setup").write_text("a file where setup keeps its plan")
+        with self.assertRaises(setup.SetupError) as raised:
+            self.plan()
+        self.assertEqual(raised.exception.code, "io_failed")
+        (self.data / "setup").unlink()
+        self.plan()
+        (self.data / "runtime").write_text("a file where the runtime goes")
+        self.assertEqual(self.install(Served(BUNDLE))["error"]["code"], "io_failed")
+
     def test_a_bundle_setup_would_not_unpack_installs_nothing(self) -> None:
         for problem, bundle in {"a symlink": tar_xz({"kumi": b"k"}, links={"escape": "/etc"}),
                                 "a climbing path": tar_xz({"kumi": b"k", "../outside": b"x"}),

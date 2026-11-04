@@ -136,6 +136,10 @@ def _write_json(path: Path, value: Mapping[str, Any]) -> None:
     os.replace(scratch, path)
 
 
+def _io_failed(data_dir: Path, error: OSError) -> SetupError:
+    return SetupError("io_failed", f"Setup couldn't write its files in {data_dir}: {error.strerror or error}.")
+
+
 def _now_ms() -> int:
     return int(time.time() * 1000)
 
@@ -312,12 +316,16 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
 def plan(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir: Path | None = None,
          plugin_dir: Path | None = None, target: str | None = None) -> dict:
     """The next setup step and its exact effects, recorded in `<data>/setup/plan.json` for approval. No network.
-    `setup_daw` calls the runtime's `setup_daw` tool; it is needed only once the runtime is installed."""
+    `setup_daw` calls the runtime's `setup_daw` tool; it is needed only once the runtime is installed. Raises only
+    SetupError, including when the plan can't be written (`io_failed`)."""
     data_dir = data_dir or default_data_dir()
     result = _compute_plan(daw, setup_daw, data_dir, plugin_dir, target or host_target())
     result["made_at"] = _now_ms()
     result["digest"] = _digest(result)
-    _write_json(data_dir / "setup" / "plan.json", result)
+    try:
+        _write_json(data_dir / "setup" / "plan.json", result)
+    except OSError as error:
+        raise _io_failed(data_dir, error) from None
     return result
 
 
@@ -393,6 +401,9 @@ def adopt(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir:
                 "status": status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)}
     except SetupError as error:
         return {"ok": False, "error": {"code": error.code, "message": error.message}}
+    except OSError as error:
+        failure = _io_failed(data_dir, error)
+        return {"ok": False, "error": {"code": failure.code, "message": failure.message}}
 
 
 # ---- install ---------------------------------------------------------------------------------------------------------
@@ -426,6 +437,9 @@ def install(daw: str, *, setup_daw: Callable[[dict], Any] | None = None,
                 "status": status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)}
     except SetupError as error:
         return {"ok": False, "error": {"code": error.code, "message": error.message}}
+    except OSError as error:
+        failure = _io_failed(data_dir, error)
+        return {"ok": False, "error": {"code": failure.code, "message": failure.message}}
 
 
 def _open_url(url: str) -> Any:
