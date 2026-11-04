@@ -216,3 +216,27 @@ case!(a_job_has_its_own_status_record_and_its_end_tells_a_producer_whos_away, as
     assert!(written().contains("\x1b]7501;state=clear:id=job-3\x1b\\"));
     h.close().await;
 });
+
+case!(only_the_frame_with_the_keyboard_is_lit_the_box_the_panes_tabs_or_a_job_opened_from_them, async {
+    // Each frame's top-left corner, top to bottom, and whether it's drawn in the lit line.
+    let lit = |h: &Harness| {
+        let [r, g, b] = kumi::tui::style::palette::TRACK;
+        h.styles_of("╭").iter().map(|style| style.split('|').next() == Some(format!("{r},{g},{b}").as_str())).collect::<Vec<_>>()
+    };
+    let h = harness(140);
+    h.start().await;
+    h.connect();
+    h.control.set("job-details", json!([{"status":job(1, "running", json!({})),"asked":"Find how Burial chops vocals","steps":[]}]));
+    h.emit(job(1, "running", json!({})));
+    // The pane, then the box: the box has the keyboard.
+    assert_eq!(lit(&h), [false, true]);
+    // Into the pane's tabs, on to JOBS: the pane has it.
+    h.type_text("\x1b[Z").await;
+    h.type_text("\x1b[Z").await;
+    assert_eq!(lit(&h), [true, false]);
+    // Enter opens the job over the conversation: the job's panel has it, not the pane it was opened from.
+    h.type_text("\r").await;
+    h.wait_for("Asked: Find how Burial chops vocals").await;
+    assert_eq!(lit(&h), [false, true, false]);
+    h.close().await;
+});

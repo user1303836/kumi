@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                ◐ 1 job   ● Live
 
-   ✓ Job 2 · Burial vocal chops · 5 steps, 3 sources · 12.4k tokens               FOCUS
-     Burial pitches vocal snippets up and drowns them in reverb.                  Night Drive
-                                                                                  Your selection will show here
-   ✗ Job 3 · Manual: Grain Delay · failed
-     The manual couldn't be reached.
-                                                                                  NOW
-                                                                                  Ready · 1 job running in the backgr…
-
-
-
-
-
-
-
-
-
-
-                                                                                  HISTORY   JOBS 1 ───────────────────
-                                                                                  Nothing changed yet
-
-
-
-
-   Background jobs · enter opens one: x stops it there, r runs it again
-
-     Job 1 · Tape loop tutorial   watching a video             running 1:05
-     Job 3 · Manual: Grain Delay  The manual couldn't be reached.    failed
-     Job 2 · Burial vocal chops   Burial pitches vocal snippets up a…  done
-
-
-
-   Ask Kumi about your Set
-                                  ↑↓ to move · enter to choose · esc to close
+   ✓ Job 2 · Burial vocal chops · 5 steps, 3 sources · 12.4k tokens             ╭─ FOCUS ──────────────────────────────╮
+     Burial pitches vocal snippets up and drowns them in reverb.                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+   ✗ Job 3 · Manual: Grain Delay · failed                                       │                                      │
+     The manual couldn't be reached.                                            │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready · 1 job running in the backgr… │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ HISTORY   JOBS 1 ───────────────────┤
+                                                                                │ Nothing changed yet                  │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭─ Background jobs · enter opens one: x stops it there, r runs it again ──────╮ │                                      │
+│                                                                             │ │                                      │
+│    Job 1 · Tape loop tutorial   watching a video              running 1:05  │ │                                      │
+│    Job 3 · Manual: Grain Delay  The manual couldn't be reached.     failed  │ │                                      │
+│    Job 2 · Burial vocal chops   Burial pitches vocal snippets up an…  done  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
+                                                                                │                                      │
+╭─────────────────────────────── ↑↓ to move · enter to choose · esc to close ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-   make the kick punchier                                                                                           FOCUS
-                                                                                                                    Night Drive
-   Raising the kick's transient first.                                                                              Your selection will show here
-   stopped
-
-   Live closed while Kumi was working in it. If it crashed, your unsaved changes may be lost: Live offers to        NOW
-   recover them when it opens. Kumi picks up when Live is back.                                                     Ready
-
-   Live is back. Your last request stopped when Live closed, which it may have caused: check the Set before you
-   send it again (enter sends it).
-
-
-
-
-
-
-
-
-
-                                                                                                                    HISTORY ──────────────────────────────────
-                                                                                                                    Nothing changed yet
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-   make the kick punchier
-                                                                                                  enter to send
+   make the kick punchier                                                                                         ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+   Raising the kick's transient first.                                                                            │ Your selection will show here              │
+   stopped                                                                                                        │                                            │
+                                                                                                                  │                                            │
+   Live closed while Kumi was working in it. If it crashed, your unsaved changes may be lost: Live offers to      ├─ NOW ──────────────────────────────────────┤
+   recover them when it opens. Kumi picks up when Live is back.                                                   │ Ready                                      │
+                                                                                                                  │                                            │
+   Live is back. Your last request stopped when Live closed, which it may have caused: check the Set before you   │                                            │
+   send it again (enter sends it).                                                                                │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ HISTORY ──────────────────────────────────┤
+                                                                                                                  │ Nothing changed yet                        │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ make the kick punchier                                                                                      ─╯ ╰────────────────────────────────────────────╯
 

@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                    GPT-6 Astra   ● Live
 
-                                                                                                                    FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    Ready
-
-
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-
-   Choose a model                                            type to filter
-
-   ChatGPT                                                        signed in
-     GPT-6 Astra              Frontier model for complex work       current                                         HISTORY ──────────────────────────────────
-     GPT-6 Luna               Fast and light                                                                        Nothing changed yet
-   Anthropic                                                  not signed in
-     Sign in to Anthropic     with an API key                       sign in
-   OpenAI API                                                 not signed in
-     Sign in to OpenAI API    with an API key                       sign in  es back to one.
-   OpenCode Zen                                               not signed in
-     Sign in to OpenCode Zen  with an API key                       sign in
-   OpenCode Go                                                not signed in
-     Sign in to OpenCode Go   with an API key                       sign in
-   More providers                                             not signed in
-     Sign in to one           OpenRouter, Venice, Google Gemini a…  sign in
-   On this computer                                                ↓ 1 more
-
-
-
-   Ask Kumi about your Set
-                                         ↑↓ to move · enter to choose · ctrl+f sets the fallback · esc to close
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+╭─ Choose a model ────────────────────────────────────────── type to filter ─╮                                    │                                            │
+│                                                                            │                                    │                                            │
+│  ChatGPT                                                        signed in  │                                    ├─ HISTORY ──────────────────────────────────┤
+│    GPT-6 Astra              Frontier model for complex work       current  │                                    │ Nothing changed yet                        │
+│    GPT-6 Luna               Fast and light                                 │                                    │                                            │
+│  Anthropic                                                  not signed in  │                                    │                                            │
+│    Sign in to Anthropic     with an API key                       sign in  │                                    │                                            │
+│  OpenAI API                                                 not signed in  │s back to one.                      │                                            │
+│    Sign in to OpenAI API    with an API key                       sign in  │                                    │                                            │
+│  OpenCode Zen                                               not signed in  │                                    │                                            │
+│    Sign in to OpenCode Zen  with an API key                       sign in  │                                    │                                            │
+│  OpenCode Go                                                not signed in  │                                    │                                            │
+│    Sign in to OpenCode Go   with an API key                       sign in  │                                    │                                            │
+│  More providers                                             not signed in  │                                    │                                            │
+│    Sign in to one           OpenRouter, Venice, Google Gemini a…  sign in  │                                    │                                            │
+│  On this computer                                                ↓ 1 more  │                                    │                                            │
+╰────────────────────────────────────────────────────────────────────────────╯                                    │                                            │
+                                                                                                                  │                                            │
+╭────────────────────────────────────── ↑↓ to move · enter to choose · ctrl+f sets the fallback · esc to close ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

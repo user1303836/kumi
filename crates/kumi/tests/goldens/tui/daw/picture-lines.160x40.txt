@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                               ● Renoise
 
-                                                                                                                    FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    ✓ Wrote 3 lines in “Drop” on “Bass”
-                                                                                                                     00 --- .. .. .. .. ....
-                                                                                                                      → C-4 01 80 .. .. 0A10
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                                        Try                                                         HISTORY 1 ────────────────────────────────
-                                              “What's on this track?”                                               ✓ Wrote 3 lines in “Drop” on “Bass”   undo
-                                              “Set the tempo to 124”                                                   00 --- .. .. .. .. ....
-                                        “Why might my low end sound muddy?”                                             → C-4 01 80 .. .. 0A10
-                                                                                                                       08 E-4 01 40 .. .. → OFF .. .. .. ..
-                      Kumi keeps each song's conversations: /conversations goes back to one.                           12 --- .. .. .. .. → G-4 01 60 .. ..
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your song
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ ✓ Wrote 3 lines in “Drop” on “Bass”        │
+                                                                                                                  │  00 --- .. .. .. .. ....                   │
+                                                                                                                  │   → C-4 01 80 .. .. 0A10                   │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY 1 ────────────────────────────────┤
+                                              “What's on this track?”                                             │ ✓ Wrote 3 lines in “Drop” on “Bass”   undo │
+                                              “Set the tempo to 124”                                              │    00 --- .. .. .. .. ....                 │
+                                        “Why might my low end sound muddy?”                                       │     → C-4 01 80 .. .. 0A10                 │
+                                                                                                                  │    08 E-4 01 40 .. .. → OFF .. .. .. ..    │
+                      Kumi keeps each song's conversations: /conversations goes back to one.                      │    12 --- .. .. .. .. → G-4 01 60 .. ..    │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your song                                                                                    ─╯ ╰────────────────────────────────────────────╯
 

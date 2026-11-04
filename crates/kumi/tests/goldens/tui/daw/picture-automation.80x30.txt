@@ -16,15 +16,15 @@
 
 
 
-  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
-  ✓ Automation of Filter Cutoff on “Bass” in “Drop”: 4 points, linear     undo
-                                                                        ⣀⡠⠤⠒⠒⠉
-                           ⣀⡠⠤⠒⠒⠤⠤⢄⣀⣀⡀                           ⣀⣀⠤⠔⠒⠉⠉
-                     ⣀⡠⠤⠒⠊⠉          ⠈⠉⠉⠒⠒⠢⠤⠤⣀⣀⡀          ⢀⣀⠤⠤⠒⠊⠉
-               ⢀⣀⠤⠔⠊⠉                          ⠈⠉⠉⠑⠒⠒⠤⠤⠒⠒⠉⠁
-         ⢀⣀⠤⠔⠒⠉⠁
+╭─ NOW   FOCUS   HISTORY 1 ──────────────────────────────────── ctrl+\ closes ─╮
+│ ✓ Automation of Filter Cutoff on “Bass” in “Drop”: 4 points, linear     undo │
+│                                                                       ⣀⡠⠤⠒⠒⠉ │
+│                          ⣀⡠⠤⠒⠒⠤⠤⢄⣀⣀⡀                           ⣀⣀⠤⠔⠒⠉⠉       │
+│                    ⣀⡠⠤⠒⠊⠉          ⠈⠉⠉⠒⠒⠢⠤⠤⣀⣀⡀          ⢀⣀⠤⠤⠒⠊⠉              │
+│              ⢀⣀⠤⠔⠊⠉                          ⠈⠉⠉⠑⠒⠒⠤⠤⠒⠒⠉⠁                    │
+│        ⢀⣀⠤⠔⠒⠉⠁                                                               │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
-
-   Ask Kumi about your song
-                                                                enter to send
+╭────────────────────────────────────────────────────────────── enter to send ─╮
+╰─ Ask Kumi about your song                                                   ─╯
 

@@ -1087,6 +1087,10 @@ impl Harness {
 pub fn has(lines: &[String], text: &str) -> bool {
     lines.iter().any(|line| line.contains(text))
 }
+/// A row's words up to where they end inside a frame: its right side's line and the blanks before it gone.
+pub fn framed(line: &str) -> &str {
+    line.trim_end().trim_end_matches('│').trim_end()
+}
 pub fn click(lines: &[String], row: usize, text: &str) -> String {
     let col = lines[row].find(text).unwrap();
     let col = lines[row][..col].chars().count();

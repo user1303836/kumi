@@ -1,40 +1,40 @@
   Kumi                                                                                                                                   ● connecting to Live…
 
-                                                                                                                    FOCUS
-                                                                                                                    Connecting to Live…
-
-
-
-                                                                                                                    NOW
-                                                                                                                    Ready
-
-
-
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                          Ask anything about production.
-                                                                                                                    HISTORY ──────────────────────────────────
-                                         “How do I make my kick punchier?”                                          Nothing changed yet
-
-                       Kumi keeps each Set's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi anything
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Connecting to Live…                        │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                          Ask anything about production.                                          ├─ HISTORY ──────────────────────────────────┤
+                                                                                                                  │ Nothing changed yet                        │
+                                         “How do I make my kick punchier?”                                        │                                            │
+                                                                                                                  │                                            │
+                       Kumi keeps each Set's conversations: /conversations goes back to one.                      │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi anything                                                                                           ─╯ ╰────────────────────────────────────────────╯
 

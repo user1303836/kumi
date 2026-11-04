@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  ✓ Bass colour orange → blue
-                                                                                  ████ → ████
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY 1 ──────────────────────────
-                             “What's on this track?”                              ■ Bass colour orange → blue     undo
-                             “Set the tempo to 124”                                 ████ → ████
-                       “Why might my low end sound muddy?”
-
-      Kumi keeps each Set's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                enter to send
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ ✓ Bass colour orange → blue          │
+                                                                                │ ████ → ████                          │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY 1 ──────────────────────────┤
+                             “What's on this track?”                            │ ■ Bass colour orange → blue     undo │
+                             “Set the tempo to 124”                             │   ████ → ████                        │
+                       “Why might my low end sound muddy?”                      │                                      │
+                                                                                │                                      │
+      Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

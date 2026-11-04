@@ -2,6 +2,7 @@
 //! it does beside it, wrapped to the panel's width so all of it shows at any size; ↑↓, the pages, home and end scroll it.
 use super::super::keymap::{action, label, Keymap};
 use super::super::{
+    icons::{command_icon, IconStyle},
     render::Cursor,
     width::text_width,
     wrap::{wrap, Span},
@@ -11,7 +12,7 @@ use super::drawing::{sp, st};
 use super::input::about;
 use super::*;
 use crate::has::Has;
-use kumi_agent::core::commands::COMMANDS;
+use kumi_agent::core::commands::{named, COMMANDS};
 
 /// The widest the keys column gets: a key wider than this has what it does on the rows under it.
 const KEYS_MOST: i32 = 18;
@@ -294,14 +295,16 @@ pub(super) fn help_sections(has: Has, keymap: &Keymap, app: &str, tabs: &[String
 }
 
 /// The help's rows at `width` cells: each section's heading, then each key with what it does beside it, in one column
-/// the whole help through and wrapped under itself, with a blank row between sections. Where there's too little room
-/// beside the keys, what a key does goes under it. No row runs past `width` (5 cells or more: a panel is never
-/// narrower), and nothing is cut.
-pub(super) fn help_rows(sections: &[HelpSection], width: i32) -> Vec<Vec<Span>> {
+/// the whole help through and wrapped under itself, with a blank row between sections. A command's row starts with its
+/// icon, as the `/` menu shows it (where `icons` draws glyphs). Where there's too little room beside the keys, what a
+/// key does goes under it. No row runs past `width` (5 cells or more: a panel is never narrower), and nothing is cut.
+pub(super) fn help_rows(sections: &[HelpSection], width: i32, icons: IconStyle) -> Vec<Vec<Span>> {
     let width = width.max(1);
     let text = |line: &[Span]| line.iter().map(|span| span.text.as_str()).collect::<String>();
     let pad = |cells: i32| " ".repeat(cells.max(0) as usize);
-    let keys = sections.iter().flat_map(|section| &section.rows).map(|(keys, _)| text_width(keys)).max().unwrap_or(0).min(KEYS_MOST);
+    let icon = |key: &str| named(key).filter(|command| command.name == key).and_then(|command| command_icon(command, icons));
+    let shown = |key: &str| text_width(key) + icon(key).map_or(0, |icon| text_width(&icon.text));
+    let keys = sections.iter().flat_map(|section| &section.rows).map(|(keys, _)| shown(keys)).max().unwrap_or(0).min(KEYS_MOST);
     let beside = width - keys - 4 >= BESIDE_LEAST;
     // Where what a key does starts, and how much room it has.
     let column = if beside { keys + 4 } else { 4 };
@@ -313,17 +316,22 @@ pub(super) fn help_rows(sections: &[HelpSection], width: i32) -> Vec<Vec<Span>> 
         rows.extend(wrap(&[sp(section.title, st::LABEL)], width));
         for (key, does) in &section.rows {
             let words: Vec<String> = wrap(&[sp(does, st::TEXT)], (width - column).max(1)).iter().map(|line| text(line)).collect();
-            if beside && text_width(key) <= keys {
+            let mark = icon(key);
+            if beside && shown(key) <= keys {
                 for (index, line) in words.iter().enumerate() {
                     rows.push(if index == 0 {
-                        vec![sp(format!("  {key}{}", pad(keys - text_width(key))), st::BRIGHT), sp(format!("  {line}"), st::TEXT)]
+                        let mut row = vec![sp("  ", st::BRIGHT)];
+                        row.extend(mark.clone());
+                        row.extend([sp(format!("{key}{}", pad(keys - shown(key))), st::BRIGHT), sp(format!("  {line}"), st::TEXT)]);
+                        row
                     } else {
                         vec![sp(format!("{}{line}", pad(column)), st::TEXT)]
                     });
                 }
             } else {
-                for line in wrap(&[sp(key, st::BRIGHT)], (width - 2).max(1)) {
-                    rows.push(vec![sp(format!("  {}", text(&line)), st::BRIGHT)]);
+                let spans: Vec<Span> = mark.into_iter().chain([sp(key, st::BRIGHT)]).collect();
+                for line in wrap(&spans, (width - 2).max(1)) {
+                    rows.push(std::iter::once(sp("  ", st::BRIGHT)).chain(line).collect());
                 }
                 rows.extend(words.iter().map(|line| vec![sp(format!("{}{line}", pad(column)), st::TEXT)]));
             }
@@ -386,8 +394,8 @@ impl Overlay<TuiApp> for HelpPanel {
     /// the title, so no row loses its end to it. It's read rather than chosen from, so it takes more of a wide window
     /// than other panels, and less of it wraps.
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
-        let width = 100.min(area.left - 2);
-        let rows = help_rows(&app.help_sections(), width - 4);
+        let width = super::draw_panel::panel_width(100, area.boxed);
+        let rows = help_rows(&app.help_sections(), width - 4, app.0.icons);
         let room = (area.box_top - 5 - 2).max(3);
         (self.shown, self.most) = (room.min(rows.len() as i32), (rows.len() as i32 - room).max(0));
         self.scroll = self.scroll.clamp(0, self.most);
@@ -465,8 +473,10 @@ mod tests {
 
     #[test]
     fn all_of_the_help_shows_at_any_width_and_no_row_runs_past_it() {
-        for (sections, width) in every_help().iter().flat_map(|sections| (5..=120).map(move |width| (sections, width))) {
-            let lines = lines(&help_rows(&sections, width));
+        let widths =
+            |sections| (5..=120).flat_map(move |width| [IconStyle::Glyphs, IconStyle::Badges].map(|icons| (sections, width, icons)));
+        for (sections, width, icons) in every_help().iter().flat_map(widths) {
+            let lines = lines(&help_rows(sections, width, icons));
             for line in &lines {
                 assert!(text_width(line) <= width, "{line:?} is wider than {width}");
             }
@@ -573,16 +583,24 @@ mod tests {
 
     #[test]
     fn words_stay_whole_and_what_a_key_does_lines_up_beside_it() {
-        for (sections, width) in every_help().iter().flat_map(|sections| [74, 96].map(move |width| (sections, width))) {
-            let lines = lines(&help_rows(sections, width));
+        let widths = |sections| {
+            [74, 96].into_iter().flat_map(move |width| [IconStyle::Glyphs, IconStyle::Badges].map(|icons| (sections, width, icons)))
+        };
+        for (sections, width, icons) in every_help().iter().flat_map(widths) {
+            let lines = lines(&help_rows(sections, width, icons));
             let joined = lines.join(" ").split_whitespace().collect::<Vec<_>>().join(" ");
             for (keys, does) in sections.iter().flat_map(|section| &section.rows) {
                 let does = does.split_whitespace().collect::<Vec<_>>().join(" ");
                 assert!(joined.contains(&format!("{} {does}", keys.split_whitespace().collect::<Vec<_>>().join(" "))), "{keys}: {does}");
             }
-            // What the keys do starts in one column, the whole help through.
-            let starts =
-                |key: &str, does: &str| lines.iter().find(|line| line.starts_with(&format!("  {key} "))).and_then(|line| line.find(does));
+            // What the keys do starts in one column, the whole help through: a command's after its icon.
+            let lead = |key: &str| {
+                format!("  {}{key} ", named(key).and_then(|command| command_icon(command, icons)).map_or(String::new(), |icon| icon.text))
+            };
+            let starts = |key: &str, does: &str| {
+                lines.iter().find(|line| line.starts_with(&lead(key))).and_then(|line| line.find(does).map(|at| text_width(&line[..at])))
+            };
+            assert!(starts("enter", "Send.").is_some());
             assert_eq!(starts("enter", "Send."), starts("ctrl+home", "The start"));
             assert_eq!(starts("enter", "Send."), starts("/quit", "Close Kumi"));
         }
@@ -590,8 +608,10 @@ mod tests {
 
     #[test]
     fn a_narrow_panel_puts_what_a_key_does_under_it() {
-        let lines = lines(&help_rows(&every_section(), 30));
+        let lines = lines(&help_rows(&every_section(), 30, IconStyle::Glyphs));
         let at = lines.iter().position(|line| line == "  enter").expect("enter on a row of its own");
         assert!(lines[at + 1].starts_with("    Send."), "{:?}", &lines[at..at + 2]);
+        let quit = lines.iter().position(|line| line == "  ⊗ /quit").expect("a command on a row of its own, after its icon");
+        assert!(lines[quit + 1].starts_with("    Close Kumi"), "{:?}", &lines[quit..quit + 2]);
     }
 }

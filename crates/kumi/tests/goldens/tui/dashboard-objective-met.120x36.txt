@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-   /goal master this to -9 LUFS                                                   FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-   Loop: 2 rounds · 1 kept · 1 taken back · 5 listens · 1:01 · every item
-   within tolerance
-                                                                                  NOW
-                                                                                  Ready
-
-
-
-
-
-
-
-
-
-
-                                                                                  HISTORY   GOAL ─────────────────────
-                                                                                  master this to -9 LUFS
-                                                                                  met · turn 2 of 12 · 1:30 of 1:00:00
-                                                                                  measured: the judge's checklist is
-                                                                                  met
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                enter to send
+   /goal master this to -9 LUFS                                                 ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+   Loop: 2 rounds · 1 kept · 1 taken back · 5 listens · 1:01 · every item       │                                      │
+   within tolerance                                                             │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ HISTORY   GOAL ─────────────────────┤
+                                                                                │ master this to -9 LUFS               │
+                                                                                │ met · turn 2 of 12 · 1:30 of 1:00:00 │
+                                                                                │ measured: the judge's checklist is   │
+                                                                                │ met                                  │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

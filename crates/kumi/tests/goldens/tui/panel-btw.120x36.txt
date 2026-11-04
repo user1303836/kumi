@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  Ready
-
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY ────────────────────────────
-                             “What's on this track?”                              Nothing changed yet
-                             “Set the tempo to 124”
-                       “Why might my low end sound muddy?”
-
-      Kumi keeps each Set's conversations: /conversations goes back to one.
-
-
-   btw · how long can its tail be?
-
-   Erbe-Verb's tail runs up to a minute.
-
-
-
-   Ask Kumi about your Set
-                                       ↑↓ to scroll · c copies · esc to close
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                                                                │                                      │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY ────────────────────────────┤
+                             “What's on this track?”                            │ Nothing changed yet                  │
+                             “Set the tempo to 124”                             │                                      │
+                       “Why might my low end sound muddy?”                      │                                      │
+                                                                                │                                      │
+      Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭─ btw · how long can its tail be? ───────────────────────────────────────────╮ │                                      │
+│                                                                             │ │                                      │
+│  Erbe-Verb's tail runs up to a minute.                                      │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
+                                                                                │                                      │
+╭──────────────────────────────────── ↑↓ to scroll · c copies · esc to close ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

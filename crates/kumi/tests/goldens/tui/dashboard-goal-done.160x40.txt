@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-   /goal make my pad sound like ~/ref.wav                                                                           FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    Ready
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                    HISTORY   GOAL ───────────────────────────
-                                                                                                                    make my pad sound like ~/ref.wav
-                                                                                                                    done · stopped · gen 13 · 39 heard · 3
-                                                                                                                    candidates · 3:20
-                                                                                                                    81% from 58%  ▁▂▃▅▆█
-                                                                                                                    kept on  Kumi · Goal best
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                                                  enter to send
+   /goal make my pad sound like ~/ref.wav                                                                         ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ HISTORY   GOAL ───────────────────────────┤
+                                                                                                                  │ make my pad sound like ~/ref.wav           │
+                                                                                                                  │ done · stopped · gen 13 · 39 heard · 3     │
+                                                                                                                  │ candidates · 3:20                          │
+                                                                                                                  │ 81% from 58%  ▁▂▃▅▆█                       │
+                                                                                                                  │ kept on  Kumi · Goal best                  │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

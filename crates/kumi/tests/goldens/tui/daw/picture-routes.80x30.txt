@@ -16,15 +16,15 @@
 
 
 
-  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
-  ✓ Send “Drums” → “Reverb” −6 dB                                         undo
-    Drums → Reverb
-      ███████████─── Volume −12 dB → −6 dB
-      Taps post-fader → pre-fader
+╭─ NOW   FOCUS   HISTORY 1 ──────────────────────────────────── ctrl+\ closes ─╮
+│ ✓ Send “Drums” → “Reverb” −6 dB                                         undo │
+│   Drums → Reverb                                                             │
+│     ███████████─── Volume −12 dB → −6 dB                                     │
+│     Taps post-fader → pre-fader                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
-
-
-
-   Ask Kumi about your project
-                                                                enter to send
+╭────────────────────────────────────────────────────────────── enter to send ─╮
+╰─ Ask Kumi about your project                                                ─╯
 

@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  Ready
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-   What Kumi remembers · notes, techniques and recipes       type to filter
-
-   About you
-     Mixes at -14 LUFS                                   pinned · 1 day ago       HISTORY ────────────────────────────
-     Prefers short, dark reverbs                                2 hours ago       Nothing changed yet
-   About Night Drive
-     Kept once the Set is saved
-   Techniques
-     Neuro from a Reese  gritty, moving neuro basses       Au5 · Neuro bass
-   Recipes
-     Drum bus            a return with glue compression             3 steps
-   From your Sets
-     Vocals: EQ Eight → Compressor → Reverb (on 4 of 4 vocal tracks)
-     Tempo: usually 124–126 BPM
-
-
-
-   Ask Kumi about your Set
-                                  ↑↓ to move · enter to choose · esc to close
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                                                                │                                      │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+╭─ What Kumi remembers · notes, techniques and recipes ────── type to filter ─╮ │                                      │
+│                                                                             │ │                                      │
+│  About you                                                                  │ ├─ HISTORY ────────────────────────────┤
+│    Mixes at -14 LUFS                                    pinned · 1 day ago  │ │ Nothing changed yet                  │
+│    Prefers short, dark reverbs                                 2 hours ago  │ │                                      │
+│  About Night Drive                                                          │ │                                      │
+│    Kept once the Set is saved                                               │ │                                      │
+│  Techniques                                                                 │ │                                      │
+│    Neuro from a Reese  gritty, moving neuro basses        Au5 · Neuro bass  │ │                                      │
+│  Recipes                                                                    │ │                                      │
+│    Drum bus            a return with glue compression              3 steps  │ │                                      │
+│  From your Sets                                                             │ │                                      │
+│    Vocals: EQ Eight → Compressor → Reverb (on 4 of 4 vocal tracks)          │ │                                      │
+│    Tempo: usually 124–126 BPM                                               │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
+                                                                                │                                      │
+╭─────────────────────────────── ↑↓ to move · enter to choose · esc to close ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

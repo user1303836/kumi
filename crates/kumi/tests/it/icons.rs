@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
-use kumi::tui::icons::{detect_icon_style, device_kind, icon, icons, track_kind, DeviceRow, IconKind, IconStyle};
+use kumi::tui::icons::{command_icon, detect_icon_style, device_kind, icon, icons, track_kind, DeviceRow, IconKind, IconStyle};
 use kumi::tui::width::text_width;
+use kumi_agent::core::commands::COMMANDS;
 
 fn env(pairs: &[(&str, &str)]) -> HashMap<String, String> {
     pairs.iter().map(|(key, value)| (key.to_string(), value.to_string())).collect()
@@ -26,6 +27,23 @@ fn every_icon_is_exactly_two_cells_as_a_glyph_or_a_badge_and_each_badge_is_its_o
 fn the_tint_is_on_the_icon_only_and_a_tracks_is_its_own_colour() {
     assert_eq!(*icon(IconKind::MidiTrack, IconStyle::Glyphs, Some([200, 40, 40])).style, kumi::tui::style::Style::fg([200, 40, 40]));
     assert!(!icon(IconKind::AudioEffect, IconStyle::Glyphs, None).style.bold);
+}
+
+#[test]
+fn every_commands_icon_is_two_cells_with_its_blank_its_own_and_none_where_glyphs_dont_show() {
+    let mut seen: HashMap<&str, &str> = HashMap::new();
+    for command in COMMANDS {
+        let shown = command_icon(command, IconStyle::Glyphs).unwrap();
+        assert_eq!(text_width(&shown.text), 2, "{}", command.name);
+        // One character every terminal draws: nothing from Braille or the emoji ranges.
+        let code = command.icon.chars().next().unwrap() as u32;
+        assert!(command.icon.chars().count() == 1 && !(0x2800..=0x28ff).contains(&code) && code < 0x1f000, "{}", command.name);
+        assert!(command_icon(command, IconStyle::Badges).is_none(), "{}", command.name);
+        // One icon, one command: /conversations is /resume by another name.
+        if let Some(other) = seen.insert(command.icon, command.name) {
+            assert_eq!((other, command.name), ("/resume", "/conversations"), "{other} and {} share {}", command.name, command.icon);
+        }
+    }
 }
 
 #[test]

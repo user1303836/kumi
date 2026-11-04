@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-                                                                                                                    FOCUS · Device
-                                                                                                                    ■  4-Audio
-                                                                                                                    ├ □  Pro-Q 3
-                                                                                                                    ├ ∞  LFO
-                                                                                                                    ├ ▣  Audio Effect Rack
-                                                                                                                    │ ├ ○  Chain 1
-                                                                                                                    │ │ ├ ≈  Saturator
-                                                                                                                    │ │ └ ≈  EQ Eight                   pinned
-                                                                                                                    │ └ ○  Chain 2 (1)
-                                          ██                          ▀▀                                            └ ≈  Gate
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                            NOW
-                                                                                                                    Ready
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                                        Try
-                                              “What's on this track?”                                               HISTORY ──────────────────────────────────
-                                              “Set the tempo to 124”                                                Nothing changed yet
-                                        “Why might my low end sound muddy?”
-
-                       Kumi keeps each Set's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-   ≈  Audio Effect Rack › Chain 1 › EQ Eight  ×
-
-
-   Ask Kumi about your Set
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS · Device ───────────────────────────╮
+                                                                                                                  │ ■  4-Audio                                 │
+                                                                                                                  │ ├ □  Pro-Q 3                               │
+                                                                                                                  │ ├ ∞  LFO                                   │
+                                                                                                                  │ ├ ▣  Audio Effect Rack                     │
+                                                                                                                  │ │ ├ ○  Chain 1                             │
+                                                                                                                  │ │ │ ├ ≈  Saturator                         │
+                                                                                                                  │ │ │ └ ≈  EQ Eight                   pinned │
+                                                                                                                  │ │ └ ○  Chain 2 (1)                         │
+                                                                                                                  │ └ ≈  Gate                                  │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          ├─ NOW ──────────────────────────────────────┤
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │ Ready                                      │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY ──────────────────────────────────┤
+                                              “What's on this track?”                                             │ Nothing changed yet                        │
+                                              “Set the tempo to 124”                                              │                                            │
+                                        “Why might my low end sound muddy?”                                       │                                            │
+                                                                                                                  │                                            │
+                       Kumi keeps each Set's conversations: /conversations goes back to one.                      │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+   ≈  Audio Effect Rack › Chain 1 › EQ Eight  ×                                                                   │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

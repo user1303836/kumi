@@ -1,6 +1,8 @@
 use super::super::{
     activity::{activity_glyph, activity_of, shimmer, Activity},
     editor::EditorLayout,
+    frame,
+    icons::command_icon,
     keymap::capitalized,
     logo::*,
     render::Cursor,
@@ -12,7 +14,7 @@ use super::super::{
     width::{text_width, truncate},
     wrap::Span,
 };
-use super::drawer::{drawer_fits, PANE_COLUMNS};
+use super::drawer::{drawer_fits, strip_only, PANE_COLUMNS};
 use super::*;
 use crate::text::library_line;
 use kumi_agent::core::protocol::{size_words, MAX_MESSAGE};
@@ -21,7 +23,6 @@ use kumi_common::time::since;
 pub(super) mod st {
     use super::{palette, Style};
     pub const GROUND: Style = Style::bg(palette::GROUND);
-    pub const SURFACE: Style = Style::bg(palette::SURFACE);
     pub const RAISED: Style = Style::bg(palette::RAISED);
     pub const SELECTED: Style = Style::bg(palette::SELECTED);
     pub const BRIGHT: Style = Style::fg(palette::BRIGHT);
@@ -54,6 +55,13 @@ pub(super) struct NowLine {
     pub detail: String,
     pub style: Style,
     pub activity: Option<(Activity, f64)>,
+}
+/// Where the keyboard is, as the frames show it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum Keyboard {
+    Overlay,
+    Pane,
+    Box,
 }
 impl TuiApp {
     pub(super) fn draw(&self) {
@@ -106,9 +114,13 @@ impl TuiApp {
         }
         let (pane, left) = self.layout(columns);
         self.draw_header(&mut screen, columns);
-        let layout = self.composer_layout((left - 6).max(1));
+        // The box, and what opens over the conversation, keep a blank column from the side pane's frame.
+        let boxed = Self::box_columns(pane, left);
+        let text = Self::box_text(boxed);
+        let layout = self.composer_layout(text);
         let visible = layout.rows.len().min(5) as i32;
-        let box_height = visible + 2;
+        // Its top edge, then its rows: the last one is on its bottom edge.
+        let box_height = visible + 1;
         let box_top = rows - 1 - box_height;
         // Below 100 columns the pane is the drawer under the conversation, or the two-line strip without the rows for
         // it; put away, the strip goes.
@@ -134,28 +146,35 @@ impl TuiApp {
         {
             let mut state = self.0.state.borrow_mut();
             state.page = (area.height - 2).max(1);
-            // Where a drag selects: the conversation side down to the composer, the composer, and the pane. The drawer
-            // keeps its own, as the pane does, so the conversation side stops above it and goes on under it.
+            // Where a drag selects: the conversation side, and the box's rows inside its frame, so a copy doesn't take
+            // its lines. The conversation side stops above the drawer and goes on under it, and stops above the strip;
+            // they and the pane say where their own words are as they're drawn.
             state.select_areas = if drawer {
-                vec![
-                    Rect::new(0, 0, left, docked),
-                    Rect::new(0, docked, columns, dock),
-                    Rect::new(0, docked + dock, left, box_top - docked - dock),
-                ]
+                vec![Rect::new(0, 0, left, docked), Rect::new(0, docked + dock, left, box_top - docked - dock)]
+            } else if dock != 0 {
+                vec![Rect::new(0, 0, left, docked)]
             } else {
                 vec![Rect::new(0, 0, left, box_top)]
             };
-            state.select_areas.push(Rect::new(0, box_top, left, rows - box_top));
+            state.select_areas.push(Rect::new(frame::INSET, box_top + 1, text + 1, visible));
             if pane != 0 {
-                state.select_areas.push(Rect::new(left, 0, pane, rows));
+                // (the header's words over the pane)
+                state.select_areas.push(Rect::new(left, 0, pane, 1));
             }
         }
         self.draw_conversation(&mut screen, area);
         if pane != 0 {
             self.draw_pane(&mut screen, Rect::new(left, 1, pane, rows - 1));
         } else if drawer {
+            self.keep_keyboard_in_drawer();
             self.draw_drawer(&mut screen, Rect::new(0, docked, columns, dock));
         } else {
+            // The strip has no tabs or tree on screen: a keyboard that was in them when the window shrank to it comes back
+            // to the box.
+            if strip_only(columns, rows) {
+                self.0.tabs.leave();
+                self.0.state.borrow_mut().tree_cursor = None;
+            }
             self.keep_tree_fresh(None);
             self.draw_dock(&mut screen, Rect::new(0, docked, columns, dock));
         }
@@ -165,23 +184,23 @@ impl TuiApp {
             screen.put(columns - 2 - text_width(back), rows - 1, back, &st::FAINT);
         }
         if chip != 0 {
-            self.draw_pin(&mut screen, 3, box_top - under - 2, left - 6);
+            self.draw_pin(&mut screen, frame::INSET, box_top - under - 2, text);
         }
         if files != 0 {
-            self.draw_attachments(&mut screen, 3, box_top - under - 2 - chip, left - 6);
+            self.draw_attachments(&mut screen, frame::INSET, box_top - under - 2 - chip, text);
         }
         let open = self.0.state.borrow().overlays.all();
         let menu = self.menu();
         if waiting != 0 && open.is_empty() && menu.is_empty() {
-            self.draw_held(&mut screen, 3, box_top - under - 1 - chip - files - waiting, left - 6, waiting);
+            self.draw_held(&mut screen, frame::INSET, box_top - under - 1 - chip - files - waiting, text, waiting);
         }
-        let mut cursor = Some(self.draw_composer(&mut screen, Rect::new(1, box_top, left - 2, box_height), &layout, visible, &menu));
+        let mut cursor = Some(self.draw_composer(&mut screen, Rect::new(0, box_top, boxed, box_height), &layout, visible, &menu));
         if open.is_empty() {
-            self.draw_menu(&mut screen, box_top, left, &menu);
+            self.draw_menu(&mut screen, box_top, boxed, &menu);
         }
         // What's open over the conversation, bottom first: the top one's cursor is the one that shows.
         for overlay in open {
-            cursor = overlay.borrow_mut().draw(self, &mut screen, Area { box_top, left });
+            cursor = overlay.borrow_mut().draw(self, &mut screen, Area { box_top, left, boxed });
         }
         if self.0.state.borrow().closing {
             cursor = None;
@@ -499,6 +518,30 @@ impl TuiApp {
         }
         state.records.changes().iter().find(|c| &c.id == id).cloned()
     }
+    /// The frames' corners: rounded, or square where Kumi's icons are badges (the consoles whose fonts may lack arcs).
+    pub(super) fn corners(&self) -> frame::Corners {
+        if self.0.icons == IconStyle::Badges {
+            frame::Corners::Square
+        } else {
+            frame::Corners::Rounded
+        }
+    }
+    /// Which frame has the keyboard: what's open over the conversation (a list, the help), the pane (its tabs or FOCUS's
+    /// tree, at its side or in the drawer), or the box. Its frame is the one lit.
+    pub(super) fn keyboard(&self) -> Keyboard {
+        let state = self.0.state.borrow();
+        if state.overlays.top().is_some() {
+            Keyboard::Overlay
+        } else if self.0.tabs.inside() || state.tree_cursor.is_some() {
+            Keyboard::Pane
+        } else {
+            Keyboard::Box
+        }
+    }
+    /// A frame's line, lit while the keyboard is in it, in this terminal's colours.
+    pub(super) fn frame_line(&self, lit: bool) -> Style {
+        frame::line(lit, self.0.depth)
+    }
     pub(super) fn now_line(&self) -> NowLine {
         self.now_said(true)
     }
@@ -686,10 +729,14 @@ impl TuiApp {
             vec![(format!("{} isn't connected", crate::daw::words().app), st::DIM)]
         }
     }
+    /// The input box, in a rounded frame as omp draws its own: what the voice is doing and the box's hint set into its
+    /// top edge, its rows inside, the last of them on its bottom edge (`╰─ text ─╯`), so a line takes two rows.
     fn draw_composer(&self, screen: &mut Screen, box_: Rect, layout: &EditorLayout, visible: i32, menu: &super::complete::Menu) -> Cursor {
-        screen.fill(box_, &st::RAISED);
-        let x = box_.x + 2;
-        let width = (box_.width - 4).max(1);
+        let x = box_.x + frame::INSET;
+        let width = Self::box_text(box_.width);
+        let (top, bottom) = (box_.y, box_.y + box_.height - 1);
+        // Its rows, with the cell after them the cursor takes at a full row's end.
+        let inside = Rect::new(x, top + 1, width + 1, visible);
         let first = (layout.cursor_row as i32 - visible + 1).min(layout.rows.len() as i32 - visible).max(0);
         let voice = self.0.voice.as_ref().and_then(|v| v.view(perf_now()));
         let busy = self.busy();
@@ -697,11 +744,15 @@ impl TuiApp {
         let toast = self.toasted(perf_now());
         // The top overlay's own words, while one is open: asked before the state is borrowed, which an overlay may read.
         // A list's own words stay over a toast: a countdown to Kumi's pick can't wait for it to go.
-        let top = self.0.state.borrow().overlays.top();
-        let overlay_hint = top.as_ref().map(|top| top.borrow().hint(self));
-        let toast = toast.filter(|_| !top.is_some_and(|top| top.borrow().hint_stays(self)));
+        let opened = self.0.state.borrow().overlays.top();
+        let overlay_hint = opened.as_ref().map(|opened| opened.borrow().hint(self));
+        let toast = toast.filter(|_| !opened.is_some_and(|opened| opened.borrow().hint_stays(self)));
+        // The box has the keyboard unless what's open over the conversation, or the pane, has it.
+        let lit = self.keyboard() == Keyboard::Box;
+        frame::border(screen, box_, &self.frame_line(lit), self.corners());
+        screen.fill(Rect::new(box_.x + 2, bottom, box_.width - 4, 1), &st::GROUND);
         let state = self.0.state.borrow();
-        // A message past what the session takes at once says so under the box, before enter would.
+        // A message past what the session takes at once says so in the box's edge, before enter would.
         let toast = toast.or_else(|| {
             let len = state.editor.expanded_len();
             (len > MAX_MESSAGE && state.search.is_none()).then(|| {
@@ -713,7 +764,7 @@ impl TuiApp {
         });
         if state.search.is_some() {
             let shown: Vec<String> = layout.rows.iter().skip(first as usize).take(visible as usize).cloned().collect();
-            self.draw_search(screen, x, box_.y + 1, &shown, box_);
+            self.draw_search(screen, x, top + 1, &shown, inside);
         } else if state.editor.is_empty() {
             let placeholder = voice.as_ref().map(|v| v.placeholder.clone()).unwrap_or_else(|| {
                 if busy && (state.current.is_some() || state.pending_turn) {
@@ -724,10 +775,10 @@ impl TuiApp {
                     "Ask Kumi anything".into()
                 }
             });
-            screen.put(x, box_.y + 1, &truncate(&placeholder, width), &st::FAINT);
+            screen.put(x, top + 1, &truncate(&placeholder, width), &st::FAINT);
         } else {
             for (index, row) in layout.rows.iter().skip(first as usize).take(visible as usize).enumerate() {
-                screen.put_in(x, box_.y + 1 + index as i32, row, &st::BRIGHT, box_);
+                screen.put_in(x, top + 1 + index as i32, row, &st::BRIGHT, inside);
             }
         }
         // The box's own hints say its keys as the keymap has them.
@@ -759,80 +810,90 @@ impl TuiApp {
         } else {
             self.keys_hint(&[(&["composer.send"], "to send")])
         };
-        let bottom = box_.y + box_.height - 1;
-        let used = voice.as_ref().map(|v| spans(screen, x, bottom, &v.status, Some(box_))).unwrap_or(x);
-        let right = box_.x + box_.width - 2;
-        if let Some((_, tone)) = &toast {
-            // A toast that doesn't fit is cut short; a hint that doesn't is left out.
-            let text = truncate(&hint, right - used - 2);
-            screen.put(right - text_width(&text), bottom, &text, if *tone == NoticeTone::Warn { &st::WARN } else { &st::ACCENT });
-        } else if text_width(&hint) + 2 < width && right - text_width(&hint) > used + 1 {
-            screen.put(right - text_width(&hint), bottom, &hint, &st::FAINT);
-        }
-        Cursor { x: x + layout.cursor_column, y: box_.y + 1 + layout.cursor_row as i32 - first }
+        // What the voice is doing at the edge's left, the hint at its right: a toast that doesn't fit is cut short, a
+        // hint that doesn't is left out.
+        let after = frame::left_words(screen, box_, top, voice.as_ref().map_or(&[][..], |voice| &voice.status));
+        let said = match &toast {
+            Some((_, tone)) => {
+                sp(truncate(&hint, frame::right_room(box_, after)), if *tone == NoticeTone::Warn { st::WARN } else { st::ACCENT })
+            }
+            None => sp(hint, st::FAINT),
+        };
+        frame::right_words(screen, box_, top, &[said], after);
+        Cursor { x: x + layout.cursor_column, y: top + 1 + layout.cursor_row as i32 - first }
     }
+    /// The `/` and `@` menu, in a frame over the box: each row's name (a command's after its icon), and what it says.
     fn draw_menu(&self, screen: &mut Screen, box_top: i32, left: i32, menu: &super::complete::Menu) {
         use super::complete::Menu;
         if menu.is_empty() {
             return;
         }
-        let width = 70.min(left - 2);
-        // As many as fit above the box (from the screen's second row), the one chosen among them: a full session has more
-        // commands than a short screen has rows. What's out of sight is said on the first and last rows, as the lists do.
-        let fits = (box_top - 3).max(0) as usize;
+        // As many as fit in the frame above the box (from the screen's second row), the one chosen among them: a full
+        // session has more commands than a short screen has rows. What's out of sight is said in the frame's edges.
+        let fits = (box_top - 4).max(0) as usize;
         if fits == 0 {
             return;
         }
         let selected = self.0.state.borrow().menu_index.min(menu.len() - 1);
         let shown = menu.len().min(fits);
         let first = if selected < shown { 0 } else { selected + 1 - shown };
-        let top = box_top - shown as i32 - 1;
-        // Each row's name, and what it says beside it: a command's what it does, where it's the one chosen; a word's what
-        // it is, on every row (a conversation's when and where, a palette's sounds).
-        let rows: Vec<(&str, Option<String>)> = match menu {
-            Menu::Commands(found) => found.iter().map(|item| (item.command.name, Some(super::input::about(item.command)))).collect(),
+        // Each row's icon, name, and what it says beside it: a command's what it does, where it's the one chosen; a
+        // word's what it is, on every row (a conversation's when and where, a palette's sounds).
+        let rows: Vec<(Option<Span>, &str, Option<String>)> = match menu {
+            Menu::Commands(found) => found
+                .iter()
+                .map(|item| (command_icon(item.command, self.0.icons), item.command.name, Some(super::input::about(item.command))))
+                .collect(),
             Menu::Words { offered, .. } => offered
                 .iter()
-                .map(|item| (item.candidate.label.as_str(), Some(item.candidate.about.clone()).filter(|about| !about.is_empty())))
+                .map(|item| (None, item.candidate.label.as_str(), Some(item.candidate.about.clone()).filter(|about| !about.is_empty())))
                 .collect(),
             // What `@` names: its name, then what it is in the DAW's words and where it is.
             Menu::References { rows, .. } => rows
                 .iter()
                 .map(|row| {
                     let detail = row.detail.as_deref().map(|detail| format!(" · {detail}")).unwrap_or_default();
-                    (row.label.as_str(), Some(format!("{}{detail}", kind_word(row.kind))))
+                    (None, row.label.as_str(), Some(format!("{}{detail}", kind_word(row.kind))))
                 })
                 .collect(),
         };
         let words = matches!(menu, Menu::Words { .. } | Menu::References { .. });
+        let marks = if rows.iter().any(|(icon, ..)| icon.is_some()) { 2 } else { 0 };
+        // Wider by the icons, where there's room: what a command does keeps its room beside them.
+        let width = super::draw_panel::panel_width(70 + marks, left);
         let longest = match menu {
             Menu::Commands(_) => kumi_agent::core::commands::COMMANDS.iter().map(|c| c.name.len()).max().unwrap_or(0) as i32,
-            Menu::Words { .. } | Menu::References { .. } => rows.iter().map(|(label, _)| text_width(label)).max().unwrap_or(0).min(28),
+            Menu::Words { .. } | Menu::References { .. } => rows.iter().map(|(_, label, _)| text_width(label)).max().unwrap_or(0).min(28),
         };
-        let about = 3 + longest + 2;
-        let area = Rect::new(1, top - 1, width, shown as i32 + 1);
-        screen.fill(area, &st::RAISED);
+        let about = frame::INSET + marks + longest + 2;
+        let area = Rect::new(0, box_top - 3 - shown as i32, width + 2, shown as i32 + 2);
+        frame::border(screen, area, &self.frame_line(true), self.corners());
         self.cover(area);
-        for (row, (index, (label, said))) in rows.iter().enumerate().skip(first).take(shown).enumerate() {
-            let y = top + row as i32;
+        self.shut_out(area);
+        let (top, bottom) = (area.y, area.y + area.height - 1);
+        // A drag over it copies what's inside its frame, from where its rows start.
+        self.0.state.borrow_mut().select_areas.insert(0, Rect::new(frame::INSET, top + 1, width - frame::INSET, shown as i32));
+        if first > 0 {
+            frame::right_words(screen, area, top, &[sp(format!("↑ {first} more"), st::FAINT)], area.x + 2);
+        }
+        let below = menu.len() - first - shown;
+        if below > 0 {
+            frame::right_words(screen, area, bottom, &[sp(format!("↓ {below} more"), st::FAINT)], area.x + 2);
+        }
+        for (row, (index, (icon, label, said))) in rows.iter().enumerate().skip(first).take(shown).enumerate() {
+            let y = top + 1 + row as i32;
             let chosen = index == selected;
-            let more = if row == 0 && first > 0 {
-                Some(format!("↑ {first} more"))
-            } else if row == shown - 1 && first + shown < menu.len() {
-                Some(format!("↓ {} more", menu.len() - first - shown))
-            } else {
-                None
-            };
-            let room = width - 1 - more.as_ref().map_or(0, |more| text_width(more) + 1);
             if chosen {
                 screen.fill(Rect::new(1, y, width, 1), &st::SELECTED);
             }
-            screen.put(3, y, &truncate(label, (about - 5).max(1)), &if chosen { st::ACCENT } else { st::TEXT });
-            if let Some(said) = said.as_ref().filter(|_| chosen || words) {
-                screen.put(about, y, &truncate(said, (room - about).max(1)), &if chosen { st::BRIGHT } else { st::FAINT });
+            let mut x = frame::INSET;
+            if let Some(icon) = icon {
+                x = screen.put(x, y, &icon.text, &icon.style);
             }
-            if let Some(more) = more {
-                screen.put(width - text_width(&more), y, &more, &st::FAINT);
+            // In a narrow window the label and what it says stop two cells inside the frame, as the rows start.
+            screen.put(x, y, &truncate(label, (about - x - 2).min(width - 1 - x).max(1)), &if chosen { st::ACCENT } else { st::TEXT });
+            if let Some(said) = said.as_ref().filter(|_| (chosen || words) && about < width - 1) {
+                screen.put(about, y, &truncate(said, width - 1 - about), &if chosen { st::BRIGHT } else { st::FAINT });
             }
         }
     }

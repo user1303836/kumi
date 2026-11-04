@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-                                                                                                                    FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    Ready
-
-
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                                        Try                                                         HISTORY ──────────────────────────────────
-                                              “What's on this track?”                                               Nothing changed yet
-
-   “Bass ideas” · far001
-
-     Last asked: sketch a bassline                                           es back to one.
-     Kumi: Wrote an eight-bar bassline on Bass.
-     Go back to it  Kumi's next answer carries on from it
-     Rename it      In the box below; enter keeps the name
-     Unpin it       Kept as long as other conversations again
-     Copy its id    cargo run -p kumi -- -r far001 brings it back
-     Delete it      For good
-     Leave it as it is
-
-
-
-   Ask Kumi about your Set
-                                                                    ↑↓ to move · enter to choose · esc to close
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY ──────────────────────────────────┤
+                                              “What's on this track?”                                             │ Nothing changed yet                        │
+                                              “Set the tempo to 124”                                              │                                            │
+                                        “Why might my low end sound muddy?”                                       │                                            │
+╭─ “Bass ideas” · far001 ────────────────────────────────────────────────────╮                                    │                                            │
+│                                                                            │s back to one.                      │                                            │
+│    Last asked: sketch a bassline                                           │                                    │                                            │
+│    Kumi: Wrote an eight-bar bassline on Bass.                              │                                    │                                            │
+│    Go back to it  Kumi's next answer carries on from it                    │                                    │                                            │
+│    Rename it      In the box below; enter keeps the name                   │                                    │                                            │
+│    Unpin it       Kept as long as other conversations again                │                                    │                                            │
+│    Copy its id    cargo run -p kumi -- -r far001 brings it back            │                                    │                                            │
+│    Delete it      For good                                                 │                                    │                                            │
+│    Leave it as it is                                                       │                                    │                                            │
+╰────────────────────────────────────────────────────────────────────────────╯                                    │                                            │
+                                                                                                                  │                                            │
+╭───────────────────────────────────────────────────────────────── ↑↓ to move · enter to choose · esc to close ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  Ready
-
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY ────────────────────────────
-                             “What's on this track?”                              Nothing changed yet
-                             “Set the tempo to 124”
-                       “Why might my low end sound muddy?”
-
-
-   This conversation is about its Set; Live has a Set not saved yet open
-
-     Open its Set in Live         Live may ask whether to sav…  recommended
-     Carry it on here, as a copy  The original stays with its Set
-     Cancel                       Stay with a Set not saved yet's own conv…
-
-
-
-   Ask Kumi about your Set
-                                  ↑↓ to move · enter to choose · esc to close
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                                                                │                                      │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY ────────────────────────────┤
+                             “What's on this track?”                            │ Nothing changed yet                  │
+                             “Set the tempo to 124”                             │                                      │
+                       “Why might my low end sound muddy?”                      │                                      │
+                                                                                │                                      │
+      Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
+                                                                                │                                      │
+╭─ This conversation is about its Set; Live has a Set not saved yet open ─────╮ │                                      │
+│                                                                             │ │                                      │
+│    Open its Set in Live         Live may ask whether to save…  recommended  │ │                                      │
+│    Carry it on here, as a copy  The original stays with its Set             │ │                                      │
+│    Cancel                       Stay with a Set not saved yet's own conve…  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
+                                                                                │                                      │
+╭─────────────────────────────── ↑↓ to move · enter to choose · esc to close ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

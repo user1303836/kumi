@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                ● REAPER
 
-                                                                                                                    FOCUS · FX
-                                                                                                                    ■  Drums
-                                                                                                                    ├ ▣  Input FX (1)
-                                                                                                                    ├ □  VST3: ReaEQ (Cockos)
-                                                                                                                    ├ ▣  Bus glue
-                                                                                                                    │ ├ □  VST3: ReaComp (Cockos)
-                                                                                                                    │ ├ □  VST3: ReaXcomp (Cockos) · parallel
-                                                                                                                    │ └ □  JS: Limiter · bypassed
-                                                                                                                    └ □  VST3: ReaVerbate (Cockos) · offline
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                            NOW
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                            Ready
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                                        Try                                                         HISTORY ──────────────────────────────────
-                                              “What's on this track?”                                               Nothing changed yet
-                                              “Set the tempo to 124”
-                                        “Why might my low end sound muddy?”
-
-                     Kumi keeps each project's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your project
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS · FX ───────────────────────────────╮
+                                                                                                                  │ ■  Drums                                   │
+                                                                                                                  │ ├ ▣  Input FX (1)                          │
+                                                                                                                  │ ├ □  VST3: ReaEQ (Cockos)                  │
+                                                                                                                  │ ├ ▣  Bus glue                              │
+                                                                                                                  │ │ ├ □  VST3: ReaComp (Cockos)              │
+                                                                                                                  │ │ ├ □  VST3: ReaXcomp (Cockos) · parallel  │
+                                                                                                                  │ │ └ □  JS: Limiter · bypassed              │
+                                                                                                                  │ └ □  VST3: ReaVerbate (Cockos) · offline   │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          ├─ NOW ──────────────────────────────────────┤
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │ Ready                                      │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY ──────────────────────────────────┤
+                                              “What's on this track?”                                             │ Nothing changed yet                        │
+                                              “Set the tempo to 124”                                              │                                            │
+                                        “Why might my low end sound muddy?”                                       │                                            │
+                                                                                                                  │                                            │
+                     Kumi keeps each project's conversations: /conversations goes back to one.                    │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your project                                                                                 ─╯ ╰────────────────────────────────────────────╯
 

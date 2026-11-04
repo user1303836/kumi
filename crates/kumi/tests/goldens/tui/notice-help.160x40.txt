@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-                                                                                                                    FOCUS
-   Keys and commands                                                                      ↓ 52 more                 Night Drive
-                                                                                                                    Your selection will show here
-   Send and steer
-     enter               Send. While Kumi works, it reads your message after the step under way
-     tab                 While Kumi works: send it after the answer instead; it waits above the box                 NOW
-     alt+↑               Take the last waiting message back into the box                                            Ready
-     ctrl+j  alt+enter   A new line (shift+enter too, where the terminal tells it apart)
-     ↑ ↓                 The box's lines, then what you sent before
-     ctrl+r              Look back through what you sent for the words you type: ctrl+r again finds
-                         an earlier one, enter puts it in the box, esc goes back to your draft
-     ctrl+v              Add the picture on the clipboard to your next message; files dragged in go
-                         with it too
-     backspace           In an empty box, take back the last file added
-
-   Move around
-     page up  page down  Scroll the conversation; the mouse wheel too (over the tabs, it scrolls
-                         them)
-     ctrl+home           The start of the conversation
-     ctrl+end            Back to the latest                                                                         HISTORY ──────────────────────────────────
-     ctrl+o              The conversation in detail, with what each step was given and gave back: /                 Nothing changed yet
-                         searches it, { } go from request to request, [ prints it into the
-                         terminal's scrollback, v opens it in your editor
-     drag                Copy text as you let go; double-click for a word, triple-click for a line
-     shift+drag          Your terminal's own selection (option+drag in iTerm2)
-     ctrl+l              Draw the screen again
-
-   The pane
-     ctrl+\              Below 100 columns, open or close the drawer; at full width, put the side
-                         pane away or bring it back; below 24 rows, the same for the two-line strip
-     shift+tab           Into the tabs (HISTORY), then on to the next: ↑↓ and page up/down move,
-                         esc or tab comes back
-
-
-
-   Ask Kumi about your Set
-                                                                                    ↑↓ to scroll · esc to close
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+╭─ Keys and commands ──────────────────────────────────────────────────────────────────── ↓ 51 more ─╮            │ Night Drive                                │
+│                                                                                                    │            │ Your selection will show here              │
+│  Send and steer                                                                                    │            │                                            │
+│    enter               Send. While Kumi works, it reads your message after the step under way      │            │                                            │
+│    tab                 While Kumi works: send it after the answer instead; it waits above the box  │            ├─ NOW ──────────────────────────────────────┤
+│    alt+↑               Take the last waiting message back into the box                             │            │ Ready                                      │
+│    ctrl+j  alt+enter   A new line (shift+enter too, where the terminal tells it apart)             │            │                                            │
+│    ↑ ↓                 The box's lines, then what you sent before                                  │            │                                            │
+│    ctrl+r              Look back through what you sent for the words you type: ctrl+r again finds  │            │                                            │
+│                        an earlier one, enter puts it in the box, esc goes back to your draft       │            │                                            │
+│    ctrl+v              Add the picture on the clipboard to your next message; files dragged in go  │            │                                            │
+│                        with it too                                                                 │            │                                            │
+│    backspace           In an empty box, take back the last file added                              │            │                                            │
+│                                                                                                    │            │                                            │
+│  Move around                                                                                       │            │                                            │
+│    page up  page down  Scroll the conversation; the mouse wheel too (over the tabs, it scrolls     │            │                                            │
+│                        them)                                                                       │            │                                            │
+│    ctrl+home           The start of the conversation                                               │            │                                            │
+│    ctrl+end            Back to the latest                                                          │            ├─ HISTORY ──────────────────────────────────┤
+│    ctrl+o              The conversation in detail, with what each step was given and gave back: /  │            │ Nothing changed yet                        │
+│                        searches it, { } go from request to request, [ prints it into the           │            │                                            │
+│                        terminal's scrollback, v opens it in your editor                            │            │                                            │
+│    drag                Copy text as you let go; double-click for a word, triple-click for a line   │            │                                            │
+│    shift+drag          Your terminal's own selection (option+drag in iTerm2)                       │            │                                            │
+│    ctrl+l              Draw the screen again                                                       │            │                                            │
+│                                                                                                    │            │                                            │
+│  The pane                                                                                          │            │                                            │
+│    ctrl+\              Below 100 columns, open or close the drawer; at full width, put the side    │            │                                            │
+│                        pane away or bring it back; below 24 rows, the same for the two-line strip  │            │                                            │
+│    shift+tab           Into the tabs (HISTORY), then on to the next: ↑↓ and page up/down move,     │            │                                            │
+│                        esc or tab comes back                                                       │            │                                            │
+│    enter               In the tabs: open a change's picture; on what Kumi kept, forget it          │            │                                            │
+╰────────────────────────────────────────────────────────────────────────────────────────────────────╯            │                                            │
+                                                                                                                  │                                            │
+╭───────────────────────────────────────────────────────────────────────────────── ↑↓ to scroll · esc to close ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

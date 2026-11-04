@@ -16,15 +16,15 @@
 
 
 
-  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
-  ✓ “Pad” settings: volume −3 dB, transpose 12, loop forward              undo
-    ███████████▏── Volume −6 dB → −3 dB
-    Transpose 0 → 12
-    Loop off → forward
+╭─ NOW   FOCUS   HISTORY 1 ──────────────────────────────────── ctrl+\ closes ─╮
+│ ✓ “Pad” settings: volume −3 dB, transpose 12, loop forward              undo │
+│   ███████████▏── Volume −6 dB → −3 dB                                        │
+│   Transpose 0 → 12                                                           │
+│   Loop off → forward                                                         │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
-
-
-
-   Ask Kumi about your song
-                                                                enter to send
+╭────────────────────────────────────────────────────────────── enter to send ─╮
+╰─ Ask Kumi about your song                                                   ─╯
 

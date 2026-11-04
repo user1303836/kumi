@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-   recreate the bubbles from this tutorial                                                                          FOCUS
-                                                                                                                    Night Drive
-   Built the bubble chain on Bubbles.                                                                               Your selection will show here
-   0.9s
-
-   ◆ Keep this as a technique? Liquid bubbles                                                                       NOW
-                                                                                                                    ◆ Keep this as a technique? Liquid bubbles
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                    HISTORY ──────────────────────────────────
-                                                                                                                    Nothing changed yet
-
-
-
-
-
-
-
-   Keep “Liquid bubbles” as a technique?
-
-     1. Yes, keep it
-     2. No
-
-
-
-   Ask Kumi about your Set
-                                                 a number, then enter answers · or type your own · esc to close
+   recreate the bubbles from this tutorial                                                                        ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+   Built the bubble chain on Bubbles.                                                                             │ Your selection will show here              │
+   0.9s                                                                                                           │                                            │
+                                                                                                                  │                                            │
+   ◆ Keep this as a technique? Liquid bubbles                                                                     ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ ◆ Keep this as a technique? Liquid bubbles │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ HISTORY ──────────────────────────────────┤
+                                                                                                                  │ Nothing changed yet                        │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─ Keep “Liquid bubbles” as a technique? ────────────────────────────────────╮                                    │                                            │
+│                                                                            │                                    │                                            │
+│    1. Yes, keep it                                                         │                                    │                                            │
+│    2. No                                                                   │                                    │                                            │
+╰────────────────────────────────────────────────────────────────────────────╯                                    │                                            │
+                                                                                                                  │                                            │
+╭────────────────────────────────────────────── a number, then enter answers · or type your own · esc to close ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

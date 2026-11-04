@@ -16,15 +16,15 @@
 
 
 
-  NOW   FOCUS   HISTORY 1 ────────────────────────────────────── ctrl+\ closes
-  ✓ Gainer on Bass Gain −6.021 dB                                         undo
-    ██───▏──────── Gain 0.000 dB → −6.021 dB
+╭─ NOW   FOCUS   HISTORY 1 ──────────────────────────────────── ctrl+\ closes ─╮
+│ ✓ Gainer on Bass Gain −6.021 dB                                         undo │
+│   ██───▏──────── Gain 0.000 dB → −6.021 dB                                   │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
-
-
-
-
-
-   Ask Kumi about your song
-                                                                enter to send
+╭────────────────────────────────────────────────────────────── enter to send ─╮
+╰─ Ask Kumi about your song                                                   ─╯
 

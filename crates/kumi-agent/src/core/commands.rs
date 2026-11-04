@@ -9,6 +9,9 @@ use kumi_types::daw::DawWords;
 /// One command, as the menu and the help show it.
 pub struct Command {
     pub name: &'static str,
+    /// Its icon beside its name, one cell wide: what a glance down the menu finds it by, in its family's colour.
+    pub icon: &'static str,
+    pub family: Family,
     /// Other names it answers to, with no row of their own: the menu lists the command for them.
     pub aliases: &'static [&'static str],
     /// What it does, with `{app}` and `{place}` for the DAW's words ([`Command::about`] puts them in).
@@ -18,6 +21,21 @@ pub struct Command {
     /// The words it takes that the menu offers, as each is typed (tab puts the one chosen in).
     pub args: &'static [Arg],
     pub needs: Needs,
+}
+
+/// What a command is about: the menu colours its icon by it, so the commands of a kind read as one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Family {
+    /// The conversation: starting one, going back to one, naming, copying and sharing it, talking in it.
+    Conversation,
+    /// The DAW, and the producer's sounds and music.
+    Daw,
+    /// The models Kumi talks to, and signing in to them.
+    Models,
+    /// What Kumi keeps at and keeps: loops, goals, background jobs, memory and recipes.
+    Work,
+    /// Kumi itself: its connection, updates, the help, and leaving.
+    Kumi,
 }
 
 /// A word a command takes, and what the menu offers for it.
@@ -122,95 +140,169 @@ impl Command {
     }
 }
 
-/// Every command, in the order the menu and the help list them.
-pub const COMMANDS: &[Command] = &[
-    command("/new", "Start a fresh conversation (the last one is kept); /new <name> names it", &[], ALWAYS),
-    command("/btw", "Ask something on the side, without interrupting Kumi", &["aside", "question"], can(|c| c.aside)),
-    command("/voice", "Talk instead of typing: ctrl+t, and how it listens", &["microphone", "speak"], front(Front::Voice)),
-    Command {
-        args: &[to_end("conversation", 1, &[], Completes::Conversations)],
-        ..command(
-            "/resume",
-            "Go back to a kept conversation, this {place}'s or any {place}'s: /resume <id or name>",
-            &[],
+/// Every command, in the order the menu and the help list them. Each icon is one cell wide, from the arrows, shapes and
+/// symbols terminal fonts carry or fall back to (no emoji, whose width terminals disagree on), and says the command's
+/// own thing: the same one twice only for the same command. /quit's isn't the × a click takes something back with.
+pub const COMMANDS: &[Command] = {
+    use Family::*;
+    &[
+        command("/new", "+", Conversation, "Start a fresh conversation (the last one is kept); /new <name> names it", &[], ALWAYS),
+        command(
+            "/btw",
+            "↪",
+            Conversation,
+            "Ask something on the side, without interrupting Kumi",
+            &["aside", "question"],
+            can(|c| c.aside),
+        ),
+        command(
+            "/voice",
+            "∿",
+            Conversation,
+            "Talk instead of typing: ctrl+t, and how it listens",
+            &["microphone", "speak"],
+            front(Front::Voice),
+        ),
+        Command {
+            args: &[to_end("conversation", 1, &[], Completes::Conversations)],
+            ..command(
+                "/resume",
+                "◷",
+                Conversation,
+                "Go back to a kept conversation, this {place}'s or any {place}'s: /resume <id or name>",
+                &[],
+                can(|c| c.conversations),
+            )
+        },
+        Command {
+            args: &[to_end("conversation", 1, &[], Completes::Conversations)],
+            ..command("/conversations", "◷", Conversation, "The same as /resume", &[], can(|c| c.conversations))
+        },
+        command("/rename", "✐", Conversation, "Name this conversation: /rename <name>", &["title"], can(|c| c.conversations)),
+        command(
+            "/fork",
+            "⋔",
+            Conversation,
+            "Carry on in a copy of this conversation; the original stays",
+            &["branch"],
             can(|c| c.conversations),
-        )
-    },
-    Command {
-        args: &[to_end("conversation", 1, &[], Completes::Conversations)],
-        ..command("/conversations", "The same as /resume", &[], can(|c| c.conversations))
-    },
-    command("/rename", "Name this conversation: /rename <name>", &["title"], can(|c| c.conversations)),
-    command("/fork", "Carry on in a copy of this conversation; the original stays", &["branch"], can(|c| c.conversations)),
-    command("/reconnect", "Connect to {app} again, keeping the conversation", &[], can(|c| c.reconnect)),
-    command("/daw", "Which DAW Kumi works with; /daw <name> opens Kumi again with another", &[], front(Front::SwitchDaw)),
-    command("/undo", "Undo Kumi's last change", &["history", "revert"], ALWAYS),
-    command(
-        "/takeback",
-        "Take back your last request: its changes, and its words to edit; /takeback 3, your last three",
-        &["rewind", "back"],
-        can(|c| c.take_back),
-    ),
-    command("/stop", "Stop {app}: clips, the transport and recording", &[], can(|c| c.stop_daw)),
-    command("/refresh", "Read your {app} {place} again", &["reload"], ALWAYS),
-    command("/copy", "Copy Kumi's last answer", &["clipboard"], ALWAYS),
-    Command {
-        args: &[arg("format", 1, &[], Completes::Words(&["copy", "md", "html", "json"]))],
-        ..command("/export", "This conversation as a file: choose, or /export copy, md, html or json (for another Kumi)", &["save"], ALWAYS)
-    },
-    command("/share", "Save this conversation as a web page that opens anywhere, to send", &["link"], ALWAYS),
-    Command {
-        args: &[arg("model", 1, &[], Completes::Models)],
-        ..command("/model", "Choose the model Kumi talks to", &[], can(|c| c.models))
-    },
-    command("/effort", "How hard the model thinks", &["reasoning"], can(|c| c.models)),
-    command("/fast", "The model's faster tier, when its provider offers one", &["speed"], can(|c| c.models)),
-    command("/willington", "Willington's bindings in {app}: macro mapping, zones", &[], front(Front::Willington)),
-    Command {
-        args: &[
-            arg("slot", 1, &[], Completes::Words(&["listening", "stems", "transcription", "embeddings", "back"])),
-            arg("slot", 2, &["back"], Completes::Words(JOBS)),
-            // (after any word: a slot answers to other names too, "ears" for listening)
-            arg("model", 2, &[], Completes::SlotModels),
-        ],
-        ..command("/slots", "Which model does each listening job: /slots listening gemini, /slots back <job>", &[], can(|c| c.slots))
-    },
-    Command {
-        args: &[
-            arg("what", 1, &[], Completes::Words(&["list", "new", "use", "rename", "forget", "strict", "loose"])),
-            // (not after rename, which takes a new name)
-            to_end("palette", 2, &["use", "forget"], Completes::Palettes),
-        ],
-        ..command(
-            "/palette",
-            "The sounds you gathered (Enter on /map): list, new, use, rename, forget; strict or loose",
-            &["samples"],
-            can(|c| c.palette),
-        )
-    },
-    Command {
-        args: &[arg("what", 1, &[], Completes::Words(&["add", "remove", "pause", "resume", "forget"]))],
-        ..command("/music", "Your own music, which Kumi learns your taste from: folders, songs, pause, forget", &[], can(|c| c.music))
-    },
-    command("/map", "Your sounds and songs as a map: hear a point, find more like it; /map open in the browser", &[], can(|c| c.map)),
-    command("/login", "Sign in to a provider", &["key"], can(|c| c.models)),
-    command("/loop", "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop", &[], ALWAYS),
-    command("/goal", "Keep at one goal until it's met: /goal <what>, then resume, edit, pause, clear", &["objective"], can(|c| c.goal)),
-    command("/memory", "What Kumi remembers", &["notes"], can(|c| c.memory)),
-    command("/note", "Change a note's words: /note <id> <new words>", &[], can(|c| c.change_note)),
-    command("/recipes", "Your saved ways of working", &[], can(|c| c.recipes)),
-    command("/recipe", "Run a recipe now: /recipe <name> blank=value …", &[], can(|c| c.run_recipe)),
-    command("/jobs", "What's running in the background: see, stop or run one again", &[], can(|c| c.jobs)),
-    command("/logout", "Sign out of a provider", &[], can(|c| c.models)),
-    command("/status", "What Kumi is connected to", &["connection"], ALWAYS),
-    command("/update", "Get the newest Kumi", &["upgrade", "version"], front(Front::Updates)),
-    command("/changelog", "What's new in Kumi", &["release", "news"], ALWAYS),
-    command("/help", "Keys and commands", &[], ALWAYS),
-    command("/quit", "Close Kumi", &["exit"], ALWAYS),
-];
+        ),
+        command("/reconnect", "⇄", Daw, "Connect to {app} again, keeping the conversation", &[], can(|c| c.reconnect)),
+        command("/daw", "▤", Daw, "Which DAW Kumi works with; /daw <name> opens Kumi again with another", &[], front(Front::SwitchDaw)),
+        command("/undo", "↶", Daw, "Undo Kumi's last change", &["history", "revert"], ALWAYS),
+        command(
+            "/takeback",
+            "«",
+            Daw,
+            "Take back your last request: its changes, and its words to edit; /takeback 3, your last three",
+            &["rewind", "back"],
+            can(|c| c.take_back),
+        ),
+        command("/stop", "■", Daw, "Stop {app}: clips, the transport and recording", &[], can(|c| c.stop_daw)),
+        command("/refresh", "↻", Daw, "Read your {app} {place} again", &["reload"], ALWAYS),
+        command("/copy", "❐", Conversation, "Copy Kumi's last answer", &["clipboard"], ALWAYS),
+        Command {
+            args: &[arg("format", 1, &[], Completes::Words(&["copy", "md", "html", "json"]))],
+            ..command(
+                "/export",
+                "↧",
+                Conversation,
+                "This conversation as a file: choose, or /export copy, md, html or json (for another Kumi)",
+                &["save"],
+                ALWAYS,
+            )
+        },
+        command("/share", "↗", Conversation, "Save this conversation as a web page that opens anywhere, to send", &["link"], ALWAYS),
+        Command {
+            args: &[arg("model", 1, &[], Completes::Models)],
+            ..command("/model", "✦", Models, "Choose the model Kumi talks to", &[], can(|c| c.models))
+        },
+        command("/effort", "◔", Models, "How hard the model thinks", &["reasoning"], can(|c| c.models)),
+        command("/fast", "»", Models, "The model's faster tier, when its provider offers one", &["speed"], can(|c| c.models)),
+        command("/willington", "⌁", Daw, "Willington's bindings in {app}: macro mapping, zones", &[], front(Front::Willington)),
+        Command {
+            args: &[
+                arg("slot", 1, &[], Completes::Words(&["listening", "stems", "transcription", "embeddings", "back"])),
+                arg("slot", 2, &["back"], Completes::Words(JOBS)),
+                // (after any word: a slot answers to other names too, "ears" for listening)
+                arg("model", 2, &[], Completes::SlotModels),
+            ],
+            ..command(
+                "/slots",
+                "⊞",
+                Models,
+                "Which model does each listening job: /slots listening gemini, /slots back <job>",
+                &[],
+                can(|c| c.slots),
+            )
+        },
+        Command {
+            args: &[
+                arg("what", 1, &[], Completes::Words(&["list", "new", "use", "rename", "forget", "strict", "loose"])),
+                // (not after rename, which takes a new name)
+                to_end("palette", 2, &["use", "forget"], Completes::Palettes),
+            ],
+            ..command(
+                "/palette",
+                "◈",
+                Daw,
+                "The sounds you gathered (Enter on /map): list, new, use, rename, forget; strict or loose",
+                &["samples"],
+                can(|c| c.palette),
+            )
+        },
+        Command {
+            args: &[arg("what", 1, &[], Completes::Words(&["add", "remove", "pause", "resume", "forget"]))],
+            ..command(
+                "/music",
+                "♫",
+                Daw,
+                "Your own music, which Kumi learns your taste from: folders, songs, pause, forget",
+                &[],
+                can(|c| c.music),
+            )
+        },
+        command(
+            "/map",
+            "∴",
+            Daw,
+            "Your sounds and songs as a map: hear a point, find more like it; /map open in the browser",
+            &[],
+            can(|c| c.map),
+        ),
+        command("/login", "⇥", Models, "Sign in to a provider", &["key"], can(|c| c.models)),
+        command("/loop", "∞", Work, "Listen, judge and adjust in rounds until the goal is met: /loop <what>, then stop", &[], ALWAYS),
+        command(
+            "/goal",
+            "◎",
+            Work,
+            "Keep at one goal until it's met: /goal <what>, then resume, edit, pause, clear",
+            &["objective"],
+            can(|c| c.goal),
+        ),
+        command("/memory", "★", Work, "What Kumi remembers", &["notes"], can(|c| c.memory)),
+        command("/note", "✎", Work, "Change a note's words: /note <id> <new words>", &[], can(|c| c.change_note)),
+        command("/recipes", "≣", Work, "Your saved ways of working", &[], can(|c| c.recipes)),
+        command("/recipe", "▸", Work, "Run a recipe now: /recipe <name> blank=value …", &[], can(|c| c.run_recipe)),
+        command("/jobs", "◐", Work, "What's running in the background: see, stop or run one again", &[], can(|c| c.jobs)),
+        command("/logout", "⇤", Models, "Sign out of a provider", &[], can(|c| c.models)),
+        command("/status", "⊙", Kumi, "What Kumi is connected to", &["connection"], ALWAYS),
+        command("/update", "⇪", Kumi, "Get the newest Kumi", &["upgrade", "version"], front(Front::Updates)),
+        command("/changelog", "¶", Kumi, "What's new in Kumi", &["release", "news"], ALWAYS),
+        command("/help", "?", Kumi, "Keys and commands", &[], ALWAYS),
+        command("/quit", "⊗", Kumi, "Close Kumi", &["exit"], ALWAYS),
+    ]
+};
 
-const fn command(name: &'static str, about: &'static str, finds: &'static [&'static str], needs: Needs) -> Command {
-    Command { name, aliases: &[], about, finds, args: &[], needs }
+const fn command(
+    name: &'static str,
+    icon: &'static str,
+    family: Family,
+    about: &'static str,
+    finds: &'static [&'static str],
+    needs: Needs,
+) -> Command {
+    Command { name, icon, family, aliases: &[], about, finds, args: &[], needs }
 }
 
 /// The word a line is typing, where its command offers words for it: `/palette use Ki` is typing the palette (`Ki` so

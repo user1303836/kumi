@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-   ✎ Noted about Night Drive: The Reese is the main bass                          FOCUS
-                                                                                  Night Drive
-   ✎ Noted about you: Prefers short, dark reverbs                                 Your selection will show here
-
-   ↻ Saved a recipe: Drum bus (3 steps)
-                                                                                  NOW
-   ◆ Kept a technique: Neuro from a Reese                                         ✓ Tempo 120 → 124 BPM
-
-
-
-
-
-
-
-
-
-
-                                                                                  HISTORY 1 ──────────────────────────
-                                                                                  ◆ Neuro from a Reese          forget
-                                                                                  ↻ Drum bus                    forget
-                                                                                  ✎ Prefers short, dark reverbs forget
-                                                                                  1 more kept · /memory
-
-                                                                                  ✓ Tempo 120 → 124 BPM           undo
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                enter to send
+   ✎ Noted about Night Drive: The Reese is the main bass                        ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+   ✎ Noted about you: Prefers short, dark reverbs                               │ Your selection will show here        │
+                                                                                │                                      │
+   ↻ Saved a recipe: Drum bus (3 steps)                                         │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+   ◆ Kept a technique: Neuro from a Reese                                       │ ✓ Tempo 120 → 124 BPM                │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ HISTORY 1 ──────────────────────────┤
+                                                                                │ ◆ Neuro from a Reese          forget │
+                                                                                │ ↻ Drum bus                    forget │
+                                                                                │ ✎ Prefers short, dark reverbs forget │
+                                                                                │ 1 more kept · /memory                │
+                                                                                │                                      │
+                                                                                │ ✓ Tempo 120 → 124 BPM           undo │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

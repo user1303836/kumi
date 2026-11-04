@@ -1,30 +1,30 @@
   Kumi  ·  Night Drive                                                                    ● REAPER
 
-                                                                  FOCUS · MIDI
-                                                                  ■  Bass › ▬  Bass take
-                                                                  ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-                                                                  ⠀⠀⠀⠀⠉⠀⠀⠀⠀⠀⠀⠀⠤⠤⠤⠤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-                                                                  ⣀⣀⠀⠀⠀⠀⠀⠀⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-                 ██                          ▀▀                   ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀
-                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                   4 bars · 4 notes · 1 selected
-                 ██▀█▄   ██  ██  ██  ██  ██  ██                   CC 1      ▁▁▁▁▁▃▃▃▃▃▃▅▅▅▅▅▆▆▆▆▆█
-                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                   Pitch       ────────────────────
-                                                                  CC 11     ▇▇▇▇▇▇▇▇▇▇▇▅▅▅▅▅▅▅▅▅▅▅
-                 ░▒▓████████████████████████▓▒░                   and 1 more lane
-
-                    Kumi can see Night Drive.
-                                                                  NOW
-                               Try                                HISTORY ────────────────────────
-                     “What's on this track?”                      Nothing changed yet
-                     “Set the tempo to 124”
-               “Why might my low end sound muddy?”
-
-   Kumi keeps each project's conversations: /conversations go…
-
-
-
-
-
-   Ask Kumi about your project
-                                                enter to send
+                                                                ╭─ FOCUS · MIDI ───────────────────╮
+                                                                │ ■  Bass › ▬  Bass take           │
+                                                                │ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ │
+                                                                │ ⠀⠀⠀⠀⠉⠀⠀⠀⠀⠀⠀⠀⠤⠤⠤⠤⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ │
+                                                                │ ⣀⣀⠀⠀⠀⠀⠀⠀⣀⣀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ │
+                 ██                          ▀▀                 │ ⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀ │
+                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                 │ 4 bars · 4 notes · 1 selected    │
+                 ██▀█▄   ██  ██  ██  ██  ██  ██                 │ CC 1      ▁▁▁▁▁▃▃▃▃▃▃▅▅▅▅▅▆▆▆▆▆█ │
+                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                 │ Pitch       ──────────────────── │
+                                                                │ CC 11     ▇▇▇▇▇▇▇▇▇▇▇▅▅▅▅▅▅▅▅▅▅▅ │
+                 ░▒▓████████████████████████▓▒░                 │ and 1 more lane                  │
+                                                                │                                  │
+                    Kumi can see Night Drive.                   │                                  │
+                                                                ├─ NOW ────────────────────────────┤
+                               Try                              ├─ HISTORY ────────────────────────┤
+                     “What's on this track?”                    │ Nothing changed yet              │
+                     “Set the tempo to 124”                     │                                  │
+               “Why might my low end sound muddy?”              │                                  │
+                                                                │                                  │
+   Kumi keeps each project's conversations: /conversations go…  │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+                                                                │                                  │
+╭───────────────────────────────────────────── enter to send ─╮ │                                  │
+╰─ Ask Kumi about your project                               ─╯ ╰──────────────────────────────────╯
 

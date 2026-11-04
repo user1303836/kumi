@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-                                                                                                                    FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    ✓ Bass volume 0.0 dB → -3.0 dB, pan C → 1…
-                                                                                                                    ███████──▏ Volume -3.0 dB
-                                                                                                                    ████─▏──── Pan 13L
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                                        Try                                                         HISTORY 1 ────────────────────────────────
-                                              “What's on this track?”                                               ■ Bass volume 0.0 dB → -3.0 dB, pan C undo
-                                              “Set the tempo to 124”                                                  → 13L, send A 0 → 30 %
-                                        “Why might my low end sound muddy?”                                           ███████──▏ Volume -3.0 dB
-                                                                                                                      ████─▏──── Pan 13L
-                       Kumi keeps each Set's conversations: /conversations goes back to one.                          ███─────── Send A Reverb -12 dB
-                                                                                                                      ██▏─────── Send B Delay -20 dB
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ ✓ Bass volume 0.0 dB → -3.0 dB, pan C → 1… │
+                                                                                                                  │ ███████──▏ Volume -3.0 dB                  │
+                                                                                                                  │ ████─▏──── Pan 13L                         │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY 1 ────────────────────────────────┤
+                                              “What's on this track?”                                             │ ■ Bass volume 0.0 dB → -3.0 dB, pan C undo │
+                                              “Set the tempo to 124”                                              │   → 13L, send A 0 → 30 %                   │
+                                        “Why might my low end sound muddy?”                                       │   ███████──▏ Volume -3.0 dB                │
+                                                                                                                  │   ████─▏──── Pan 13L                       │
+                       Kumi keeps each Set's conversations: /conversations goes back to one.                      │   ███─────── Send A Reverb -12 dB          │
+                                                                                                                  │   ██▏─────── Send B Delay -20 dB           │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

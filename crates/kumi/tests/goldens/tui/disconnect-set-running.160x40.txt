@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                    ● Live not connected
 
-   make the kick punchier                                                                                           FOCUS
-                                                                                                                    Live isn't connected
-   Raising the kick's transient first.
-
-   Live is opening another Set, so Kumi stopped what it was doing: nothing it was doing lands in the other Set.
-   It picks up once the Set is open.                                                                                NOW                              ● working
-                                                                                                                    ⠋ thinking
-
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                    HISTORY ──────────────────────────────────
-                                                                                                                    Nothing changed yet
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-   Tell Kumi more while it works
-                                                                                                    esc to stop
+   make the kick punchier                                                                                         ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Live isn't connected                       │
+   Raising the kick's transient first.                                                                            │                                            │
+                                                                                                                  │                                            │
+   Live is opening another Set, so Kumi stopped what it was doing: nothing it was doing lands in the other Set.   │                                            │
+   It picks up once the Set is open.                                                                              ├─ NOW ────────────────────────── ● working ─┤
+                                                                                                                  │ ⠋ thinking                                 │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ HISTORY ──────────────────────────────────┤
+                                                                                                                  │ Nothing changed yet                        │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭───────────────────────────────────────────────────────────────────────────────────────────────── esc to stop ─╮ │                                            │
+╰─ Tell Kumi more while it works                                                                               ─╯ ╰────────────────────────────────────────────╯
 

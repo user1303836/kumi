@@ -107,7 +107,8 @@ impl TuiApp {
                 return Some((drawn.clone(), image_key(&drawn)));
             }
         }
-        let mut drawn = pictures::draw(picture, cols, rows, self.0.graphics, 0, palette::SURFACE);
+        // (on the ground the pane, the drawer and the strip are drawn on, inside their frames)
+        let mut drawn = pictures::draw(picture, cols, rows, self.0.graphics, 0, palette::GROUND);
         let mut state = self.0.state.borrow_mut();
         if let Some(image) = drawn.image.take() {
             let id = state.images.id(&name, |id| kitty::transmit(id, &image, cols, rows));

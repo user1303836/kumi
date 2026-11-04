@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  Ready
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try
-                             “What's on this track?”                              HISTORY ────────────────────────────
-                             “Set the tempo to 124”                               Nothing changed yet
-                       “Why might my low end sound muddy?”
-
-
-   “Mixes at -14 LUFS”
-
-     Change the words  In the box below; press enter to keep them
-     Unpin it          A full memory can make room by dropping it again
-     Forget it
-     Keep it
-
-
-
-   Ask Kumi about your Set
-                                  ↑↓ to move · enter to choose · esc to close
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                                                                │                                      │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY ────────────────────────────┤
+                             “What's on this track?”                            │ Nothing changed yet                  │
+                             “Set the tempo to 124”                             │                                      │
+                       “Why might my low end sound muddy?”                      │                                      │
+                                                                                │                                      │
+      Kumi keeps each Set's conversations: /conversations goes back to one.     │                                      │
+╭─ “Mixes at -14 LUFS” ───────────────────────────────────────────────────────╮ │                                      │
+│                                                                             │ │                                      │
+│    Change the words  In the box below; press enter to keep them             │ │                                      │
+│    Unpin it          A full memory can make room by dropping it again       │ │                                      │
+│    Forget it                                                                │ │                                      │
+│    Keep it                                                                  │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
+                                                                                │                                      │
+╭─────────────────────────────── ↑↓ to move · enter to choose · esc to close ─╮ │                                      │
+╰─ Ask Kumi about your Set                                                   ─╯ ╰──────────────────────────────────────╯
 

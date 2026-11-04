@@ -16,9 +16,24 @@ macro_rules! case {
     };
 }
 
-/// The drawer's row of tabs.
+/// The drawer's row of tabs: set into its frame's top edge (`╭─ NOW   FOCUS`), or into a rule while it's folded.
 fn tabs(lines: &[String]) -> usize {
-    lines.iter().position(|line| line.starts_with("  NOW   FOCUS")).unwrap_or_else(|| panic!("no drawer:\n{}", lines.join("\n")))
+    lines.iter().position(|line| strip(line).starts_with("NOW   FOCUS")).unwrap_or_else(|| panic!("no drawer:\n{}", lines.join("\n")))
+}
+
+/// The row of tabs' words, past the edge's `╭─ ` (or the rule's `── `).
+fn strip(line: &str) -> String {
+    line.chars().skip(3).collect()
+}
+
+/// Where a row of tabs ends: its last words, without the edge's ` ─╮` (or the rule's ` ──`).
+fn end(line: &str) -> &str {
+    line.trim_end_matches(['─', '╮', ' '])
+}
+
+/// A row's words inside the drawer's frame: its side lines and the blanks by them gone.
+fn inside(line: &str) -> &str {
+    line.trim().trim_matches('│').trim()
 }
 
 /// A notes change, with its picture.
@@ -45,7 +60,7 @@ case!(below_100_columns_the_pane_is_a_drawer_folded_to_its_row_of_tabs, async {
         h.connect();
         let lines = h.screen();
         let row = tabs(&lines);
-        assert!(lines[row].contains("   HISTORY ─") && lines[row].trim_end().ends_with("ctrl+\\ opens"), "{}", lines[row]);
+        assert!(lines[row].contains("   HISTORY ─") && end(&lines[row]).ends_with("ctrl+\\ opens"), "{}", lines[row]);
         // Folded: one row, a blank one, then the box; the side pane's headings are nowhere.
         assert!(lines[row + 3].contains("Ask Kumi about your Set"), "{}", lines.join("\n"));
         assert!(!has(&lines, "FOCUS ·") && !has(&lines, "Your selection will show here"));
@@ -76,13 +91,18 @@ case!(a_change_opens_the_drawer_to_now_with_its_picture_and_its_undo, async {
         h.emit(change("c1", "Chords · 3 notes moved"));
         let lines = h.screen();
         let row = tabs(&lines);
-        assert!(lines[row].trim_end().ends_with("ctrl+\\ closes"), "{}", lines[row]);
-        assert!(lines[row + 1].trim() == "Ready", "{}", lines.join("\n"));
-        assert!(lines[row + 2].contains("■ Chords · 3 notes moved") && lines[row + 2].trim_end().ends_with("undo"), "{}", lines[row + 2]);
-        assert!(!lines[row + 3].trim().is_empty(), "its picture:\n{}", lines.join("\n"));
-        // 6 to 10 rows by the window's height, then a blank row over the box.
+        assert!(end(&lines[row]).ends_with("ctrl+\\ closes"), "{}", lines[row]);
+        assert!(inside(&lines[row + 1]) == "Ready", "{}", lines.join("\n"));
+        assert!(lines[row + 2].contains("■ Chords · 3 notes moved") && inside(&lines[row + 2]).ends_with("undo"), "{}", lines[row + 2]);
+        assert!(!inside(&lines[row + 3]).is_empty(), "its picture:\n{}", lines.join("\n"));
+        // 6 to 10 rows by the window's height, its frame's bottom edge under them, then a blank row over the box.
         let tall = (height / 4).clamp(6, 10) as usize;
-        assert!(lines[row + tall].trim().is_empty() && lines[row + tall + 2].contains("Ask Kumi about your Set"), "{}", lines.join("\n"));
+        assert!(lines[row + tall].trim_start().starts_with('╰'), "{}", lines.join("\n"));
+        assert!(
+            lines[row + tall + 1].trim().is_empty() && lines[row + tall + 3].contains("Ask Kumi about your Set"),
+            "{}",
+            lines.join("\n")
+        );
         click(&h, row + 2, "undo").await;
         assert!(h.calls().contains(&"undo:c1".into()), "{:?}", h.calls());
         h.close().await;
@@ -109,7 +129,7 @@ case!(ctrl_backslash_closes_the_drawer_and_kumi_leaves_it_closed_until_it_opens_
     h.has("ctrl+\\ closes");
     h.type_text("\x1c").await;
     let lines = h.screen();
-    assert!(lines[tabs(&lines)].trim_end().ends_with("ctrl+\\ opens") && !has(&lines, "Chords · 3 notes moved"), "{}", lines.join("\n"));
+    assert!(end(&lines[tabs(&lines)]).ends_with("ctrl+\\ opens") && !has(&lines, "Chords · 3 notes moved"), "{}", lines.join("\n"));
     // Closed by the producer: a change only counts in HISTORY.
     h.emit(change("c2", "Bass · 2 notes added"));
     let lines = h.screen();
@@ -118,7 +138,7 @@ case!(ctrl_backslash_closes_the_drawer_and_kumi_leaves_it_closed_until_it_opens_
     h.type_text("\x1c").await;
     let lines = h.screen();
     let row = tabs(&lines);
-    assert!(lines[row].trim_end().ends_with("ctrl+\\ closes") && lines[row + 2].contains("Bass · 2 notes added"), "{}", lines.join("\n"));
+    assert!(end(&lines[row]).ends_with("ctrl+\\ closes") && lines[row + 2].contains("Bass · 2 notes added"), "{}", lines.join("\n"));
     h.close().await;
 });
 
@@ -140,7 +160,7 @@ case!(what_kumi_opened_folds_after_a_quiet_spell_and_what_the_producer_opened_st
     tokio::time::advance(Duration::from_millis(4_100)).await;
     delay(5).await;
     let lines = h.screen();
-    assert!(lines[tabs(&lines)].trim_end().ends_with("ctrl+\\ opens"), "folded:\n{}", lines.join("\n"));
+    assert!(end(&lines[tabs(&lines)]).ends_with("ctrl+\\ opens"), "folded:\n{}", lines.join("\n"));
     // Opened by the producer, it stays.
     h.type_text("\x1c").await;
     tokio::time::advance(Duration::from_millis(30_000)).await;
@@ -163,7 +183,7 @@ case!(a_click_on_a_tab_opens_the_drawer_there, async {
     assert!(lines[tabs(&lines) + 1].contains("Nothing changed yet"), "{}", lines.join("\n"));
     click(&h, tabs(&lines), "NOW").await;
     let lines = h.screen();
-    assert!(lines[tabs(&lines) + 1].trim() == "Ready", "{}", lines.join("\n"));
+    assert!(inside(&lines[tabs(&lines) + 1]) == "Ready", "{}", lines.join("\n"));
     // A disconnect clears FOCUS, as it does in the pane.
     click(&h, tabs(&lines), "FOCUS").await;
     h.emit(json!({"type":"connection","state":"disconnected"}));
@@ -191,7 +211,7 @@ case!(the_keys_into_the_pane_open_the_drawer_there_and_nothing_turns_it_under_th
     h.type_text("\x1c").await;
     h.type_text("hello").await;
     let lines = h.screen();
-    assert!(lines[tabs(&lines)].trim_end().ends_with("ctrl+\\ opens") && has(&lines, "hello"), "{}", lines.join("\n"));
+    assert!(end(&lines[tabs(&lines)]).ends_with("ctrl+\\ opens") && has(&lines, "hello"), "{}", lines.join("\n"));
     h.close().await;
 });
 
@@ -211,7 +231,7 @@ case!(tab_into_focuss_tree_opens_the_drawer_on_focus, async {
     h.type_text("\t").await;
     let lines = h.screen();
     let row = tabs(&lines);
-    assert!(lines[row].starts_with("  NOW   FOCUS · Device"), "{}", lines[row]);
+    assert!(strip(&lines[row]).starts_with("NOW   FOCUS · Device"), "{}", lines[row]);
     assert!(h.selected_line().is_some_and(|line| line.contains("Operator")), "{}", lines.join("\n"));
     // Enter points at the row, as in the pane.
     h.type_text("\x1b[B\r").await;
@@ -236,10 +256,42 @@ case!(a_focus_body_taller_than_the_drawer_stops_at_its_edge, async {
     click(&h, tabs(&h.screen()), "FOCUS").await;
     let lines = h.screen();
     let row = tabs(&lines);
-    assert!(lines[row].starts_with("  NOW   FOCUS · Clip") && lines[row + 1].contains("Chords"), "{}", lines.join("\n"));
-    // The drawer's 7 rows hold the header and the notes; what's past them is painted over: a blank row, then the box.
-    assert!(lines[row + 7].trim().is_empty() && lines[row + 9].contains("Ask Kumi about your Set"), "{}", lines.join("\n"));
+    assert!(strip(&lines[row]).starts_with("NOW   FOCUS · Clip") && lines[row + 1].contains("Chords"), "{}", lines.join("\n"));
+    // The drawer's 7 rows hold the header and the notes, its frame's bottom edge under them; what's past them is painted
+    // over: a blank row, then the box.
+    assert!(lines[row + 7].trim_start().starts_with('╰'), "{}", lines.join("\n"));
+    assert!(lines[row + 8].trim().is_empty() && lines[row + 10].contains("Ask Kumi about your Set"), "{}", lines.join("\n"));
     assert!(!has(&lines[row + 7..], "Mod wheel"), "{}", lines.join("\n"));
+    h.close().await;
+});
+
+case!(a_focus_body_taller_than_a_short_side_pane_stops_above_its_tabs, async {
+    let c = Rc::new(Control::default());
+    *c.tree.borrow_mut() = Some(
+        serde_json::from_value(json!({"trackRef":"3:track:1","devices":[
+            {"ref":"d1","name":"Operator","className":"Operator","deviceType":"instrument"},
+            {"ref":"d2","name":"Saturator on the low end","className":"Saturator","deviceType":"audio_effect"}]}))
+        .unwrap(),
+    );
+    let h = Harness::with(100, 8, c, |_| {});
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"focus","focus":{"track":{"name":"Bass","color":"#f59a3c","kind":"midi"},"trackRef":"3:track:1","device":"Operator","detail":"Device","view":"Session"}}));
+    h.wait_for_call("tree:3:track:1").await;
+    delay(5).await;
+    let lines = h.screen();
+    let rule = lines.iter().position(|line| line.contains("├─ HISTORY")).unwrap_or_else(|| panic!("{}", lines.join("\n")));
+    // The device tree has no room above the tabs: their row shows only what HISTORY says while it's empty, none of the
+    // tree's (at 100 columns the pane's frame starts at column 64).
+    let inside = lines[rule + 1].chars().skip(65).take(34).collect::<String>();
+    assert_eq!(inside.trim(), "Nothing changed yet", "{}", lines.join("\n"));
+    // A click on their rule or row is theirs, never a hidden device's to point at.
+    for y in [rule, rule + 1] {
+        h.type_text(&format!("\x1b[<0;{};{}M\x1b[<0;{};{}m", 80, y + 1, 80, y + 1)).await;
+    }
+    delay(5).await;
+    let lines = h.screen();
+    assert!(!lines.iter().any(|line| line.contains("Operator  ×") || line.contains("low end  ×")), "{}", lines.join("\n"));
     h.close().await;
 });
 
@@ -269,9 +321,9 @@ case!(at_full_width_ctrl_backslash_puts_the_side_pane_away_and_brings_it_back, a
     h.type_text("\x1c").await;
     let lines = h.screen();
     assert!(!has(&lines, "Your selection will show here") && !has(&lines, "HISTORY"), "{}", lines.join("\n"));
-    // The conversation and the box take the whole width.
+    // The conversation and the box take the whole width: the box's frame from the first column to the last.
     let hint = lines.iter().find(|line| line.contains("enter to send")).unwrap();
-    assert_eq!(hint.trim_end().chars().count(), 117, "{hint}");
+    assert!(hint.starts_with('╭') && hint.trim_end().ends_with('╮') && hint.trim_end().chars().count() == 120, "{hint}");
     // Shift-Tab, into the tabs, brings it back too.
     h.type_text("\x1b[Z").await;
     h.has("Your selection will show here");
@@ -383,7 +435,7 @@ case!(a_click_on_the_tab_showing_closes_the_drawer_and_the_keys_words_open_it, a
     h.emit(change("c1", "Chords · 3 notes moved"));
     click(&h, tabs(&h.screen()), "NOW").await;
     let lines = h.screen();
-    assert!(lines[tabs(&lines)].trim_end().ends_with("ctrl+\\ opens"), "{}", lines.join("\n"));
+    assert!(end(&lines[tabs(&lines)]).ends_with("ctrl+\\ opens"), "{}", lines.join("\n"));
     // Closed by the click, as by ctrl+\: a change leaves it folded.
     h.emit(change("c2", "Bass · 2 notes added"));
     assert!(!has(&h.screen(), "Bass · 2 notes added"));
@@ -419,10 +471,180 @@ case!(a_drag_stays_above_the_drawer_or_in_it, async {
     h.type_text("\x03").await;
     let text = copied.borrow().last().cloned().unwrap_or_default();
     assert!(text.starts_with("Words in the conversation") && !text.contains("Chords") && !text.contains("NOW"), "{text:?}");
-    // From past the drawer's change up into the conversation: the drawer's rows only.
+    // From past the drawer's change up into the conversation: the drawer's rows only, inside its frame (its row of
+    // tabs is its top edge).
     h.type_text(&drag((30, changed), (0, said))).await;
     h.type_text("\x03").await;
     let text = copied.borrow().last().cloned().unwrap_or_default();
-    assert!(text.contains("NOW   FOCUS") && text.contains("Chords") && !text.contains("Words in the conversation"), "{text:?}");
+    assert!(text.starts_with("Ready") && text.contains("Chords") && !text.contains("Words in the conversation"), "{text:?}");
+    assert!(!text.contains(FRAME), "{text:?}");
+    h.close().await;
+});
+
+/// What a frame is drawn with, none of which a copy takes.
+const FRAME: [char; 9] = ['─', '│', '╭', '╮', '╰', '╯', '├', '┤', '┬'];
+
+/// Whether each frame's top-left corner, top to bottom, is drawn in the lit line.
+fn lit(h: &Harness) -> Vec<bool> {
+    let [r, g, b] = kumi::tui::style::palette::TRACK;
+    h.styles_of("╭").iter().map(|style| style.split('|').next() == Some(format!("{r},{g},{b}").as_str())).collect()
+}
+
+case!(the_drawers_frame_is_lit_while_the_keyboard_is_in_it, async {
+    let h = Harness::new(80, 30);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    // The drawer, then the box: the box has the keyboard.
+    assert_eq!(lit(&h), [false, true]);
+    // Shift-Tab, into the tabs: the drawer has it.
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some(), "{}", h.screen().join("\n"));
+    assert_eq!(lit(&h), [true, false]);
+    // Esc gives it back to the box.
+    h.escape().await;
+    assert_eq!(lit(&h), [false, true]);
+    h.close().await;
+});
+
+case!(a_drag_in_the_side_pane_copies_one_parts_rows_and_never_the_frames_lines, async {
+    use std::cell::RefCell;
+    let copied = Rc::new(RefCell::new(Vec::<String>::new()));
+    let copy = copied.clone();
+    let h = Harness::with(120, 36, Rc::new(Control::default()), move |o| {
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }));
+    });
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    let lines = h.screen();
+    let drag = |from: (usize, usize), to: (usize, usize)| {
+        format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", from.0 + 1, from.1 + 1, to.0 + 1, to.1 + 1, to.0 + 1, to.1 + 1)
+    };
+    // Where `text` starts on `row`.
+    let at = |row: usize, text: &str| (lines[row][..lines[row].find(text).unwrap()].chars().count(), row);
+    let history = lines.iter().position(|line| line.contains("HISTORY 1")).unwrap() + 1;
+    let focus = lines.iter().position(|line| line.contains("Your selection will show here")).unwrap() - 1;
+    // At 120 columns the pane's rows run from column 82 to 117, and its frame's last row inside is the third from the
+    // bottom. From there (a press on a change is a click, so the drag starts under it) up past HISTORY's rule, and to
+    // the frame's left side: the tab's rows.
+    h.type_text(&drag((117, lines.len() - 3), (80, history - 2))).await;
+    h.type_text("\x03").await;
+    let text = copied.borrow().last().cloned().unwrap_or_default();
+    assert!(text.contains("Chords · 3 notes moved") && text.contains("undo") && !text.contains("HISTORY"), "{text:?}");
+    assert!(!text.contains(FRAME), "{text:?}");
+    // From FOCUS down across NOW's rule to HISTORY: FOCUS's rows.
+    h.type_text(&drag(at(focus, "Night Drive"), (119, history))).await;
+    h.type_text("\x03").await;
+    let text = copied.borrow().last().cloned().unwrap_or_default();
+    assert!(text.starts_with("Night Drive") && text.ends_with("Your selection will show here"), "{text:?}");
+    assert!(!text.contains(FRAME), "{text:?}");
+    h.close().await;
+});
+
+case!(a_drag_beside_the_menu_or_a_panel_takes_none_of_it, async {
+    use std::cell::RefCell;
+    let copied = Rc::new(RefCell::new(Vec::<String>::new()));
+    let copy = copied.clone();
+    let h = Harness::with(160, 40, Rc::new(Control::default()), move |o| {
+        o.copy = Some(Rc::new(move |text| {
+            copy.borrow_mut().push(text.into());
+            true
+        }));
+    });
+    h.start().await;
+    h.connect();
+    h.emit(json!({"type":"notice","message":"Words in the conversation"}));
+    let drag = |from: (usize, usize), to: (usize, usize)| {
+        format!("\x1b[<0;{};{}M\x1b[<32;{};{}M\x1b[<0;{};{}m", from.0 + 1, from.1 + 1, to.0 + 1, to.1 + 1, to.0 + 1, to.1 + 1)
+    };
+    // The `/` menu, with one command, framed above the box; at 160 columns it spans the first 74.
+    h.type_text("/qu").await;
+    let lines = h.screen();
+    let menu = lines.iter().position(|line| line.contains("/quit")).unwrap();
+    let said = lines.iter().position(|line| line.contains("Words in the conversation")).unwrap();
+    let at = lines[said][..lines[said].find("Words").unwrap()].chars().count();
+    // From the conversation down into the menu: the conversation's rows, none of the menu's.
+    h.type_text(&drag((at, said), (20, menu))).await;
+    h.type_text("\x03").await;
+    let text = copied.borrow().last().cloned().unwrap_or_default();
+    assert!(text.starts_with("Words in the conversation"), "{text:?}");
+    // From beside it, to its right, across it to its left: none of it.
+    h.type_text(&drag((100, menu), (5, menu))).await;
+    h.type_text("\x03").await;
+    // The help over the conversation, from beside it across it: none of it.
+    h.type_text("\x15").await;
+    h.type_text("?").await;
+    h.wait_for("Keys and commands").await;
+    let lines = h.screen();
+    let row = lines.iter().position(|line| line.contains("Keys and commands")).unwrap() + 4;
+    h.type_text(&drag((108, row), (10, row - 2))).await;
+    h.type_text("\x03").await;
+    for text in copied.borrow().iter() {
+        assert!(!text.contains("/quit") && !text.contains("Keys and commands") && !text.contains(FRAME), "{text:?}");
+    }
+    h.close().await;
+});
+
+case!(the_keyboard_goes_only_into_tabs_and_a_tree_on_screen, async {
+    // The strip, below 100 columns and 24 rows, has neither: Shift-Tab and Tab leave the keyboard in the box.
+    let h = Harness::new(80, 23);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    h.type_text("\x1b[Z").await;
+    h.type_text("\t").await;
+    assert!(h.selected_line().is_none(), "{}", h.screen().join("\n"));
+    // The strip, then the box: the box keeps the light, and what's typed goes into it.
+    assert_eq!(lit(&h), [false, true]);
+    h.type_text("tighten the hats").await;
+    h.has("tighten the hats");
+    h.close().await;
+    // In the drawer's tabs when the window shrinks to the strip: the keyboard comes back to the box.
+    let h = Harness::new(80, 30);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some(), "{}", h.screen().join("\n"));
+    h.resize(80, 23);
+    delay(10).await;
+    assert!(h.selected_line().is_none(), "{}", h.screen().join("\n"));
+    assert_eq!(lit(&h), [false, true]);
+    h.close().await;
+    // In the side pane's tabs when the window narrows to the drawer, folded: the keyboard comes back to the box.
+    let h = Harness::new(120, 36);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some(), "{}", h.screen().join("\n"));
+    h.resize(80, 30);
+    delay(10).await;
+    assert!(h.selected_line().is_none(), "{}", h.screen().join("\n"));
+    assert_eq!(lit(&h), [true]);
+    // In the drawer's tabs when another of its tabs is chosen: the same.
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some(), "{}", h.screen().join("\n"));
+    click(&h, tabs(&h.screen()), "NOW").await;
+    assert!(h.selected_line().is_none(), "{}", h.screen().join("\n"));
+    // (the drawer open on NOW, then the box)
+    assert_eq!(lit(&h), [false, true]);
+    h.close().await;
+    // The side pane in a short window keeps a row for its tabs under NOW's rule, which Shift-Tab goes into.
+    let h = Harness::new(100, 12);
+    h.start().await;
+    h.connect();
+    h.emit(change("c1", "Chords · 3 notes moved"));
+    let lines = h.screen();
+    let rule = lines.iter().position(|line| line.contains("├─ HISTORY")).unwrap_or_else(|| panic!("{}", lines.join("\n")));
+    // (at 100 columns the pane starts at column 64: its bottom edge is two rows under the rule, the tabs' row between)
+    assert!(lines[rule - 1].contains("├─ NOW") && lines[rule + 2].chars().nth(64) == Some('╰'), "{}", lines.join("\n"));
+    h.type_text("\x1b[Z").await;
+    assert!(h.selected_line().is_some_and(|line| line.contains("Chords · 3 notes moved")), "{}", h.screen().join("\n"));
+    assert_eq!(lit(&h), [true, false]);
     h.close().await;
 });

@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                       ● Renoise
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  ✓ Automation of Filter Cutoff on “B…
-                                                                                  Cutoff · 0 → 4 points
-                         ██                          ▀▀                           10% to 100% over lines 00–24
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY 1 ──────────────────────────
-                             “What's on this track?”                              ✓ Automation of Filter Cutoff   undo
-                             “Set the tempo to 124”                                 on “Bass” in “Drop”: 4 points, li…
-                       “Why might my low end sound muddy?”                          Cutoff · 0 → 4 points
-                                                                                    10% to 100% over lines 00–24
-     Kumi keeps each song's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-   Ask Kumi about your song
-                                                                enter to send
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ ✓ Automation of Filter Cutoff on “B… │
+                                                                                │ Cutoff · 0 → 4 points                │
+                         ██                          ▀▀                         │ 10% to 100% over lines 00–24         │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY 1 ──────────────────────────┤
+                             “What's on this track?”                            │ ✓ Automation of Filter Cutoff   undo │
+                             “Set the tempo to 124”                             │   on “Bass” in “Drop”: 4 points, li… │
+                       “Why might my low end sound muddy?”                      │   Cutoff · 0 → 4 points              │
+                                                                                │   10% to 100% over lines 00–24       │
+     Kumi keeps each song's conversations: /conversations goes back to one.     │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your song                                                  ─╯ ╰──────────────────────────────────────╯
 

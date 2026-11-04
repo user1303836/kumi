@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-                                                                                                                    FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    Ready
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                      Since you were last here · 3 hours ago
-                                               • Tempo 120 → 124 BPM
-                                                • Added track “Pad”
-                                             • Renamed 2-MIDI to Lead                                               HISTORY ──────────────────────────────────
-                                                and 2 more changes                                                  Nothing changed yet
-
-                                                        Try
-                                              “What's on this track?”
-                                              “Set the tempo to 124”
-                                        “Why might my low end sound muddy?”
-
-                       Kumi keeps each Set's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ Ready                                      │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                      Since you were last here · 3 hours ago                                      │                                            │
+                                               • Tempo 120 → 124 BPM                                              │                                            │
+                                                • Added track “Pad”                                               │                                            │
+                                             • Renamed 2-MIDI to Lead                                             ├─ HISTORY ──────────────────────────────────┤
+                                                and 2 more changes                                                │ Nothing changed yet                        │
+                                                                                                                  │                                            │
+                                                        Try                                                       │                                            │
+                                              “What's on this track?”                                             │                                            │
+                                              “Set the tempo to 124”                                              │                                            │
+                                        “Why might my low end sound muddy?”                                       │                                            │
+                                                                                                                  │                                            │
+                       Kumi keeps each Set's conversations: /conversations goes back to one.                      │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

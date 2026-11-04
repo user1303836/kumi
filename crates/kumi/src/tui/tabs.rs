@@ -259,32 +259,33 @@ impl TabPanel {
         true
     }
 
-    /// The strip on the area's first row, then the active tab's rows filling the rest.
+    /// The tabs over their rows, the area the rows': the strip set into the frame's rule on the area's first row, its
+    /// words where the frame's edge has its own (`├─ HISTORY   GOAL ───┤`, a cell in from the rows, with a blank either
+    /// side and the rule the frame's), then the active tab's rows filling the rest.
     pub fn draw(&self, screen: &mut Screen, area: Rect, hits: &mut Vec<Hit>) {
         let faint = Style::fg(palette::FAINT);
         let dim = Style::fg(palette::DIM);
         let accent = Style::fg(palette::ACCENT);
-        let rule = Style::fg(palette::RULE);
         let active = self.active_id();
-        let mut x = area.x;
+        let strip = Rect { x: area.x + 1, width: area.width - 1, height: 1, ..area };
+        screen.put(strip.x - 1, area.y, " ", &faint);
+        let mut x = strip.x;
         for (index, tab) in self.inner.tabs.iter().filter(|tab| tab.shown()).enumerate() {
             if index > 0 {
-                x = screen.put(x, area.y, "   ", &faint);
+                x = screen.put_in(x, area.y, "   ", &faint, strip);
             }
             let title = if tab.id() == active { accent } else { dim };
             let start = x;
-            x = screen.put(x, area.y, tab.title(), &title);
+            x = screen.put_in(x, area.y, tab.title(), &title, strip);
             if let Some(count) = tab.badge().filter(|count| *count != 0) {
-                x = screen.put(x, area.y, &format!(" {count}"), &faint);
+                x = screen.put_in(x, area.y, &format!(" {count}"), &faint, strip);
             }
             let panel = self.clone();
             let id = tab.id().to_string();
-            hits.push(Hit { x: start, y: area.y, width: x - start, action: Rc::new(move || panel.show(&id)) });
+            let width = (x.min(area.x + area.width) - start).max(0);
+            hits.push(Hit { x: start, y: area.y, width, action: Rc::new(move || panel.show(&id)) });
         }
-        // A quiet rule to the edge: the strip reads as a heading over its rows, finished with one tab too.
-        if x + 1 < area.x + area.width {
-            screen.put(x + 1, area.y, &"─".repeat((area.x + area.width - x - 1) as usize), &rule);
-        }
+        screen.put_in(x, area.y, " ", &faint, strip);
         self.draw_rows(screen, Rect { x: area.x, y: area.y + 1, width: area.width, height: area.height - 1 }, hits);
     }
 

@@ -2347,7 +2347,7 @@ impl Overlay<TuiApp> for AsidePanel {
         app.aside_input(self, event)
     }
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
-        let width = 76.min(area.left - 2);
+        let width = super::draw_panel::panel_width(76, area.boxed);
         let (inner, space) = (width - 4, area.box_top - 5);
         let mut lines: Vec<Line> = vec![];
         let (at, scroll) = (self.at, &mut self.scroll);
@@ -2488,7 +2488,7 @@ impl Overlay<TuiApp> for ChatGptPanel {
         Handled::Kept
     }
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
-        let width = 76.min(area.left - 2);
+        let width = super::draw_panel::panel_width(76, area.boxed);
         let (inner, space) = (width - 4, area.box_top - 5);
         let mut lines: Vec<Line> = vec![];
         if self.by_code {
@@ -2581,7 +2581,7 @@ impl Overlay<TuiApp> for KeyPanel {
         Handled::Kept
     }
     fn draw(&mut self, app: &TuiApp, screen: &mut Screen, area: Area) -> Option<Cursor> {
-        let width = 76.min(area.left - 2);
+        let width = super::draw_panel::panel_width(76, area.boxed);
         let inner = width - 4;
         let mut lines: Vec<Line> = vec![];
         let mut cursor_at: Option<(usize, i32)> = None;

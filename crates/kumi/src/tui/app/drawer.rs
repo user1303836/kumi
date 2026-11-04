@@ -8,14 +8,15 @@
 
 use super::super::{
     activity::activity_glyph,
+    frame,
     pictures::Graphics,
     screen::Screen,
-    style::{palette, Style},
+    style::Style,
     width::{text_width, truncate},
     wrap::Span,
 };
 use super::draw_live::{change_marks, FocusRoom};
-use super::drawing::{sp, spans, st, NowLine};
+use super::drawing::{sp, spans, st, Keyboard, NowLine};
 use super::*;
 
 /// The columns the side pane needs: below them, the drawer or the strip.
@@ -93,6 +94,12 @@ impl Drawer {
 /// Whether the pane is the drawer at this size.
 pub(super) fn drawer_fits(columns: i32, rows: i32) -> bool {
     columns < PANE_COLUMNS && rows >= DRAWER_ROWS
+}
+
+/// Whether the pane is only the two-line strip at this size, too narrow for the side pane and too short for the drawer:
+/// it has no tabs or tree for the keyboard to go into.
+pub(super) fn strip_only(columns: i32, rows: i32) -> bool {
+    columns < PANE_COLUMNS && rows < DRAWER_ROWS
 }
 
 impl TuiApp {
@@ -189,6 +196,22 @@ impl TuiApp {
         }
     }
 
+    /// The keyboard stays only in what the drawer shows: its tabs while it's open on them, FOCUS's tree while it's open
+    /// on FOCUS. Anywhere else (the window narrowed to the drawer from the side pane, another of its tabs was chosen, it
+    /// folded), the keyboard comes back to the box.
+    pub(super) fn keep_keyboard_in_drawer(&self) {
+        let (open, tab) = {
+            let state = self.0.state.borrow();
+            (state.drawer.is_open(), state.drawer.tab)
+        };
+        if self.0.tabs.inside() && !(open && tab == DrawerTab::Tabs) {
+            self.0.tabs.leave();
+        }
+        if !(open && tab == DrawerTab::Focus) {
+            self.0.state.borrow_mut().tree_cursor = None;
+        }
+    }
+
     /// A click on one of the drawer's tabs (`id`, the tab panel's): on the one showing it closes the drawer, as ctrl+\
     /// does; on another it opens there.
     fn click_drawer_tab(&self, tab: DrawerTab, id: Option<&str>) {
@@ -205,27 +228,30 @@ impl TuiApp {
         }
     }
 
-    /// The drawer's rows: its row of tabs folded, 6 to 10 open by the window's.
+    /// The drawer's rows: its row of tabs folded; open, 6 to 10 by the window's (its row of tabs and the tab it shows),
+    /// and its frame's bottom edge under them.
     pub(super) fn drawer_height(&self, rows: i32) -> i32 {
         if self.0.state.borrow().drawer.is_open() {
-            (rows / 4).clamp(6, 10)
+            (rows / 4).clamp(6, 10) + 1
         } else {
             1
         }
     }
 
-    /// The drawer at `area`: its row of tabs, then the tab it shows while it's open.
+    /// The drawer at `area`: open, a frame with its row of tabs set into the top edge and the tab it shows inside;
+    /// folded, the row of tabs set into a rule. Its line is lit while the keyboard is in it (its tabs, FOCUS's tree), as
+    /// the side pane's is, and a drag copies the tab's rows, never the frame's lines.
     pub(super) fn draw_drawer(&self, screen: &mut Screen, area: Rect) {
         self.0.state.borrow_mut().drawer.area = Some(area);
-        screen.fill(area, &st::SURFACE);
-        let (x, width) = (area.x + 2, area.width - 4);
+        let (x, width) = (area.x + frame::SNUG, area.width - 2 * frame::SNUG);
         let (tab, open) = {
             let state = self.0.state.borrow();
             (state.drawer.tab, state.drawer.is_open())
         };
+        screen.fill(area, &st::GROUND);
         // NOW's words without the change that just landed: the drawer shows it on a row of its own.
         let now = self.now_said(false);
-        let body = Rect::new(x, area.y + 1, width, area.height - 1);
+        let body = Rect::new(x, area.y + 1, width, area.height - 2);
         let mut heading = None;
         match tab {
             _ if !open || body.height <= 0 => self.keep_tree_fresh(None),
@@ -249,23 +275,31 @@ impl TuiApp {
                 self.0.state.borrow_mut().hits.extend(hits);
             }
         }
-        self.draw_drawer_strip(screen, x, area.y, width, tab, open, heading, &now);
+        let line = self.frame_line(self.keyboard() == Keyboard::Pane);
+        if open && area.height > 1 {
+            frame::outline(screen, area, &line, self.corners());
+            if body.height > 0 {
+                self.0.state.borrow_mut().select_areas.push(body);
+            }
+        } else {
+            frame::rule(screen, area, &line);
+        }
+        self.draw_drawer_strip(screen, area, tab, open, heading, &now);
     }
 
-    /// The drawer's row of tabs: NOW, FOCUS (with its heading while it shows), then the tab panel's with their counts,
-    /// each a click away; at its end what Kumi is at (working, a goal, a loop), or the key that opens and closes it.
-    #[allow(clippy::too_many_arguments)]
+    /// The drawer's row of tabs, set into its top edge: NOW, FOCUS (with its heading while it shows), then the tab
+    /// panel's with their counts, each a click away; at its end what Kumi is at (working, a goal, a loop), or the key
+    /// that opens and closes it.
     fn draw_drawer_strip(
         &self,
         screen: &mut Screen,
-        x: i32,
-        y: i32,
-        width: i32,
+        area: Rect,
         tab: DrawerTab,
         open: bool,
         heading: Option<(String, Style)>,
         now: &NowLine,
     ) {
+        let (x, y, width) = (area.x + frame::INSET, area.y, area.width - 2 * frame::INSET);
         let titles = self.0.tabs.titles();
         let active = self.0.tabs.active_id();
         let counted = |badge: &Option<i64>| badge.map_or(0, |count| text_width(&format!(" {count}")));
@@ -273,7 +307,7 @@ impl TuiApp {
             + 3
             + text_width("FOCUS")
             + titles.iter().map(|(_, title, badge)| 3 + text_width(title) + counted(badge)).sum::<i32>();
-        // The end, in what's left after the tabs and a rule's start.
+        // The end, in what's left after the tabs and a rule's cell between them.
         let room = width - named - 3;
         let end: Vec<Span> = match now.dot {
             Some(dot) if room >= 8 => vec![sp("● ", dot), sp(truncate(&now.label, room - 2), st::DIM)],
@@ -284,32 +318,32 @@ impl TuiApp {
         let room = width - named - ends - 3;
         let heading = heading.filter(|_| tab == DrawerTab::Focus && open && room >= 6);
         let style = |chosen: bool| if chosen { st::ACCENT } else { st::DIM };
+        let strip = Rect::new(x, y, width, 1);
+        screen.put(x - 1, y, " ", &st::FAINT);
         let start = x;
-        let mut column = screen.put(x, y, "NOW", &style(tab == DrawerTab::Now));
+        let mut column = screen.put_in(x, y, "NOW", &style(tab == DrawerTab::Now), strip);
         self.hit(start, y, column - start, |app| app.click_drawer_tab(DrawerTab::Now, None));
-        column = screen.put(column, y, "   ", &st::FAINT);
+        column = screen.put_in(column, y, "   ", &st::FAINT, strip);
         let start = column;
-        column = screen.put(column, y, "FOCUS", &style(tab == DrawerTab::Focus));
+        column = screen.put_in(column, y, "FOCUS", &style(tab == DrawerTab::Focus), strip);
         if let Some((words, style)) = &heading {
-            column = screen.put(column, y, &truncate(words, room), style);
+            column = screen.put_in(column, y, &truncate(words, room), style, strip);
         }
         self.hit(start, y, column - start, |app| app.click_drawer_tab(DrawerTab::Focus, None));
         for (id, title, badge) in titles {
-            column = screen.put(column, y, "   ", &st::FAINT);
+            column = screen.put_in(column, y, "   ", &st::FAINT, strip);
             let start = column;
-            column = screen.put(column, y, &title, &style(tab == DrawerTab::Tabs && id == active));
+            column = screen.put_in(column, y, &title, &style(tab == DrawerTab::Tabs && id == active), strip);
             if let Some(count) = badge {
-                column = screen.put(column, y, &format!(" {count}"), &st::FAINT);
+                column = screen.put_in(column, y, &format!(" {count}"), &st::FAINT, strip);
             }
-            self.hit(start, y, column - start, move |app| app.click_drawer_tab(DrawerTab::Tabs, Some(&id)));
+            self.hit(start, y, (column.min(x + width) - start).max(0), move |app| app.click_drawer_tab(DrawerTab::Tabs, Some(&id)));
         }
-        // A quiet rule to the end, as the pane's tabs have; the key's words there open and close it too.
-        let at = x + width - ends;
-        if at - column >= 3 {
-            screen.put(column + 1, y, &"─".repeat((at - column - 2) as usize), &Style::fg(palette::RULE));
-            spans(screen, at, y, &end, None);
-            if now.dot.is_none() && ends > 0 {
-                self.hit(at, y, ends, |app| app.toggle_pane());
+        screen.put_in(column, y, " ", &st::FAINT, strip);
+        // The key's words at the edge's end open and close it too.
+        if let Some(at) = frame::right_words(screen, area, y, &end, column + 1) {
+            if now.dot.is_none() {
+                self.hit(at + 1, y, ends, |app| app.toggle_pane());
             }
         }
     }

@@ -16,15 +16,15 @@
 
 
 
-  NOW   FOCUS · Device   HISTORY ─────────────────────────────── ctrl+\ closes
-  ■  Drums
-  ├ ▦  Drum Rack
-  │ ├ ▪  Kick
-  │ │ ├ ●  Drum Sampler
-  │ │ └ ≈  Saturator
-    8 more
+╭─ NOW   FOCUS · Device   HISTORY ───────────────────────────── ctrl+\ closes ─╮
+│ ■  Drums                                                                     │
+│ ├ ▦  Drum Rack                                                               │
+│ │ ├ ▪  Kick                                                                  │
+│ │ │ ├ ●  Drum Sampler                                                        │
+│ │ │ └ ≈  Saturator                                                           │
+│   8 more                                                                     │
+╰──────────────────────────────────────────────────────────────────────────────╯
 
-
-   Ask Kumi about your Set
-                                                                enter to send
+╭────────────────────────────────────────────────────────────── enter to send ─╮
+╰─ Ask Kumi about your Set                                                    ─╯
 

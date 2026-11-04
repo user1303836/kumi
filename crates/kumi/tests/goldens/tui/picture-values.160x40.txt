@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-                                                                                                                    FOCUS
-                                                                                                                    Night Drive
-                                                                                                                    Your selection will show here
-
-
-                                                                                                                    NOW
-                                                                                                                    ✓ Operator · Filter Freq 1.20 kHz → 800 H…
-                                                                                                                    Filter Freq 1.20 kHz → 800 Hz
-                                                                                                                    Resonance 20 % → 35 % · asked 36 %
-
-                                          ██                          ▀▀
-                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                                          ██▀█▄   ██  ██  ██  ██  ██  ██
-                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                                          ░▒▓████████████████████████▓▒░
-
-                                             Kumi can see Night Drive.
-
-                                                        Try                                                         HISTORY 1 ────────────────────────────────
-                                              “What's on this track?”                                               ■ Operator · Filter Freq 1.20 kHz →   undo
-                                              “Set the tempo to 124”                                                  800 Hz, Resonance 20 % → 35 %
-                                        “Why might my low end sound muddy?”                                           Filter Freq 1.20 kHz → 800 Hz
-                                                                                                                      Resonance 20 % → 35 % · asked 36 %
-                       Kumi keeps each Set's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-
-
-   Ask Kumi about your Set
-                                                                                                  enter to send
+                                                                                                                  ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+                                                                                                                  │ Your selection will show here              │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ NOW ──────────────────────────────────────┤
+                                                                                                                  │ ✓ Operator · Filter Freq 1.20 kHz → 800 H… │
+                                                                                                                  │ Filter Freq 1.20 kHz → 800 Hz              │
+                                                                                                                  │ Resonance 20 % → 35 % · asked 36 %         │
+                                                                                                                  │                                            │
+                                          ██                          ▀▀                                          │                                            │
+                                          ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                                          │                                            │
+                                          ██▀█▄   ██  ██  ██  ██  ██  ██                                          │                                            │
+                                          ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                                          │                                            │
+                                                                                                                  │                                            │
+                                          ░▒▓████████████████████████▓▒░                                          │                                            │
+                                                                                                                  │                                            │
+                                             Kumi can see Night Drive.                                            │                                            │
+                                                                                                                  │                                            │
+                                                        Try                                                       ├─ HISTORY 1 ────────────────────────────────┤
+                                              “What's on this track?”                                             │ ■ Operator · Filter Freq 1.20 kHz →   undo │
+                                              “Set the tempo to 124”                                              │   800 Hz, Resonance 20 % → 35 %            │
+                                        “Why might my low end sound muddy?”                                       │   Filter Freq 1.20 kHz → 800 Hz            │
+                                                                                                                  │   Resonance 20 % → 35 % · asked 36 %       │
+                       Kumi keeps each Set's conversations: /conversations goes back to one.                      │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─────────────────────────────────────────────────────────────────────────────────────────────── enter to send ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

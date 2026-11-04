@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                       ● Renoise
 
-                                                                                  FOCUS · Phrase
-                                                                                  Fill · 16 lines · LPB 4 · key track…
-                                                                                      Fill
-                                                                                   00 C-4 00 80 .. .. --- .. .. .. ..…
-                                                                                   01 --- .. .. .. .. --- .. .. .. ..…
-                                                                                   02 --- .. .. .. .. --- .. .. .. ..…
-                                                                                   03 --- .. .. .. .. --- .. .. .. ..…
-                                                                                   04 E-4 00 .. .. .. G-4 01 40 .. ..…
-                         ██                          ▀▀                            05 --- .. .. .. .. --- .. .. .. ..…
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                            06 --- .. .. .. .. --- .. .. .. ..…
-                         ██▀█▄   ██  ██  ██  ██  ██  ██                            07 --- .. .. .. .. --- .. .. .. ..…
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                            08 OFF .. .. .. .. --- .. .. .. ..…
-                                                                                   09 --- .. .. .. .. --- .. .. .. ..…
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.                             NOW
-                                                                                  Ready
-                                       Try                                        HISTORY ────────────────────────────
-                             “What's on this track?”                              Nothing changed yet
-                             “Set the tempo to 124”
-                       “Why might my low end sound muddy?”
-
-     Kumi keeps each song's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-   Ask Kumi about your song
-                                                                enter to send
+                                                                                ╭─ FOCUS · Phrase ─────────────────────╮
+                                                                                │ Fill · 16 lines · LPB 4 · key track… │
+                                                                                │     Fill                             │
+                                                                                │  00 C-4 00 80 .. .. --- .. .. .. ..… │
+                                                                                │  01 --- .. .. .. .. --- .. .. .. ..… │
+                                                                                │  02 --- .. .. .. .. --- .. .. .. ..… │
+                                                                                │  03 --- .. .. .. .. --- .. .. .. ..… │
+                                                                                │  04 E-4 00 .. .. .. G-4 01 40 .. ..… │
+                         ██                          ▀▀                         │  05 --- .. .. .. .. --- .. .. .. ..… │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │  06 --- .. .. .. .. --- .. .. .. ..… │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │  07 --- .. .. .. .. --- .. .. .. ..… │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │  08 OFF .. .. .. .. --- .. .. .. ..… │
+                                                                                │  09 --- .. .. .. .. --- .. .. .. ..… │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                       Try                                      ├─ HISTORY ────────────────────────────┤
+                             “What's on this track?”                            │ Nothing changed yet                  │
+                             “Set the tempo to 124”                             │                                      │
+                       “Why might my low end sound muddy?”                      │                                      │
+                                                                                │                                      │
+     Kumi keeps each song's conversations: /conversations goes back to one.     │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your song                                                  ─╯ ╰──────────────────────────────────────╯
 

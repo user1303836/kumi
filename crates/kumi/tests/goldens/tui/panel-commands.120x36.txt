@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                          ● Live
 
-                                                                                  FOCUS
-                                                                                  Night Drive
-                                                                                  Your selection will show here
-
-
-                                                                                  NOW
-                                                                                  Ready
-
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██
-                         ██▀█▄   ██  ██  ██  ██  ██  ██
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-   /new            Start a fresh conversation (the last one is kept)…             HISTORY ────────────────────────────
-   /reconnect                                                                     Nothing changed yet
-   /undo
-   /refresh
-   /copy
-   /export                                                             one.
-   /share
-   /loop
-   /status
-   /changelog
-   /help
-   /quit
-
-
-   /
-                                               enter to choose · esc to close
+                                                                                ╭─ FOCUS ──────────────────────────────╮
+                                                                                │ Night Drive                          │
+                                                                                │ Your selection will show here        │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                ├─ NOW ────────────────────────────────┤
+                                                                                │ Ready                                │
+                                                                                │                                      │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         │                                      │
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │                                      │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+╭─────────────────────────────────────────────────────────────────────────────╮ │                                      │
+│  + /new            Start a fresh conversation (the last one is kept); /ne…  │ ├─ HISTORY ────────────────────────────┤
+│  ⇄ /reconnect                                                               │ │ Nothing changed yet                  │
+│  ↶ /undo                                                                    │ │                                      │
+│  ↻ /refresh                                                                 │ │                                      │
+│  ❐ /copy                                                                    │ │                                      │
+│  ↧ /export                                                                  │ │                                      │
+│  ↗ /share                                                                   │ │                                      │
+│  ∞ /loop                                                                    │ │                                      │
+│  ⊙ /status                                                                  │ │                                      │
+│  ¶ /changelog                                                               │ │                                      │
+│  ? /help                                                                    │ │                                      │
+│  ⊗ /quit                                                                    │ │                                      │
+╰─────────────────────────────────────────────────────────────────────────────╯ │                                      │
+                                                                                │                                      │
+╭──────────────────────────────────────────── enter to choose · esc to close ─╮ │                                      │
+╰─ /                                                                         ─╯ ╰──────────────────────────────────────╯
 

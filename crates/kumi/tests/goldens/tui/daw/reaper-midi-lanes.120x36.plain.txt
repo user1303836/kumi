@@ -1,36 +1,36 @@
   Kumi  ·  Night Drive                                                                                        ● REAPER
 
-                                                                                  FOCUS · MIDI
-                                                                                  ■  Bass › ▬  Bass take
-                                                                                  4 bars · 4 notes · 1 selected
-                                                                                  CC 1      5 points · 0–127
-                                                                                  Pitch     3 points · 0–3808
-                                                                                  CC 11     2 points · 70–100
-                                                                                  and 1 more lane
-
-                         ██                          ▀▀
-                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                           NOW
-                         ██▀█▄   ██  ██  ██  ██  ██  ██                           Ready
-                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀
-
-                         ░▒▓████████████████████████▓▒░
-
-                            Kumi can see Night Drive.
-
-                                       Try                                        HISTORY ────────────────────────────
-                             “What's on this track?”                              Nothing changed yet
-                             “Set the tempo to 124”
-                       “Why might my low end sound muddy?”
-
-    Kumi keeps each project's conversations: /conversations goes back to one.
-
-
-
-
-
-
-
-
-   Ask Kumi about your project
-                                                                enter to send
+                                                                                ╭─ FOCUS · MIDI ───────────────────────╮
+                                                                                │ ■  Bass › ▬  Bass take               │
+                                                                                │ 4 bars · 4 notes · 1 selected        │
+                                                                                │ CC 1      5 points · 0–127           │
+                                                                                │ Pitch     3 points · 0–3808          │
+                                                                                │ CC 11     2 points · 70–100          │
+                                                                                │ and 1 more lane                      │
+                                                                                │                                      │
+                         ██                          ▀▀                         │                                      │
+                         ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                         ├─ NOW ────────────────────────────────┤
+                         ██▀█▄   ██  ██  ██  ██  ██  ██                         │ Ready                                │
+                         ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                         │                                      │
+                                                                                │                                      │
+                         ░▒▓████████████████████████▓▒░                         │                                      │
+                                                                                │                                      │
+                            Kumi can see Night Drive.                           │                                      │
+                                                                                │                                      │
+                                       Try                                      ├─ HISTORY ────────────────────────────┤
+                             “What's on this track?”                            │ Nothing changed yet                  │
+                             “Set the tempo to 124”                             │                                      │
+                       “Why might my low end sound muddy?”                      │                                      │
+                                                                                │                                      │
+    Kumi keeps each project's conversations: /conversations goes back to one.   │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+                                                                                │                                      │
+╭───────────────────────────────────────────────────────────── enter to send ─╮ │                                      │
+╰─ Ask Kumi about your project                                               ─╯ ╰──────────────────────────────────────╯
 

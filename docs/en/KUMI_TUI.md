@@ -8,7 +8,9 @@ and the plain mode. The [guide](KUMI_GUIDE.md) explains what Kumi does.
 ## The screen
 
 Kumi takes the whole terminal window and gives it back as it was when Kumi
-closes, crashes or is stopped.
+closes, crashes or is stopped. The input box, the pane and what opens over the
+conversation sit in rounded frames, with their titles and the keys that apply
+set into the frame's top edge; the frame the keyboard is in has the brighter line.
 
 - **Header:** Kumi, the Set's name, the model and its effort, the background
   jobs at work (◐ 2 jobs), and Live's connection. While Live plays, a yellow light blinks on its beat (brightest on
@@ -63,11 +65,13 @@ closes, crashes or is stopped.
   `/loop`, the best score with its trend, the leading candidate, and the time.
   **JOBS** joins them with the first background job: each one's progress, time
   and tokens, newest first, with **stop**; Enter opens its steps and report.
-- **Input box** (bottom left): messages waiting to be sent show above it, a
-  pinned device as a chip, and the files that go with your next message (name,
-  kind, size and ×). Empty, it says "ctrl+t to talk". While Kumi listens,
-  its bottom line shows a pulsing mint `●`, the time and a level meter, with the
-  keys that apply at its right; no red, which in Live means recording.
+- **Input box** (bottom left): the keys that apply now are in its top edge (for
+  a moment, what you just did), and the line you're typing is on its bottom
+  edge, so one line takes two rows; it grows to five. Messages waiting to be sent
+  show above it, a pinned device as a chip, and the files that go with your next
+  message (name, kind, size and ×). Empty, it says "ctrl+t to talk". While Kumi
+  listens, its top edge shows a pulsing mint `●`, the time and a level meter,
+  with the keys that apply at its right; no red, which in Live means recording.
 
 The welcome screen shows what changed in the Set since you were last here, a
 newer Kumi when there is one, and, the first time, that Kumi is learning your
@@ -98,8 +102,9 @@ program, say), and what fixes it, instead of asking for it again; so does the se
 Linux, setup only signs in. A Kumi that's set up starts straight into the session.
 
 Below 100 columns (a window beside your DAW) the pane is a **drawer** under the
-conversation: a row of tabs (NOW, FOCUS, HISTORY and the others) over the tab it
-shows, 6 to 10 rows by the window's height.
+conversation: a frame with a row of tabs (NOW, FOCUS, HISTORY and the others)
+in its top edge, over the tab it shows, 6 to 10 rows by the window's height;
+folded, the row of tabs on a line.
 
 - A change Kumi makes opens it to NOW: what Kumi is doing, the change with its
   undo, and its picture. A goal opens it, folded, on GOAL. What Kumi opened folds
@@ -111,9 +116,9 @@ shows, 6 to 10 rows by the window's height.
 - Ctrl-\\ opens and closes it. Once you close it, Kumi leaves it closed until
   you open it again.
 
-Below 24 rows the pane is a two-line strip above the input box instead (where
-you are and what Kumi is doing, then the last change with its undo). Below 24×8
-Kumi asks for a bigger window.
+Below 24 rows the pane is a two-line strip above the input box instead, framed as
+the box is (where you are and what Kumi is doing in its top edge, then the last
+change with its undo). Below 24×8 Kumi asks for a bigger window.
 
 ## REAPER and Renoise
 
@@ -211,6 +216,9 @@ Run these as `kumi <command>`; from a copy of the repository, as
 ## Commands inside Kumi
 
 Type `/` for a menu of these: ↑↓ choose, Tab completes, Enter runs, Esc closes.
+Each command has an icon beside its name, here and in the help, coloured by what
+it's about: the conversation, Live and your sounds, the models, Kumi's work and
+memory, or Kumi itself.
 After a command and a space, the menu offers its words: `/palette use` your
 palettes, `/resume` your kept conversations, `/slots listening` the models the
 slot takes, `/model` the models you can use, `/export` its formats. Tab puts the
@@ -467,7 +475,8 @@ text, and `/help` lists those this session has.
 Kumi detects how many colours the terminal shows; `KUMI_COLOR` (`truecolor`,
 `256`, `16`, `none`) overrides it, and `NO_COLOR` is honoured. Where the
 terminal's symbols may not show (the old Windows console, the Linux console),
-Kumi uses two-letter badges instead of icons; `KUMI_ICONS=glyphs` or `badges`
+Kumi uses two-letter badges instead of icons and square corners on its frames,
+and the `/` menu shows commands without theirs; `KUMI_ICONS=glyphs` or `badges`
 chooses. Changes' pictures show as images in kitty and Ghostty (with 24-bit
 colour, outside tmux), in braille and half-blocks elsewhere, and as words where
 symbols may not show; `KUMI_PICTURES=cells` keeps them in cells. As it

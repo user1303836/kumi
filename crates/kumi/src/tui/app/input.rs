@@ -533,9 +533,10 @@ impl TuiApp {
                     _ => self.stash(),
                 }
             }
-            // The pane: the drawer, or the side pane at full width.
+            // The pane: the drawer, or the side pane at full width. The strip has no tabs or tree to go into: there the
+            // keys go on to what else they do.
             "pane.toggle" => self.toggle_pane(),
-            "pane.tabs" | "tabs.next" => {
+            "pane.tabs" | "tabs.next" if self.pane_has_keys() => {
                 self.0.state.borrow_mut().tree_cursor = None;
                 // The pane shows the tabs the keyboard goes into, the drawer open on them.
                 self.open_pane(super::drawer::DrawerTab::Tabs);
@@ -594,7 +595,7 @@ impl TuiApp {
                 drop(state);
                 self.hold(raw, shown, words, "after");
             }
-            "pane.tree" => {
+            "pane.tree" if self.pane_has_keys() => {
                 let eligible = {
                     let state = self.0.state.borrow();
                     // (the chain FOCUS shows: a take's FX chain where one is open, else the track's)
@@ -1746,8 +1747,23 @@ impl TuiApp {
             Self::layout_for(columns)
         }
     }
+    /// The input box's columns: the conversation's, but for a blank one before the side pane's frame.
+    pub(super) fn box_columns(pane: i32, left: i32) -> i32 {
+        left - i32::from(pane != 0)
+    }
+    /// How wide the text is in an input box this many columns wide: what's inside its frame.
+    pub(super) fn box_text(columns: i32) -> i32 {
+        (columns - 2 * super::super::frame::INSET).max(1)
+    }
     pub(super) fn input_width(&self) -> i32 {
-        (self.layout(self.0.tty.size().columns).1 - 6).max(1)
+        let (pane, left) = self.layout(self.0.tty.size().columns);
+        Self::box_text(Self::box_columns(pane, left))
+    }
+    /// Whether the pane at this window's size has tabs and FOCUS's tree for the keyboard to go into: the side pane and
+    /// the drawer do (Shift-Tab and Tab bring them back or open them), the strip doesn't.
+    pub(super) fn pane_has_keys(&self) -> bool {
+        let size = self.0.tty.size();
+        !super::drawer::strip_only(size.columns, size.rows)
     }
 }
 /// How soon a press on the same cell counts with the one before: a double or a triple click.

@@ -2,12 +2,14 @@
 //! MIDI, instruments, plug-ins; a track in its own Live colour). Only characters every terminal Kumi
 //! supports draws (box drawing, blocks and a few geometric shapes, no Braille, no pictures); where
 //! even those don't show, a two-letter badge stands in. The tint goes on the icon only, never the
-//! row's text. What follows an icon leaves one space after its two cells.
+//! row's text. What follows an icon leaves one space after its two cells. The commands' icons are
+//! theirs ([`command_icon`]), tinted by what each is about.
 
+use kumi_agent::core::commands::{Command, Family};
 use kumi_agent::core::view::{DeviceForm, DeviceRole, DeviceSignal};
 use std::collections::HashMap;
 
-use super::style::{process_platform, Rgb, Style};
+use super::style::{palette, process_platform, Rgb, Style};
 use super::wrap::Span;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -203,6 +205,19 @@ pub fn icon(kind: IconKind, style: IconStyle, color: Option<Rgb>) -> Span {
         IconStyle::Badges => Span::styled(found.badge, Style { fg: Some(tint), bold: true, ..Style::default() }),
         IconStyle::Glyphs => Span::styled(format!("{} ", found.glyph), Style::fg(tint)),
     }
+}
+
+/// A command's icon with the blank after it, two cells, in the colour of what it's about; none where glyphs don't show,
+/// as a badge would only say its name again.
+pub fn command_icon(command: &Command, style: IconStyle) -> Option<Span> {
+    let tint = match command.family {
+        Family::Conversation => palette::NOTE,
+        Family::Daw => tints::AUDIO,
+        Family::Models => palette::TECHNIQUE,
+        Family::Work => palette::LESSON,
+        Family::Kumi => palette::DIM,
+    };
+    (style == IconStyle::Glyphs).then(|| Span::styled(format!("{} ", command.icon), Style::fg(tint)))
 }
 
 pub use kumi_agent::core::view::DeviceRow;

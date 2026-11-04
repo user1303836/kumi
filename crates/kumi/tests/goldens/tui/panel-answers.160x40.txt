@@ -1,40 +1,40 @@
   Kumi  ·  Night Drive                                                                                                                                  ● Live
 
-   sidechain the bass                                                                                               FOCUS
-                                                                                                                    Night Drive
-   Which bass should duck under the kick?                                                                           Your selection will show here
-
-   1. Sub Bass
-   2. Reese                                                                                                         NOW
-   3. Both                                                                                                          Ready
-   0.9s
-
-
-
-
-
-
-
-
-
-
-
-                                                                                                                    HISTORY ──────────────────────────────────
-                                                                                                                    Nothing changed yet
-
-
-
-
-
-
-   Your answer
-
-     1. Sub Bass
-     2. Reese
-     3. Both
-
-
-
-   Ask Kumi about your Set
-                                                 a number, then enter answers · or type your own · esc to close
+   sidechain the bass                                                                                             ╭─ FOCUS ────────────────────────────────────╮
+                                                                                                                  │ Night Drive                                │
+   Which bass should duck under the kick?                                                                         │ Your selection will show here              │
+                                                                                                                  │                                            │
+   1. Sub Bass                                                                                                    │                                            │
+   2. Reese                                                                                                       ├─ NOW ──────────────────────────────────────┤
+   3. Both                                                                                                        │ Ready                                      │
+   0.9s                                                                                                           │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  ├─ HISTORY ──────────────────────────────────┤
+                                                                                                                  │ Nothing changed yet                        │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+                                                                                                                  │                                            │
+╭─ Your answer ──────────────────────────────────────────────────────────────╮                                    │                                            │
+│                                                                            │                                    │                                            │
+│    1. Sub Bass                                                             │                                    │                                            │
+│    2. Reese                                                                │                                    │                                            │
+│    3. Both                                                                 │                                    │                                            │
+╰────────────────────────────────────────────────────────────────────────────╯                                    │                                            │
+                                                                                                                  │                                            │
+╭────────────────────────────────────────────── a number, then enter answers · or type your own · esc to close ─╮ │                                            │
+╰─ Ask Kumi about your Set                                                                                     ─╯ ╰────────────────────────────────────────────╯
 

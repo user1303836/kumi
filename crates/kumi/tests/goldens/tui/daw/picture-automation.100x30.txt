@@ -1,30 +1,30 @@
   Kumi  ·  Night Drive                                                                   ● Renoise
 
-                                                                  FOCUS
-                                                                  Night Drive
-                                                                  Your selection will show here
-
-
-                 ██                          ▀▀                   NOW
-                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                   ✓ Automation of Filter Cutoff o…
-                 ██▀█▄   ██  ██  ██  ██  ██  ██                         ⢀⣀⡠⠤⠔⠒⠒⠢⠤⠤⢄⣀⣀⣀   ⣀⣀⡠⠤⠤⠒⠒⠊⠉
-                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                   ⠤⠤⠔⠒⠊⠉⠁             ⠉⠉⠉
-
-                 ░▒▓████████████████████████▓▒░
-
-                    Kumi can see Night Drive.
-
-                               Try                                HISTORY 1 ──────────────────────
-                     “What's on this track?”                      ✓ Automation of Filter      undo
-                     “Set the tempo to 124”                         Cutoff on “Bass” in “Drop”: 4…
-               “Why might my low end sound muddy?”                                             ⢀⠔⠊
-                                                                             ⢀⠔⠢⢄⡀          ⢀⡠⠊⠁
-   Kumi keeps each song's conversations: /conversations goes …             ⡠⠊⠁   ⠈⠑⠢⢄⡀    ⡠⠔⠁
-                                                                        ⢀⠔⠊          ⠈⠑⠢⠔⠊
-                                                                      ⡠⠔⠁
-                                                                    ⠒⠊
-                                                                    Cutoff · 0 → 4 points
-                                                                    10% to 100% over lines 00–24
-   Ask Kumi about your song
-                                                enter to send
+                                                                ╭─ FOCUS ──────────────────────────╮
+                                                                │ Night Drive                      │
+                                                                │ Your selection will show here    │
+                                                                │                                  │
+                                                                │                                  │
+                 ██                          ▀▀                 ├─ NOW ────────────────────────────┤
+                 ██ ▄█▀  ██  ██  ██▀▀██▀▀█▄  ██                 │ ✓ Automation of Filter Cutoff o… │
+                 ██▀█▄   ██  ██  ██  ██  ██  ██                 │       ⢀⣀⡠⠤⠔⠒⠒⠢⠤⠤⢄⣀⣀⣀   ⣀⣀⡠⠤⠤⠒⠒⠊⠉ │
+                 ▀▀  ▀▀   ▀▀▀▀▀  ▀▀  ▀▀  ▀▀  ▀▀                 │ ⠤⠤⠔⠒⠊⠉⠁             ⠉⠉⠉          │
+                                                                │                                  │
+                 ░▒▓████████████████████████▓▒░                 │                                  │
+                                                                │                                  │
+                    Kumi can see Night Drive.                   │                                  │
+                                                                │                                  │
+                               Try                              ├─ HISTORY 1 ──────────────────────┤
+                     “What's on this track?”                    │ ✓ Automation of Filter      undo │
+                     “Set the tempo to 124”                     │   Cutoff on “Bass” in “Drop”: 4… │
+               “Why might my low end sound muddy?”              │                              ⢀⠔⠊ │
+                                                                │            ⢀⠔⠢⢄⡀          ⢀⡠⠊⠁   │
+   Kumi keeps each song's conversations: /conversations goes …  │          ⡠⠊⠁   ⠈⠑⠢⢄⡀    ⡠⠔⠁      │
+                                                                │       ⢀⠔⠊          ⠈⠑⠢⠔⠊         │
+                                                                │     ⡠⠔⠁                          │
+                                                                │   ⠒⠊                             │
+                                                                │   Cutoff · 0 → 4 points          │
+                                                                │   10% to 100% over lines 00–24   │
+╭───────────────────────────────────────────── enter to send ─╮ │                                  │
+╰─ Ask Kumi about your song                                  ─╯ ╰──────────────────────────────────╯
 

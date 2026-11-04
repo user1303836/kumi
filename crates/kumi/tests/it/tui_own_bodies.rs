@@ -364,7 +364,9 @@ case!(renoises_pattern_fits_the_drawer_around_its_cursor, async {
     h.connect();
     let focus = json!({"track":{"name":"Bass","kind":"sequencer"},"trackRef":"3:track:2","mainView":{"kind":"pattern-editor","label":"Pattern Editor"},"item":{"kind":"pattern-track","itemRef":"3:pattern:2","name":"Drop"}});
     h.emit(json!({"type":"focus","focus":focus}));
-    let strip = |lines: &[String]| lines.iter().position(|line| line.starts_with("  NOW   FOCUS")).expect("the drawer");
+    let strip = |lines: &[String]| {
+        lines.iter().position(|line| line.chars().skip(3).collect::<String>().starts_with("NOW   FOCUS")).expect("the drawer")
+    };
     let lines = h.screen();
     h.type_text(&click(&lines, strip(&lines), "FOCUS")).await;
     shows(&h, "FOCUS · Pattern").await;
@@ -403,7 +405,9 @@ case!(renoises_pattern_at_focus_widest_draws_no_track_past_the_ones_read, async 
     h.connect();
     let focus = json!({"track":{"name":"T40","kind":"sequencer"},"trackRef":"3:track:40","mainView":{"kind":"pattern-editor","label":"Pattern Editor"},"item":{"kind":"pattern-track","itemRef":"3:pattern:2","name":"Wide"}});
     h.emit(json!({"type":"focus","focus":focus}));
-    let strip = |lines: &[String]| lines.iter().position(|line| line.starts_with("  NOW   FOCUS")).expect("the drawer");
+    let strip = |lines: &[String]| {
+        lines.iter().position(|line| line.chars().skip(3).collect::<String>().starts_with("NOW   FOCUS")).expect("the drawer")
+    };
     let lines = h.screen();
     h.type_text(&click(&lines, strip(&lines), "FOCUS")).await;
     shows(&h, "Wide · 64 lines").await;

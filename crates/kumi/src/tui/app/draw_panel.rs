@@ -1,4 +1,5 @@
 use super::super::{
+    frame,
     picker::NoteTone,
     render::Cursor,
     screen::Screen,
@@ -31,11 +32,24 @@ pub(super) fn say(lines: &mut Vec<Line>, text: &str, style: Style, width: i32) {
         lines.push(Line::new(string::trim_end(&text), style));
     }
 }
+/// How many columns there are inside the frame of what opens over the conversation, over an input box `boxed` columns
+/// wide: `most` at most. Where the box is only a little wider, it takes the box's width, so their frames' sides line up
+/// rather than miss by a column or two.
+pub(super) fn panel_width(most: i32, boxed: i32) -> i32 {
+    /// How much narrower than the box a panel can be before it's drawn as wide as the box.
+    const SNAP: i32 = 8;
+    let inside = boxed - 2;
+    if inside - most <= SNAP {
+        inside
+    } else {
+        most
+    }
+}
 impl TuiApp {
     /// A list to choose from, in its box: its title (with its tabs, or what's typed to filter it), then the rows that
     /// fit around the one chosen.
     pub(super) fn draw_pick(&self, screen: &mut Screen, area: Area, picker: &Picker) -> Option<Cursor> {
-        let width = 76.min(area.left - 2);
+        let width = panel_width(76, area.boxed);
         let space = area.box_top - 5;
         let mut lines: Vec<Line> = vec![];
         let visible = picker.visible();
@@ -123,8 +137,10 @@ impl TuiApp {
         }
         self.draw_lines(screen, area.box_top, width, &lines, None)
     }
-    /// A panel's `lines` in a box `width` wide over the conversation, down to the input box, whose top row is `box_top`;
-    /// the cursor where `cursor_at` puts it, when that line shows.
+    /// A panel's `lines` in a frame `width` wide inside, over the conversation, down to the input box, whose top row is
+    /// `box_top`: the first line, its title, is set into the frame's top edge, with what it says at its right (what's
+    /// typed to filter it, which answer it shows, a job's state), which keeps its room: the title is cut short first.
+    /// The cursor where `cursor_at` puts it, when that line shows.
     pub(super) fn draw_lines(
         &self,
         screen: &mut Screen,
@@ -133,18 +149,37 @@ impl TuiApp {
         lines: &[Line],
         cursor_at: Option<(usize, i32)>,
     ) -> Option<Cursor> {
-        let x = 3;
+        let x = frame::INSET;
         let inner = width - 4;
-        let gap = i32::from(lines.len() as i32 + 3 <= box_top - 2);
-        let height = lines.len() as i32 + gap + 2;
+        let gap = i32::from(lines.len() as i32 + 2 <= box_top - 2);
+        let height = lines.len() as i32 + gap + 1;
         let top = (box_top - 1 - height).max(1);
-        let area = Rect::new(1, top, width, height.min(box_top - 1 - top));
-        screen.fill(area, &st::RAISED);
+        let area = Rect::new(0, top, width + 2, height.min(box_top - 1 - top));
+        let bottom = area.y + area.height - 1;
+        frame::border(screen, area, &self.frame_line(true), self.corners());
         self.cover(area);
-        let row_of = |index: usize| top + 1 + index as i32 + if index > 0 { gap } else { 0 };
-        for (index, line) in lines.iter().enumerate() {
+        self.shut_out(area);
+        // A drag over it copies what's inside its frame, from where its rows start.
+        self.0.state.borrow_mut().select_areas.insert(0, Rect::new(x, top + 1, inner, (area.height - 2).max(0)));
+        if let Some(title) = lines.first() {
+            let words = title.spans.clone().unwrap_or_else(|| vec![sp(&title.text, title.style)]);
+            // As much of what's at its right as the edge holds beside a title cut to nothing, and the title in what's left.
+            let right = title.right.as_ref().map(|right| sp(truncate(&right.text, area.width - 2 * frame::INSET - 2), *right.style));
+            let kept = right.as_ref().map_or(0, |right| text_width(&right.text) + 2);
+            let after = frame::left_words(screen, Rect { width: area.width - kept, ..area }, top, &words);
+            if let Some(right) = &right {
+                frame::right_words(screen, area, top, std::slice::from_ref(right), after);
+            }
+            // The title's words in the edge are copied as what's inside the frame is, on their own: a drag on them stays
+            // on them.
+            if after - 1 > x {
+                self.0.state.borrow_mut().select_areas.insert(0, Rect::new(x, top, after - 1 - x, 1));
+            }
+        }
+        let row_of = |index: usize| top + index as i32 + if index > 0 { gap } else { 0 };
+        for (index, line) in lines.iter().enumerate().skip(1) {
             let y = row_of(index);
-            if y >= box_top - 1 {
+            if y >= bottom {
                 continue;
             }
             if line.band {
@@ -167,6 +202,6 @@ impl TuiApp {
                 screen.put(x + inner - text_width(&right.text), y, &right.text, &right.style);
             }
         }
-        cursor_at.filter(|(line, _)| row_of(*line) < box_top - 1).map(|(line, column)| Cursor { x: x + column, y: row_of(line) })
+        cursor_at.filter(|(line, _)| *line > 0 && row_of(*line) < bottom).map(|(line, column)| Cursor { x: x + column, y: row_of(line) })
     }
 }
