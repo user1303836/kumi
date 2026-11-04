@@ -225,7 +225,7 @@ async fn the_host_connects_through_the_discovery_file_and_status_answers_from_th
     assert_eq!((welcome.identity.daw.as_str(), welcome.identity.pid), ("soundcraft", std::process::id()));
     assert_eq!(welcome.identity.project.as_ref().and_then(|project| project.name.as_deref()), Some("Midnight Groove"));
     let offered = (welcome.methods.clone(), welcome.events.clone());
-    assert_eq!(offered, (vec!["ping".to_string(), "status".into(), "read".into()], vec!["project".to_string()]));
+    assert_eq!(offered, (vec!["ping".to_string(), "status".into(), "read".into(), "snapshot".into()], vec!["project".to_string()]));
     assert_eq!(client.request("ping", json!({}), WAIT).await.unwrap(), json!({}));
     let status = client.request("status", json!({}), WAIT).await.unwrap();
     assert_eq!((&status["busy"], &status["project"]["name"]), (&json!(false), &json!("Midnight Groove")));
@@ -284,6 +284,11 @@ async fn the_host_reads_through_the_bridge_and_a_read_while_the_app_is_busy_is_r
     let tracks = client.request("read", json!({"kind": "track"}), WAIT).await.unwrap();
     assert_eq!((&tracks["items"], &tracks["total"]), (&json!([]), &json!(0)), "{tracks}");
     assert!(tracks["epoch"].is_string());
+    let snapshot = client.request("snapshot", json!({}), WAIT).await.unwrap();
+    assert_eq!(
+        (&snapshot["epoch"], &snapshot["project"]["name"], &snapshot["tracks"]),
+        (&tracks["epoch"], &json!("Midnight Groove"), &json!([]))
+    );
     lab.shown.lock().unwrap().dialog = Some("Save Changes".into());
     status_until(&client, |status| status["busy"] == "modal").await;
     let began = Instant::now();
@@ -312,15 +317,26 @@ async fn a_dialog_or_an_app_that_does_not_answer_makes_the_bridge_busy_until_it_
 #[tokio::test]
 async fn a_new_session_is_told_as_a_project_event_and_the_discovery_file_follows() {
     let lab = Lab::new().await;
+    let track =
+        |name: &str| json!([{"id": 1, "kind": "audio", "format": "Mono", "name": name, "instrument": null, "inserts": [], "clips": []}]);
+    lab.shown.lock().unwrap().tracks = track("Kick");
     let _serving = tokio::spawn(server::serve(lab.config(std::process::id()), std::future::pending()));
     let client = lab.connect().await;
     let before = client.request("status", json!({}), WAIT).await.unwrap()["project"]["epoch"].clone();
     let mut events = client.events();
-    lab.shown.lock().unwrap().name = "Next Song".into();
+    // Another song: another name, and objects not these.
+    {
+        let mut shown = lab.shown.lock().unwrap();
+        (shown.name, shown.tracks) = ("Next Song".into(), track("Pad"));
+    }
     let told = tokio::time::timeout(WAIT, events.recv()).await.unwrap().unwrap();
     assert_eq!((told.name.as_str(), &told.data["name"]), ("project", &json!("Next Song")));
     assert!(told.data["epoch"].is_string() && told.data["epoch"] != before, "a new epoch for its refs: {:?} after {before}", told.data);
     assert_eq!(lab.discovery().await["project"]["name"], "Next Song");
+    // Saved under another name, nothing else changed: told, and the same session, its refs kept.
+    lab.shown.lock().unwrap().name = "Next Song v2".into();
+    let saved = tokio::time::timeout(WAIT, events.recv()).await.unwrap().unwrap();
+    assert_eq!((&saved.data["name"], &saved.data["epoch"]), (&json!("Next Song v2"), &told.data["epoch"]));
 }
 
 #[tokio::test]

@@ -151,13 +151,17 @@ async fn tracks_read_as_rows_named_by_refs() {
     assert_eq!(answer["epoch"], app.reads.epoch());
     let kick = &rows[0];
     assert_eq!(
-        (&kick["ref"], &kick["name"], &kick["selected"], &kick["insertCount"]),
+        (&kick["ref"], &kick["name"], &kick["selected"], &kick["deviceCount"]),
         (&json!("s:track:3"), &json!("Kick"), &json!(true), &json!(2))
     );
     let verb = rows.iter().find(|row| row["name"] == "Verb").unwrap();
-    assert_eq!((&verb["kind"], &verb["inputRef"], &verb["output"]), (&json!("aux"), &json!("s:bus:1"), &json!("Main")));
+    assert_eq!((&verb["type"], &verb["inputRef"], &verb["output"]), (&json!("aux"), &json!("s:bus:1"), &json!("Main")));
     let keys = rows.iter().find(|row| row["name"] == "Keys").unwrap();
-    assert_eq!((&keys["instrument"], &keys["sendCount"]), (&json!("subtractive_synth"), &json!(1)));
+    assert_eq!(
+        (&keys["instrument"], &keys["sendCount"], &keys["deviceCount"]),
+        (&json!("subtractive_synth"), &json!(1), &json!(1)),
+        "its instrument is a device"
+    );
 }
 
 #[tokio::test]
@@ -237,7 +241,12 @@ async fn refs_and_cursors_from_an_earlier_session_are_stale() {
     let mut app = App::new(json!([])).await;
     let first = app.read(json!({"kind": "track", "limit": 4})).await.unwrap();
     let (epoch, cursor) = (first["epoch"].as_str().unwrap().to_string(), first["nextCursor"].as_str().unwrap().to_string());
-    app.session.lock().unwrap()["name"] = json!("Another Song");
+    // Another song: another name, and objects not these (a save, under another name with the same ones, isn't another).
+    {
+        let mut session = app.session.lock().unwrap();
+        session["name"] = json!("Another Song");
+        session["tracks"][0]["name"] = json!("Snare");
+    }
     tokio::time::sleep(STALE_AFTER).await;
     let stale = app.read(json!({"kind": "track", "epoch": epoch})).await.unwrap_err();
     assert_eq!(stale.0, "stale", "{stale:?}");
@@ -524,4 +533,239 @@ async fn two_points_at_one_sample_from_a_loaded_session_are_a_tie_and_never_a_gu
     assert_eq!(ties, [&json!(2), &json!(2), &Value::Null]);
     assert_eq!(app.read(json!({"ref": "s:point:3:volume:0"})).await.unwrap_err().0, "failed", "which of the two isn't known");
     assert_eq!(app.read(json!({"ref": "s:point:3:volume:48000"})).await.unwrap()["items"][0]["value"], -3.0);
+}
+
+/// The snapshot as Kumi's look takes it.
+async fn snapshot(app: &mut App) -> Value {
+    app.reads.snapshot(Instant::now() + Duration::from_secs(5)).await.unwrap()
+}
+
+#[tokio::test]
+async fn a_snapshot_shows_the_session_on_one_screen() {
+    let mut app = App::new(json!([])).await;
+    let snapshot = snapshot(&mut app).await;
+    assert_eq!(misplaced(&snapshot), Vec::<String>::new(), "{snapshot}");
+    let epoch = app.reads.epoch().to_string();
+    assert_eq!(snapshot["epoch"], epoch.as_str());
+    // (the recorded session was never saved: no place; its identity is the open session's)
+    let project = &snapshot["project"];
+    assert_eq!((&project["name"], &project["id"], &project["identity"]), (&json!("Midnight Groove"), &Value::Null, &json!(epoch)));
+    let tracks = snapshot["tracks"].as_array().unwrap();
+    assert_eq!(tracks.len(), 9);
+    assert_eq!((&tracks[0]["ref"], &tracks[0]["type"], &tracks[0]["deviceCount"]), (&json!("s:track:3"), &json!("audio"), &json!(2)));
+    assert_eq!(
+        (&snapshot["selection"]["trackRef"], &snapshot["selection"]["track"]),
+        (&json!("s:track:3"), &json!({"name": "Kick", "type": "audio"}))
+    );
+    // At the start: 104 bpm in 4/4.
+    let transport = &snapshot["transport"];
+    assert_eq!(
+        (&transport["state"], &transport["beat"], &transport["bar"], &transport["beatInBar"]),
+        (&json!("stopped"), &json!(0.0), &json!(1), &json!(1.0))
+    );
+    assert_eq!((&transport["tempo"], &transport["timeSignature"], &transport["beatsPerBar"]), (&json!(104.0), &json!([4, 4]), &json!(4.0)));
+    assert_eq!(snapshot["markers"].as_array().map(Vec::len), recorded()["markers"].as_array().map(Vec::len), "every marker");
+    assert!(snapshot.get("truncated").is_none(), "nothing left out");
+}
+
+#[tokio::test]
+async fn a_saved_sessions_id_is_its_files_place_and_the_session_read_says_the_same() {
+    let path = json!("/sessions/Midnight Groove/Midnight Groove.scraft");
+    let mut app = App::new(json!([])).await;
+    app.session.lock().unwrap()["path"] = path.clone();
+    let project = snapshot(&mut app).await["project"].clone();
+    let id = project["id"].as_str().unwrap();
+    assert!(id.len() == 32 && id.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)), "a place's id: {id}");
+    assert_eq!(project["identity"], app.reads.epoch(), "the open session's, not its file's");
+    let session = app.read(json!({"kind": "session"})).await.unwrap();
+    assert_eq!(
+        (&session["items"][0]["id"], &session["items"][0]["identity"]),
+        (&project["id"], &project["identity"]),
+        "what Kumi compares when the epoch moves"
+    );
+    // The bridge started again, the same file open: the same id, so its conversations are where they were.
+    let mut again = App::new(json!([])).await;
+    again.session.lock().unwrap()["path"] = path;
+    assert_eq!(snapshot(&mut again).await["project"]["id"], project["id"]);
+    // A relative path is resolved from a folder the bridge can't know: no place.
+    let mut relative = App::new(json!([])).await;
+    relative.session.lock().unwrap()["path"] = json!("Midnight Groove.scraft");
+    assert_eq!(snapshot(&mut relative).await["project"]["id"], Value::Null);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_session_file_opened_through_a_link_is_the_place_of_the_file_it_links_to() {
+    let folder = tempfile::tempdir().unwrap();
+    let (file, link) = (folder.path().join("Groove.scraft"), folder.path().join("Groove link.scraft"));
+    std::fs::write(&file, b"{}").unwrap();
+    std::os::unix::fs::symlink(&file, &link).unwrap();
+    let (mut direct, mut linked) = (App::new(json!([])).await, App::new(json!([])).await);
+    direct.session.lock().unwrap()["path"] = json!(file.to_str().unwrap());
+    linked.session.lock().unwrap()["path"] = json!(link.to_str().unwrap());
+    let (direct, linked) = (snapshot(&mut direct).await["project"]["id"].clone(), snapshot(&mut linked).await["project"]["id"].clone());
+    assert!(direct.is_string());
+    assert_eq!(direct, linked);
+}
+
+#[tokio::test]
+async fn a_save_or_a_save_as_is_the_same_session_with_its_refs_and_identity() {
+    let mut app = App::new(json!([])).await;
+    let before = snapshot(&mut app).await;
+    let (epoch, identity) = (before["epoch"].clone(), before["project"]["identity"].clone());
+    assert_eq!(before["project"]["id"], Value::Null, "never saved");
+    let names = |app: &App, name: &str, path: &str| {
+        let mut session = app.session.lock().unwrap();
+        (session["name"], session["path"]) = (json!(name), json!(path));
+    };
+    // Its first save: SoundCraft names the session after its file, and nothing else changes.
+    names(&app, "Groove", "/sessions/Groove.scraft");
+    tokio::time::sleep(STALE_AFTER).await;
+    let saved = snapshot(&mut app).await;
+    assert_eq!((&saved["epoch"], &saved["project"]["identity"]), (&epoch, &identity), "the same session");
+    assert!(saved["project"]["id"].is_string(), "with a place now");
+    let kick = app.read(json!({"ref": "s:track:3", "epoch": epoch})).await.unwrap();
+    assert_eq!(kick["items"][0]["name"], "Kick", "its refs hold");
+    // Save As: another file and place, the same session.
+    names(&app, "Groove 2", "/sessions/Groove 2.scraft");
+    tokio::time::sleep(STALE_AFTER).await;
+    let saved_as = snapshot(&mut app).await;
+    assert_eq!((&saved_as["epoch"], &saved_as["project"]["identity"]), (&epoch, &identity));
+    assert_ne!(saved_as["project"]["id"], saved["project"]["id"]);
+    // Another file opened, whose objects aren't these: another session.
+    names(&app, "Other", "/sessions/Other.scraft");
+    app.session.lock().unwrap()["tracks"][0]["name"] = json!("Snare");
+    tokio::time::sleep(STALE_AFTER).await;
+    let other = snapshot(&mut app).await;
+    assert_ne!(other["epoch"], epoch);
+    assert_ne!(other["project"]["identity"], identity);
+}
+
+#[tokio::test]
+async fn another_file_whose_objects_are_who_they_were_but_hold_other_things_is_another_session() {
+    // A "v2" of the song, opened with nothing to undo in either: every object who it was, but its audio clips moved and
+    // Kick's first insert another plug-in.
+    let mut app = App::new(json!([])).await;
+    let epoch = snapshot(&mut app).await["epoch"].clone();
+    {
+        let mut session = app.session.lock().unwrap();
+        (session["name"], session["path"]) = (json!("Groove v2"), json!("/sessions/Groove v2.scraft"));
+        let tracks = session["tracks"].as_array_mut().unwrap();
+        for clip in tracks.iter_mut().flat_map(|track| track["clips"].as_array_mut().into_iter().flatten()) {
+            if clip.get("source").is_some() {
+                clip["start"] = json!(clip["start"].as_i64().unwrap() + 48000);
+            }
+        }
+        tracks[0]["inserts"][0]["plugin"] = json!("compressor");
+    }
+    tokio::time::sleep(STALE_AFTER).await;
+    assert_ne!(snapshot(&mut app).await["epoch"], epoch);
+}
+
+#[tokio::test]
+async fn a_session_renamed_on_the_same_path_is_the_same_session() {
+    // Setup > Session renames it as a step of its own: the history moves, the file and the objects stay.
+    let mut app = App::new(json!([])).await;
+    app.session.lock().unwrap()["path"] = json!("/sessions/Groove.scraft");
+    let epoch = snapshot(&mut app).await["epoch"].clone();
+    {
+        let mut session = app.session.lock().unwrap();
+        (session["name"], session["undo"]) = (json!("Groove (final)"), json!("Session Setup"));
+    }
+    tokio::time::sleep(STALE_AFTER).await;
+    assert_eq!(snapshot(&mut app).await["epoch"], epoch);
+}
+
+#[tokio::test]
+async fn deleting_every_object_in_one_step_is_the_same_session() {
+    let mut app = App::new(json!([])).await;
+    let epoch = snapshot(&mut app).await["epoch"].clone();
+    {
+        let mut session = app.session.lock().unwrap();
+        for key in ["tracks", "busses", "markers", "groups", "sources"] {
+            session[key] = json!([]);
+        }
+        session["undo"] = json!("Delete");
+    }
+    tokio::time::sleep(STALE_AFTER).await;
+    assert_eq!(snapshot(&mut app).await["epoch"], epoch, "a step took them, so the history moved: the same session");
+}
+
+#[tokio::test]
+async fn a_big_selection_is_named_in_part_and_counted_in_full() {
+    let mut app = App::new(json!([])).await;
+    {
+        let mut session = app.session.lock().unwrap();
+        let kick = session["tracks"][0].clone();
+        let hit = kick["clips"][0].clone();
+        assert!(hit.is_object(), "Kick has a clip to copy");
+        let tracks = session["tracks"].as_array_mut().unwrap();
+        for n in 0..60 {
+            let mut copy = kick.clone();
+            let mut clip = hit.clone();
+            clip["id"] = json!(5000 + n);
+            (copy["id"], copy["name"], copy["clips"]) = (json!(1000 + n), json!(format!("Copy {n}")), json!([clip]));
+            tracks.push(copy);
+        }
+        session["selection"]["tracks"] = json!((1000..1060).collect::<Vec<_>>());
+        session["selection"]["clips"] = json!((5000..5030).collect::<Vec<_>>());
+    }
+    let selection = snapshot(&mut app).await["selection"].clone();
+    assert_eq!(
+        (&selection["trackRef"], &selection["trackCount"], &selection["clipCount"]),
+        (&json!("s:track:1000"), &json!(60), &json!(30))
+    );
+    assert_eq!(
+        (selection["trackRefs"].as_array().map(Vec::len), selection["clipRefs"].as_array().map(Vec::len)),
+        (Some(50), Some(20)),
+        "named as REAPER names them"
+    );
+}
+
+#[tokio::test]
+async fn the_beat_in_a_bar_counts_quarter_notes_in_any_meter() {
+    // (at 120 bpm and 48 kHz a quarter note is 24000 samples)
+    for ((numerator, denominator), quarters, bar, in_bar) in [((6, 8), 1.5, 1, 2.5), ((6, 8), 3.5, 2, 1.5), ((4, 4), 1.5, 1, 2.5)] {
+        let mut app = App::new(json!([])).await;
+        {
+            let mut session = app.session.lock().unwrap();
+            session["tempo"] = json!([{"bpm": 120.0, "tick": 0}]);
+            session["meter"] = json!([{"denominator": denominator, "numerator": numerator, "tick": 0}]);
+            session["transport"]["position"] = json!(quarters * 24000.0);
+        }
+        let transport = snapshot(&mut app).await["transport"].clone();
+        let at = format!("{numerator}/{denominator}, {quarters} quarter notes in");
+        assert_eq!((&transport["bar"], &transport["beatInBar"]), (&json!(bar), &json!(in_bar)), "{at}");
+    }
+}
+
+#[tokio::test]
+async fn a_snapshot_names_the_tracks_it_leaves_out_and_read_goes_on_from_there() {
+    let mut app = App::new(json!([])).await;
+    {
+        let mut session = app.session.lock().unwrap();
+        let tracks = session["tracks"].as_array_mut().unwrap();
+        let kick = tracks[0].clone();
+        for n in 0..241 {
+            let mut copy = kick.clone();
+            (copy["id"], copy["name"]) = (json!(1000 + n), json!(format!("Copy {n}")));
+            tracks.push(copy);
+        }
+    }
+    let snapshot = snapshot(&mut app).await;
+    assert_eq!(snapshot["tracks"].as_array().unwrap().len(), 200);
+    let left = &snapshot["truncated"]["tracks"];
+    assert_eq!(left["total"], 250);
+    let rest = app.read(json!({"kind": "track", "cursor": left["nextCursor"], "limit": 100})).await.unwrap();
+    assert_eq!(refs(&rest)[0], "s:track:1191", "the 201st track, the first the snapshot left out");
+    assert!(rest.get("nextCursor").is_none(), "and the 50 after it are all");
+}
+
+#[tokio::test]
+async fn a_tempo_map_with_more_than_steps_gives_the_transport_no_beats() {
+    let mut app = App::new(json!([])).await;
+    app.session.lock().unwrap()["tempo"][0]["ramp"] = json!(true);
+    let transport = snapshot(&mut app).await["transport"].clone();
+    assert_eq!((&transport["seconds"], &transport["state"]), (&json!(0.0), &json!("stopped")));
+    assert!(transport.get("beat").is_none() && transport.get("timeSignature").is_none(), "no beats rather than wrong ones: {transport}");
 }
