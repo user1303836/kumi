@@ -4,11 +4,13 @@
     python3 scripts/release.py          # a dry run: the edits and checks in a scratch worktree, which is removed
     python3 scripts/release.py --go     # the release
 
+It first refuses until main's CI on the commit it releases is green on Linux, macOS and Windows: pull requests test on
+Linux alone (AGENTS.md, "Minimal CI"), so main's run is the first on the other two. The dry run says how that run stands.
 With --go it commits "Kumi X.Y.Z: the changelog, READMEs and versions" on release/vX.Y.Z, opens the pull request
-"Kumi X.Y.Z" and merges it with the admin bypass as "Kumi X.Y.Z (#PR)" without waiting for its CI (the tag build
-checks the same commit on six platforms, and main's CI runs on it too). Then it tags the merge commit vX.Y.Z,
-pushes the tag and creates the draft release with its notes. The tag's Installer run attaches the bundles and
-publishes the release once every install and migration job has passed.
+"Kumi X.Y.Z" and merges it with the admin bypass as "Kumi X.Y.Z (#PR)" without waiting for its CI (it changes only the
+versions and the notes, and main's CI runs on it too). Then it tags the merge commit vX.Y.Z, pushes the tag and creates
+the draft release with its notes. The tag's Installer run attaches the bundles and publishes the release once every
+install and migration job has passed.
 
 What ships is read from main since the last release tag:
 - Each pull request's "Changelog:" lines, verbatim. "none" adds nothing. A line goes under the bridge's heading
@@ -671,6 +673,47 @@ def publish(args: argparse.Namespace, repo: str, plan: Plan, changes: list[Chang
           f"publishes it once every install passes: https://github.com/{repo}/actions/workflows/installer.yml")
 
 
+# The systems main's CI tests a commit on (its `Rust / <system>…` jobs), all of which a release waits for: pull requests
+# test on Linux alone, so main's run is the first on macOS and Windows.
+CI_SYSTEMS = ("Linux", "macOS", "Windows")
+
+
+def ci_problems(ci_run: dict | None, jobs: list[dict]) -> list[str]:
+    """What keeps main's CI run on a commit (`gh run list`'s, and its `jobs`) from being green on every one of
+    CI_SYSTEMS: nothing when it is."""
+    if ci_run is None:
+        return ["CI hasn't run on it"]
+    if ci_run["status"] != "completed":
+        return [f"CI is still running on it: {ci_run['url']}"]
+    if ci_run["conclusion"] != "success":
+        return [f"CI's run on it ended {ci_run['conclusion']}: {ci_run['url']}"]
+    problems = []
+    for system in CI_SYSTEMS:
+        ran = [job for job in jobs if job["name"].startswith(f"Rust / {system}")]
+        if not ran or any(job["conclusion"] != "success" for job in ran):
+            problems.append(f"CI's Rust / {system} didn't pass on it: {ci_run['url']}")
+    return problems
+
+
+def main_ci(repo: str, head: str) -> list[str]:
+    """`ci_problems` for CI's run on main's commit `head` (its push's)."""
+    runs = json.loads(run(["gh", "run", "list", "--repo", repo, "--workflow", "ci.yml", "--commit", head, "--event", "push",
+                           "--json", "databaseId,status,conclusion,url", "--limit", "1"]))
+    if not runs:
+        return ci_problems(None, [])
+    jobs = json.loads(run(["gh", "run", "view", str(runs[0]["databaseId"]), "--repo", repo, "--json", "jobs"]))["jobs"]
+    return ci_problems(runs[0], jobs)
+
+
+def ci_gate(repo: str, head: str, go: bool) -> None:
+    """Says how main's CI on `head` stands; with --go, refuses unless it's green on every one of CI_SYSTEMS."""
+    ci = main_ci(repo, head)
+    print(f"main's CI on {head[:8]}: " + ("green on " + ", ".join(CI_SYSTEMS) if not ci else "; ".join(ci)))
+    if go and ci:
+        raise Refused(f"main's CI on {head[:8]} isn't green on {', '.join(CI_SYSTEMS)} yet, and a release waits for it: "
+                      + "; ".join(ci))
+
+
 def release(args: argparse.Namespace) -> None:
     repo = run(["gh", "repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"])
     run(["git", "fetch", "--quiet", "--tags", args.remote, "main"])
@@ -716,6 +759,7 @@ def release(args: argparse.Namespace) -> None:
     if args.go:  # admin before anything is pushed: the merge goes through the admin bypass, and tags are admin-only
         if run(["gh", "api", f"repos/{repo}", "--jq", ".permissions.admin"]) != "true":
             raise Refused(f"gh isn't signed in as an admin of {repo}, which the merge and the tag need")
+    ci_gate(repo, head, args.go)
 
     scratch = Path(tempfile.mkdtemp(prefix=f"kumi-release-{plan.new}-"))
     work = scratch / "worktree"

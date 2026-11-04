@@ -129,13 +129,7 @@ async fn music_is_shown_added_paused_and_forgotten() {
             h.type_text("/music forget\r").await;
             h.has("Forget what Kumi learned of your music?");
             h.type_text("\r").await;
-            for _ in 0..200 {
-                if !music.agreed() && !kept.exists() {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-            h.has("Forgot your music.");
+            h.wait_for("Forgot your music.").await;
             assert!(!music.agreed() && !kept.exists());
             h.close().await;
         })

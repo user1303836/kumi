@@ -126,7 +126,7 @@ async fn running_extension_checks_process_and_first_hello_with_timeout() {
                 tokio::task::yield_now().await;
             }
         });
-        assert_eq!(extension_answers(port as f64, 30).await, want);
+        assert_eq!(extension_answers(port as f64, if want { 2_000 } else { 30 }).await, want);
         server.await.unwrap();
     }
     assert!(!extension_answers(-1., 5).await);

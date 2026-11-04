@@ -956,7 +956,9 @@ async fn renoise_with_changes(
 
 /// (M7) Kumi (another run of it, when called again) on the Renoise the simulator plays.
 async fn kumi_on_renoise(home: &std::path::Path) -> (Rc<dyn Integration>, Observation, Rc<RefCell<Vec<ChangeRecord>>>) {
-    let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, home)), id: Cell::new(0) });
+    // (a busy runner's simulated bridge may answer a render's start or status late: the host gives each 30 s)
+    let host = Host::new(Daw::Renoise, home).with_listening_timeout(std::time::Duration::from_secs(30));
+    let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
     let connect: Connect = Rc::new(move |_| {
         let endpoint = endpoint.clone();
         async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()

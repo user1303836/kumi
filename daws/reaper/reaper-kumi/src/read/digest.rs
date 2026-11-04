@@ -1247,8 +1247,11 @@ mod tests {
             });
             forget();
             TEST_LIMITS.with(|limits| limits.set(Some((page_bytes, MOST_ITEMS, MOST_MARKERS))));
+            // (pages end on bytes alone, never on a slow runner's clock: #870, #871)
+            TEST_READS.with(|reads| reads.set(Some(usize::MAX)));
             let before = fake::with(|s| s.calls);
             let (first, records) = whole(&Reads::default(), false, true);
+            TEST_READS.with(|reads| reads.set(None));
             TEST_LIMITS.with(|limits| limits.set(None));
             (fake::with(|s| s.calls) - before, first, records)
         };

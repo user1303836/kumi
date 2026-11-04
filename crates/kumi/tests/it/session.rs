@@ -3871,6 +3871,7 @@ local_test!(a_reaper_sessions_loose_palette_reaches_reapers_sounds_and_brings_in
         sources: Some(SourceOptions {
             home: Some(dir.path().join("home").to_string_lossy().into()),
             platform: Some("darwin".into()),
+            applications: Some(dir.path().join("Applications").to_string_lossy().into()),
             ..Default::default()
         }),
         ..Default::default()

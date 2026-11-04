@@ -1,26 +1,24 @@
 name: Extended
 
-# Every test, on every platform: what the CI workflow's blocking runs leave out (the `extended` set in
-# .config/nextest.toml): the recorded-source oracles, the long listening, form and rendering simulations, the video
-# tests (with ffmpeg), the benchmarks, the interoperability tests beside the official MCP and model SDKs (from npm), the
-# migration from the published Kumi 1.7.5, the long sweeps of the timing building blocks, each platform's every test,
-# the documentation tests, the eval runner's own tests, and REAPER's extension built against the newest SDK header Cockos
-# has published. It blocks nothing: it runs each week, by hand, and on a pull request labelled full-tests (from the push
-# after the label is added, and when it is added).
+# Every test, on every system: what the pull requests' gate (CI's `ci` set in .config/nextest.toml) leaves out, in the
+# `extended` set: the recorded-source oracles, the long listening, form and rendering simulations, the video tests (with
+# ffmpeg), the interoperability tests beside the official MCP and model SDKs (from npm), the migration from the published
+# Kumi 1.7.5, the long sweeps of the timing building blocks, and each system's every test. It blocks nothing and runs on
+# no pull request (AGENTS.md, "Minimal CI"): each week on main, and by hand on any branch (Actions > Extended > Run
+# workflow, or `gh workflow run Extended --ref <branch>`).
 
 on:
   schedule:
     - cron: "17 6 * * 1"
   workflow_dispatch:
-  pull_request:
-    types: [opened, synchronize, reopened, labeled]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # A run by hand replaces one still under way on its branch; the weekly run keeps its own, so neither cancels the other.
+  group: ${{ github.workflow }}-${{ github.event_name == 'schedule' && github.run_id || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_INCREMENTAL: 0
@@ -29,18 +27,15 @@ env:
 jobs:
   systems:
     # Each system's tests built once and run in shares from the archive (extended-system.yml): a system's shares start
-    # when its own build is done.
+    # when its own build is done. A share runs about ten minutes after its system's build.
     name: Extended / ${{ matrix.label }}
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-tests')
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { os: ubuntu-24.04, label: Linux, cache: kumi-rust-linux, parts: "[1, 2, 3]" }
+          - { os: ubuntu-24.04, label: Linux, cache: kumi-rust-linux, parts: "[1, 2]" }
           - { os: macos-15, label: macOS, cache: rust-platforms, parts: "[1, 2]" }
-          # Windows builds and runs the slowest (its install lifecycles most): a share costs about a minute now, so six
-          # keep each to about five minutes after its 8-minute build.
-          - { os: windows-2025, label: Windows, cache: app-rust-windows, linker: rust-lld, parts: "[1, 2, 3, 4, 5, 6]" }
+          - { os: windows-2025, label: Windows, cache: app-rust-windows, linker: rust-lld, parts: "[1, 2, 3]" }
     uses: ./.github/workflows/extended-system.yml
     with:
       os: ${{ matrix.os }}
@@ -49,9 +44,10 @@ jobs:
       linker: ${{ matrix.linker || '' }}
       parts: ${{ matrix.parts }}
 
-  docs:
-    name: Extended / documentation and eval runner tests
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-tests')
+  eval-runner:
+    # The eval runner's own tests (its lab guard, which refuses a producer's real project or ~/.kumi, and that its
+    # Live-words and names checks can fail): an example's tests, which no test binary holds, so nextest never runs them.
+    name: Extended / eval runner tests
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -62,63 +58,4 @@ jobs:
         with:
           shared-key: kumi-rust-linux
           save-if: false
-      - run: cargo test --workspace --locked --doc
-      # The eval runner's own tests (its lab guard, and that its Live-words and names checks can fail): an example's tests,
-      # which no test binary holds.
       - run: cargo test -p kumi --locked --example eval_daws
-
-  reaper-sdk:
-    # REAPER's newest SDK headers, from Cockos' repository, in place of the vendored ones: build.rs generates every
-    # function they declare (a prototype it can't read fails the build by name, as does a change to the control surface's
-    # virtual functions), the extension builds against them, and the generated table is the header's every function. The
-    # summary lists the functions a move to them would bring. Here and not in CI: it follows another repository's newest
-    # commit, which no pull request should wait on.
-    name: Extended / REAPER SDK, newest header
-    if: github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'full-tests')
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-      - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d # stable
-      # CI's for the bridges, which builds the extension's crates from crates.io.
-      - uses: Swatinem/rust-cache@63fed3e2fecf6f7b51dc6f043341b79ef82a9ae7 # v2.9.2
-        with:
-          shared-key: bridges-rust-linux
-          save-if: false
-      - name: The newest SDK headers, and the functions they add, take away or change
-        id: sdk
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone -q --depth 1 https://github.com/justinfrankel/reaper-sdk "$RUNNER_TEMP/reaper-sdk"
-          newest="$RUNNER_TEMP/reaper-sdk/sdk" vendored=daws/reaper/reaper-kumi/sdk
-          # Every function a header declares, by its loader table's names; and each one's prototype, spaces folded.
-          names() { grep -o '{(void\*\*)&REAPERAPI_FUNCNAME([A-Za-z0-9_]*)' "$1/reaper_plugin_functions.h" | sed 's/.*(//; s/)$//' | LC_ALL=C sort; }
-          protos() { grep -E '\(\*REAPERAPI_FUNCNAME\([A-Za-z0-9_]+\)\)\(' "$1/reaper_plugin_functions.h" | sed -E 's/^[[:space:]]+//; s/[[:space:]]+/ /g' | LC_ALL=C sort -u; }
-          made_by() { grep -m 1 -o 'Generated by REAPER v[^ ]*' "$1/reaper_plugin_functions.h"; }
-          new="$(LC_ALL=C comm -13 <(names "$vendored") <(names "$newest") | xargs echo)"
-          gone="$(LC_ALL=C comm -23 <(names "$vendored") <(names "$newest") | xargs echo)"
-          # A function in both whose prototype differs: what the extension calls may now take or give other types.
-          changed="$(LC_ALL=C comm -13 <(protos "$vendored") <(protos "$newest") | sed -E 's/.*REAPERAPI_FUNCNAME\(([A-Za-z0-9_]+)\).*/\1/' \
-            | LC_ALL=C sort -u | LC_ALL=C comm -12 - <(LC_ALL=C comm -12 <(names "$vendored") <(names "$newest")) | xargs echo)"
-          {
-            echo "### REAPER SDK: $(git -C "$RUNNER_TEMP/reaper-sdk" log -1 --format='%h "%s" (%cs)')"
-            echo "- Vendored: $(made_by "$vendored"), $(names "$vendored" | wc -l | tr -d ' ') functions. Newest: $(made_by "$newest"), $(names "$newest" | wc -l | tr -d ' ') functions."
-            echo "- New: $new"
-            echo "- Gone: $gone"
-            echo "- Changed: $changed"
-          } | tee -a "$GITHUB_STEP_SUMMARY"
-          # A newer SDK is said where it's seen, not only in the summary: new functions warn; gone or changed ones fail the
-          # job (last, once the build and the table below have said what they find).
-          if [ -n "$new" ]; then echo "::warning title=REAPER SDK::the newest header adds functions: $new"; fi
-          if [ -n "$gone" ]; then echo "::error title=REAPER SDK::the newest header no longer declares: $gone"; fi
-          if [ -n "$changed" ]; then echo "::error title=REAPER SDK::the newest header changes the prototypes of: $changed"; fi
-          if [ -n "$gone$changed" ]; then echo "breaking=true" >> "$GITHUB_OUTPUT"; fi
-          cp "$newest/reaper_plugin_functions.h" "$newest/reaper_plugin.h" "$vendored/"
-      - name: The extension builds with them, every function generated
-        run: cargo build -p reaper-kumi --locked
-      - name: The generated table is the newest header's every function
-        run: cargo test -p reaper-kumi --locked --test it -- sdk::the_generated_table_is_the_headers_every_function
-      - name: Functions gone or changed in the newest header fail the job (see the summary)
-        if: ${{ !cancelled() && steps.sdk.outputs.breaking == 'true' }}
-        run: exit 1

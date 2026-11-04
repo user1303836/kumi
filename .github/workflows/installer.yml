@@ -4,20 +4,143 @@ name: Installer
 # Windows (Windows PowerShell 5.1, the one every Windows has), from a local copy of the release. On a
 # version tag it also attaches the bundle, and the installers beside it, to that tag's GitHub release.
 #
-# Pull requests and pushes to main build with the quicker ci-release profile: those bundles are installed and
-# checked, never published. Tags build with the release profile, and so does a nightly run of main, which keeps
-# the release profile's cache warm for the next tag (a tag's own cache can't be read by later tags).
+# It runs for a change to the install surface only (the `install` area in scripts/areas.toml, which the paths below repeat
+# and scripts/tests/test_dev.py holds them to): a pull request's, and main's once one merges, which keeps the ci-release
+# cache the pull requests restore. Those build with the quicker ci-release profile: the bundles are installed and
+# checked, never published. Tags build with the release profile (a tag runs whatever it changed), and so does a nightly
+# run of main, which keeps the release profile's cache warm for the next tag (a tag's own cache can't be read by later
+# tags).
 
 on:
   push:
     branches: [main]
     tags: ["v*"]
+    paths:
+      - "install.sh"
+      - "install.ps1"
+      - "crates/kumi/src/install.rs"
+      - "crates/kumi/src/install/**"
+      - "crates/kumi/src/update.rs"
+      - "crates/kumi/src/process.rs"
+      - "crates/kumi-daw/src/process.rs"
+      - "crates/kumi/src/doctor.rs"
+      - "crates/kumi/src/doctor/installation.rs"
+      - "daws/ableton/kumi-daw-ableton/src/app/bridge_setup.rs"
+      - "daws/ableton/kumi-daw-ableton/src/app/live_extension.rs"
+      - "daws/ableton/kumi-daw-ableton/src/app/live_app.rs"
+      - "daws/own/kumi-daw-own/src/provider.rs"
+      - "daws/own/kumi-daw-own/src/beside.rs"
+      - "daws/reaper/kumi-daw-reaper/src/provider.rs"
+      - "daws/renoise/kumi-daw-renoise/src/provider.rs"
+      - "daws/soundcraft/kumi-daw-soundcraft/src/provider.rs"
+      - "crates/kumi-types/src/system.rs"
+      - "crates/kumi-ai/src/http.rs"
+      - "crates/kumi-library/src/sources.rs"
+      - "crates/kumi-net/src/lib.rs"
+      - "crates/kumi-net/src/proxy.rs"
+      - "crates/kumi-net/src/trust.rs"
+      - "daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift"
+      - "daws/ableton/kumi-daw-ableton/src/hands/mac.rs"
+      - "daws/ableton/ableton-mcp-server/src/lifecycle.rs"
+      - "daws/ableton/ableton-mcp-server/src/lifecycle/**"
+      - "daws/own/daw-bridge/Cargo.toml"
+      - "daws/own/daw-bridge/src/lifecycle.rs"
+      - "daws/own/daw-bridge/src/install.rs"
+      - "daws/own/daw-bridge/src/detect.rs"
+      - "daws/own/daw-bridge/src/files.rs"
+      - "daws/own/daw-bridge/src/owner.rs"
+      - "daws/own/daw-bridge/src/paths.rs"
+      - "daws/own/daw-mcp-server/Cargo.toml"
+      - "daws/own/daw-mcp-server/src/bin/**"
+      - "daws/soundcraft/soundcraft-kumi/Cargo.toml"
+      - "daws/soundcraft/soundcraft-kumi/src/main.rs"
+      - "daws/reaper/reaper-kumi/build.rs"
+      - "daws/reaper/reaper-kumi/Cargo.toml"
+      - "daws/reaper/reaper-kumi/shim/**"
+      - "daws/reaper/reaper-kumi/sdk/**"
+      - "daws/reaper/reaper-kumi/src/lib.rs"
+      - "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml"
+      - "daws/renoise/com.kumi.Bridge.xrnx/main.lua"
+      - "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua"
+      - "scripts/build-native-release.py"
+      - "scripts/build-migration-release.py"
+      - "scripts/daws.toml"
+      - "scripts/build-hands.py"
+      - "scripts/release.py"
+      - "scripts/check-installers.sh"
+      - "scripts/vendor-willington.py"
+      - "scripts/migration/**"
+      - "vendor/willington/**"
+      - ".github/workflows/installer.yml"
+      - "!**/tests/**"
+      - "!**/examples/**"
+      - "!**/tests.rs"
+      - "!daws/ableton/ableton-mcp-server/src/lifecycle/diagnostics.rs"
   pull_request:
-    # labeled: the full run starts when a pull request is labelled full-tests (see What to build).
-    types: [opened, synchronize, reopened, labeled]
+    paths:
+      - "install.sh"
+      - "install.ps1"
+      - "crates/kumi/src/install.rs"
+      - "crates/kumi/src/install/**"
+      - "crates/kumi/src/update.rs"
+      - "crates/kumi/src/process.rs"
+      - "crates/kumi-daw/src/process.rs"
+      - "crates/kumi/src/doctor.rs"
+      - "crates/kumi/src/doctor/installation.rs"
+      - "daws/ableton/kumi-daw-ableton/src/app/bridge_setup.rs"
+      - "daws/ableton/kumi-daw-ableton/src/app/live_extension.rs"
+      - "daws/ableton/kumi-daw-ableton/src/app/live_app.rs"
+      - "daws/own/kumi-daw-own/src/provider.rs"
+      - "daws/own/kumi-daw-own/src/beside.rs"
+      - "daws/reaper/kumi-daw-reaper/src/provider.rs"
+      - "daws/renoise/kumi-daw-renoise/src/provider.rs"
+      - "daws/soundcraft/kumi-daw-soundcraft/src/provider.rs"
+      - "crates/kumi-types/src/system.rs"
+      - "crates/kumi-ai/src/http.rs"
+      - "crates/kumi-library/src/sources.rs"
+      - "crates/kumi-net/src/lib.rs"
+      - "crates/kumi-net/src/proxy.rs"
+      - "crates/kumi-net/src/trust.rs"
+      - "daws/ableton/kumi-daw-ableton/src/hands/KumiHands.swift"
+      - "daws/ableton/kumi-daw-ableton/src/hands/mac.rs"
+      - "daws/ableton/ableton-mcp-server/src/lifecycle.rs"
+      - "daws/ableton/ableton-mcp-server/src/lifecycle/**"
+      - "daws/own/daw-bridge/Cargo.toml"
+      - "daws/own/daw-bridge/src/lifecycle.rs"
+      - "daws/own/daw-bridge/src/install.rs"
+      - "daws/own/daw-bridge/src/detect.rs"
+      - "daws/own/daw-bridge/src/files.rs"
+      - "daws/own/daw-bridge/src/owner.rs"
+      - "daws/own/daw-bridge/src/paths.rs"
+      - "daws/own/daw-mcp-server/Cargo.toml"
+      - "daws/own/daw-mcp-server/src/bin/**"
+      - "daws/soundcraft/soundcraft-kumi/Cargo.toml"
+      - "daws/soundcraft/soundcraft-kumi/src/main.rs"
+      - "daws/reaper/reaper-kumi/build.rs"
+      - "daws/reaper/reaper-kumi/Cargo.toml"
+      - "daws/reaper/reaper-kumi/shim/**"
+      - "daws/reaper/reaper-kumi/sdk/**"
+      - "daws/reaper/reaper-kumi/src/lib.rs"
+      - "daws/renoise/com.kumi.Bridge.xrnx/manifest.xml"
+      - "daws/renoise/com.kumi.Bridge.xrnx/main.lua"
+      - "daws/renoise/com.kumi.Bridge.xrnx/payload/version.lua"
+      - "scripts/build-native-release.py"
+      - "scripts/build-migration-release.py"
+      - "scripts/daws.toml"
+      - "scripts/build-hands.py"
+      - "scripts/release.py"
+      - "scripts/check-installers.sh"
+      - "scripts/vendor-willington.py"
+      - "scripts/migration/**"
+      - "vendor/willington/**"
+      - ".github/workflows/installer.yml"
+      - "!**/tests/**"
+      - "!**/examples/**"
+      - "!**/tests.rs"
+      - "!daws/ableton/ableton-mcp-server/src/lifecycle/diagnostics.rs"
   schedule:
     - cron: "47 5 * * *"
-  # Warms the release profile's cache by hand, as the nightly run does.
+  # Every platform, by hand (on any branch), as a tag runs them.
   workflow_dispatch:
 
 permissions:
@@ -41,24 +164,20 @@ jobs:
       migrations: ${{ steps.plan.outputs.migrations }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
       - id: plan
         shell: bash
         run: |
-          # Each push to main, and a pull request that changes the install surface, build and install on one machine of
+          # A pull request that changes the install surface, and main once it merges, build and install on one machine of
           # each system (Linux and Windows on x64, macOS on Apple silicon). The install surface is the `install` area in
           # scripts/areas.toml: the installers, installing, updating and releasing, Willington's files, the Mac helper the
           # bundle carries, the tar and PowerShell Kumi runs, how it downloads (its HTTP client and network settings) and
           # builds paths, how Kumi's extension goes into Live, how REAPER's and Renoise's bridges are built and go in, and
-          # this workflow; not their tests. Any other pull request builds nothing: main's run covers it once merged. Tags,
-          # a run by hand and a pull request labelled full-tests build all six platforms, install each, update to it from
-          # the release before it and check the update from the JavaScript release (see below); the nightly run only
-          # builds them.
-          full=true
+          # this workflow; not their tests. Tags and a run by hand build all six platforms, install each, update to it from
+          # the release before it and check the update from the JavaScript release; the nightly run builds all six and
+          # installs on one machine of each system.
           checks=true
-          # A change to any of these gets every system's install and transition jobs before it merges: main broke once
-          # when the Mac helper's didn't. Each has to be there, so a renamed one can't drop out unnoticed.
+          # A change to any of these runs the installs above before it merges: main broke once when the Mac helper's
+          # didn't. Each has to be there and count as installing, so a renamed one can't drop out of the paths unnoticed.
           for path in install.sh install.ps1 crates/kumi/src/install.rs crates/kumi/src/update.rs crates/kumi/src/install/migration.rs \
             daws/ableton/kumi-daw-ableton/src/app/bridge_setup.rs daws/ableton/kumi-daw-ableton/src/app/live_extension.rs \
             daws/ableton/kumi-daw-ableton/src/app/live_app.rs crates/kumi/src/process.rs crates/kumi-daw/src/process.rs \
@@ -76,45 +195,31 @@ jobs:
             test -e "$path" || { echo "::error::$path, which the installs depend on, isn't there: point this check at its new name"; exit 1; }
             python3 scripts/dev.py areas --in install "$path" > /dev/null || { echo "::error::$path must count as installing (scripts/areas.toml)"; exit 1; }
           done
-          # The nightly run only builds, to keep the release profile's cache warm. A run started by hand also installs.
-          if [[ "${{ github.event_name }}" == "schedule" ]]; then
-            checks=false
-          fi
-          # Every platform, the updates from GitHub's releases, the edges and the transition from the JavaScript installer run
-          # on tags, by hand and on a pull request labelled full-tests (the nightly run only builds, above). Each push to
-          # main, and a pull request that changes the install surface, install and remove on one machine of each system:
-          # Linux and Windows on x64, macOS on Apple silicon.
+          # The nightly run builds all six with the release profile, to keep its cache warm for the next tag, and installs
+          # and checks on one machine of each system, so a change outside the install surface that breaks installing shows
+          # the next morning, not on a tag. A run started by hand does all a tag does.
           extended=false
+          nightly=false
           case "${{ github.event_name }}" in
             workflow_dispatch) extended=true ;;
+            schedule) nightly=true ;;
             push) [[ "${{ github.ref }}" == refs/tags/v* ]] && extended=true ;;
-            pull_request) [[ "${{ contains(github.event.pull_request.labels.*.name, 'full-tests') }}" == "true" ]] && extended=true ;;
           esac
-          if [[ "${{ github.event_name }}" == "schedule" ]]; then extended=true; fi
-          if [[ "${{ github.event_name }}" == "pull_request" ]] && ! $extended; then
-            installing="$(python3 scripts/dev.py affected --base "origin/${GITHUB_BASE_REF}" --job installer)"
-            if [[ "$installing" == false ]]; then
-              full=false
-              checks=false
-            fi
-          fi
           echo "full=$extended" >> "$GITHUB_OUTPUT"
           echo "checks=$checks" >> "$GITHUB_OUTPUT"
-          if $extended; then
+          if $extended || $nightly; then
             # The Intel Mac bundle is built on an Apple Silicon Mac, a cross build: the Intel runners take about twice
             # as long. The Intel Mac install below still runs on Intel.
             echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"macos-15","target":"x86_64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"ubuntu-22.04-arm","target":"aarch64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"},{"os":"windows-11-arm","target":"aarch64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
+          fi
+          if $extended; then
             # One install on each system (update) also updates to this bundle from the release before it, from GitHub.
             echo 'installs=[{"os":"macos-15","label":"macOS-arm64","update":true},{"os":"macos-15-intel","label":"macOS-x64"},{"os":"ubuntu-22.04","label":"Linux-x64","update":true},{"os":"ubuntu-22.04-arm","label":"Linux-arm64"},{"os":"windows-2025","label":"Windows-x64","update":true},{"os":"windows-11-arm","label":"Windows-arm64"}]' >> "$GITHUB_OUTPUT"
             echo 'migrations=["macos-15","ubuntu-24.04","windows-2025"]' >> "$GITHUB_OUTPUT"
-          elif $full; then
-            echo 'targets=[{"os":"macos-15","target":"aarch64-apple-darwin"},{"os":"ubuntu-22.04","target":"x86_64-unknown-linux-gnu"},{"os":"windows-2025","target":"x86_64-pc-windows-msvc"}]' >> "$GITHUB_OUTPUT"
-            echo 'installs=[{"os":"macos-15","label":"macOS-arm64"},{"os":"ubuntu-22.04","label":"Linux-x64"},{"os":"windows-2025","label":"Windows-x64"}]' >> "$GITHUB_OUTPUT"
-            echo 'migrations=[]' >> "$GITHUB_OUTPUT"
           else
-            # Nothing to build: every job below skips.
-            echo 'targets=[]' >> "$GITHUB_OUTPUT"
-            echo 'installs=[]' >> "$GITHUB_OUTPUT"
+            echo 'installs=[{"os":"macos-15","label":"macOS-arm64"},{"os":"ubuntu-22.04","label":"Linux-x64"},{"os":"windows-2025","label":"Windows-x64"}]' >> "$GITHUB_OUTPUT"
             echo 'migrations=[]' >> "$GITHUB_OUTPUT"
           fi
 
@@ -929,10 +1034,11 @@ jobs:
 
   nightly-failed:
     # The nightly run is the only one before a tag that builds all six bundles with the release profile, REAPER's
-    # extension in each (the cross builds, lipo, strip and codesign). A break there stops the next release, Live's
-    # fixes too, so it opens an issue (or comments on the open one) to be seen the next morning.
+    # extension in each (the cross builds, lipo, strip and codesign), and the only install of main's bundle for a change
+    # outside the install surface. A break there stops the next release, Live's fixes too, so it opens an issue (or
+    # comments on the open one) to be seen the next morning.
     name: The nightly build failed
-    needs: [plan, native]
+    needs: [plan, native, bundle, install]
     if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-24.04
     timeout-minutes: 5
@@ -946,7 +1052,7 @@ jobs:
         run: |
           set -euo pipefail
           title="The nightly Installer build failed"
-          body="The nightly release-profile build of main failed: $RUN. Every release builds the same six bundles, with REAPER's extension in each, so a tag fails the same way until this is fixed."
+          body="The nightly run of main failed, building or installing: $RUN. Every release builds and installs the same bundles, with REAPER's extension in each, so a tag fails the same way until this is fixed."
           open="$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number,title --jq "map(select(.title == \"$title\")) | .[0].number // empty")"
           if [ -n "$open" ]; then
             gh issue comment "$open" -R "$GITHUB_REPOSITORY" --body "$body"

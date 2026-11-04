@@ -8244,6 +8244,7 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
     def test_a_timer_gone_quiet_leaves_the_display_ticks_their_12_ms_wait(self):
         # (a timer Live paused without stopping: what's left serves on display ticks, about 100 ms apart)
         client, channel = self.connect(); waits = []; self.bridge.between_ticks = True; self.bridge.timer_gap = 0.010
+        served = self.bridge._connections[0].socket
         real = remote_module.selectors.DefaultSelector
         class Recording:
             def __init__(self): self.inner = real()
@@ -8251,11 +8252,13 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
             def __exit__(self, *rest): self.inner.close()
             def register(self, *args, **kwargs): return self.inner.register(*args, **kwargs)
             def select(self, timeout=None): waits.append(timeout); return self.inner.select(timeout)
-        with patch.object(remote_module.selectors, "DefaultSelector", Recording):
-            client.sendall(self.frame(channel, 1)); time.sleep(0.05)
+        # A clock that stands still: how long the runner takes to serve a request can't make the timer's last call look
+        # older, or spend the tick's budget, between setting it and the wait.
+        with patch.object(remote_module.selectors, "DefaultSelector", Recording), patch.object(remote_module.time, "perf_counter", return_value=1000.0):
+            client.sendall(self.frame(channel, 1)); self.assertTrue(select_module.select([served], [], [], 5)[0], "the request reached the bridge")
             self.bridge._timer_last = time.perf_counter() - 0.2; self.bridge.update_display()
             quiet, waits[:] = list(waits), []
-            client.sendall(self.frame(channel, 2)); time.sleep(0.05)
+            client.sendall(self.frame(channel, 2)); self.assertTrue(select_module.select([served], [], [], 5)[0], "the request reached the bridge")
             self.bridge._timer_last = time.perf_counter(); self.bridge.update_display()
             calling = list(waits)
         self.assertEqual((max(quiet), max(calling)), (0.012, 0.004))

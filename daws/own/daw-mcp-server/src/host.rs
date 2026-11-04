@@ -81,6 +81,8 @@ pub struct Host {
     jobs: crate::listening::Jobs,
     /// How the host starts the DAW's bridge, for a DAW whose bridge runs beside it; None for one that loads its bridge.
     spawn: Option<Spawn>,
+    /// The least time a listening call is given ([`Host::with_listening_timeout`]); zero keeps each call's own limit.
+    pub(crate) listening_floor: Duration,
 }
 
 /// Which running instance a tool means, when several run.
@@ -164,11 +166,20 @@ impl Host {
             catchup: crate::catchup::Catchup::new(BridgePaths::new(kumi_home, daw).snapshots()),
             jobs: crate::listening::Jobs::default(),
             spawn: Spawn::of(daw, kumi_home),
+            listening_floor: Duration::ZERO,
         };
         if daw == Daw::Renoise {
             crate::renoise::instruments::sweep_work(&host.paths.root.join("work"), std::time::SystemTime::now());
         }
         host
+    }
+
+    /// The host, giving each listening call (a job's start, its status, a cancel or a stop) at least `floor` to be
+    /// answered. For tests on a busy machine, whose simulated bridge may answer late; Kumi itself never sets it, so a
+    /// producer's calls keep their own limits.
+    pub fn with_listening_timeout(mut self, floor: Duration) -> Self {
+        self.listening_floor = floor;
+        self
     }
 
     /// Starts the DAW's bridge with `spawn` (a test's), as for a DAW whose bridge runs beside it.

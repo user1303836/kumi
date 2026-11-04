@@ -170,7 +170,7 @@ cargo run --locked --release -p ableton-mcp-server --bin ableton-mcp-benchmark
 
 **提交**的标题用通俗的英文，说明对制作人来说改变了什么（“Kumi: talk to it while it works”）。桥接或 Remote Script 的修改要提升 `daws/ableton/ableton-mcp-server/Cargo.toml` 和 `Cargo.lock` 中的版本，标题以新版本开头（“Bridge 1.0.71: …”），并在 `CHANGELOG.md` 的 `## Unreleased` 下添加一个 `### Bridge x.y.z` 块。如果扩展变了，重新构建并提交它的包。工作在分支上进行，通过拉取请求合并到 `main`。
 
-**一次 Kumi 发布**只需一条命令，可在任意源码副本中运行，`gh` 需以仓库管理员身份登录。在拉取请求合并后立即运行：
+**一次 Kumi 发布**只需一条命令，可在任意源码副本中运行，`gh` 需以仓库管理员身份登录。等 `main` 上对要发布的提交运行的 CI 在 Linux、macOS 和 Windows 上都通过后再运行：拉取请求只在 Linux 上测试，所以 `main` 的运行是另外两个系统上的第一次运行，在它通过之前 `--go` 会拒绝发布：
 
 ```sh
 python3 scripts/release.py          # 试运行：显示版本、CHANGELOG 条目、发布说明和各项检查
@@ -182,7 +182,7 @@ python3 scripts/release.py --go     # 正式发布
 - **桥接**在拉取请求修改了 Live 加载的内容时获得新版本：`daws/ableton/ableton-mcp-server`、主机链接的 `crates/kumi-common`、`daws/ableton/remote-script`、`daws/ableton/protocol`、`daws/ableton/live-extension` 或 `vendor/willington`（测试和 Markdown 除外）。`Cargo.lock` 中主机的依赖变化时，试运行会提示，这时用 `--bridge` 给桥接一个新版本。
 - **REAPER 的扩展和 Renoise 的工具**也按同样的方式获得新版本：拉取请求修改了该 DAW 加载的内容时（`daws/reaper/reaper-kumi` 和 `daws/own/daw-bridge`，或 `daws/renoise/com.kumi.Bridge.xrnx`）。`--reaper` 和 `--renoise` 无论如何都给它新版本，`--no-reaper` 和 `--no-renoise` 保持原版本；`--no-bridge` 只针对 Live。写成 `Changelog (reaper):` 或 `Changelog (renoise):` 的行会放到它的标题下。使用 `--go` 时，`daws/reaper/reaper-kumi/Cargo.toml` 和 `Cargo.lock`、工具的 `payload/version.lua` 和 `manifest.xml` 中的版本会前进，三个 `KUMI_GUIDE.md` 中各自的 ships-with 行也会前进。上一个版本没有的桥接按它自己的版本发布，它那一行已经写着本次版本。`scripts/daws.toml` 为发布和打包脚本列出这些桥接：在那里添加的 DAW 会有自己的标志、标题和 ships-with 行。那里的 `program`（SoundCraft 的 `soundcraft-kumi`）则都没有：它随 `kumi` 一起放在旁边发布，并与 Kumi 的 crate 一起在其 `Cargo.toml` 和 `Cargo.lock` 中采用 Kumi 的版本。
 - **版本**是下一个补丁版本；`--minor` 或 `--version X.Y.Z` 可以选择其他版本。
-- **加上 `--go`**，它会在 `release/vX.Y.Z` 上提交 “Kumi X.Y.Z: the changelog, READMEs and versions”：根目录的 `package.json`、`crates/kumi-types/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-types` 的 Cargo 清单以及 `Cargo.lock` 中的版本（打包测试会确保这些相等），桥接变化时还有桥接的版本；三个 README 中当前状态（Status）的那一行；三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；以及 `CHANGELOG.md` 中的 `## X.Y.Z — date` 条目。然后它打开拉取请求 “Kumi X.Y.Z”，不等其 CI，用管理员绕过将其合并为 “Kumi X.Y.Z (#PR)”，给合并提交打上标签 `vX.Y.Z` 并推送，再创建带发布说明的草稿发布（`--summary` 可以在说明开头加一句话）。
+- **加上 `--go`**，它会在 `release/vX.Y.Z` 上提交 “Kumi X.Y.Z: the changelog, READMEs and versions”：根目录的 `package.json`、`crates/kumi-types/src/version.rs`、`kumi`、`kumi-common` 和 `kumi-types` 的 Cargo 清单以及 `Cargo.lock` 中的版本（打包测试会确保这些相等），桥接变化时还有桥接的版本；三个 README 中当前状态（Status）的那一行；三个 `KUMI_CHANGES.md` 中“桥接版本”（Bridge versions）下说明随附哪个桥接的那一行；以及 `CHANGELOG.md` 中的 `## X.Y.Z — date` 条目。然后它打开拉取请求 “Kumi X.Y.Z”，不等其 CI（它只修改版本和说明，`main` 的 CI 也会在它上面运行），用管理员绕过将其合并为 “Kumi X.Y.Z (#PR)”，给合并提交打上标签 `vX.Y.Z` 并推送，再创建带发布说明的草稿发布（`--summary` 可以在说明开头加一句话）。
 - **标签触发的 Installer 运行**会为 macOS、Linux 和 Windows 的 Intel 与 ARM 构建原生发行包，测试安装和迁移，附加各平台的发行包（`.tar.gz` 和 `.tar.xz`）和清单以及兼容用的 `kumi.tar.gz`、`kumi-release.json`、`SHA256SUMS` 和安装程序，并在说明由 `release.py` 撰写（说明以 `<!-- kumi:release-notes -->` 结尾）且两个安装程序都已附加时发布该版本。只有在此之后，安装程序、`kumi update` 和更新检查才能看到它。其他草稿，例如手动推送、说明“待补充”的标签，在有人发布之前一直是草稿。
 - **Discord**：发布版本的那次运行随后会把说明发到公告频道，使用仓库机密 `DISCORD_RELEASES_WEBHOOK` 中的 Webhook（`scripts/discord_release.py`）。没有该机密时不会发帖，发帖失败也不会让发布失败。已发布版本的说明也可以通过“Release notes to Discord”工作流手动发帖。
 

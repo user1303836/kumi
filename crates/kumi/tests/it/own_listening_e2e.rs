@@ -225,20 +225,35 @@ async fn esc_stops_kumis_play_out_loud_and_a_play_nobody_stopped_plays_on() {
             let observed = reaper.observe(Signal::new(), None).await.unwrap();
             let context: Value = serde_json::from_str(&observed.context).unwrap();
             let track = context["tracks"][2]["ref"].as_str().unwrap().to_owned();
+            // (64 beats are 32 s at the simulator's 120 bpm, past every wait here: only Esc can end a play in time)
             let audition = |signal: Signal| {
                 let tool = tool(&observed, "audition");
-                let input = object(json!({"candidates": [{"track": track}], "from_beat": 16, "beats": 8}));
+                let input = object(json!({"candidates": [{"track": track}], "from_beat": 16, "beats": 64}));
                 async move { tool.execute(input, signal).await.unwrap() }
+            };
+            // (the simulator's play state is read with a bound: on a busy runner the play may start, or stop, a moment late)
+            let playing_is = |want: bool| {
+                let listening = script.listening();
+                async move {
+                    for _ in 0..250 {
+                        if listening.playing().is_some() == want {
+                            return true;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+                    }
+                    false
+                }
             };
             let answer = Signal::new();
             assert!(!audition(answer.clone()).await.is_error);
-            assert!(script.listening().playing().is_some(), "Kumi plays what it heard");
+            assert!(playing_is(true).await, "Kumi plays what it heard");
             answer.cancel();
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-            assert_eq!(script.listening().playing(), None, "Esc stopped it");
+            assert!(playing_is(false).await, "Esc stopped it");
             let answer = Signal::new();
             assert!(!audition(answer.clone()).await.is_error);
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            assert!(playing_is(true).await, "Kumi plays it again");
+            // (a stop would follow the answer at once: half a second without one is a play nobody stopped)
+            tokio::time::sleep(std::time::Duration::from_millis(500)).await;
             assert!(script.listening().playing().is_some(), "plays on");
             reaper.close().await.unwrap();
             simulator.stop();
