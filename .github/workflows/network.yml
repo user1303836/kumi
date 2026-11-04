@@ -4,48 +4,42 @@ name: Network
 # before: a certificate authority installed in the system's own trust store (what a network that inspects secure
 # connections asks for), and a proxy in the system's own settings with an exception (on Linux, which has none, in
 # HTTPS_PROXY and NO_PROXY). The tests are the ignored ones in kumi-net's tests/it/network.rs. Only for changes to
-# how Kumi's HTTP clients are made (the `network` area in scripts/areas.toml): macOS runners are scarce.
+# how Kumi's HTTP clients are made: the `network` area in scripts/areas.toml, which the paths below repeat and
+# scripts/tests/test_dev.py holds them to (a pull request's, and main's once one merges, which keeps the cache), and by
+# hand on any branch.
 
 on:
   push:
     branches: [main]
+    paths:
+      - "crates/kumi-net/src/lib.rs"
+      - "crates/kumi-net/src/proxy.rs"
+      - "crates/kumi-net/src/trust.rs"
+      - "crates/kumi-net/tests/it/network.rs"
+      - ".github/workflows/network.yml"
   pull_request:
+    paths:
+      - "crates/kumi-net/src/lib.rs"
+      - "crates/kumi-net/src/proxy.rs"
+      - "crates/kumi-net/src/trust.rs"
+      - "crates/kumi-net/tests/it/network.rs"
+      - ".github/workflows/network.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.run_id }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_INCREMENTAL: 0
   CARGO_PROFILE_DEV_DEBUG: 0
 
 jobs:
-  plan:
-    name: Network / What changed
-    runs-on: ubuntu-24.04
-    outputs:
-      network: ${{ steps.paths.outputs.network }}
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-        with:
-          fetch-depth: 0
-      - id: paths
-        shell: bash
-        run: |
-          # This pull request's files, or this push's.
-          case "${{ github.event_name }}" in
-            pull_request) base="origin/${GITHUB_BASE_REF}" ;;
-            *) base="${{ github.event.before }}" ;;
-          esac
-          python3 scripts/dev.py affected --base "$base" --github-output
-
   system:
     name: Network / ${{ matrix.label }}
-    needs: plan
-    if: needs.plan.outputs.network == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:

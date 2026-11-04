@@ -78,7 +78,7 @@ Tests:
 - They never need a running DAW, a sign-in, the network or anything from this machine, and never touch `~/.kumi` or a DAW's folders.
 - A crate's integration tests are one binary: `tests/it/<file>.rs`, listed in `tests/it/main.rs`. Shared support goes in `kumi-testkit`.
 - `ci` is the fast set; long simulations, oracle replays and SDK interop belong in Extended (`.config/nextest.toml` says what `ci` leaves out).
-- CI tests what a change affects (`dev.py affected`): Rust / Linux in three parts and Rust / macOS gate a merge; Rust / Windows runs on main's pushes; `full-tests` runs every test on every system.
+- CI is minimal and stays so: section 6 says what runs and what may be added.
 - Goldens (`tests/goldens/` in `kumi`, `kumi-agent`, `kumi-daw-ableton`; `daw-mcp-server/tests/golden`; `daw-bridge/tests/vectors`) are byte-exact. `KUMI_BLESS=1` rewrites them: bless only an intended change, and say why in the PR. Oracles are never regenerated or edited.
 - A refactor's proof: goldens unchanged, the same test list, an unchanged release dry run.
 
@@ -86,7 +86,7 @@ Commits and PRs:
 - Subjects are plain English and say what changed ("The Network workflow parses again"). No conventional-commit prefixes.
 - The PR body: what changes, the proof (commands and results), then its `Changelog:` lines (section 5).
 - Squash-merge. The subject must end in `(#N)`: `release.py` finds each PR by it, and refuses to release past a commit on main without it.
-- A PR that moves files: commit 1 is `git mv` only, commit 2 the fix-ups; record the move in `scripts/moves.toml`; add `full-tests`; merge with a merge commit titled `<PR title> (#N)` so git follows the moves.
+- A PR that moves files: commit 1 is `git mv` only, commit 2 the fix-ups; record the move in `scripts/moves.toml`; run CI and Extended on the branch by hand (section 6) and wait for both; merge with a merge commit titled `<PR title> (#N)` so git follows the moves.
 - Only `Required CI` and `Willington files` gate a merge. Wait on the CI run of your pushed commit (`gh pr checks --required --watch` can return early): `gh run watch --exit-status "$(gh run list -c "$(git rev-parse HEAD)" -w CI --json databaseId -q '.[0].databaseId')"`
 
 Docs:
@@ -102,7 +102,7 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
   - `daw: ableton`, `daw: reaper`, `daw: renoise`, `daw: logic`. A change in `daws/own/` gets each DAW it changes.
   - `area: bridge` (what runs in or beside a DAW), `area: app`, `area: install` (installers, setup, update, rollback), `area: agent` (models, prompts, tools), `area: listening`, `area: library`, `area: memory`, `area: video`, `area: devices` (Max for Live devices, racks, plug-ins), `area: willington`.
   - `platform: macos`, `platform: windows`, `platform: linux`: only when it's specific to that system.
-- **Flags, when true:** `critical` (crashes or hangs a DAW, loses work, blocks a release); `bridge bump` (changes what a DAW loads, section 5); `migration` (changes the form of saved settings or data; update and rollback must keep them); `full-tests` (every test, and the Installer on all six platforms: add it to a PR that moves files, has `bridge bump` or `migration`, or changes platform-specific code, and wait for it).
+- **Flags, when true:** `critical` (crashes or hangs a DAW, loses work, blocks a release); `bridge bump` (changes what a DAW loads, section 5); `migration` (changes the form of saved settings or data; update and rollback must keep them).
 - **Status, while true:** `status: stacked` (the body says "Stacked on #N"), `status: blocked`, `status: needs decision` (the body says what's to decide), `status: needs live test`, `status: needs repro` (issues), `status: do not merge`. Never merge a PR with `stacked`, `blocked`, `needs decision` or `do not merge`.
 - **Not for agents:** `release`, `dependencies`, `javascript`, and GitHub's defaults (`duplicate`, `invalid`, `wontfix`, `question`, `good first issue`, `help wanted`).
 - In the body: `Fixes #N` when the PR finishes an issue, `Refs #N` when it's part of one.
@@ -121,3 +121,22 @@ Label every issue and PR you open (`--label` on `gh issue create` / `gh pr creat
 - The tag's Installer run builds the six bundles (macOS, Linux, Windows; Intel and ARM) with the `release` profile, tests installing, updating and migrating, attaches them and publishes the release. Nobody gets it before then.
 - If that run fails, the release stays a draft: fix main and release the next patch (1.21.1 did this for 1.21.0). Never move, delete or re-push a `v*` tag.
 - More: DEVELOPER_GUIDE.md "Releasing", DISTRIBUTION_POLICY.md.
+
+## 6. Minimal CI
+
+CI catches what would break for a producer before a release does, and nothing more. It stays this small: the owner decides any addition, in the PR that makes it.
+
+What runs:
+- **A pull request:** `Required CI`, on Linux only, for what the PR changes (`dev.py affected` from its merge commit): `Rust / Linux` in three parts (the `ci` tests), `Rust / Lint` (fmt, the gating clippy), `Checks` (the repository's scripts, the Remote Script, the Live extension, Renoise's tool) and `REAPER extension loads`. With `Willington files`, nothing else gates a merge.
+- **Main, after each merge:** the same, plus `Rust / macOS`, `Rust / Windows` (the `ci-os` set) and the Remote Script on macOS and Windows. A red run on main is fixed before anything else, by whoever broke it.
+- **By hand:** `gh workflow run CI --ref <branch>` runs the macOS and Windows jobs on a branch: do it, and wait for it, for a PR with `bridge bump` or `migration` or one that changes platform-specific code. `gh workflow run Extended --ref <branch>` runs every test.
+- **Extended** (every test: oracle replays, long simulations, SDK interop): each Monday and by hand, never on a pull request.
+- **Installer and Network:** only when their own files change (their workflows' `paths:`, which `scripts/tests/test_dev.py` keeps equal to `scripts/areas.toml`); the Installer also each night and on a release tag.
+
+Rules:
+- No new workflow, job, matrix entry, schedule, required check or step in the PR gate without the owner's yes in the PR. A one-off measurement or probe runs locally or through `workflow_dispatch` of a workflow that exists; it's never committed as a workflow of its own.
+- A test earns its place by catching a break a producer would notice, at the lowest level that shows it. Extend a test before adding one. Don't test wiring, forwarding, defaults or wording.
+- No test asserts how long something takes, and none is a benchmark: a test waits on a state, never on a clock. Speed is measured on purpose, outside the suite.
+- A `ci` test takes seconds. One that needs longer is made faster or moves to Extended (`.config/nextest.toml`); past 30 s it fails by name.
+- A test that fails on a change it has nothing to do with is deleted in the PR that sees it, or fixed there if the fix is small and certain, and its issue closed. No retries, no quarantine, no re-running until green.
+- Locally, run only what a change affects (`python3 scripts/dev.py check`), one build at a time.

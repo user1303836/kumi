@@ -147,16 +147,18 @@ class Affected(unittest.TestCase):
         self.assertEqual(run("M\tcrates/store/src/lib.rs", "M\tprotocol/ops.json").packages, ["app", "runtime", "store"])
         self.assertEqual(run("M\tdaws/renoise/tool/payload/notes.lua").packages, [], "the tool's own Lua runs no Rust")
 
-    def test_the_install_surface_and_network_are_their_own_jobs(self):
-        self.assertIn("installer", jobs(run("M\tinstall.sh")))
-        self.assertIn("installer", jobs(run("M\tcrates/app/src/install/swap.rs")))
-        self.assertNotIn("installer", jobs(run("M\tcrates/app/src/install/tests.rs")), "its tests aren't")
-        self.assertIn("network", jobs(run("M\tcrates/runtime/src/net/proxy.rs")))
-        self.assertNotIn("network", jobs(run("M\tcrates/runtime/src/lib.rs")))
+    def test_the_path_filtered_workflows_repeat_their_areas(self):
+        # The Installer and Network run for their areas alone, by their `paths:` (a pull request's, and main's): each
+        # trigger's list is the area's globs, with each `except` as a `!` glob, in the order areas.toml has them.
+        for workflow, area in dev.PATH_FILTERED:
+            triggers = dev.workflow_paths((ROOT / workflow).read_text(encoding="utf-8"))
+            self.assertEqual(sorted(triggers), ["pull_request", "push"], workflow)
+            for trigger, paths in triggers.items():
+                self.assertEqual(paths, dev.area_filter(area), f"{workflow} {trigger}: scripts/areas.toml's [{area}]")
 
     def test_a_rename_counts_both_its_paths(self):
-        result = run("R090\tcrates/app/src/install/old.rs\tcrates/app/src/old.rs")
-        self.assertIn("installer", jobs(result), "moving a file out of the install surface changes it")
+        result = run("R090\tcrates/extension/src/old.rs\tcrates/app/src/old.rs")
+        self.assertIn("reaper_extension", jobs(result), "moving a file out of the extension changes it")
 
     def test_no_change_runs_nothing_and_no_base_everything(self):
         self.assertEqual(jobs(run()), set())
