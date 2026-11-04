@@ -45,6 +45,7 @@ pub struct Fake {
     port: u16,
     seen: Arc<Seen>,
     drop_all: tokio::sync::watch::Sender<u64>,
+    accepting: tokio::task::JoinHandle<()>,
 }
 
 impl Fake {
@@ -54,16 +55,16 @@ impl Fake {
         let seen = Arc::new(Seen::default());
         let (drop_all, dropped) = tokio::sync::watch::channel(0u64);
         let answers: Answers = Arc::new(answers);
-        let accepting = seen.clone();
-        tokio::spawn(async move {
+        let shared = seen.clone();
+        let accepting = tokio::spawn(async move {
             while let Ok((mut stream, _)) = listener.accept().await {
-                if accepting.open.load(Ordering::SeqCst) >= connections {
+                if shared.open.load(Ordering::SeqCst) >= connections {
                     let _ = stream.write_all(b"{\"ok\":false,\"error\":\"too many control connections\"}\n").await;
                     continue;
                 }
-                accepting.connections.fetch_add(1, Ordering::SeqCst);
-                accepting.open.fetch_add(1, Ordering::SeqCst);
-                let (seen, answers, mut dropped) = (accepting.clone(), answers.clone(), dropped.clone());
+                shared.connections.fetch_add(1, Ordering::SeqCst);
+                shared.open.fetch_add(1, Ordering::SeqCst);
+                let (seen, answers, mut dropped) = (shared.clone(), answers.clone(), dropped.clone());
                 dropped.mark_unchanged();
                 tokio::spawn(async move {
                     tokio::select! {
@@ -74,11 +75,17 @@ impl Fake {
                 });
             }
         });
-        Self { port, seen, drop_all }
+        Self { port, seen, drop_all, accepting }
     }
 
     pub fn port(&self) -> u16 {
         self.port
+    }
+
+    /// Quits, as the app does: no connection is taken any more, and those open close.
+    pub fn quit(&self) {
+        self.accepting.abort();
+        self.drop_connections();
     }
 
     /// Every request read, in order.

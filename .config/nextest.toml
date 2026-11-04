@@ -3,11 +3,11 @@
 [[profile.default.overrides]]
 # The Remote Script adapter's tests give each local connection 500 ms. Two of kept conversations' tests look at a file
 # within 2 s and 3 s of writing it, as another Kumi would. SoundCraft's control client's tests count connections around
-# deadlines and answers a few hundred milliseconds apart.
+# deadlines and answers a few hundred milliseconds apart, and its bridge's tests look at a fake app every 100 ms.
 filter = '''
 test(/bounded_latency|reads_in_a_moment|looks_at_each_byte_once|read_in_linear_time|analyzed_quickly_part_by_part|keeps_the_runtime_responsive|returns_promptly|maximum_duplicate_ambiguity/) | (binary_id(ableton-mcp-server::it) & test(/^remote_adapter::/))
   | (binary_id(kumi-agent::it) & test(/^conversations::(where_the_file_system_cant_lock_the_lock_file_names_the_kumi_that_has_it|two_changes_in_the_second_the_file_system_keeps_are_both_seen)$/))
-  | (binary_id(soundcraft-kumi::it) & test(/^control::/))
+  | (binary_id(soundcraft-kumi::it) & test(/^(control|server)::/))
 '''
 threads-required = "num-cpus"
 
@@ -72,7 +72,8 @@ fail-fast = false
 # Windows' job leaves out the slowest of these there (9 to 16 s each: ci.yml's KUMI_WINDOWS_EXTENDED_ONLY); `extended`
 # runs them.
 # SoundCraft's control channel from Kumi's side: its loopback connections, and what they do at their limits (control),
-# and SoundCraft started with it on, a process of its own (launch).
+# SoundCraft started with it on, a process of its own (launch), and the bridge program, which ends with its stdin or with
+# SoundCraft (server).
 [profile.ci-os]
 default-filter = '''
 (
@@ -98,7 +99,7 @@ default-filter = '''
   | (binary_id(ableton-mcp-server::it) & test(/^(extension_launcher|extension_channel|stdio|fixture_paths|project)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(host_probes|analysis_runner|sqlite_reader|native_connected)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(remote_adapter|loopback)::/))
-  | (binary_id(soundcraft-kumi::it) & test(/^(control|launch)::/))
+  | (binary_id(soundcraft-kumi::it) & test(/^(control|launch|server)::/))
   | (binary_id(kumi-ai::it) & test(/^ai_transport::/))
   | (binary_id(kumi-net::it) & test(/^network::/))
   | (binary_id(kumi-store::it) & test(/^store::/))

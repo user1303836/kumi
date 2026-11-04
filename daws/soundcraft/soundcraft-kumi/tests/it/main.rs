@@ -2,4 +2,5 @@
 mod control;
 mod fake;
 mod launch;
+mod server;
 mod vectors;
