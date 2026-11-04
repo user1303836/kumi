@@ -514,6 +514,21 @@ class RemoteScriptTests(unittest.TestCase):
         unchecked.start()
         self.addCleanup(unchecked.stop)
 
+    def wait_for_the_check(self, checked):
+        deadline = time.time() + 5
+        while not checked.done() and time.time() < deadline: time.sleep(0.01)
+        self.assertTrue(checked.done(), "the check finished")
+
+    @staticmethod
+    def live_with_a_timer(made):
+        """A stand-in for Live's module with Live.Base.Timer: each timer made is put in made."""
+        class Timer:
+            def __init__(self, callback, interval, repeat): self.callback, self.running = callback, False; made.append(self)
+            def start(self): self.running = True
+            def stop(self): self.running = False
+        live = types.ModuleType("Live"); live.Base = types.SimpleNamespace(Timer=Timer)
+        return live
+
     def test_each_display_tick_serves_the_bridge_once_and_nothing_is_scheduled(self):
         """Live's _Framework delivers schedule_message's tasks from its own update_display, which this surface
         overrides: a drain it scheduled never ran in Live (a lab Live: 0 drains in 111 display ticks), and with the
@@ -634,10 +649,90 @@ class RemoteScriptTests(unittest.TestCase):
                 began = time.monotonic()
                 surface.update_display()
                 longest = max(longest, time.monotonic() - began)
-                surface._between_ticks()  # the timer's calls never wait (there's no timer here, so it returns)
                 time.sleep(0.02)
         self.assertEqual(surface._bridge.served, 1, "started, and served, at the first tick after the check")
         self.assertLess(longest, 0.08, f"no tick held long: {longest:.3f} s")
+
+    def test_the_timers_calls_never_wait_for_the_check_and_the_first_after_it_starts_the_bridge(self):
+        """Live's timer calls back about every 10 ms: past the bound, while the check runs, each call returns at once.
+        Only a display tick gives the check a moment of the interpreter (at most every 100 ms)."""
+        package = __import__("AbletonMcpBridge"); made, release = [], threading.Event()
+
+        class Bridge:
+            between_ticks = False
+            def __init__(self, *args, **kwargs): self.served = 0
+            def serve_between_ticks(self): self.served += 1
+
+        # (a moment as long as this would show in any call that took one)
+        with patch.dict(sys.modules, {"Live": self.live_with_a_timer(made)}), patch.object(package, "_files_check", return_value=lambda: release.wait(5)), \
+                patch.object(package, "_CHECK_ON_ITS_OWN_SECONDS", 0.0), patch.object(package, "_CHECK_WAIT_SECONDS", 0.2), \
+                patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
+            surface = package.AbletonMcpBridge(FakeInstance())
+            checked, waits = surface._checked, []
+            given = checked.wait
+            checked.wait = lambda seconds: (waits.append(seconds), given(seconds))[1]
+            longest = 0.0
+            for _ in range(20):
+                began = time.perf_counter(); made[0].callback(); longest = max(longest, time.perf_counter() - began)
+            self.assertEqual((waits, surface._bridge), ([], None), "past the bound, the timer's calls never wait")
+            self.assertLess(longest, 0.1, f"a timer's call held Live: {longest:.3f} s")
+            surface.update_display()
+            self.assertEqual(waits, [0.2], "a display tick does")
+            release.set(); self.wait_for_the_check(checked)
+            made[0].callback()
+        self.assertEqual(surface._bridge.served, 1, "the timer's first call after the check starts the bridge and serves it")
+        self.assertTrue(made[0].running)
+
+    def test_a_disconnect_while_the_check_runs_starts_nothing_after_it_and_raises_nothing(self):
+        package = __import__("AbletonMcpBridge"); made, built, release = [], [], threading.Event()
+
+        class Bridge:
+            def __init__(self, *args, **kwargs): built.append(self)
+            def update_display(self): pass
+
+        with patch.dict(sys.modules, {"Live": self.live_with_a_timer(made)}), patch.object(package, "_files_check", return_value=lambda: release.wait(5)), \
+                patch.object(package, "_CHECK_ON_ITS_OWN_SECONDS", 0.0), patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
+            surface = package.AbletonMcpBridge(FakeInstance())
+            surface._keep_willington = lambda: None
+            checked = surface._checked
+            surface.disconnect()
+            self.assertFalse(made[0].running, "the timer stopped")
+            release.set(); self.wait_for_the_check(checked)
+            made[0].callback()  # (one already on its way)
+            for _ in range(3): surface.update_display()
+        self.assertEqual(built, [], "nothing started after the disconnect")
+        self.assertEqual((surface._bridge, surface.address), (None, None))
+
+    @unittest.skipUnless(os.name == "nt", "the bridge's files are checked off Live's thread only on Windows")
+    def test_on_windows_the_real_check_runs_powershell_once_off_lives_thread_and_the_start_finds_every_verdict(self):
+        """The real _files_check, and the real start: _read_config asks about the files the check asked about, so it
+        finds every verdict waiting, and PowerShell runs once in all, on the check's thread, never on Live's. Without
+        ctypes, as in Live's own Python, the ACL check decides each owner alone."""
+        package = __import__("AbletonMcpBridge"); ran_on, built = [], []
+
+        def run(args, **kwargs):
+            ran_on.append(threading.get_ident())
+            return types.SimpleNamespace(returncode=package._ACL_ANSWERED)
+
+        class Bridge:
+            def __init__(self, instance, config, **kwargs): self.served = 0; built.append(config)
+            def update_display(self): self.served += 1
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve(); config = root / "bridge-config.json"; secret = root / "secret"
+            secret.write_text("s" * 40, encoding="utf-8")
+            config.write_text(json.dumps({"version": 1, "host": "127.0.0.1", "port": 9765, "secretFile": str(secret)}), encoding="utf-8")
+            (root / "bridge-reference.json").write_text(json.dumps({"config": str(config)}), encoding="utf-8")
+            with patch.object(package, "__file__", str(root / "__init__.py")), patch.dict(package._ACL_VERDICTS, clear=True), \
+                    patch.dict(sys.modules, {"ctypes": None, "Live": None}), patch("AbletonMcpBridge.subprocess.run", run), patch.object(package, "_Bridge", Bridge):
+                surface = package.AbletonMcpBridge(FakeInstance())
+                surface._keep_willington = lambda: None
+                self.wait_for_the_check(surface._checked)
+                surface.update_display()
+        self.assertEqual(len(built), 1, "the bridge started")
+        self.assertEqual((built[0]["secret"], surface._bridge.served), ("s" * 40, 1))
+        self.assertEqual(len(ran_on), 1, "PowerShell ran once: the start found every verdict waiting")
+        self.assertNotEqual(ran_on[0], threading.get_ident(), "and not on Live's thread")
 
     def test_a_failed_start_stops_the_timer_and_a_good_one_counts_its_rate_from_the_start(self):
         package = __import__("AbletonMcpBridge"); made = []
