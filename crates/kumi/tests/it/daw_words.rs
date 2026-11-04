@@ -1,5 +1,5 @@
-//! What a REAPER or Renoise producer sees from Kumi's app never speaks Live's words: every TUI state a session reaches
-//! (connecting, idle, the DAW gone, no model, FOCUS of each view, the command menu, /help, /status, the panels, the
+//! What a REAPER, Renoise or SoundCraft producer sees from Kumi's app never speaks Live's words: every TUI state a session
+//! reaches (connecting, idle, the DAW gone, no model, FOCUS of each view, the command menu, /help, /status, the panels, the
 //! goodbye), the plain terminal's lines, and the commands' messages (bridge, doctor, report, update, uninstall). Live's
 //! own screens keep their bytes: the pins say so.
 #[path = "../support/live_words.rs"]
@@ -300,6 +300,42 @@ case!(a_reaper_session_never_speaks_lives_words, async {
         "keys.json names",
     ];
     tui_states(DawId::Reaper, "REAPER — Night Drive", focuses).await.saw(&seen.map(String::from)).assert_none("REAPER");
+});
+
+case!(a_soundcraft_session_never_speaks_lives_words, async {
+    // Its focus as the bridge sends it, read by its integration: the Edit window, the MIDI Editor, a plug-in's window and
+    // the Mix window with its strips.
+    let focus = |view: &str, more: serde_json::Value| {
+        let mut selection = json!({"track": {"name": "Bass", "type": "midi"}, "trackRef": "s:track:3", "trackRefs": ["s:track:3"],
+            "clipRefs": ["s:clip:25"]});
+        for (key, value) in more.as_object().unwrap() {
+            selection[key] = value.clone();
+        }
+        serde_json::to_value((kumi_daw_soundcraft::DAW.fill_focus)(&json!({"view": view, "selection": selection}))).unwrap()
+    };
+    let strips = json!({"strips": [
+        {"ref": "s:track:3", "name": "Bass", "type": "midi", "volumeDb": -6.0, "pan": 0.0, "selected": true},
+        {"ref": "s:track:0", "name": "Master", "type": "master", "master": true, "volumeDb": 0.0, "pan": 0.0}], "trackCount": 1, "from": 0,
+        "levels": false});
+    let mixer = (kumi_daw_soundcraft::DAW.to_body)(&BodyRequest::Mixer { track_ref: Some("s:track:3".into()) }, &strips);
+    let focuses = vec![
+        (focus("edit", json!({})), None),
+        (focus("midi", json!({"midiClipRef": "s:clip:25"})), None),
+        (focus("fx", json!({"fxRef": "s:insert:3:a", "fxName": "Compressor"})), None),
+        (focus("mixer", json!({})), mixer),
+    ];
+    let seen = [
+        "connecting to SoundCraft",
+        "Ask Kumi about your session",
+        "Read your SoundCraft session again",
+        "SoundCraft connected",
+        "SoundCraft isn't connected",
+        "Kumi closed. Each session's conversation continues next time.",
+        "reading your session",
+        "FOCUS · Mix",
+        "keys.json names",
+    ];
+    tui_states(DawId::SoundCraft, "SoundCraft — Night Drive", focuses).await.saw(&seen.map(String::from)).assert_none("SoundCraft");
 });
 
 case!(a_renoise_session_never_speaks_lives_words, async {

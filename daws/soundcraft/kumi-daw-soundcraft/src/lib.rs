@@ -12,17 +12,17 @@ use kumi_agent::core::{
     describe::ProjectWords,
     presentation::{ToolActivity, ToolPresentation},
     refs::{Moved, RefScheme, Shift},
-    view::{BodyKind, DawFocus, FocusItem, ItemKind, ViewKind, ViewPresentation},
+    view::{BodyKind, BodyRequest, DawFocus, FocusBody, FocusItem, ItemKind, ViewKind, ViewPresentation},
 };
 use kumi_agent::mcp::client::BridgeDescriptor;
 use kumi_daw_own::bridge::{create_own_integration, OwnBridge, OwnDaw, OwnOptions, OwnTools};
 use kumi_daw_own::catchup::{CatchUpWords, RecipeKinds};
 use kumi_daw_own::phrases::{OwnPhrases, Phrased};
-use kumi_daw_own::views::{focus_track, selected, view};
+use kumi_daw_own::views::{self as own_views, body_args, focus_track, selected, view};
 use kumi_types::contracts::JsonObject;
 use kumi_types::daw::DawProfile;
 use regex::Regex;
-use serde_json::Value;
+use serde_json::{json, Value};
 use std::{rc::Rc, sync::LazyLock};
 
 pub use provider::PROVIDER;
@@ -55,9 +55,9 @@ pub const DAW: OwnDaw = OwnDaw {
     read_kinds: &["session", "track", "clip", "insert", "send", "bus", "marker", "group", "source", "note", "param", "env", "point"],
     project_kind: "session",
     fill_focus,
-    bodies: &[],
-    body_request: |_| None,
-    to_body: |_, _| None,
+    bodies: &[BodyKind::Timeline, BodyKind::Notes, BodyKind::Tree, BodyKind::Mixer],
+    body_request,
+    to_body,
     changes: &changes::CHANGES,
     catch_up: &CATCH_UP,
     phrases: &PHRASES,
@@ -103,27 +103,109 @@ pub const CATCH_UP: CatchUpWords = CatchUpWords {
 const PHRASES: OwnPhrases = OwnPhrases { plan: |_, _| Phrased::Model, loops_by_slot: false };
 
 /// What the producer looks at in SoundCraft: the Edit window always, with the MIDI Editor, a plug-in's window or the Mix
-/// window over it when the bridge says so; the first selected track, the first selected clip, and the plug-in whose
-/// window is open.
+/// window over it when the bridge says so; the first selected track (in a plug-in's window, that window's track), the
+/// clip the MIDI Editor shows (else the first selected clip), and the plug-in whose window is open.
 fn fill_focus(focus: &Value) -> DawFocus {
-    let selection = focus.get("selection").cloned().unwrap_or(Value::Null);
-    let editor = match focus.get("view").and_then(Value::as_str) {
+    let mut selection = focus.get("selection").cloned().unwrap_or(Value::Null);
+    if let Some(track) = selection.get_mut("track") {
+        chipped(track);
+    }
+    let shown = focus.get("view").and_then(Value::as_str);
+    let editor = match shown {
         Some("midi") => Some(view(ViewKind::NoteEditor, "MIDI Editor")),
         Some("fx") => Some(view(ViewKind::DeviceChain, "Plug-in")),
         Some("mixer") => Some(view(ViewKind::Mixer, "Mix")),
         _ => None,
     };
-    let clip = selection.get("clipRefs").and_then(Value::as_array).and_then(|clips| clips.first()).and_then(Value::as_str);
+    // The MIDI Editor's clip, by SoundCraft's own rule (the bridge says which), not always the first selected one.
+    let first = selection.get("clipRefs").and_then(Value::as_array).and_then(|clips| clips.first()).and_then(Value::as_str);
+    let clip = selected(&selection, "midiClipRef").filter(|_| shown == Some("midi")).or_else(|| first.map(str::to_owned));
+    // A plug-in's window is one track's, not always the selected one's: FOCUS's tree is that track's inserts, under its
+    // name (the selected track's chip only when it's the same track).
+    let selected_ref = selected(&selection, "trackRef");
+    let window_track = selected(&selection, "fxTrackRef").filter(|_| shown == Some("fx"));
+    let track = match &window_track {
+        Some(reference) if Some(reference) != selected_ref.as_ref() => {
+            focus_track(&json!({"track": {"name": selection.get("fxTrackName").cloned().unwrap_or_default()}}))
+        }
+        _ => focus_track(&selection),
+    };
     DawFocus {
-        track: focus_track(&selection),
-        track_ref: selected(&selection, "trackRef"),
+        track,
+        track_ref: window_track.or(selected_ref),
         device_ref: selected(&selection, "fxRef"),
         device: selected(&selection, "fxName"),
         main_view: Some(view(ViewKind::Timeline, "Edit")),
         editor_view: editor,
-        item: clip.map(|reference| FocusItem { kind: ItemKind::Clip, item_ref: Some(reference.to_owned()), name: None }),
+        item: clip.map(|reference| FocusItem { kind: ItemKind::Clip, item_ref: Some(reference), name: None }),
         ..Default::default()
     }
+}
+
+/// A SoundCraft track kind (the bridge's `type`) in the words of Kumi's chips: an instrument track plays MIDI, an aux
+/// track takes a bus (a return), a VCA leads a group; None for a kind Kumi has no chip for.
+fn chip(kind: &str) -> Option<&'static str> {
+    Some(match kind {
+        "audio" => "audio",
+        "midi" | "instrument" => "midi",
+        "aux" => "send",
+        "vca" => "group",
+        "master" => "master",
+        _ => return None,
+    })
+}
+
+/// A track's or strip's `type` as Kumi's chip word, or none.
+fn chipped(row: &mut Value) {
+    if let Some(row) = row.as_object_mut() {
+        match row.get("type").and_then(Value::as_str).and_then(chip) {
+            Some(word) => row.insert("type".into(), word.into()),
+            None => row.remove("type"),
+        };
+    }
+}
+
+/// A body whose `rows` (the Edit window's tracks, the Mix window's strips) name their kinds as Kumi's chips do.
+fn with_chips(body: &Value, rows: &str) -> Value {
+    let mut body = body.clone();
+    if let Some(rows) = body.get_mut(rows).and_then(Value::as_array_mut) {
+        rows.iter_mut().for_each(chipped);
+    }
+    body
+}
+
+/// FOCUS draws a screenful of lanes, so it asks for that many tracks, not a page of every track in the session.
+const EDIT_LANES: u32 = 24;
+
+fn body_request(request: &BodyRequest) -> Option<JsonObject> {
+    Some(match request {
+        BodyRequest::Tree { track_ref } => body_args("fx", Some(track_ref)),
+        BodyRequest::Notes { item_ref } => body_args("midi", Some(item_ref)),
+        BodyRequest::Timeline => {
+            let mut args = body_args("edit", None);
+            args.insert("limit".into(), EDIT_LANES.into());
+            args
+        }
+        BodyRequest::Mixer { track_ref } => {
+            let mut args = body_args("mixer", None);
+            if let Some(track_ref) = track_ref {
+                args.insert("around".into(), track_ref.as_str().into());
+            }
+            args.insert("limit".into(), EDIT_LANES.into());
+            args
+        }
+        _ => return None,
+    })
+}
+
+fn to_body(request: &BodyRequest, body: &Value) -> Option<FocusBody> {
+    Some(match request {
+        BodyRequest::Tree { track_ref } => FocusBody::Tree(own_views::tree(track_ref, body)),
+        BodyRequest::Notes { item_ref } => FocusBody::Notes(own_views::notes(item_ref, body)),
+        BodyRequest::Timeline => FocusBody::Timeline(own_views::timeline(&with_chips(body, "tracks"))),
+        BodyRequest::Mixer { .. } => FocusBody::Mixer(own_views::mixer(&with_chips(body, "strips"))),
+        _ => return None,
+    })
 }
 
 /// SoundCraft's refs: `s:<kind>:<id>` (a reused id's later life `<id>.<life>`), and what's in a track by the track's
@@ -195,14 +277,17 @@ pub const PRESENTATION: ToolPresentation = ToolPresentation {
     read_prefix: Some("soundcraft_"),
 };
 
-/// How the app reads SoundCraft's focus: it comes neutral, and FOCUS draws no bodies of it yet.
+/// How the app reads SoundCraft's focus: it comes neutral, and a clip in the MIDI Editor over the Edit window shows its
+/// notes. A track's instrument and inserts are its Inserts, as the Edit and Mix windows name them.
 pub const VIEW: ViewPresentation = ViewPresentation {
     heading: |kind| match kind {
         BodyKind::Timeline => "Edit",
         BodyKind::Mixer => "Mix",
         BodyKind::Notes => "MIDI",
+        BodyKind::Tree => "Inserts",
         other => (ViewPresentation::NONE.heading)(other),
     },
+    timeline_notes: true,
     ..ViewPresentation::NONE
 };
 
@@ -214,7 +299,7 @@ pub fn create_soundcraft_integration(options: OwnOptions) -> Rc<dyn Integration>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use kumi_agent::core::view::TrackKind;
 
     #[test]
     fn a_soundcraft_ref_is_its_kind_and_soundcrafts_id() {
@@ -258,6 +343,90 @@ mod tests {
         assert_eq!((fx.device_ref.as_deref(), fx.device.as_deref()), (Some("s:insert:3:a"), Some("Compressor")));
         let edit = fill_focus(&json!({"view": "edit", "selection": {"trackRefs": [], "clipRefs": []}}));
         assert!(edit.editor_view.is_none() && edit.item.is_none() && edit.track_ref.is_none());
+    }
+
+    #[test]
+    fn the_midi_editors_clip_is_the_one_soundcraft_shows_and_a_plugin_window_shows_its_tracks_inserts() {
+        // The MIDI Editor shows the clip SoundCraft picks, not the first selected one.
+        let midi = fill_focus(&json!({"view": "midi",
+            "selection": {"trackRef": "s:track:3", "clipRefs": ["s:clip:20", "s:clip:25"], "midiClipRef": "s:clip:25"}}));
+        assert_eq!(midi.item.and_then(|item| item.item_ref).as_deref(), Some("s:clip:25"));
+        // (the Edit window's item stays the first selected clip: the MIDI Editor's is only for its view)
+        let edit = fill_focus(&json!({"view": "edit", "selection": {"clipRefs": ["s:clip:20"], "midiClipRef": "s:clip:25"}}));
+        assert_eq!(edit.item.and_then(|item| item.item_ref).as_deref(), Some("s:clip:20"));
+        let none = fill_focus(&json!({"view": "midi", "selection": {"trackRef": "s:track:3", "clipRefs": []}}));
+        assert!(none.item.is_none());
+
+        // A plug-in's window on the selected track: its tree is the track's own, under its name and chip.
+        let own =
+            fill_focus(&json!({"view": "fx", "selection": {"trackRef": "s:track:3.2", "track": {"name": "Keys", "type": "instrument"},
+            "fxRef": "s:insert:3:instrument", "fxName": "Subtractive Synth", "fxTrackRef": "s:track:3.2", "fxTrackName": "Keys"}}));
+        assert_eq!(own.track_ref.as_deref(), Some("s:track:3.2"));
+        let track = own.track.unwrap();
+        assert_eq!((track.name.as_str(), track.kind), ("Keys", Some(TrackKind::Midi)));
+        // On another track, or with none selected: the tree is the window's track's (its ref as the bridge gives it, with
+        // its life), under that track's name.
+        let other = fill_focus(&json!({"view": "fx", "selection": {"trackRef": "s:track:3", "track": {"name": "Bass", "type": "midi"},
+            "fxRef": "s:insert:7:b", "fxName": "Compressor", "fxTrackRef": "s:track:7.2", "fxTrackName": "Vox"}}));
+        assert_eq!(other.track_ref.as_deref(), Some("s:track:7.2"));
+        let track = other.track.unwrap();
+        assert_eq!((track.name.as_str(), track.kind), ("Vox", None));
+        let alone =
+            fill_focus(&json!({"view": "fx", "selection": {"fxRef": "s:insert:7:b", "fxTrackRef": "s:track:7.2", "fxTrackName": "Vox"}}));
+        assert_eq!((alone.track_ref.as_deref(), alone.track.map(|track| track.name).as_deref()), (Some("s:track:7.2"), Some("Vox")));
+        // A bridge that doesn't name the window's track: the selected track, as before (never one made up from the insert).
+        let unnamed = fill_focus(&json!({"view": "fx", "selection": {"trackRef": "s:track:3", "fxRef": "s:insert:7:b"}}));
+        assert_eq!(unnamed.track_ref.as_deref(), Some("s:track:3"));
+        // Outside a plug-in's window, the selected track.
+        let mixer = fill_focus(&json!({"view": "mixer", "selection": {"trackRef": "s:track:3", "fxTrackRef": "s:track:7"}}));
+        assert_eq!(mixer.track_ref.as_deref(), Some("s:track:3"));
+    }
+
+    #[test]
+    fn soundcrafts_track_kinds_wear_kumis_chips() {
+        let kind = |kind: &str| {
+            let focus = fill_focus(&json!({"selection": {"trackRef": "s:track:1", "track": {"name": "T", "type": kind}}}));
+            focus.track.and_then(|track| track.kind)
+        };
+        assert_eq!(kind("audio"), Some(TrackKind::Audio));
+        assert_eq!(kind("midi"), Some(TrackKind::Midi));
+        assert_eq!(kind("instrument"), Some(TrackKind::Midi));
+        assert_eq!(kind("aux"), Some(TrackKind::Return), "an aux input takes a bus");
+        assert_eq!(kind("vca"), Some(TrackKind::Group));
+        assert_eq!(kind("master"), Some(TrackKind::Main));
+        assert_eq!(kind("folder"), None, "no chip for a kind Kumi has none for");
+        assert_eq!(kind("sequencer"), None, "Renoise's word isn't SoundCraft's");
+
+        let rows = ["audio", "instrument", "aux", "vca", "master", "folder"].map(|kind| json!({"name": kind, "type": kind}));
+        let strips = json!({"strips": rows});
+        let Some(FocusBody::Mixer(mixer)) = to_body(&BodyRequest::Mixer { track_ref: None }, &strips) else { panic!() };
+        let kinds: Vec<_> = mixer.strips.iter().map(|strip| strip.kind).collect();
+        let want =
+            [Some(TrackKind::Audio), Some(TrackKind::Midi), Some(TrackKind::Return), Some(TrackKind::Group), Some(TrackKind::Main), None];
+        assert_eq!(kinds, want);
+        // The Edit window's tracks are read in the same words (the body itself is left as the bridge sent it).
+        let tracks = json!({"tracks": [{"ref": "s:track:1", "name": "Pad", "type": "instrument", "items": []}]});
+        assert!(matches!(to_body(&BodyRequest::Timeline, &tracks), Some(FocusBody::Timeline(_))));
+        assert_eq!(with_chips(&tracks, "tracks")["tracks"][0]["type"], "midi");
+        assert_eq!(tracks["tracks"][0]["type"], "instrument");
+    }
+
+    #[test]
+    fn each_body_is_asked_for_by_soundcrafts_kind_with_its_args() {
+        let args = |request: BodyRequest| Value::Object(body_request(&request).expect("a body SoundCraft draws"));
+        assert_eq!(args(BodyRequest::Timeline), json!({"kind": "edit", "limit": 24}));
+        assert_eq!(args(BodyRequest::Notes { item_ref: "s:clip:25".into() }), json!({"kind": "midi", "ref": "s:clip:25"}));
+        assert_eq!(args(BodyRequest::Tree { track_ref: "s:track:3".into() }), json!({"kind": "fx", "ref": "s:track:3"}));
+        assert_eq!(
+            args(BodyRequest::Mixer { track_ref: Some("s:track:3".into()) }),
+            json!({"kind": "mixer", "around": "s:track:3", "limit": 24})
+        );
+        assert_eq!(args(BodyRequest::Mixer { track_ref: None }), json!({"kind": "mixer", "limit": 24}));
+        assert!(body_request(&BodyRequest::Routing { track_ref: "s:track:3".into() }).is_none(), "no routing window");
+        assert!(body_request(&BodyRequest::Levels { track_ref: None }).is_none(), "no meters");
+        for kind in DAW.bodies {
+            assert_ne!((VIEW.heading)(*kind), (ViewPresentation::NONE.heading)(*kind), "{kind:?} has SoundCraft's heading");
+        }
     }
 
     #[test]

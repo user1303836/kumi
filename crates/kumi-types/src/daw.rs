@@ -1088,7 +1088,16 @@ impl DawProfile {
     pub const SOUNDCRAFT: DawProfile = DawProfile {
         id: Some(DawId::SoundCraft),
         words: DawWords { app: "SoundCraft", place: "session", places: "sessions", master: "the master track", timeline: "Edit window" },
-        caps: Capabilities::NONE,
+        // FOCUS follows SoundCraft (M2): the look's focus and transport as read, a track's instrument and inserts, a MIDI
+        // clip's notes and the Edit window at a glance (and the Mix window's strips, without meters). It changes nothing.
+        caps: Capabilities {
+            focus_stream: true,
+            transport_stream: true,
+            device_tree: true,
+            note_view: true,
+            timeline_strip: true,
+            ..Capabilities::NONE
+        },
         vocab: PromptVocab {
             plan_tool: "make_changes",
             ref_example: "track:3",

@@ -694,13 +694,15 @@ impl Drop for Told<'_> {
     }
 }
 
-/// Why the DAW may answer late, in words: REAPER's `busy` code.
+/// Why the DAW may answer late, in words: REAPER's `busy` code, and SoundCraft's bridge's `stalled` (its look at the app
+/// missed its deadline three times running).
 fn busy_words(code: &str, profile: &DawProfile) -> String {
     match code {
         "modal" => "a dialog is open".into(),
         "loading" => format!("a {} is loading", profile.words.place),
         "rendering" => "it's rendering".into(),
         "working" => "it's still running a long request (a plug-in loading, or a dialog that request opened)".into(),
+        "stalled" => "it isn't answering in time".into(),
         other => other.into(),
     }
 }
