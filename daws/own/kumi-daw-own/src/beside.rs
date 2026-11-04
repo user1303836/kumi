@@ -58,6 +58,8 @@ pub struct Beside {
     pub library: &'static dyn LibrarySources,
     /// Where the DAW is downloaded from, as setup names it.
     pub site: &'static str,
+    /// Whether the DAW is still experimental: only `--daw`, `KUMI_DAW` and `/daw` reach it.
+    pub experimental: bool,
     /// The program, by its name beside Kumi's executable: "soundcraft-kumi".
     pub program: &'static str,
     /// The variable the program takes for the app to open ("KUMI_SOUNDCRAFT_APP"): Kumi sets it to the app it found, so
@@ -76,8 +78,6 @@ pub struct Beside {
     /// Why a DAW the producer opened has to be opened again by Kumi, as setup says it.
     pub restart_why: &'static str,
     pub watch_words: WatchWords,
-    /// What `kumi uninstall --dry-run` says it would also do with the bridge's state.
-    pub removal_question: &'static str,
     /// Whether this user has used the DAW.
     pub used: fn(&Env) -> bool,
     /// Whether the DAW is on this computer, from files alone.
@@ -335,6 +335,9 @@ impl DawProvider for Beside {
     fn here(&self, env: &Env) -> bool {
         (self.here)(env)
     }
+    fn experimental(&self) -> bool {
+        self.experimental
+    }
     fn running_now(&self, processes: &[(u32, String)]) -> bool {
         processes.iter().any(|(_, name)| detect::process_is(self.daw, name))
     }
@@ -512,8 +515,9 @@ impl DawProvider for Beside {
     fn remove_bridge<'a>(&'a self, _io: &'a DawIo) -> LocalBoxFuture<'a, Result<RemovedBridge, RuntimeError>> {
         async { Ok(RemovedBridge::None) }.boxed_local()
     }
+    /// Nothing of Kumi's went into the DAW, and its state goes with Kumi's folder: the dry run has nothing more to say.
     fn removal_question(&self) -> &'static str {
-        self.removal_question
+        ""
     }
     fn files_stay(&self, folder: &str) -> String {
         format!("What Kumi's bridge for {} keeps stays in {folder}.", self.name())
@@ -725,6 +729,7 @@ mod tests {
         view: &ViewPresentation::NONE,
         library: &NO_LIBRARY,
         site: "renoise.com",
+        experimental: false,
         program: "program",
         app_variable: "TEST_APP",
         bridge_folder: "bridges/renoise",
@@ -734,7 +739,6 @@ mod tests {
         not_found: "",
         restart_why: "",
         watch_words: WatchWords { starting: "", unreachable: "", answered: "" },
-        removal_question: "",
         used: |_| true,
         here: |_| true,
         app: |env| env.get("TEST_APP").map(PathBuf::from),

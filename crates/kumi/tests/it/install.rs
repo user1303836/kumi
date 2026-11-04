@@ -2749,9 +2749,10 @@ async fn the_daw_used_last_and_the_other_daws_bridge_files_count_as_kumis() {
     assert!(home.join("last-daw").exists() && home.join("bridges").exists(), "a dry run removes nothing");
 }
 
-/// Uninstalling takes out what's Kumi's in REAPER's and Renoise's bridge folders and keeps what the lifecycle promised:
-/// the copies of Kumi's bridge the producer had changed (`changed`) always, and catch-up's baselines (`snapshots`) until
-/// --all. A DAW's folder with nothing else in it goes whole.
+/// Uninstalling takes out what's Kumi's in REAPER's, Renoise's and SoundCraft's bridge folders (SoundCraft's: its bridge
+/// program's launch record, lock, runs and serving locks) and keeps what the lifecycle promised: the copies of Kumi's
+/// bridge the producer had changed (`changed`) always, and catch-up's baselines (`snapshots`) until --all. A DAW's folder
+/// with nothing else in it goes whole.
 #[cfg(not(windows))]
 #[tokio::test]
 async fn uninstall_keeps_the_changed_copies_and_until_all_the_baselines_in_the_daws_bridge_folders() {
@@ -2771,6 +2772,13 @@ async fn uninstall_keeps_the_changed_copies_and_until_all_the_baselines_in_the_d
         put(reaper.join("snapshots/reaper-0123/last-seen.json"), "{}");
         put(home.join("bridges/renoise/bridge.secret"), "kumi's");
         put(home.join("bridges/renoise/logs/bridge.log"), "kumi's");
+        let soundcraft = home.join("bridges/soundcraft");
+        for part in
+            ["launched.json", "launch.lock", "runs/1700000000000/launch.out", "serving-4242.lock", "bridge.secret", "discovery/a.json"]
+        {
+            put(soundcraft.join(part), "kumi's");
+        }
+        put(soundcraft.join("snapshots/soundcraft-0123/last-seen.json"), "{}");
     };
     setup();
     let (removing, out) = io(&env);
@@ -2782,6 +2790,11 @@ async fn uninstall_keeps_the_changed_copies_and_until_all_the_baselines_in_the_d
         assert!(!reaper.join(part).exists(), "{part}: {said}");
     }
     assert!(!home.join("bridges/renoise").exists(), "nothing else in it: it goes whole. {said}");
+    let soundcraft = home.join("bridges/soundcraft");
+    for part in ["launched.json", "launch.lock", "runs", "serving-4242.lock", "bridge.secret", "discovery"] {
+        assert!(!soundcraft.join(part).exists(), "SoundCraft's {part}: {said}");
+    }
+    assert!(soundcraft.join("snapshots/soundcraft-0123/last-seen.json").exists(), "SoundCraft's baselines stay without --all: {said}");
     assert_eq!(fs::read_to_string(reaper.join("changed/reaper_kumi.dylib-1700000000000")).unwrap(), "the producer's own build");
     assert!(reaper.join("snapshots/reaper-0123/last-seen.json").exists(), "the baselines stay without --all: {said}");
     assert!(said.contains("The copies of Kumi's bridges you had changed stay in ") && said.contains("changed"), "{said}");
@@ -2791,6 +2804,7 @@ async fn uninstall_keeps_the_changed_copies_and_until_all_the_baselines_in_the_d
     assert_eq!(uninstall_installed(removing, UninstallOptions { all: true, yes: true, ..Default::default() }).await.unwrap(), 0);
     let said = out.0.borrow().clone();
     assert!(!reaper.join("snapshots").exists(), "{said}");
+    assert!(!home.join("bridges/soundcraft").exists(), "with its baselines gone, nothing else in it: {said}");
     assert!(reaper.join("changed/reaper_kumi.dylib-1700000000000").exists(), "{said}");
     assert!(home.exists(), "the producer's copies keep Kumi's folder: {said}");
 }

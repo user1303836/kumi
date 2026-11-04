@@ -1,18 +1,20 @@
 //! The app reaches each DAW only through its provider in the DAW table: outside src/daw/, nothing names a DAW's crates
 //! (kumi-daw-ableton, whose `app` module is Live's provider; kumi-daw-own, with REAPER's and Renoise's; kumi-daw-reaper;
-//! kumi-daw-renoise; Live's bridge) or Live's modules (live_app, live_extension, bridge_setup, willington). Allowed:
+//! kumi-daw-renoise; kumi-daw-soundcraft; Live's bridge) or Live's modules (live_app, live_extension, bridge_setup,
+//! willington). Allowed:
 //! imports only unit tests use (`#[cfg(test)] use …`), and the uses listed below, each with why.
 
 use std::path::{Path, PathBuf};
 
 /// What names a DAW's parts.
-const DAW_PARTS: [&str; 10] = [
+const DAW_PARTS: [&str; 11] = [
     "ableton",
     "ableton_mcp_server",
     "kumi_daw_ableton",
     "kumi_daw_own",
     "kumi_daw_reaper",
     "kumi_daw_renoise",
+    "kumi_daw_soundcraft",
     "live_app",
     "live_extension",
     "bridge_setup",

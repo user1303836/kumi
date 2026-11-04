@@ -195,6 +195,11 @@ pub trait DawProvider {
         let _ = env;
         false
     }
+    /// Whether the DAW is still experimental (SoundCraft's, while Kumi only reads it): Kumi never picks or offers it by
+    /// itself, open, installed or on this computer; `--daw`, `KUMI_DAW` and `/daw` with its name still reach it.
+    fn experimental(&self) -> bool {
+        false
+    }
     fn watch_words(&self) -> WatchWords;
     /// Why the open DAW couldn't start Kumi's bridge the last time it tried, and what fixes it, in words, from what the
     /// DAW keeps (Live: its log, when AbletonMcpBridge is chosen but failed to start). Said in place of
@@ -259,7 +264,7 @@ pub trait DawProvider {
     fn bridge_files_in_use(&self, folder: &str, env: &Env) -> bool;
     /// Takes Kumi's bridge out of the DAW, asking first.
     fn remove_bridge<'a>(&'a self, io: &'a DawIo) -> LocalBoxFuture<'a, Result<RemovedBridge, RuntimeError>>;
-    /// What `kumi uninstall --dry-run` says it would also do with the bridge.
+    /// What `kumi uninstall --dry-run` says it would also do with the bridge; empty when there's nothing more to do.
     fn removal_question(&self) -> &'static str;
     /// What removing Kumi says when the bridge's files stay in `folder`.
     fn files_stay(&self, folder: &str) -> String;

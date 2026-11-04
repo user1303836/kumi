@@ -1,0 +1,20 @@
+[package]
+name = "kumi-daw-soundcraft"
+version = "0.1.0"
+description = "Kumi's SoundCraft integration, host side: its refs, read tool and instructions, what FOCUS shows of it, and its provider: a bridge program beside Kumi that opens SoundCraft with its control channel on. Experimental, and read-only so far."
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+kumi-daw.workspace = true
+kumi-daw-own.workspace = true
+kumi-library.workspace = true
+kumi-agent.workspace = true
+kumi-types.workspace = true
+# Where SoundCraft is and its settings folder: the same detection as the other own-bridge DAWs'.
+daw-bridge.workspace = true
+regex.workspace = true
+serde_json.workspace = true

@@ -1378,6 +1378,7 @@ dependencies = [
  "kumi-daw-own",
  "kumi-daw-reaper",
  "kumi-daw-renoise",
+ "kumi-daw-soundcraft",
  "kumi-library",
  "kumi-listening",
  "kumi-media",
@@ -1618,6 +1619,20 @@ dependencies = [
  "tempfile",
  "tokio",
  "uuid",
+]
+
+[[package]]
+name = "kumi-daw-soundcraft"
+version = "0.1.0"
+dependencies = [
+ "daw-bridge",
+ "kumi-agent",
+ "kumi-daw",
+ "kumi-daw-own",
+ "kumi-library",
+ "kumi-types",
+ "regex",
+ "serde_json",
 ]
 
 [[package]]

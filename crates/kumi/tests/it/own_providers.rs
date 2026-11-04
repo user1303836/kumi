@@ -831,3 +831,43 @@ async fn the_report_reads_the_bridge_logs_oldest_first() {
     assert_eq!(heading, "Renoise's bridge log");
     assert_eq!(lines, "b.log line\nc.log line\na.log line");
 }
+
+/// SoundCraft's bridge is a program beside Kumi: setup finds the app a variable names, its version (its bundle's, on
+/// macOS) and the session to open again once the producer has quit SoundCraft (its newest recent); Kumi isn't set up in
+/// it until it has opened SoundCraft through the program; and nothing went into SoundCraft for uninstall to take out.
+#[tokio::test(flavor = "current_thread")]
+async fn soundcraft_is_found_with_the_session_to_open_again_and_nothing_goes_into_it() {
+    use kumi_daw::provider::Installed;
+    let dir = tempfile::tempdir().unwrap();
+    let path = |part: &str| dir.path().join(part).to_string_lossy().into_owned();
+    let app = dir.path().join("Apps/SoundCraft.app");
+    std::fs::create_dir_all(app.join("Contents")).unwrap();
+    let plist = "<plist><dict><key>CFBundleShortVersionString</key><string>0.17.0</string></dict></plist>";
+    std::fs::write(app.join("Contents/Info.plist"), plist).unwrap();
+    let session = dir.path().join("Sessions/Beat.scraft");
+    std::fs::create_dir_all(session.parent().unwrap()).unwrap();
+    std::fs::write(&session, "{}").unwrap();
+    std::fs::create_dir_all(dir.path().join("Settings")).unwrap();
+    std::fs::write(dir.path().join("Settings/ui.json"), serde_json::json!({"recent_sessions": [session]}).to_string()).unwrap();
+    let env = Env::from([
+        ("HOME".into(), dir.path().to_string_lossy().into_owned()),
+        ("KUMI_HOME".into(), path(".kumi")),
+        ("KUMI_SOUNDCRAFT_APP".into(), path("Apps/SoundCraft.app")),
+        ("SOUNDCRAFT_CONFIG_DIR".into(), path("Settings")),
+    ]);
+    let soundcraft: &dyn DawProvider = &kumi_daw_soundcraft::PROVIDER;
+    assert!(soundcraft.experimental() && soundcraft.here(&env));
+    assert_eq!(soundcraft.bridge_config(&env), None, "Kumi hasn't opened SoundCraft through its program yet");
+    let setup = soundcraft.setup(&env, Rc::default(), false, Rc::default());
+    assert_eq!(setup.installed().await, Installed::Ready);
+    assert_eq!(setup.open_set(), Some(session.to_string_lossy().into_owned()));
+    let version = setup.version(Some(app.to_string_lossy().into_owned())).await;
+    assert_eq!(version.as_deref(), cfg!(target_os = "macos").then_some("0.17.0"));
+    // Nothing went into SoundCraft.
+    let out = Rc::new(Out::default());
+    assert!(matches!(soundcraft.remove_bridge(&daw_io(out, &env)).await.unwrap(), RemovedBridge::None));
+    // The app the variable names is gone: setup says SoundCraft is missing, whatever else is installed.
+    let mut gone = env.clone();
+    gone.insert("KUMI_SOUNDCRAFT_APP".into(), path("Apps/Gone.app"));
+    assert_eq!(soundcraft.setup(&gone, Rc::default(), false, Rc::default()).installed().await, Installed::Missing);
+}

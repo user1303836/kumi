@@ -2,11 +2,11 @@
 
 ## 1. What Kumi is
 
-Kumi is a producer's agent that works inside their DAW from the terminal: it reads the project, makes changes with its own history and undo, listens to the audio and learns the producer's library. It supports Ableton Live 12 (macOS, Windows), REAPER 7+ and Renoise 3.5+ (macOS, Windows, Linux); Logic Pro is in progress (#374). One Rust workspace, shipped as GitHub releases.
+Kumi is a producer's agent that works inside their DAW from the terminal: it reads the project, makes changes with its own history and undo, listens to the audio and learns the producer's library. It supports Ableton Live 12 (macOS, Windows), REAPER 7+ and Renoise 3.5+ (macOS, Windows, Linux); Logic Pro is in progress (#374), and SoundCraft is experimental (read-only, reached only with `--daw soundcraft`). One Rust workspace, shipped as GitHub releases.
 
 Kumi starts a bridge and talks MCP to it over stdio; the bridge reaches the DAW over authenticated TCP on 127.0.0.1:
 - Live: `ableton-mcp-server`, to the Remote Script (`ableton-loopback/v1`) and Kumi's Live extension.
-- REAPER and Renoise (and Logic): `daw-mcp-server --daw <daw>`, to Kumi's extension or tool in the DAW (`kumi-daw/1`).
+- REAPER, Renoise and SoundCraft (and Logic): `daw-mcp-server --daw <daw>`, to Kumi's extension or tool in the DAW (`kumi-daw/1`); SoundCraft's bridge is a program beside it, which the host starts.
 
 Words: **own bridge** = Kumi's `kumi-daw/1` bridge, for every DAW but Live. **integration** = a DAW's host side in Kumi (`kumi-daw-<daw>`). **provider** = a DAW's install, update, doctor and setup steps (`DawProvider`, in `kumi-daw`). **place** = where a conversation, its notes and jobs are kept. **FOCUS** = what the producer is looking at. **catch-up** = what changed since Kumi last looked. **change family** = a kind of change with its own HISTORY row and undo. **Hands** = drives Live's menus. **Ears** = how Kumi hears a DAW. **slots** = which model does each listening job. **kit** = Max for Live building blocks. **goldens** = byte-exact expected outputs. **oracles** = recordings of the old TypeScript Kumi (tag `v1.7.6`). **Willington** = optional native Live bindings.
 
@@ -38,7 +38,9 @@ daws/                       everything DAW-specific, one folder per DAW
   reaper/                   reaper-kumi/ (REAPER's extension; SDK in sdk/), kumi-daw-reaper/ (L5)
   renoise/                  com.kumi.Bridge.xrnx/ (Lua tool), tests/ (against a mock Renoise), kumi-daw-renoise/ (L5)
   soundcraft/               soundcraft-kumi/ (Kumi's bridge beside SoundCraft, a program its host starts: the client of
-                            SoundCraft's control channel and its recorded vectors, starting SoundCraft, kumi-daw/1)
+                            SoundCraft's control channel and its recorded vectors, starting SoundCraft, kumi-daw/1),
+                            kumi-daw-soundcraft/ (L5: experimental and read-only; its provider, `Beside`, opens SoundCraft
+                            through the bridge program beside Kumi)
 testdata/oracles/<crate>/   recorded oracles; .ignore hides them from search (rg -u finds them)
 plugin-formats/             plug-in preset formats Kumi builds in
 vendor/willington/          Willington's files: owner only

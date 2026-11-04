@@ -30,6 +30,7 @@ kumi-daw.workspace = true
 kumi-daw-ableton.workspace = true
 kumi-daw-reaper.workspace = true
 kumi-daw-renoise.workspace = true
+kumi-daw-soundcraft.workspace = true
 kumi-daw-own.workspace = true
 daw-bridge.workspace = true
 async-trait.workspace = true

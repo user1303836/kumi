@@ -17,6 +17,12 @@ pub fn providers() -> impl Iterator<Item = &'static dyn DawProvider> + Clone {
     registry::DAWS.iter().map(|daw| *daw as &'static dyn DawProvider)
 }
 
+/// The DAWs Kumi picks and offers by itself, open, installed or on this computer: every registered one but an experimental
+/// one, which only `--daw`, `KUMI_DAW` and `/daw` with its name reach.
+pub fn offered() -> impl Iterator<Item = &'static dyn DawProvider> + Clone {
+    providers().filter(|provider| !provider.experimental())
+}
+
 /// A registered DAW's provider; None for one this Kumi doesn't integrate.
 pub fn provider(id: DawId) -> Option<&'static dyn DawProvider> {
     providers().into_iter().find(|provider| provider.id() == id)
@@ -45,16 +51,16 @@ pub fn chosen_with(
 
 /// The DAWs on this computer whose bridge isn't installed yet, as `here` says.
 fn found_here(env: &Env, here: &dyn Fn(&dyn DawProvider) -> bool) -> Vec<&'static dyn DawProvider> {
-    if providers().into_iter().any(|provider| provider.bridge_config(env).is_some()) {
+    if offered().any(|provider| provider.bridge_config(env).is_some()) {
         return vec![];
     }
-    providers().into_iter().filter(|provider| here(*provider)).collect()
+    offered().filter(|provider| here(*provider)).collect()
 }
 
 /// The DAWs a first run asks the producer to choose among ("Which DAW do you work in?"): with no bridge installed,
 /// several DAWs here, none of them picked before, and none open (the one open is the answer).
 pub fn to_ask(env: &Env, here: &dyn Fn(&dyn DawProvider) -> bool, running: &dyn Fn(&dyn DawProvider) -> bool) -> Vec<DawId> {
-    if providers().into_iter().any(running) {
+    if offered().any(running) {
         return vec![];
     }
     let found = found_here(env, here);
@@ -75,12 +81,12 @@ pub fn chosen_among(
     if let Some(provider) = asked.and_then(provider) {
         return (provider, provider.bridge_config(env));
     }
-    let open: Vec<&'static dyn DawProvider> = providers().into_iter().filter(|provider| running(*provider)).collect();
+    let open: Vec<&'static dyn DawProvider> = offered().filter(|provider| running(*provider)).collect();
     if let Some(provider) = open_among(&open, env) {
         return (provider, provider.bridge_config(env));
     }
     let installed: Vec<(&'static dyn DawProvider, String)> =
-        providers().into_iter().filter_map(|provider| provider.bridge_config(env).map(|config| (provider, config))).collect();
+        offered().filter_map(|provider| provider.bridge_config(env).map(|config| (provider, config))).collect();
     let pick = |provider: &'static dyn DawProvider, config: &str| (provider, Some(config.to_string()));
     match installed.as_slice() {
         [] => {
@@ -113,7 +119,7 @@ pub fn chosen_among(
 
 /// The other DAWs open beside `chosen`: a session that chose among them says so, and how to switch.
 pub fn also_running(chosen: DawId, running: &dyn Fn(&dyn DawProvider) -> bool) -> Vec<&'static dyn DawProvider> {
-    providers().into_iter().filter(|provider| provider.id() != chosen && running(*provider)).collect()
+    offered().filter(|provider| provider.id() != chosen && running(*provider)).collect()
 }
 
 /// Among the DAWs open now, the one Kumi works with: the only one; else, of those whose bridge is in (all of them when
@@ -141,7 +147,7 @@ pub fn open_among(open: &[&'static dyn DawProvider], env: &Env) -> Option<&'stat
 /// session's own, when that one isn't running and another is, or has no bridge in while a DAW whose bridge is in runs.
 /// Chosen as a start chooses among the DAWs open ([`open_among`]), so Kumi, opened again, starts with it.
 pub fn to_follow(current: DawId, env: &Env, running: &dyn Fn(&dyn DawProvider) -> bool) -> Option<&'static dyn DawProvider> {
-    let open: Vec<&'static dyn DawProvider> = providers().into_iter().filter(|provider| running(*provider)).collect();
+    let open: Vec<&'static dyn DawProvider> = offered().filter(|provider| running(*provider)).collect();
     let follows = if open.iter().any(|provider| provider.id() == current) {
         provider(current).is_some_and(|provider| provider.bridge_config(env).is_none())
             && open.iter().any(|provider| provider.id() != current && provider.bridge_config(env).is_some())
@@ -160,7 +166,7 @@ pub struct RunningDaws(pub Rc<dyn Fn() -> Vec<DawId>>);
 /// rather than how to make one answer. None with fewer than two (each DAW's own words say it).
 pub fn open_one_words(env: &Env) -> Option<String> {
     let names: Vec<&str> =
-        providers().into_iter().filter(|provider| provider.bridge_installed(env)).map(|provider| provider.profile().words.app).collect();
+        offered().filter(|provider| provider.bridge_installed(env)).map(|provider| provider.profile().words.app).collect();
     let (last, rest) = names.split_last()?;
     if rest.is_empty() {
         return None;
@@ -234,7 +240,8 @@ pub fn offer_here(here: Here) {
     HERE.with(|offered| *offered.borrow_mut() = Some(here));
 }
 
-/// [`daw_command`], offering the other DAWs `here` says are on this computer (any can still be asked for by name).
+/// [`daw_command`], offering the other DAWs `here` says are on this computer (any can still be asked for by name, an
+/// experimental one too).
 pub fn daw_command_among(typed: &str, here: &dyn Fn(&dyn DawProvider) -> bool) -> DawCommand {
     let current = current().id();
     let app = |id: DawId| provider(id).map(|provider| provider.profile().words.app).unwrap_or_default();
@@ -242,7 +249,7 @@ pub fn daw_command_among(typed: &str, here: &dyn Fn(&dyn DawProvider) -> bool) -
     let word = typed.trim().to_lowercase();
     if word.is_empty() {
         let others: Vec<DawId> =
-            providers().into_iter().filter(|provider| provider.id() != current && here(*provider)).map(|provider| provider.id()).collect();
+            offered().filter(|provider| provider.id() != current && here(*provider)).map(|provider| provider.id()).collect();
         if others.is_empty() {
             return DawCommand::Say(format!("Kumi works with {}, the only DAW it works with on this computer.", app(current)));
         }
@@ -256,7 +263,7 @@ pub fn daw_command_among(typed: &str, here: &dyn Fn(&dyn DawProvider) -> bool) -
         ));
     }
     let Some(asked) = ids.iter().copied().find(|id| command_name(*id) == word || id.as_str() == word) else {
-        let commands: Vec<String> = ids.iter().map(|id| format!("/daw {}", command_name(*id))).collect();
+        let commands: Vec<String> = offered().map(|provider| format!("/daw {}", command_name(provider.id()))).collect();
         return DawCommand::Say(format!("Kumi doesn't know {}: {}.", typed.trim(), commands.join(", ")));
     };
     if asked == current {

@@ -1466,8 +1466,8 @@ pub struct UninstallOptions {
 /// What `kumi uninstall` takes out of Kumi's folder, by these exact names: Kumi and the one kept for a rollback, what
 /// updates and repairs leave behind (`app.replaced` is the Windows installer's), and what Kumi fetched and fetches
 /// again when needed (programs, models, videos; each only while it holds only Kumi's own). Never conversations, notes,
-/// recipes, sign-ins, the library or references; the bridge's files stay while Live uses them. REAPER's and Renoise's
-/// bridge files (`bridges`) go by what's in them ([`BRIDGES_OWN`]).
+/// recipes, sign-ins, the library or references; the bridge's files stay while Live uses them. The files of the DAWs on
+/// Kumi's own bridges (`bridges`) go by what's in them ([`BRIDGES_OWN`]).
 pub const KUMI_S_OWN: [&str; 13] = [
     "app",
     "app.previous",
@@ -1483,16 +1483,28 @@ pub const KUMI_S_OWN: [&str; 13] = [
     "videos",
     "bridge",
 ];
-/// In each DAW's folder in `bridges` (REAPER's and Renoise's bridge files; their DAWs load their own copies), what's
-/// Kumi's to take out: kept generations, discovery, logs, renders to listen to, the receipt, the secret, the lock and the
-/// journal, and a temporary file one of them left (`.<name>.tmp-…`). Catch-up's baselines (`snapshots`) are Kumi's data,
-/// gone only with --all; the copies of Kumi's bridge the producer had changed (`changed`), which the lifecycle kept for
-/// them, always stay.
-pub const BRIDGES_OWN: [&str; 8] =
-    ["generations", "discovery", "logs", "listening", "install-receipt.json", "bridge.secret", "lifecycle.lock", "lifecycle-journal.json"];
-/// What only Kumi's bridge lifecycle writes in a DAW's folder in `bridges`: in a folder the producer also uses, a DAW's
-/// folder is Kumi's only when it holds one of these.
-const BRIDGES_MARKS: [&str; 4] = ["install-receipt.json", "bridge.secret", "lifecycle.lock", "lifecycle-journal.json"];
+/// In each DAW's folder in `bridges` (REAPER's and Renoise's bridge files, their DAWs loading their own copies; the state of
+/// SoundCraft's bridge program), what's Kumi's to take out: kept generations, discovery, logs, renders to listen to, the
+/// receipt, the secret, the lock and the journal, the program's launch record, its lock and its runs' output, a bridge's
+/// lock on the copy it serves (`serving-<pid>.lock`), and a temporary file one of them left (`.<name>.tmp-…`). Catch-up's
+/// baselines (`snapshots`) are Kumi's data, gone only with --all; the copies of Kumi's bridge the producer had changed
+/// (`changed`), which the lifecycle kept for them, always stay.
+pub const BRIDGES_OWN: [&str; 11] = [
+    "generations",
+    "discovery",
+    "logs",
+    "listening",
+    "install-receipt.json",
+    "bridge.secret",
+    "lifecycle.lock",
+    "lifecycle-journal.json",
+    "launched.json",
+    "launch.lock",
+    "runs",
+];
+/// What only Kumi's bridge lifecycle (or its bridge program's launch) writes in a DAW's folder in `bridges`: in a folder
+/// the producer also uses, a DAW's folder is Kumi's only when it holds one of these.
+const BRIDGES_MARKS: [&str; 5] = ["install-receipt.json", "bridge.secret", "lifecycle.lock", "lifecycle-journal.json", "launched.json"];
 /// The data in a DAW's folder in `bridges`, and the copies kept for the producer there.
 const BRIDGES_DATA: &str = "snapshots";
 const BRIDGES_CHANGED: &str = "changed";
@@ -1903,6 +1915,7 @@ fn bridges_parts(bridges: &str, all: bool, parts: &mut Parts) {
     };
     let kumis = |name: &str| {
         BRIDGES_OWN.contains(&name)
+            || name.strip_prefix("serving-").and_then(|rest| rest.strip_suffix(".lock")).is_some_and(|pid| pid.parse::<u32>().is_ok())
             || name.strip_prefix('.').and_then(|rest| rest.split_once(".tmp-")).is_some_and(|(of, _)| BRIDGES_OWN.contains(&of))
     };
     let (mut whole, mut gone) = (true, vec![]);
@@ -2080,9 +2093,7 @@ fn dry_run(io: &InstalledIo, home: &str, options: UninstallOptions, display: &dy
     } else if !files.is_empty() {
         also.push(format!("take Kumi out of {}", listed(&files)));
     }
-    for provider in &bridges {
-        also.push(provider.removal_question().into());
-    }
+    also.extend(bridges.iter().map(|provider| provider.removal_question()).filter(|question| !question.is_empty()).map(String::from));
     if !also.is_empty() {
         say(format!("It would also {}.", also.join(", and ")));
     }
