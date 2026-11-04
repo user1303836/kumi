@@ -1,0 +1,441 @@
+//! What an operation of `kumi serve` is and is given: its MCP tool ([`Operation`]), the call it answers ([`Call`]: the
+//! arguments, the host's identity for it, its cancel signal and its progress) and the runtime it runs in ([`Ctx`]).
+//! Every stream's operations are written against these; each module adds its own to [`super::registry`].
+
+use super::snapshots::Snapshots;
+use super::Args;
+use futures::future::LocalBoxFuture;
+use kumi_common::abort::Signal;
+use kumi_types::daw::DawId;
+use kumi_types::system::Env;
+use serde::Serialize;
+use serde_json::{json, Map, Value};
+use std::cell::RefCell;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
+use tokio::sync::mpsc::UnboundedSender;
+
+pub type JsonObject = Map<String, Value>;
+pub type OpFuture<'a> = LocalBoxFuture<'a, Result<Value, OpError>>;
+
+/// One MCP tool of `kumi serve`: a C1 tool without its `kumi_` prefix.
+pub struct Operation {
+    pub name: &'static str,
+    pub description: &'static str,
+    /// The arguments' JSON schema (C1's, without `_host`): a call that doesn't fit is refused before `run`.
+    pub schema: fn() -> Value,
+    /// What a call with these arguments does: `listen` reads a file but plays the Set for a track. The runtime takes
+    /// the write lease before running a call that writes, plays or imports.
+    pub effect: fn(&JsonObject) -> Effect,
+    pub run: for<'a> fn(&'a Ctx, Call) -> OpFuture<'a>,
+}
+
+/// What a call does, by C1's effect classes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Effect {
+    /// Reads the DAW, the runtime's state or an approved file.
+    Read,
+    /// Starts or ends the runtime's connection to the DAW; changes nothing in it.
+    Connect,
+    /// Changes the project.
+    Write,
+    /// Plays or captures the project (a track listen), changing settings while it does.
+    Playback,
+    /// Places a file in the project.
+    Import,
+    /// Reads a folder the producer approved.
+    FolderRead,
+    /// Installs Kumi's part in the DAW.
+    Setup,
+    /// Sends a file to a service.
+    Upload,
+    /// Spends the producer's credits.
+    Paid,
+}
+
+impl Effect {
+    /// Whether a call with this effect needs the DAW endpoint's write lease.
+    pub fn writes(self) -> bool {
+        matches!(self, Effect::Write | Effect::Playback | Effect::Import)
+    }
+}
+
+/// [`Operation::effect`] for an operation that only ever reads.
+pub fn reads(_: &JsonObject) -> Effect {
+    Effect::Read
+}
+
+/// Who asked, as the host says it (`_host` in the arguments): the profile, its session, the tool call and the request.
+/// Identity for deduplication, ownership and the snapshots' envelope; never permission.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct Host {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub request_id: Option<String>,
+}
+
+impl Host {
+    /// `_host` as the host sends it: an object of these four strings, any of them left out.
+    pub fn from_value(value: &Value) -> Result<Host, String> {
+        let Value::Object(fields) = value else { return Err("_host is an object".into()) };
+        let mut host = Host::default();
+        for (key, field) in fields {
+            let slot = match key.as_str() {
+                "profile_id" => &mut host.profile_id,
+                "session_id" => &mut host.session_id,
+                "tool_call_id" => &mut host.tool_call_id,
+                "request_id" => &mut host.request_id,
+                other => return Err(format!("_host has no \"{other}\"")),
+            };
+            match field {
+                Value::String(text) if text.len() <= 256 => *slot = Some(text.clone()),
+                Value::Null => {}
+                _ => return Err(format!("_host.{key} is a string of at most 256 characters")),
+            }
+        }
+        Ok(host)
+    }
+}
+
+/// A message the runtime sends the host.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Out {
+    Message(Value),
+    /// The runtime is done: what was sent before goes out, then the output closes.
+    Close,
+}
+
+pub type Outbox = UnboundedSender<Out>;
+
+/// A call's progress, for long work: `notifications/progress` when the host asked for it (a `progressToken`), nothing
+/// otherwise.
+#[derive(Debug, Clone)]
+pub struct Progress {
+    to: Option<(Value, Outbox)>,
+}
+
+impl Progress {
+    pub fn new(token: Option<Value>, outbox: Outbox) -> Progress {
+        Progress { to: token.map(|token| (token, outbox)) }
+    }
+
+    /// Progress no one asked for: reported nowhere.
+    pub fn none() -> Progress {
+        Progress { to: None }
+    }
+
+    /// `done` of `total` (when known), and what's under way.
+    pub fn report(&self, done: f64, total: Option<f64>, message: Option<&str>) {
+        let Some((token, outbox)) = &self.to else { return };
+        let mut params = json!({"progressToken": token, "progress": done});
+        if let Some(total) = total {
+            params["total"] = json!(total);
+        }
+        if let Some(message) = message {
+            params["message"] = json!(message);
+        }
+        let _ = outbox.send(Out::Message(json!({"jsonrpc": "2.0", "method": "notifications/progress", "params": params})));
+    }
+}
+
+/// One call to an operation.
+pub struct Call {
+    /// The arguments, already checked against the operation's schema, `_host` taken out.
+    pub args: JsonObject,
+    pub host: Host,
+    /// Fires when the host cancels the call (`notifications/cancelled`) or its input ends. An operation stops at it,
+    /// but settles first: puts back what it changed for the while, deletes its scratch, and records `unsure` when it
+    /// can't tell what happened.
+    pub signal: Signal,
+    pub progress: Progress,
+}
+
+/// Why a call didn't run: the call never reached the DAW. What a call that ran did, refused steps and `unsure` writes
+/// included, is its result, not one of these.
+#[derive(Debug, Clone, PartialEq)]
+pub enum OpError {
+    /// The arguments don't fit.
+    Invalid { reason: String },
+    /// There's no connection to the DAW yet: `connect` first.
+    NotConnected { reason: String },
+    /// The runtime won't: `code` says why (`stale`, `leased`, `unsupported`…), `owner` who holds the DAW when it's held.
+    Refused { code: &'static str, reason: String, owner: Option<Value> },
+    /// It failed before changing anything.
+    Failed { reason: String },
+}
+
+impl OpError {
+    pub fn code(&self) -> &str {
+        match self {
+            OpError::Invalid { .. } => "invalid",
+            OpError::NotConnected { .. } => "not_connected",
+            OpError::Refused { code, .. } => code,
+            OpError::Failed { .. } => "failed",
+        }
+    }
+
+    pub fn reason(&self) -> &str {
+        match self {
+            OpError::Invalid { reason } | OpError::NotConnected { reason } | OpError::Failed { reason } => reason,
+            OpError::Refused { reason, .. } => reason,
+        }
+    }
+
+    /// The error as the call's result says it: `{"error": {"code", "reason", "owner"?}}`.
+    pub fn to_value(&self) -> Value {
+        let mut error = json!({"code": self.code(), "reason": self.reason()});
+        if let OpError::Refused { owner: Some(owner), .. } = self {
+            error["owner"] = owner.clone();
+        }
+        json!({"error": error})
+    }
+}
+
+/// The folders the runtime works in.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Paths {
+    /// Everything the runtime writes: snapshots, HISTORY, jobs, artifacts, scratch.
+    pub state_dir: PathBuf,
+    /// The Kumi home the DAW bridge's transport files are in.
+    pub kumi_home: PathBuf,
+}
+
+/// The programs optional features may run, as setup selected them. The runtime fetches nothing: a feature that needs a
+/// program not here is unavailable, and says so.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Media {
+    pub tools: BTreeMap<String, PathBuf>,
+}
+
+impl Media {
+    /// Always: in `kumi serve`, only what's installed and given is used.
+    pub fn installed_only(&self) -> bool {
+        true
+    }
+
+    pub fn tool(&self, name: &str) -> Option<&Path> {
+        self.tools.get(name).map(PathBuf::as_path)
+    }
+}
+
+/// The runtime every operation runs in. One per process, shared by its calls (on one thread).
+pub struct Ctx {
+    daw: DawId,
+    paths: Paths,
+    env: Env,
+    library_roots: RefCell<Vec<PathBuf>>,
+    media_roots: Vec<PathBuf>,
+    media: Media,
+    snapshots: Snapshots,
+    shutdown: Signal,
+}
+
+impl Ctx {
+    /// The runtime for these arguments: its state folder made, owner-only, when it isn't there.
+    pub fn new(args: Args, env: Env) -> Result<Ctx, String> {
+        make_private_dir(&args.state_dir).map_err(|error| format!("can't make {}: {error}", args.state_dir.display()))?;
+        let ctx = Ctx {
+            daw: args.daw,
+            snapshots: Snapshots::new(args.state_dir.clone()),
+            paths: Paths { state_dir: args.state_dir, kumi_home: args.kumi_home },
+            env,
+            library_roots: RefCell::new(granted("library", args.library_roots)),
+            media_roots: granted("media", args.media_roots),
+            media: Media { tools: args.tools },
+            shutdown: Signal::new(),
+        };
+        ctx.project_library_roots();
+        Ok(ctx)
+    }
+
+    pub fn daw(&self) -> DawId {
+        self.daw
+    }
+
+    pub fn paths(&self) -> &Paths {
+        &self.paths
+    }
+
+    /// The environment the DAW code reads (KUMI_HOME is `--kumi-home`).
+    pub fn env(&self) -> &Env {
+        &self.env
+    }
+
+    /// The sample folders the producer approved: the only ones the library reads. `--library-root` is the whole grant
+    /// at each start (a folder taken out of the host's settings is gone); folders approved while it runs join them.
+    /// Each as it was on disk when granted (links resolved then, never again), so a check against them is a check
+    /// against what the producer approved.
+    pub fn library_roots(&self) -> Vec<PathBuf> {
+        self.library_roots.borrow().clone()
+    }
+
+    /// A folder the producer just approved joins the library's roots for this run (the host keeps it in its settings
+    /// for the next): the root as granted. `library-roots.json` shows the roots now: for the UI, never read back as
+    /// permission.
+    pub fn add_library_root(&self, root: &Path) -> std::io::Result<PathBuf> {
+        let root = std::fs::canonicalize(root)?;
+        if !root.is_dir() {
+            return Err(std::io::Error::new(std::io::ErrorKind::NotADirectory, format!("{} isn't a folder", root.display())));
+        }
+        let added = {
+            let mut roots = self.library_roots.borrow_mut();
+            let new = !roots.contains(&root);
+            if new {
+                roots.push(root.clone());
+            }
+            new
+        };
+        if added {
+            self.project_library_roots();
+        }
+        Ok(root)
+    }
+
+    /// The host's own media folders, only for placing one of its files in the DAW: as granted, like the library's.
+    pub fn media_roots(&self) -> &[PathBuf] {
+        &self.media_roots
+    }
+
+    pub fn media(&self) -> &Media {
+        &self.media
+    }
+
+    pub fn snapshots(&self) -> &Snapshots {
+        &self.snapshots
+    }
+
+    /// Fires when the host's input ends: every call in flight stops and settles, then the runtime exits.
+    pub fn shutdown(&self) -> &Signal {
+        &self.shutdown
+    }
+
+    fn project_library_roots(&self) {
+        let roots: Vec<String> = self.library_roots.borrow().iter().map(|root| root.display().to_string()).collect();
+        if let Err(error) = self.snapshots.write("library-roots", &json!({"roots": roots})) {
+            super::say(&format!("kumi serve: library-roots.json not written: {error}"));
+        }
+    }
+}
+
+/// The folders granted at start, each resolved on disk now. One that isn't a folder there now grants nothing this run.
+fn granted(kind: &str, roots: Vec<PathBuf>) -> Vec<PathBuf> {
+    let mut granted: Vec<PathBuf> = Vec::with_capacity(roots.len());
+    for root in roots {
+        match std::fs::canonicalize(&root) {
+            Ok(found) if found.is_dir() => {
+                if !granted.contains(&found) {
+                    granted.push(found);
+                }
+            }
+            Ok(_) => super::say(&format!("kumi serve: {kind} root {} isn't a folder; left out", root.display())),
+            Err(error) => super::say(&format!("kumi serve: {kind} root {} isn't there ({error}); left out", root.display())),
+        }
+    }
+    granted
+}
+
+/// A folder only its owner can open, made with its parents when it isn't there.
+pub(crate) fn make_private_dir(path: &Path) -> std::io::Result<()> {
+    if path.is_dir() {
+        return Ok(());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(path)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(path)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_host_says_who_asked_and_nothing_else() {
+        let host =
+            Host::from_value(&json!({"profile_id": "default", "session_id": "s1", "tool_call_id": "t1", "request_id": null})).unwrap();
+        assert_eq!(
+            (host.profile_id.as_deref(), host.session_id.as_deref(), host.tool_call_id.as_deref()),
+            (Some("default"), Some("s1"), Some("t1"))
+        );
+        assert_eq!(host.request_id, None);
+        assert!(Host::from_value(&json!({"profile_id": "default", "approved": true})).unwrap_err().contains("approved"));
+        assert!(Host::from_value(&json!({"session_id": 7})).unwrap_err().contains("string"));
+        assert!(Host::from_value(&json!("default")).is_err());
+    }
+
+    #[test]
+    fn an_error_says_its_code_reason_and_holder() {
+        let refused = OpError::Refused { code: "leased", reason: "another session has Live".into(), owner: Some(json!({"pid": 7})) };
+        assert_eq!(refused.to_value(), json!({"error": {"code": "leased", "reason": "another session has Live", "owner": {"pid": 7}}}));
+        assert_eq!(OpError::NotConnected { reason: "connect first".into() }.to_value()["error"]["code"], "not_connected");
+    }
+
+    #[test]
+    fn only_writes_plays_and_imports_take_the_lease() {
+        let writing: Vec<Effect> = [
+            Effect::Read,
+            Effect::Connect,
+            Effect::Write,
+            Effect::Playback,
+            Effect::Import,
+            Effect::FolderRead,
+            Effect::Setup,
+            Effect::Upload,
+            Effect::Paid,
+        ]
+        .into_iter()
+        .filter(|effect| effect.writes())
+        .collect();
+        assert_eq!(writing, [Effect::Write, Effect::Playback, Effect::Import]);
+    }
+
+    #[test]
+    fn progress_goes_out_only_when_asked_for() {
+        let (outbox, mut sent) = tokio::sync::mpsc::unbounded_channel();
+        Progress::new(Some(json!("p1")), outbox.clone()).report(2.0, Some(5.0), Some("scanning"));
+        Progress::new(None, outbox).report(1.0, None, None);
+        let Ok(Out::Message(message)) = sent.try_recv() else { panic!("progress") };
+        assert_eq!(message["params"], json!({"progressToken": "p1", "progress": 2.0, "total": 5.0, "message": "scanning"}));
+        assert!(sent.try_recv().is_err(), "nothing for a call that didn't ask");
+    }
+
+    #[test]
+    fn the_library_reads_only_the_roots_granted_as_they_were_then() {
+        let dir = tempfile::tempdir().unwrap();
+        for folder in ["Samples", "Drums", "media"] {
+            std::fs::create_dir_all(dir.path().join(folder)).unwrap();
+        }
+        std::fs::write(dir.path().join("kick.wav"), b"RIFF").unwrap();
+        let args = Args {
+            state_dir: dir.path().join("state"),
+            kumi_home: dir.path().join("home"),
+            daw: DawId::Reaper,
+            library_roots: vec![dir.path().join("Samples"), dir.path().join("Gone"), dir.path().join("Samples/../Samples")],
+            media_roots: vec![dir.path().join("media"), dir.path().join("kick.wav")],
+            tools: BTreeMap::new(),
+        };
+        let ctx = Ctx::new(args, Env::new()).unwrap();
+        let resolved = |name: &str| std::fs::canonicalize(dir.path().join(name)).unwrap();
+        assert_eq!(ctx.library_roots(), [resolved("Samples")], "a root not there grants nothing; one root named twice is one");
+        assert_eq!(ctx.media_roots(), [resolved("media")], "a file is no root");
+        assert_eq!(ctx.add_library_root(&dir.path().join("Drums")).unwrap(), resolved("Drums"));
+        ctx.add_library_root(&dir.path().join("Drums")).unwrap();
+        assert!(ctx.add_library_root(&dir.path().join("Gone")).is_err());
+        assert!(ctx.add_library_root(&dir.path().join("kick.wav")).is_err());
+        assert_eq!(ctx.library_roots(), [resolved("Samples"), resolved("Drums")]);
+        let shown: Value = serde_json::from_slice(&std::fs::read(dir.path().join("state/library-roots.json")).unwrap()).unwrap();
+        assert_eq!(shown["roots"].as_array().map(Vec::len), Some(2));
+        assert!(ctx.media().installed_only() && ctx.media().tool("ffmpeg").is_none());
+    }
+}
