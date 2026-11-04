@@ -261,14 +261,52 @@ impl Host {
     /// `discover`: every running instance's bridge, connected and asked for its status. A bridge the host starts is
     /// started first, if its DAW runs.
     pub async fn discover(&self) -> Value {
-        let starting = match &self.spawn {
-            Some(spawn) => spawn.bring_up(self.daw, &self.paths, || !self.instances().0.is_empty()).await.err(),
-            None => None,
-        };
-        let (alive, mut stale, invalid) = self.instances();
-        let secret = self.secret();
-        let mut instances = vec![];
-        for discovery in &alive {
+        let deadline = self.spawn.as_ref().map(Spawn::deadline);
+        let (mut stale, mut retried) = (0, false);
+        loop {
+            let starting = match (&self.spawn, deadline) {
+                (Some(spawn), Some(deadline)) => {
+                    spawn.bring_up(self.daw, &self.paths, || !self.instances().0.is_empty(), deadline).await.err()
+                }
+                _ => None,
+            };
+            let (alive, removed, invalid) = self.instances();
+            let secret = self.secret();
+            let (instances, gone) = self.rows(&alive, &secret).await;
+            stale += removed + gone;
+            // (a gone bridge's file, removed just now while its DAW runs on: one the host starts is started again, once)
+            if self.spawn.is_some() && gone > 0 && instances.is_empty() && !retried {
+                retried = true;
+                continue;
+            }
+            let mut result = json!({"daw": self.daw.id(), "setUp": secret.is_ok(), "instances": instances});
+            if stale > 0 {
+                result["staleRemoved"] = stale.into();
+            }
+            if !invalid.is_empty() {
+                result["invalid"] = invalid.into();
+            }
+            if instances.is_empty() {
+                result["hint"] = match (starting, &secret) {
+                    (Some(why), _) => why,
+                    (None, Err(why)) => why.clone(),
+                    (None, Ok(_)) if self.spawn.is_some() => format!("Kumi's {} bridge doesn't answer: ask again in a moment", self.daw),
+                    (None, Ok(_)) => format!(
+                        "no {} with Kumi's bridge is running: open {}, or restart it if it was open before Kumi set up its bridge",
+                        self.daw, self.daw
+                    ),
+                }
+                .into();
+            }
+            return result;
+        }
+    }
+
+    /// A row for each instance whose bridge answers, connected and asked for its status, and how many files were a gone
+    /// bridge's (removed).
+    async fn rows(&self, alive: &[Discovery], secret: &Result<daw_bridge::auth::Secret, String>) -> (Vec<Value>, usize) {
+        let (mut instances, mut gone) = (vec![], 0);
+        for discovery in alive {
             let mut row = json!({
                 "pid": discovery.pid,
                 "port": discovery.port,
@@ -277,14 +315,14 @@ impl Host {
                 "dawVersion": discovery.daw_version,
                 "project": discovery.project,
             });
-            match &secret {
+            match secret {
                 Err(why) => {
                     row["connected"] = false.into();
                     row["error"] = why.clone().into();
                 }
                 Ok(secret) => match self.connect(discovery, secret).await {
                     None => {
-                        stale += 1;
+                        gone += 1;
                         continue;
                     }
                     Some(Err(why)) => {
@@ -312,34 +350,18 @@ impl Host {
             }
             instances.push(row);
         }
-        let mut result = json!({"daw": self.daw.id(), "setUp": secret.is_ok(), "instances": instances});
-        if stale > 0 {
-            result["staleRemoved"] = stale.into();
-        }
-        if !invalid.is_empty() {
-            result["invalid"] = invalid.into();
-        }
-        if instances.is_empty() {
-            result["hint"] = match (starting, &secret) {
-                (Some(why), _) => why,
-                (None, Err(why)) => why.clone(),
-                (None, Ok(_)) => format!(
-                    "no {} with Kumi's bridge is running: open {}, or restart it if it was open before Kumi set up its bridge",
-                    self.daw, self.daw
-                ),
-            }
-            .into();
-        }
-        result
+        (instances, gone)
     }
 
     /// The chosen instance's connection, made if there isn't one, and how many instances run. A DAW whose bridge the host
-    /// starts has it started first, if the DAW runs, without the lock on the connection held: other calls go on.
+    /// starts has it started first, if the DAW runs, without the lock on the connection held: other calls go on. The
+    /// call's waits for its bridge share one deadline.
     async fn connected(&self, pick: &Pick) -> Result<(tokio::sync::MutexGuard<'_, Option<Current>>, usize), String> {
+        let deadline = self.spawn.as_ref().map(Spawn::deadline);
         let mut gone = false;
         loop {
-            if let Some(spawn) = &self.spawn {
-                spawn.bring_up(self.daw, &self.paths, || !self.instances().0.is_empty()).await?;
+            if let (Some(spawn), Some(deadline)) = (&self.spawn, deadline) {
+                spawn.bring_up(self.daw, &self.paths, || !self.instances().0.is_empty(), deadline).await?;
             }
             let mut current = self.current.lock().await;
             match self.ensure_connected(&mut current, pick).await {

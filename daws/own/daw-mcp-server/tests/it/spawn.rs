@@ -2,7 +2,7 @@
 //! none answers, once however many calls ask, never waited on past a moment, stopped with the session, and ended with a
 //! host that is killed. The first tests run simulated bridges in this process; the last run the test binary as the bridge
 //! and as the host, to kill a real host.
-use daw_bridge::files::{process_alive, read_secret};
+use daw_bridge::files::{ensure_secret, process_alive, read_secret, write_discovery, Discovery, DISCOVERY_SCHEMA};
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
 use daw_mcp_server::host::{Host, Pick};
@@ -66,6 +66,16 @@ impl World {
             bridge.end("its DAW quit");
         }
     }
+
+    /// The DAW quits and its bridges' files go (as the DAW's pid, in them, ends), but the bridges themselves run on.
+    fn quit_leaving_bridges(&self) {
+        self.running.store(false, Ordering::SeqCst);
+        for bridge in self.serving.lock().unwrap().drain(..) {
+            if let Some(simulator) = bridge.simulator.lock().unwrap().take() {
+                simulator.stop();
+            }
+        }
+    }
 }
 
 /// One simulated bridge: its simulator once it serves, and how it ended.
@@ -117,7 +127,10 @@ impl Lab {
             stopped: 0.into(),
             serving: Mutex::default(),
         };
-        Self { home: tempfile::tempdir().unwrap(), world: Arc::new(world) }
+        let home = tempfile::tempdir().unwrap();
+        // (made here, the secret's owner-only permissions are no part of any call's time: a PowerShell run on Windows)
+        ensure_secret(&BridgePaths::new(home.path(), Daw::Renoise).secret()).unwrap();
+        Self { home, world: Arc::new(world) }
     }
 
     fn paths(&self) -> BridgePaths {
@@ -227,16 +240,21 @@ async fn a_bridge_slow_to_serve_holds_a_call_only_a_moment_and_is_stopped_after_
     let times = Times { call: ms(300), serve: ms(1500), retry: ms(1000), stop: ms(200) };
     let lab = Lab::new(How::Never);
     let host = lab.host(times);
+    let began = Instant::now();
     let first = host.status(&anyone()).await;
     assert_eq!(reason(&first), STARTING);
-    let waited = lab.world.since_start();
-    assert!(waited < ms(1200), "a call waits a moment for a starting bridge, not its whole start: {waited:?}");
+    assert!(began.elapsed() < ms(1200), "a call waits a moment for a starting bridge, not its whole start: {:?}", began.elapsed());
     assert_eq!(reason(&host.status(&anyone()).await), STARTING);
     assert_eq!(lab.world.starts(), 1, "a starting bridge is waited for, not started again");
-    // (timed from the bridge's start: making the secret first takes a while on Windows)
+    // (timed from the bridge's start, which the first call set going)
     tokio::time::sleep(times.serve.saturating_sub(lab.world.since_start()) + ms(150)).await;
     let failed = host.status(&anyone()).await;
     assert_eq!(reason(&failed), "Kumi's Renoise bridge didn't start serving within 1.5 s");
+    // (stopped beside the call)
+    let until = Instant::now() + Duration::from_secs(2);
+    while lab.world.stopped() == 0 && Instant::now() < until {
+        tokio::time::sleep(ms(20)).await;
+    }
     assert_eq!(lab.world.stopped(), 1);
     assert_eq!(reason(&host.status(&anyone()).await), reason(&failed), "told why at once, with no bridge started");
     assert_eq!(lab.world.starts(), 1);
@@ -280,6 +298,65 @@ async fn a_bridge_goes_with_its_daw_and_a_reopened_daw_gets_a_new_one() {
     let status = host.status(&anyone()).await;
     assert_eq!(status["connected"], true, "{status}");
     assert_eq!(lab.world.starts(), 2);
+}
+
+/// Asks for `status` until it says `reason` (the first call after a change may be the one that finds the connection
+/// closed, or the one that starts a bridge).
+async fn status_saying(host: &Host, reason_said: &str) -> Value {
+    let mut status = host.status(&anyone()).await;
+    for _ in 0..40 {
+        if reason(&status) == reason_said {
+            break;
+        }
+        tokio::time::sleep(ms(50)).await;
+        status = host.status(&anyone()).await;
+    }
+    status
+}
+
+#[tokio::test]
+async fn a_gone_bridges_file_is_removed_and_one_bridge_is_started_in_its_place() {
+    let lab = Lab::new(How::Serve(ms(50)));
+    // A gone bridge's file: its DAW (this test's process) runs on, and nothing listens on its port.
+    let closed = std::net::TcpListener::bind(("127.0.0.1", 0)).unwrap().local_addr().unwrap().port();
+    let gone = Discovery {
+        schema: DISCOVERY_SCHEMA.into(),
+        daw: "renoise".into(),
+        pid: std::process::id(),
+        host: "127.0.0.1".into(),
+        port: closed,
+        protocol: daw_bridge::wire::PROTOCOL.into(),
+        version: "0.1.0".into(),
+        daw_version: "3.5.4".into(),
+        resource: "/lab/Renoise-before".into(),
+        project: None,
+        started_ms: 1,
+    };
+    let file = write_discovery(&lab.paths().discovery(), &gone).unwrap();
+    let host = lab.host(Times::default());
+    // (on Windows the refused connect takes its 2 s, the call's whole wait: then the next call connects)
+    let mut status = host.status(&anyone()).await;
+    if status["connected"] != true {
+        status = host.status(&anyone()).await;
+    }
+    assert_eq!(status["connected"], true, "{status}");
+    assert!(!file.exists(), "the gone bridge's file was removed");
+    assert_eq!(lab.world.starts(), 1, "one bridge started in its place");
+}
+
+#[tokio::test]
+async fn a_bridge_left_running_after_its_daw_quit_is_stopped() {
+    let lab = Lab::new(How::Serve(ms(50)));
+    let host = lab.host(Times::default());
+    assert_eq!(host.status(&anyone()).await["connected"], true);
+    lab.world.quit_leaving_bridges();
+    let status = status_saying(&host, "no Renoise is running: open Renoise").await;
+    assert_eq!(reason(&status), "no Renoise is running: open Renoise", "{status}");
+    let until = Instant::now() + Duration::from_secs(2);
+    while lab.world.stopped() == 0 && Instant::now() < until {
+        tokio::time::sleep(ms(20)).await;
+    }
+    assert_eq!((lab.world.stopped(), lab.world.starts()), (1, 1), "the bridge was stopped, and none started");
 }
 
 /// One of this binary's ignored tests, run as a program.

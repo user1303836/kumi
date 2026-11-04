@@ -1,7 +1,8 @@
 //! A bridge the host starts and stops itself, for a DAW nothing of Kumi's can be loaded into: Kumi's own program beside
-//! the DAW. The host starts it for a running DAW when no bridge answers, one at a time, and no call waits on it for more
-//! than a moment: it goes on starting while the calls go on. Its stdin is the host's pipe. Closing it is how the host
-//! stops it, and a host that dies (killed, or crashed) closes it too, so the bridge ends by itself and removes its
+//! the DAW. The host starts it for a running DAW when no bridge answers, one at a time. The start runs in a task of its
+//! own (the secret made off the async threads, then the program), and a call waits for a starting bridge no longer than
+//! its own deadline: the bridge goes on starting while the calls go on. Its stdin is the host's pipe. Closing it is how
+//! the host stops it, and a host that dies (killed, or crashed) closes it too, so the bridge ends by itself and removes its
 //! discovery file either way. Which DAWs have such a bridge: [`bridge_program`] (none yet).
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
@@ -27,7 +28,8 @@ pub struct Times {
     /// The longest a call waits for a bridge that is starting. A call that waits that long is told the bridge is
     /// starting, and the bridge goes on starting.
     pub call: Duration,
-    /// How long a bridge gets to serve (its discovery file appears) before it's stopped as one that failed.
+    /// How long a bridge gets to serve (its discovery file appears). One that hasn't by then is stopped as failed, by the
+    /// first call after (or the session's end).
     pub serve: Duration,
     /// How long after a bridge failed before another is started. The calls in between are told why at once.
     pub retry: Duration,
@@ -48,7 +50,9 @@ const POLL: Duration = Duration::from_millis(50);
 pub trait SpawnedBridge: Send {
     /// Why it ended, once it has (the last line it wrote, else its exit status); None while it runs.
     fn exited(&mut self) -> Option<String>;
-    /// Asks it to end: its stdin closes, and it removes its discovery file and ends by itself.
+    /// Asks it to end: its stdin closes, as it does when the host dies. The bridge removes its discovery file first and
+    /// then ends. From then on its stderr may be a pipe nobody reads, so a bridge ignores a write there that fails
+    /// (`eprintln!` panics on one).
     fn stop(&mut self);
     /// Ends it now.
     fn kill(&mut self);
@@ -57,17 +61,23 @@ pub trait SpawnedBridge: Send {
 /// Starting a bridge: the bridge, or why it couldn't start.
 pub type Starting = Pin<Box<dyn Future<Output = Result<Box<dyn SpawnedBridge>, String>> + Send>>;
 
+type Start = Arc<dyn Fn() -> Starting + Send + Sync>;
+
 /// How the host starts its DAW's bridge, and the bridge it started.
 pub struct Spawn {
     /// Whether the DAW runs now. It may list the processes, so it's asked off the async threads.
     running: Arc<dyn Fn() -> bool + Send + Sync>,
-    start: Box<dyn Fn() -> Starting + Send + Sync>,
+    start: Start,
     times: Times,
-    state: tokio::sync::Mutex<State>,
+    state: Arc<tokio::sync::Mutex<State>>,
 }
 
+#[derive(Default)]
 enum State {
+    #[default]
     Idle,
+    /// A task of its own is getting a bridge going: making the secret, then starting the program.
+    Starting,
     Started {
         bridge: Box<dyn SpawnedBridge>,
         at: Instant,
@@ -93,7 +103,7 @@ impl Spawn {
 
     /// Starts bridges with `start`, for a DAW that runs while `running` says so.
     pub fn new(running: impl Fn() -> bool + Send + Sync + 'static, start: impl Fn() -> Starting + Send + Sync + 'static) -> Self {
-        Self { running: Arc::new(running), start: Box::new(start), times: Times::default(), state: tokio::sync::Mutex::new(State::Idle) }
+        Self { running: Arc::new(running), start: Arc::new(start), times: Times::default(), state: Arc::default() }
     }
 
     pub fn with_times(mut self, times: Times) -> Self {
@@ -101,15 +111,27 @@ impl Spawn {
         self
     }
 
+    /// The deadline of a call that begins now: all the call's waits for its bridge share it.
+    pub(crate) fn deadline(&self) -> Instant {
+        Instant::now() + self.times.call
+    }
+
     /// Makes sure a bridge serves the DAW, if it runs: one that serves already (a discovery file that answers, whoever
-    /// started its bridge), else the one the host started a moment ago, else one it starts now. `serving` says whether a
-    /// discovery file answers. A call waits at most `Times::call`. Ok once a bridge serves. Otherwise it says why none
-    /// does, at once when the DAW isn't running or a bridge failed a moment ago.
-    pub(crate) async fn bring_up(&self, daw: Daw, paths: &BridgePaths, serving: impl Fn() -> bool) -> Result<(), String> {
-        let deadline = Instant::now() + self.times.call;
+    /// started its bridge), else the one the host is starting, else one it starts now. `serving` says whether a discovery
+    /// file answers. Ok once a bridge serves, by `deadline`. Otherwise it says why none does: at once when the DAW isn't
+    /// running or a bridge failed a moment ago, and that the bridge is starting when the deadline comes first.
+    pub(crate) async fn bring_up(
+        &self,
+        daw: Daw,
+        paths: &BridgePaths,
+        serving: impl Fn() -> bool,
+        deadline: Instant,
+    ) -> Result<(), String> {
+        let starting = || format!("Kumi's {daw} bridge is starting: ask again in a moment");
         loop {
             let up = serving();
-            let mut state = self.state.lock().await;
+            // (another call may be looking at the process listing: waited for no longer than this call's deadline)
+            let Ok(mut state) = tokio::time::timeout_at(deadline.into(), self.state.lock()).await else { return Err(starting()) };
             if let State::Started { bridge, at, served } = &mut *state {
                 *served |= up;
                 let (served, at) = (*served, *at);
@@ -122,18 +144,17 @@ impl Spawn {
                         State::Failed { at: Instant::now(), why: format!("Kumi's {daw} bridge ended before it served: {how}") }
                     };
                 } else if !up && (served || at.elapsed() >= self.times.serve) {
-                    // Its discovery file went after it served (its DAW quit), or it never served in time. It's stopped, and
-                    // one that never served failed.
+                    // Its discovery file went after it served (its DAW quit), or it never served in time. It's stopped beside
+                    // the call (one that ignores its stdin's end is killed after `Times::stop`), and one that never served
+                    // failed.
                     let next = if served {
                         State::Idle
                     } else {
                         let why = format!("Kumi's {daw} bridge didn't start serving within {} s", self.times.serve.as_secs_f64());
                         State::Failed { at: Instant::now(), why }
                     };
-                    let stopping = std::mem::replace(&mut *state, next);
-                    drop(state);
-                    if let State::Started { bridge, .. } = stopping {
-                        stop_bridge(bridge, self.times.stop).await;
+                    if let State::Started { bridge, .. } = std::mem::replace(&mut *state, next) {
+                        tokio::spawn(stop_bridge(bridge, self.times.stop));
                     }
                     continue;
                 }
@@ -143,7 +164,7 @@ impl Spawn {
             }
             match &*state {
                 // Starting: waited for below.
-                State::Started { .. } => {}
+                State::Starting | State::Started { .. } => {}
                 State::Failed { at, why } if at.elapsed() < self.times.retry => return Err(why.clone()),
                 State::Idle | State::Failed { .. } => {
                     let running = self.running.clone();
@@ -151,34 +172,49 @@ impl Spawn {
                         *state = State::Idle;
                         return Err(format!("no {daw} is running: open {daw}"));
                     }
-                    // The secret the bridge and the host both prove they know: the host makes it, the bridge reads it.
-                    daw_bridge::files::ensure_secret(&paths.secret())
-                        .map_err(|error| format!("the secret for Kumi's {daw} bridge can't be made: {error}"))?;
-                    match (self.start)().await {
-                        Ok(bridge) => *state = State::Started { bridge, at: Instant::now(), served: false },
-                        Err(why) => {
-                            let why = format!("Kumi's {daw} bridge {why}");
-                            *state = State::Failed { at: Instant::now(), why: why.clone() };
-                            return Err(why);
-                        }
-                    }
+                    *state = State::Starting;
+                    tokio::spawn(start(self.state.clone(), self.start.clone(), paths.secret(), daw, self.times.stop));
                 }
             }
             drop(state);
             if Instant::now() >= deadline {
-                return Err(format!("Kumi's {daw} bridge is starting: ask again in a moment"));
+                return Err(starting());
             }
             tokio::time::sleep(POLL).await;
         }
     }
 
-    /// Stops the bridge the host started, if one runs: the session ends.
+    /// Stops the bridge the host started, if one runs: the session ends. A start under way stops its bridge once it has
+    /// one.
     pub(crate) async fn stop(&self) {
         let stopping = std::mem::replace(&mut *self.state.lock().await, State::Idle);
         if let State::Started { bridge, .. } = stopping {
             stop_bridge(bridge, self.times.stop).await;
         }
     }
+}
+
+/// Gets a bridge going beside the calls. First the secret the bridge and the host both prove they know: the host makes
+/// it, off the async threads, since on Windows its owner-only permissions are a PowerShell run, seconds each. Then the
+/// program. A session that ended meanwhile (the state is no longer `Starting`) has the new bridge stopped.
+async fn start(state: Arc<tokio::sync::Mutex<State>>, start: Start, secret: PathBuf, daw: Daw, stop: Duration) {
+    let made = tokio::task::spawn_blocking(move || daw_bridge::files::ensure_secret(&secret).map_err(|error| error.to_string())).await;
+    let started = match made.map_err(|error| error.to_string()).and_then(|made| made) {
+        Ok(_) => start().await.map_err(|why| format!("Kumi's {daw} bridge {why}")),
+        Err(error) => Err(format!("the secret for Kumi's {daw} bridge can't be made: {error}")),
+    };
+    let mut state = state.lock().await;
+    if !matches!(*state, State::Starting) {
+        drop(state);
+        if let Ok(bridge) = started {
+            stop_bridge(bridge, stop).await;
+        }
+        return;
+    }
+    *state = match started {
+        Ok(bridge) => State::Started { bridge, at: Instant::now(), served: false },
+        Err(why) => State::Failed { at: Instant::now(), why },
+    };
 }
 
 /// Whether one of the DAW's programs runs now, by the process listing (KUMI_PROCESSES stands in for it).
@@ -198,9 +234,12 @@ async fn stop_bridge(mut bridge: Box<dyn SpawnedBridge>, wait: Duration) {
     }
 }
 
-/// Starts `program` with `args` as a bridge the host holds. Its stdin is a pipe the host keeps open while it wants the
-/// bridge. Its stdout is closed, because the host's own stdout is the MCP channel. Its stderr is passed on to the host's,
-/// and the end of it is kept to say why the bridge ended.
+/// Starts `program` with `args` as a bridge the host holds.
+/// - Its stdin is a pipe the host keeps open while it wants the bridge.
+/// - Its stdout is closed, because the host's own stdout is the MCP channel.
+/// - Its stderr is passed on to the host's, and the end of it is kept to say why the bridge ended. Once the host is
+///   gone, nobody reads that pipe, so the bridge must ignore a stderr write that fails and remove its discovery file
+///   before it writes anything ([`SpawnedBridge::stop`]).
 pub fn program(program: PathBuf, args: Vec<OsString>) -> impl Fn() -> Starting + Send + Sync + 'static {
     move || {
         let (program, args) = (program.clone(), args.clone());
