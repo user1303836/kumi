@@ -71,6 +71,10 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - **Interpret measurements** (off unless you turn it on) sends the measured numbers and a small image of the measured
   band energy, never the audio or file paths, to the model you choose for Kumi's listening task.
 - **Audio stays here:** Kumi measures audio on your computer and uploads none of it.
+- **Listening to a track or the mix** asks first, and plays only the beat window you approve (60 seconds at most),
+  only while the DAW is stopped. Routing and transport may change briefly and are put back after. Live captures it
+  through Kumi Ears (Max for Live); REAPER and Renoise render it into the listening folder of the Kumi installation
+  that owns their part, and Kumi copies that one file and removes it.
 - Kumi in Hermes never uses Kumi's own sign-in, model providers or updater, and sends no telemetry.
 
 ## Limits
