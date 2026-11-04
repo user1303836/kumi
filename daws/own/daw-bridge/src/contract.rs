@@ -6,8 +6,8 @@
 
 use serde_json::Value;
 
-/// The kinds a ref names, for both DAWs (`r:track:{GUID}`, `E:pattern:3`).
-const REF_KINDS: [&str; 18] = [
+/// The kinds a ref names, for every own bridge's DAW (`r:track:{GUID}`, `E:pattern:3`, `s:clip:40`).
+const REF_KINDS: [&str; 26] = [
     "aitem",
     "track",
     "item",
@@ -26,6 +26,15 @@ const REF_KINDS: [&str; 18] = [
     "phrase",
     "device",
     "line",
+    // SoundCraft's own (soundcraft-kumi's refs)
+    "clip",
+    "insert",
+    "bus",
+    "group",
+    "point",
+    "note",
+    "playlist",
+    "source",
 ];
 
 /// What an item's or a take's row says of a MIDI source (`source`): REAPER's extension writes it, Kumi's REAPER side reads it.
@@ -102,7 +111,20 @@ mod tests {
 
     #[test]
     fn refs_are_told_from_names_and_other_text() {
-        for ref_ in ["r:track:{0A1B}", "r:track:master", "r:param:{AB}:3", "e7:pattern:3", "1a15-2:device:2.1.4", "r:env:{AB}:VOLENV2"] {
+        for ref_ in [
+            "r:track:{0A1B}",
+            "r:track:master",
+            "r:param:{AB}:3",
+            "e7:pattern:3",
+            "1a15-2:device:2.1.4",
+            "r:env:{AB}:VOLENV2",
+            "s:clip:40",
+            "s:track:1.2",
+            "s:insert:12:a",
+            "s:param:12:a:high_shelf_gain",
+            "s:note:40:480.60.0",
+            "s:playlist:12:2",
+        ] {
             assert!(looks_like_ref(ref_), "{ref_}");
         }
         for text in ["Drums", "bass: track: loud", "track:3", "r:nothing:{AB}", "r:track:", "c1.sim-1.2", "36591:2", ""] {
