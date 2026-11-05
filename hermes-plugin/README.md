@@ -105,7 +105,9 @@ and installs under this profile's plugin-data folder; setup shows the download a
 Live Remote Script with its Kumi Ears device, a REAPER extension or a Renoise tool, only at the locations you approve.
 Kumi's runtime, its DAW bridge and its library workers run on the machine that runs Hermes, on loopback only, and stop
 when the chat ends, when the plugin unloads, or after 15 minutes idle; your DAW keeps running. Kumi reads the open
-project and the sample folders you list. Changes to your project go through Hermes's approval (unless Hermes's
+project, the sample folders you list, and finished audio other Hermes plugins saved in Hermes's generated-audio folder
+(`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates), to place or measure it. Changes to your project go
+through Hermes's approval (unless Hermes's
 approvals are off: `--yolo`, a chat's `/yolo` or `approvals.mode: off` run them without asking, and `/kumi` says so),
 and HISTORY records what actually happened, including when an outcome is uncertain; undo is available only while the
 recorded change can still be reversed. Listening to a track or the mix also asks first: it plays only the beat window

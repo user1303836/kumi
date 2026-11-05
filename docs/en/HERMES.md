@@ -96,6 +96,9 @@ Hermes runs Kumi's changes, track listens and setup steps without asking; `/kumi
 - Your DAW must run on the computer that runs Hermes. Hermes Desktop connected to a remote Hermes controls that
   computer's DAW, not yours.
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
+- Kumi reads only the open project, the sample folders you list, and finished audio other Hermes plugins saved in
+  Hermes's generated-audio folder (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates), to place or
+  measure it.
 - Kumi reads WAV and AIFF itself. For MP3, FLAC and other compressed audio it uses an ffmpeg already on your
   computer, if you allow it at setup; it never downloads one. Before each start Kumi checks that it's still the ffmpeg
   file you allowed (not the libraries it loads, which an upgrade can change). A file it measures can be up to 50 MB.
