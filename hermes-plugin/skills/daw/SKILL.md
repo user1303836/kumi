@@ -166,6 +166,7 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
 
 ## What Kumi doesn't do here
 - **Projects:** it doesn't open, save or close Sets and projects, or record.
+- **Grouping tracks in Live:** Live's API can't group tracks without Kumi's native editing, which this plugin doesn't use. Ask the producer to select the tracks and press Cmd+G (Ctrl+G on Windows), then route and name the group with steps.
 - **Files and code:** it doesn't delete files, run scripts or code, or drive the DAW's menus.
 - **Setup:** it doesn't build Max for Live devices or change the DAW's settings.
 
