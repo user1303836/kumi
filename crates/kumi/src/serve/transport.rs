@@ -13,8 +13,8 @@ use serde_json::{json, Value};
 
 pub static TRANSPORT: Operation = Operation {
     name: "transport",
-    description: "Starts or stops the DAW's playback with its own transport. `play` starts from where it is, from a bar \
-                  or beat (REAPER), a sequence slot and line (Renoise), or launches a Session clip or fires a scene \
+    description: "Starts or stops the DAW's playback with its own transport. `play` starts where the DAW starts it, from \
+                  a bar or beat (REAPER), a sequence slot and line (Renoise), or launches a Session clip or fires a scene \
                   (Live); `stop` stops it. It changes nothing in the project but where play starts, and keeps no \
                   HISTORY row. `play` is refused while a listen runs, while the DAW records or would record, and when \
                   the project isn't the one named; `stop` always runs. `preview` says what it would do.",
@@ -85,7 +85,8 @@ fn play_from(args: &JsonObject) -> Result<PlayFrom, OpError> {
 /// What a play would do, in words, naming the project and what it launches.
 fn play_text(from: &PlayFrom, project: &str, names: &std::collections::HashMap<String, String>) -> String {
     match from {
-        PlayFrom::Here => format!("Play {project} from where it is"),
+        // Where a plain play starts is the DAW's own (Live's start marker, REAPER's edit cursor, Renoise's position).
+        PlayFrom::Here => format!("Play {project}"),
         PlayFrom::Bar(bar) => format!("Play {project} from bar {bar}"),
         PlayFrom::Beat(beat) => {
             let beat = kumi_common::js::number::round(*beat * 1000.0) / 1000.0;
@@ -132,8 +133,19 @@ async fn transport(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         return Err(OpError::Invalid { reason: "A play names the project it plays (expected_project_key, from the last look).".into() });
     };
     ctx.link().expect_project(key)?;
-    if ctx.jobs().running_of(&PLAYING_JOBS) || ctx.lease().held() {
-        return Err(refused("busy", format!("Kumi is listening to {project}, or changing it, right now: play it once that's done.")));
+    let busy = format!("Kumi is listening to {project}, or changing it, right now: play it once that's done.");
+    // A play holds the DAW's write lease from before it reads whether the DAW would record until it has played, so no
+    // change, listen or capture starts between the two; it never waits for one, and a preview only looks.
+    let _held = if previewing(args) {
+        if ctx.lease().held() {
+            return Err(refused("busy", busy));
+        }
+        None
+    } else {
+        Some(ctx.lease().try_take(&call.host, &busy)?)
+    };
+    if ctx.jobs().running_of(&PLAYING_JOBS) {
+        return Err(refused("busy", busy));
     }
     match connection.integration.record_armed(call.signal.clone()).await {
         Ok(Some(false)) => {}

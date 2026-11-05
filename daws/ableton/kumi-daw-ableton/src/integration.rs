@@ -227,6 +227,16 @@ impl Ableton {
         )?;
         Ok(read.get("items").and_then(|items| items.get(0)).and_then(|item| item.get("transport")).cloned().unwrap_or_default())
     }
+    /// Whether no track is armed, by a fresh read of the Set's tracks: false when one is, or the read doesn't reach every
+    /// track.
+    async fn none_armed(&self, signal: Signal) -> Result<bool, RuntimeError> {
+        let read = payload(
+            &self.connection.call("live_discover", views::object(json!({"kind":"track","limit":512})), self.combined(signal)).await?,
+        )?;
+        let rows = read.get("items").and_then(Value::as_array);
+        let whole = read.get("nextCursor").is_none_or(Value::is_null);
+        Ok(whole && rows.is_some_and(|rows| rows.iter().all(|row| row.get("armed") != Some(&Value::Bool(true)))))
+    }
     /// The scene at `index` (from 0), by a fresh read of the Set's scenes.
     async fn scene_ref(&self, index: u32, signal: Signal) -> Result<String, RuntimeError> {
         let read = payload(
@@ -948,9 +958,11 @@ impl Integration for Ableton {
         }
         let transport = self.session_transport(signal).await?;
         let on = |key: &str| transport.get(key).and_then(Value::as_bool);
+        // Either on would record; off only when both are known off, else Live can't say.
         Ok(match (on("sessionRecord"), on("arrangementRecord")) {
-            (None, None) => None,
-            (session, arrangement) => Some(session == Some(true) || arrangement == Some(true)),
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), Some(false)) => Some(false),
+            _ => None,
         })
     }
     /// Live plays from its start marker, or launches a Session clip or a scene. Moving the start marker is a change in
@@ -974,6 +986,13 @@ impl Integration for Ableton {
                 self.transport_action("launch_clip", json!({"slotRef": slot}), signal).await
             }
             PlayFrom::Scene(index) => {
+                // With "Start Recording on Scene Launch" on (a preference Kumi can't read), a scene records into an armed
+                // track's empty slots: Kumi fires one only while it can see that no track is armed.
+                if !self.none_armed(signal.clone()).await? {
+                    return Err(RuntimeError::plain(
+                        "A track is armed, or Kumi can't see every track's arm: firing a scene can record into an armed track's empty slots (Live's Start Recording on Scene Launch), so Kumi doesn't. Disarm it in Live, or launch a clip instead.",
+                    ));
+                }
                 let scene = self.scene_ref(*index, signal.clone()).await?;
                 self.transport_action("fire_scene", json!({"ref": scene}), signal).await
             }

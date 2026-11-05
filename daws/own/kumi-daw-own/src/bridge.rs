@@ -1859,9 +1859,12 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         }
         let Ok(focus) = self.call("focus", json!({}), signal).await? else { return Ok(None) };
         let on = |key: &str| focus.pointer(&format!("/transport/{key}")).and_then(Value::as_bool);
+        // `recording` is what both DAWs say (Renoise's from its edit mode): off only when it's known off and nothing else
+        // says it would record, else the DAW can't say.
         Ok(match (on("recording"), on("editMode")) {
-            (None, None) => None,
-            (recording, edit) => Some(recording == Some(true) || edit == Some(true)),
+            (Some(true), _) | (_, Some(true)) => Some(true),
+            (Some(false), _) => Some(false),
+            (None, _) => None,
         })
     }
     /// What the DAW's own transport actions take: a timeline's (REAPER's: a cursor to move first) plays from a bar or a
