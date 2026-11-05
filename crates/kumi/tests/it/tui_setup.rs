@@ -70,6 +70,9 @@ struct FakeLive {
     failure: RefCell<Option<String>>,
     /// Setup asks before it opens Live, closed (a DAW Kumi only opens, to reach it).
     asks: Cell<bool>,
+    /// Attached bridges install beside an app that stays open, then wait for a separate permission.
+    restart: Cell<bool>,
+    enabled: Cell<Option<bool>>,
 }
 impl FakeLive {
     fn new(open: bool) -> Rc<Self> {
@@ -92,6 +95,8 @@ impl FakeLive {
             set_fails: Cell::new(false),
             failure: RefCell::default(),
             asks: Cell::new(false),
+            restart: Cell::new(true),
+            enabled: Cell::new(None),
         })
     }
     fn calls(&self) -> Vec<String> {
@@ -116,6 +121,15 @@ impl FakeLive {
 }
 #[async_trait(?Send)]
 impl LiveSetup for FakeLive {
+    fn needs_restart(&self) -> bool {
+        self.restart.get()
+    }
+    async fn enabled(&self) -> Option<bool> {
+        if self.enabled.get().is_some() {
+            self.calls.borrow_mut().push("enabled?".into());
+        }
+        self.enabled.get()
+    }
     async fn open_live(&self) -> Option<String> {
         self.calls.borrow_mut().push("open?".into());
         self.open.borrow().clone()
@@ -243,6 +257,28 @@ fn rows(h: &Harness) -> String {
     let last = lines.iter().rposition(|l| !l.trim().is_empty()).unwrap_or(0);
     lines[..=last].iter().map(|l| l.trim_end()).collect::<Vec<_>>().join("\n")
 }
+
+case!(an_attached_bridge_installs_while_the_app_stays_open_and_waits_for_accessibility, async {
+    use kumi_types::daw::DawId;
+    kumi::daw::work_with(DawId::Logic);
+    let live = FakeLive::new(true);
+    live.restart.set(false);
+    live.enabled.set(Some(false));
+    let h = setup(80, FakeModels::catalog(), Some((Some("Logic's bridge isn't installed yet."), live.clone())), |_| {});
+    h.start().await;
+    live.wait_for_call("connect").await;
+    h.emit(json!({"type":"connection","state":"connected"}));
+    live.wait_for_call("enabled?").await;
+    assert!(!said(&h).contains("You're set."), "a connection alone does not grant Accessibility");
+    assert_eq!(live.calls().iter().filter(|call| matches!(call.as_str(), "quit" | "closed?" | "start")).count(), 0);
+    assert_eq!(live.open.borrow().as_deref(), Some(LIVE));
+    assert_eq!(live.count("install"), 1);
+    live.enabled.set(Some(true));
+    h.wait_for("You're set.").await;
+    assert!(!live.calls().iter().any(|call| call.starts_with("start")), "the running app is never relaunched");
+    h.close().await;
+    kumi::daw::work_with(DawId::Ableton);
+});
 
 case!(a_first_run_signs_in_puts_the_bridge_in_and_waits_for_the_control_surface, async {
     let live = FakeLive::new(false);

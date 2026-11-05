@@ -14,14 +14,33 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// The program a DAW's bridge is, when the host starts it (it ships beside the host's own); None for a DAW that loads its
-/// bridge itself (REAPER's extension, Renoise's tool).
+/// The program a DAW's bridge is, when the host starts it; None for a DAW that loads its bridge itself
+/// (REAPER's extension, Renoise's tool). Logic may use its installed owned folder; SoundCraft ships beside the host.
 pub fn bridge_program(daw: Daw) -> Option<&'static str> {
     match daw {
         Daw::Reaper | Daw::Renoise => None,
         Daw::Logic => Some("logic-kumi"),
         Daw::SoundCraft => Some("soundcraft-kumi"),
     }
+}
+
+/// Which program to start. Once Logic has an owned installation, an incomplete or unreadable copy must be reported
+/// at that path instead of silently running a different sibling. Without that layout a development bundle can still
+/// provide the sibling program, as SoundCraft does.
+fn bridge_executable(daw: Daw, kumi_home: &Path, host_executable: Option<&Path>) -> Option<PathBuf> {
+    let name = bridge_program(daw)?;
+    if daw == Daw::Logic {
+        let target = daw_bridge::install::logic_target(kumi_home);
+        let present = |path: &Path| match std::fs::symlink_metadata(path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+            _ => true,
+        };
+        if present(&target.dir) || present(&BridgePaths::new(kumi_home, daw).receipt()) {
+            return Some(target.path().join(daw_bridge::install::LOGIC_BINARY));
+        }
+    }
+    let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
+    Some(host_executable.and_then(Path::parent).map_or_else(|| PathBuf::from(&file), |folder| folder.join(&file)))
 }
 
 /// How long the host waits on a bridge it starts.
@@ -93,17 +112,21 @@ enum State {
 }
 
 impl Spawn {
-    /// The DAW table's: its bridge program, beside the host's own, started with `--kumi-home` while the DAW runs. None for
-    /// a DAW that loads its bridge itself.
+    /// The DAW table's: its bridge program, started with `--kumi-home` while the DAW runs. Logic's owned installation
+    /// takes precedence over a bundled sibling. None for a DAW that loads its bridge itself.
     pub fn of(daw: Daw, kumi_home: &Path) -> Option<Self> {
-        let name = bridge_program(daw)?;
-        let file = if cfg!(windows) { format!("{name}.exe") } else { name.to_string() };
-        let beside = std::env::current_exe().ok().and_then(|exe| exe.parent().map(|folder| folder.join(&file)));
+        bridge_program(daw)?;
+        let host_executable = std::env::current_exe().ok();
         let mut args = vec!["--kumi-home".into(), kumi_home.into()];
         if daw == Daw::Logic {
             args.push("--hosted".into());
         }
-        let start = program(beside.unwrap_or_else(|| PathBuf::from(file)), args);
+        let kumi_home = kumi_home.to_path_buf();
+        let start = move || {
+            // Setup may install the bridge after this Host was made. Resolve at each start, not at construction.
+            let file = bridge_executable(daw, &kumi_home, host_executable.as_deref()).expect("a DAW with a bridge program");
+            program(file, args.clone())()
+        };
         Some(Self::new(move || daw_running(daw), start))
     }
 
@@ -337,6 +360,47 @@ async fn pass_on(mut stderr: tokio::process::ChildStderr, said: Arc<Mutex<Tail>>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn logic_uses_its_owned_installation_and_never_hides_an_incomplete_one_with_a_sibling() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("kumi");
+        let host = root.path().join("bundle/daw-mcp-server");
+        let sibling_name = if cfg!(windows) { "logic-kumi.exe" } else { "logic-kumi" };
+        let sibling = host.parent().unwrap().join(sibling_name);
+        std::fs::create_dir_all(host.parent().unwrap()).unwrap();
+        std::fs::write(&sibling, "bundled program").unwrap();
+        let resolve = || bridge_executable(Daw::Logic, &home, Some(&host)).unwrap();
+        assert_eq!(resolve(), sibling, "no installed layout: a bundle can provide the bridge");
+        let target = daw_bridge::install::logic_target(&home);
+        let installed = target.path().join(daw_bridge::install::LOGIC_BINARY);
+        // A setup begun after the Host was created is observed on the next start, even before its copy is complete.
+        std::fs::create_dir_all(&target.dir).unwrap();
+        assert_eq!(resolve(), installed, "an incomplete owned layout must fail at its own path");
+        std::fs::create_dir_all(target.path()).unwrap();
+        std::fs::write(&installed, "installed program").unwrap();
+        assert_eq!(resolve(), installed, "the installed copy wins over a different bundled one");
+        std::fs::remove_file(&installed).unwrap();
+        assert_eq!(resolve(), installed, "a missing owned binary is reported rather than replaced by the sibling");
+        std::fs::remove_dir_all(&target.dir).unwrap();
+        let receipt = BridgePaths::new(&home, Daw::Logic).receipt();
+        std::fs::write(&receipt, "an unreadable receipt must not switch program copies").unwrap();
+        assert_eq!(resolve(), installed, "a receipt with a missing folder still names an owned installation");
+        std::fs::remove_file(receipt).unwrap();
+        assert_eq!(resolve(), sibling);
+    }
+
+    #[test]
+    fn soundcraft_keeps_its_sibling_program_and_loaded_bridges_have_no_program() {
+        let root = tempfile::tempdir().unwrap();
+        let host = root.path().join("bundle/daw-mcp-server");
+        let name = if cfg!(windows) { "soundcraft-kumi.exe" } else { "soundcraft-kumi" };
+        let owned = BridgePaths::new(root.path(), Daw::SoundCraft).bridge();
+        std::fs::create_dir_all(owned).unwrap();
+        assert_eq!(bridge_executable(Daw::SoundCraft, root.path(), Some(&host)), Some(host.parent().unwrap().join(name)));
+        assert_eq!(bridge_executable(Daw::Reaper, root.path(), Some(&host)), None);
+        assert_eq!(bridge_executable(Daw::Renoise, root.path(), Some(&host)), None);
+    }
 
     #[test]
     fn what_a_bridge_said_last_is_its_last_line_with_words_and_the_tail_stays_bounded() {

@@ -2,6 +2,7 @@
 use crate::daw::Daw;
 use crate::detect::{Arch, Os, ReaperInstall, RenoiseInstall, RenoisePrefs, Version, REAPER_MIN, RENOISE_MIN};
 use crate::lifecycle::Target;
+use crate::paths::BridgePaths;
 use std::path::Path;
 
 /// The Renoise tool's id: song `tool_data` is keyed by it, so it never changes.
@@ -12,6 +13,28 @@ pub const RENOISE_REFERENCE: &str = "bridge-reference.json";
 /// Beside REAPER's extension in UserPlugins (REAPER loads only `reaper_*` libraries, so it ignores this). In `paths`,
 /// which the extension links (it finds its reference by this name).
 pub use crate::paths::REAPER_REFERENCE;
+/// Logic's program and helpers, kept together inside Kumi's own bridge folder.
+pub const LOGIC_BRIDGE_FOLDER: &str = "logic-kumi";
+/// The lifecycle's reference inside that folder, excluded from its payload hash.
+pub const LOGIC_REFERENCE: &str = "bridge-reference.json";
+/// The program inside the installed folder, started by the MCP host.
+pub const LOGIC_BINARY: &str = "logic-kumi";
+/// Native Accessibility helpers beside the program, one per architecture.
+pub const LOGIC_HELPER_PREFIX: &str = "kumi-logic-hands-";
+/// The installed program's version, as one line.
+pub const LOGIC_VERSION_FILE: &str = "version";
+
+/// Logic loads nothing into its app: its bridge goes in Kumi's folder without needing Logic to run first.
+pub fn logic_target(home: &Path) -> Target {
+    let dir = BridgePaths::new(home, Daw::Logic).bridge();
+    Target {
+        daw: Daw::Logic,
+        reference: dir.join(LOGIC_BRIDGE_FOLDER).join(LOGIC_REFERENCE),
+        name: LOGIC_BRIDGE_FOLDER.into(),
+        folder: true,
+        dir,
+    }
+}
 
 /// REAPER loads `reaper_*.dylib|dll|so` from UserPlugins: one file per platform (macOS's is universal).
 pub fn reaper_extension_name(os: Os) -> &'static str {
@@ -176,6 +199,18 @@ mod tests {
         assert!(said.contains("reaper.exe"), "{said}");
         assert_eq!(unloadable(&extension, &reaper(vec![Arch::X86_64])), None);
         assert_eq!(unloadable(&extension, &reaper(vec![])), None, "an app whose architecture isn't known");
+    }
+
+    #[test]
+    fn logics_bridge_is_owned_by_kumi_without_a_daw_folder() {
+        let root = tempfile::tempdir().unwrap();
+        let home = root.path().join("kumi");
+        let target = logic_target(&home);
+        assert_eq!(target.daw, Daw::Logic);
+        assert!(target.folder);
+        assert_eq!(target.path(), home.join("bridges/logic/bridge/logic-kumi"));
+        assert_eq!(target.reference, target.path().join("bridge-reference.json"));
+        assert!(!home.exists(), "choosing the target doesn't create folders or need a running app");
     }
 
     #[test]

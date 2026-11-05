@@ -8,6 +8,28 @@ page says what works where. Connecting is in the
 [how Kumi changes your Set](KUMI_CHANGES.md), and the Live bridge's detail in
 the [capability matrix](CAPABILITY_MATRIX.md).
 
+## Logic Pro (experimental reader)
+
+On macOS with Logic Pro 12 or later, explicitly choose `kumi --daw logic` or
+`/daw logic`. Logic is experimental and is not selected automatically. Set up
+its bridge with `kumi --daw logic bridge`; it installs into Kumi's folder and
+keeps an open Logic session running. Allow Accessibility for Kumi's helper in
+System Settings when setup asks; a bridge connection alone does not finish
+that step.
+
+Kumi reads the project, tracks, regions, the selected region's notes, plug-ins,
+sends, markers and tempo. FOCUS shows the channel strip, notes, timeline and
+routing. It reports recording state, remembers a saved project's path and can
+open a previously observed saved project. Changes, undo, listening, goals,
+scripts, catch-up and library discovery are not enabled yet. Note reads require
+the requested region to be the only selected region; Kumi leaves selection as
+it is. Normal launch creates no MIDI ports.
+
+The [wire contract](LOGIC_CONTRACT.md) describes the recorded shapes and
+limits. Replay tests do not establish native acceptance on the current Logic
+version. Developers can build and explicitly run the `accept_logic` example on
+a scratch project to collect a current acceptance report.
+
 ## At a glance
 
 ✓ works. "Live only", "REAPER only" or "Renoise only" is something only that

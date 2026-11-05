@@ -153,7 +153,7 @@ async fn session_with(daw: Daw, home: &Path, steps: Vec<Step>, question: &str, l
         let mut context = IntegrationContext::new(listener);
         let out = into.clone();
         context.on_catch_up = Some(Rc::new(move |catch_up| out.borrow_mut().push(SessionEvent::CatchUp { catch_up })));
-        create(OwnOptions { context, kumi_home: home_path.clone(), connect: Some(connect) })
+        create(OwnOptions { open_file: None, context, kumi_home: home_path.clone(), connect: Some(connect) })
     });
     let main = Rc::new(Recorded::default());
     let out = events.clone();

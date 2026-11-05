@@ -27,6 +27,7 @@ members = [
     "daws/own/kumi-daw-own",
     "daws/soundcraft/soundcraft-kumi",
     "daws/logic/logic-kumi",
+    "daws/logic/kumi-daw-logic",
 ]
 
 [workspace.package]
@@ -57,6 +58,7 @@ kumi-daw-reaper = { path = "daws/reaper/kumi-daw-reaper" }
 kumi-daw-renoise = { path = "daws/renoise/kumi-daw-renoise" }
 kumi-daw-soundcraft = { path = "daws/soundcraft/kumi-daw-soundcraft" }
 kumi-daw-own = { path = "daws/own/kumi-daw-own" }
+kumi-daw-logic = { path = "daws/logic/kumi-daw-logic" }
 
 async-trait = "0.1"
 base64 = "0.22"

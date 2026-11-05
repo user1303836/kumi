@@ -361,7 +361,7 @@ impl DawProvider for Beside {
     }
     fn integration(&self, context: IntegrationContext, session: &DawSession) -> Rc<dyn Integration> {
         let connect = session.answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id));
-        (self.create)(OwnOptions { context, kumi_home: kumi_home(&session.env), connect })
+        (self.create)(OwnOptions { open_file: None, context, kumi_home: kumi_home(&session.env), connect })
     }
     fn probe(&self, _bridge_config: String, answers: &Answers, env: &Env) -> LocalBoxFuture<'static, Probe> {
         probe_host(self.create, kumi_home(env), answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id)))

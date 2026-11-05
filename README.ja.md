@@ -21,6 +21,8 @@
 
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
+macOS の Logic Pro 12 は `kumi --daw logic` から実験的に選べます。プロジェクトと FOCUS の読み取りに対応し、編集や聴く機能は開発中です。[Logic Pro](docs/ja/DAWS.md#logic-pro実験的な読み取り) を参照してください。
+
 ## クイックスタート
 
 Mac ではターミナル、Windows では PowerShell で、コマンド一つで始められます。

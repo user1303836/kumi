@@ -478,7 +478,7 @@ async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Di
                     session.watch(WatchEvent::Change(change));
                 }
             }));
-            let options = OwnOptions { context, kumi_home: home.clone(), connect: Some(connect) };
+            let options = OwnOptions { open_file: None, context, kumi_home: home.clone(), connect: Some(connect) };
             match daw {
                 Daw::Reaper => create_reaper_integration(options),
                 Daw::Renoise => create_renoise_integration(options),

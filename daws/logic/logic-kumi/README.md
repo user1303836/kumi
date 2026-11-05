@@ -1,7 +1,7 @@
 # Logic Pro bridge: M2
 
 - Experimental native-reader foundation for Logic Pro 12 on macOS. Authenticated loopback exposes exactly `ping`, `status`, `focus`, `read`, `snapshot`, and `focus_body`, with project, transport, track, and selection events. Cached status and focus keep answering while a native read waits.
-- Reads cover project, track, region, note, plugin, send, marker, and tempo rows; bodies cover `tree`, `notes`, `timeline`, and `routing`. Musical edits, listening, and rendering are not exposed. The app has no Logic provider or DAW selection entry yet; host exposure and native/app acceptance remain separate work.
+- Reads cover project, track, region, note, plugin, send, marker, and tempo rows; bodies cover `tree`, `notes`, `timeline`, and `routing`. Musical edits, listening, and rendering are not exposed. The experimental app provider is available through `kumi --daw logic` and `/daw logic`; recorded tests and real-Logic acceptance remain separate.
 - Sample rate is optional: a background probe reads only bounded XML metadata at `Alternatives/000/MetaData.plist`. Binary, inaccessible, symlinked, or uncertain metadata stays unknown.
 - `kumi-logic-hands` is a separate child process. Missing Accessibility permission is reported as `permission: "accessibility"`, separately from `busy`. macOS may ask for the helper's permission when the bridge first attaches. Nothing is installed into Logic, and no Logic restart is required.
 

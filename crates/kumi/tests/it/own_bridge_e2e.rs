@@ -59,7 +59,8 @@ async fn reapers_integration_reads_what_kumis_host_answers() {
             let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
             context.on_focus = Some(Rc::new(move |focus| into.borrow_mut().push(focus)));
             context.focus_interval_ms = Some(50);
-            let reaper = create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let reaper =
+                create_reaper_integration(OwnOptions { open_file: None, context, kumi_home: home.path().into(), connect: Some(connect) });
 
             reaper.start(Signal::new()).await.unwrap();
             let observed = reaper.observe(Signal::new(), None).await.unwrap();
@@ -138,7 +139,8 @@ async fn renoises_integration_reads_what_kumis_host_answers_from_the_tool() {
             let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
             context.on_focus = Some(Rc::new(move |focus| into.borrow_mut().push(focus)));
             context.focus_interval_ms = Some(50);
-            let renoise = create_renoise_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let renoise =
+                create_renoise_integration(OwnOptions { open_file: None, context, kumi_home: home.path().into(), connect: Some(connect) });
 
             renoise.start(Signal::new()).await.unwrap();
             let observed = renoise.observe(Signal::new(), None).await.unwrap();
@@ -331,7 +333,8 @@ async fn reapers_changes_go_through_kumis_host_into_history_and_back_out_as_new_
             let into = told.clone();
             let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
             context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
-            let reaper = create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let reaper =
+                create_reaper_integration(OwnOptions { open_file: None, context, kumi_home: home.path().into(), connect: Some(connect) });
             reaper.start(Signal::new()).await.unwrap();
             let observed = reaper.observe(Signal::new(), None).await.unwrap();
             let tracks: Value = serde_json::from_str::<Value>(&observed.context).unwrap()["tracks"].clone();
@@ -492,7 +495,8 @@ async fn renoises_changes_follow_its_epoch_and_its_undo_that_skips_mute() {
             let into = told.clone();
             let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
             context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
-            let renoise = create_renoise_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let renoise =
+                create_renoise_integration(OwnOptions { open_file: None, context, kumi_home: home.path().into(), connect: Some(connect) });
             renoise.start(Signal::new()).await.unwrap();
             let observed = renoise.observe(Signal::new(), None).await.unwrap();
             assert!(observed.instructions.contains("devices go at 2 or later"), "{}", observed.instructions);
@@ -612,7 +616,8 @@ async fn closing_retires_each_row_in_the_daws_words() {
             let into = told.clone();
             let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
             context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
-            let renoise = create_renoise_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let renoise =
+                create_renoise_integration(OwnOptions { open_file: None, context, kumi_home: home.path().into(), connect: Some(connect) });
             renoise.start(Signal::new()).await.unwrap();
             let observed = renoise.observe(Signal::new(), None).await.unwrap();
             let plan = tool(&observed, "make_changes");
@@ -664,7 +669,8 @@ async fn a_change_the_daws_undo_put_back_is_undone_again_and_an_uncertain_one_is
             let into = told.clone();
             let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
             context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
-            let reaper = create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let reaper =
+                create_reaper_integration(OwnOptions { open_file: None, context, kumi_home: home.path().into(), connect: Some(connect) });
             reaper.start(Signal::new()).await.unwrap();
             let observed = reaper.observe(Signal::new(), None).await.unwrap();
             let state_of = |title: &str| told.borrow().iter().rev().find(|record| record.title == title).map(|record| record.state);
@@ -768,7 +774,8 @@ async fn reapers_actions_make_a_row_only_with_a_point_and_saves_are_no_change() 
             let into = told.clone();
             let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
             context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
-            let reaper = create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let reaper =
+                create_reaper_integration(OwnOptions { open_file: None, context, kumi_home: home.path().into(), connect: Some(connect) });
             reaper.start(Signal::new()).await.unwrap();
             let observed = reaper.observe(Signal::new(), None).await.unwrap();
             let tracks: Value = serde_json::from_str::<Value>(&observed.context).unwrap()["tracks"].clone();
@@ -896,7 +903,8 @@ async fn an_m3_kinds_no_op_and_change_are_as_before_and_an_action_reaper_made_no
             let into = told.clone();
             let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
             context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
-            let reaper = create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let reaper =
+                create_reaper_integration(OwnOptions { open_file: None, context, kumi_home: home.path().into(), connect: Some(connect) });
             reaper.start(Signal::new()).await.unwrap();
             let observed = reaper.observe(Signal::new(), None).await.unwrap();
             let tracks: Value = serde_json::from_str::<Value>(&observed.context).unwrap()["tracks"].clone();
@@ -967,7 +975,7 @@ async fn kumi_on_renoise(home: &std::path::Path) -> (Rc<dyn Integration>, Observ
     let into = told.clone();
     let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
     context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
-    let renoise = create_renoise_integration(OwnOptions { context, kumi_home: home.into(), connect: Some(connect) });
+    let renoise = create_renoise_integration(OwnOptions { open_file: None, context, kumi_home: home.into(), connect: Some(connect) });
     renoise.start(Signal::new()).await.unwrap();
     let observed = renoise.observe(Signal::new(), None).await.unwrap();
     (renoise, observed, told)
@@ -1004,7 +1012,7 @@ async fn a_reaper_midi_items_takes_move_their_notes_through_the_host() {
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
             });
             let context = IntegrationContext::new(Rc::new(|_, _| {}));
-            let reaper = create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+            let reaper = create_reaper_integration(OwnOptions { open_file: None, context, kumi_home: home.path().into(), connect: Some(connect) });
             reaper.start(Signal::new()).await.unwrap();
             let observed = reaper.observe(Signal::new(), None).await.unwrap();
             let variations = tool(&observed, "variations");

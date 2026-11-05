@@ -527,7 +527,7 @@ async fn own_open(
         let mut context = IntegrationContext::new(listener);
         let into = into.clone();
         context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
-        create(OwnOptions { context, kumi_home: home.clone(), connect: Some(connect) })
+        create(OwnOptions { open_file: None, context, kumi_home: home.clone(), connect: Some(connect) })
     });
     let main = Rc::new(Recorded::default());
     let events = Rc::new(RefCell::new(vec![]));

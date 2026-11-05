@@ -1,6 +1,6 @@
 [package]
 name = "logic-kumi"
-version = "0.1.0"
+version = "1.24.68"
 description = "Kumi's Logic Pro bridge: a process beside Kumi that reaches Logic through its helper and serves Kumi's bridge on loopback."
 edition.workspace = true
 license.workspace = true

@@ -16,6 +16,11 @@ use std::path::{Path, PathBuf};
 
 /// REAPER, through Kumi's own bridge: its extension, a file in the UserPlugins folder of the REAPER it goes in.
 pub static PROVIDER: Own = Own {
+    lifecycle: kumi_daw_own::provider::OwnLifecycle::Loaded,
+    reads_only: false,
+    enable_step: None,
+    enabled: None,
+    source: None,
     id: DawId::Reaper,
     daw: Daw::Reaper,
     profile: &DawProfile::REAPER,

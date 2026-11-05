@@ -21,6 +21,8 @@
 
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
+Experimental Logic Pro 12 reading is available on macOS by explicitly choosing `kumi --daw logic`. It reads projects and FOCUS bodies; editing and listening are still in progress. See [Logic Pro](docs/en/DAWS.md#logic-pro-experimental-reader).
+
 ## Quickstart
 
 Get started with one command in Terminal on a Mac or PowerShell on Windows.

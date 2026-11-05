@@ -47,11 +47,25 @@ use std::{
 /// One DAW whose bridge is Kumi's own, as its crate gives it: what the app and the library take from
 /// it, its words, and what's its alone about finding it and its bridge (REAPER's installs and its extension, a file;
 /// Renoise's version folders and its tool, a folder).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OwnLifecycle {
+    /// The DAW loads its bridge at startup (REAPER's extension, Renoise's tool).
+    Loaded,
+    /// A separate program attaches to the running app; installing it never restarts the DAW.
+    Attached,
+}
+
 #[derive(Clone, Copy)]
 pub struct Own {
     pub id: DawId,
     pub daw: Daw,
     pub profile: &'static DawProfile,
+    pub lifecycle: OwnLifecycle,
+    pub reads_only: bool,
+    pub enable_step: Option<EnableStep>,
+    pub enabled: Option<fn(&Own, &Env) -> LocalBoxFuture<'static, Option<bool>>>,
+    /// A prepared source folder or file from a DAW-specific override or checkout staging step.
+    pub source: Option<fn(&Own, &Env) -> Option<PathBuf>>,
     pub presentation: &'static ToolPresentation,
     pub view: &'static ViewPresentation,
     /// The change steps an agent host's plugin may use in the DAW (C2's allowlist).
@@ -146,7 +160,8 @@ pub(crate) fn probe_host(
     connect: Option<crate::bridge::Connect>,
 ) -> LocalBoxFuture<'static, Probe> {
     async move {
-        let integration = create(OwnOptions { context: IntegrationContext::new(Rc::new(|_, _| {})), kumi_home: home, connect });
+        let integration =
+            create(OwnOptions { open_file: None, context: IntegrationContext::new(Rc::new(|_, _| {})), kumi_home: home, connect });
         if let Err(error) = integration.start(abort::timeout(20_000)).await {
             let _ = integration.close().await;
             return Probe { started: false, said: Some(error.to_string()), ..Default::default() };
@@ -241,6 +256,20 @@ pub fn detected<T>(env: &Env, read: impl FnOnce(&detect::Env) -> T) -> T {
 impl Own {
     fn name(&self) -> &'static str {
         self.profile.words.app
+    }
+
+    fn bridge_place(&self) -> &'static str {
+        match self.lifecycle {
+            OwnLifecycle::Loaded => self.name(),
+            OwnLifecycle::Attached => "Kumi's own folder",
+        }
+    }
+
+    fn restart_note(&self) -> String {
+        match self.lifecycle {
+            OwnLifecycle::Loaded => format!(": restart {} if it's open.", self.name()),
+            OwnLifecycle::Attached => ". Kumi attaches to the running app; it stays open.".into(),
+        }
     }
 
     /// Where the bridge goes in the DAW, or why it can't go yet.
@@ -340,7 +369,9 @@ impl Own {
     /// its process, closed since so it loads the bridge as it starts again).
     fn install_in(&self, env: &Env, target: Option<Target>) -> Result<Put, String> {
         let source = self
-            .bundled_source()
+            .source
+            .and_then(|source| source(self, env))
+            .or_else(|| self.bundled_source())
             .ok_or_else(|| format!("this Kumi doesn't carry {} for {}: build it, or install a release", self.bridge, self.name()))?;
         let target = match target {
             Some(target) => target,
@@ -369,7 +400,7 @@ impl Own {
     fn kept_words(&self, put: &Put) -> String {
         put.kept
             .as_ref()
-            .map(|kept| format!("The copy that was in {} had changed since Kumi put it there: it's kept in {kept}.\n", self.name()))
+            .map(|kept| format!("The copy that was in {} had changed since Kumi put it there: it's kept in {kept}.\n", self.bridge_place()))
             .unwrap_or_default()
     }
 
@@ -394,7 +425,7 @@ impl Own {
     }
 
     fn missing_words(&self) -> String {
-        format!("{} isn't in {} yet, so Kumi can't see your {}", self.bridge, self.name(), self.profile.words.place)
+        format!("{} isn't in {} yet, so Kumi can't see your {}", self.bridge, self.bridge_place(), self.profile.words.place)
     }
 }
 
@@ -447,15 +478,18 @@ impl DawProvider for Own {
     fn watch_words(&self) -> WatchWords {
         self.watch_words
     }
+    fn reads_only(&self) -> bool {
+        self.reads_only
+    }
     fn enable_step(&self) -> Option<EnableStep> {
-        None
+        self.enable_step
     }
     fn min_version(&self) -> &'static str {
         min_version(self.daw)
     }
     fn integration(&self, context: IntegrationContext, session: &DawSession) -> Rc<dyn Integration> {
         let connect = session.answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id));
-        (self.create)(OwnOptions { context, kumi_home: kumi_home(&session.env), connect })
+        (self.create)(OwnOptions { open_file: None, context, kumi_home: kumi_home(&session.env), connect })
     }
     fn probe(&self, _bridge_config: String, answers: &Answers, env: &Env) -> LocalBoxFuture<'static, Probe> {
         probe_host(self.create, kumi_home(env), answers.get::<OwnHosts>().map(|hosts| (hosts.0)(self.id)))
@@ -578,15 +612,15 @@ impl DawProvider for Own {
             };
             match self.put(life, &source, false) {
                 Ok(put) if put.changed => io.out.write(&format!(
-                    "{} {} is in {} now: restart {} if it's open.\n{}",
+                    "{} {} is in {} now{}\n{}",
                     self.bridge,
                     put.version,
-                    self.name(),
-                    self.name(),
+                    self.bridge_place(),
+                    self.restart_note(),
                     self.kept_words(&put)
                 )),
                 // The bridge in place is the one this Kumi brings: said, as Live's is.
-                Ok(_) => io.out.write(&format!("{} in {} is up to date.\n", self.bridge, self.name())),
+                Ok(_) => io.out.write(&format!("{} in {} is up to date.\n", self.bridge, self.bridge_place())),
                 Err(why) => io.out.write(&format!(
                     "{} wasn't brought up to date: {why}. Run {} --daw {} bridge to try again.\n",
                     self.bridge,
@@ -641,14 +675,14 @@ impl DawProvider for Own {
             };
             match self.put(life, &source, false) {
                 Ok(put) if put.changed => io.out.write(&format!(
-                    "{} {} is in {} now: restart {} if it's open.\n{}",
+                    "{} {} is in {} now{}\n{}",
                     self.bridge,
                     put.version,
-                    self.name(),
-                    self.name(),
+                    self.bridge_place(),
+                    self.restart_note(),
                     self.kept_words(&put)
                 )),
-                Ok(_) => io.out.write(&format!("{} in {} is up to date.\n", self.bridge, self.name())),
+                Ok(_) => io.out.write(&format!("{} in {} is up to date.\n", self.bridge, self.bridge_place())),
                 Err(why) => io.out.write(&failed(why)),
             }
             0
@@ -678,11 +712,11 @@ impl DawProvider for Own {
             let Ok(life) = self.follow(&io.env) else { return };
             if let Some(put) = self.put(life, &source, false).ok().filter(|put| put.changed) {
                 io.out.write(&format!(
-                    "{} {} is in {} now: restart {} if it's open.\n{}",
+                    "{} {} is in {} now{}\n{}",
                     self.bridge,
                     put.version,
-                    self.name(),
-                    self.name(),
+                    self.bridge_place(),
+                    self.restart_note(),
                     self.kept_words(&put)
                 ));
             }
@@ -695,7 +729,10 @@ impl DawProvider for Own {
             // Asked before anything is written into the DAW's folder (--yes answers beforehand). Without a place yet,
             // the install below says why.
             if let (false, Ok(target)) = (command.yes, own.target(&env)) {
-                let question = format!("Put {} in {} ({})?", own.bridge, own.name(), target.path().display());
+                let question = match own.lifecycle {
+                    OwnLifecycle::Loaded => format!("Put {} in {} ({})?", own.bridge, own.name(), target.path().display()),
+                    OwnLifecycle::Attached => format!("Set up {} in Kumi's own folder ({})?", own.bridge, target.path().display()),
+                };
                 if !io.ask.yes_no(&question, Some("add --yes")).await {
                     out.write(&format!(
                         "Nothing was changed. To put it in later: {} --daw {} bridge\n",
@@ -709,17 +746,20 @@ impl DawProvider for Own {
                 Ok(put) if put.changed => (
                     0,
                     format!(
-                        "{} {} is in {}. {} loads it when it starts: restart {} if it's open.\n{}",
+                        "{} {} is in {}.{}\n{}",
                         own.bridge,
                         put.version,
-                        own.name(),
-                        own.name(),
-                        own.name(),
+                        own.bridge_place(),
+                        match own.lifecycle {
+                            OwnLifecycle::Loaded =>
+                                format!(" {} loads it when it starts: restart {} if it's open.", own.name(), own.name()),
+                            OwnLifecycle::Attached => " Kumi attaches to the running app; it stays open.".into(),
+                        },
                         own.kept_words(&put)
                     ),
                 ),
-                Ok(put) => (0, format!("{} {} is in {} already.\n", own.bridge, put.version, own.name())),
-                Err(why) => (1, format!("{} couldn't go in {}: {why}.\n", own.bridge, own.name())),
+                Ok(put) => (0, format!("{} {} is in {} already.\n", own.bridge, put.version, own.bridge_place())),
+                Err(why) => (1, format!("{} couldn't go in {}: {why}.\n", own.bridge, own.bridge_place())),
             };
             out.write(&said);
             Ok(code)
@@ -747,25 +787,34 @@ impl DawProvider for Own {
             match Lifecycle::new(&kumi_home(&io.env), target).uninstall(true) {
                 Ok(receipt) => {
                     let row = receipt.history.first();
-                    let mut said = format!("{} is out of {} ({path}).\n", self.bridge, self.name());
+                    let mut said = format!("{} is out of {} ({path}).\n", self.bridge, self.bridge_place());
                     if let Some(kept) = row.and_then(|row| row.kept.as_ref()) {
                         said.push_str(&format!(
                             "The copy that was in {} had changed since Kumi put it there: it's kept in {kept}.\n",
-                            self.name()
+                            self.bridge_place()
                         ));
                     }
                     if let Some(left) = row.and_then(|row| row.left.as_ref()) {
-                        said.push_str(&format!(
-                            "{} still holds an old copy, {left}: close {}, then delete it.\n",
-                            self.name(),
-                            self.name()
-                        ));
+                        said.push_str(&match self.lifecycle {
+                            OwnLifecycle::Loaded => {
+                                format!("{} still holds an old copy, {left}: close {}, then delete it.\n", self.name(), self.name())
+                            }
+                            OwnLifecycle::Attached => format!(
+                                "{} still holds an old copy, {left}: end Kumi's session with it, then delete it. {} can stay open.\n",
+                                self.bridge,
+                                self.name()
+                            ),
+                        });
                     }
                     io.out.write(&said);
                     Ok(RemovedBridge::Removed)
                 }
                 Err(why) => {
-                    io.out.write(&format!("{} couldn't be taken out of {} ({why}): delete {path} by hand.\n", self.bridge, self.name()));
+                    io.out.write(&format!(
+                        "{} couldn't be taken out of {} ({why}): delete {path} by hand.\n",
+                        self.bridge,
+                        self.bridge_place()
+                    ));
                     Ok(RemovedBridge::Kept)
                 }
             }
@@ -802,15 +851,23 @@ impl DawProvider for Own {
             // Windows won't let a file the DAW holds open be replaced: said before anything is touched.
             if let Some(held) = look.replaced.iter().find(|copy| held(copy)) {
                 let app = self.name();
-                return Err(ApplyError::InUse(format!(
-                    "{app} has {} open ({}), so it can't be replaced while {app} runs: quit {app}, then set Kumi up for {app} again.",
-                    self.bridge,
-                    held.display()
-                )));
+                let why = match self.lifecycle {
+                    OwnLifecycle::Loaded => format!(
+                        "{app} has {} open ({}), so it can't be replaced while {app} runs: quit {app}, then set Kumi up for {app} again.",
+                        self.bridge,
+                        held.display()
+                    ),
+                    OwnLifecycle::Attached => format!(
+                        "{} is still running ({}): end Kumi's session with it, then set it up again. {app} can stay open.",
+                        self.bridge,
+                        held.display()
+                    ),
+                };
+                return Err(ApplyError::InUse(why));
             }
             self.put(look.life, &look.source, false)
                 .map(|_| ())
-                .map_err(|why| ApplyError::Failed(format!("{} couldn't go in {}: {why}.", self.bridge, self.name())))
+                .map_err(|why| ApplyError::Failed(format!("{} couldn't go in {}: {why}.", self.bridge, self.bridge_place())))
         }
         .boxed_local()
     }
@@ -920,7 +977,7 @@ impl Own {
             _ if kept.is_some() => PartState::Newer,
             _ => PartState::Older,
         };
-        let (name, shown) = (self.name(), path.display().to_string());
+        let (name, shown) = (self.bridge_place(), path.display().to_string());
         // ("bridges/reaper": each its own component, so the path reads as the system writes it.)
         let ours = self.bridge_folder.split('/').fold(home.to_path_buf(), |path, part| path.join(part));
         let version = bundled.as_deref().unwrap_or("this Kumi's");
@@ -970,12 +1027,14 @@ impl Own {
                         self.bridge
                     ),
                     Some(found) => format!(
-                        "{} in {name} ({copy}) says it's {found}, a version that can't be compared with this Kumi's {version}: it stays as it is. To replace it, quit {name}, delete that copy if no other Kumi on this computer uses it, then set Kumi up again",
-                        self.bridge
+                        "{} in {name} ({copy}) says it's {found}, a version that can't be compared with this Kumi's {version}: it stays as it is. To replace it, {}delete that copy if no other Kumi on this computer uses it, then set Kumi up again",
+                        self.bridge,
+                        if self.lifecycle == OwnLifecycle::Loaded { format!("quit {name}, ") } else { String::new() }
                     ),
                     None => format!(
-                        "{} in {name} ({copy}) doesn't say its version, so it stays as it is. To replace it, quit {name}, delete that copy if no other Kumi on this computer uses it, then set Kumi up again",
-                        self.bridge
+                        "{} in {name} ({copy}) doesn't say its version, so it stays as it is. To replace it, {}delete that copy if no other Kumi on this computer uses it, then set Kumi up again",
+                        self.bridge,
+                        if self.lifecycle == OwnLifecycle::Loaded { format!("quit {name}, ") } else { String::new() }
                     ),
                 });
             }
@@ -994,7 +1053,7 @@ impl Own {
             PartState::OtherOwner => installed.clone(),
             _ => bundled.clone(),
         };
-        let after = if paths.is_empty() { After::None } else { After::RestartDaw };
+        let after = if paths.is_empty() || self.lifecycle == OwnLifecycle::Attached { After::None } else { After::RestartDaw };
         let parts = vec![Part { name: component, path: shown, state }];
         let owner = owner.filter(|_| state == PartState::OtherOwner);
         // CC-8: whether the part, as it stands once the plan has run, keeps a project's id only while a connection asks,
@@ -1074,11 +1133,11 @@ impl BridgeRollbackStep for OwnRollback {
         };
         match own.put(life, &source, true) {
             Ok(put) if put.changed => io.out.write(&format!(
-                "{} {} is back in {}, as Kumi {version} had it: restart {} if it's open.\n{}",
+                "{} {} is back in {}, as Kumi {version} had it{}\n{}",
                 own.bridge,
                 put.version,
-                own.name(),
-                own.name(),
+                own.bridge_place(),
+                own.restart_note(),
                 own.kept_words(&put)
             )),
             Ok(_) => {}
@@ -1204,6 +1263,15 @@ fn start_apart(mut command: std::process::Command) -> bool {
 
 #[async_trait(?Send)]
 impl DawSetup for OwnSetup {
+    fn needs_restart(&self) -> bool {
+        self.own.lifecycle == OwnLifecycle::Loaded
+    }
+    async fn enabled(&self) -> Option<bool> {
+        match self.own.enabled {
+            Some(enabled) => enabled(&self.own, &self.env).await,
+            None => None,
+        }
+    }
     /// The DAW's app when it's open: the one running, from where it runs (a portable REAPER on another drive, a Renoise
     /// outside the app folders), else the one setup would open.
     async fn open_live(&self) -> Option<String> {
@@ -1239,6 +1307,9 @@ impl DawSetup for OwnSetup {
     fn open_set(&self) -> Option<String> {
         self.session.borrow().as_ref().and_then(Weak::upgrade).and_then(|session| session.open_set())
     }
+    fn settings_menu(&self) -> Option<String> {
+        (self.own.lifecycle == OwnLifecycle::Attached).then_some(self.own.enable_step).flatten().map(|step| step.say.to_string())
+    }
     /// The bridge is in and the DAW is opening: the session takes the bridge and reconnects (as Live's setup does); one
     /// still starting is asked again shortly.
     async fn connect(&self) {
@@ -1264,6 +1335,17 @@ impl DawSetup for OwnSetup {
         (self.own.app_version)(&self.own, &self.env, &is)
     }
     async fn installed(&self) -> Installed {
+        if self.own.lifecycle == OwnLifecycle::Attached {
+            if !(self.own.here)(&self.own, &self.env) || (self.own.app)(&self.own, &self.env).is_none() {
+                return Installed::Missing;
+            }
+            if let Some(version) = (self.own.app_version)(&self.own, &self.env, &|_| true) {
+                if kumi_daw::provider::older_than(&version, min_version(self.own.daw)) {
+                    return Installed::Older(version);
+                }
+            }
+            return Installed::Ready;
+        }
         match (self.own.placed)(&self.own, &self.env) {
             Ok(_) => Installed::Ready,
             Err(Some(TargetError::Older(_, version))) => Installed::Older(version),

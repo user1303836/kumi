@@ -8,6 +8,7 @@ use kumi_agent::core::presentation::ToolPresentation;
 use kumi_agent::core::view::ViewPresentation;
 use kumi_daw::provider::DawProvider;
 use kumi_daw_ableton::app::provider::Ableton;
+use kumi_daw_logic as logic;
 use kumi_daw_reaper as reaper;
 use kumi_daw_renoise as renoise;
 use kumi_daw_soundcraft as soundcraft;
@@ -17,9 +18,9 @@ use kumi_types::daw::{DawId, DawProfile};
 use kumi_types::place::Places;
 use std::sync::LazyLock;
 
-/// The DAWs this build integrates, Live's first, then the DAWs whose bridges are Kumi's own (SoundCraft's experimental:
-/// only `--daw soundcraft` reaches it, `super::offered`).
-pub static DAWS: &[&(dyn DawProvider + Sync)] = &[&Ableton, &reaper::PROVIDER, &renoise::PROVIDER, &soundcraft::PROVIDER];
+/// The DAWs this build integrates, Live's first, then the DAWs whose bridges are Kumi's own. Experimental providers
+/// remain reachable by explicit choice while `super::offered` keeps them out of automatic suggestions.
+pub static DAWS: &[&(dyn DawProvider + Sync)] = &[&Ableton, &reaper::PROVIDER, &renoise::PROVIDER, &soundcraft::PROVIDER, &logic::PROVIDER];
 
 /// The DAWs this build integrates, by profile.
 pub fn registered() -> impl Iterator<Item = &'static DawProfile> {
@@ -75,7 +76,7 @@ pub fn recent_projects(options: &SourceOptions) -> Vec<String> {
 #[test]
 fn each_own_daws_instructions_keep_within_lives() {
     let live = kumi_daw_ableton::context::INSTRUCTIONS.len();
-    for daw in [&reaper::DAW, &renoise::DAW, &soundcraft::DAW] {
+    for daw in [&reaper::DAW, &renoise::DAW, &soundcraft::DAW, &logic::DAW] {
         let text = kumi_daw_own::bridge::instructions_of(daw);
         assert!(text.len() <= live, "{}'s instructions are {} bytes, over Live's {live}", daw.profile.words.app, text.len());
     }

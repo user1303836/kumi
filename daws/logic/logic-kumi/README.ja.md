@@ -3,7 +3,7 @@
 - サンプルレートは任意情報です。バックグラウンドで `Alternatives/000/MetaData.plist` のサイズ制限付き XML だけを読みます。バイナリ形式、アクセス不可、シンボリックリンク、不確かなメタデータの場合は不明のままです。
 
 - macOS の Logic Pro 12 向けの、実機の情報を読む実験的な基盤です。認証付きループバック接続で公開するのは `ping`、`status`、`focus`、`read`、`snapshot`、`focus_body` の6メソッドと、プロジェクト・トランスポート・トラック・選択のイベントです。実機への読み取りが待機していても、キャッシュ済みの状態と FOCUS は応答します。
-- 読み取り対象は project、track、region、note、plugin、send、marker、tempo の行です。本文は `tree`、`notes`、`timeline`、`routing` に対応します。楽曲の編集、試聴、レンダリングは公開しません。アプリには Logic のプロバイダーや DAW 選択項目もまだありません。ホストでの公開と、実機・アプリの受け入れ確認は別の作業です。
+- 読み取り対象は project、track、region、note、plugin、send、marker、tempo の行です。本文は `tree`、`notes`、`timeline`、`routing` に対応します。楽曲の編集、試聴、レンダリングは公開しません。実験的なアプリ統合は `kumi --daw logic` と `/daw logic` で選べます。記録の再生テストと実機での受け入れ確認は別です。
 - `kumi-logic-hands` は別の子プロセスです。アクセシビリティ権限の不足は `busy` とは別に `permission: "accessibility"` として返します。最初の接続時に macOS がヘルパーの権限を求める場合があります。Logic 内には何もインストールせず、Logic の再起動も不要です。
 
 リポジトリのルートで実行します。ビルドは同時に一つだけ実行してください。

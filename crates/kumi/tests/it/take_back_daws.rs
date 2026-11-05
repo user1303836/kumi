@@ -56,7 +56,7 @@ impl Kumi {
                 }
                 told(SessionEvent::Change { change });
             }));
-            create(OwnOptions { context, kumi_home: home_path.clone(), connect: Some(connect) })
+            create(OwnOptions { open_file: None, context, kumi_home: home_path.clone(), connect: Some(connect) })
         });
         let model = Rc::new(Recorded::default());
         let mut options = SessionOptions::new(recording(model.clone()), integration, emit);

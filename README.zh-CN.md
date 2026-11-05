@@ -21,6 +21,8 @@
 
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
+macOS 上的 Logic Pro 12 可通过 `kumi --daw logic` 显式选择实验性读取。可读取工程和 FOCUS 正文，编辑和聆听仍在开发中。详见 [Logic Pro](docs/zh-CN/DAWS.md#logic-pro实验性读取)。
+
 ## 快速开始
 
 在 Mac 的终端或 Windows 的 PowerShell 中，一条命令即可开始。

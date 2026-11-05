@@ -3,7 +3,7 @@
 - 采样率是可选信息：后台仅限量读取 `Alternatives/000/MetaData.plist` 中的 XML。二进制、无法访问、符号链接或不确定的元数据均保持未知。
 
 - 面向 macOS 上 Logic Pro 12 的实验性原生读取基础。经过身份验证的本地回环连接仅公开六个方法：`ping`、`status`、`focus`、`read`、`snapshot`、`focus_body`，以及项目、走带、轨道和选择事件。原生读取等待时，缓存的状态和 FOCUS 仍能响应。
-- 可读取 project、track、region、note、plugin、send、marker、tempo 行，支持 `tree`、`notes`、`timeline`、`routing` 四种正文。不公开乐曲编辑、试听或渲染。应用中尚未注册 Logic 提供程序或 DAW 选择项；主机功能开放以及原生与应用验收仍是独立工作。
+- 可读取 project、track、region、note、plugin、send、marker、tempo 行，支持 `tree`、`notes`、`timeline`、`routing` 四种正文。不公开乐曲编辑、试听或渲染。实验性应用集成可通过 `kumi --daw logic` 和 `/daw logic` 选择；录制数据回放与真实 Logic 验收仍需分别进行。
 - `kumi-logic-hands` 是独立的子进程。缺少辅助功能权限时，状态会单独返回 `permission: "accessibility"`，而非将其视为 `busy`。首次连接时，macOS 可能询问是否授予助手权限。无需向 Logic 内安装任何内容，也无需重启 Logic。
 
 在仓库根目录运行以下命令，每次只执行一个构建：

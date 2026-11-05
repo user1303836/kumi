@@ -595,6 +595,7 @@ impl TuiApp {
             if self.closing() {
                 return LiveStep::Later(None);
             }
+            let stays_open = open.is_some() && !live.needs_restart();
             if open.is_some() {
                 // Open (again): nothing is held until the producer says how it closes.
                 self.setup_show(|s| s.holding = false);
@@ -610,37 +611,39 @@ impl TuiApp {
                     }
                     continue;
                 }
-                let mut say = vec![live.restart_why(app), format!("{app} will ask to save first.")];
-                // Asking Live to quit is an Apple Event: the first time, macOS asks whether this terminal may send it.
-                let permission = live.asks_permission();
-                if let Some(terminal) = &permission {
-                    say.push(format!("If macOS asks whether {terminal} can control {app}, choose OK."));
-                }
-                let wait = choice("I'll quit it", &format!("Kumi waits, then opens {app} again"), "wait");
-                // A DAW Kumi can't ask to quit is quit by the producer.
-                let restart =
-                    if live.can_ask_to_quit() { vec![choice(&format!("Restart {app} now"), "", "restart"), wait] } else { vec![wait] };
-                let Some(answer) = self.setup_choose(&format!("{app} is open · restart needed"), say, restart).await else {
-                    return self.leave_live(&live, None, None, false).await;
-                };
-                held = open.clone();
-                set = live.open_set();
-                let mut asked = answer == "restart";
-                self.setup_show(|s| s.holding = true);
-                let mut refused = None;
-                if asked {
-                    self.setup_show(|s| s.status = format!("asking {app} to quit…"));
-                    if !live.ask_to_quit().await {
-                        // Turned down: asking again can't help, so the producer quits Live.
-                        asked = false;
-                        refused = Some(refused_words(permission.as_deref()));
+                if !stays_open {
+                    let mut say = vec![live.restart_why(app), format!("{app} will ask to save first.")];
+                    // Asking Live to quit is an Apple Event: the first time, macOS asks whether this terminal may send it.
+                    let permission = live.asks_permission();
+                    if let Some(terminal) = &permission {
+                        say.push(format!("If macOS asks whether {terminal} can control {app}, choose OK."));
                     }
+                    let wait = choice("I'll quit it", &format!("Kumi waits, then opens {app} again"), "wait");
+                    // A DAW Kumi can't ask to quit is quit by the producer.
+                    let restart =
+                        if live.can_ask_to_quit() { vec![choice(&format!("Restart {app} now"), "", "restart"), wait] } else { vec![wait] };
+                    let Some(answer) = self.setup_choose(&format!("{app} is open · restart needed"), say, restart).await else {
+                        return self.leave_live(&live, None, None, false).await;
+                    };
+                    held = open.clone();
+                    set = live.open_set();
+                    let mut asked = answer == "restart";
+                    self.setup_show(|s| s.holding = true);
+                    let mut refused = None;
+                    if asked {
+                        self.setup_show(|s| s.status = format!("asking {app} to quit…"));
+                        if !live.ask_to_quit().await {
+                            // Turned down: asking again can't help, so the producer quits Live.
+                            asked = false;
+                            refused = Some(refused_words(permission.as_deref()));
+                        }
+                    }
+                    if !self.wait_closed(&live, asked, refused).await {
+                        return self.leave_live(&live, held, set, asked).await;
+                    }
+                    // The Live Kumi was connected to has gone: Control Surface waits for the one that opens next.
+                    self.0.state.borrow_mut().connection = ConnectionState::Disconnected;
                 }
-                if !self.wait_closed(&live, asked, refused).await {
-                    return self.leave_live(&live, held, set, asked).await;
-                }
-                // The Live Kumi was connected to has gone: Control Surface waits for the one that opens next.
-                self.0.state.borrow_mut().connection = ConnectionState::Disconnected;
             } else if held.is_none() {
                 // Not open, and not because Kumi closed it: is there a Live here that can take the bridge?
                 match live.installed().await {
@@ -681,10 +684,14 @@ impl TuiApp {
                     }
                 }
             }
-            let said = why.clone();
+            let said = if stays_open {
+                vec![why.clone(), format!("The bridge goes into Kumi's own folder; {app} stays open.")]
+            } else {
+                vec![why.clone()]
+            };
             self.setup_show(move |s| {
                 s.status = "installing…".into();
-                s.say = vec![said];
+                s.say = said;
                 s.hint.clear();
                 s.waiting = true;
                 s.installing = true;
@@ -698,7 +705,7 @@ impl TuiApp {
                 Ok(version) => {
                     self.setup_show(|s| {
                         s.bridge = Some(format!("bridge {version}"));
-                        s.status = format!("opening {app}…");
+                        s.status = if stays_open { format!("connecting to {app}…") } else { format!("opening {app}…") };
                         s.say.clear();
                     });
                     // The Live Kumi closed opens again, with its Set when Kumi knows it (else the producer finds it in
@@ -708,8 +715,8 @@ impl TuiApp {
                     let app = open.or(held);
                     let set = if closed_by_kumi { set } else { live.closed_set() };
                     // (read before the DAW starts again and rewrites its settings)
-                    let note = after_restart(&live);
-                    let (opened, with_set) = reopen(&live, app.clone(), set).await;
+                    let note = if stays_open { None } else { after_restart(&live) };
+                    let (opened, with_set) = if stays_open { (true, true) } else { reopen(&live, app.clone(), set).await };
                     // Then what opened it says is worth knowing (a recovery it will offer).
                     let notes: Vec<String> = [note.filter(|_| closed_by_kumi && !with_set), live.opened_note().filter(|_| opened)]
                         .into_iter()
@@ -901,7 +908,18 @@ impl TuiApp {
         let more = live.settings_menu().map(|menu| format!("{menu} If {} shows a dialog, answer it first.", crate::daw::words().app));
         let more_at = std::time::Instant::now() + live.surface_wait();
         let (mut more_said, mut failure, mut looked) = (false, None::<String>, None::<std::time::Instant>);
-        while !self.connected() {
+        let mut enable_look: Option<std::time::Instant> = None;
+        loop {
+            if self.connected() && enable_look.is_none_or(|at| at.elapsed() >= Duration::from_secs(1)) {
+                let enabled = tokio::select! {
+                    enabled = live.enabled() => enabled,
+                    _ = stop.cancelled() => return Err(failure),
+                };
+                if enabled.unwrap_or(true) {
+                    break;
+                }
+                enable_look = Some(std::time::Instant::now());
+            }
             if self.closing() {
                 return Err(failure);
             }

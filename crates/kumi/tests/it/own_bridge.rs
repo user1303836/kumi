@@ -69,6 +69,7 @@ fn options(host: Rc<Host>, states: Rc<RefCell<Vec<ConnectionState>>>) -> OwnOpti
         async move { Ok(host as Rc<dyn McpEndpoint>) }.boxed_local()
     });
     OwnOptions {
+        open_file: None,
         context: IntegrationContext::new(Rc::new(move |state, _| states.borrow_mut().push(state))),
         kumi_home: std::env::temp_dir(),
         connect: Some(connect),
@@ -1452,6 +1453,7 @@ async fn a_failed_call_keeps_kumis_host_and_only_its_going_away_starts_another()
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
             });
             let options = OwnOptions {
+                open_file: None,
                 context: IntegrationContext::new(Rc::new(|_, _| {})),
                 kumi_home: std::env::temp_dir(),
                 connect: Some(connect),
@@ -1536,7 +1538,7 @@ async fn a_pinned_renoise_device_keeps_naming_it_when_tracks_move_above_it() {
                     async move { Ok(eventful as Rc<dyn McpEndpoint>) }.boxed_local()
                 })
             };
-            let renoise = create_renoise_integration(OwnOptions {
+            let renoise = create_renoise_integration(OwnOptions { open_file: None,
                 context: IntegrationContext::new(Rc::new(|_, _| {})),
                 kumi_home: std::env::temp_dir(),
                 connect: Some(connect),
@@ -1612,6 +1614,7 @@ async fn pinned_song() -> (Rc<Host>, Rc<Eventful>, Rc<dyn Integration>) {
         })
     };
     let renoise = create_renoise_integration(OwnOptions {
+        open_file: None,
         context: IntegrationContext::new(Rc::new(|_, _| {})),
         kumi_home: std::env::temp_dir(),
         connect: Some(connect),
@@ -1832,6 +1835,7 @@ async fn renoises_at_offers_tracks_dsps_and_instruments_and_a_reference_is_carri
                 })
             };
             let renoise = create_renoise_integration(OwnOptions {
+                open_file: None,
                 context: IntegrationContext::new(Rc::new(|_, _| {})),
                 kumi_home: std::env::temp_dir(),
                 connect: Some(connect),
@@ -1989,6 +1993,195 @@ async fn a_daw_that_quits_is_looked_for_often_and_one_back_at_the_usual_pace() {
             let back = reads() - before;
             reaper.close().await.unwrap();
             assert!(back <= 7, "the usual pace once it answers: {back} in a second");
+        })
+        .await;
+}
+
+/// An openable integration with observed saved paths and real bridge project notifications. Every app action is injected.
+struct OpeningLab {
+    _home: tempfile::TempDir,
+    events: Rc<Eventful>,
+    integration: Rc<dyn Integration>,
+    opener: Rc<RefCell<kumi_daw_own::bridge::OpenFile>>,
+    states: Rc<RefCell<Vec<(ConnectionState, Option<DisconnectCause>)>>>,
+    focus: tokio::sync::mpsc::UnboundedReceiver<()>,
+    first: String,
+    second: String,
+    place: String,
+}
+
+impl OpeningLab {
+    async fn start() -> Self {
+        let home = tempfile::tempdir().unwrap();
+        let first = home.path().join("First.rpp").to_string_lossy().into_owned();
+        let second = home.path().join("Second.rpp").to_string_lossy().into_owned();
+        std::fs::write(&first, "first project").unwrap();
+        std::fs::write(&second, "second project").unwrap();
+        let host = Rc::new(Host { answers: RefCell::new(vec![("status", json!({"connected":true}), false)]), asked: RefCell::default() });
+        let events = Rc::new(Eventful { host: host.clone(), listener: RefCell::default() });
+        let endpoint = events.clone();
+        let connect: Connect = Rc::new(move |_| {
+            let endpoint = endpoint.clone();
+            async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+        });
+        let opener: Rc<RefCell<kumi_daw_own::bridge::OpenFile>> =
+            Rc::new(RefCell::new(Rc::new(|_| async { Err("the app refused".into()) }.boxed_local())));
+        let open = opener.clone();
+        let states = Rc::new(RefCell::new(vec![]));
+        let changed = states.clone();
+        let (focus, focused) = tokio::sync::mpsc::unbounded_channel();
+        let mut context = IntegrationContext::new(Rc::new(move |state, cause| changed.borrow_mut().push((state, cause))));
+        context.focus_interval_ms = Some(50);
+        context.on_focus = Some(Rc::new(move |seen| {
+            if seen.is_some() {
+                let _ = focus.send(());
+            }
+        }));
+        let integration = create_reaper_integration(OwnOptions {
+            context,
+            kumi_home: home.path().into(),
+            connect: Some(connect),
+            open_file: Some(Rc::new(move |path| (open.borrow())(path))),
+        });
+        let mut lab = Self { _home: home, events, integration, opener, states, focus: focused, first, second, place: String::new() };
+        lab.project("a", &lab.first.clone(), "1");
+        lab.integration.start(Signal::new()).await.unwrap();
+        let seen = lab.integration.observe(Signal::new(), None).await.unwrap();
+        lab.place = seen.project.unwrap().id;
+        lab.focus.recv().await.expect("the first focus establishes the current project");
+        lab.project("b", &lab.second.clone(), "2");
+        lab.integration.observe(Signal::new(), None).await.unwrap();
+        lab.focus.recv().await.expect("the second project is observed before reopening the first");
+        lab.states.borrow_mut().clear();
+        lab
+    }
+
+    fn project(&self, id: &str, path: &str, epoch: &str) {
+        send_opening_project(&self.events, id, path, epoch);
+    }
+
+    fn opens_immediately(&self, id: &'static str, epoch: &'static str) {
+        let events = self.events.clone();
+        *self.opener.borrow_mut() = Rc::new(move |path| {
+            // This event is synchronous with invoking the opener, before its future has even been returned.
+            send_opening_project(&events, id, &path, epoch);
+            async { Ok(()) }.boxed_local()
+        });
+    }
+}
+
+fn send_opening_project(events: &Eventful, id: &str, path: &str, epoch: &str) {
+    let mut snapshot = reaper_snapshot();
+    snapshot["epoch"] = epoch.into();
+    snapshot["project"]["id"] = id.repeat(32).into();
+    snapshot["project"]["identity"] = id.into();
+    snapshot["project"]["path"] = path.into();
+    let mut answers = events.host.answers.borrow_mut();
+    answers.push(("snapshot", snapshot.clone(), false));
+    answers.push(("read", json!({"epoch":epoch,"items":[snapshot["project"].clone()]}), false));
+    answers.push(("focus", json!({"epoch":epoch,"view":"arrange","selection":{},"transport":{"playing":false}}), false));
+    drop(answers);
+    if let Some(send) = events.listener.borrow().clone() {
+        send(json!({"name":"project","data":snapshot["project"]}).as_object().unwrap().clone());
+    }
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn an_observed_saved_project_opens_even_when_its_event_is_synchronous() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut lab = OpeningLab::start().await;
+            assert!(lab.integration.has_open_place());
+            let unknown = format!("reaper-{}", "f".repeat(32));
+            assert_eq!(
+                lab.integration.open_place(&unknown, Signal::new()).await.unwrap(),
+                Err("Kumi doesn't know where that project is.".into())
+            );
+            lab.opens_immediately("a", "3");
+            assert_eq!(lab.integration.open_place(&lab.place, Signal::new()).await.unwrap(), Ok(()));
+            assert_eq!(
+                lab.integration.open_set().as_deref(),
+                Some(lab.first.as_str()),
+                "the event updates the saved file without waiting for another look"
+            );
+            lab.focus.recv().await.unwrap();
+            assert!(
+                lab.states.borrow().contains(&(ConnectionState::Disconnected, Some(DisconnectCause::AskedSet))),
+                "{:?}",
+                lab.states.borrow()
+            );
+            lab.integration.close().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn a_different_producer_switch_while_an_opener_waits_is_not_claimed_as_asked() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let mut lab = OpeningLab::start().await;
+            let started = Rc::new(tokio::sync::Notify::new());
+            let began = started.clone();
+            *lab.opener.borrow_mut() = Rc::new(move |_| {
+                began.notify_one();
+                async {
+                    std::future::pending::<()>().await;
+                    Ok(())
+                }
+                .boxed_local()
+            });
+            let signal = Signal::new();
+            let (integration, place, pending_signal) = (lab.integration.clone(), lab.place.clone(), signal.clone());
+            let opening = tokio::task::spawn_local(async move { integration.open_place(&place, pending_signal).await });
+            started.notified().await;
+            // Its identity can even have the same displayed project name: the path is what was requested.
+            lab.project("b", "/producer/Their project.rpp", "3");
+            lab.focus.recv().await.unwrap();
+            assert!(
+                lab.states.borrow().contains(&(ConnectionState::Disconnected, Some(DisconnectCause::Set))),
+                "{:?}",
+                lab.states.borrow()
+            );
+            assert!(!lab.states.borrow().iter().any(|(_, cause)| *cause == Some(DisconnectCause::AskedSet)), "{:?}", lab.states.borrow());
+            assert!(!opening.is_finished());
+            signal.cancel();
+            assert!(opening.await.unwrap().unwrap_err().is_aborted());
+            // Cancellation removed the expectation, so another explicit open can begin immediately.
+            lab.opens_immediately("a", "4");
+            assert_eq!(lab.integration.open_place(&lab.place, Signal::new()).await.unwrap(), Ok(()));
+            lab.focus.recv().await.unwrap();
+            assert!(lab.states.borrow().iter().any(|(_, cause)| *cause == Some(DisconnectCause::AskedSet)));
+            lab.integration.close().await.unwrap();
+        })
+        .await;
+}
+
+#[tokio::test(flavor = "current_thread", start_paused = true)]
+async fn failed_timed_out_and_dropped_project_opens_release_their_expectation() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let lab = OpeningLab::start().await;
+            assert_eq!(lab.integration.open_place(&lab.place, Signal::new()).await.unwrap(), Err("the app refused".into()));
+            *lab.opener.borrow_mut() = Rc::new(move |_| async { Ok(()) }.boxed_local());
+            let timed_out = lab.integration.open_place(&lab.place, Signal::new()).await.unwrap().unwrap_err();
+            assert!(timed_out.contains("hasn't confirmed"), "{timed_out}");
+            *lab.opener.borrow_mut() = Rc::new(move |_| {
+                async {
+                    std::future::pending::<()>().await;
+                    Ok(())
+                }
+                .boxed_local()
+            });
+            let mut opening = Box::pin(lab.integration.open_place(&lab.place, Signal::new()));
+            assert!(matches!(futures::poll!(opening.as_mut()), std::task::Poll::Pending));
+            drop(opening);
+            *lab.opener.borrow_mut() = Rc::new(move |_| async { Err("the app refused".into()) }.boxed_local());
+            assert_eq!(
+                lab.integration.open_place(&lab.place, Signal::new()).await.unwrap(),
+                Err("the app refused".into()),
+                "neither the timeout nor dropping a caller keeps a stale expectation"
+            );
+            lab.integration.close().await.unwrap();
         })
         .await;
 }
