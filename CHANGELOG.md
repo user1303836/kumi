@@ -3,6 +3,27 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.68 — 2026-11-05
+
+Ships with bridge 1.0.105, as 1.24.67 did.
+
+- Kumi can set a Live track's volume, pan and sends to a level as Live shows it (-6 dB, 25L), placed
+  exactly where Live shows that level; a level Live can't show is refused with the nearest ones it
+  can.
+- Hermes can scan approved sample folders, stop a scan, find similar sounds on their map, and measure
+  or compare audio while keeping the exact files it heard for playback.
+- Kumi for Hermes names your DAW as Live, REAPER or Renoise and says what to do next when it can't
+  connect, set up or undo a change from before a restart.
+- `hermes kumi doctor` checks Kumi's part in the DAW against the running runtime's own reading, names
+  the DAW Kumi is actually connected to, and no longer creates Kumi's data folder in a profile Kumi
+  never ran in.
+- Kumi for Hermes won't undo a change to a Live track's mixer, the tempo or a device's parameters that
+  you've since changed by hand; its undo preview shows each value as it is now and as the undo would
+  put it back.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
 ## 1.24.67 — 2026-11-05
 
 Ships with bridge 1.0.105, which Live loads when it restarts. After updating, Kumi offers to quit Live
