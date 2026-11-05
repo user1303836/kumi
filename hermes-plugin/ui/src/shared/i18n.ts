@@ -92,9 +92,9 @@ const en = {
     restoreUnsure: 'Kumi isn’t sure it put everything back.',
     restartedSince: (daw: string) =>
       `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
-    dawUndo: (daw: string, keys: string) => `Undo in ${daw} (${keys}), if nothing has changed there since`,
+    dawUndo: (daw: string) => `Next in ${daw}'s Undo, if nothing has changed there since`,
     dawUndoTitle: (daw: string, keys: string) =>
-      `Press ${keys} in ${daw} once, right away, if nothing has changed there since: it takes back that whole change.`,
+      `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
     byHand: (daw: string) => `Remove it by hand in ${daw}, or undo the later changes first.`,
     byHandTitle: (daw: string) =>
       `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
@@ -393,8 +393,8 @@ const ja: Shape<typeof en> = {
     restartedSince: daw =>
       `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
     restoreUnsure: 'すべて元に戻せたか Kumi は確信できません。',
-    dawUndo: (daw, keys) => `${daw} で取り消す（${keys}）。その後 ${daw} で何も変えていなければ`,
-    dawUndoTitle: (daw, keys) => `その後 ${daw} で何も変えていなければ、すぐに ${keys} を一度押してください。その変更全体が取り消されます。`,
+    dawUndo: daw => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
+    dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
     byHand: daw => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
     byHandTitle: daw => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
   },
@@ -688,8 +688,8 @@ const zh: Shape<typeof en> = {
     restored: 'Kumi 已还原期间做出的改动。',
     restartedSince: daw => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
     restoreUnsure: 'Kumi 不确定是否已全部还原。',
-    dawUndo: (daw, keys) => `在 ${daw} 中撤销（${keys}），前提是之后那里没有任何改动`,
-    dawUndoTitle: (daw, keys) => `如果之后在 ${daw} 中没有任何改动，请立即按一次 ${keys}：它会撤回这整个改动。`,
+    dawUndo: daw => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
+    dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
     byHand: daw => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
     byHandTitle: daw => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
   },
