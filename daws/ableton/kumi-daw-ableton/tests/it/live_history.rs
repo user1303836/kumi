@@ -229,10 +229,11 @@ async fn an_unsure_undo_keeps_the_bridge_cause_in_its_record_for_the_serve_audit
 async fn a_typed_pad_content_refusal_keeps_its_history_row_applied() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            for tool in ["load_sample_to_pad", "load_samples_to_pads"] {
-                let reason = "A pad's loaded sample changed in Live since Kumi loaded it; undo refused";
-                let reply =
-                    json!({"isError":true,"content":[{"type":"text","text":json!({"code":"changed_since","reason":reason}).to_string()}]});
+            for (tool, state) in ["load_sample_to_pad", "load_samples_to_pads"].into_iter().flat_map(|tool| {
+                [kumi_types::contracts::ChangeState::Applied, kumi_types::contracts::ChangeState::Unsure].map(|state| (tool, state))
+            }) {
+                let reason = "This request sent nothing to Live; a prior uncertain undo remains uncertain.";
+                let reply = json!({"isError":true,"content":[{"type":"text","text":json!({"code":"changed_since","reason":reason,"undoUnavailable":true}).to_string()}]});
                 let endpoint = Rc::new(Fixture {
                     config: json!({"undoStep":true,"responses":[{"value":{"stepId":"pad-undo-step"}},{"reply":reply},{"value":{"closed":true}}]}),
                     calls: RefCell::new(vec![]),
@@ -250,14 +251,17 @@ async fn a_typed_pad_content_refusal_keeps_its_history_row_applied() {
                 connection.available.set(true);
                 let history = History::new(connection.clone(), Remember::new(connection.clone(), None, None), Some(50), None);
                 history.remember(
-                    serde_json::from_value(json!({"id":"pad-1","family":"device","title":"Load kick","state":"applied","at":0})).unwrap(),
+                    serde_json::from_value(json!({"id":"pad-1","family":"device","title":"Load kick","state":state,"note":"Existing history note","at":0})).unwrap(),
                     "pad-load-1".into(),
                     None,
                 );
                 history.entries.borrow()["pad-1"].borrow_mut().tool = Some(tool.into());
+                history.entries.borrow()["pad-1"].borrow_mut().undo_key = Some("original-undo-key".into());
+                let before = serde_json::to_value(&*history.entries.borrow()["pad-1"].borrow()).unwrap();
                 let result = history.undo("pad-1", Signal::new(), false).await.unwrap();
                 assert!(result.record.is_none(), "a typed refusal does not move the history state on");
-                assert_eq!(history.entries.borrow()["pad-1"].borrow().record.state, kumi_types::contracts::ChangeState::Applied);
+                assert!(result.refused && result.stopped);
+                assert_eq!(serde_json::to_value(&*history.entries.borrow()["pad-1"].borrow()).unwrap(), before, "a no-write refusal preserves prior uncertainty and recovery keys");
                 let refusal = history.host.guard.take_refusal().unwrap();
                 assert_eq!((refusal.code, refusal.reason), ("changed_since", reason.into()));
                 assert_eq!(endpoint.calls.borrow().iter().map(|call| call["name"].as_str().unwrap()).collect::<Vec<_>>(),

@@ -17,7 +17,7 @@ use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     future::Future,
     panic::{catch_unwind, AssertUnwindSafe},
     rc::Rc,
@@ -644,6 +644,25 @@ impl<H: ChangeHost> History<H> {
                 let left = members.iter().filter(|id| standing(id)).count();
                 if left == 0 && past == 0 {
                     return Ok(self.undone(&entry));
+                }
+                if stopped.is_some() {
+                    // A no-write refusal says nothing about an earlier uncertain undo on that child or on any older
+                    // child we stopped before reaching. Include nested members without changing their records.
+                    let entries = self.entries.borrow();
+                    let mut pending = members.clone();
+                    let mut seen = HashSet::new();
+                    while let Some(id) = pending.pop() {
+                        if !seen.insert(id.clone()) {
+                            continue;
+                        }
+                        let Some(member) = entries.get(&id) else { continue };
+                        let member = member.borrow();
+                        if member.record.state == ChangeState::Unsure {
+                            unsettled = true;
+                            break;
+                        }
+                        pending.extend(member.members.iter().flatten().cloned());
+                    }
                 }
                 let total = members.len() + snapshot.trimmed.unwrap_or(0);
                 let them = |count: usize| if count == 1 { "it" } else { "them" };
