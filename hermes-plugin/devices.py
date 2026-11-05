@@ -20,9 +20,11 @@ from typing import Any
 
 from . import scripts
 
-# 22e, word for word: the approval, Desktop's pane (through `script.pending`) and the docs all say it this way.
+# 22e as W1-C built it, word for word: the approval, Desktop's pane (through `script.pending`) and the docs all say it
+# this way. The clamp is on the wet path only; the dry signal passes bit for bit.
 WARNING = ("Writes a new Max for Live device into your User Library (Kumi folder); it stays in your Set and runs "
-           "whenever the Set is open. Its output is held under −0.3 dBFS.")
+           "whenever the Set is open. What it adds to the sound is held under −0.3 dBFS; the track's own signal "
+           "passes through untouched.")
 # Where serve's build writes (22d), as its preview names the file.
 FOLDER = "User Library/Kumi/Audio Effects/"
 LANGUAGE = "device"  # in `scripts.LANGUAGES` and `script.pending`'s language
