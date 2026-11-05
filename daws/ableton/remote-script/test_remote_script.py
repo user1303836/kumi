@@ -8248,7 +8248,9 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
             def register(self, *args, **kwargs): return self.inner.register(*args, **kwargs)
             def select(self, timeout=None): waits.append(timeout); return self.inner.select(timeout)
         seen = {}
-        with patch.object(remote_module.selectors, "DefaultSelector", Recording):
+        # The runner's time serving a request mustn't spend the tick's budget or age the timer
+        # between stamping its last call and choosing the wait.
+        with patch.object(remote_module.selectors, "DefaultSelector", Recording), patch.object(remote_module.time, "perf_counter", return_value=1000.0):
             for sequence, gap in enumerate((None, 0.0156, 0.013, 0.012, 0.010), 1):
                 self.bridge.timer_gap = gap; waits.clear()
                 with patch.object(self.bridge, "_timer_called"):
