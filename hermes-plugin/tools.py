@@ -311,11 +311,13 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
         log.exception("Kumi couldn't tell Desktop about %s", tool)
 
 
-NO_APPROVALS = ("Hermes's approvals are off here (--yolo, /yolo or approvals.mode: off), so Kumi's changes, track "
-                "listens, folder reads and setup steps run without asking the producer.")
+# What runs without asking first when Hermes's approvals are off: every call Kumi asks about (policy.py). One list,
+# said the same everywhere (research-1's copy review, P3).
+UNASKED = "Kumi's changes, undos, track listens, sample-folder adds and scans, and setup steps"
+NO_APPROVALS = (f"Hermes's approvals are off here (--yolo, /yolo or approvals.mode: off), so {UNASKED} run without "
+                "asking first.")
 UNKNOWN_APPROVALS = ("Kumi can't tell whether /yolo is on in this chat (Hermes runs Kumi in its plugin isolation, or "
-                     "doesn't say). If it is, Kumi's changes, track listens, folder reads and setup steps run without "
-                     "asking the producer.")
+                     f"doesn't say). If it is, {UNASKED} run without asking first.")
 # Set in the environment of Hermes's plugin host (`plugins.isolation: host`), whose process holds no chat's /yolo.
 PLUGIN_HOST_ENV = "HERMES_PLUGIN_HOST_PROCESS"
 
@@ -330,10 +332,10 @@ def approval_gaps(host: Host) -> list[str]:
     delegation = config.get("delegation") if isinstance(config.get("delegation"), dict) else {}
     gaps = []
     if str(approvals.get("single_query_mode", "deny")).lower().strip() in {"approve", "off", "allow", "yes"}:
-        gaps.append("approvals.single_query_mode lets a one-shot hermes -q run Kumi's changes without asking.")
+        gaps.append(f"approvals.single_query_mode lets a one-shot hermes -q run {UNASKED} without asking first.")
     auto = delegation.get("subagent_auto_approve", False)
     if auto.strip().lower() in {"1", "true", "yes", "on"} if isinstance(auto, str) else bool(auto):
-        gaps.append("delegation.subagent_auto_approve lets a subagent's Kumi changes run without asking.")
+        gaps.append(f"delegation.subagent_auto_approve lets a subagent run {UNASKED} without asking first.")
     return gaps
 
 
@@ -414,8 +416,8 @@ def setup_daw_caller(host: Host, daw: str, kwargs: dict) -> Callable[[dict], dic
         live = host.runtimes.get(data_dir)
         if live is not None and live.daw != daw:
             raise runtime.Refused("other_daw", (
-                f"Kumi's runtime in this profile works in {schemas.DAW_NAMES[live.daw]}; set Kumi up for "
-                f"{schemas.DAW_NAMES[daw]} once the chat that started it ends."))
+                f"Kumi is running for {schemas.DAW_NAMES[live.daw]} in this profile. To set Kumi up for "
+                f"{schemas.DAW_NAMES[daw]}, end the chat using Kumi, then set it up again."))
         live = live or host.runtimes.start(data_dir, install, daw, kwargs.get("session_id"),
                                            library_roots=host.library_folders(), media_roots=host.media_roots(),
                                            profile=host.profile())
@@ -450,12 +452,13 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
                        "ffmpeg": "install (optional: ask the producer; setup is done either way)"}.get(planned["step"])
         shown = {**setup.plan_for_model(planned), "next": f"kumi_setup {next_action}" if next_action else None}
         if planned["step"] == "none" and setup.next_daw(daw, current):  # set up, but another DAW stays Kumi's
-            shown["next"] = setup.next_daw(daw, current) + " The producer runs it in a terminal."
+            shown["next"] = (setup.next_daw(daw, current) + " The producer runs it in a terminal, or changes the DAW "
+                             "setting under Settings → Plugins → Kumi in Hermes Desktop.")
         return shown
     call = kwargs.get("kumi_call")
     digest = call.extra.get("digest") if isinstance(call, calls.Entry) else None
     if not isinstance(digest, str) or not digest:
-        return {"error": {"code": "not_approved", "reason": "Kumi did not set anything up: this call carries no "
+        return {"error": {"code": "not_approved", "reason": "Kumi didn't set anything up: this call carries no "
                                                             "approved setup plan. Run kumi_setup plan first."}}
     if action == "install":
         result = setup.install(daw, expected_digest=digest, setup_daw=setup_daw, data_dir=data_dir,
@@ -492,8 +495,8 @@ def kumi_connect(host: Host, args: dict, **kwargs: Any) -> dict:
     live = host.runtimes.get(data_dir)
     if live is not None and live.daw != daw:
         return {"error": {"code": "other_daw", "reason": (
-            f"Kumi's runtime in this profile works in {schemas.DAW_NAMES[live.daw]}; it works in "
-            f"{schemas.DAW_NAMES[daw]} once the chat that started it ends.")}}
+            f"Kumi is running for {schemas.DAW_NAMES[live.daw]} in this profile. To use {schemas.DAW_NAMES[daw]}, "
+            "end the chat using Kumi, then connect again.")}}
     live = live or host.runtimes.start(data_dir, install, daw, kwargs.get("session_id"),
                                        library_roots=host.library_folders(), media_roots=host.media_roots(),
                                        profile=host.profile())

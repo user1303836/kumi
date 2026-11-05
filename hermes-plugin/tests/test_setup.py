@@ -201,7 +201,7 @@ class SetupTest(unittest.TestCase):
         self.assertIn(URL, asked["message"])
         self.assertEqual(asked["digest"], plan["digest"])
         self.assertEqual((asked["title"], asked["effects"]),
-                         (f"Kumi: set up Kumi {VERSION}'s runtime", [*plan["effects"], f"Writes: {plan['paths'][0]}"]),
+                         (f"Kumi: download and install Kumi {VERSION}", [*plan["effects"], f"Writes: {plan['paths'][0]}"]),
                          "each effect is its own line, its URL and folder in full, then the folder it writes")
         self.assertIn("reconnects at its next Kumi call", asked["message"], "it says a running runtime stops")
         self.assertIsNone(setup.approval("reaper", data_dir=self.data), "a plan for Live doesn't approve REAPER")
@@ -426,8 +426,8 @@ class SetupTest(unittest.TestCase):
         self.install_runtime()
         tagging = {"reaper": "keeps an id for each saved project in the project (ext state), saved with it",
                    "renoise": "keeps an id for each song in the song's tool data, saved with it"}
-        when_asked = {"reaper": "only when a standalone Kumi connected to REAPER asks it to; Kumi in Hermes never asks",
-                      "renoise": "only when a standalone Kumi connected to Renoise asks it to; Kumi in Hermes never asks"}
+        when_asked = {"reaper": "only when a standalone Kumi connected to REAPER asks it to; Kumi for Hermes never asks",
+                      "renoise": "only when a standalone Kumi connected to Renoise asks it to; Kumi for Hermes never asks"}
         for daw, words in tagging.items():
             with self.subTest(daw):
                 setup.plan(daw, setup_daw=Runtime(), data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
@@ -595,7 +595,7 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none", "no ffmpeg here: setup is done")
         audio = self.status()["compressed_audio"]
         self.assertEqual((audio["state"], audio["found"]), ("not_allowed", None))
-        self.assertIn("WAV and AIFF only: there's no ffmpeg on this computer", audio["message"])
+        self.assertIn("WAV and AIFF only: setup found no ffmpeg on this computer", audio["message"])
         program = self.ffmpeg()
         planned = self.plan(setup_daw=Runtime("same"))
         self.assertEqual((planned["step"], planned["optional"]), ("ffmpeg", True))
@@ -658,7 +658,7 @@ class SetupTest(unittest.TestCase):
             self.assertEqual(shown["daw_component"]["parts"], [{"name": "Remote Script", "state": "same"},
                                                                {"name": "Kumi Ears", "state": "same"}])
         self.assertEqual(shown["compressed_audio"]["message"], "Compressed audio (MP3, FLAC…): no. The ffmpeg you allowed "
-                         "is gone, and there's no other ffmpeg on this computer; Kumi reads WAV and AIFF only.")
+                         "is gone, and setup found no other ffmpeg on this computer; Kumi reads WAV and AIFF only.")
 
     @unittest.skipIf(os.name == "nt", "links need privileges on Windows")
     def test_an_allowed_ffmpeg_whose_folder_became_a_link_isnt_used(self) -> None:

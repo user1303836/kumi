@@ -145,7 +145,7 @@ class SetupTool(unittest.TestCase):
             with self.subTest(action):
                 decision = policy.pre_tool_call(host, "kumi_setup", {"action": action}, tool_call_id="c1")
                 self.assertEqual(decision, {"action": "block",
-                                            "message": "Kumi did not set anything up: run kumi_setup plan first."})
+                                            "message": "Kumi didn't set anything up: run kumi_setup plan first."})
         support.call(host, "kumi_setup", {"action": "plan"})
         self.assertEqual(policy.pre_tool_call(host, "kumi_setup", {"action": "adopt"})["action"], "block",
                          "a runtime plan is never approved as an adoption")

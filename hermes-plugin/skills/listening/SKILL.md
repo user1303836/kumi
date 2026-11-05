@@ -16,7 +16,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 ## Comparing
 - **Use `compare_to` for two files,** and report the measured differences.
 - **Louder seems better.** Compare tone at matched loudness: say how far apart the files are in LUFS before you say which is brighter or fuller.
-- **The measurements may be of a mono sum.** They can't tell you about stereo width or placement.
+- **Stereo, only when measured.** When a result has stereo correlation and width, report them as measured. When it has none (a mono file or a mono sum), say nothing about width or placement.
 - **Short one-shots give few frames.** Say when a measurement rests on very little audio.
 
 ## Reporting

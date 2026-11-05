@@ -30,8 +30,10 @@ log = logging.getLogger(__name__)
 
 PREVIEW_TIMEOUT = 10.0
 LINE = 120
-# The most of the agent's title an approval quotes: its first line, label and quotes included, stays within LINE.
-TITLE = 90
+# How the approval's first line labels the model's title as Hermes's, never Kumi's: the title is cut so the whole line,
+# label and quotes included, stays within LINE (rgzm, #1055).
+TITLE_LABEL = ("Hermes's change \"", "\", which Kumi will make:")
+TITLE = LINE - len("".join(TITLE_LABEL))
 # The longest line of a change's preview the runtime writes (W1: values first, each name quoted and capped at 40, one
 # line of at most 200). A longer one is never cut: the approval is blocked (research-1's review, item 2).
 STEP_LINE = 200
@@ -118,9 +120,9 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
 # ends with the chat's session id (Hermes's, as C1's identity has it); without one, with the plan's own digest, never a
 # family alone. A one-shot run that resumes a chat (`hermes chat -q --resume`) is that chat, and its approvals apply
 # there. Setup's key is its plan's digest already (and a paid call's will be its quote's). Hermes keeps an "always" in
-# its config's command allowlist; Kumi never edits that.
-CHAT_ONLY = ("Kumi's approvals apply to one chat, including a one-shot run that resumes it (hermes chat -q --resume); a "
-             "scheduled job, a new one-shot run or another chat always asks or is refused.")
+# its config's command allowlist; Kumi never edits that. The approval says so in one row, so the steps keep the rest
+# of the window (research-1's copy review, P2); the docs say the whole rule.
+CHAT_ONLY = "Kumi's approvals cover this chat only."
 
 
 def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
@@ -251,12 +253,12 @@ def _change(host: Any, args: dict, kwargs: dict) -> dict:
 
 
 def agents_title(title: Any) -> str:
-    """A plan's title as the approval's first line: the model's own words, quoted and labelled as the agent's, never
-    as Kumi's (research-1's review, item 3). Every mark that reads as a quote (#994's list: curly, low, prime, CJK
-    corner brackets, guillemets…) becomes ', so none can seem to close the quote early; it's cut so the line stays
-    whole."""
+    """A plan's title as the approval's first line: the model's own words, quoted and labelled as Hermes's, never as
+    Kumi's (research-1's review, item 3; copy review P22). Every mark that reads as a quote (#994's list: curly, low,
+    prime, CJK corner brackets, guillemets…) becomes ', so none can seem to close the quote early; it's cut so the
+    line stays whole."""
     words = _QUOTE_MARKS.sub("'", one_line(title, TITLE))
-    return f"Kumi, for the agent's \"{words}\":"
+    return f"{TITLE_LABEL[0]}{words}{TITLE_LABEL[1]}"
 
 
 # What reads as a double quote (#994's QUOTE_MARKS in the UI): a title's own can't close the agent's.
@@ -313,17 +315,17 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
     if action == "plan":
         return None, {}
     if action not in ("install", "adopt"):
-        return block("Kumi did not set anything up: kumi_setup's action is plan, install or adopt."), {}
+        return block("Kumi didn't set anything up: kumi_setup's action is plan, install or adopt."), {}
     asked = setup.approval(args.get("daw") or host.daw(), action=action, data_dir=host.data_dir())
     if asked is None:
-        return block("Kumi did not set anything up: run kumi_setup plan first."), {}
+        return block("Kumi didn't set anything up: run kumi_setup plan first."), {}
     lines = [asked["title"], *(f"• {line}" for line in asked["effects"])]
     message = "\n".join(lines)
     surface = host.session_surface()
     if not shows_whole(message, surface):
         where = "Hermes Desktop or `hermes kumi setup` in a terminal" if surface not in ("cli", "tui") else \
             "`hermes kumi setup` in a terminal"
-        return block(f"Kumi did not set anything up: this setup step is longer than this window shows, and Kumi asks only "
+        return block(f"Kumi didn't set anything up: this setup step is longer than this window shows, and Kumi asks only "
                      f"with every line of it in view. Use {where}: it shows the whole plan before it asks."), {}
     decision = {"action": "approve", "message": message, "rule_key": f"kumi:setup:{asked['digest']}"}
     return decision, {"digest": asked["digest"]}

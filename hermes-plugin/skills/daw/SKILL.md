@@ -9,8 +9,8 @@ rules keep its changes exact, approved and reversible.
 
 ## Start
 - **`kumi_status` first.**
-  - Not set up: say so, and don't guess around it.
-  - Not connected: call `kumi_connect`. The DAW must be open with Kumi's component enabled; for Live that's the AbletonMcpBridge control surface. Hermes never opens, closes or saves the DAW or the project.
+  - Not set up: say so, and offer to set Kumi up (`kumi_setup` with `plan`; the producer approves each step), or point to `hermes kumi setup` in a terminal.
+  - Not connected: call `kumi_connect`. The DAW must be open with Kumi's part in it enabled; for Live that's the AbletonMcpBridge control surface. Hermes never opens, closes or saves the DAW or the project.
 
 ## Look before you change
 - **Observe first.** `kumi_observe` with `scope: focus` gives what the producer is on, `catch_up` what changed since Kumi last looked, and `project` a bounded overview. FOCUS changes as the producer works, so observe again before acting on it.

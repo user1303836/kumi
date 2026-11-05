@@ -334,13 +334,17 @@ class Command(unittest.TestCase):
                                                           "tools.approval": asks}))
         host, _, data = support.host(self, installed=False)
         self.assertEqual(commands.kumi(host, "", session_id="s1"),
-                         "Kumi isn't ready: Kumi needs its runtime: 26.0 MB from github.com/user1303836/kumi. Ask the "
-                         "agent to set Kumi up, or run `hermes kumi setup` in a terminal (Hermes leaves plugin "
-                         "commands out when `plugins.isolation` is `host`).")
+                         "Kumi isn't ready: Kumi needs its runtime: 26.0 MB from github.com/user1303836/kumi. Ask "
+                         "Hermes to set Kumi up, or run `hermes kumi setup` in a terminal.")
+        isolated, _, _ = support.host(self, installed=False, hermes_config={"plugins": {"isolation": "host"}})
+        self.assertTrue(commands.kumi(isolated, "", session_id="s1").endswith("Ask Hermes to set Kumi up."),
+                        "Hermes leaves plugin commands out: no terminal command is offered")
         support.install(data)
         support.call(host, "kumi_connect", {}, session_id="s1")
-        self.assertEqual(commands.kumi(host, "", session_id="s1").splitlines()[1],
-                         "Connected to Live: Night Drive (epoch 1). Changes are held by this chat.")
+        self.assertEqual(commands.kumi(host, "", session_id="s1").splitlines()[1:],
+                         ["Connected to Live: Night Drive. This chat is using Kumi."])
+        self.assertEqual(commands.kumi(host, "", session_id="s2").splitlines()[1:],
+                         ["Connected to Live: Night Drive. Another chat is using Kumi: use that chat, or end it."])
 
 
 if __name__ == "__main__":

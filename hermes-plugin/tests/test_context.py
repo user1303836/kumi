@@ -170,10 +170,10 @@ class Cli(unittest.TestCase):
         ctx.settings["library_folders"] = [support.DRUMS]
         shown = self.run_cli(host).splitlines()
         self.assertEqual(shown, self.run_cli(host, "status").splitlines(), "`hermes kumi` alone is status")
-        self.assertEqual(shown[0], f"Setup: Kumi {support.VERSION} is set up ({support.module('setup').host_target()}).")
+        self.assertEqual(shown[0], f"Setup: Kumi {support.VERSION} is set up ({setup.platform_name(setup.host_target())}).")
         self.assertRegex(shown[2], r"^Runtime: running \(pid \d+\), for chat s1\.$")
-        self.assertEqual(shown[3:], ["Connected to Live: Night Drive (epoch 1).", f"Sample folders: {support.DRUMS}",
-                                     "Compressed audio (MP3, FLAC…): no. Kumi reads WAV and AIFF only: there's no "
+        self.assertEqual(shown[3:], ["Connected to Live: Night Drive.", f"Sample folders: {support.DRUMS}",
+                                     "Compressed audio (MP3, FLAC…): no. Kumi reads WAV and AIFF only: setup found no "
                                      "ffmpeg on this computer.",
                                      "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that)."])
         host.runtimes.stop_all()
@@ -218,7 +218,7 @@ class Cli(unittest.TestCase):
 
 class Approvals(unittest.TestCase):
     """Hermes's approvals off (`approvals.mode: off`, `--yolo`, a chat's `/yolo`): kumi_status, /kumi and `hermes kumi
-    status` say plainly that Kumi's changes run without asking."""
+    status` say plainly that what Kumi asks about runs without asking."""
 
     def setUp(self):
         environ = mock.patch.dict("os.environ", {key: value for key, value in os.environ.items()
@@ -279,8 +279,9 @@ class Approvals(unittest.TestCase):
 
     def test_hermes_kumi_status_says_whether_hermes_asks(self):
         host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "off"}})
-        self.assertIn("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without asking.",
-                      commands.status_text(host))
+        unasked = support.module("tools").UNASKED
+        self.assertIn(f"Approvals: off in Hermes (approvals.mode: off or --yolo), so {unasked} run without asking "
+                      "first.", commands.status_text(host))
         with self.chat_yolo(True):  # a terminal can't see any chat's /yolo
             host, _, _ = support.host(self)
             self.assertIn("Approvals: Hermes asks before each Kumi change", commands.status_text(host))

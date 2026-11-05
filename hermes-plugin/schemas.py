@@ -42,8 +42,10 @@ KUMI_SETUP = _tool(
     "the DAW instead of replacing it (also asked first). Once the DAW is set up, if an ffmpeg is already on this "
     "computer, the plan offers one optional last step: letting Kumi's runtime run it to read MP3, FLAC and other "
     "compressed audio (Kumi never downloads one; without it, WAV and AIFF only). Ask the producer before installing "
-    "that step; setup is done whether or not they allow it, so don't plan again after a no. Setup never starts or "
-    "quits the DAW. kumi_status says where setup stands.",
+    "that step; setup is done whether or not they allow it, so don't plan again after a no. Setting up the first DAW "
+    "also makes it Kumi's DAW, in the same approval. Switching to another DAW that's set up is `hermes kumi setup "
+    "--daw <daw> --use` in a terminal, or the DAW setting. Setup never starts or quits the DAW. kumi_status says where "
+    "setup stands.",
     {"action": {"type": "string", "enum": ["plan", "install", "adopt"]},
      "daw": {"type": "string", "enum": list(DAWS), "description": "The DAW to set up for; the DAW setting when left out."}},
     ("action",))
@@ -51,9 +53,9 @@ KUMI_SETUP = _tool(
 KUMI_CONNECT = _tool(
     "kumi_connect",
     "Connect Kumi to the DAW: Ableton Live (ableton), REAPER or Renoise. Starts Kumi's runtime for this chat when it "
-    "isn't running (Kumi's local program and its DAW bridge, as background processes on this computer, until the chat "
-    "ends); changes nothing in the DAW or the project. The DAW must be open with Kumi's component enabled (Live: the "
-    "AbletonMcpBridge control surface). Returns what kumi_status returns.",
+    "isn't running (Kumi's local program and its link to the DAW, as background processes on this computer, until the "
+    "chat ends); changes nothing in the DAW or the project. The DAW must be open with Kumi's part in it enabled (Live: "
+    "the AbletonMcpBridge control surface). Returns what kumi_status returns.",
     {"daw": {"type": "string", "enum": list(DAWS), "description": "The DAW to connect to; the DAW setting when left out."}})
 
 KUMI_OBSERVE = _tool(
@@ -111,8 +113,8 @@ KUMI_HISTORY = _tool(
     "Kumi's HISTORY for the open project, newest first: each change's id, title, family, time, state and whether it can "
     "still be undone. When Kumi's runtime doesn't run in this Hermes process, and always in a scheduled job, it's "
     "HISTORY as Kumi last published it (from: last_published, as_of): nothing can be undone then, and the project may "
-    "have changed since. Reads only; starts nothing. Its titles and track names leave this computer only where you send "
-    "the answer (a scheduled job's delivery).",
+    "have changed since. Reads only; starts nothing. In a scheduled job, its titles and track names go wherever that "
+    "job delivers.",
     {"limit": {"type": "integer", "minimum": 1, "maximum": 200}})
 
 # A listen's source: a file, a sound or an artifact as _SOURCE, or one track or the mix over a beat window (CC-2).
