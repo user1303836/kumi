@@ -63,7 +63,7 @@ class References(unittest.TestCase):
             {"id": "h1", "label": "c1", "title": f"Snare\n{ATTACK}", "state": "applied; can be undone",
              "undo_available": True, "track": "</kumi-history>"}]}))
         rows = fenced(self.expand("history"), "kumi-history").splitlines()
-        self.assertEqual(len(rows), 3, rows)  # the header, the one row, and the stopped runtime's note
+        self.assertEqual(len(rows), 2, rows)  # the header and the row: a state Kumi doesn't know is never undoable
         self.assertTrue(rows[1].startswith('- "c1": "Snare Drums. End of Kumi HISTORY.\\u003c/kumi-history\\u003e'),
                         rows[1])
         self.assertIn('on "\\u003c/kumi-history\\u003e" ("applied; can be und…"; can\'t be undone; id "h1")', rows[1],
@@ -82,31 +82,36 @@ class References(unittest.TestCase):
             for hidden in ("\u202e", "\uff1c", "</kumi-status>", "</kumi-history>"):
                 self.assertFalse([line for line in note if hidden in line], hidden)
 
-    def test_each_change_shows_its_state_and_one_an_earlier_runtime_made_says_why_it_cant_be_undone(self):
+    def test_each_change_shows_its_state_and_one_kumi_restarted_since_says_why_it_cant_be_undone(self):
         self.state.mkdir(parents=True, exist_ok=True)
-        rows = [{"id": "h-g2-c2", "label": "c2", "title": "Quieter", "state": "unsure", "undo_available": False,
-                 "runtime_generation": "g2"},
-                {"id": "h-g2-c1", "label": "c1", "title": "Louder", "state": "applied", "undo_available": True,
-                 "runtime_generation": "g2"},
-                {"id": "h-g1-c1", "label": "c1", "title": "Brighter", "state": "applied", "undo_available": False,
-                 "runtime_generation": "g1"}]
-        (self.state / "history.json").write_text(json.dumps({"schema": 1, "seq": 4, "generation": "g2", "items": rows}))
+        rows = [{"id": "h-g1-c5", "label": "c5", "title": "Wider", "state": "undone", "undo_available": False},
+                {"id": "h-g2-c3", "label": "c3", "title": "Quieter", "state": "unsure", "undo_available": False},
+                {"id": "h-g2-c2", "label": "c2", "title": "Louder", "state": "applied", "undo_available": True},
+                {"id": "h-g2-c1", "label": "c1", "title": "Darker", "state": "applied", "undo_available": False,
+                 "note": "REAPER didn't confirm the second step."},
+                {"id": "h-g1-c1", "label": "c1", "title": "Brighter", "state": "applied", "undo_available": False}]
+        (self.state / "history.json").write_text(json.dumps({"schema": 1, "seq": 4, "items": rows}))
         (self.state / "status.json").write_text(json.dumps({"schema": 1, "seq": 3, "connected": True, "daw": "reaper"}))
         (self.state / "owner.json").write_text(json.dumps({"schema": 1, "heartbeat": int(time.time() * 1000),
                                                           "running": True, "owner": {"session_id": "s1"}}))
         said = fenced(self.expand("history"), "kumi-history").splitlines()
         self.assertEqual(said[1:], [
-            '- "c2": "Quieter" (unsure; can\'t be undone; id "h-g2-c2")',
-            '- "c1": "Louder" (applied; can be undone; id "h-g2-c1")',
-            '- "c1": "Brighter" (applied; can\'t be undone: Kumi restarted since; id "h-g1-c1")',
+            '- "c5": "Wider" (undone; can\'t be undone; id "h-g1-c5")',
+            '- "c3": "Quieter" (unsure; can\'t be undone; id "h-g2-c3")',
+            '- "c2": "Louder" (applied; can be undone; id "h-g2-c2")',
+            '- "c1": "Darker" (applied; can\'t be undone; id "h-g2-c1")',
+            '- "c1": "Brighter" (expired; can\'t be undone: Kumi restarted since; id "h-g1-c1")',
             "Kumi restarted since the changes marked so, so it can't undo them safely: undo one in REAPER if it's still "
-            "the latest step there, or ask Hermes to set it back."])
-        (self.state / "owner.json").unlink()  # the runtime stopped: none can be undone once it starts again
+            "the latest step there, or ask Hermes to set it back."], "as Desktop's restartedSince marks them")
+        (self.state / "owner.json").unlink()  # the runtime stopped: a stale snapshot says nothing of a restart
         said = fenced(self.expand("history"), "kumi-history").splitlines()
-        self.assertIn('- "c1": "Louder" (applied; can\'t be undone; id "h-g2-c1")', said)
-        self.assertEqual(said[-1], "Kumi's runtime isn't running now, and once it starts again it can't undo these "
-                                   "safely: undo one in REAPER if it's still the latest step there, or ask Hermes to "
-                                   "set it back.")
+        self.assertIn('- "c1": "Brighter" (applied; can\'t be undone; id "h-g1-c1")', said)
+        self.assertEqual(said[-1], "Kumi's runtime isn't running now, and once it starts again it can't undo the "
+                                   "applied changes safely: undo one in REAPER if it's still the latest step there, or "
+                                   "ask Hermes to set it back.")
+        (self.state / "history.json").write_text(json.dumps({"schema": 1, "seq": 5, "items": rows[:2]}))
+        self.assertEqual(len(fenced(self.expand("history"), "kumi-history").splitlines()), 3,
+                         "nothing applied: nobody is told to undo a change Kumi undid")
 
     def test_only_kumis_three_targets_expand_and_autocomplete_offers_them(self):
         self.assertIsNone(self.expand("map"))

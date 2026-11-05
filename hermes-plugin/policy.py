@@ -30,8 +30,10 @@ log = logging.getLogger(__name__)
 
 PREVIEW_TIMEOUT = 10.0
 LINE = 120
-# The most of the agent's title an approval quotes: its first line, label and quotes included, stays within LINE.
-TITLE = 80
+# How the approval's first line labels the model's title as Hermes's, never Kumi's: the title is cut so the whole line,
+# label and quotes included, stays within LINE (rgzm, #1055).
+TITLE_LABEL = ("Hermes's change \"", "\", which Kumi will make:")
+TITLE = LINE - len("".join(TITLE_LABEL))
 # The longest line of a change's preview the runtime writes (W1: values first, each name quoted and capped at 40, one
 # line of at most 200). A longer one is never cut: the approval is blocked (research-1's review, item 2).
 STEP_LINE = 200
@@ -256,7 +258,7 @@ def agents_title(title: Any) -> str:
     prime, CJK corner brackets, guillemets…) becomes ', so none can seem to close the quote early; it's cut so the
     line stays whole."""
     words = _QUOTE_MARKS.sub("'", one_line(title, TITLE))
-    return f"Hermes's change \"{words}\", which Kumi will make:"
+    return f"{TITLE_LABEL[0]}{words}{TITLE_LABEL[1]}"
 
 
 # What reads as a double quote (#994's QUOTE_MARKS in the UI): a title's own can't close the agent's.

@@ -127,6 +127,9 @@ class Approvals(unittest.TestCase):
         lines = decision["message"].splitlines()
         self.assertEqual(len(lines), 4, lines[:5])
         self.assertLessEqual(len(lines[0]), policy.LINE)
+        longest = policy.agents_title("x" * 500)
+        self.assertEqual((len(longest), longest[-24:]), (policy.LINE, '", which Kumi will make:'),
+                         "the longest title is cut, never the label (rgzm, #1055)")
         self.assertTrue(lines[0].startswith("Hermes's change \"") and lines[0].endswith('", which Kumi will make:'),
                         "the model's words, quoted and labelled as Hermes's, never as Kumi's")
         for mark in ('"', "\u201d", "\u300d", "\uff02"):  # ASCII, curly, a CJK corner bracket, fullwidth
