@@ -17,6 +17,39 @@ trap 'rm -rf "$test_home"' EXIT INT TERM
 export HOME="$test_home" USERPROFILE="$test_home" APPDATA="$test_home/AppData/Roaming" LOCALAPPDATA="$test_home/AppData/Local" XDG_CONFIG_HOME="$test_home/.config" KUMI_HOME="$test_home/.kumi"
 unset KUMI_REMOTE_SCRIPTS_DIR KUMI_LIVE_EXTENSIONS_DIR
 export KUMI_PROCESSES=none
+# The library tests the build profile names (`libraries`), for the crates this run takes: its `-p` crates, else the
+# workspace less its `--exclude`d ones. The run's other arguments go with them; KUMI_NEXTEST_LIST's tests for them go
+# beside its file (<name>.lib.json).
+run_libraries() {
+  taken=" " excluded=" " workspace=yes count=$#
+  while [ "$count" -gt 0 ]; do
+    arg=$1
+    shift
+    count=$((count - 1))
+    case "$arg" in
+      -p | --package) workspace='' taken="$taken$1 "; shift; count=$((count - 1)) ;;
+      --exclude) excluded="$excluded$1 "; shift; count=$((count - 1)) ;;
+      --package=*) workspace='' taken="$taken${arg#--package=} " ;;
+      -p*) workspace='' taken="$taken${arg#-p} " ;;
+      --workspace) ;;
+      *) set -- "$@" "$arg" ;;
+    esac
+  done
+  picked=""
+  for library in $libraries; do
+    case "$taken" in
+      *" $library "*) picked="$picked -p $library" ;;
+      *) if [ -n "$workspace" ]; then case "$excluded" in *" $library "*) ;; *) picked="$picked -p $library" ;; esac; fi ;;
+    esac
+  done
+  [ -n "$picked" ] || return 0
+  if [ -n "${KUMI_NEXTEST_LIST:-}" ]; then
+    # shellcheck disable=SC2086
+    cargo nextest list --locked --lib $picked "$@" --message-format json > "${KUMI_NEXTEST_LIST%.json}.lib.json"
+  fi
+  # shellcheck disable=SC2086
+  cargo nextest run --locked --lib $picked "$@"
+}
 if [ "${KUMI_NEXTEST:-1}" != 0 ]; then
   if ! cargo nextest --version > /dev/null 2>&1; then
     echo "test-isolated.sh: the tests run on cargo-nextest: cargo install cargo-nextest --locked (KUMI_NEXTEST=0: cargo test)" >&2
@@ -24,12 +57,18 @@ if [ "${KUMI_NEXTEST:-1}" != 0 ]; then
   fi
   # A profile that names its test binaries (`binary(…)`, or a crate's `binary_id(<crate>::it)`, in its default-filter,
   # .config/nextest.toml) builds only those: nextest builds every binary it could run, whatever the filter, and runs the
-  # ones the filter leaves.
+  # ones the filter leaves. A crate's library tests it names (`binary_id(<crate>)`) are built and run after those, on
+  # their own and only for the crates this run takes (`libraries`): `--lib` beside the others' `it` binaries would build
+  # every library's tests. Such a crate's `it` binary is in the profile too, so `dev.py select --tested-by` takes it.
   only=""
+  libraries=""
   if [ -n "${KUMI_NEXTEST_BUILD_PROFILE:-}" ]; then
-    only="$(awk -v p="[profile.$KUMI_NEXTEST_BUILD_PROFILE]" '$0 == p { on = 1; next } /^\[/ { on = 0 } on' .config/nextest.toml \
+    section="$(awk -v p="[profile.$KUMI_NEXTEST_BUILD_PROFILE]" '$0 == p { on = 1; next } /^\[/ { on = 0 } on' .config/nextest.toml)"
+    only="$(printf '%s\n' "$section" \
       | grep -o -E 'binary\([a-z0-9_]*\)|binary_id\([a-z0-9_-]*::it\)' | sed -E 's/^binary(_id)?\(([a-z0-9_-]*::)?([a-z0-9_]*)\)$/--test \3/' \
       | sort -u | tr '\n' ' ')"
+    libraries="$(printf '%s\n' "$section" | grep -o -E 'binary_id\([a-z0-9_-]+\)' \
+      | sed -E 's/^binary_id\(([a-z0-9_-]+)\)$/\1/' | sort -u | tr '\n' ' ')"
   fi
   # The whole workspace, or the crates named (-p): CI's Linux parts each take some (--exclude works with the workspace).
   scope=--workspace
@@ -48,6 +87,9 @@ if [ "${KUMI_NEXTEST:-1}" != 0 ]; then
   fi
   # shellcheck disable=SC2086
   cargo nextest run $build "$@"
+  if [ -n "$libraries" ] && [ -z "${KUMI_NEXTEST_ARCHIVE:-}" ]; then
+    run_libraries "$@"
+  fi
 else
   cargo test --workspace --locked "$@"
 fi

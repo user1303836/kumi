@@ -86,7 +86,8 @@ fail-fast = false
 # SoundCraft started with it on, a process of its own (launch), and the bridge program, which ends with its stdin or with
 # SoundCraft (server).
 # Kumi's runtime for plugins (`kumi serve`): its own tests (the library's serve::) and the runtime run as a program
-# (serve, serve_daw), whose child processes, file locks, paths and pipes differ on each system.
+# (serve, serve_daw), whose child processes, file locks, paths and pipes differ on each system. A library's tests named
+# here (`binary_id(<crate>)`) are built and run by test-isolated after the `it` binaries, for the crates a job takes.
 [profile.ci-os]
 default-filter = '''
 (
