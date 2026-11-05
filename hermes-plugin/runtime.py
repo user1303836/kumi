@@ -36,6 +36,10 @@ RUNTIME_PROTOCOL = "kumi-serve/1"
 CLIENT_INFO = {"name": "kumi-hermes", "version": "1"}
 # C2's resources, each the snapshot (C3) it's read from: a runtime that offers subscriptions says when one has landed.
 RESOURCES = {"kumi://status": "status", "kumi://focus": "focus", "kumi://history": "history", "kumi://map": "map"}
+# The runtime's tools the plugin calls (C2), and the only ones Runtime.call sends: the pinned release must serve each
+# (`serve_operations` in kumi_release.json, read from that runtime when it's pinned), or a call fails for every producer.
+OPERATIONS = frozenset({"status", "setup_daw", "connect", "observe", "read", "change", "undo", "history", "listen",
+                        "sounds", "library", "job", "generate"})
 # What `kumi serve` gets of Hermes's environment: what a program needs to start and to find the user's folders on each
 # system. Never a key, a token or Hermes's own settings (C2, catalog rule 11).
 LAUNCH_VARIABLES = frozenset({
@@ -620,7 +624,10 @@ class Runtime:
         give (`_host`, and CC-13's `_mirelo`, which the runtime takes as the host's say-so): one in `args`, written by
         the model, is dropped, never passed on (rgzm, #1007). With `interrupted`, the producer's Stop cancels the call
         while it waits (Client.request). `private` is the host's own (`_mirelo`, after the producer's approval): added
-        to this one request only, never logged, recorded or returned."""
+        to this one request only, never logged, recorded or returned. `tool` is one of OPERATIONS, which the pinned
+        runtime must serve."""
+        if tool not in OPERATIONS:
+            raise ValueError(f"{tool!r} isn't in runtime.OPERATIONS: add it there, so the pin is checked for it")
         arguments = {key: value for key, value in args.items() if not (isinstance(key, str) and key.startswith("_"))}
         hosts = {key: value for key, value in (private or {}).items() if isinstance(key, str) and key.startswith("_")}
         with self._lock:
