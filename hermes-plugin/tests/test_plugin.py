@@ -37,13 +37,13 @@ class Register(unittest.TestCase):
         self.assertEqual(set(ctx.skills), {"daw", "sounds", "listening"})
         self.assertIn("kumi:daw", ctx.prompt["kumi"])
 
-    def test_only_status_and_connect_are_shown_before_kumi_is_set_up(self):
+    def test_only_status_setup_and_connect_are_shown_before_kumi_is_set_up(self):
         host, _, data = support.host(self, installed=False)
         shown = tools.installed_check(host)
         self.assertFalse(shown())
         support.install(data)
         self.assertTrue(shown())
-        self.assertEqual(tools.ALWAYS_SHOWN, {"kumi_status", "kumi_connect"})
+        self.assertEqual(tools.ALWAYS_SHOWN, {"kumi_status", "kumi_setup", "kumi_connect"})
 
 
 class Tools(unittest.TestCase):
@@ -58,7 +58,9 @@ class Tools(unittest.TestCase):
     def test_status_before_setup_says_so_and_starts_nothing(self):
         host, _, data = support.host(self, installed=False)
         status = support.call(host, "kumi_status", {}, session_id="s1")
-        self.assertEqual(status["setup"], {"installed": False, "message": "Kumi isn't set up in this Hermes profile yet."})
+        self.assertEqual((status["setup"]["state"], status["setup"]["runtime"]), ("needs_runtime", {"installed": False}))
+        self.assertEqual(status["message"], status["setup"]["message"])
+        self.assertIn("github.com/user1303836/kumi", status["message"])
         self.assertEqual((status["connected"], status["daw"], status["runtime"]), (False, "ableton", None))
         self.assertEqual(support.call(host, "kumi_observe", {"scope": "focus"})["error"]["code"], "setup_needed")
         support.install(data)
@@ -143,7 +145,8 @@ class Command(unittest.TestCase):
         commands = support.module("commands")
         host, _, data = support.host(self, installed=False)
         self.assertEqual(commands.kumi(host, "", session_id="s1"),
-                         "Kumi isn't ready: Kumi isn't set up in this Hermes profile yet.")
+                         "Kumi isn't ready: Kumi needs its runtime: 26.0 MB from github.com/user1303836/kumi. Ask the "
+                         "agent to set Kumi up, or run `hermes kumi setup` in a terminal.")
         support.install(data)
         support.call(host, "kumi_connect", {}, session_id="s1")
         self.assertEqual(commands.kumi(host, "", session_id="s1").splitlines()[1],
