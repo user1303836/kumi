@@ -260,6 +260,58 @@ class ListeningInterpretationTests(unittest.TestCase):
                 self.assertEqual(result, before)
                 self.assertEqual(len(model.calls), 1)
 
+    def test_explicit_image_model_rejection_is_actionable_without_exposing_provider_details(self):
+        class ProviderError(Exception):
+            status_code = 400
+
+            def __init__(self, body):
+                super().__init__("PRIVATE_EXCEPTION")
+                self.body = body
+
+        for status, body in (
+            (400, {"message": "PRIVATE_MODEL does not support images; PRIVATE_KEY"}),
+            (400, {"error": {"message": "Only 'text' content type is supported. PRIVATE_KEY"}}),
+            (404, {"message": "No endpoints found that support image input; PRIVATE_ENDPOINT"}),
+            (422, "Vision input is not supported. PRIVATE_KEY"),
+        ):
+            with self.subTest(status=status, body=type(body)):
+                failure = ProviderError(body)
+                failure.status_code = status
+                result = {"metrics": measured()}
+                before = copy.deepcopy(result)
+                model = LocalModel(error=failure)
+                with self.assertRaises(listening.InterpretationError) as error:
+                    listening.interpret(model, result, timeout=30)
+                self.assertIn("the listening model needs image input", str(error.exception))
+                self.assertNotIn("PRIVATE", str(error.exception))
+                self.assertEqual(result, before)
+                self.assertEqual(len(model.calls), 1)
+
+    def test_other_provider_failures_and_metrics_only_calls_do_not_blame_image_support(self):
+        class ProviderError(Exception):
+            def __init__(self, status, message):
+                super().__init__("PRIVATE_EXCEPTION")
+                self.status_code = status
+                self.body = {"message": message}
+
+        for failure, spectrum in (
+            (ProviderError(400, "failed to decode image: invalid or unsupported image format"), True),
+            (ProviderError(400, "image too large"), True),
+            (ProviderError(400, "Invalid image_url: expected a valid URL"), True),
+            (ProviderError(400, "Unexpected item type in content"), True),
+            (ProviderError(429, "model does not support images"), True),
+            (ProviderError(500, "model does not support images"), True),
+            (RuntimeError("model does not support images"), True),
+            (ProviderError(400, "model does not support images"), False),
+        ):
+            with self.subTest(status=getattr(failure, "status_code", None), spectrum=spectrum):
+                model = LocalModel(error=failure)
+                with self.assertRaises(listening.InterpretationError) as error:
+                    listening.interpret(model, {"metrics": measured(spectrum=spectrum)}, timeout=30)
+                self.assertNotIn("needs image input", str(error.exception))
+                self.assertNotIn("PRIVATE", str(error.exception))
+                self.assertEqual(len(model.calls), 1)
+
     def test_unparsed_wrong_shape_or_excessive_answers_are_not_published(self):
         for parsed in (None, [], {"text": 9}, {"text": ""}, {"text": "x" * 2401}, {"text": "ok", "instructions": "PRIVATE_OUTPUT"}):
             with self.subTest(parsed=type(parsed)):

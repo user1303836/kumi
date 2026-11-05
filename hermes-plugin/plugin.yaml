@@ -30,3 +30,8 @@ config_schema:
     default: []
     label: Sample folders
     description: "Folders Kumi may read to build your sound map. Nothing else is scanned."
+  listen_interpretation:
+    type: bool
+    default: false
+    label: Interpret measurements with a model
+    description: "After Kumi measures audio, the model set for Kumi's listening task in Hermes (it follows Vision, and must accept images) reads the numbers and a coarse band-energy image, never the audio. Its reading is added beside the measurements, which stay either way. The model or Hermes's fallback providers for that task may cost tokens."

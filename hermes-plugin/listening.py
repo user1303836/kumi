@@ -235,6 +235,38 @@ def _heatmap(spectrum: Any) -> tuple[bytes, dict[str, Any]]:
     }
 
 
+def _rejects_image_input(error: Exception) -> bool:
+    """Recognize explicit provider modality refusals, never infer model capabilities.
+
+    Hermes v0.22.7 preserves SDK exceptions at the PluginLlm boundary. This narrow
+    subset of its message_sanitization image-rejection cases excludes corrupt
+    payloads, invalid URLs and generic content errors: those do not prove that
+    the listening model lacks image input.
+    """
+    if getattr(error, "status_code", None) not in (400, 404, 422):
+        return False
+    body = getattr(error, "body", None)
+    if isinstance(body, dict):
+        if isinstance(body.get("error"), dict):
+            body = body["error"]
+        message = body.get("message")
+    else:
+        message = body if isinstance(body, str) else getattr(error, "message", None)
+    if not isinstance(message, str):
+        return False
+    message = message[:4096].lower()
+    return any(phrase in message for phrase in (
+        "only 'text' content type is supported", "only text content type is supported",
+        "image_url is not supported", "image content is not supported",
+        "multimodal is not supported", "multimodal content is not supported",
+        "multimodal input is not supported", "vision is not supported",
+        "vision input is not supported", "does not support images",
+        "does not support image input", "does not support multimodal",
+        "does not support vision", "model does not support image",
+        "no endpoints found that support image input",
+    ))
+
+
 def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, Any]:
     """Make one auxiliary call; return interpretation only, leaving result intact.
 
@@ -290,7 +322,9 @@ def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, 
         raise InterpretationError("Model interpretation timed out; the measured results remain available.") from None
     except PermissionError:
         raise InterpretationError("Hermes refused the listening auxiliary task; check its model settings. The measurements remain available.") from None
-    except Exception:
+    except Exception as error:
+        if any(block["type"] == "image" for block in blocks) and _rejects_image_input(error):
+            raise InterpretationError("interpretation unavailable: the listening model needs image input") from None
         raise InterpretationError("Model interpretation failed; the measurements remain available.") from None
     parsed = getattr(completed, "parsed", None)
     # Hermes validates JSON Schema only when its optional jsonschema dependency

@@ -51,6 +51,7 @@ class Context:
         self.cli: dict[str, dict] = {}
         self.skills: dict[str, Path] = {}
         self.prompt: dict[str, str] = {}
+        self.aux_tasks: dict[str, dict] = {}
         self.settings = dict(settings or {})
         self.profile_name = profile_name
 
@@ -79,6 +80,10 @@ class Context:
         if len(content) > max_chars:
             raise ValueError(f"system prompt section {id} is over {max_chars} characters")
         self.prompt[id] = content
+
+    def register_auxiliary_task(self, key, *, display_name, description, defaults=None, inherit_from=None):
+        self.aux_tasks[key] = {"display_name": display_name, "description": description, "defaults": defaults,
+                               "inherit_from": inherit_from}
 
     def get_config(self, key: str, default: Any = None) -> Any:
         return self.settings.get(key, default)
@@ -136,10 +141,10 @@ def requests(state_dir: Path) -> list[dict]:
 
 
 def host(test, settings: dict | None = None, *fixture_args: str, installed: bool = True, hook_timeout: float = 30.0,
-         daw_component: bool = True):
+         daw_component: bool = True, hermes_config: dict | None = None):
     """A plugin host as the tools see it, on a fresh plugin-data folder with the fixture runtime set up (unless
-    `installed` is false), and a plugin folder whose kumi_release.json pins it. Returns (host, context, data folder);
-    everything is cleaned up after `test`."""
+    `installed` is false), a plugin folder whose kumi_release.json pins it, and `hermes_config` as Hermes's own
+    settings (never this machine's). Returns (host, context, data folder); everything is cleaned up after `test`."""
     import tempfile
     folder, plugin = tempfile.TemporaryDirectory(), tempfile.TemporaryDirectory()
     test.addCleanup(folder.cleanup)
@@ -152,7 +157,8 @@ def host(test, settings: dict | None = None, *fixture_args: str, installed: bool
     runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10)
     test.addCleanup(runtimes.stop_all)
     return (module("tools").Host(ctx, runtimes, data_dir=lambda: data, pinned=lambda: VERSION,
-                                 hook_timeout=lambda: hook_timeout, plugin_dir=Path(plugin.name)), ctx, data)
+                                 hook_timeout=lambda: hook_timeout, plugin_dir=Path(plugin.name),
+                                 hermes_config=lambda: dict(hermes_config or {})), ctx, data)
 
 
 _IDS = iter(range(1, 1 << 30))

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Callable
 import uuid
 
-from . import calls, runtime, schemas, setup
+from . import calls, listening, runtime, schemas, setup
 
 log = logging.getLogger(__name__)
 
@@ -38,7 +38,8 @@ class Host:
 
     def __init__(self, ctx: Any, runtimes: runtime.Runtimes, *, data_dir: Callable[[], Path] | None = None,
                  pinned: Callable[[], str | None] = setup.pinned_version,
-                 hook_timeout: Callable[[], float | None] | None = None, plugin_dir: Path | None = None):
+                 hook_timeout: Callable[[], float | None] | None = None, plugin_dir: Path | None = None,
+                 hermes_config: Callable[[], dict] | None = None):
         self._ctx = ctx
         self.runtimes = runtimes
         self.calls = calls.CallIds()
@@ -46,6 +47,18 @@ class Host:
         self._pinned = pinned
         self._hook_timeout = hook_timeout
         self.plugin_dir = plugin_dir  # where setup reads kumi_release.json (None: this plugin's own folder)
+        self._hermes_config = hermes_config
+
+    def hermes_config(self) -> dict:
+        """Hermes's own settings (its config.yaml, as Hermes reads it), for the few Kumi follows; read on each use."""
+        if self._hermes_config is not None:
+            return self._hermes_config()
+        try:
+            from hermes_cli.config import load_config_readonly  # Hermes's
+            config = load_config_readonly()
+        except Exception:
+            return {}
+        return config if isinstance(config, dict) else {}
 
     def hook_timeout(self) -> float | None:
         """Hermes's `plugins.hook_callback_timeout` (default 30 s; 0 or less: none), read on each call."""
@@ -77,6 +90,28 @@ class Host:
     def library_folders(self) -> list[str]:
         folders = self._ctx.get_config("library_folders", [])
         return [folder for folder in folders if isinstance(folder, str) and folder] if isinstance(folders, list) else []
+
+    def listen_interpretation(self) -> bool:
+        return self._ctx.get_config("listen_interpretation", False) is True
+
+    def llm(self) -> Any:
+        """Hermes's model facade for this plugin (CC-1), read per call: never while registering."""
+        return self._ctx.llm
+
+    def interpretation_timeout(self) -> float:
+        """The listening task's budget for one attempt (CC-1, rgzm's note): its whole time
+        (`auxiliary.kumi_listen.timeout`, else the task's default) split over Hermes's attempts, 1 plus
+        `auxiliary.transient_retries` (default 2, at most 6)."""
+        total, retries = float(listening.AUX_TASK["defaults"]["timeout"]), 2
+        auxiliary = self.hermes_config().get("auxiliary")
+        task = auxiliary.get(listening.AUX_TASK_KEY) if isinstance(auxiliary, dict) else None
+        configured = task.get("timeout") if isinstance(task, dict) else None
+        if isinstance(configured, (int, float)) and not isinstance(configured, bool) and 0 < configured < math.inf:
+            total = float(configured)
+        configured = auxiliary.get("transient_retries") if isinstance(auxiliary, dict) else None
+        if isinstance(configured, int) and not isinstance(configured, bool):
+            retries = max(0, min(configured, 6))
+        return total / (1 + retries)
 
     def set_library_folders(self, folders: list[str]) -> None:
         self._ctx.set_config("library_folders", folders)
@@ -374,7 +409,8 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
     if refusal:
         return {"error": {"code": "invalid", "reason": refusal}}
     if not is_track_listen(args):
-        return host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
+        result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
+        return interpreted(host, result)
     # A track listen plays the project: sent once, and an answer that never came is unsure, never resent (CC-2).
     call = kwargs.get("kumi_call")
     deadline = track_deadline(call.extra.get("deadline")) if isinstance(call, calls.Entry) else None
@@ -393,7 +429,26 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
         result = {key: value for key, value in result.items() if key not in MEASURED}
         if result["state"] == "unsure":
             result.setdefault("hint", UNSURE_HINT)
-    return result
+        return result
+    return interpreted(host, result)
+
+
+def interpreted(host: Host, result: dict) -> dict:
+    """CC-1: with the producer's `listen_interpretation` on, a measured result gets the reading of Hermes's listening
+    model (`interpretation`: its numbers and a band-energy image, never the audio), or why there's none
+    (`interpretation_error`). The measurements stay either way, and nothing is asked again of the runtime or the DAW.
+    A listen that didn't measure (refused, cancelled, unsure, or an error) is never sent to a model."""
+    if (not host.listen_interpretation() or "error" in result or not isinstance(result.get("metrics"), dict)
+            or result.get("state") not in (None, "done")):
+        return result
+    try:
+        return {**result, "interpretation": listening.interpret(host.llm(), result,
+                                                               timeout=host.interpretation_timeout())}
+    except listening.InterpretationError as failure:
+        return {**result, "interpretation_error": str(failure)}
+    except Exception:
+        log.exception("Kumi's listening interpretation failed")
+        return {**result, "interpretation_error": "Model interpretation failed; the measurements remain available."}
 
 
 def kumi_sounds(host: Host, args: dict, **kwargs: Any) -> dict:

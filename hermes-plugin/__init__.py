@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import commands, context, policy, runtime, tools
+from . import commands, context, listening, policy, runtime, tools
 
 SKILLS = Path(__file__).resolve().parent / "skills"
 # What every chat's system prompt says of Kumi (cache-safe: the same each turn). Kumi's tools may be behind tool
@@ -52,6 +52,7 @@ def register(ctx) -> None:
     ctx.register_hook("on_session_finalize", host.on_session_finalize)
     ctx.register_command("kumi", kumi_command, description=commands.DESCRIPTION)
     commands.register_cli(ctx, host)
+    ctx.register_auxiliary_task(listening.AUX_TASK_KEY, **listening.AUX_TASK)  # CC-1; ctx.llm is read only per call
     for skill in ("daw", "sounds", "listening"):
         ctx.register_skill(skill, SKILLS / skill / "SKILL.md")
     ctx.register_system_prompt_section("kumi", PROMPT)
