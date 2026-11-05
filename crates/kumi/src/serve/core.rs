@@ -109,7 +109,7 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             "project_key": project.key,
             "epoch": project.epoch,
             "project": project_value(&project),
-            "focus": focus,
+            "focus": focus.as_ref().map(connection::focus_value),
             "transport": transport.as_ref().map(connection::transport_value),
             "catch_up": catch_up,
             "refs": refs,
@@ -175,9 +175,13 @@ fn run_job(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     })
 }
 
-/// The runtime's status now, also written as `status.json` (`stale` there: whether the runtime has stopped).
+/// The runtime's status now, also written as `status.json` (`stale` there: whether the runtime has stopped). Once the
+/// runtime is stopping, only the stop is written: a late write from before (a connection change) never undoes it.
 pub async fn publish_status(ctx: &Ctx, stale: bool) -> Value {
     let status = status(ctx).await;
+    if !stale && ctx.shutdown().is_cancelled() {
+        return status;
+    }
     let mut snapshot = status.clone();
     snapshot["stale"] = json!(stale);
     if let Err(error) = ctx.snapshots().write("status", &snapshot) {

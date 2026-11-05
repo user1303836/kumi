@@ -281,25 +281,51 @@ case!(serve_wont_use_reaper_through_an_adopted_home_yet, async {
     assert!(lab.methods_sent().is_empty(), "nothing reached REAPER");
 });
 
-case!(serve_wont_take_over_lives_bridge_when_another_kumi_installed_it, async {
+/// Live with nothing in it but what a Kumi start reads.
+struct Silent;
+
+#[async_trait(?Send)]
+impl kumi_agent::core::contracts::Integration for Silent {
+    async fn start(&self, _: Signal) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    async fn observe(
+        &self,
+        _: Signal,
+        _: Option<kumi_agent::core::contracts::ObserveHints>,
+    ) -> Result<kumi_agent::core::contracts::Observation, RuntimeError> {
+        Err(RuntimeError::plain("Live isn't open"))
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+}
+
+/// A runtime for Live whose Remote Script's reference names a configuration in `owner`'s home (the runtime's own when
+/// None); and whether it started Live's integration.
+async fn live_connect(owner: Option<&std::path::Path>) -> (Result<Value, OpError>, bool) {
     let home = tempfile::tempdir().unwrap();
-    let other = tempfile::tempdir().unwrap();
-    // The producer's own Kumi put the bridge in Live: the Remote Script's reference names a configuration in its home.
-    let config = other.path().join("bridge/state/bridge-config.json");
+    let transport = home.path().join("kumi-home");
+    let config = owner.unwrap_or(&transport).join("bridge/state/bridge-config.json");
     std::fs::create_dir_all(config.parent().unwrap()).unwrap();
     std::fs::write(&config, "{}").unwrap();
     let scripts = home.path().join("Remote Scripts");
     std::fs::create_dir_all(scripts.join("AbletonMcpBridge")).unwrap();
     std::fs::write(scripts.join("AbletonMcpBridge/bridge-reference.json"), json!({"config": config}).to_string()).unwrap();
-    let transport = home.path().join("kumi-home");
-    std::fs::create_dir_all(&transport).unwrap();
     let env = Env::from([
         ("HOME".into(), home.path().display().to_string()),
         ("KUMI_HOME".into(), transport.display().to_string()),
         ("KUMI_REMOTE_SCRIPTS_DIR".into(), scripts.display().to_string()),
         ("KUMI_PROCESSES".into(), "none".into()),
     ]);
-    let answers = kumi_daw::io::Answers::default().with(AbletonFactory(Rc::new(|_| panic!("another Kumi's bridge isn't started"))));
+    let started = Rc::new(Cell::new(false));
+    let factory = {
+        let started = started.clone();
+        AbletonFactory(Rc::new(move |_| {
+            started.set(true);
+            Rc::new(Silent) as Rc<dyn kumi_agent::core::contracts::Integration>
+        }))
+    };
     let args = Args {
         state_dir: home.path().join("state"),
         kumi_home: transport,
@@ -308,10 +334,27 @@ case!(serve_wont_take_over_lives_bridge_when_another_kumi_installed_it, async {
         media_roots: vec![],
         tools: BTreeMap::new(),
     };
-    let ctx = Ctx::new(args, env, answers).unwrap();
+    let ctx = Ctx::new(args, env, kumi_daw::io::Answers::default().with(factory)).unwrap();
     let connect = registry::OPERATIONS.iter().find(|operation| operation.name == "connect").unwrap();
     let call = Call { args: Default::default(), host: HostCall::default(), signal: Signal::new(), progress: Progress::none() };
-    let Err(OpError::Refused { code, owner, .. }) = (connect.run)(&ctx, call).await else { panic!("took over another Kumi's bridge") };
+    let connected = (connect.run)(&ctx, call).await;
+    ctx.link().close().await;
+    (connected, started.get())
+}
+
+case!(serve_wont_take_over_lives_bridge_when_another_kumi_installed_it, async {
+    // The producer's own Kumi put the bridge in Live: the Remote Script's reference names a configuration in its home.
+    let other = tempfile::tempdir().unwrap();
+    let (connected, started) = live_connect(Some(other.path())).await;
+    let Err(OpError::Refused { code, owner, .. }) = connected else { panic!("took over another Kumi's bridge") };
     assert_eq!(code, "owned_elsewhere");
     assert_eq!(owner.unwrap()["kumi_home"], std::fs::canonicalize(other.path()).unwrap().display().to_string());
+    assert!(!started, "its bridge isn't started");
+});
+
+case!(serve_connects_to_live_through_the_bridge_its_own_home_installed, async {
+    let (connected, started) = live_connect(None).await;
+    let status = connected.expect("its own bridge");
+    assert!(started, "Live's integration started");
+    assert_eq!((status["daw"].clone(), status["project"].clone()), (json!("ableton"), Value::Null), "no look yet: Live isn't open");
 });

@@ -340,13 +340,43 @@ pub fn publish_focus(ctx: &Weak<Ctx>) {
     let body = json!({
         "connected": connected,
         "project": project,
-        "focus": connection.focus().filter(|_| connected),
+        "focus": connection.focus().filter(|_| connected).map(|focus| focus_value(&focus)),
         "transport": connection.transport().filter(|_| connected).as_ref().map(transport_value),
         "catch_up": bounded_catch_up(connection.reported.catch_up.borrow().clone()),
     });
     if let Err(error) = ctx.snapshots().write("focus", &body) {
         say(&format!("kumi serve: focus.json not written: {error}"));
     }
+}
+
+/// The focus as `focus.json` and `observe` give it (CC-7): Kumi's `DawFocus`, its own fields only, with any name that
+/// is a whole path (a take or sample named by its file) cut to the file's name, so no folder of the producer's leaves
+/// the runtime. Refs (`…Ref`) are the DAW's own and stay as they are.
+pub fn focus_value(focus: &DawFocus) -> Value {
+    fn whole_path(text: &str) -> bool {
+        let bytes = text.as_bytes();
+        text.starts_with('/') || text.starts_with("\\\\") || (bytes.len() > 2 && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
+    }
+    fn names_only(value: &mut Value) {
+        match value {
+            Value::String(text) if whole_path(text) => {
+                let name = text.rsplit(['/', '\\']).next().unwrap_or_default().to_string();
+                *text = name;
+            }
+            Value::Array(items) => items.iter_mut().for_each(names_only),
+            Value::Object(fields) => {
+                for (key, field) in fields.iter_mut() {
+                    if !key.ends_with("Ref") {
+                        names_only(field);
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut value = serde_json::to_value(focus).unwrap_or(Value::Null);
+    names_only(&mut value);
+    value
 }
 
 /// The transport as C3 names it (`playing`, `tempo`, `position` in beats), with the bar's beats, the meter and a
@@ -430,6 +460,61 @@ mod tests {
         reported.answered.set(true);
         *link.connection.borrow_mut() = Some(Rc::new(Connection { integration: Rc::new(Nothing), reported: reported.clone() }));
         reported
+    }
+
+    #[test]
+    fn focus_names_no_folder_of_the_producers_and_keeps_the_daws_refs() {
+        let focus: DawFocus = serde_json::from_value(json!({
+            "track": {"name": "Drums"},
+            "trackRef": "track:3",
+            "clip": "/Users/producer/Samples/Breaks/Amen 170.wav",
+            "item": {"kind": "take", "itemRef": "item:7/take:1", "name": "C:\\Users\\producer\\Music\\Vox take 2.wav"},
+        }))
+        .unwrap();
+        let value = focus_value(&focus);
+        assert_eq!(value["clip"], "Amen 170.wav");
+        assert_eq!(value["item"]["name"], "Vox take 2.wav");
+        assert_eq!(
+            (value["trackRef"].clone(), value["item"]["itemRef"].clone()),
+            (json!("track:3"), json!("item:7/take:1")),
+            "refs are the DAW's"
+        );
+        let text = value.to_string();
+        assert!(!text.contains("/Users/") && !text.contains("\\Users\\"), "{text}");
+        let known: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(known, ["track", "trackRef", "clip", "item"], "nothing but DawFocus's own fields");
+    }
+
+    #[test]
+    fn the_transport_is_c3s_without_the_integrations_clock() {
+        let transport = Transport {
+            playing: true,
+            tempo: Some(124.0),
+            beat: Some(33.5),
+            at: 9_876.0,
+            beats_per_bar: Some(4.0),
+            meter: None,
+            line: None,
+        };
+        let value = transport_value(&transport);
+        let keys: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
+        assert_eq!(keys, ["playing", "tempo", "position", "beatsPerBar", "meter", "line"]);
+        assert_eq!((value["position"].clone(), value["playing"].clone()), (json!(33.5), json!(true)));
+    }
+
+    #[test]
+    fn catch_up_is_the_newest_five_projects_with_twenty_lines_each_at_most() {
+        let seen = |n: usize, lines: usize| CatchUp {
+            set: format!("Set {n}"),
+            last_seen_at: n as i64,
+            lines: (0..lines).map(|line| format!("line {line}")).collect(),
+            more: 3,
+            after_reconnect: None,
+        };
+        let bounded = bounded_catch_up((0..7).map(|n| seen(n, if n == 6 { 25 } else { 2 })).collect());
+        assert_eq!(bounded.iter().map(|seen| seen.set.as_str()).collect::<Vec<_>>(), ["Set 2", "Set 3", "Set 4", "Set 5", "Set 6"]);
+        let last = bounded.last().unwrap();
+        assert_eq!((last.lines.len(), last.more), (20, 3 + 5), "the lines past 20 are counted with the rest");
     }
 
     #[test]
