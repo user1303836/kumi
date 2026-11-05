@@ -444,6 +444,72 @@ async fn a_take_the_producer_edited_or_deleted_is_left_out_of_a_drop() {
     assert!(daw.names().is_empty());
 }
 
+/// (#832) Undo restores Kumi's earlier material, including after the sets were reloaded. A real producer edit is
+/// still left out of both changing and dropping the rest. A saved set from before write history was added still loads.
+#[tokio::test(flavor = "current_thread")]
+async fn an_undone_take_stays_kumis_across_a_restart_while_a_producer_edit_stays_theirs() {
+    for action in ["change", "drop"] {
+        let home = tempfile::tempdir().unwrap();
+        let daw = Rc::new(Daw::default());
+        let tool = kumi(&daw, home.path());
+        let recipes = |first| (first..first + 3).map(|step| json!({"lines": [{"step": step, "level": 5}]})).collect::<Vec<_>>();
+        run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "takes": recipes(1), "listen": false})).await.unwrap();
+        let original = daw.takes.borrow().clone();
+        drop(tool);
+        let path = std::fs::read_dir(home.path().join("variations")).unwrap().next().unwrap().unwrap().path();
+        let mut legacy: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        for take in legacy["sets"][0]["takes"].as_array_mut().unwrap() {
+            take.as_object_mut().unwrap().remove("previous");
+        }
+        std::fs::write(&path, legacy.to_string()).unwrap();
+        let tool = kumi(&daw, home.path());
+        let changed = run(&tool, json!({"action": "change", "names": ["rest"], "takes": recipes(5), "listen": false})).await.unwrap();
+        assert_eq!(changed["changed"].as_array().unwrap().len(), 3, "{changed}");
+        drop(tool);
+        {
+            let mut takes = daw.takes.borrow_mut();
+            for id in [1, 2] {
+                takes.get_mut(&id).unwrap().1 = original[&id].1.clone();
+            }
+            takes.get_mut(&3).unwrap().1 .0[15] = 9;
+        }
+        let producer = daw.takes.borrow()[&3].clone();
+        let again = kumi(&daw, home.path());
+        let done = run(&again, json!({"action": action, "names": ["rest"], "takes": recipes(9), "listen": false})).await.unwrap();
+        assert_eq!(done["skipped"].as_array().unwrap().len(), 1, "{done}");
+        assert!(done["skipped"][0].as_str().unwrap().contains("V3 was edited in Fake"), "{done}");
+        if action == "change" {
+            assert_eq!(done["changed"].as_array().unwrap().len(), 2, "{done}");
+        } else {
+            assert_eq!(done["dropped"], json!(["V1", "V2"]), "{done}");
+        }
+        assert_eq!(daw.takes.borrow()[&3], producer, "the producer's edit stays as it is");
+    }
+}
+
+/// A change may make more than one HISTORY entry: the new material, then the listening pass's turn-down. Undoing
+/// both still reaches a known write, rather than leaving only the intermediate one as the accepted previous material.
+#[tokio::test(flavor = "current_thread")]
+async fn undoing_a_change_and_its_listening_correction_still_leaves_a_take_as_kumi_wrote_it() {
+    let home = tempfile::tempdir().unwrap();
+    let daw = Rc::new(Daw::default());
+    let tool = kumi(&daw, home.path());
+    run(&tool, json!({"action": "make", "source": {"steps": BEAT}, "takes": [{"lines": [{"step": 2, "level": 5}]}], "listen": false}))
+        .await
+        .unwrap();
+    let original = daw.takes.borrow()[&1].1.clone();
+    daw.clips.set(1);
+    let changed = run(&tool, json!({"action": "change", "names": ["V1"], "takes": [{"lines": [{"step": 4, "level": 9}]}]})).await.unwrap();
+    assert_eq!(changed["changed"].as_array().unwrap().len(), 1, "{changed}");
+    assert!(!daw.quieted.borrow().is_empty(), "listening made another write");
+    daw.takes.borrow_mut().get_mut(&1).unwrap().1 = original;
+    drop(tool);
+    let again = kumi(&daw, home.path());
+    let dropped = run(&again, json!({"action": "drop"})).await.unwrap();
+    assert_eq!(dropped["dropped"], json!(["V1"]), "{dropped}");
+    assert!(dropped["skipped"].as_array().unwrap().is_empty(), "{dropped}");
+}
+
 /// (#606) A take the DAW put where Kumi can't follow it (REAPER's ticks that bend) isn't called edited: Kumi says it can't
 /// tell, and why, and leaves it to a change or a drop of the rest as it does an edited one.
 #[tokio::test(flavor = "current_thread")]

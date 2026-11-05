@@ -4,7 +4,8 @@
 use super::backend::{found, gone, Recipe, Rewritten, Set, Source, Undroppable, VariationsBackend, Words};
 use super::heard::{db_text, Fault, Heard};
 use super::{
-    bolder_or_milder, check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, TRIES,
+    bolder_or_milder, check, kept_name, roll, seed_of, take_name, Bounds, Material, Purpose, Rng, Take, TakeSet, TakeState, TakeVersion,
+    TRIES,
 };
 use async_trait::async_trait;
 use kumi_common::abort::Signal;
@@ -20,6 +21,8 @@ use std::rc::Rc;
 /// The most takes one request makes or changes, and the sets Kumi keeps for a project.
 const MOST_TAKES: usize = 16;
 const SETS_KEPT: usize = 8;
+/// A change can also redraw or turn a take down while listening: retain those writes too, so their undos are recognized.
+const PREVIOUS_WRITES: usize = 8;
 
 /// A take drawn, before it's written: its number, material, direction, what was done (and warnings) and its distance.
 pub struct Drawn<M> {
@@ -146,7 +149,9 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                     .iter()
                     .map(|take| {
                         json!({"number": take.number, "state": take.state.word(), "place": take.place, "change": take.change,
-                            "direction": take.direction, "digest": take.digest, "line": take.line, "material": backend.material_json(&take.material)})
+                            "direction": take.direction, "digest": take.digest, "line": take.line, "material": backend.material_json(&take.material),
+                            "previous": take.previous.iter().map(|version| json!({"digest": version.digest,
+                                "material": backend.material_json(&version.material)})).collect::<Vec<_>>()})
                     })
                     .collect();
                 json!({"id": set.id, "seed": set.seed, "floor": set.floor, "label": set.source.label, "short": set.source.short,
@@ -186,6 +191,23 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                         direction: text(take, "direction"),
                         digest: text(take, "digest"),
                         material,
+                        previous: take
+                            .get("previous")
+                            .and_then(Value::as_array)
+                            .into_iter()
+                            .flatten()
+                            .rev()
+                            .take(PREVIOUS_WRITES)
+                            .filter_map(|version| {
+                                Some(TakeVersion {
+                                    digest: version.get("digest")?.as_str()?.into(),
+                                    material: backend.material_of(version.get("material")?)?,
+                                })
+                            })
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .collect(),
                         line: text(take, "line"),
                     });
                 }
@@ -266,6 +288,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                         direction: drawn.direction.clone(),
                         digest: self.backend.digest(&drawn.material),
                         material: drawn.material,
+                        previous: vec![],
                         line,
                     });
                 }
@@ -338,20 +361,19 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let mut skipped = Vec::new();
         let mut rewritten = BTreeMap::new();
         for ((number, mut recipe), row) in numbers.iter().copied().zip(recipes).zip(rows) {
-            let take = set.take(number).expect("a picked take").clone();
             if !found(&row) {
                 skipped.push(format!("V{number} isn't in the {} any more", self.backend.words().app));
                 continue;
             }
             // (a take that can't be read now is left: the takes rewritten before it stay told)
-            let current = match self.backend.current(&set, &row, signal).await {
+            let current = match self.current_take(&mut set, number, &row, signal).await {
                 Ok(current) => current,
                 Err(why) => {
                     skipped.push(format!("V{number} wasn't changed: Kumi couldn't read it ({why})"));
                     continue;
                 }
             };
-            if self.backend.digest(&current) != take.digest {
+            if self.backend.digest(&current) != set.take(number).expect("a picked take").digest {
                 skipped.push(format!("{}: left as it is", edited_line(&self.backend, number, &current)));
                 continue;
             }
@@ -373,8 +395,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                     let reference = row.get("ref").and_then(Value::as_str).unwrap_or("");
                     lines_out.push(json!({"take": format!("V{number}"), "ref": self.backend.short(reference), "line": line}));
                     if let Some(take) = set.take_mut(number) {
-                        take.digest = self.backend.digest(&material);
-                        take.material = material;
+                        self.written(take, material);
                         take.direction = drawn.direction;
                         take.change = Some(change);
                         take.line = line;
@@ -481,7 +502,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
                 skipped.push(format!("Kumi can't find V{number} where it left it, nor by its name: left as it is"));
                 continue;
             }
-            let current = self.backend.current(&set, &row, signal).await?;
+            let current = self.current_take(&mut set, number, &row, signal).await?;
             if self.backend.digest(&current) != set.take(number).expect("a picked take").digest {
                 if !named.contains(&number) {
                     skipped.push(format!("{}: left as it is (name it to drop it anyway)", edited_line(&self.backend, number, &current)));
@@ -813,8 +834,7 @@ impl<B: VariationsBackend + 'static> Variations<B> {
         let done = self.backend.rewrite(set, &row, &before, &redrawn.material, signal).await.map_err(|(why, _)| why)?;
         let (change, material, line) = holding(&redrawn, done);
         if let Some(take) = set.take_mut(number) {
-            take.digest = self.backend.digest(&material);
-            take.material = material;
+            self.written(take, material);
             take.change = Some(change);
             take.line = line;
         }
@@ -841,11 +861,48 @@ impl<B: VariationsBackend + 'static> Variations<B> {
             None => (quieter, None),
         };
         if let Some(take) = set.take_mut(number) {
-            take.digest = self.backend.digest(&material);
-            take.material = material;
+            self.written(take, material);
             take.change = Some(change.clone());
         }
         Ok((change, partly))
+    }
+
+    /// The take as last written, or as an earlier Kumi write an undo restored. Backends can normalize a read against
+    /// the kept material (REAPER's whole note ticks, for example), so a prior version is read with that material too.
+    async fn current_take(&self, set: &mut Set<B>, number: usize, row: &Value, signal: &Signal) -> Result<B::Material, String> {
+        let current = self.backend.current(set, row, signal).await?;
+        let take = set.take(number).expect("a picked take");
+        if self.backend.digest(&current) == take.digest {
+            return Ok(current);
+        }
+        let previous = take.previous.clone();
+        for (index, version) in previous.into_iter().enumerate().rev() {
+            let mut earlier = set.clone();
+            let take = earlier.take_mut(number).expect("a picked take");
+            take.material = version.material.clone();
+            take.digest = version.digest.clone();
+            let restored = self.backend.current(&earlier, row, signal).await?;
+            if self.backend.digest(&restored) == version.digest {
+                let take = set.take_mut(number).expect("a picked take");
+                take.material = version.material;
+                take.digest = version.digest;
+                // Newer versions were undone: don't accept them as an unedited take after it moves back again.
+                take.previous.truncate(index);
+                return Ok(restored);
+            }
+        }
+        Ok(current)
+    }
+
+    fn written(&self, take: &mut Take<Value, B::Material>, material: B::Material) {
+        let digest = self.backend.digest(&material);
+        if digest != take.digest {
+            take.previous.push(TakeVersion { digest: take.digest.clone(), material: take.material.clone() });
+            let excess = take.previous.len().saturating_sub(PREVIOUS_WRITES);
+            take.previous.drain(..excess);
+        }
+        take.digest = digest;
+        take.material = material;
     }
 
     fn put_back(&self, set: Set<B>) {
