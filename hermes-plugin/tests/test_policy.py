@@ -136,6 +136,9 @@ class Approvals(unittest.TestCase):
         lines = self.hook("kumi_change", plan)["message"].splitlines()
         self.assertEqual(len([line for line in lines if line.startswith("• ")]), 20, "Desktop shows every step")
         self.assertEqual(lines[-2:], [policy.FOOTER, policy.CHAT_ONLY])
+        self.ctx.surface = RuntimeError("the plugin host's channel is gone")
+        self.assertEqual(self.host.session_surface(), "unknown")
+        self.assertFalse(policy.shows_whole("Kumi: Louder drums", "unknown"), "never taken as whole")
 
     def test_the_terminals_panel_shows_a_change_undo_or_listen_whole_at_its_longest_step(self):
         def message(lines, footer=None):
