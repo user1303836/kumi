@@ -10,6 +10,7 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 HERE = Path(__file__).resolve().parent
 
@@ -242,6 +243,41 @@ class Media(StateTest):
         for network in ("/net/server/Samples", "/Network/Servers/x", "//net/server", "/NET/server", "/tmp/../net/s"):
             self.assertIsNone(local(network, windows=False), network)  # the automounter's: a lookup mounts a share
         self.assertEqual(local("/Users/me/net/Snare.wav", windows=False), "/Users/me/net/Snare.wav")
+        for firmlinked in ("/System/Volumes/Data/Network/Servers/x", "/System/Volumes/Data/net/server"):
+            self.assertIsNone(local(firmlinked, windows=False), firmlinked)  # macOS: the same roots again
+        for home in ("/home/someone/Samples", "/System/Volumes/Data/home/someone"):
+            self.assertIsNone(local(home, windows=False, darwin=True), home)  # macOS's automounter serves /home
+            self.assertEqual(local(home, windows=False, darwin=False), home, "elsewhere /home is a plain folder")
+
+    def test_a_link_to_a_network_share_is_never_followed_nor_looked_up_and_a_local_one_is(self) -> None:
+        # A link inside an approved folder, or a folder that is one, can lead to a share: its target is read without
+        # following it and checked first, so nothing on another machine is ever looked up (rgzm, #1001).
+        root = Path(os.path.realpath(self.tmp.name))
+        share = r"\\server\share\Samples" if os.name == "nt" else "/net/server/Samples"
+        (root / "real.wav").write_bytes(b"RIFF")
+        try:
+            (root / "Drums").symlink_to(share, target_is_directory=True)
+            (root / "kick.wav").symlink_to(os.path.join(share, "kick.wav"))
+            (root / "here.wav").symlink_to(root / "real.wav")
+            (root / "loop-a.wav").symlink_to(root / "loop-b.wav")
+            (root / "loop-b.wav").symlink_to(root / "loop-a.wav")
+        except OSError:
+            self.skipTest("this system can't make links here")
+        looked: list[str] = []
+        real = {name: getattr(os, name) for name in ("stat", "lstat", "readlink")}
+
+        def recording(name):
+            def call(path, *args, **kwargs):
+                looked.append(os.fspath(path))
+                return real[name](path, *args, **kwargs)
+            return call
+
+        with mock.patch.multiple(os, **{name: recording(name) for name in real}):
+            for path in (root / "Drums" / "kick.wav", root / "kick.wav", root / "loop-a.wav"):
+                with self.subTest(path=str(path)):
+                    self.assertIsNone(snapshots.resolved(str(path)))
+            self.assertEqual(snapshots.resolved(str(root / "here.wav")), str(root / "real.wav"), "a local link is")
+        self.assertFalse([path for path in looked if "server" in path], looked)
 
     def test_a_resolved_path_is_checked_again_so_a_link_to_a_share_is_refused_and_a_long_path_compares_plainly(self) -> None:
         # realpath's answer goes through the same check: a link inside an approved folder, or a folder that is one, can

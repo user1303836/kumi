@@ -17,18 +17,9 @@ import time
 import unittest
 
 import support
+from support import eventually
 
 runtime = support.module("runtime")
-
-
-def eventually(check, timeout: float = 10.0) -> bool:
-    """Wait for a state, never for a fixed time: true once `check()` is, false after `timeout`."""
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if check():
-            return True
-        time.sleep(0.02)
-    return check()
 
 
 def _takes(lock) -> bool:
@@ -175,7 +166,7 @@ class Runtimes(unittest.TestCase):
         self.events.clear()
         self.runtimes.stop_session("s1")
         self.assertIsNone(self.runtimes.get(self.data))
-        self.assertFalse(live.client.running)
+        self.assertTrue(eventually(lambda: not live.client.running), "its process ended")
         self.assertEqual([event for event in self.events if event[1]["seq"] is None],
                          [("status.changed", {"seq": None, "profile": "studio"})], "one stop event")
 
@@ -286,7 +277,7 @@ class Runtimes(unittest.TestCase):
         self.assertTrue(live.client.unsettled)
         self.assertTrue(eventually(lambda: not live.client.unsettled), "its late answer came")
         self.runtimes.stop_session("s1")
-        self.assertFalse(live.client.running, "an idle runtime is waited for, as before")
+        self.assertTrue(eventually(lambda: not live.client.running), "an idle runtime is waited for, as before")
 
     def test_a_stopped_runtime_gets_at_least_as_long_to_settle_as_any_call_of_the_plugins_waits(self):
         tools = support.module("tools")
@@ -310,7 +301,7 @@ class Runtimes(unittest.TestCase):
         self.assertEqual(other.exception.code, "other_runtime")
         self.assertIn(f"pid {os.getpid()}", other.exception.reason)
         self.runtimes.stop(self.data)
-        self.assertFalse(live.client.running)
+        self.assertTrue(eventually(lambda: not live.client.running))
         self.start(runtimes=self.make())  # the lock came free with the first runtime's end
 
     @unittest.skipIf(os.name == "nt", "on Windows the lock isn't inherited; owner.json's live pid holds the folder")

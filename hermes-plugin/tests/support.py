@@ -10,6 +10,7 @@ import os
 from pathlib import Path
 import stat
 import sys
+import time
 import types
 from typing import Any
 
@@ -62,6 +63,16 @@ def plugin():
         sys.modules[PACKAGE] = module
         spec.loader.exec_module(module)
     return sys.modules[PACKAGE]
+
+
+def eventually(check, timeout: float = 10.0) -> bool:
+    """Wait for a state, never for a fixed time: true once `check()` is, false after `timeout`."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if check():
+            return True
+        time.sleep(0.02)
+    return check()
 
 
 def module(name: str):

@@ -18,9 +18,10 @@ import os
 import posixpath
 import re
 import stat
+import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 log = logging.getLogger(__name__)
 
@@ -274,19 +275,24 @@ def _inside(path: str, roots: list[Path]) -> bool:
 # (`C:x`, `\x`), which depends on the process's own drive and folder, and one Windows would read as something else: a
 # reserved device name (`NUL`, `COM1.wav`), a name ending in a dot or space (Windows drops them, so `a.wav.` is
 # `a.wav`), or an alternate data stream (`a.wav:hidden`). Network folders therefore can't be auditioned on Windows.
-# Elsewhere, the automounter's network roots (`/net`, macOS's `/Network`) are refused the same way: looking one up mounts
-# another machine's share.
+# Elsewhere, the automounter's network roots (`/net`, macOS's `/Network`, and both again under macOS's firmlinked
+# `/System/Volumes/Data`) are refused the same way: looking one up mounts another machine's share. So is macOS's `/home`,
+# a link to `/System/Volumes/Data/home`, which its automounter serves (auto_home); Linux's `/home` is a plain folder.
 _VERBATIM_DRIVE = re.compile(r"^[\\/]{2}\?[\\/](?=[A-Za-z]:[\\/])")
 _DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
 _RESERVED = re.compile(r"^(?:CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]|CONIN\$|CONOUT\$) *(?:\..*)?$", re.IGNORECASE)
-_NETWORK_ROOT = re.compile(r"^/(?:net|Network)(?:/|$)", re.IGNORECASE)
+_NETWORK_ROOT = re.compile(r"^/(?:System/Volumes/Data/)?(?:net|Network)(?:/|$)", re.IGNORECASE)
+_AUTO_HOME = re.compile(r"^/(?:System/Volumes/Data/)?home(?:/|$)", re.IGNORECASE)
+# How many links one path may pass through before it's taken as a loop.
+_HOPS = 32
 
 
-def local(path: str, windows: bool = os.name == "nt") -> str | None:
+def local(path: str, windows: bool = os.name == "nt", darwin: bool = sys.platform == "darwin") -> str | None:
     """`path` as a file path on this machine, in the form the containment check compares; None for one never served
     or read, decided without touching the filesystem. Elsewhere than Windows it is returned as it is."""
     if not windows:
-        return None if _NETWORK_ROOT.match(posixpath.normpath(path).replace("//", "/", 1)) else path
+        plain = posixpath.normpath(path).replace("//", "/", 1)
+        return None if _NETWORK_ROOT.match(plain) or (darwin and _AUTO_HOME.match(plain)) else path
     plain = _VERBATIM_DRIVE.sub("", path, count=1)
     if not _DRIVE_ABSOLUTE.match(plain) or ":" in plain[2:]:
         return None
@@ -299,9 +305,50 @@ def local(path: str, windows: bool = os.name == "nt") -> str | None:
 
 
 def resolved(path: str, windows: bool = os.name == "nt") -> str | None:
-    """`path` (already through `local`) with its links resolved, checked again: a link inside an approved folder, or a
-    folder that is one, can lead to a network share, and a long path can come back in the verbatim form."""
-    return local(os.path.realpath(path), windows)
+    """`path` (already through `local`) with its links followed (`follow`), each link's target checked by `local`
+    before anything under it is touched: a link inside an approved folder, or a folder that is one, can lead to a
+    network share, which a lookup alone would reach (rgzm). A long path can come back in the verbatim form."""
+    return follow(path, lambda each: local(each, windows))
+
+
+def follow(path: str, allowed: Callable[[str], str | None]) -> str | None:
+    """`path` with every link in it followed from the root down, as `realpath` would, except that each link's target is
+    read without following it (`readlink`) and must pass `allowed` before anything under it is touched. `allowed`
+    answers the path to go on with (its plain form), or None to refuse it. None too if the links loop."""
+    start = allowed(path)
+    if start is None:
+        return None
+    anchor, *names = Path(start).parts
+    current, hops = anchor, 0
+    while names:
+        name = names.pop(0)
+        if name in ("", "."):
+            continue
+        if name == "..":
+            current = os.path.dirname(current)
+            continue
+        step = os.path.join(current, name)
+        try:  # lstat and readlink: neither follows `step`, and everything above it is already followed
+            linked = os.path.islink(step) or getattr(os.path, "isjunction", lambda _: False)(step)
+            target = os.readlink(step) if linked else None
+        except (OSError, ValueError):
+            return None
+        if target is None:
+            current = step
+            continue
+        hops += 1
+        if hops > _HOPS or (Path(target).anchor and not Path(target).is_absolute()):  # a loop, or `\x`/`C:x`
+            return None
+        if Path(target).is_absolute():
+            plain = allowed(target)
+            if plain is None:
+                return None
+            current, names = Path(plain).anchor, [*Path(plain).parts[1:], *names]
+        else:
+            names = [*Path(target).parts, *names]
+    if allowed(current) is None:
+        return None
+    return allowed(os.path.realpath(current))  # no links are left: realpath only spells it canonically
 
 
 def hermes_home() -> str | None:
