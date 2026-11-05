@@ -6,7 +6,8 @@ use kumi_common::abort::{self, Signal};
 use kumi_media::audio::decode::{open_audio_to_with_options, DecodeOptions};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::io::Read;
+use std::fs::File;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -52,7 +53,7 @@ impl Pin {
             return Err(stale());
         }
         let stage = ctx.artifacts().stage(ctx, &self.path, Some(&self.identity), signal).await.map_err(safe_error)?;
-        let (digest, bytes) = hash(stage.path().to_path_buf(), None, signal.clone()).await?;
+        let (stage, digest, bytes) = hash_staged(stage, signal.clone()).await?;
         if digest != self.digest || bytes != self.bytes {
             return Err(stale());
         }
@@ -87,37 +88,55 @@ pub async fn preview(ctx: &Ctx, source: &Value, signal: &Signal) -> Result<Pin, 
 async fn hash(path: PathBuf, expected: Option<Value>, signal: Signal) -> Result<(String, u64), OpError> {
     tokio::task::spawn_blocking(move || {
         check(&signal)?;
-        let mut file = open_regular(&path).map_err(|_| invalid("The selected audio could not be opened safely."))?;
-        let before = file_identity(&file).map_err(|_| invalid("The selected audio identity could not be read."))?;
-        if expected.as_ref().is_some_and(|expected| expected != &before) {
-            return Err(stale());
-        }
-        let size = file.metadata().map_err(|_| invalid("The selected audio size could not be read."))?.len();
-        if size == 0 || size > MAX_BYTES {
-            return Err(invalid("Choose a nonempty audio file no larger than 50 MiB."));
-        }
-        let mut digest = Sha256::new();
-        let mut total = 0_u64;
-        let mut buffer = [0_u8; 64 * 1024];
-        loop {
-            check(&signal)?;
-            let count = file.read(&mut buffer).map_err(|_| invalid("The selected audio could not be read."))?;
-            if count == 0 {
-                break;
-            }
-            total += count as u64;
-            if total > MAX_BYTES {
-                return Err(stale());
-            }
-            digest.update(&buffer[..count]);
-        }
-        if total != size || file_identity(&file).map_err(|_| stale())? != before {
-            return Err(stale());
-        }
-        Ok((format!("{:x}", digest.finalize()), total))
+        let file = open_regular(&path).map_err(|_| invalid("The selected audio could not be opened safely."))?;
+        hash_file(&file, expected.as_ref(), &signal)
     })
     .await
     .map_err(|_| invalid("The upload-preview reader failed."))?
+}
+
+async fn hash_staged(stage: StagedArtifact, signal: Signal) -> Result<(StagedArtifact, String, u64), OpError> {
+    tokio::task::spawn_blocking(move || {
+        // The writable NamedTempFile is still alive. A path reopen denying write-sharing fails
+        // on Windows; moving the stage here lets us read its exact owned handle without relaxing
+        // the producer-source open guard, duplicating a handle, or sharing a seek cursor.
+        let (digest, bytes) = hash_file(stage.opened(), None, &signal)?;
+        Ok((stage, digest, bytes))
+    })
+    .await
+    .map_err(|_| invalid("The staged upload reader failed."))?
+}
+
+fn hash_file(mut file: &File, expected: Option<&Value>, signal: &Signal) -> Result<(String, u64), OpError> {
+    check(signal)?;
+    let before = file_identity(file).map_err(|_| invalid("The selected audio identity could not be read."))?;
+    if expected.is_some_and(|expected| expected != &before) {
+        return Err(stale());
+    }
+    let size = file.metadata().map_err(|_| invalid("The selected audio size could not be read."))?.len();
+    if size == 0 || size > MAX_BYTES {
+        return Err(invalid("Choose a nonempty audio file no larger than 50 MiB."));
+    }
+    file.seek(SeekFrom::Start(0)).map_err(|_| invalid("The selected audio could not be read."))?;
+    let mut digest = Sha256::new();
+    let mut total = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    loop {
+        check(signal)?;
+        let count = file.read(&mut buffer).map_err(|_| invalid("The selected audio could not be read."))?;
+        if count == 0 {
+            break;
+        }
+        total += count as u64;
+        if total > MAX_BYTES {
+            return Err(stale());
+        }
+        digest.update(&buffer[..count]);
+    }
+    if total != size || file_identity(file).map_err(|_| stale())? != before {
+        return Err(stale());
+    }
+    Ok((format!("{:x}", digest.finalize()), total))
 }
 
 /// Read duration from the approved bytes, not a model argument. No FFT or model is needed. The

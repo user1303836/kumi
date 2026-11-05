@@ -112,6 +112,13 @@ fn unavailable() -> OpError {
     refused("ledger_unavailable", "A retained generation receipt could not be read safely; no new generation was authorized.")
 }
 
+fn unreadable_job(id: &str) -> OpError {
+    refused(
+        "ledger_unavailable",
+        &format!("Saved job {id} could not be read safely; restore its saved record before starting a new generation."),
+    )
+}
+
 pub(super) fn job_id(id: &str) -> bool {
     id.len() <= 64
         && id.strip_prefix('j').and_then(|id| id.split_once('-')).is_some_and(|(time, number)| {
@@ -134,11 +141,11 @@ pub(super) fn load(state: &Path) -> Result<Records, OpError> {
         if path.extension().is_none_or(|extension| extension != "json") {
             continue;
         }
-        let file = open_regular(&path).map_err(|_| unavailable())?;
+        let file = open_regular(&path).map_err(|_| unreadable_job(id))?;
         let mut input = BufReader::new(file.take(16 * 1024 * 1024 + 1));
-        let saved: Saved = serde_json::from_reader(&mut input).map_err(|_| unavailable())?;
+        let saved: Saved = serde_json::from_reader(&mut input).map_err(|_| unreadable_job(id))?;
         if input.into_inner().limit() == 0 {
-            return Err(unavailable());
+            return Err(unreadable_job(id));
         }
         let Saved::Generate { job_id: saved_id, result: Some(receipt) } = saved else { continue };
         if saved_id != id
@@ -147,14 +154,14 @@ pub(super) fn load(state: &Path) -> Result<Records, OpError> {
             || !matches!(receipt.submission.as_str(), "unknown" | "submitted" | "not_submitted")
             || (receipt.credits.actual.is_some() && receipt.submission != "submitted")
         {
-            return Err(unavailable());
+            return Err(unreadable_job(id));
         }
         let previous = records.insert(
             receipt.quote_id,
             Record { job_id: saved_id, kind: receipt.kind, reserved: receipt.credits.reserved, actual: receipt.credits.actual },
         );
         if previous.is_some() {
-            return Err(unavailable());
+            return Err(unreadable_job(id));
         }
     }
     Ok(records)
@@ -177,6 +184,19 @@ fn remember(records: &mut Records, id: &str, receipt: &Value) -> Result<(), OpEr
 mod tests {
     use super::*;
     use std::io::Write;
+
+    #[test]
+    fn an_unreadable_record_names_its_job_without_disclosing_the_state_path() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().canonicalize().unwrap();
+        std::fs::create_dir(root.join("jobs")).unwrap();
+        std::fs::write(root.join("jobs/j123-7.json"), b"not json").unwrap();
+        let error = load(&root).err().unwrap();
+        assert_eq!(error.code(), "ledger_unavailable");
+        let shown = error.reason();
+        assert!(shown.contains("j123-7"), "{shown}");
+        assert!(!shown.contains(&root.display().to_string()), "{shown}");
+    }
 
     fn receipt(quote: &str, actual: Option<u64>) -> Value {
         serde_json::json!({"quote_id":quote, "kind":"sfx", "credits":{"reserved":15, "actual":actual}})
