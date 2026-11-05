@@ -45,6 +45,11 @@ SCHEMA = 1
 VERSION = re.compile(r"[0-9]+\.[0-9]+\.[0-9]+")
 SHA256 = re.compile(r"[0-9a-f]{64}")
 DAWS = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
+# A DAW whose part a standalone Kumi put in can be used as it is (adopted): Live only (kumi-adv's D1). A REAPER
+# extension or Renoise tool serves one Kumi at a time, so setup stops while another Kumi's is there, and says how to
+# take it out.
+ADOPTABLE = ("ableton",)
+_STANDALONE_PART = {"reaper": "Kumi's extension in REAPER", "renoise": "Kumi's tool in Renoise"}
 # A plan is approved for this long; after that, setup asks again.
 PLAN_TTL_MS = 10 * 60 * 1000
 DOWNLOAD_TIMEOUT_S = 60
@@ -501,7 +506,11 @@ def plan_for_model(plan: Mapping[str, Any]) -> dict:
         "runtime": f"Download Kumi {plan.get('version')} ({_mb(int(download.get('bytes') or 0))}), check it against "
                    "the SHA-256 this plugin pins, and unpack it into this profile's plugin data.",
         "daw_component": f"Install Kumi's part in {daw}; the approval lists everything it writes.",
-        "owned_elsewhere": f"Another Kumi installation already serves {daw}: adopt it rather than replace it.",
+        "owned_elsewhere": f"A standalone Kumi already put its part in {daw}: Kumi for Hermes can use that "
+                           "installation as it is (kumi_setup adopt; the producer is asked first).",
+        "other_kumi": f"A standalone Kumi's part is in {daw}, and Kumi for Hermes can't share it, so setup can't go "
+                      f"on while it's there. The producer quits {daw} and uninstalls that Kumi (kumi uninstall in a "
+                      "terminal; hermes kumi setup shows exactly which), then sets Kumi up again. Nothing to approve.",
         "ffmpeg": "Optional: let Kumi's runtime use the ffmpeg already on this computer for compressed audio.",
         "use_daw": f"Make {daw} Kumi's DAW in this profile, so Kumi connects to it.",
         "none": f"Kumi is set up for {daw}.",
@@ -609,13 +618,30 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
                 f"Kumi's runtime will run {found['path']} to decode MP3, FLAC and other compressed audio in the "
                 "folders and files you let it read",
                 "Kumi doesn't download or install ffmpeg. Without it, Kumi reads WAV and AIFF only.", _RESTART])
-    elif dry["state"] == "other_owner":
+    elif dry["state"] == "other_owner" and daw in ADOPTABLE:
         plan.update(step="owned_elsewhere", paths=dry["paths"], effects=[*dry["effects"], *_tagging(daw, dry)],
                     component=dry, **({"use_daw": using} if using else {}))
+    elif dry["state"] == "other_owner":  # nothing to approve: the producer takes that Kumi's part out first
+        plan.update(step="other_kumi", paths=[], effects=_other_kumi(daw, dry), component=dry)
     else:
         plan.update(step="daw_component", paths=dry["paths"], effects=[*dry["effects"], *_tagging(daw, dry)],
                     component=dry, **({"use_daw": using} if using else {}))
     return plan
+
+
+def _other_kumi(daw: str, component: Mapping[str, Any]) -> list[str]:
+    """What the producer reads when a standalone Kumi's part is in REAPER or Renoise: whose it is and where, and the
+    exact way to take it out with that Kumi (its own `kumi uninstall`, which asks first), then setup again (D1)."""
+    owner = _owner_home({"component": component})
+    paths = [path for path in component.get("paths") or [] if isinstance(path, str)]
+    whose = f"the standalone Kumi at {owner}" if owner else "a standalone Kumi on this computer"
+    # The standalone installer's launcher: bin/kumi, or bin\kumi.cmd on Windows (install.ps1); quoted, for a space.
+    program = f'"{Path(owner) / "bin" / ("kumi.cmd" if os.name == "nt" else "kumi")}"' if owner else "kumi"
+    return [f"{_STANDALONE_PART[daw]}{f' ({paths[0]})' if paths else ''} belongs to {whose}, and Kumi for Hermes "
+            "can't share it, so setup can't go on while it's there",
+            f"To take it out, quit {DAWS[daw]}, then run {program} uninstall in a terminal: it removes that Kumi and "
+            f"its part in {DAWS[daw]} (it asks first, and keeps your conversations unless you say)",
+            "Then run setup again"]
 
 
 def _set_up(daw: str, data_dir: Path) -> bool:
@@ -724,6 +750,13 @@ def approval(daw: str, *, action: str = "install", data_dir: Path | None = None,
     return {"title": lines[0], "effects": lines[1:], "message": "\n".join(lines), "digest": cached["digest"]}
 
 
+def dead_end(daw: str, *, data_dir: Path | None = None) -> str | None:
+    """Why the fresh plan for `daw` can't be carried out, in the model's words, or None: a standalone Kumi's part in
+    REAPER or Renoise (D1), which only the producer can take out."""
+    cached = _cached_plan(daw, data_dir or default_data_dir())
+    return plan_for_model(cached)["summary"] if cached and cached.get("step") == "other_kumi" else None
+
+
 def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str] | None:
     """The approval's title, then each effect of the plan and each path it writes, as the producer reads them, and
     whether it makes the DAW Kumi's DAW in this profile (`use_daw`)."""
@@ -772,8 +805,10 @@ def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -
                                     "setup didn't use it; plan again and approve that.")
     if _approval_lines(claimed, daw, action) is None:
         if action == "install" and claimed.get("step") == "owned_elsewhere":
-            raise SetupError("owned_elsewhere", "Another Kumi installation owns this DAW's component; adopt it "
-                                                "explicitly (kumi_setup action adopt) or keep them separate.")
+            raise SetupError("owned_elsewhere", f"A standalone Kumi already put its part in {DAWS[daw]}: use that "
+                                                "installation with kumi_setup adopt (the producer is asked first).")
+        if claimed.get("step") == "other_kumi":
+            raise SetupError("other_kumi", plan_for_model(claimed)["summary"])
         raise SetupError("no_plan", f"The approved plan isn't one {action} carries out; plan again.")
     return claimed
 
@@ -1062,10 +1097,14 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
             print(now["message"], now["compressed_audio"]["message"], *filter(None, [next_daw(daw, current)]),
                   sep="\n", file=stdout)
             return 0
+        if step["step"] == "other_kumi":  # nothing to approve: the producer takes that Kumi's part out first
+            print(*step["effects"], sep="\n", file=stdout)
+            return 1
         adopting = step["step"] == "owned_elsewhere"
         lines = _approval_lines(step, daw, "adopt" if adopting else "install")  # what a chat's approval shows
-        if lines is None:  # another installation owns the component, and it names no folder to adopt
-            print("Another Kumi installation owns this DAW's component:", *step["effects"], sep="\n  ", file=stdout)
+        if lines is None:  # a standalone Kumi's part in Live, and it names no folder to adopt
+            print(f"A standalone Kumi already put its part in {DAWS[daw]}, and didn't say where that Kumi is, so "
+                  "setup can't use it:", *step["effects"], sep="\n  ", file=stdout)
             return 1
         print(lines[0], *lines[1:], sep="\n  ", file=stdout)
         print("Go ahead? [y/N] ", end="", file=stdout, flush=True)

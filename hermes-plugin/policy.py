@@ -316,9 +316,11 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
         return None, {}
     if action not in ("install", "adopt"):
         return block("Kumi didn't set anything up: kumi_setup's action is plan, install or adopt."), {}
-    asked = setup.approval(args.get("daw") or host.daw(), action=action, data_dir=host.data_dir())
+    daw = args.get("daw") or host.daw()
+    asked = setup.approval(daw, action=action, data_dir=host.data_dir())
     if asked is None:
-        return block("Kumi didn't set anything up: run kumi_setup plan first."), {}
+        why = setup.dead_end(daw, data_dir=host.data_dir()) or "run kumi_setup plan first."
+        return block(f"Kumi didn't set anything up: {why}"), {}
     lines = [asked["title"], *(f"• {line}" for line in asked["effects"])]
     message = "\n".join(lines)
     surface = host.session_surface()
