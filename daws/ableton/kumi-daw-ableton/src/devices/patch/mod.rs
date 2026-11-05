@@ -350,7 +350,7 @@ impl MaxBox {
         Some(item)
     }
 
-    /// The file the box would load: a bpatcher's, a poly~'s voice, a gen~'s @gen, or an abstraction named like it.
+    /// The file the box would load: a bpatcher's, a poly~'s voice, a gen's named code, or an abstraction named like it.
     fn file_name(&self) -> Option<String> {
         match self.maxclass() {
             "bpatcher" => self.fields.get("name").and_then(Value::as_str).filter(|name| !name.is_empty()).map(str::to_string),
@@ -360,8 +360,10 @@ impl MaxBox {
                     "poly~" | "mc.poly~" => words.get(1).map(|name| with_extension(name, ".maxpat")),
                     "gen~" | "gen" | "mc.gen~" | "mcs.gen~" => words
                         .iter()
-                        .position(|word| *word == "@gen")
+                        .position(|word| matches!(*word, "@gen" | "@file"))
                         .and_then(|at| words.get(at + 1))
+                        .or_else(|| words.get(1).filter(|word| !word.starts_with('@')))
+                        .filter(|name| !name.starts_with('@'))
                         .map(|name| with_extension(name, ".gendsp")),
                     class => Some(with_extension(class, ".maxpat")),
                 }
@@ -818,7 +820,7 @@ mod tests {
         assert_eq!(patcher.to_document(), device, "files read aren't written into the boxes");
     }
 
-    /// #310: gen~'s multichannel forms load the file @gen names, and none is an abstraction named like the form.
+    /// #310, #821: gen's forms load named code, and none is an abstraction named like the form.
     #[test]
     fn gens_multichannel_forms_load_the_file_their_at_gen_names() {
         let file = |text: &str| json!({ "patcher": { "boxes": [{ "box": { "id": "obj-1", "maxclass": "comment", "text": text } }], "lines": [] } });
@@ -831,10 +833,15 @@ mod tests {
             { "box": { "id": "obj-1", "maxclass": "newobj", "text": "mc.gen~ @gen shared @chans 4" } },
             { "box": { "id": "obj-2", "maxclass": "newobj", "text": "mcs.gen~ @gen shared" } },
             { "box": { "id": "obj-3", "maxclass": "newobj", "text": "mc.gen~ @chans 4" } },
-            { "box": { "id": "obj-4", "maxclass": "newobj", "text": "mcs.gen~" } }
+            { "box": { "id": "obj-4", "maxclass": "newobj", "text": "mcs.gen~" } },
+            { "box": { "id": "obj-5", "maxclass": "newobj", "text": "mc.gen~ shared @chans 16" } },
+            { "box": { "id": "obj-6", "maxclass": "newobj", "text": "mcs.gen~ shared" } },
+            { "box": { "id": "obj-7", "maxclass": "newobj", "text": "gen @file shared" } },
+            { "box": { "id": "obj-8", "maxclass": "newobj", "text": "gen~ @gen @chans 4" } }
         ], "lines": [] } });
         let patcher = Patcher::read(&device, &files);
         let loads = |at: usize| patcher.boxes[at].file.as_ref().map(|(name, _)| name.as_str());
         assert_eq!([loads(0), loads(1), loads(2), loads(3)], [Some("shared.gendsp"), Some("shared.gendsp"), None, None]);
+        assert_eq!([loads(4), loads(5), loads(6), loads(7)], [Some("shared.gendsp"), Some("shared.gendsp"), Some("shared.gendsp"), None]);
     }
 }
