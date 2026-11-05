@@ -1000,6 +1000,15 @@ impl ImportLab {
 }
 
 /// A plan placing `sample` in the Simpler.
+/// A canonical path as a DAW gets it: on Windows without the verbatim `\\?\` prefix canonicalizing gives.
+fn daw_path(path: std::path::PathBuf) -> std::path::PathBuf {
+    let text = path.display().to_string();
+    match text.strip_prefix(r"\\?\UNC\") {
+        Some(share) => format!(r"\\{share}").into(),
+        None => text.strip_prefix(r"\\?\").map_or(path, std::path::PathBuf::from),
+    }
+}
+
 fn sample_plan(key: &Value, epoch: u64, sample: Value) -> Value {
     plan(key, epoch, json!([{"tool": "replace_sample", "input": {"deviceRef": "7:device:0:0", "sample": sample}}]))
 }
@@ -1043,8 +1052,9 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     let (placed, _) = wire.call("change", sample_plan(&key, epoch, file), Some("tc-1")).await;
     assert_eq!(placed["state"], "applied", "{placed}");
     let sent = lab.given.borrow()[0]["steps"][0]["input"]["sample"].as_str().unwrap().to_string();
-    let artifacts = std::fs::canonicalize(lab.ctx.paths().state_dir.join("artifacts")).unwrap();
+    let artifacts = daw_path(std::fs::canonicalize(lab.ctx.paths().state_dir.join("artifacts")).unwrap());
     assert!(std::path::Path::new(&sent).starts_with(&artifacts), "{sent}");
+    assert!(!sent.starts_with(r"\\?\"), "the DAW gets a plain path: {sent}");
     let row = lab.ctx.history().row(placed["history_ids"][0].as_str().unwrap()).unwrap();
     let source = &row.sources.unwrap()[0];
     assert_eq!(
@@ -1149,7 +1159,7 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     assert!(preview["steps"][0]["text"].as_str().is_some_and(|text| text.contains("\"Snare Tone.wav\"")), "{preview}");
     let (from_library, _) = wire.call("change", sample_plan(&key, epoch, from_map), Some("tc-map")).await;
     assert_eq!(from_library["state"], "applied", "{from_library}");
-    let library_file = std::fs::canonicalize(lab.library.path().join("Snare Tone.wav")).unwrap();
+    let library_file = daw_path(std::fs::canonicalize(lab.library.path().join("Snare Tone.wav")).unwrap());
     assert_eq!(lab.given.borrow()[3]["steps"][0]["input"]["sample"], json!(library_file.display().to_string()), "in place");
     let row = lab.ctx.history().row(from_library["history_ids"][0].as_str().unwrap()).unwrap();
     let source = &row.sources.unwrap()[0];

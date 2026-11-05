@@ -105,8 +105,18 @@ pub async fn keep(ctx: &Ctx, found: Found, staged: Option<StagedArtifact>, signa
 }
 
 /// `path` as a DAW opens it: on Windows without the `\\?\` verbatim prefix canonicalizing gives (`\\?\C:\…` as `C:\…`,
-/// `\\?\UNC\server\share\…` as `\\server\share\…`), which some DAWs don't take; elsewhere as it is.
+/// `\\?\UNC\server\share\…` as `\\server\share\…`), which some DAWs don't take, but only while it still names the
+/// same file (Windows drops a trailing dot or space from a plain path's name, so it can name another); elsewhere as it
+/// is.
 fn plain(path: PathBuf) -> PathBuf {
+    match without_verbatim(&path) {
+        Some(shorter) if std::fs::canonicalize(&shorter).is_ok_and(|same| same == path) => shorter,
+        _ => path,
+    }
+}
+
+/// `path` without its verbatim prefix, when it has one (Windows only).
+fn without_verbatim(path: &Path) -> Option<PathBuf> {
     #[cfg(windows)]
     {
         use std::path::{Component, Prefix};
@@ -114,16 +124,17 @@ fn plain(path: PathBuf) -> PathBuf {
         if let Some(Component::Prefix(prefix)) = components.next() {
             let rest = components.as_path();
             match prefix.kind() {
-                Prefix::VerbatimDisk(letter) => return PathBuf::from(format!("{}:\\", letter as char)).join(rest),
+                Prefix::VerbatimDisk(letter) => return Some(PathBuf::from(format!("{}:\\", letter as char)).join(rest)),
                 Prefix::VerbatimUNC(server, share) => {
                     let root = format!("\\\\{}\\{}\\", server.to_string_lossy(), share.to_string_lossy());
-                    return PathBuf::from(root).join(rest);
+                    return Some(PathBuf::from(root).join(rest));
                 }
                 _ => {}
             }
         }
     }
-    path
+    let _ = path;
+    None
 }
 
 /// The identity of the file at `path`, as the artifacts' copy checks it ([`super::artifacts::file_identity`]: its
@@ -139,9 +150,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn a_daw_gets_a_windows_path_without_the_verbatim_prefix() {
-        assert_eq!(plain(PathBuf::from(r"\\?\C:\Samples\kick.wav")), PathBuf::from(r"C:\Samples\kick.wav"));
-        assert_eq!(plain(PathBuf::from(r"\\?\UNC\studio\share\kick.wav")), PathBuf::from(r"\\studio\share\kick.wav"));
-        assert_eq!(plain(PathBuf::from(r"D:\Samples\kick.wav")), PathBuf::from(r"D:\Samples\kick.wav"));
+    fn a_daw_gets_a_windows_path_without_the_verbatim_prefix_only_while_it_names_the_same_file() {
+        assert_eq!(without_verbatim(Path::new(r"\\?\C:\Samples\kick.wav")), Some(PathBuf::from(r"C:\Samples\kick.wav")));
+        assert_eq!(without_verbatim(Path::new(r"\\?\UNC\studio\share\kick.wav")), Some(PathBuf::from(r"\\studio\share\kick.wav")));
+        assert_eq!(without_verbatim(Path::new(r"D:\Samples\kick.wav")), None);
+        let dir = tempfile::tempdir().unwrap();
+        let kick = std::fs::canonicalize(dir.path()).unwrap().join("kick.wav");
+        std::fs::write(&kick, b"RIFF").unwrap();
+        let given = plain(std::fs::canonicalize(&kick).unwrap());
+        assert!(!given.to_string_lossy().starts_with(r"\\?\"), "{}", given.display());
+        assert_eq!(std::fs::canonicalize(&given).unwrap(), std::fs::canonicalize(&kick).unwrap());
+        // A name Win32 would read otherwise (a trailing dot) keeps its verbatim path, so the DAW opens that file.
+        let dotted = std::fs::canonicalize(dir.path()).unwrap().join("snare.");
+        std::fs::write(&dotted, b"RIFF").unwrap();
+        assert_eq!(plain(dotted.clone()), dotted);
     }
 }

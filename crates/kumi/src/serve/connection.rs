@@ -498,21 +498,24 @@ pub fn focus_value(focus: &DawFocus) -> Value {
 }
 
 /// A whole path: an absolute one, a drive's or a share's.
+/// A path with a folder in it: a drive's (`C:\\…`), a share's (`\\\\server\\…`), or a rooted one with at least two parts
+/// (`/Users/…/x.wav`). A name that only starts with a slash ("/Bus") or a lone one ("Drums / Perc") isn't.
 fn whole_path(text: &str) -> bool {
     let bytes = text.as_bytes();
-    text.starts_with('/') || text.starts_with("\\\\") || (bytes.len() > 2 && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
+    let drive = bytes.len() > 3 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/');
+    let share = text.strip_prefix("\\\\").is_some_and(|rest| rest.trim_end_matches(['\\', '/']).contains(['\\', '/']));
+    let rooted = text.strip_prefix('/').is_some_and(|rest| rest.trim_end_matches('/').contains('/'));
+    drive || share || rooted
 }
 
 /// Every string in `value` that's a whole path cut to its file name, the DAW's refs aside: what the runtime shows of
 /// the producer's files is their names, never their folders.
 pub(super) fn names_only(value: &mut Value) {
     match value {
-        // A whole path cut to its name (spaces and all), and each path in a sentence ("Couldn't load /Users/…/x.wav").
         Value::String(text) if whole_path(text) => {
             let name = text.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or_default().to_string();
             *text = name;
         }
-        Value::String(text) => *text = names_only_text(text),
         Value::Array(items) => items.iter_mut().for_each(names_only),
         Value::Object(fields) => {
             for (key, field) in fields.iter_mut() {
@@ -523,6 +526,27 @@ pub(super) fn names_only(value: &mut Value) {
         }
         _ => {}
     }
+}
+
+/// What the DAW said of a plan's steps (`changed`, `error`, `reason`, as `change` answers them): [`names_only`], and
+/// each path inside those sentences ("Couldn't load /Users/…/x.wav") cut to its file name too.
+pub(super) fn names_only_said(value: &mut Value) {
+    names_only(value);
+    fn said(value: &mut Value) {
+        match value {
+            Value::Array(items) => items.iter_mut().for_each(said),
+            Value::Object(fields) => {
+                for (key, field) in fields.iter_mut() {
+                    match field {
+                        Value::String(text) if matches!(key.as_str(), "changed" | "error" | "reason") => *text = names_only_text(text),
+                        _ => said(field),
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+    said(value);
 }
 
 /// The same for text that isn't JSON: each whole path in it (as far as a space or a quote) cut to its file name.
@@ -649,13 +673,24 @@ mod tests {
     }
 
     #[test]
-    fn a_path_in_what_the_daw_says_of_a_step_is_its_file_name() {
+    fn a_path_in_what_the_daw_says_of_a_step_is_its_file_name_and_a_name_with_a_slash_stays() {
         let mut said = json!({"refused": [{"step": 2, "error": "Couldn't load /Users/producer/Samples/kick.wav: too long"}],
-            "done": [{"changed": "Simpler now plays C:\\Users\\producer\\snare.wav", "trackRef": "7:track:0"}]});
-        names_only(&mut said);
+        "done": [
+            {"changed": "Simpler now plays C:\\Users\\producer\\snare.wav", "trackRef": "7:track:0"},
+            {"changed": "Drums / Perc volume -6.0 dB → -2.0 dB", "track": "/Bus"},
+        ]});
+        names_only_said(&mut said);
         assert_eq!(said["refused"][0]["error"], "Couldn't load kick.wav: too long");
         assert_eq!(said["done"][0]["changed"], "Simpler now plays snare.wav");
         assert_eq!(said["done"][0]["trackRef"], "7:track:0", "refs are the DAW's");
+        assert_eq!(
+            (said["done"][1]["changed"].clone(), said["done"][1]["track"].clone()),
+            (json!("Drums / Perc volume -6.0 dB → -2.0 dB"), json!("/Bus"))
+        );
+        // Names elsewhere (focus, observe, read) aren't rewritten as sentences, nor taken for paths.
+        let mut focus = json!({"track": {"name": "Drums / Perc"}, "group": "/Bus", "clip": "/Users/producer/Samples/Amen 170.wav"});
+        names_only(&mut focus);
+        assert_eq!(focus, json!({"track": {"name": "Drums / Perc"}, "group": "/Bus", "clip": "Amen 170.wav"}));
     }
 
     #[test]

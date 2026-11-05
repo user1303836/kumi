@@ -283,7 +283,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let rows = history.end_call(identity, ctx.snapshots());
     let mut outcome = outcome(ran, &rows);
     // What the DAW said of a step can name the file it was given: its name only, as everywhere else.
-    connection::names_only(&mut outcome.steps);
+    connection::names_only_said(&mut outcome.steps);
     outcome.reason = outcome.reason.map(|reason| connection::names_only_text(&reason));
     // Each row keeps the files its own step placed (by the step the plan says made it); a row it doesn't place keeps
     // them all.
@@ -323,7 +323,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         "state": outcome.state,
         "history_ids": ids,
         "steps": outcome.steps,
-        "summary": connection::names_only_text(&outcome.summary),
+        "summary": outcome.summary,
         "undo_available": rows.iter().any(|row| row.undo_available),
         "project_key": project_now.key,
         "epoch": project_now.epoch,
