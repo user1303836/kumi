@@ -275,4 +275,19 @@ impl Integration for FallbackIntegration {
             Ok(Err(self.not_connected(&format!("hear the {}", self.primary.profile().or_live().words.place))))
         }
     }
+    fn has_device_build(&self) -> bool {
+        self.current().has_device_build()
+    }
+    async fn device_preview(&self, spec: &Value) -> Result<Result<DevicePreview, Vec<String>>, RuntimeError> {
+        self.current().device_preview(spec).await
+    }
+    async fn device_build(
+        &self,
+        spec: &Value,
+        sha256: &str,
+        file: &str,
+        signal: Signal,
+    ) -> Result<Result<BuiltDevice, Vec<String>>, RuntimeError> {
+        self.current().device_build(spec, sha256, file, signal).await
+    }
 }

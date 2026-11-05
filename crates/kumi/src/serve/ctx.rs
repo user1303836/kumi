@@ -57,6 +57,9 @@ pub enum Effect {
     Upload,
     /// Spends the producer's credits.
     Paid,
+    /// Writes a new file into the DAW's own library (a device built into Live's User Library): never over a file, and
+    /// not the project, so it takes no write lease.
+    LibraryWrite,
 }
 
 impl Effect {
@@ -261,6 +264,9 @@ pub enum OpError {
     NotConnected { reason: String },
     /// The runtime won't: `code` says why (`stale`, `leased`, `unsupported`…), `owner` who holds the DAW when it's held.
     Refused { code: &'static str, reason: String, owner: Option<Value> },
+    /// The runtime won't, for what it found in what it was asked (a device's spec): each finding a plain line the model
+    /// can act on, none for `stale`.
+    Findings { code: &'static str, reason: String, findings: Vec<String> },
     /// It failed before changing anything.
     Failed { reason: String },
 }
@@ -270,7 +276,7 @@ impl OpError {
         match self {
             OpError::Invalid { .. } => "invalid",
             OpError::NotConnected { .. } => "not_connected",
-            OpError::Refused { code, .. } => code,
+            OpError::Refused { code, .. } | OpError::Findings { code, .. } => code,
             OpError::Failed { .. } => "failed",
         }
     }
@@ -278,15 +284,17 @@ impl OpError {
     pub fn reason(&self) -> &str {
         match self {
             OpError::Invalid { reason } | OpError::NotConnected { reason } | OpError::Failed { reason } => reason,
-            OpError::Refused { reason, .. } => reason,
+            OpError::Refused { reason, .. } | OpError::Findings { reason, .. } => reason,
         }
     }
 
-    /// The error as the call's result says it: `{"error": {"code", "reason", "owner"?}}`.
+    /// The error as the call's result says it: `{"error": {"code", "reason", "owner"?, "findings"?}}`.
     pub fn to_value(&self) -> Value {
         let mut error = json!({"code": self.code(), "reason": self.reason()});
-        if let OpError::Refused { owner: Some(owner), .. } = self {
-            error["owner"] = owner.clone();
+        match self {
+            OpError::Refused { owner: Some(owner), .. } => error["owner"] = owner.clone(),
+            OpError::Findings { findings, .. } => error["findings"] = json!(findings),
+            _ => {}
         }
         json!({"error": error})
     }
@@ -362,6 +370,7 @@ pub struct Ctx {
     maps: super::map::MapStore,
     library: super::library::LibraryState,
     generation: super::generate::Generation,
+    devices: super::device::Previews,
     snapshots: Snapshots,
     jobs: Jobs,
     shutdown: Signal,
@@ -431,6 +440,7 @@ impl Ctx {
             maps,
             library: super::library::LibraryState::default(),
             generation: super::generate::Generation::default(),
+            devices: super::device::Previews::default(),
             paths: Paths { state_dir, kumi_home: args.kumi_home },
             env,
             library_roots: RefCell::new(library_roots),
@@ -554,6 +564,11 @@ impl Ctx {
 
     pub fn maps(&self) -> &super::map::MapStore {
         &self.maps
+    }
+
+    /// The files this runtime's device previews named, by their spec's SHA-256: what a build writes.
+    pub fn device_previews(&self) -> &super::device::Previews {
+        &self.devices
     }
 
     pub(crate) fn library_state(&self) -> &super::library::LibraryState {
@@ -1338,6 +1353,7 @@ mod tests {
             Effect::Setup,
             Effect::Upload,
             Effect::Paid,
+            Effect::LibraryWrite,
         ]
         .into_iter()
         .filter(|effect| effect.writes())

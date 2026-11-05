@@ -11,6 +11,7 @@ pub mod artifacts;
 pub mod change;
 pub mod connection;
 pub mod ctx;
+pub mod device;
 pub mod history;
 pub mod import;
 pub mod inflight;
@@ -22,6 +23,7 @@ pub mod map;
 pub mod mcp;
 pub mod read;
 pub mod registry;
+pub mod script;
 pub mod setup;
 pub mod snapshots;
 
@@ -31,6 +33,7 @@ mod generate_ledger;
 mod generate_output;
 mod generate_source;
 mod listen_track;
+mod turn;
 
 use kumi_types::daw::DawId;
 use kumi_types::system::Env;

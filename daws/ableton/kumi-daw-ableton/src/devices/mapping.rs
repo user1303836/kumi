@@ -291,26 +291,30 @@ mod tests {
     #[test]
     fn each_slot_follows_its_source_between_its_min_and_max() {
         // live.modulate~ takes −1 to 1: Min 0 and Max 100 sweep all of it.
-        let mut gen = Gen::new(&scaler(2, 3, true), false);
-        gen.set("min1", 25.0);
-        gen.set("max1", 75.0);
-        gen.set("source2", 1.0);
-        gen.set("min3", 100.0);
-        gen.set("max3", 0.0);
-        let out = gen.tick(&[0.5, 1.0], 3);
+        let mut gen = Gen::new(&scaler(2, 3, true), false).unwrap();
+        gen.set("min1", 25.0).unwrap();
+        gen.set("max1", 75.0).unwrap();
+        gen.set("source2", 1.0).unwrap();
+        gen.set("min3", 100.0).unwrap();
+        gen.set("max3", 0.0).unwrap();
+        let out = gen.tick(&[0.5, 1.0], 3).unwrap();
         assert_eq!(
             out,
             vec![0.0, 1.0, 0.0],
             "slot 1 halfway between 25% and 75%; slot 2 follows source 2 to the top; slot 3 runs backwards"
         );
-        let clamped = gen.tick(&[2.0, -1.0], 3);
+        let clamped = gen.tick(&[2.0, -1.0], 3).unwrap();
         assert_eq!(clamped, vec![0.5, -1.0, -1.0], "a source past 0 to 1 is held at its end (slot 3's top is its Max, 0%)");
-        assert_eq!(Gen::new(&scaler(1, 8, true), false).tick(&[0.0], 8), vec![-1.0; 8], "one source, every slot at the bottom");
+        assert_eq!(
+            Gen::new(&scaler(1, 8, true), false).unwrap().tick(&[0.0], 8).unwrap(),
+            vec![-1.0; 8],
+            "one source, every slot at the bottom"
+        );
         // live.remote~ takes the parameter's range, 0 to 1.
-        let mut remote = Gen::new(&scaler(1, 1, false), false);
-        remote.set("min1", 20.0);
-        remote.set("max1", 60.0);
-        assert_eq!(remote.tick(&[0.5], 1), vec![0.4]);
+        let mut remote = Gen::new(&scaler(1, 1, false), false).unwrap();
+        remote.set("min1", 20.0).unwrap();
+        remote.set("max1", 60.0).unwrap();
+        assert_eq!(remote.tick(&[0.5], 1).unwrap(), vec![0.4]);
     }
 
     #[test]

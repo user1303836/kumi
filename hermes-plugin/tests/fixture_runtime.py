@@ -172,7 +172,7 @@ class Fixture:
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(f"{path.suffix}.{threading.get_ident()}.tmp")  # one a thread: the heartbeat's own
         temporary.write_text(json.dumps(value, indent=1), encoding="utf-8")
-        os.replace(temporary, path)
+        replaced(temporary, path)
 
     def next_seq(self) -> int:
         with self.counting:
@@ -194,7 +194,7 @@ class Fixture:
                                                                                       "duration")} for sound in SOUNDS}})
         pointer = self.state / "map" / "current"
         pointer.with_name("current.tmp").write_text(f"{revision}\n", encoding="utf-8")
-        os.replace(pointer.with_name("current.tmp"), pointer)
+        replaced(pointer.with_name("current.tmp"), pointer)
         self.map_revision = revision
         self.landed("kumi://map")
 
@@ -222,7 +222,7 @@ class Fixture:
         project = self.project()
         return {"project": {**project, "epoch": int(project["epoch"]), "seen_at": self.seen_at} if project else None,
                 "focus": {"track": {"name": drums["name"]}, "trackRef": drums["ref"], "device": "Drum Rack",
-                          "view": "Arrangement"},
+                          "deviceRef": drums["devices"][0]["ref"], "view": "Arrangement"},
                 "transport": {"playing": False, "tempo": self.set["tempo"]}, "catch_up": []}
 
     def history_snapshot(self) -> dict:
@@ -242,6 +242,23 @@ class Fixture:
 
 def now() -> int:
     return int(time.time() * 1000)
+
+
+# As kumi serve replaces a snapshot (serve/snapshots.rs `replace`, TRIES): Windows refuses to rename over a file a
+# reader has open, such as the plugin's snapshot watcher reading it just then, so the writer tries again, 20 ms apart.
+# Without this, a change's publish raised PermissionError on Windows and ended this runtime's loop mid-test (#1141).
+REPLACE_TRIES = 25
+
+
+def replaced(temporary: Path, path: Path) -> None:
+    for attempt in range(REPLACE_TRIES):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            if attempt == REPLACE_TRIES - 1:
+                raise
+            time.sleep(0.02)
 
 
 def error(code: str, reason: str) -> dict:

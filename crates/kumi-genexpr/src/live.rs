@@ -176,26 +176,28 @@ pub struct Device {
 }
 
 impl Device {
+    /// Kumi's own transport and clock code: code that doesn't run here fails the test that builds the bench.
     pub fn new(transport: &str, clock: &str, delayed: bool, division: f64, length: f64) -> Device {
-        let mut device = Device { transport: Gen::new(transport, delayed), clock: Gen::new(clock, delayed) };
-        device.clock.set("division", division);
-        device.clock.set("length", length);
+        let read = |code: &str| Gen::new(code, delayed).unwrap_or_else(|why| panic!("Kumi's own code doesn't run: {why}"));
+        let mut device = Device { transport: read(transport), clock: read(clock) };
+        device.clock.set("division", division).expect("the clock's division");
+        device.clock.set("length", length).expect("the clock's length");
         device
     }
 
     /// The device told Live's loop settings, as its live.observers tell it.
     pub fn told_loop(&mut self, live: &Live) {
-        self.transport.set("loop_on", if live.loop_on { 1.0 } else { 0.0 });
-        self.transport.set("loop_start", live.loop_start);
-        self.transport.set("loop_length", live.loop_length);
+        self.transport.set("loop_on", if live.loop_on { 1.0 } else { 0.0 }).expect("the transport's loop_on");
+        self.transport.set("loop_start", live.loop_start).expect("the transport's loop_start");
+        self.transport.set("loop_length", live.loop_length).expect("the transport's loop_length");
     }
 
     /// One sample: whether a step starts, its index and its length in ms (read from the clock's buffer, as the
     /// patch's peek~ reads them once the vector is done), and where the true song position was.
     pub fn tick(&mut self, live: &mut Live) -> (bool, f64, f64, f64) {
         let (read, truth) = live.tick();
-        let transport = self.transport.tick(&read, 6);
-        let clock = self.clock.tick(&transport, 4);
+        let transport = self.transport.tick(&read, 6).unwrap_or_else(|why| panic!("the transport: {why}"));
+        let clock = self.clock.tick(&transport, 4).unwrap_or_else(|why| panic!("the clock: {why}"));
         let memory = &self.clock.buffers[0].1;
         if clock[0] > 0.5 {
             assert_eq!((memory[0], memory[1]), (clock[1], clock[2]), "the buffer holds the step that starts");

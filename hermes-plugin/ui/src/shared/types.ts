@@ -111,6 +111,9 @@ export interface HistoryItem {
   cleanup?: string
   /** What `kumi serve` (#965) writes in plain words: why an undo didn't happen, or what's unsure. */
   note?: string
+  /** A row only the DAW's own undo can take back (#1101's device loads, whose undo Kumi refuses): `next` while it's
+   *  the DAW's next undo, `buried` once later work sits above it there, so the DAW's undo would take that back first. */
+  daw_undo?: 'next' | 'buried'
 }
 
 export interface History extends Liveness {

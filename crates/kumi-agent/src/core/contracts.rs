@@ -786,6 +786,58 @@ pub trait Integration {
         let _ = (request, signal);
         Err(absent())
     }
+    /// Whether the DAW builds a device from a typed spec into its library ([`Integration::device_preview`],
+    /// [`Integration::device_build`]): Live's Max for Live audio effects (CC-22).
+    fn has_device_build(&self) -> bool {
+        false
+    }
+    /// What building `spec` would write, reading only the library's folder for the free name: the device's name, its
+    /// file, controls and code. `Err` inside carries the findings that refuse the spec; nothing is ever written.
+    async fn device_preview(&self, spec: &serde_json::Value) -> Result<Result<DevicePreview, Vec<String>>, RuntimeError> {
+        let _ = spec;
+        Err(absent())
+    }
+    /// Builds `spec` as a new file in the library, never over one, as the preview named it (`file`), and waits for the
+    /// DAW's browser to list it. `sha256` is the spec's approved hash, for the integration's own record: the caller (serve)
+    /// checks it against the bytes it was given and has already refused a mismatch, so the integration doesn't check it.
+    /// `Err` inside carries the findings that refuse it (a spec refused, or a free name that's no longer `file`); nothing
+    /// is written then.
+    async fn device_build(
+        &self,
+        spec: &serde_json::Value,
+        sha256: &str,
+        file: &str,
+        signal: Signal,
+    ) -> Result<Result<BuiltDevice, Vec<String>>, RuntimeError> {
+        let _ = (spec, sha256, file, signal);
+        Err(absent())
+    }
+}
+
+/// What building a device would write ([`Integration::device_preview`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DevicePreview {
+    pub name: String,
+    /// The file it would be written as, from the library's root: "User Library/Kumi/Audio Effects/<free name>.amxd".
+    pub file: String,
+    /// Each control as the device has it: name, type, min, max, default, unit and options.
+    pub controls: Vec<serde_json::Value>,
+    pub code: String,
+    pub lines: usize,
+}
+
+/// A device built into the DAW's library ([`Integration::device_build`]).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BuiltDevice {
+    pub name: String,
+    /// The browser's item id, which loading the device takes.
+    pub item: String,
+    /// The file, labelled as in the preview.
+    pub file: String,
+    /// Where the file is on disk, for the caller to keep a copy of: never said to a model.
+    pub path: std::path::PathBuf,
+    /// Whether the DAW's browser listed it before the wait was over.
+    pub listed: bool,
 }
 
 /// A goal's candidate chain in Live: its track, what it is, and the knobs a search may move.

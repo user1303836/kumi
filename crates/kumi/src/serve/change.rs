@@ -375,19 +375,41 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
 
 /// A plan's steps as its preview says them, one line each; a step only the DAW's own Undo takes back is marked so.
 fn preview_steps(names: &HashMap<String, String>, steps: &[Value], checked: &Checked) -> Vec<Value> {
+    let names = shown_names(names, steps);
     steps
         .iter()
         .zip(&checked.families)
         .zip(&checked.daw_undo)
         .map(|((step, family), daw_undo)| {
             let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
-            let mut line = describe(names, tool, family, step.get("input").unwrap_or(&Value::Null));
+            let mut line = describe(&names, tool, family, step.get("input").unwrap_or(&Value::Null));
             if *daw_undo {
                 line["undo"] = json!("daw");
             }
             line
         })
         .collect()
+}
+
+/// How a preview names the refs its steps point at: by the name the last look gave each, quoted; and what an earlier
+/// step of the plan makes (`@alias`), by the name that step gives it ("the new "Reverb" (step 1)"), or by its number.
+fn shown_names(names: &HashMap<String, String>, steps: &[Value]) -> HashMap<String, String> {
+    let mut shown: HashMap<String, String> = names.iter().map(|(reference, name)| (reference.clone(), quoted(name, NAME))).collect();
+    for (at, step) in steps.iter().enumerate() {
+        let Some(alias) = step.get("as").and_then(Value::as_str) else { continue };
+        let input = step.get("input").unwrap_or(&Value::Null);
+        let name = input
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| input.get("itemId").and_then(Value::as_str).and_then(|item| item.rsplit('/').next()))
+            .filter(|name| !name.trim().is_empty());
+        let said = match name {
+            Some(name) => format!("the new {} (step {})", quoted(name, NAME), at + 1),
+            None => format!("what step {} makes", at + 1),
+        };
+        shown.insert(format!("@{alias}"), said);
+    }
+    shown
 }
 
 /// The project may have changed: the epoch moves on, and `focus.json` gives the new one.
@@ -495,11 +517,7 @@ fn describe(names: &HashMap<String, String>, tool: &str, family: &str, input: &V
     }
     targets.dedup();
     let set = if settings.is_empty() { String::new() } else { format!(": {}", settings.join(", ")) };
-    let on = if targets.is_empty() {
-        String::new()
-    } else {
-        format!(" — on {}", targets.iter().map(|name| quoted(name, NAME)).collect::<Vec<_>>().join(", "))
-    };
+    let on = if targets.is_empty() { String::new() } else { format!(" — on {}", targets.join(", ")) };
     let text = one_line(&format!("{}{set}{on}", capitalized(&tool.replace('_', " "))), LINE);
     json!({"tool": tool, "family": family, "effect": "write", "text": text})
 }
@@ -509,10 +527,7 @@ fn describe(names: &HashMap<String, String>, tool: &str, family: &str, input: &V
 fn shown(names: &HashMap<String, String>, value: &Value) -> String {
     let more = |n: usize| if n > FIRST { format!(", +{} more", n - FIRST) } else { String::new() };
     match value {
-        Value::String(text) => match target(names, text) {
-            Some(name) => quoted(&name, NAME),
-            None => quoted(text, QUOTED),
-        },
+        Value::String(text) => target(names, text).unwrap_or_else(|| quoted(text, QUOTED)),
         Value::Number(number) => number.to_string(),
         Value::Bool(flag) => (if *flag { "on" } else { "off" }).into(),
         Value::Null => "none".into(),
@@ -527,7 +542,7 @@ fn shown(names: &HashMap<String, String>, value: &Value) -> String {
     }
 }
 
-/// What a ref is called: the name the last look gave it, or what a step before makes (`@name`).
+/// What a ref is called, as a preview shows it ([`shown_names`]): its name, or what a step before makes (`@name`).
 fn target(names: &HashMap<String, String>, text: &str) -> Option<String> {
     names.get(text).cloned().or_else(|| text.strip_prefix('@').map(|made| format!("what {made} makes")))
 }
@@ -585,7 +600,8 @@ pub static UNDO: Operation = Operation {
     name: "undo",
     description: "Undoes one change from HISTORY by its id, under the DAW's write lease: undone, kept (Kumi can't take it \
                   back, and says why), unsure, expired (made by an earlier runtime, or no longer undoable) or refused. \
-                  `preview` says what it would undo without doing it.",
+                  With `whole_change`, every step of the change that row is part of, newest first, stopping at the first \
+                  it can't undo. `preview` says what it would undo without doing it.",
     schema: undo_schema,
     effect: undo_effect,
     run: run_undo,
@@ -594,7 +610,9 @@ pub static UNDO: Operation = Operation {
 fn undo_schema() -> Value {
     json!({"type": "object", "additionalProperties": false, "required": ["history_id"], "properties": {
         "history_id": {"type": "string", "minLength": 1, "maxLength": 96},
-        "preview": {"type": "boolean"}
+        "preview": {"type": "boolean"},
+        "whole_change": {"type": "boolean"},
+        "expect_rows": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
     }})
 }
 
@@ -616,24 +634,20 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let Some(row) = ctx.history().row(id) else {
         return Ok(answer("refused", "There's no change by that id in HISTORY."));
     };
-    // A change only the DAW's own Undo takes back is refused with its words, before anything is asked (CC-20).
+    // A script's row (CC-19): Kumi can't undo what code did, preview or not, whole or a row of it, and the DAW isn't
+    // asked. It comes before CC-20's refusal and #1129's whole change, so neither reaches a script's row.
+    if row.script.is_some() {
+        return Ok(super::script::not_undoable(ctx, previewing(&call.args)));
+    }
+    // A change only the DAW's own Undo takes back is refused with its words, before anything is asked (CC-20), whole or
+    // a row of it.
     if row.reason.as_deref() == Some(DAW_UNDO) {
         return Ok(daw_undo_refusal(ctx.history(), &row, previewing(&call.args)));
     }
-    // Why it can't be undone from here, before the DAW is asked: CC-3's reason, C1's state and the words.
-    let restarted = format!(
-        "Kumi restarted since this change, so it can't undo it safely: undo it in {} if it's still the latest step there, or ask Hermes to set it back.",
-        ctx.daw().profile().words.app
-    );
-    let why_not = if row.runtime_generation != ctx.history().generation() {
-        Some(("restarted", "expired", restarted.as_str()))
-    } else if row.state == "expired" {
-        Some(("expired", "expired", "It can't be undone any more."))
-    } else if !row.undo_available {
-        Some(("kept", "refused", "That change can't be undone now (see its state in HISTORY)."))
-    } else {
-        None
-    };
+    if call.args.get("whole_change").and_then(Value::as_bool) == Some(true) {
+        return whole_change(ctx, &call, &row).await;
+    }
+    let why_not = cant_undo(ctx, &row);
     // The DAW must answer, with that change's project open and no return since the last look.
     let connection = match ctx.connection() {
         Ok(connection) => connection,
@@ -645,39 +659,89 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         if let Err(error) = here {
             return Ok(json!({"state": "refused", "code": error.code(), "reason": error.reason()}));
         }
-        // A value Kumi set is read fresh: what it is now and what the undo would put back, in the DAW's own words, and
-        // why the undo would be refused.
-        if why_not.is_none() {
-            if let Ok(Some(fresh)) = connection.integration.undo_preview(&row.label, call.signal.clone()).await {
-                let track = on_track(&fresh.text, row.track.as_deref());
-                let said = match &fresh.refusal {
-                    Some(refusal) => format!("{}{track}. {}", fresh.text, refusal.reason),
-                    None => format!("{}{track}", fresh.text),
-                };
-                let mut preview = json!({"state": "preview", "text": one_line(&said, 600), "undo_available": fresh.refusal.is_none()});
-                if let Some(refusal) = fresh.refusal {
-                    preview["reason"] = json!(refusal.code);
-                }
-                return Ok(preview);
-            }
-        }
-        let text = format!("Undo {}{}", row.title, on_track(&row.title, row.track.as_deref()));
-        let mut preview = json!({"state": "preview", "text": text, "undo_available": why_not.is_none()});
-        if let Some((reason, _, _)) = why_not {
-            preview["reason"] = json!(reason);
-        }
-        return Ok(preview);
+        return Ok(row_preview(&connection, &row, why_not.as_ref().map(|(reason, _, _)| *reason), &call).await);
     }
     if let Some((_, state, reason)) = why_not {
-        return Ok(answer(state, reason));
+        return Ok(answer(state, &reason));
     }
     if let Err(error) = here {
         return Ok(json!({"state": "refused", "code": error.code(), "reason": error.reason()}));
     }
-    // The DAW reads again what the change set right before it's asked: one changed since is refused with nothing asked
-    // and nothing recorded, audited or moved on.
+    let undone = undo_row(ctx, &connection, &row, &call).await;
+    if let Some(code) = undone.code {
+        return Ok(json!({"state": "refused", "code": code, "reason": undone.reason}));
+    }
+    if undone.state != "refused" {
+        // Kumi's undo is a step of the DAW's own undo too: a change only that undo takes back is under it now.
+        ctx.history().wrote(&row.project_key);
+        moved_on(ctx);
+    }
+    super::core::publish_status(ctx, false).await;
+    let mut answered = answer(undone.state, &undone.reason);
+    if let Some(audit) = undone.audit {
+        answered["history_ids"] = json!([audit]);
+    }
+    Ok(answered)
+}
+
+/// Why `row` can't be undone from here, before the DAW is asked: CC-3's reason, C1's state and the words.
+fn cant_undo(ctx: &Ctx, row: &Row) -> Option<(&'static str, &'static str, String)> {
+    if row.runtime_generation != ctx.history().generation() {
+        let restarted = format!(
+            "Kumi restarted since this change, so it can't undo it safely: undo it in {} if it's still the latest step there, or ask Hermes to set it back.",
+            ctx.daw().profile().words.app
+        );
+        Some(("restarted", "expired", restarted))
+    } else if row.state == "expired" {
+        Some(("expired", "expired", "It can't be undone any more.".into()))
+    } else if !row.undo_available {
+        Some(("kept", "refused", "That change can't be undone now (see its state in HISTORY).".into()))
+    } else {
+        None
+    }
+}
+
+/// What undoing `row` would do, `why_not` being why it can't: a value Kumi set is read fresh, what it is now and what the
+/// undo would put back, in the DAW's own words, and why the undo would be refused.
+async fn row_preview(connection: &connection::Connection, row: &Row, why_not: Option<&'static str>, call: &Call) -> Value {
+    if why_not.is_none() {
+        if let Ok(Some(fresh)) = connection.integration.undo_preview(&row.label, call.signal.clone()).await {
+            let track = on_track(&fresh.text, row.track.as_deref());
+            let said = match &fresh.refusal {
+                Some(refusal) => format!("{}{track}. {}", fresh.text, refusal.reason),
+                None => format!("{}{track}", fresh.text),
+            };
+            let mut preview = json!({"state": "preview", "text": one_line(&said, 600), "undo_available": fresh.refusal.is_none()});
+            if let Some(refusal) = fresh.refusal {
+                preview["reason"] = json!(refusal.code);
+            }
+            return preview;
+        }
+    }
+    let text = format!("Undo {}{}", row.title, on_track(&row.title, row.track.as_deref()));
+    let mut preview = json!({"state": "preview", "text": text, "undo_available": why_not.is_none()});
+    if let Some(reason) = why_not {
+        preview["reason"] = json!(reason);
+    }
+    preview
+}
+
+/// One row's undo as it came to: its state and why, the code of a refusal the DAW's guard made before anything changed,
+/// and the audit row of an unsure undo.
+struct RowUndone {
+    state: &'static str,
+    reason: String,
+    code: Option<&'static str>,
+    audit: Option<String>,
+}
+
+/// `row` undone: the DAW reads again what the change set right before it's asked, and one changed since is refused with
+/// nothing asked, recorded, audited or moved on. An unsure undo gets its own audit row, which the answer names.
+async fn undo_row(ctx: &Ctx, connection: &connection::Connection, row: &Row, call: &Call) -> RowUndone {
     let undone = match connection.integration.guarded_undo(&row.label, call.signal.clone()).await {
-        Ok(Err(refusal)) => return Ok(json!({"state": "refused", "code": refusal.code, "reason": one_line(&refusal.reason, 600)})),
+        Ok(Err(refusal)) => {
+            return RowUndone { state: "refused", reason: one_line(&refusal.reason, 600), code: Some(refusal.code), audit: None }
+        }
         Ok(Ok(record)) => Ok(record),
         Err(error) => Err(error),
     };
@@ -697,27 +761,158 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         }
         Err(error) => ("unsure", format!("The undo stopped: {error}")),
     };
-    // Its own audit row for an unsure undo, in the answer's history_ids: the adapter then adds none of its own.
-    let mut audited = None;
+    let mut audit = None;
     if state == "unsure" {
         let asked = super::mcp::digest(UNDO.name, &call.args);
         let identity = CallIdentity::of(&call.host, &asked);
-        let audit = ctx.history().audit(&format!("Undo {}", row.title), &row.project_key, &reason, identity, ctx.snapshots());
-        ctx.history().call_came_to(std::slice::from_ref(&audit.id), "unsure", ctx.snapshots());
+        let audited = ctx.history().audit(&format!("Undo {}", row.title), &row.project_key, &reason, identity, ctx.snapshots());
+        ctx.history().call_came_to(std::slice::from_ref(&audited.id), "unsure", ctx.snapshots());
         ctx.link().note_unsure("undo", &reason, "unsure");
-        audited = Some(audit.id);
+        audit = Some(audited.id);
     }
-    if state != "refused" {
+    RowUndone { state, reason, code: None, audit }
+}
+
+/// The rows of the change `row` is part of, newest first (CC-3 A2): those with its `change_id`, or the row alone.
+fn change_rows(ctx: &Ctx, row: &Row) -> Vec<Row> {
+    match &row.change_id {
+        Some(change) => ctx.history().rows(usize::MAX).into_iter().filter(|other| other.change_id.as_ref() == Some(change)).collect(),
+        None => vec![row.clone()],
+    }
+}
+
+/// The set of rows an approval binds (CC-3 A2-c): the lower-case hex SHA-256 of `<history_id>:<state>`, a line a row,
+/// newest first, joined by `\n`.
+fn rows_digest(rows: &[Row]) -> String {
+    use sha2::{Digest, Sha256};
+    let lines: Vec<String> = rows.iter().map(|row| format!("{}:{}", row.id, row.state)).collect();
+    format!("{:x}", Sha256::digest(lines.join("\n").as_bytes()))
+}
+
+/// Every row of the change `row` is part of, newest first (CC-3 A2): what undoing them would do, or each undone in turn
+/// under the one write lease, as one undo of it would be, until the first that isn't; the rows after it aren't tried, as
+/// an older one can depend on a newer (a track's creation, and its volume since). A row undone already is skipped.
+async fn whole_change(ctx: &Ctx, call: &Call, row: &Row) -> Result<Value, OpError> {
+    let rows = change_rows(ctx, row);
+    // A change only the DAW's own Undo takes back is undone of nothing, whichever of its rows says so (CC-20's 20e).
+    if let Some(daw_undo) = rows.iter().find(|row| row.reason.as_deref() == Some(DAW_UNDO)) {
+        return Ok(daw_undo_refusal(ctx.history(), daw_undo, previewing(&call.args)));
+    }
+    let digest = rows_digest(&rows);
+    let previewed = previewing(&call.args);
+    // The real call names the set its approval listed (the preview's `rows_digest`), and a set that's changed since (a
+    // row undone by id, or expired) is refused before the DAW is asked anything.
+    if !previewed {
+        match call.args.get("expect_rows").and_then(Value::as_str) {
+            None => {
+                return Err(OpError::Invalid {
+                    reason: "Undoing a whole change takes expect_rows, the rows_digest its preview gave: preview it first.".into(),
+                })
+            }
+            Some(expected) if expected != digest => {
+                return Ok(
+                    json!({"state": "refused", "code": "stale", "reason": "This change's steps aren't as they were when its undo was approved: preview it again."}),
+                );
+            }
+            Some(_) => {}
+        }
+    }
+    let connection = match ctx.connection() {
+        Ok(connection) => connection,
+        Err(error) if previewed => return Err(error),
+        Err(error) => return Ok(json!({"state": "refused", "code": error.code(), "reason": error.reason()})),
+    };
+    if let Err(error) = ctx.link().expect_project(&row.project_key) {
+        return Ok(json!({"state": "refused", "code": error.code(), "reason": error.reason()}));
+    }
+    if previewed {
+        let mut listed = Vec::new();
+        let mut texts = Vec::new();
+        let mut available = true;
+        for row in &rows {
+            let mut line = json!({"history_id": row.id, "title": row.title, "family": row.family, "state": row.state});
+            if row.state == "undone" {
+                line["text"] = json!(format!("{} is undone already", row.title));
+                line["undo_available"] = json!(false);
+            } else {
+                let why_not = cant_undo(ctx, row);
+                let preview = row_preview(&connection, row, why_not.as_ref().map(|(reason, _, _)| *reason), call).await;
+                available &= preview["undo_available"] == true;
+                texts.push(preview["text"].as_str().unwrap_or_default().to_string());
+                line["text"] = preview["text"].clone();
+                line["undo_available"] = preview["undo_available"].clone();
+                if let Some(reason) = preview.get("reason") {
+                    line["reason"] = reason.clone();
+                }
+            }
+            listed.push(line);
+        }
+        let text = match texts.as_slice() {
+            [] => "Every step of this change is undone already.".to_string(),
+            [one] => one.clone(),
+            many => one_line(&format!("Undo {} steps: {}", many.len(), many.join("; ")), 600),
+        };
+        return Ok(json!({
+            "state": "preview",
+            "text": text,
+            "undo_available": available && !texts.is_empty(),
+            "rows_digest": digest,
+            "rows": listed,
+        }));
+    }
+    let mut answered = Vec::new();
+    let mut audits = Vec::new();
+    // The first row that isn't undone: the undo stops there.
+    let mut stopped: Option<(&'static str, String)> = None;
+    let (mut moved, mut some_undone) = (false, false);
+    for row in &rows {
+        if stopped.is_some() {
+            answered.push(json!({"history_id": row.id, "state": "not_tried"}));
+            continue;
+        }
+        if row.state == "undone" {
+            some_undone = true;
+            answered.push(json!({"history_id": row.id, "state": "undone"}));
+            continue;
+        }
+        let mut line = json!({"history_id": row.id});
+        let (state, reason) = match cant_undo(ctx, row) {
+            Some((_, state, reason)) => (state, reason),
+            None => {
+                let undone = undo_row(ctx, &connection, row, call).await;
+                // The DAW was asked, and may have changed, unless its guard refused before anything did.
+                moved |= undone.code.is_none() && undone.state != "refused";
+                audits.extend(undone.audit);
+                if let Some(code) = undone.code {
+                    line["code"] = json!(code);
+                }
+                (undone.state, undone.reason)
+            }
+        };
+        line["state"] = json!(state);
+        if state == "undone" {
+            some_undone = true;
+        } else {
+            line["reason"] = json!(reason);
+            stopped = Some((state, reason));
+        }
+        answered.push(line);
+    }
+    if moved {
         // Kumi's undo is a step of the DAW's own undo too: a change only that undo takes back is under it now.
         ctx.history().wrote(&row.project_key);
         moved_on(ctx);
     }
     super::core::publish_status(ctx, false).await;
-    let mut answered = answer(state, &reason);
-    if let Some(audit) = audited {
-        answered["history_ids"] = json!([audit]);
+    let mut whole = match stopped {
+        None => json!({"state": "undone"}),
+        Some((state, reason)) => json!({"state": if some_undone { "partly_undone" } else { state }, "reason": reason}),
+    };
+    whole["rows"] = json!(answered);
+    if !audits.is_empty() {
+        whole["history_ids"] = json!(audits);
     }
-    Ok(answered)
+    Ok(whole)
 }
 
 /// The answer to an undo of a change only the DAW's own Undo takes back (CC-20's 20e): refused with the change's words,
@@ -872,6 +1067,7 @@ mod tests {
             call_outcome: None,
             change_id: None,
             sources: None,
+            script: None,
         }
     }
 
@@ -919,6 +1115,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
+        let names = shown_names(&names, &[]);
         let line = describe(&names, "set_mixer", "mixer", &json!({"trackRef": "7:track:1", "volume": 0.85, "mute": false}));
         assert_eq!(
             (line["family"].clone(), line["text"].clone()),
@@ -945,6 +1142,18 @@ mod tests {
         );
         let long = describe(&names, "rename", "rename", &json!({"ref": "x", "name": "a".repeat(500), "other": "b".repeat(500)}));
         assert!(long["text"].as_str().unwrap().chars().count() <= LINE, "{long}");
+        // What an earlier step makes is named by that step's own name for it, and the step: never by its alias.
+        let plan = [
+            json!({"tool": "track_add", "input": {"name": "Reverb"}, "as": "rev"}),
+            json!({"tool": "fx_add", "input": {"ref": "@rev", "name": "ReaVerbate (Cockos)"}}),
+            json!({"tool": "load_device", "input": {"itemId": "audio_effects/Reverb"}, "as": "verb"}),
+            json!({"tool": "track_add", "input": {}, "as": "blank"}),
+        ];
+        let made = shown_names(&HashMap::new(), &plan);
+        let fx = describe(&made, "fx_add", "device", &plan[1]["input"]);
+        assert_eq!(fx["text"], "Fx add: name \"ReaVerbate (Cockos)\" — on the new \"Reverb\" (step 1)");
+        assert_eq!(made["@verb"], "the new \"Reverb\" (step 3)", "a loaded device by its Browser name");
+        assert_eq!(made["@blank"], "what step 4 makes");
     }
 
     #[test]
