@@ -1,38 +1,12 @@
-"""Kumi's Automation Blueprints: what a producer can schedule, and that a scheduled run can only read."""
+"""Kumi's Automation Blueprints, as Hermes's own catalog builds and schedules them. That a scheduled run can't start
+Kumi is the policy's to enforce, and its test (#983)."""
 from __future__ import annotations
 
-import re
 import unittest
 
 import support
 
 blueprints = support.module("blueprints")
-
-# Every Kumi tool that starts Kumi, takes the DAW's lease, needs an approval or changes something.
-WRITERS = ("kumi_connect", "kumi_setup", "kumi_library", "kumi_listen", "kumi_change", "kumi_undo")
-
-
-class Registering(unittest.TestCase):
-    def test_both_blueprints_are_added_and_an_older_hermes_gets_none(self):
-        added = []
-
-        class Ctx:
-            def register_automation_blueprint(self, key, **fields):
-                added.append((key, fields["schedule_template"]))
-
-        blueprints.register(Ctx())
-        self.assertEqual(added, [("weekly-digest", "{minute} {hour} * * {dow}"), ("morning-check", "{minute} {hour} * * 1-5")])
-        blueprints.register(object())  # no register_automation_blueprint: nothing, and no error
-
-    def test_a_scheduled_run_may_call_only_the_read_tools_and_is_told_never_to_call_a_writer(self):
-        for blueprint in blueprints.BLUEPRINTS:
-            prompt = blueprint["prompt_template"]
-            # The tools it may call: named outside the never-call list.
-            allowed = set(re.findall(r"kumi_[a-z]+", prompt.replace(blueprints.NEVER, "")))
-            self.assertLessEqual(allowed, {"kumi_history", "kumi_status"}, blueprint["key"])
-            self.assertIn("Never call " + blueprints.NEVER, prompt)
-            for tool in WRITERS:
-                self.assertIn(tool, blueprints.NEVER)
 
 
 class ThroughHermes(unittest.TestCase):

@@ -65,11 +65,7 @@ BLUEPRINTS: tuple[dict[str, Any], ...] = (
 
 
 def register(ctx: Any) -> None:
-    """Add Kumi's blueprints to this profile's catalog. A Hermes without blueprints gets none, and its plugin loads as
-    before."""
-    add = getattr(ctx, "register_automation_blueprint", None)
-    if add is None:
-        return
+    """Add Kumi's blueprints to this profile's catalog (`ctx.register_automation_blueprint`, Hermes v0.22.7)."""
     for blueprint in BLUEPRINTS:
         fields = dict(blueprint)
-        add(fields.pop("key"), **fields)
+        ctx.register_automation_blueprint(fields.pop("key"), **fields)
