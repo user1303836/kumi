@@ -212,6 +212,8 @@ class Runtimes(unittest.TestCase):
         self.assertTrue(eventually(lambda: live.gone.is_set()), "then it exited and was retired")
         self.start(session="s2")  # and the profile came free with its exit
 
+    @unittest.skipIf(os.name == "nt", "the test's kumi.bat runs the fixture under cmd.exe, which terminate ends without "
+                                      "its child; Client's tests end the fixture itself on every system")
     def test_a_runtime_that_doesnt_settle_in_time_is_ended_and_frees_the_profile(self):
         runtimes = self.make(settle_wait=0.5)
         live = self.start("--slow", "history=30", "--ignore-eof", runtimes=runtimes)  # never exits on its own
