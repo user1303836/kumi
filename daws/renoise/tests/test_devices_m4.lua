@@ -1417,6 +1417,57 @@ test("devices m4: device-params refuses a parameter the producer moved between t
   eq(value(2, 2, 2), 5)
 end)
 
+test("devices m4: refused parameters aren't written back when they didn't move, so no rollback step is made (#399 N-N2)", function()
+  local _, peer = setup()
+  mock.song:track(2):device(2):parameter(1).value = 5
+  mock.song:undo()
+  H.tick(2)
+  eq(#mock.data.undo.redo, 1, "the producer has a step to redo")
+  local params = device_data(2, 2).params
+  params[1].refuse_value, params[1].record_unchanged = -6, true
+  params[2].refuse_value, params[2].record_unchanged = 3, true
+  local epoch, layout = place(peer)
+  local input = eq_knobs(epoch)
+  local previewed = preview(peer, "device-params", input)
+  local refused = apply(peer, "device-params", input, previewed, "Kumi: knobs (knn2)", epoch, layout)
+  failure(refused, "failed", "nothing is changed")
+  eq(value(2, 2, 1), 0)
+  eq(value(2, 2, 2), 0)
+  eq(steps(), 0, "no redundant prior-value writes manufactured an undo step")
+  eq(#mock.data.undo.redo, 1, "the producer's redo stays too")
+end)
+
+test("devices m4: a refused parameter destination isn't re-aimed at the unchanged prior destination (#399 N-N2)", function()
+  local _, peer = meta_song()
+  for k = 1, 3 do
+    local param = device_data(1, 2).params[k]
+    param.refuse_value, param.record_unchanged = 1, true
+  end
+  local epoch, layout = place(peer)
+  local input = { ref = epoch .. ":device:1.2", values = {
+    {param = "Dest. Track", value = 1}, {param = "Dest. Effect", value = 1}, {param = "Dest. Parameter", value = 1},
+  } }
+  local previewed = preview(peer, "device-params", input)
+  failure(apply(peer, "device-params", input, previewed, "Kumi: aim (knn4)", epoch, layout), "failed", "nothing is changed")
+  eq(values(1, 2, 1, 3), "-1/-1/-1")
+  eq(steps(), 0, "no redundant destination writes manufactured an undo step")
+end)
+
+test("devices m4: a partially refused parameter batch goes back in the same native undo group (#399 N-N2)", function()
+  local _, peer = setup()
+  local params = device_data(2, 2).params
+  params[2].refuse_value, params[2].record_unchanged = 3, true
+  local epoch, layout = place(peer)
+  local input = eq_knobs(epoch)
+  local previewed = preview(peer, "device-params", input)
+  failure(apply(peer, "device-params", input, previewed, "Kumi: knobs (knn3)", epoch, layout), "failed", "nothing is changed")
+  eq(value(2, 2, 1), 0, "the parameter the host did take was restored")
+  eq(value(2, 2, 2), 0, "the refused value was left alone")
+  eq(steps(), 1, "the actual write and rollback keep their unavoidable native step")
+  eq(newest(), "Kumi: knobs (knn3)")
+  eq(#mock.data.undo.stack[1].writes, 2, "one accepted write and its rollback, in that same group")
+end)
+
 test("devices m4: device-params' undo refuses a parameter changed since, puts back with discard, and writes only those still as Kumi set them", function()
   local _, peer = setup()
   local record = change(peer, "device-params", eq_knobs(place(peer)))
