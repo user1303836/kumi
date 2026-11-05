@@ -26,6 +26,13 @@ class Unwindowed(ledger.Ledger):
         return {key: value for key, value in super().quote(quote_id).items() if key != "source_seconds"}
 
 
+class Newer(ledger.Ledger):
+    """A ledger a newer Kumi for Hermes wrote: its policy names a kind this plugin doesn't know (W5-d)."""
+
+    def configure(self, *, acknowledged: bool, enabled: dict) -> None:
+        raise ledger.LedgerError("ledger_newer_policy")
+
+
 class Kinds(Paid, unittest.TestCase):
     def host(self, settings: dict | None = None, *fixture_args: str, key: str | None = KEY, ledger: type | None = None):
         return super().host(dict(ON if settings is None else settings), *fixture_args, key=key, ledger=ledger)
@@ -104,6 +111,14 @@ class Kinds(Paid, unittest.TestCase):
         self.assertEqual(asked["action"], "block")
         self.assertIn("doesn't say plainly what it makes", asked["message"])
         self.assertEqual(host.ledger().snapshot()["reserved"], 0, "nothing is reserved")
+
+    def test_a_ledger_a_newer_plugin_wrote_is_kept_and_said_to_need_this_one_updated(self):
+        host, _, data = self.host(ledger=Newer)
+        answer = support.call(host, "kumi_generate", {"action": "quote", "kind": "sfx", "prompt": "a hit"},
+                              session_id="s1")
+        self.assertEqual(answer["error"]["code"], "ledger_newer_policy")
+        self.assertIn("hermes plugins update kumi", answer["error"]["reason"])
+        self.assertEqual(self.sent(data, "quote"), [], "Mirelo is never asked")
 
 
 if __name__ == "__main__":

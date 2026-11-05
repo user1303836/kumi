@@ -11,11 +11,11 @@ from pathlib import Path
 import time
 from typing import Any
 
-from . import calls, runtime, snapshots
+from . import calls, runtime, schemas, snapshots
 
 log = logging.getLogger(__name__)
 
-KINDS = ("sfx", "audio_to_midi", "video_to_sfx", "extend", "inpaint")
+KINDS = schemas.GENERATE_KINDS
 # Each kind's own switch (plugin.yaml), and where Hermes keeps the key (its `mirelo_api_key` secret). Every kind is off
 # until its own switch is on: an earlier acknowledgement or key never turns on one added later (CC-15).
 SETTINGS = {"sfx": "mirelo_sfx_enabled", "audio_to_midi": "mirelo_midi_enabled",

@@ -122,7 +122,8 @@ class Host:
         """This profile's credit ledger (W3's `ledger.Ledger`, under its own file lock), with the cap as the producer
         set it now, and their acknowledgement and each kind's switch written into it (`configure`): the runtime reads
         that policy and a create's reservation from the ledger, never from `_mirelo`'s copy alone (agent-m). Raises
-        generate.LedgerUnavailable when it can't be had."""
+        generate.LedgerUnavailable when it can't be had; a ledger a newer Kumi for Hermes wrote is kept as it is, and
+        said to need this plugin updated (CC-15's W5-d), never repaired or reset."""
         settings = self.generation()
         try:
             opener = self._ledger
@@ -133,6 +134,11 @@ class Host:
             return ledger
         except Exception as failure:
             log.warning("Kumi couldn't open its credit ledger: %s", type(failure).__name__)
+            if getattr(failure, "code", None) == "ledger_newer_policy":
+                raise generate.LedgerUnavailable(
+                    "ledger_newer_policy", "Kumi's credit ledger was written by a newer Kumi for Hermes, so nothing is "
+                    "paid until this plugin is updated (hermes plugins update kumi). The ledger is kept as it is.") \
+                    from None
             raise generate.LedgerUnavailable("ledger_unavailable",
                                              "Kumi can't read its credit ledger, so nothing is paid.") \
                 from None

@@ -1,12 +1,12 @@
 """The tools' schemas as Hermes registers them (RESEARCH.md C1): what the model reads to choose and call a tool."""
 from __future__ import annotations
 
-from . import generate
-
 # Kumi's names for the DAWs it works in (its settings' and the runtime's): `ableton` is Ableton Live.
 DAWS = ("ableton", "reaper", "renoise")
 DAW_NAMES = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
 MAX_STEPS = 20
+# The kinds kumi_generate offers (CC-13, CC-15), generate.KINDS. Here, since the dashboard loads this file on its own.
+GENERATE_KINDS = ("sfx", "audio_to_midi", "video_to_sfx", "extend", "inpaint")
 
 
 def _tool(name: str, description: str, properties: dict | None = None, required: tuple[str, ...] = ()) -> dict:
@@ -195,7 +195,7 @@ KUMI_GENERATE = _tool(
     "new file with the whole edited audio; the original isn't changed. The generation runs as a job: follow it with "
     "kumi_job. Never create a quote again after an unsure answer.",
     {"action": {"type": "string", "enum": ["quote", "create"]},
-     "kind": {"type": "string", "enum": list(generate.KINDS),
+     "kind": {"type": "string", "enum": list(GENERATE_KINDS),
               "description": "quote: what to generate."},
      "prompt": {"type": "string", "description": (
          "quote: what it should sound like. Needed for sfx; optional for video_to_sfx (which may not follow it), "
