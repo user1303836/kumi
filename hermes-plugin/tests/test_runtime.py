@@ -198,14 +198,15 @@ class Runtimes(unittest.TestCase):
         runtimes = self.make(idle_after=0.3)
         other = Path(self.enterContext(tempfile.TemporaryDirectory()))
 
-        def start(name: str, data: Path) -> None:
+        def start(name: str, data: Path):
             profile.set(name)
             support.install(data)
-            runtimes.start(data, runtime.installed(data, support.VERSION), "ableton", None, profile=name)
+            return runtimes.start(data, runtime.installed(data, support.VERSION), "ableton", None, profile=name)
 
-        contextvars.copy_context().run(start, "first", self.data)  # this start begins the one idle watch
-        contextvars.copy_context().run(start, "second", other)
-        self.assertTrue(eventually(lambda: runtimes.get(self.data) is None and runtimes.get(other) is None))
+        first = contextvars.copy_context().run(start, "first", self.data)  # this start begins the one idle watch
+        second = contextvars.copy_context().run(start, "second", other)
+        # Stopped, exited and the profile's lock let go (Windows can't remove a folder while it's held).
+        self.assertTrue(eventually(lambda: first.gone.is_set() and second.gone.is_set()))
         about_second = [name for subject, name in heard if subject == other]
         self.assertTrue(about_second, "its idle stop was logged")
         self.assertEqual(set(about_second), {"second"}, "never in the first profile's context")

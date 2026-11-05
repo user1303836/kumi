@@ -261,6 +261,9 @@ class Media(StateTest):
             (root / "here.wav").symlink_to(root / "real.wav")
             (root / "loop-a.wav").symlink_to(root / "loop-b.wav")
             (root / "loop-b.wav").symlink_to(root / "loop-a.wav")
+            climbing = [root / "climb.wav"] if os.name != "nt" else []  # relative, up to the root, then into /net
+            for link in climbing:
+                link.symlink_to("../" * len(root.parts) + "net/server/Samples/kick.wav")
         except OSError:
             self.skipTest("this system can't make links here")
         looked: list[str] = []
@@ -273,11 +276,11 @@ class Media(StateTest):
             return call
 
         with mock.patch.multiple(os, **{name: recording(name) for name in real}):
-            for path in (root / "Drums" / "kick.wav", root / "kick.wav", root / "loop-a.wav"):
+            for path in (root / "Drums" / "kick.wav", root / "kick.wav", root / "loop-a.wav", *climbing):
                 with self.subTest(path=str(path)):
                     self.assertIsNone(snapshots.resolved(str(path)))
             self.assertEqual(snapshots.resolved(str(root / "here.wav")), str(root / "real.wav"), "a local link is")
-        self.assertFalse([path for path in looked if "server" in path], looked)
+        self.assertFalse([path for path in looked if snapshots.local(path) is None or "server" in path], looked)
 
     def test_a_resolved_path_is_checked_again_so_a_link_to_a_share_is_refused_and_a_long_path_compares_plainly(self) -> None:
         # realpath's answer goes through the same check: a link inside an approved folder, or a folder that is one, can

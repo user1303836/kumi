@@ -312,9 +312,10 @@ def resolved(path: str, windows: bool = os.name == "nt") -> str | None:
 
 
 def follow(path: str, allowed: Callable[[str], str | None]) -> str | None:
-    """`path` with every link in it followed from the root down, as `realpath` would, except that each link's target is
-    read without following it (`readlink`) and must pass `allowed` before anything under it is touched. `allowed`
-    answers the path to go on with (its plain form), or None to refuse it. None too if the links loop."""
+    """`path` with every link in it followed from the root down, as `realpath` would, except that nothing is looked up
+    before it passes `allowed`: each step on the way (a relative link can climb into `/net`), and each link's target,
+    read without following it (`readlink`). `allowed` answers the path to go on with (its plain form), or None to
+    refuse it. None too if the links loop."""
     start = allowed(path)
     if start is None:
         return None
@@ -328,9 +329,10 @@ def follow(path: str, allowed: Callable[[str], str | None]) -> str | None:
             current = os.path.dirname(current)
             continue
         step = os.path.join(current, name)
+        if allowed(step) is None:  # before its lstat: looking up a network root mounts it
+            return None
         try:  # lstat and readlink: neither follows `step`, and everything above it is already followed
-            linked = os.path.islink(step) or getattr(os.path, "isjunction", lambda _: False)(step)
-            target = os.readlink(step) if linked else None
+            target = os.readlink(step) if _linked(step) else None
         except (OSError, ValueError):
             return None
         if target is None:
@@ -349,6 +351,17 @@ def follow(path: str, allowed: Callable[[str], str | None]) -> str | None:
     if allowed(current) is None:
         return None
     return allowed(os.path.realpath(current))  # no links are left: realpath only spells it canonically
+
+
+def _linked(path: str) -> bool:
+    """Whether `path` is a link, or on Windows a junction (a mount-point reparse point, which `os.path.isjunction` sees
+    only from Python 3.12), from one `lstat` that follows neither. A path that isn't there is no link."""
+    try:
+        info = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISLNK(info.st_mode) or (getattr(info, "st_reparse_tag", 0) != 0
+                                          and info.st_reparse_tag == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", -1))
 
 
 def hermes_home() -> str | None:

@@ -511,9 +511,14 @@ class SetupTest(unittest.TestCase):
             self.assertFalse(setup._on_this_computer(r"Z:\ffmpeg\bin\ffmpeg.exe", windows=True),
                              "a mapped drive can make Windows authenticate to its server")
             self.assertFalse(setup._on_this_computer(r"\\server\share\ffmpeg.exe", windows=True))
-        for path in ("/net/server/bin/ffmpeg", "/Network/Servers/server/ffmpeg", "/NET/server/ffmpeg"):
+        for path in ("/net/server/bin/ffmpeg", "/Network/Servers/server/ffmpeg", "/NET/server/ffmpeg",
+                     "/System/Volumes/Data/Network/Servers/s/ffmpeg", "/system/volumes/data/net/s/ffmpeg",
+                     "/tmp/../net/server/ffmpeg"):
             self.assertFalse(setup._on_this_computer(path, windows=False), f"{path} mounts a server's share")
         self.assertTrue(setup._on_this_computer("/opt/homebrew/bin/ffmpeg", windows=False))
+        for home in ("/home/someone/bin/ffmpeg", "/System/Volumes/Data/home/someone/ffmpeg"):
+            self.assertFalse(setup._on_this_computer(home, windows=False, darwin=True), "macOS's auto_home")
+            self.assertTrue(setup._on_this_computer(home, windows=False, darwin=False), "Linux's /home is a folder")
 
     @unittest.skipIf(os.name == "nt", "links need privileges on Windows")
     def test_links_are_followed_only_to_this_computer_from_the_root_down(self) -> None:
@@ -532,14 +537,27 @@ class SetupTest(unittest.TestCase):
         tools = self.data.parent / "tools"
         tools.symlink_to("//server/share")  # a folder above the candidate, linked to a share
         self.search.return_value = [str(tools / "bin")]
-        touched = []
-        islink = os.path.islink
-        with mock.patch.object(setup.os.path, "islink", side_effect=lambda path: touched.append(path) or islink(path)):
+        touched: list[str] = []
+        lstat = os.lstat
+
+        def recording():
+            return mock.patch.object(setup.os, "lstat", side_effect=lambda path, *a, **k: touched.append(str(path))
+                                     or lstat(path))
+
+        with recording():
             self.assertIsNone(setup.find_ffmpeg())
         self.assertTrue(touched, "the candidate's folders were looked at")
         under = tuple(os.path.join(parent, "tools") + os.sep  # as given, and with the temp folder's own links resolved
                       for parent in (str(self.data.parent), os.path.realpath(self.data.parent)))
         self.assertFalse([path for path in touched if path.startswith(under)], "nothing under the linked folder")
+        tools.unlink()
+        (tools / "bin").mkdir(parents=True)
+        (tools / "bin" / FFMPEG).symlink_to("../" * len(tools.parts) + "net/server/ffmpeg")  # up to /, then /net
+        touched.clear()
+        with recording():
+            self.assertIsNone(setup.find_ffmpeg(), "a relative link that climbs into /net is never followed")
+        self.assertTrue(touched)
+        self.assertFalse([path for path in touched if not setup._on_this_computer(path)], "no network root looked up")
 
     def test_allowing_ffmpeg_is_an_optional_last_step_that_binds_the_program(self) -> None:
         self.install_runtime()
