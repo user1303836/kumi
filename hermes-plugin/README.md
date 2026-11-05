@@ -114,7 +114,8 @@ listens only to a window that starts and ends on whole pattern lines inside the 
 play more than you approved. REAPER may show the project as modified after a track listen, since only saving clears
 that flag; Kumi never saves. Kumi's REAPER extension keeps an id for each saved project in the project (ext state),
 and its Renoise tool one for each song in the song's tool data, saved with them. With your approval at setup, Kumi's
-runtime runs an ffmpeg already on this computer to decode compressed audio; Kumi never downloads one. Audio is measured
+runtime runs an ffmpeg already on this computer to decode compressed audio; Kumi never downloads one, and checks the
+ffmpeg file you allowed before each start (not the libraries it loads, which an upgrade can change). Audio is measured
 on this computer and is never sent to a model; in a messaging chat (Telegram, Discord…), a sound or measured audio you
 ask Hermes to send you goes to that chat as an attachment, through that app. The project details Kumi notes for FOCUS,
 and the measurements it returns, go to the model you use in Hermes as part of the conversation. With

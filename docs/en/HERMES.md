@@ -91,7 +91,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
   computer's DAW, not yours.
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
 - Kumi reads WAV and AIFF itself. For MP3, FLAC and other compressed audio it uses an ffmpeg already on your
-  computer, if you allow it at setup; it never downloads one. A file it measures can be up to 50 MB.
+  computer, if you allow it at setup; it never downloads one. Before each start Kumi checks that it's still the ffmpeg
+  file you allowed (not the libraries it loads, which an upgrade can change). A file it measures can be up to 50 MB.
 - Kumi's REAPER extension keeps an id for each saved project in the project (ext state), and its Renoise tool one for
   each song in the song's tool data, saved with them.
 - Kumi in Hermes leaves out what would act without Hermes's approval: running code inside the DAW, driving Live's

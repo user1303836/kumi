@@ -67,7 +67,7 @@ Hermes に「Live 用に Kumi をセットアップして」（REAPER や Renois
 
 - DAW は Hermes を動かしているコンピューターで動いている必要があります。リモートの Hermes につないだ Hermes Desktop が操作するのは、そのコンピューターの DAW です。
 - Live は macOS と Windows、REAPER と Renoise は macOS、Windows、Linux で使えます。
-- Kumi は WAV と AIFF をそのまま読めます。MP3、FLAC などの圧縮音声には、セットアップで許可すれば、すでにコンピューターにある ffmpeg を使います（ダウンロードはしません）。測れるファイルは 50 MB までです。
+- Kumi は WAV と AIFF をそのまま読めます。MP3、FLAC などの圧縮音声には、セットアップで許可すれば、すでにコンピューターにある ffmpeg を使います（ダウンロードはしません）。起動のたびに、許可した ffmpeg のファイルが変わっていないかを確かめます（読み込むライブラリは確かめません。アップデートで変わることがあります）。測れるファイルは 50 MB までです。
 - Kumi の REAPER 拡張は保存したプロジェクトごとの ID をプロジェクト内（ext state）に、Renoise ツールは曲ごとの ID を曲のツールデータに保持し、一緒に保存されます。
 - Hermes の確認なしに動いてしまうものは Hermes の中の Kumi に含めていません（DAW 内でのコード実行、Live のメニュー操作、録音、プロジェクトの保存や読み込み）。
 
