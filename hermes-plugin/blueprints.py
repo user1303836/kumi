@@ -27,9 +27,11 @@ BLUEPRINTS: tuple[dict[str, Any], ...] = (
         "prompt_template": (
             "Summarize what Kumi changed in my DAW projects over the last 7 days, from Kumi's HISTORY: call "
             "kumi_history, and no other Kumi tool but kumi_status. Per project: what changed, what was undone, and "
-            "any change marked unsure or partly applied, with what to check in the project. If Kumi isn't running "
-            "(kumi_history says to connect first), say so in one line and stop. Never call " + NEVER + ": this runs "
-            "unattended, and none of them may run without me. If nothing changed, say so in one line."
+            "any change marked unsure or partly applied, with what to check in the project. If Kumi isn't running, "
+            "kumi_history may answer with HISTORY as Kumi last published it (from: last_published): summarize that, "
+            "and say when it was published. If it gives no items and says to connect first, say so in one line and "
+            "stop. Never call " + NEVER + ": this runs unattended, and none of them may run without me. If nothing "
+            "changed, say so in one line."
         ),
         "slots": [
             {"name": "time", "type": "time", "label": "What time?", "default": "18:00", "help": "24h local time"},
