@@ -95,14 +95,25 @@ export function undoKeys(target: unknown): string {
   return /apple-darwin|Mac/.test(on) ? 'Cmd+Z' : 'Ctrl+Z'
 }
 
-/** How to take back a row only the DAW's own undo can reverse (CC-20): its key while serve knows it's the DAW's next
- *  undo, or by hand once a later Kumi change sits above it there (the DAW's undo would take that back first). Words,
- *  never a request: Kumi would refuse it. */
+/** Where a row only the DAW's own undo can reverse (CC-20) stands, as a line under its note: next in the DAW's undo
+ *  while serve knows of nothing above it, or by hand once a later Kumi change sits above it there (the DAW's undo would
+ *  take that back first). How many presses take it back is the note's to say (a pad load is two Live steps, a plan of
+ *  add-chains one), so these words never count them. Words, never a request: Kumi would refuse it. */
 function DawUndo({ daw, how, keys }: { daw: unknown; how: 'next' | 'buried'; keys: string }) {
   const t = useT()
   const app = dawName(daw, t)
-  if (how === 'buried') return <Chip title={t('history.byHandTitle', app)}>{t('history.byHand', app)}</Chip>
-  return <Chip title={t('history.dawUndoTitle', app, keys)}>{t('history.dawUndo', app, keys)}</Chip>
+  if (how === 'buried') {
+    return (
+      <span title={t('history.byHandTitle', app)} style={{ ...S.muted, color: T.warn, whiteSpace: 'normal' }}>
+        {t('history.byHand', app)}
+      </span>
+    )
+  }
+  return (
+    <span title={t('history.dawUndoTitle', app, keys)} style={{ ...S.muted, whiteSpace: 'normal' }}>
+      {t('history.dawUndo', app)}
+    </span>
+  )
 }
 
 /** HISTORY's rows. `live`: the runtime answers now (connected, not stale), so a row without undo was a restart's;
@@ -132,6 +143,7 @@ export function HistoryView({
       {items.map(item => {
         const state = stateOf(item, t, live)
         const track = nameOf(item.track)
+        const dawUndo = item.state === 'applied' && (item.daw_undo === 'next' || item.daw_undo === 'buried') ? item.daw_undo : null
         return (
           <li key={item.id} style={{ ...S.row, gap: 7, padding: '4px 0', borderTop: `1px solid ${T.border}`, opacity: item.state === 'undone' ? 0.7 : 1 }}>
             <span aria-label={state.word} title={state.word} style={{ width: 14, textAlign: 'center', color: TONE[state.tone], flex: 'none' }}>
@@ -156,13 +168,14 @@ export function HistoryView({
               ) : (
                 // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
                 item.note ? (
-                  <span style={{ ...S.muted, whiteSpace: 'normal' }}>{clean(item.note, 200)}</span>
+                  <span style={{ ...S.muted, whiteSpace: 'normal' }}>{clean(item.note, 400)}</span>
                 ) : (
                   restartedSince(item, live) && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{t('history.restartedSince', dawName(daw, t))}</span>
                 )
               )}
+              {dawUndo && <DawUndo daw={daw} how={dawUndo} keys={undoKeys(target)} />}
             </span>
-            {item.state === 'applied' && (item.daw_undo === 'next' || item.daw_undo === 'buried') ? <DawUndo daw={daw} how={item.daw_undo} keys={undoKeys(target)} /> : action?.(item)}
+            {dawUndo ? null : action?.(item)}
           </li>
         )
       })}
