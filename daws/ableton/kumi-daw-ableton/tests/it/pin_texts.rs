@@ -1740,6 +1740,7 @@ mod jobs_session {
                 tracks: None,
                 saved_at: None,
                 identity: None,
+                native_epoch: None,
             })
         }
         fn worker_tools(&self) -> Vec<Rc<dyn KernelTool>> {

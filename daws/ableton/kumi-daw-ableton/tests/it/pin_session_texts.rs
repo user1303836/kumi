@@ -194,6 +194,7 @@ fn harness_with(record: Rc<Record>, run: Option<Run>, config: impl FnOnce(&mut S
         tracks: None,
         saved_at: None,
         identity: None,
+        native_epoch: None,
     }));
     let events = Rc::new(RefCell::new(vec![]));
     let out = events.clone();

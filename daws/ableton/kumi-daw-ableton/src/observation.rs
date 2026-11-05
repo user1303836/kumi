@@ -918,6 +918,7 @@ impl Observer {
                     .filter(|_| !more_tracks)
                     .map(|tracks| tracks.iter().filter_map(|t| t.get("name").and_then(Value::as_str).map(str::to_owned)).collect()),
                 saved_at,
+                native_epoch: None,
                 context: stringify(&Value::Object(context)),
             })
         }.await;

@@ -21,6 +21,7 @@ use kumi_types::system::Env;
 use kumi_types::{daw::DawId, errors::RuntimeError};
 use serde_json::{json, Value};
 use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::{cell::Cell, rc::Rc, sync::Arc};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
@@ -658,12 +659,6 @@ case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins
     let sent = lab.methods_sent();
     assert!(sent.iter().all(|method| reads.contains(&method.as_str())), "{sent:?}");
 
-    // A look whose epoch Kumi couldn't pin (REAPER busy as it read, say): a read isn't taken on trust.
-    lab.ctx.link().saw_page_epoch(None);
-    let (unpinned, error) = wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": {"kind": "track"}}), None).await;
-    assert!(error && unpinned["error"]["code"] == "stale", "{unpinned}");
-    wire.call("observe", json!({"scope": "focus"}), None).await;
-
     // REAPER switches tabs after the look: its rows aren't the looked project's, so a read is stale, not stamped with it.
     tab.switch_tab();
     let (stale, error) = wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": {"kind": "track"}}), None).await;
@@ -672,5 +667,71 @@ case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins
     wire.call("observe", json!({"scope": "focus"}), None).await;
     let (again, error) = wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": {"kind": "track"}}), None).await;
     assert!(!error && again["project_key"] != key, "{again}");
+    wire.end().await;
+});
+
+/// (#980) The look's own snapshot gives the epoch a read is held to: REAPER switches from project A to B right after
+/// it answers the look's snapshot (where a second read of the epoch, after the look, would have read B's), and B's
+/// page is never taken for A's: A's key stays with A's epoch, a read is stale, and the next look is B's with B's epoch.
+case!(serve_holds_a_read_to_the_epoch_of_the_snapshot_the_look_read_so_a_switch_after_it_is_never_the_looked_project, async {
+    let script = ReaperScript::new(3, 0);
+    // What REAPER does as it answers the next look's snapshot: nothing (0), switch to another project right after (1),
+    // or answer without its epoch (2), as a look Kumi can't pin.
+    let next_look = Arc::new(AtomicU8::new(0));
+    let armed = next_look.clone();
+    let lab = Lab::new(
+        DawId::Reaper,
+        Daw::Reaper,
+        Some(Box::new(move |secret| {
+            let mut config = script.config(secret, "/lab/REAPER");
+            let answer = script.respond();
+            config.respond = Some(Arc::new(move |method, params| {
+                let mut answered = answer(method, params);
+                if method == "snapshot" {
+                    match armed.swap(0, Ordering::SeqCst) {
+                        1 => script.switch_tab(),
+                        2 => {
+                            if let Some(Ok(Value::Object(snapshot))) = answered.as_mut() {
+                                snapshot.remove("epoch");
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+                answered
+            }));
+            config
+        })),
+    )
+    .await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (a, _, _, _) = looked(&mut wire).await;
+    assert_eq!(lab.ctx.link().observed_native_epoch().as_deref(), Some("sim-1"), "A's epoch, from the look's snapshot");
+    let track = json!({"action": "data", "tool": "reaper_read", "query": {"kind": "track"}});
+    let (rows, error) = wire.call("read", track.clone(), None).await;
+    assert!(!error && rows["project_key"] == a, "{rows}");
+
+    // A→B between the look's snapshot and anything after it.
+    next_look.store(1, Ordering::SeqCst);
+    let (seen, _) = wire.call("observe", json!({"scope": "focus"}), None).await;
+    assert_eq!(seen["project_key"], a, "the look read A: {seen}");
+    assert_eq!(lab.ctx.link().observed_native_epoch().as_deref(), Some("sim-1"), "A's key keeps A's epoch, never B's");
+    assert!(!lab.ctx.link().page_is_looked(Some("sim-2")));
+    let (stale, error) = wire.call("read", track.clone(), None).await;
+    assert!(error && stale["error"]["code"] == "stale", "B's page passed as A's: {stale}");
+
+    // The next look is B's, with B's epoch: B's rows are B's.
+    let (b, _) = wire.call("observe", json!({"scope": "focus"}), None).await;
+    assert_ne!(b["project_key"], a, "{b}");
+    assert_eq!(lab.ctx.link().observed_native_epoch().as_deref(), Some("sim-2"));
+    let (rows, error) = wire.call("read", track.clone(), None).await;
+    assert!(!error && rows["project_key"] == b["project_key"], "{rows}");
+
+    // A look whose snapshot gave no epoch pins nothing: a read isn't taken on trust.
+    next_look.store(2, Ordering::SeqCst);
+    wire.call("observe", json!({"scope": "focus"}), None).await;
+    assert_eq!(lab.ctx.link().observed_native_epoch(), None);
+    let (unpinned, error) = wire.call("read", track, None).await;
+    assert!(error && unpinned["error"]["code"] == "stale", "{unpinned}");
     wire.end().await;
 });
