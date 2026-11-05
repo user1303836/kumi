@@ -58,7 +58,7 @@ async fn a_device_action_names_its_device_by_a_short_ref_and_says_what_renoise_d
             let mut config = script.config(secret, "/lab/Renoise").with_methods(&["device_editor", "preset_save"], respond);
             config.discovery_dir = Some(paths.discovery());
             let simulator = Simulator::start(config).await.unwrap();
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, home.path())), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
             let connect: Connect = Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()

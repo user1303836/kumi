@@ -4,7 +4,8 @@ use crate::core::contracts::{ActionEvent, CatchUp, ConnectionListener, PinnedNod
 use crate::core::view::{DawFocus, Transport};
 use chrono::{DateTime, Utc};
 use futures::future::LocalBoxFuture;
-use kumi_types::contracts::{AuditionEvent, ChangeRecord};
+use kumi_types::contracts::{AuditionEvent, ChangeRecord, HearRequest};
+use kumi_types::errors::HearFailure;
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -32,7 +33,50 @@ pub enum ListeningPolicy {
     Standalone,
     /// Only preinstalled capture devices and a caller-owned directory below this root. No recording
     /// fallback, automatic audition, installation or shared-cache sweep.
-    Restricted { scratch_root: PathBuf },
+    Restricted { scratch_root: PathBuf, quarantine_root: PathBuf },
+}
+
+impl ListeningPolicy {
+    /// Validate the runtime's private per-call directory. Preview never needs it, and this
+    /// method neither creates directories nor repairs permissions.
+    pub async fn scratch_dir(&self, request: &HearRequest) -> Result<PathBuf, HearFailure> {
+        let refused = || HearFailure::Refused {
+            code: "scratch_invalid",
+            reason: "Restricted listening requires a private per-call scratch directory inside its configured root.".into(),
+        };
+        let Self::Restricted { scratch_root, .. } = self else { return Err(refused()) };
+        let Some(directory) = request.scratch_dir.as_ref() else { return Err(refused()) };
+        if !scratch_root.is_absolute() || !directory.is_absolute() {
+            return Err(refused());
+        }
+        let root_meta = tokio::fs::symlink_metadata(scratch_root).await.map_err(|_| refused())?;
+        let directory_meta = tokio::fs::symlink_metadata(directory).await.map_err(|_| refused())?;
+        if !root_meta.is_dir() || !directory_meta.is_dir() {
+            return Err(refused());
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            // The root may be traversable, but another user must not be able to replace
+            // its entries. The per-call directory itself is readable only by its owner.
+            let owner = unsafe { libc::geteuid() };
+            if root_meta.uid() != owner
+                || directory_meta.uid() != owner
+                || root_meta.mode() & 0o022 != 0
+                || directory_meta.mode() & 0o077 != 0
+            {
+                return Err(refused());
+            }
+        }
+        let root = tokio::fs::canonicalize(scratch_root).await.map_err(|_| refused())?;
+        let directory = tokio::fs::canonicalize(directory).await.map_err(|_| refused())?;
+        // Scratch allocates one directory directly under this root for each call. Accepting
+        // arbitrary descendants would also accept caller-created, unverified ancestors.
+        if directory.parent() != Some(root.as_path()) {
+            return Err(refused());
+        }
+        Ok(directory)
+    }
 }
 
 impl HostPolicy {
@@ -40,8 +84,8 @@ impl HostPolicy {
         Self { persist_identity: true, guards_undo: false, listening: ListeningPolicy::Standalone }
     }
 
-    pub fn plugin(listen_root: PathBuf) -> Self {
-        Self { persist_identity: false, guards_undo: true, listening: ListeningPolicy::Restricted { scratch_root: listen_root } }
+    pub fn plugin(listen_root: PathBuf, quarantine_root: PathBuf) -> Self {
+        Self { persist_identity: false, guards_undo: true, listening: ListeningPolicy::Restricted { scratch_root: listen_root, quarantine_root } }
     }
 }
 

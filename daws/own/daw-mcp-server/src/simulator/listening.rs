@@ -64,6 +64,8 @@ struct State {
     /// The next job fails with this, at its first status.
     fail_next: Option<(String, String)>,
     demo: bool,
+    /// Opt in to the new native guarded-render seam; historical fixture components lack it.
+    render_preflight: bool,
     playing_now: bool,
     audition_works: bool,
     next_copy: u32,
@@ -126,9 +128,24 @@ pub fn write_noise(path: &Path, seconds: f64, level: f64, seed: u32) -> std::io:
     file.extend_from_slice(&(data.len() as u32).to_le_bytes());
     file.extend_from_slice(&data);
     if let Some(folder) = path.parent() {
-        std::fs::create_dir_all(folder)?;
+        let mut builder = std::fs::DirBuilder::new();
+        builder.recursive(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        builder.create(folder)?;
     }
-    std::fs::write(path, file)
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true).create(true).truncate(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    use std::io::Write;
+    options.open(path)?.write_all(&file)
 }
 
 impl SimListening {
@@ -158,6 +175,7 @@ impl SimListening {
                 restored: 0,
                 fail_next: None,
                 demo: false,
+                render_preflight: false,
                 playing_now: false,
                 audition_works: true,
                 next_copy: 0,
@@ -202,6 +220,14 @@ impl SimListening {
 
     pub fn set_tempo(&self, tempo: f64) {
         self.state.lock().unwrap().tempo = tempo;
+    }
+
+    pub fn set_render_preflight(&self, enabled: bool) {
+        self.state.lock().unwrap().render_preflight = enabled;
+    }
+
+    pub fn supports_render_preflight(&self) -> bool {
+        self.state.lock().unwrap().render_preflight
     }
 
     /// A track the bridge won't make scratch copies of (by ref, or a Renoise track's place: "track:3"), and why.
@@ -333,14 +359,18 @@ impl SimListening {
     /// The `listening` flags `status` carries.
     pub fn flags(&self) -> Value {
         let state = self.state.lock().unwrap();
-        json!({
+        let mut flags = json!({
             "render": !state.demo,
             "capture": state.daw == Daw::Reaper,
             "audition": state.audition_works,
             "grid": true,
             "scratch": true,
             "version": 1,
-        })
+        });
+        if state.render_preflight {
+            flags["render_preflight"] = json!(true);
+        }
+        flags
     }
 
     /// The copies kept as tracks (`scratch-keep`), by ref, with their names.
@@ -502,6 +532,27 @@ impl SimListening {
         }
         if state.jobs.values().any(|job| !matches!(job.state, "done" | "failed" | "cancelled")) {
             return Err(("busy".into(), format!("{} is rendering for Kumi; nothing changed", Self::app(state))));
+        }
+        if let Some(value) = params.get("maxSeconds") {
+            if !state.render_preflight {
+                return Err(("unsupported".into(), "This component has no guarded render preflight.".into()));
+            }
+            let cap = value.as_f64().filter(|cap| cap.is_finite() && *cap > 0.0 && *cap <= 60.0)
+                .ok_or_else(|| bad("maxSeconds: finite, more than 0 and at most 60"))?;
+            let from = params.pointer("/range/fromBeat").and_then(Value::as_f64)
+                .filter(|from| from.is_finite() && *from >= 0.0).ok_or_else(|| bad("range.fromBeat is invalid"))?;
+            let beats = params.pointer("/range/beats").and_then(Value::as_f64)
+                .filter(|beats| beats.is_finite() && *beats > 0.0 && (from + *beats).is_finite())
+                .ok_or_else(|| bad("range.beats is invalid"))?;
+            if params.get("preRollBeats").is_some_and(|v| v.as_f64() != Some(0.0)) {
+                return Err(bad("Restricted renders do not permit preroll."));
+            }
+            if !state.tempo.is_finite() || state.tempo <= 0.0 || beats * 60.0 / state.tempo > cap {
+                return Err(bad("The render exceeds maxSeconds."));
+            }
+            if state.playing_now || state.playing.is_some() {
+                return Err(("busy".into(), "Playback started before the restricted render.".into()));
+            }
         }
         let tempo = state.next_tempo.take();
         let id = params["jobId"].as_str().ok_or_else(|| bad("jobId is missing"))?.to_string();

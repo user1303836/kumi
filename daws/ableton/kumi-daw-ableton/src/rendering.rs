@@ -9,6 +9,7 @@ mod listen;
 pub mod main_chain;
 mod pass;
 mod probe;
+mod restricted_listen;
 mod rig;
 mod roles;
 mod tune;
@@ -27,6 +28,7 @@ use futures::{
     FutureExt,
 };
 use indexmap::IndexMap;
+use kumi_agent::core::context::ListeningPolicy;
 use kumi_agent::core::contracts::*;
 use kumi_common::{
     abort::{self, Signal, SignalExt},
@@ -76,6 +78,7 @@ pub struct LiveRenderer {
     /// audition in the next EARS_RETRY_MS records instead, rather than waiting for the same failure.
     ears_failed_at: Cell<Option<i64>>,
     ears_folder: PathBuf,
+    listening_policy: ListeningPolicy,
     rendering: ListenFlag,
     /// Held for the whole of each Live tool call. A stopped answer's call goes on putting Live back (taking a round
     /// back, closing a render, removing copies), and the next call, or the next answer, waits for it.
@@ -164,6 +167,7 @@ impl LiveRenderer {
             ears_refused: Cell::new(false),
             ears_failed_at: Cell::new(None),
             ears_folder,
+            listening_policy: options.policy.listening.clone(),
             rendering: ListenFlag::default(),
             busy: tokio::sync::Mutex::new(()),
             best_steps: RefCell::new(vec![]),
@@ -347,6 +351,9 @@ impl Rendering {
     /// How many auditions the answer has made.
     pub fn round_count(&self) -> usize {
         self.listening.round_count()
+    }
+    pub async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        self.live.preview_restricted_hear(request, signal).await
     }
     pub async fn hear_in_set(&self, request: &HearRequest, original: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         self.live.hear_in_set(request, original).await

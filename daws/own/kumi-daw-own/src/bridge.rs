@@ -720,12 +720,15 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         let endpoint = match &self.options.connect {
             Some(connect) => connect(signal).await?,
             None => {
-                let args = vec![
+                let mut args = vec![
                     "--daw".into(),
                     self.daw.host_flag.into(),
                     "--kumi-home".into(),
                     self.options.kumi_home.to_string_lossy().into_owned(),
                 ];
+                if matches!(self.options.context.policy.listening, kumi_agent::core::context::ListeningPolicy::Restricted { .. }) {
+                    args.push("--restricted-listening".into());
+                }
                 connect_mcp(Options { signal, args, timeout_ms: Some(CALL_MS), bridge: Some(self.daw.descriptor), ..Default::default() })
                     .await?
             }
@@ -1700,6 +1703,9 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
     }
     fn has_audio_file(&self) -> bool {
         self.connected.get() && self.listening.renderer.flags().known
+    }
+    async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        self.listening.preview_hear(request, signal).await
     }
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         self.listening.hear(request, signal).await

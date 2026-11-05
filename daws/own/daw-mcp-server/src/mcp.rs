@@ -90,6 +90,10 @@ fn tool_list(daw: Daw) -> Value {
     let [status, discover] = finding(daw, place, &pick);
     let grid = json!({
         "grid": {"type": "integer", "minimum": 2, "maximum": MAX_GRID, "description": "For kind param: each parameter's text read at this many points across its range (grid), or its steps' texts (items)."},
+        "range": {"type": "object", "properties": {
+            "fromBeat": {"type": "number", "minimum": 0}, "beats": {"type": "number", "exclusiveMinimum": 0}
+        }, "required": ["fromBeat", "beats"], "additionalProperties": false,
+            "description": "Required for kind render_preflight: a read-only plan of this beat window and the render state, only when status reports listening.render_preflight."},
     });
     let read = read_tool(daw, (place, inside, parent), &kinds, &pick, grid);
     let mut list = json!([

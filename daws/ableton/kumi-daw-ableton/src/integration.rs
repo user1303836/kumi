@@ -925,6 +925,9 @@ impl Integration for Ableton {
         let _live = self.rendering.hold(&signal).await?;
         self.rendering.open_goal(request, signal).await
     }
+    async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        self.rendering.preview_hear(request, self.combined(signal)).await
+    }
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let _live = self.rendering.hold(&signal).await?;
         self.rendering.hear_in_set(request, signal).await

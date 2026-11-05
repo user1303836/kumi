@@ -2,7 +2,7 @@
 //! answers at once (`render`, `hear`, then `listen_job` and `listen_cancel`), a file played out loud (`audition`,
 //! `audition_stop`), the audio behind a ref (`audio_file`) and scratch copies of a track (`scratch`). One implementation
 //! for both DAWs: each checks its arguments, asks the bridge and keeps the jobs; what a job renders is the bridge's.
-use crate::host::{Host, Pick};
+use crate::host::{Host, ListeningMode, Pick};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -339,7 +339,7 @@ fn sources(arguments: &Value) -> Result<Vec<Value>, String> {
 }
 
 /// A stretch in beats (quarter notes from the project's start).
-fn range(arguments: &Value, name: &str) -> Result<Value, String> {
+pub(crate) fn range(arguments: &Value, name: &str) -> Result<Value, String> {
     let range = arguments.get(name).filter(|r| r.is_object()).ok_or_else(|| format!("{name} must be {{fromBeat, beats}}"))?;
     let from = number(range, "fromBeat")?.filter(|from| *from >= 0.);
     let beats = number(range, "beats")?.filter(|beats| *beats > 0.);
@@ -367,12 +367,15 @@ impl Host {
         self.paths().root.join("listening")
     }
 
-    /// The listening folder pruned, and the bytes free on its disk (None when the system won't say).
+    /// The bytes free on the listening folder's disk (None when the system won't say). Only standalone mode prunes
+    /// shared files first; restricted mode leaves other calls' staging alone, even when old or over the size limit.
     async fn tidy_folder(&self) -> Option<u64> {
         let folder = self.listening_folder();
-        let keep = self.jobs().running_files();
+        let keep = (self.listening_mode == ListeningMode::Standalone).then(|| self.jobs().running_files());
         tokio::task::spawn_blocking(move || {
-            prune(&folder, &keep, PRUNE_AGE, MAX_FOLDER_BYTES);
+            if let Some(keep) = keep {
+                prune(&folder, &keep, PRUNE_AGE, MAX_FOLDER_BYTES);
+            }
             free_bytes(&folder)
         })
         .await
@@ -413,6 +416,12 @@ impl Host {
             let pre_roll = number(arguments, "preRollBeats")?.unwrap_or(0.);
             if !(0. ..=MAX_PRE_ROLL_BEATS).contains(&pre_roll) {
                 return Err(format!("preRollBeats: from 0 to {MAX_PRE_ROLL_BEATS}"));
+            }
+            if self.listening_mode == ListeningMode::Restricted {
+                if pre_roll != 0.0 {
+                    return Err("restricted listening does not permit preroll".into());
+                }
+                params.insert("maxSeconds".into(), json!(60));
             }
             params.insert("preRollBeats".into(), pre_roll.into());
             match arguments.get("sampleRate") {

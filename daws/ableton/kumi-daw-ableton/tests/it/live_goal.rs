@@ -32,6 +32,9 @@ use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
+#[path = "live_goal_listen.rs"]
+mod bounded_listening;
+
 /// The tools a goal can reach, as the oracle's bridge lists them.
 const TOOLS: [&str; 38] = [
     "live_run_python",
@@ -141,6 +144,8 @@ enum Undo {
     Remove(Vec<u32>),
     /// The track goes back as it was.
     Restore(Track),
+    /// The exact device a bounded capture placed, preserving other edits on its track.
+    RemoveDevice(u32),
 }
 
 /// Live, as far as a goal can tell: refs are places, as Live's are, so a device or a track put in above moves them.
@@ -149,6 +154,7 @@ struct Set {
     /// The one file every take plays.
     take: PathBuf,
     playing: Cell<bool>,
+    bounded: RefCell<Option<Rc<bounded_listening::State>>>,
     next: Cell<u32>,
     previews: RefCell<HashMap<String, (String, JsonObject)>>,
     undos: RefCell<HashMap<String, Undo>>,
@@ -183,6 +189,7 @@ impl Set {
             tracks: RefCell::new(tracks.iter().map(|(name, devices)| Track::new(name, devices)).collect()),
             take: take.into(),
             playing: Cell::new(false),
+            bounded: RefCell::new(None),
             next: Cell::new(0),
             previews: RefCell::default(),
             undos: RefCell::default(),
@@ -293,6 +300,11 @@ impl Set {
         self.asked.borrow().iter().filter(|call| call["name"] == name).count()
     }
     fn discover(&self, args: &JsonObject) -> Value {
+        if let Some(state) = self.bounded.borrow().as_ref() {
+            if let Some(items) = state.discover(self, args) {
+                return json!({"epoch":7,"kind":args["kind"],"items":items,"revision":"r1","truncated":false});
+            }
+        }
         let tracks = self.tracks.borrow();
         let kind = text(&args["kind"]);
         let parent = args.get("parent").map(text).unwrap_or_default();
@@ -382,6 +394,11 @@ impl Set {
         let transaction = text(&args["transactionId"]).to_owned();
         let (tool, asked) = self.previews.borrow_mut().remove(&transaction).unwrap();
         let mut answer = json!({"transactionId":transaction,"state":"applied"});
+        if let Some(state) = self.bounded.borrow().as_ref() {
+            if let Some(answer) = state.apply(self, &tool, &asked, &transaction) {
+                return answer;
+            }
+        }
         let mut tracks = self.tracks.borrow_mut();
         match tool.as_str() {
             "live_session_structure" => {
@@ -474,6 +491,11 @@ impl Set {
                     *track = was;
                 }
             }
+            Some(Undo::RemoveDevice(identity)) => {
+                for track in tracks.iter_mut() {
+                    track.devices.retain(|device| device.identity != identity);
+                }
+            }
             None => {}
         }
         json!({"transactionId":transaction,"state":"undone","idempotent":false})
@@ -504,6 +526,7 @@ impl McpEndpoint for Set {
         tokio::task::yield_now().await;
         Ok(reply(match name {
             "live_discover" => self.discover(&args),
+            "live_song_state" if self.bounded.borrow().is_some() => self.bounded.borrow().as_ref().unwrap().song_state(),
             "live_undo" => self.undo(&args),
             "live_run_python" => self.python(&args),
             "live_status" => json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":7}),
@@ -571,6 +594,9 @@ struct Live {
 }
 impl Live {
     async fn new(tracks: &[(&str, &[&str])]) -> Self {
+        Self::configured(tracks, |_, _, _| {}).await
+    }
+    async fn configured(tracks: &[(&str, &[&str])], configure: impl FnOnce(&Rc<Set>, &mut AbletonOptions, &Path)) -> Self {
         let folder = tempfile::tempdir().unwrap();
         let (take, reference) = (folder.path().join("take.wav"), folder.path().join("reference.wav"));
         noise(&take, 3);
@@ -593,6 +619,7 @@ impl Live {
         let told: Rc<RefCell<Vec<String>>> = Rc::default();
         let out = told.clone();
         options.on_action = Some(Rc::new(move |event| out.borrow_mut().push(event.title)));
+        configure(&set, &mut options, folder.path());
         let options = Rc::new(options);
         let connection = LiveConnection::new(options.connection_options());
         connection.start(Signal::new()).await.unwrap();

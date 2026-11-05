@@ -254,6 +254,18 @@ impl Integration for FallbackIntegration {
     fn has_hear(&self) -> bool {
         true
     }
+    async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        let current = self.current();
+        if current.has_hear() {
+            current.preview_hear(request, signal).await
+        } else {
+            Err(kumi_types::errors::HearFailure::Refused {
+                code: "not_connected",
+                reason: self.not_connected(&format!("hear the {}", self.primary.profile().or_live().words.place)),
+            }
+            .into())
+        }
+    }
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let c = self.current();
         if c.has_hear() {

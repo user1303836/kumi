@@ -224,6 +224,9 @@ pub struct HearPreview {
     pub label: String,
     pub seconds: f64,
     pub method: HearMethod,
+    /// Total native call budget, including capture or rendering, restoration and measurement.
+    /// Does not include a host's subsequent model interpretation.
+    pub deadline_seconds: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -245,6 +248,9 @@ pub struct HeardTake {
     /// What went short of the request (Live stopped before the part's end, say).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
+    /// Restoration may leave the DAW's modified flag set. Kept off the standalone wire.
+    #[serde(skip)]
+    pub marked_modified: bool,
 }
 
 /// A gap no knob closes, and the structural change that closes it.

@@ -8,7 +8,11 @@ use crate::changes::{Link, OwnPlan};
 use crate::groove::Part;
 use async_trait::async_trait;
 use indexmap::IndexMap;
-use kumi_agent::core::{context::IntegrationContext, contracts::*, refs::RefScheme};
+use kumi_agent::core::{
+    context::{IntegrationContext, ListeningPolicy},
+    contracts::*,
+    refs::RefScheme,
+};
 use kumi_common::{
     abort::{self, Signal, SignalExt},
     js::string::head,
@@ -30,11 +34,16 @@ use kumi_listening::{
 };
 use kumi_types::contracts::*;
 use kumi_types::display::parse_display;
-use kumi_types::{daw::DawProfile, errors::RuntimeError};
+use kumi_types::{
+    daw::{DawId, DawProfile},
+    errors::{HearFailure, RuntimeError},
+};
 use serde_json::{json, Value};
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
+    fs::File,
+    io::{Read, Seek, SeekFrom},
     path::PathBuf,
     rc::Rc,
     time::{Duration, Instant},
@@ -54,6 +63,135 @@ const JOB_LIMIT: Duration = Duration::from_secs(30 * 60);
 /// song's tempo commands, a slice each time it's asked and more between, so a moment later it goes on from there.
 const BUSY_WAIT: Duration = Duration::from_secs(20);
 const BUSY_PACE: Duration = Duration::from_secs(1);
+
+fn hear_refused(code: &'static str, reason: impl Into<String>) -> RuntimeError {
+    HearFailure::Refused { code, reason: reason.into() }.into()
+}
+
+/// The restricted facade never inherits standalone's implicit source, loop, playhead or duration.
+fn bounded_hear_window(request: &HearRequest) -> Result<Window, RuntimeError> {
+    let mix = request.mix == Some(true);
+    if (mix && !request.tracks.is_empty()) || (!mix && request.tracks.len() != 1) {
+        return Err(hear_refused("invalid_source", "Give exactly one fresh track ref or mix: true, not both."));
+    }
+    if request.whole == Some(true) || request.seconds.is_some() {
+        return Err(hear_refused("invalid_window", "Restricted listening needs an explicit beat window, not whole-song or seconds."));
+    }
+    match (request.from_beat, request.beats) {
+        (Some(from), Some(beats))
+            if from.is_finite() && from >= 0. && beats.is_finite() && beats > 0. && beats <= 256. && (from + beats).is_finite() =>
+        {
+            Ok(Window { from, beats })
+        }
+        _ => Err(hear_refused("invalid_window", "Give finite from_beat >= 0 and 0 < beats <= 256 with a finite end.")),
+    }
+}
+
+fn bounded_hear_transport(transport: &Value) -> Result<(), RuntimeError> {
+    let playing = transport.get("playing").and_then(Value::as_bool);
+    let recording = transport.get("recording").and_then(Value::as_bool);
+    if playing == Some(true) || recording == Some(true) || transport.get("paused") == Some(&Value::Bool(true)) {
+        return Err(hear_refused("transport_running", "Stop playback and recording before listening; Kumi will not stop them for you."));
+    }
+    if playing != Some(false) || recording != Some(false) {
+        return Err(hear_refused("transport_unknown", "The bridge did not establish that playback and recording are stopped."));
+    }
+    transport.get("tempo").and_then(Value::as_f64).filter(|tempo| tempo.is_finite() && *tempo > 0.)
+        .ok_or_else(|| hear_refused("tempo_unknown", "The bridge did not report a finite positive current tempo."))?;
+    Ok(())
+}
+
+struct RestrictedPreflight {
+    preview: HearPreview,
+    window: Window,
+    source: Value,
+    epoch: String,
+    state: Value,
+    focus: Value,
+}
+
+const RENDER_NUMBERS: &[&str] = &[
+    "RENDER_SETTINGS", "RENDER_BOUNDSFLAG", "RENDER_CHANNELS", "RENDER_SRATE", "RENDER_STARTPOS", "RENDER_ENDPOS",
+    "RENDER_TAILFLAG", "RENDER_TAILMS", "RENDER_ADDTOPROJ", "RENDER_DITHER", "RENDER_NORMALIZE", "RENDER_NORMALIZE_TARGET",
+    "RENDER_BRICKWALL", "RENDER_FADEIN", "RENDER_FADEOUT", "RENDER_FADEINSHAPE", "RENDER_FADEOUTSHAPE", "RENDER_FADELPF",
+    "RENDER_PADSTART", "RENDER_PADEND", "RENDER_TRIMSTART", "RENDER_TRIMEND", "RENDER_DELAY",
+];
+const RENDER_TEXTS: &[&str] = &["RENDER_FILE", "RENDER_PATTERN", "RENDER_FORMAT", "RENDER_FORMAT2", "RENDER_EXTRAFILEDIR"];
+
+fn finite(value: &Value) -> bool {
+    value.as_f64().is_some_and(f64::is_finite)
+}
+
+fn render_state_complete(daw: Option<DawId>, state: &Value) -> bool {
+    let unique_refs = |rows: &[Value]| {
+        let mut seen = std::collections::HashSet::with_capacity(rows.len());
+        rows.iter().all(|row| row.get("ref").and_then(Value::as_str).is_some_and(|reference| !reference.is_empty() && seen.insert(reference)))
+    };
+    match daw {
+        Some(DawId::Reaper) => {
+            let (Some(selection), Some(mutes), Some(time)) =
+                (state["selection"].as_array(), state["mutes"].as_array(), state["time_selection"].as_array()) else { return false };
+            state["numbers"].as_object().is_some_and(|numbers| numbers.len() == RENDER_NUMBERS.len()
+                && RENDER_NUMBERS.iter().all(|key| numbers.get(*key).is_some_and(finite)))
+                && state["texts"].as_object().is_some_and(|texts| texts.len() == RENDER_TEXTS.len()
+                    && RENDER_TEXTS.iter().all(|key| texts.get(*key).is_some_and(Value::is_string)))
+                && state["projrenderlimit"].as_f64().is_some_and(|speed| speed.is_finite() && speed.fract() == 0.
+                    && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&speed))
+                && state["dirty"].is_boolean() && finite(&state["master_fx"])
+                && time.len() == 2 && time.iter().all(finite)
+                && !selection.is_empty() && selection.len() == mutes.len() && unique_refs(selection)
+                && selection.iter().zip(mutes).all(|(a, b)| a["ref"] == b["ref"] && finite(&a["value"]) && finite(&b["value"]))
+        }
+        Some(DawId::Renoise) => {
+            state["bpm"].as_f64().is_some_and(|bpm| bpm.is_finite() && bpm > 0.)
+                && state["lpb"].as_f64().is_some_and(|lpb| lpb.is_finite() && (1.0..=256.0).contains(&lpb) && lpb.fract() == 0.)
+                && state["tracks"].as_array().is_some_and(|tracks| unique_refs(tracks)
+                    && tracks.iter().all(|track| track["mute"].as_u64().is_some_and(|mute| (1..=3).contains(&mute)) && track["solo"].is_boolean()))
+        }
+        _ => false,
+    }
+}
+
+fn focus_state(mut focus: Value) -> Result<Value, RuntimeError> {
+    let transport = &focus["transport"];
+    if !focus["selection"].is_object() || !finite(&transport["beat"])
+        || !transport["loop"]["on"].is_boolean() || !finite(&transport["loop"]["start"]) || !finite(&transport["loop"]["end"]) {
+        return Err(hear_refused("unsupported", "The bridge did not expose a complete transport and selection snapshot."));
+    }
+    focus.as_object_mut().expect("validated focus snapshot").retain(|key, _| matches!(key.as_str(), "epoch" | "transport" | "selection"));
+    Ok(focus)
+}
+
+fn exact_render_seconds(read: &Value) -> Result<f64, RuntimeError> {
+    if read["schema"].as_u64() != Some(1) || !read["aligned"].is_boolean() || !read["irregular"].is_boolean()
+        || !read["clipped"].is_boolean() || !finite(&read["offset"]) {
+        return Err(hear_refused("unsupported", "The bridge did not return render preflight schema 1."));
+    }
+    if read["aligned"] != true || read["irregular"] != false || read["clipped"] != false || read["offset"].as_f64() != Some(0.) {
+        return Err(hear_refused("window_unrenderable", "This interval cannot be rendered exactly without extra, clipped or irregular material."));
+    }
+    let seconds = read["seconds"].as_f64().filter(|seconds| seconds.is_finite() && *seconds > 0.)
+        .ok_or_else(|| hear_refused("unsupported", "The bridge did not provide a finite positive exact render duration."))?;
+    if seconds > 60. {
+        return Err(hear_refused("window_too_long", "The requested interval exceeds 60 seconds on the current tempo map."));
+    }
+    Ok(seconds)
+}
+
+fn restored_state(daw: Option<DawId>, before: &Value, after: &Value) -> Result<bool, RuntimeError> {
+    if !render_state_complete(daw, before) || !render_state_complete(daw, after) {
+        return Err(HearFailure::Unsure { reason: "The render's touched state could not be read completely after cleanup.".into() }.into());
+    }
+    let expected = before.as_object().expect("validated render state");
+    let observed = after.as_object().expect("validated render state");
+    let marked_modified = daw == Some(DawId::Reaper) && before["dirty"] == false && after["dirty"] == true;
+    if expected.len() != observed.len() || expected.iter().any(|(key, value)| {
+        !(daw == Some(DawId::Reaper) && key == "dirty") && observed.get(key) != Some(value)
+    }) {
+        return Err(HearFailure::Unsure { reason: "The state read after rendering did not match the state before it. Observe again before another action.".into() }.into());
+    }
+    Ok(marked_modified)
+}
 
 /// What Kumi knows of one DAW's listening: what its sources hold, the master's devices that don't make masking unfair,
 /// its gain stage, its equaliser, and the change kinds the listening tools use.
@@ -2193,6 +2331,7 @@ pub struct OwnListening<S: RefScheme + 'static> {
     busy: tokio::sync::Mutex<()>,
     /// The scratch copies an earlier session left that the producer was told the bridge removed.
     swept: RefCell<std::collections::HashSet<String>>,
+    policy: ListeningPolicy,
 }
 
 impl<S: RefScheme + 'static> OwnListening<S> {
@@ -2207,7 +2346,13 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             context.references.clone(),
             context.search_memory.clone(),
         );
-        Rc::new(Self { renderer, listening, busy: tokio::sync::Mutex::new(()), swept: RefCell::default() })
+        Rc::new(Self {
+            renderer,
+            listening,
+            busy: tokio::sync::Mutex::new(()),
+            swept: RefCell::default(),
+            policy: context.policy.listening.clone(),
+        })
     }
 
     /// The bridge removed scratch copies an earlier session left behind (a crash, a quit mid-search): the producer is
@@ -2260,6 +2405,55 @@ impl<S: RefScheme + 'static> OwnListening<S> {
     /// Resolves once no listening call runs.
     pub async fn settled(&self) {
         drop(self.busy.lock().await);
+    }
+
+    async fn restricted_cancel(&self, id: &str) {
+        // An acknowledgment is not a restoration observation. The waiter still polls the job,
+        // and the caller must read the touched state after its terminal status.
+        let signal = abort::timeout(10_000);
+        let _ = tokio::time::timeout(
+            Duration::from_secs(10),
+            self.renderer.link.call("listen_cancel", json!({"jobId": id}), signal),
+        ).await;
+    }
+
+    async fn restricted_wait(&self, started: &Value, seconds: f64, original: &Signal) -> Result<(Value, bool), RuntimeError> {
+        let Some(id) = started.get("jobId").and_then(Value::as_str).filter(|id| !id.is_empty()) else {
+            return Err(HearFailure::Unsure { reason: "The render may have started, but the bridge returned no job identity.".into() }.into());
+        };
+        let deadline = tokio::time::Instant::now() + Duration::from_secs_f64((seconds * 4.).max(120.).min(240.));
+        let mut cancelled = false;
+        loop {
+            if original.is_cancelled() && !cancelled {
+                cancelled = true;
+                self.restricted_cancel(id).await;
+            }
+            let answer = tokio::select! {
+                biased;
+                _ = tokio::time::sleep_until(deadline) => {
+                    self.restricted_cancel(id).await;
+                    return Err(HearFailure::Unsure {
+                        reason: "The offline render exceeded its bounded wait; stopping and restoration could not be verified. Observe again.".into(),
+                    }.into());
+                }
+                _ = original.cancelled(), if !cancelled => continue,
+                answer = self.renderer.link.call("listen_job", json!({"jobId": id, "waitMs": 1000}), abort::timeout(5_000)) => answer,
+            };
+            match answer {
+                Ok(Ok(status)) => match status.get("state").and_then(Value::as_str) {
+                    Some("done" | "failed" | "cancelled") => return Ok((status, cancelled)),
+                    Some("running" | "queued") => {}
+                    _ => {
+                        self.restricted_cancel(id).await;
+                        return Err(HearFailure::Unsure { reason: "The bridge returned an unknown render state; restoration is unverified.".into() }.into());
+                    }
+                },
+                _ => {
+                    self.restricted_cancel(id).await;
+                    return Err(HearFailure::Unsure { reason: "The render could not be observed through completion; restoration is unverified. Observe again.".into() }.into());
+                }
+            }
+        }
     }
 
     /// The listening tools the DAW offers now (none while it can't render, or its bridge is older than listening).
@@ -2327,9 +2521,194 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         crate::goal::OwnGoalRig::open(self.renderer.clone(), &self.listening, request, signal).await
     }
 
+    /// Pure preflight: no listening hold, job, scratch access, audition or mutation.
+    pub async fn preview_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
+        self.restricted_preflight(request, signal).await.map(|checked| checked.preview)
+    }
+
+    async fn render_preflight_read(&self, window: Window, epoch: &str, signal: Signal) -> Result<Value, RuntimeError> {
+        let read = self.renderer.link.call("read", json!({
+            "kind": "render_preflight", "range": {"fromBeat": window.from, "beats": window.beats}, "epoch": epoch,
+        }), signal).await?.map_err(|refused| hear_refused("unsupported", refused.why))?;
+        if read["schema"].as_u64() != Some(1) || !render_state_complete(self.renderer.profile().id, &read["render_state"]) {
+            return Err(hear_refused("unsupported", "The bridge did not provide a complete schema-1 render-state snapshot."));
+        }
+        Ok(read)
+    }
+
+    async fn restricted_preflight(&self, request: &HearRequest, signal: Signal) -> Result<RestrictedPreflight, RuntimeError> {
+        signal.check()?;
+        let window = bounded_hear_window(request)?;
+        let renderer = &self.renderer;
+        let status = renderer.link.call("status", json!({}), signal.clone()).await?
+            .map_err(|refused| hear_refused("render_unavailable", refused.why))?;
+        let flags = Flags::of(&status);
+        if !flags.known || !flags.render || flags.demo {
+            return Err(hear_refused("render_unavailable", "The bridge does not support offline rendering now."));
+        }
+        if status["busy"] != false && !status["busy"].is_null() {
+            return Err(hear_refused("render_busy", "The DAW is busy; no render was started."));
+        }
+        let focus = renderer.link.call("focus", json!({}), signal.clone()).await?
+            .map_err(|refused| hear_refused("transport_unknown", refused.why))?;
+        bounded_hear_transport(&focus["transport"])?;
+        let epoch = focus["epoch"].as_str().filter(|epoch| !epoch.is_empty())
+            .ok_or_else(|| hear_refused("stale_ref", "The bridge did not establish the current project epoch."))?.to_owned();
+        let (label, source) = if let Some(reference) = request.tracks.first() {
+            let long = renderer.plan.lengthen(reference).map_err(|why| hear_refused("stale_ref", why))?;
+            if renderer.link.book.borrow().scheme.kind_of(&long) != Some("track") {
+                return Err(hear_refused("invalid_source", "Restricted listening accepts a fresh track ref, never a track name."));
+            }
+            if renderer.link.seen_in.borrow().get(&long).map(String::as_str) != Some(epoch.as_str()) {
+                return Err(hear_refused("stale_ref", "The track was not observed in the current project epoch; observe again."));
+            }
+            let read = renderer.link.call("read", renderer.read_placed(json!({"ref": long})), signal.clone()).await?
+                .map_err(|refused| hear_refused("stale_ref", refused.why))?;
+            let row = read["items"].as_array().and_then(|rows| rows.iter().find(|row| row["ref"].as_str() == Some(long.as_str())))
+                .ok_or_else(|| hear_refused("stale_ref", "The track is no longer present; observe again."))?;
+            if row["type"] == "master" || row["master"] == true {
+                return Err(hear_refused("invalid_source", "Use mix: true for the master output."));
+            }
+            let label = row["name"].as_str().ok_or_else(|| hear_refused("unsupported", "The bridge did not provide the current track name."))?;
+            (label.to_owned(), json!({"id": "bounded", "what": "track", "ref": long, "stage": "pre-fader"}))
+        } else {
+            ("The whole mix".to_owned(), json!({"id": "bounded", "what": "master"}))
+        };
+        if status.pointer("/listening/render_preflight") != Some(&Value::Bool(true)) {
+            return Err(hear_refused("unsupported", format!(
+                "This {} bridge does not expose read(kind=render_preflight) schema 1, required to prove bounded duration and restoration.", renderer.app()
+            )));
+        }
+        let focus = focus_state(focus)?;
+        let mut read = self.render_preflight_read(window, &epoch, signal.clone()).await?;
+        let seconds = exact_render_seconds(&read)?;
+        signal.check()?;
+        Ok(RestrictedPreflight {
+            preview: HearPreview { label, seconds, method: HearMethod::Offline, deadline_seconds: (seconds * 4.).max(120.).ceil() as u64 + 120 },
+            window, source, epoch, state: read.get_mut("render_state").expect("validated preflight state").take(), focus,
+        })
+    }
+
+    /// A terminal job is not restoration evidence. Read all touched state, restore Renoise's
+    /// tempo from our own before-snapshot, then read it again along with transport and selection.
+    async fn restricted_restore(&self, before: &RestrictedPreflight) -> Result<bool, RuntimeError> {
+        let cleanup = async {
+            let renderer = &self.renderer;
+            // A temporary LPB change can move the approved interval past the song's end.
+            // This pure state-only probe always fits its first line; it renders nothing.
+            let probe = Window { from: 0., beats: 1. / 256. };
+            let mut after = self.render_preflight_read(probe, &before.epoch, abort::timeout(15_000)).await?;
+            if renderer.profile().id == Some(DawId::Renoise) {
+                for (key, tool) in [("bpm", "song_bpm"), ("lpb", "song_lpb")] {
+                    if after["render_state"][key] != before.state[key] {
+                        let mut input = serde_json::Map::new();
+                        input.insert(key.into(), if key == "lpb" {
+                            json!(before.state[key].as_f64().expect("validated integer LPB") as u32)
+                        } else { before.state[key].clone() });
+                        // The write result is not proof: the independent read below is mandatory.
+                        let _ = renderer.plan.history.quietly(
+                            None, renderer.change(tool, Value::Object(input), abort::timeout(10_000)),
+                        ).await;
+                    }
+                }
+                after = self.render_preflight_read(probe, &before.epoch, abort::timeout(15_000)).await?;
+            }
+            let marked_modified = restored_state(renderer.profile().id, &before.state, &after["render_state"])?;
+            let status = renderer.link.call("status", json!({}), abort::timeout(5_000)).await?
+                .map_err(|_| hear_refused("render_unavailable", "The DAW's rendering state could not be read."))?;
+            if status["busy"] != false {
+                return Err(HearFailure::Unsure { reason: "The DAW still reports busy after the render; restoration is unverified.".into() }.into());
+            }
+            let focus = renderer.link.call("focus", json!({}), abort::timeout(5_000)).await?
+                .map_err(|_| hear_refused("transport_unknown", "The transport could not be read after rendering."))?;
+            bounded_hear_transport(&focus["transport"])?;
+            if focus_state(focus)? != before.focus {
+                return Err(HearFailure::Unsure { reason: "Transport or selection differs from the before-render snapshot. Observe again.".into() }.into());
+            }
+            Ok::<bool, RuntimeError>(marked_modified)
+        };
+        match tokio::time::timeout(Duration::from_secs(60), cleanup).await {
+            Ok(Ok(marked)) => Ok(marked),
+            _ => Err(HearFailure::Unsure { reason: "The render ended, but complete restoration could not be verified. Observe again before another action.".into() }.into()),
+        }
+    }
+
+    fn restricted_discard(&self, done: &Value, scratch: &std::path::Path, quarantine_root: &std::path::Path) {
+        let Some(files) = done["files"].as_array() else { return };
+        if files.is_empty() { return; }
+        if files.len() != 1 || files[0]["id"] != "bounded" {
+            self.renderer.tell_app("The bridge returned unexpected staging files; they were left untouched.");
+            return;
+        }
+        let Some(path) = files[0]["file"].as_str() else { return };
+        match restricted_staging::discard(&self.renderer.folder, scratch, quarantine_root, std::path::Path::new(path)) {
+            Ok(Some(warning)) => self.renderer.tell_app(&warning),
+            Ok(None) => {}
+            Err(_) => self.renderer.tell_app("This call's bridge staging file could not be safely discarded; it was left untouched."),
+        }
+    }
+
+    async fn restricted_hear(&self, request: &HearRequest, original: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
+        let _held = self.hold(&original).await?;
+        let before = self.restricted_preflight(request, original.clone()).await?;
+        let scratch = self.policy.scratch_dir(request).await?;
+        let ListeningPolicy::Restricted { quarantine_root, .. } = &self.policy else {
+            return Err(hear_refused("unsupported", "Restricted listening requires an explicit host policy."));
+        };
+        restricted_staging::check_cache(&self.renderer.folder)?;
+        if self.renderer.flag.is_on() {
+            return Err(hear_refused("listening_busy", "Kumi is already listening; wait for it to settle."));
+        }
+        original.check()?;
+        let _listening = self.renderer.flag.begin();
+        // Do not cancel the start RPC with the caller: retain its job identity so a cancellation
+        // during dispatch can still stop and settle that exact job. There is no busy retry.
+        let started = match self.renderer.ask("render", json!({
+            "sources": [before.source], "range": {"fromBeat": before.window.from, "beats": before.window.beats}, "preRollBeats": 0,
+        }), abort::timeout(10_000)).await {
+            Ok(Ok(started)) => started,
+            _ => return Err(HearFailure::Unsure { reason: "The render start could not be resolved; its effects and restoration are unknown. Observe again.".into() }.into()),
+        };
+        let (done, cancelled) = self.restricted_wait(&started, before.preview.seconds, &original).await?;
+        let restoration = self.restricted_restore(&before).await;
+        if restoration.is_err() || cancelled || original.is_cancelled() || done["state"] == "cancelled" {
+            self.restricted_discard(&done, &scratch, quarantine_root);
+            restoration?;
+            return Err(RuntimeError::Aborted);
+        }
+        let marked_modified = restoration?;
+        if done["state"] != "done" {
+            return Err(hear_refused("render_failed", done["error"].as_str().unwrap_or("The offline render failed after its state was restored.")));
+        }
+        let files = done["files"].as_array().filter(|files| files.len() == 1)
+            .ok_or_else(|| hear_refused("invalid_render_result", "The completed render did not return exactly this call's one source."))?;
+        let file = &files[0];
+        if file["id"] != "bounded" || file.get("start").is_some_and(|start| start.as_f64() != Some(0.)) {
+            return Err(hear_refused("invalid_render_result", "The render returned a different source or an unapproved leading interval."));
+        }
+        let returned = file["file"].as_str().ok_or_else(|| hear_refused("invalid_render_result", "The render returned no file."))?;
+        let staged = restricted_staging::copy(&self.renderer.folder, &scratch, quarantine_root, std::path::Path::new(returned), &original)?;
+        original.check()?;
+        let mut notes = vec![];
+        if staged.seconds + 0.001 < before.preview.seconds {
+            notes.push(format!("The render is short: {:.3} of {:.3} requested seconds.", staged.seconds, before.preview.seconds));
+        }
+        if let Some(warning) = staged.warning {
+            self.renderer.tell_app(&warning);
+            notes.push(warning);
+        }
+        Ok(Ok(vec![HeardTake {
+            label: before.preview.label, file: staged.path.to_string_lossy().into_owned(), start: 0., seconds: Some(staged.seconds),
+            live: false, note: (!notes.is_empty()).then(|| notes.join(" ")), marked_modified,
+        }]))
+    }
+
     /// The listen tool's hearing of the project: what plays now (REAPER, while it plays), or a stretch rendered offline
     /// and played out loud after.
     pub async fn hear(&self, request: &HearRequest, original: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
+        if matches!(self.policy, ListeningPolicy::Restricted { .. }) {
+            return self.restricted_hear(request, original).await;
+        }
         let heard = self.hear_now(request, original.clone()).await;
         self.renderer.put_tempo_back().await;
         self.renderer.stop_play_on(&original);
@@ -2443,6 +2822,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                             seconds: Some(render.seconds.unwrap_or(window.beats * 60. / tempo)),
                             live: false,
                             note: said,
+                            marked_modified: false,
                         })
                     })
                     .collect();
@@ -2486,7 +2866,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         if stretches.len() <= 1 {
             let (start, seconds) = stretches.first().map_or((0., held), |(start, seconds, _)| (*start, Some(*seconds)));
             let note = (!notes.is_empty()).then(|| notes.join(" "));
-            return Ok(Ok(vec![HeardTake { label: "The whole mix".into(), file: path, start, seconds, live: true, note }]));
+            return Ok(Ok(vec![HeardTake { label: "The whole mix".into(), file: path, start, seconds, live: true, note, marked_modified: false }]));
         }
         // The playhead jumped (a loop, a seek): what's measured is the longest stretch it played straight through (the
         // stretches aren't parts heard at once).
@@ -2499,7 +2879,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             stretches.iter().map(|(_, _, label)| label.as_str()).collect::<Vec<_>>().join(", "),
             seconds
         ));
-        Ok(Ok(vec![HeardTake { label, file: path, start, seconds: Some(seconds), live: true, note: Some(notes.join(" ")) }]))
+        Ok(Ok(vec![HeardTake { label, file: path, start, seconds: Some(seconds), live: true, note: Some(notes.join(" ")), marked_modified: false }]))
     }
 }
 
@@ -2569,6 +2949,109 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn restricted_windows_require_one_source_and_explicit_finite_bounds() {
+        use super::bounded_hear_window;
+        use kumi_types::contracts::HearRequest;
+        let request = HearRequest { mix: Some(true), from_beat: Some(0.), beats: Some(8.), ..Default::default() };
+        assert!(bounded_hear_window(&request).is_ok());
+        for (from_beat, beats) in [
+            (None, Some(8.)), (Some(0.), None), (Some(-1.), Some(8.)),
+            (Some(f64::NAN), Some(8.)), (Some(f64::INFINITY), Some(8.)),
+            (Some(0.), Some(f64::NAN)), (Some(0.), Some(f64::INFINITY)),
+            (Some(0.), Some(0.)), (Some(0.), Some(-1.)), (Some(0.), Some(257.)),
+        ] {
+            assert!(bounded_hear_window(&HearRequest { from_beat, beats, ..request.clone() }).is_err(), "{from_beat:?} {beats:?}");
+        }
+        for invalid in [
+            HearRequest { mix: None, ..request.clone() },
+            HearRequest { tracks: vec!["t1".into()], ..request.clone() },
+            HearRequest { mix: None, tracks: vec!["t1".into(), "t2".into()], ..request.clone() },
+            HearRequest { whole: Some(true), ..request.clone() },
+            HearRequest { seconds: Some(1.), ..request.clone() },
+        ] {
+            assert!(bounded_hear_window(&invalid).is_err(), "{invalid:?}");
+        }
+        assert!(bounded_hear_window(&HearRequest { mix: None, tracks: vec!["t1".into()], ..request }).is_ok());
+    }
+
+    #[test]
+    fn restricted_transport_requires_known_stopped_state_and_positive_tempo() {
+        use super::bounded_hear_transport;
+        let stopped = json!({"playing": false, "recording": false, "tempo": 120.});
+        assert!(bounded_hear_transport(&stopped).is_ok());
+        // Duration comes from the native tempo map, not this instantaneous BPM.
+        assert!(bounded_hear_transport(&json!({"playing": false, "recording": false, "tempo": 1.})).is_ok());
+        for field in ["playing", "recording", "paused"] {
+            let mut transport = stopped.clone();
+            transport[field] = true.into();
+            assert!(bounded_hear_transport(&transport).is_err(), "{field}");
+        }
+        for field in ["playing", "recording", "tempo"] {
+            let mut transport = stopped.clone();
+            transport.as_object_mut().unwrap().remove(field);
+            assert!(bounded_hear_transport(&transport).is_err(), "{field}");
+        }
+        for tempo in [0., -1.] {
+            let mut transport = stopped.clone();
+            transport["tempo"] = tempo.into();
+            assert!(bounded_hear_transport(&transport).is_err(), "{tempo}");
+        }
+    }
+
+    #[test]
+    fn restricted_exact_duration_rejects_hidden_preroll_irregular_clipped_and_long_audio() {
+        use super::exact_render_seconds;
+        let exact = json!({"schema": 1, "seconds": 60., "offset": 0., "aligned": true, "irregular": false, "clipped": false});
+        assert_eq!(exact_render_seconds(&exact).unwrap(), 60.);
+        for (key, value) in [
+            ("seconds", json!(60.001)), ("seconds", json!(0.)), ("seconds", Value::Null),
+            ("offset", json!(0.001)), ("aligned", json!(false)), ("irregular", json!(true)),
+            ("clipped", json!(true)), ("schema", json!(2)),
+        ] {
+            let mut invalid = exact.clone();
+            invalid[key] = value;
+            assert!(exact_render_seconds(&invalid).is_err(), "{invalid}");
+        }
+        for key in ["schema", "seconds", "offset", "aligned", "irregular", "clipped"] {
+            let mut incomplete = exact.clone();
+            incomplete.as_object_mut().unwrap().remove(key);
+            assert!(exact_render_seconds(&incomplete).is_err(), "{key}");
+        }
+    }
+
+    #[test]
+    fn restricted_restoration_compares_every_snapshot_field_but_reports_reaper_dirty_residue() {
+        use super::{DawId, HearFailure, RuntimeError, RENDER_NUMBERS, RENDER_TEXTS, restored_state};
+        let numbers: serde_json::Map<String, Value> = RENDER_NUMBERS.iter().map(|key| ((*key).into(), json!(0.))).collect();
+        let texts: serde_json::Map<String, Value> = RENDER_TEXTS.iter().map(|key| ((*key).into(), json!("before"))).collect();
+        let before = json!({
+            "numbers": numbers, "texts": texts, "projrenderlimit": 0,
+            "selection": [{"ref": "master", "value": 0.}, {"ref": "track", "value": 1.}],
+            "mutes": [{"ref": "master", "value": 0.}, {"ref": "track", "value": 0.}],
+            "master_fx": 1., "time_selection": [0., 4.], "dirty": false,
+        });
+        assert!(!restored_state(Some(DawId::Reaper), &before, &before).unwrap());
+        let mut dirty = before.clone();
+        dirty["dirty"] = true.into();
+        assert!(restored_state(Some(DawId::Reaper), &before, &dirty).unwrap());
+        for pointer in [
+            "/numbers/RENDER_SETTINGS", "/numbers/RENDER_STARTPOS", "/texts/RENDER_FILE", "/projrenderlimit",
+            "/selection/0/value", "/mutes/1/value", "/master_fx", "/time_selection/1",
+        ] {
+            let mut changed = before.clone();
+            *changed.pointer_mut(pointer).unwrap() = json!(99);
+            assert!(matches!(restored_state(Some(DawId::Reaper), &before, &changed), Err(RuntimeError::Hear(HearFailure::Unsure { .. }))), "{pointer}");
+        }
+        let renoise = json!({"bpm": 120., "lpb": 4, "tracks": [{"ref": "track", "mute": 1, "solo": false}]});
+        assert!(!restored_state(Some(DawId::Renoise), &renoise, &renoise).unwrap());
+        for pointer in ["/bpm", "/lpb", "/tracks/0/mute", "/tracks/0/solo"] {
+            let mut changed = renoise.clone();
+            *changed.pointer_mut(pointer).unwrap() = json!(2);
+            assert!(matches!(restored_state(Some(DawId::Renoise), &renoise, &changed), Err(RuntimeError::Hear(HearFailure::Unsure { .. }))), "{pointer}");
+        }
+    }
+
     #[test]
     fn only_an_enabled_vst3_limiter_identity_satisfies_the_existing_chain() {
         let mut device = super::DeviceRow {
@@ -2820,5 +3303,696 @@ mod tests {
         assert_eq!(flags, Flags { known: true, render: true, capture: false, audition: true, grid: true, scratch: true, demo: false });
         assert!(!Flags::of(&json!({"connected": true})).known, "an older bridge says nothing");
         assert!(Flags::of(&json!({"listening": {"render": false}, "demo": true})).demo);
+    }
+}
+
+/// A bridge-cache file is never a library root. Copy through a verified descriptor, then claim
+/// just that directory entry privately before deleting it; never sweep or repair the cache.
+#[cfg(unix)]
+mod restricted_staging {
+    use super::{hear_refused, HearFailure, RuntimeError, Signal, SignalExt};
+    use super::wav_seconds;
+    use std::{
+        ffi::{CStr, CString},
+        fs::{File, Metadata, OpenOptions},
+        io::{Read, Write},
+        os::{fd::{AsRawFd, FromRawFd}, unix::{ffi::OsStrExt, fs::{MetadataExt, OpenOptionsExt}}},
+        path::{Path, PathBuf},
+    };
+
+    const MAX_BYTES: u64 = 50 * 1024 * 1024;
+
+    pub(super) struct Staged {
+        pub path: PathBuf,
+        pub seconds: f64,
+        pub warning: Option<String>,
+    }
+
+    fn unsafe_file(reason: impl Into<String>) -> RuntimeError {
+        hear_refused("unsafe_render_file", reason)
+    }
+
+    fn name(path: &Path) -> Result<CString, RuntimeError> {
+        CString::new(path.as_os_str().as_bytes()).map_err(|_| unsafe_file("A staging path contains a NUL."))
+    }
+
+    fn same_inode(a: &Metadata, b: &Metadata) -> bool {
+        a.dev() == b.dev() && a.ino() == b.ino()
+    }
+
+    fn stable(a: &Metadata, b: &Metadata) -> bool {
+        same_inode(a, b) && a.len() == b.len() && a.mtime() == b.mtime() && a.mtime_nsec() == b.mtime_nsec()
+            && a.ctime() == b.ctime() && a.ctime_nsec() == b.ctime_nsec()
+    }
+
+    fn private(meta: &Metadata) -> bool {
+        meta.uid() == unsafe { libc::geteuid() } && meta.mode() & 0o077 == 0
+    }
+
+    fn directory(path: &Path) -> Result<File, RuntimeError> {
+        let file = OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW).open(path)
+            .map_err(|_| unsafe_file("The staging directory could not be opened without following a symlink."))?;
+        let meta = file.metadata().map_err(|_| unsafe_file("The staging directory could not be inspected."))?;
+        if !meta.is_dir() || !private(&meta) {
+            return Err(unsafe_file("The staging directory must already be owner-only and owned by this account."));
+        }
+        Ok(file)
+    }
+
+    fn open_at(dir: &File, leaf: &CStr) -> std::io::Result<File> {
+        let fd = unsafe { libc::openat(dir.as_raw_fd(), leaf.as_ptr(), libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC) };
+        if fd < 0 { Err(std::io::Error::last_os_error()) } else { Ok(unsafe { File::from_raw_fd(fd) }) }
+    }
+
+    /// The installed bridges produce flat cache files, so no intermediate path may be traversed.
+    pub(super) fn check_cache(cache: &Path) -> Result<(), RuntimeError> {
+        match std::fs::symlink_metadata(cache) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            _ => directory(cache).map(drop),
+        }
+    }
+
+    fn rename_new(from: &File, old: &CStr, to: &File, new: &CStr) -> std::io::Result<()> {
+        #[cfg(target_os = "macos")]
+        let result = unsafe { libc::renameatx_np(from.as_raw_fd(), old.as_ptr(), to.as_raw_fd(), new.as_ptr(), libc::RENAME_EXCL) };
+        #[cfg(target_os = "linux")]
+        let result = unsafe { libc::renameat2(from.as_raw_fd(), old.as_ptr(), to.as_raw_fd(), new.as_ptr(), libc::RENAME_NOREPLACE) };
+        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "atomic no-replace rename is unavailable"));
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        if result == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+    }
+
+    /// A race may replace the named entry. In that case put it back only if the old name is
+    /// still vacant; otherwise preserve it in quarantine. Never unlink the substituted inode.
+    fn remove_exact(
+        cache: &File,
+        leaf: &CStr,
+        original: &Metadata,
+        quarantine_root: &Path,
+        call: &CStr,
+        claim: impl FnOnce(&File, &CStr, &File, &CStr) -> std::io::Result<()>,
+    ) -> Result<Option<String>, RuntimeError> {
+        let current = open_at(cache, leaf).and_then(|file| file.metadata())
+            .map_err(|_| unsafe_file("The returned staging file disappeared or became unsafe before cleanup."))?;
+        if !stable(original, &current) {
+            return Err(unsafe_file("The returned staging file was replaced or modified; it was not deleted."));
+        }
+        let root = match directory(quarantine_root) {
+            Ok(root) => root,
+            Err(_) => return Ok(Some("The private quarantine is unavailable; the verified bridge source was left in place.".into())),
+        };
+        if unsafe { libc::mkdirat(root.as_raw_fd(), call.as_ptr(), 0o700) } != 0 {
+            return Ok(Some("The call's private quarantine could not be created; the verified bridge source was left in place.".into()));
+        }
+        let fd = unsafe {
+            libc::openat(root.as_raw_fd(), call.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
+        };
+        if fd < 0 {
+            unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR); }
+            return Ok(Some("The call's private quarantine could not be opened; the verified source was left in place.".into()));
+        }
+        let claimed = unsafe { File::from_raw_fd(fd) };
+        let slot = c"source";
+        let kept_at = quarantine_root.join(std::ffi::OsStr::from_bytes(call.to_bytes())).join("source");
+        if let Err(error) = claim(cache, leaf, &claimed, slot) {
+            unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR); }
+            return Ok(Some(if error.raw_os_error() == Some(libc::EXDEV) {
+                "The bridge cache is on another filesystem; the verified source was left in place after copying.".into()
+            } else {
+                "The verified bridge source could not be claimed for cleanup; it was left in place.".into()
+            }));
+        }
+        // The permanent private quarantine is never auto-deleted on cancellation or restart.
+        // In particular, a crash before this comparison cannot make Scratch delete a replacement.
+        let captured = std::fs::symlink_metadata(&kept_at);
+        let ours = captured.as_ref().is_ok_and(|now| {
+            same_inode(original, now) && original.len() == now.len()
+                && original.mtime() == now.mtime() && original.mtime_nsec() == now.mtime_nsec()
+        });
+        if !ours {
+            let restored = rename_new(&claimed, slot, cache, leaf).is_ok();
+            if restored {
+                unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR); }
+            }
+            return Err(unsafe_file(if restored {
+                "The staging file changed during cleanup; its replacement was put back and nothing was deleted.".into()
+            } else {
+                format!("The staging file changed during cleanup; its replacement was preserved at {}.", kept_at.display())
+            }));
+        }
+        if unsafe { libc::unlinkat(claimed.as_raw_fd(), slot.as_ptr(), 0) } != 0 {
+            return Ok(Some(format!("The verified staging inode could not be deleted and remains at {}.", kept_at.display())));
+        }
+        if unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR) } != 0 {
+            return Ok(Some("The render source was removed, but its empty private quarantine directory remains.".into()));
+        }
+        Ok(None)
+    }
+
+
+    fn verified_source(cache: &Path, returned: &Path) -> Result<(File, CString, File, Metadata), RuntimeError> {
+        let cache_handle = directory(cache)?;
+        let canonical_cache = std::fs::canonicalize(cache).map_err(|_| unsafe_file("The bridge cache cannot be resolved."))?;
+        let canonical_file = std::fs::canonicalize(returned).map_err(|_| unsafe_file("The returned render file cannot be resolved."))?;
+        if !returned.is_absolute() || canonical_file.parent() != Some(canonical_cache.as_path()) {
+            return Err(unsafe_file("The returned file is not a direct file in this bridge's verified listening cache."));
+        }
+        let cache_named = std::fs::symlink_metadata(cache).map_err(|_| unsafe_file("The bridge cache disappeared."))?;
+        let cache_opened = cache_handle.metadata().map_err(|_| unsafe_file("The bridge cache descriptor cannot be inspected."))?;
+        if !same_inode(&cache_named, &cache_opened) {
+            return Err(unsafe_file("The cache directory was replaced while it was being opened."));
+        }
+        let leaf = name(Path::new(returned.file_name().ok_or_else(|| unsafe_file("The returned render has no filename."))?))?;
+        let source = open_at(&cache_handle, &leaf).map_err(|_| unsafe_file("The returned render is a symlink or cannot be opened safely."))?;
+        let before = source.metadata().map_err(|_| unsafe_file("The opened render cannot be inspected."))?;
+        if !before.is_file() || !private(&before) || before.nlink() != 1 || before.len() > MAX_BYTES {
+            return Err(unsafe_file("The returned render must be an owner-only regular file, not hard-linked, and at most 50 MiB."));
+        }
+        let named = std::fs::symlink_metadata(returned).map_err(|_| unsafe_file("The named render disappeared."))?;
+        if !same_inode(&before, &named) || named.file_type().is_symlink() {
+            return Err(unsafe_file("The returned path does not name the verified open render file."));
+        }
+        Ok((cache_handle, leaf, source, before))
+    }
+
+    pub(super) fn discard(cache: &Path, scratch: &Path, quarantine_root: &Path, returned: &Path) -> Result<Option<String>, RuntimeError> {
+        let (cache, leaf, source, before) = verified_source(cache, returned)?;
+        if !stable(&before, &source.metadata().map_err(|_| unsafe_file("The opened render cannot be rechecked."))?) {
+            return Err(unsafe_file("The render changed before it could be discarded."));
+        }
+        let call = name(Path::new(scratch.file_name().ok_or_else(|| unsafe_file("The call scratch has no name."))?))?;
+        remove_exact(&cache, &leaf, &before, quarantine_root, &call, rename_new)
+    }
+
+    pub(super) fn copy(cache: &Path, scratch: &Path, quarantine_root: &Path, returned: &Path, signal: &Signal) -> Result<Staged, RuntimeError> {
+        signal.check()?;
+        let (cache_handle, leaf, mut source, before) = verified_source(cache, returned)?;
+        let scratch_handle = directory(scratch)?;
+        let scratch_named = std::fs::symlink_metadata(scratch).map_err(|_| unsafe_file("The scratch directory disappeared."))?;
+        let scratch_opened = scratch_handle.metadata().map_err(|_| unsafe_file("The scratch descriptor cannot be inspected."))?;
+        if !same_inode(&scratch_named, &scratch_opened) {
+            return Err(unsafe_file("The scratch directory was replaced while it was being opened."));
+        }
+        let target = CString::new(format!("render-{}.wav", uuid::Uuid::new_v4())).expect("UUID has no NUL");
+        let fd = unsafe {
+            libc::openat(scratch_handle.as_raw_fd(), target.as_ptr(),
+                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0o600)
+        };
+        if fd < 0 { return Err(unsafe_file("A private scratch copy could not be created.")); }
+        let mut output = unsafe { File::from_raw_fd(fd) };
+        let result = (|| {
+            let mut buffer = [0u8; 64 * 1024];
+            let mut copied = 0u64;
+            loop {
+                signal.check()?;
+                let count = source.read(&mut buffer).map_err(|_| unsafe_file("The render could not be read."))?;
+                if count == 0 { break; }
+                copied += count as u64;
+                if copied > before.len() || copied > MAX_BYTES { return Err(unsafe_file("The render grew while it was being copied.")); }
+                output.write_all(&buffer[..count]).map_err(|_| unsafe_file("The render could not be copied into scratch."))?;
+            }
+            let after = source.metadata().map_err(|_| unsafe_file("The render could not be rechecked."))?;
+            if copied != before.len() || !stable(&before, &after) {
+                return Err(unsafe_file("The render changed while it was being copied."));
+            }
+            let named_scratch = std::fs::symlink_metadata(scratch).map_err(|_| unsafe_file("The scratch directory disappeared."))?;
+            if !same_inode(&scratch_opened, &named_scratch) {
+                return Err(unsafe_file("The scratch directory was replaced during the copy."));
+            }
+            let output_meta = output.metadata().map_err(|_| unsafe_file("The scratch copy could not be inspected."))?;
+            let named_output = std::fs::symlink_metadata(scratch.join(target.to_str().expect("UUID filename is UTF-8")))
+                .map_err(|_| unsafe_file("The scratch copy disappeared."))?;
+            if !same_inode(&output_meta, &named_output) || named_output.file_type().is_symlink()
+                || output_meta.nlink() != 1 || !private(&output_meta) || output_meta.len() != before.len() {
+                return Err(unsafe_file("The scratch copy was replaced before it could be returned."));
+            }
+            let seconds = wav_seconds(&mut output).map_err(|_| unsafe_file("The rendered file is not a complete PCM WAV."))?;
+            let call = name(Path::new(scratch.file_name().ok_or_else(|| unsafe_file("The call scratch has no name."))?))?;
+            let warning = remove_exact(&cache_handle, &leaf, &before, quarantine_root, &call, rename_new)?;
+            if !seconds.is_finite() || seconds > 65. {
+                return Err(HearFailure::Unsure { reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into() }.into());
+            }
+            Ok(Staged { path: scratch.join(target.to_str().expect("UUID filename is UTF-8")), seconds, warning })
+        })();
+        if result.is_err() {
+            unsafe { libc::unlinkat(scratch_handle.as_raw_fd(), target.as_ptr(), 0); }
+        }
+        result
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+
+        fn copy(cache: &Path, scratch: &Path, returned: &Path, signal: &Signal) -> Result<Staged, RuntimeError> {
+            super::copy(cache, scratch, &cache.parent().unwrap().join("quarantine"), returned, signal)
+        }
+
+        fn lab() -> (tempfile::TempDir, PathBuf, PathBuf) {
+            let home = tempfile::tempdir().unwrap();
+            let cache = home.path().join("cache");
+            let scratch = home.path().join("scratch");
+            for dir in [&cache, &scratch, &home.path().join("quarantine")] {
+                std::fs::DirBuilder::new().mode(0o700).create(dir).unwrap();
+            }
+            (home, cache, scratch)
+        }
+
+        fn wav(path: &Path, seconds: usize) {
+            let data = kumi_media::audio::decode::float_wav(&[vec![0.; seconds * 10]], 10);
+            let mut file = OpenOptions::new().write(true).create_new(true).mode(0o600).open(path).unwrap();
+            file.write_all(&data).unwrap();
+        }
+
+        #[test]
+        fn copies_only_the_returned_file_and_preserves_neighbors() {
+            let (_home, cache, scratch) = lab();
+            let source = cache.join("this-call.wav");
+            let neighbor = cache.join("old-unrelated.wav");
+            wav(&source, 2);
+            wav(&neighbor, 3);
+            let expected = std::fs::read(&source).unwrap();
+            let staged = copy(&cache, &scratch, &source, &Signal::new()).unwrap();
+            assert_eq!(staged.seconds, 2.);
+            assert!(staged.warning.is_none());
+            assert_eq!(std::fs::read(&staged.path).unwrap(), expected);
+            assert!(!source.exists());
+            assert!(neighbor.is_file());
+            assert_eq!(std::fs::metadata(&staged.path).unwrap().mode() & 0o077, 0);
+        }
+
+        #[test]
+        fn rejects_outside_symlink_directory_shared_and_oversized_files_without_deletion() {
+            let (home, cache, scratch) = lab();
+            let outside = home.path().join("outside.wav");
+            wav(&outside, 1);
+            let symlink = cache.join("linked.wav");
+            std::os::unix::fs::symlink(&outside, &symlink).unwrap();
+            let directory = cache.join("directory.wav");
+            std::fs::create_dir(&directory).unwrap();
+            let shared = cache.join("shared.wav");
+            wav(&shared, 1);
+            std::fs::set_permissions(&shared, std::fs::Permissions::from_mode(0o644)).unwrap();
+            let huge = cache.join("huge.wav");
+            wav(&huge, 1);
+            OpenOptions::new().write(true).open(&huge).unwrap().set_len(MAX_BYTES + 1).unwrap();
+            for path in [&outside, &symlink, &directory, &shared, &huge] {
+                assert!(copy(&cache, &scratch, path, &Signal::new()).is_err(), "{path:?}");
+                assert!(std::fs::symlink_metadata(path).is_ok(), "{path:?} must not be deleted");
+            }
+            assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
+        }
+
+        #[test]
+        fn rejects_hardlinks_and_an_unsafe_cache_without_repairing_permissions() {
+            let (_home, cache, scratch) = lab();
+            let source = cache.join("this-call.wav");
+            wav(&source, 1);
+            let neighbor = cache.join("hardlinked-neighbor.wav");
+            std::fs::hard_link(&source, &neighbor).unwrap();
+            assert!(copy(&cache, &scratch, &source, &Signal::new()).is_err());
+            std::fs::remove_file(&neighbor).unwrap();
+            std::fs::set_permissions(&cache, std::fs::Permissions::from_mode(0o755)).unwrap();
+            assert!(copy(&cache, &scratch, &source, &Signal::new()).is_err());
+            assert_eq!(std::fs::metadata(&cache).unwrap().mode() & 0o777, 0o755);
+            assert!(source.exists());
+        }
+
+        #[test]
+        fn replacement_is_not_deleted_and_cancellation_does_not_copy() {
+            let (_home, cache, scratch) = lab();
+            let source = cache.join("this-call.wav");
+            wav(&source, 1);
+            let before = std::fs::metadata(&source).unwrap();
+            let kept = cache.join("original-kept.wav");
+            std::fs::rename(&source, &kept).unwrap();
+            wav(&source, 2);
+            let replacement = std::fs::read(&source).unwrap();
+            assert!(remove_exact(&directory(&cache).unwrap(), c"this-call.wav", &before,
+                &_home.path().join("quarantine"), c"replacement", rename_new).is_err());
+            assert_eq!(std::fs::read(&source).unwrap(), replacement);
+            assert!(kept.exists());
+            let signal = Signal::new();
+            signal.cancel();
+            assert!(matches!(copy(&cache, &scratch, &source, &signal), Err(RuntimeError::Aborted)));
+            assert!(source.exists());
+            assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
+        }
+
+        #[test]
+        fn substitution_between_copy_and_claim_survives_and_is_not_left_in_scratch() {
+            for occupied in [false, true] {
+                let (home, cache, scratch) = lab();
+                let source = cache.join("this-call.wav");
+                let original_kept = cache.join("original-kept.wav");
+                wav(&source, 1);
+                let before = std::fs::metadata(&source).unwrap();
+                let quarantine = home.path().join("quarantine");
+                let outcome = remove_exact(
+                    &directory(&cache).unwrap(), c"this-call.wav", &before, &quarantine, c"call-id",
+                    |from, old, to, new| {
+                        std::fs::rename(&source, &original_kept).unwrap();
+                        wav(&source, 2);
+                        rename_new(from, old, to, new)?;
+                        if occupied { wav(&source, 3); }
+                        Ok(())
+                    },
+                );
+                assert!(outcome.is_err(), "a substituted file must never be accepted as this render");
+                assert!(original_kept.exists());
+                let preserved = if occupied { quarantine.join("call-id").join("source") } else { source.clone() };
+                assert_eq!(wav_seconds(&mut File::open(&preserved).unwrap()).unwrap(), 2.);
+                if occupied { assert_eq!(wav_seconds(&mut File::open(&source).unwrap()).unwrap(), 3.); }
+                assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
+            }
+        }
+
+        #[test]
+        fn cross_filesystem_cleanup_is_a_warning_and_leaves_the_exact_source() {
+            let (home, cache, _scratch) = lab();
+            let source = cache.join("this-call.wav");
+            wav(&source, 1);
+            let before = std::fs::metadata(&source).unwrap();
+            let warning = remove_exact(
+                &directory(&cache).unwrap(), c"this-call.wav", &before, &home.path().join("quarantine"), c"call-id",
+                |_, _, _, _| Err(std::io::Error::from_raw_os_error(libc::EXDEV)),
+            ).unwrap().unwrap();
+            assert!(warning.contains("another filesystem"));
+            assert!(same_inode(&before, &std::fs::metadata(&source).unwrap()));
+            assert_eq!(std::fs::read_dir(home.path().join("quarantine")).unwrap().count(), 0);
+        }
+
+        #[test]
+        fn audio_over_sixty_five_seconds_is_discarded_with_typed_uncertainty() {
+            let (_home, cache, scratch) = lab();
+            let source = cache.join("this-call.wav");
+            wav(&source, 66);
+            assert!(matches!(copy(&cache, &scratch, &source, &Signal::new()), Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
+            assert!(!source.exists());
+            assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
+        }
+    }
+}
+    /// Read only the PCM WAV's layout, without invoking a converter or measuring its audio.
+    fn wav_seconds(file: &mut File) -> std::io::Result<f64> {
+        let invalid = || std::io::Error::new(std::io::ErrorKind::InvalidData, "the render is not a complete PCM WAV");
+        let length = file.metadata()?.len();
+        file.seek(SeekFrom::Start(0))?;
+        let mut header = [0; 12];
+        file.read_exact(&mut header)?;
+        if &header[..4] != b"RIFF" || &header[8..] != b"WAVE" { return Err(invalid()); }
+        let end = u32::from_le_bytes(header[4..8].try_into().unwrap()) as u64 + 8;
+        if end > length || end < 12 { return Err(invalid()); }
+        let mut format = None;
+        let mut data = None;
+        let mut at = 12;
+        while at + 8 <= end {
+            file.seek(SeekFrom::Start(at))?;
+            let mut chunk = [0; 8];
+            file.read_exact(&mut chunk)?;
+            let size = u32::from_le_bytes(chunk[4..].try_into().unwrap()) as u64;
+            if size > end - at - 8 { return Err(invalid()); }
+            match &chunk[..4] {
+                b"fmt " if size >= 16 => {
+                    if format.is_some() { return Err(invalid()); }
+                    let mut fmt = [0; 16];
+                    file.read_exact(&mut fmt)?;
+                    let mut encoding = u16::from_le_bytes(fmt[..2].try_into().unwrap());
+                    let channels = u16::from_le_bytes(fmt[2..4].try_into().unwrap());
+                    let rate = u32::from_le_bytes(fmt[4..8].try_into().unwrap());
+                    let align = u16::from_le_bytes(fmt[12..14].try_into().unwrap());
+                    let bits = u16::from_le_bytes(fmt[14..16].try_into().unwrap());
+                    if encoding == 65534 {
+                        if size < 40 { return Err(invalid()); }
+                        let mut extension = [0u8; 24];
+                        file.read_exact(&mut extension)?;
+                        let extra = u16::from_le_bytes(extension[..2].try_into().unwrap());
+                        let valid_bits = u16::from_le_bytes(extension[2..4].try_into().unwrap());
+                        if extra < 22 || u64::from(extra) + 18 > size || valid_bits == 0 || valid_bits > bits
+                            || extension[12..] != [0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71] {
+                            return Err(invalid());
+                        }
+                        encoding = match u32::from_le_bytes(extension[8..12].try_into().unwrap()) {
+                            1 => 1, 3 => 3, _ => return Err(invalid()),
+                        };
+                    }
+                    if !matches!(encoding, 1 | 3) || channels == 0 || channels > 64 || rate == 0
+                        || bits == 0 || bits % 8 != 0 || (encoding == 3 && !matches!(bits, 32 | 64))
+                        || u32::from(align) != u32::from(channels) * u32::from(bits / 8) {
+                        return Err(invalid());
+                    }
+                    format = Some((rate, align));
+                }
+                b"data" => {
+                    if data.replace(size).is_some() { return Err(invalid()); }
+                }
+                _ => {}
+            }
+            at += 8 + size + (size & 1);
+        }
+        let (rate, align) = format.ok_or_else(invalid)?;
+        let bytes = data.ok_or_else(invalid)?;
+        if bytes == 0 || bytes % u64::from(align) != 0 { return Err(invalid()); }
+        Ok((bytes / u64::from(align)) as f64 / f64::from(rate))
+    }
+
+#[cfg(test)]
+#[test]
+fn restricted_wave_extensible_rejects_compressed_subformats_before_duration_claims() {
+    use std::io::Write;
+    for (subformat, accepted) in [(1u32, true), (0x55, false)] {
+        let mut format = Vec::new();
+        format.extend_from_slice(&65534u16.to_le_bytes());
+        format.extend_from_slice(&1u16.to_le_bytes());
+        format.extend_from_slice(&1u32.to_le_bytes());
+        format.extend_from_slice(&2u32.to_le_bytes());
+        format.extend_from_slice(&2u16.to_le_bytes());
+        format.extend_from_slice(&16u16.to_le_bytes());
+        format.extend_from_slice(&22u16.to_le_bytes());
+        format.extend_from_slice(&16u16.to_le_bytes());
+        format.extend_from_slice(&0u32.to_le_bytes());
+        format.extend_from_slice(&subformat.to_le_bytes());
+        format.extend_from_slice(&[0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71]);
+        let mut wave = b"RIFF".to_vec();
+        wave.extend_from_slice(&62u32.to_le_bytes());
+        wave.extend_from_slice(b"WAVEfmt ");
+        wave.extend_from_slice(&40u32.to_le_bytes());
+        wave.extend_from_slice(&format);
+        wave.extend_from_slice(b"data");
+        wave.extend_from_slice(&2u32.to_le_bytes());
+        wave.extend_from_slice(&[0, 0]);
+        let mut file = tempfile::tempfile().unwrap();
+        file.write_all(&wave).unwrap();
+        let seconds = wav_seconds(&mut file);
+        if accepted { assert_eq!(seconds.unwrap(), 1.); } else { assert!(seconds.is_err()); }
+    }
+}
+
+#[cfg(windows)]
+mod restricted_staging {
+    use super::{hear_refused, wav_seconds, HearFailure, RuntimeError, Signal, SignalExt};
+    use std::{
+        fs::{File, OpenOptions},
+        io::{Read, Write},
+        os::windows::{ffi::{OsStrExt, OsStringExt}, fs::OpenOptionsExt, io::{AsRawHandle, FromRawHandle}},
+        path::{Path, PathBuf},
+    };
+    use windows_sys::Win32::{
+        Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
+        Storage::FileSystem::{
+            CreateFileW, GetFileInformationByHandle, GetFinalPathNameByHandleW, SetFileInformationByHandle, FileDispositionInfo,
+            BY_HANDLE_FILE_INFORMATION, FILE_DISPOSITION_INFO, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+            FILE_NAME_NORMALIZED, VOLUME_NAME_DOS,
+        },
+    };
+
+    const MAX_BYTES: u64 = 50 * 1024 * 1024;
+
+    pub(super) struct Staged {
+        pub path: PathBuf,
+        pub seconds: f64,
+        pub warning: Option<String>,
+    }
+
+    fn unsafe_file(reason: impl Into<String>) -> RuntimeError {
+        hear_refused("unsafe_render_file", reason)
+    }
+
+    fn information(file: &File) -> Result<BY_HANDLE_FILE_INFORMATION, RuntimeError> {
+        let mut info = BY_HANDLE_FILE_INFORMATION::default();
+        if unsafe { GetFileInformationByHandle(file.as_raw_handle(), &mut info) } == 0 {
+            return Err(unsafe_file("The render file's handle identity could not be read."));
+        }
+        Ok(info)
+    }
+
+    fn same(a: &BY_HANDLE_FILE_INFORMATION, b: &BY_HANDLE_FILE_INFORMATION) -> bool {
+        a.dwVolumeSerialNumber == b.dwVolumeSerialNumber && a.nFileIndexHigh == b.nFileIndexHigh && a.nFileIndexLow == b.nFileIndexLow
+            && a.nFileSizeHigh == b.nFileSizeHigh && a.nFileSizeLow == b.nFileSizeLow
+            && a.ftLastWriteTime.dwHighDateTime == b.ftLastWriteTime.dwHighDateTime
+            && a.ftLastWriteTime.dwLowDateTime == b.ftLastWriteTime.dwLowDateTime
+    }
+
+    fn open(path: &Path, directory: bool) -> Result<File, RuntimeError> {
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        if wide.contains(&0) { return Err(unsafe_file("A staging path contains a NUL.")); }
+        wide.push(0);
+        // Holding the cache directory without delete sharing prevents replacement. Holding a
+        // source without write/delete sharing prevents a writer changing it during the copy.
+        let access = if directory { FILE_READ_ATTRIBUTES } else { GENERIC_READ | DELETE };
+        let sharing = if directory { FILE_SHARE_READ | FILE_SHARE_WRITE } else { FILE_SHARE_READ };
+        let handle = unsafe {
+            CreateFileW(wide.as_ptr(), access, sharing, std::ptr::null(), OPEN_EXISTING,
+                FILE_FLAG_OPEN_REPARSE_POINT | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 }, std::ptr::null_mut())
+        };
+        if handle == INVALID_HANDLE_VALUE { return Err(unsafe_file("The staging path could not be opened safely.")); }
+        let file = unsafe { File::from_raw_handle(handle) };
+        let info = information(&file)?;
+        if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
+            || (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0) != directory
+            || !daw_bridge::lifecycle::is_owner_only(path) {
+            return Err(unsafe_file("The staging path must already be owner-only and must not be a reparse point."));
+        }
+        Ok(file)
+    }
+
+    pub(super) fn check_cache(cache: &Path) -> Result<(), RuntimeError> {
+        match std::fs::symlink_metadata(cache) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            _ => open(cache, true).map(drop),
+        }
+    }
+
+    fn remove_handle(file: &File, original: &BY_HANDLE_FILE_INFORMATION) -> Result<Option<String>, RuntimeError> {
+        if !same(original, &information(file)?) {
+            return Err(unsafe_file("The verified render handle changed; it was not deleted."));
+        }
+        let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
+        let deleted = unsafe {
+            SetFileInformationByHandle(file.as_raw_handle(), FileDispositionInfo, (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+                std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32)
+        };
+        Ok((deleted == 0).then(|| "The verified bridge staging file could not be deleted by handle; it was left in place.".into()))
+    }
+
+    fn final_path(file: &File) -> Result<PathBuf, RuntimeError> {
+        let flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
+        let size = unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, flags) };
+        if size == 0 || size > 32768 { return Err(unsafe_file("The opened file's final path could not be established.")); }
+        let mut buffer = vec![0u16; size as usize];
+        let written = unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), buffer.as_mut_ptr(), size, flags) };
+        if written == 0 || written >= size { return Err(unsafe_file("The opened file's final path changed while being read.")); }
+        Ok(PathBuf::from(std::ffi::OsString::from_wide(&buffer[..written as usize])))
+    }
+
+    fn verified_source(cache: &Path, returned: &Path) -> Result<(File, File, BY_HANDLE_FILE_INFORMATION), RuntimeError> {
+        if returned.file_name().is_none_or(|leaf| leaf.encode_wide().any(|character| character == u16::from(b':'))) {
+            return Err(unsafe_file("A returned render must be a regular file, not an alternate data stream."));
+        }
+        let cache_handle = open(cache, true)?;
+        let canonical_cache = std::fs::canonicalize(cache).map_err(|_| unsafe_file("The bridge cache cannot be resolved."))?;
+        let canonical_file = std::fs::canonicalize(returned).map_err(|_| unsafe_file("The returned render cannot be resolved."))?;
+        if !returned.is_absolute() || canonical_file.parent() != Some(canonical_cache.as_path()) {
+            return Err(unsafe_file("The returned file is outside this bridge's verified listening cache."));
+        }
+        let source = open(returned, false)?;
+        if final_path(&source)?.parent() != Some(final_path(&cache_handle)?.as_path()) {
+            return Err(unsafe_file("The opened render is outside the verified cache directory."));
+        }
+        let before = information(&source)?;
+        let length = (u64::from(before.nFileSizeHigh) << 32) | u64::from(before.nFileSizeLow);
+        if before.nNumberOfLinks != 1 || length > MAX_BYTES {
+            return Err(unsafe_file("The returned render must not be hard-linked and must be at most 50 MiB."));
+        }
+        Ok((cache_handle, source, before))
+    }
+
+    pub(super) fn discard(cache: &Path, _scratch: &Path, _quarantine_root: &Path, returned: &Path) -> Result<Option<String>, RuntimeError> {
+        let (_cache, source, before) = verified_source(cache, returned)?;
+        remove_handle(&source, &before)
+    }
+
+    pub(super) fn copy(cache: &Path, scratch: &Path, _quarantine_root: &Path, returned: &Path, signal: &Signal) -> Result<Staged, RuntimeError> {
+        signal.check()?;
+        let (_cache, mut source, before) = verified_source(cache, returned)?;
+        let _scratch = open(scratch, true)?;
+        let length = (u64::from(before.nFileSizeHigh) << 32) | u64::from(before.nFileSizeLow);
+        let target = scratch.join(format!("render-{}.wav", uuid::Uuid::new_v4()));
+        let mut output = OpenOptions::new().read(true).write(true).access_mode(GENERIC_READ | GENERIC_WRITE | DELETE).create_new(true).share_mode(0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(&target)
+            .map_err(|_| unsafe_file("A private scratch copy could not be created."))?;
+        let result = (|| {
+            if final_path(&output)?.parent() != Some(final_path(&_scratch)?.as_path()) {
+                return Err(unsafe_file("The scratch path changed before its copy could be written."));
+            }
+            let mut buffer = [0u8; 64 * 1024];
+            let mut copied = 0u64;
+            loop {
+                signal.check()?;
+                let count = source.read(&mut buffer).map_err(|_| unsafe_file("The render could not be read."))?;
+                if count == 0 { break; }
+                copied += count as u64;
+                if copied > length || copied > MAX_BYTES { return Err(unsafe_file("The render grew while being copied.")); }
+                output.write_all(&buffer[..count]).map_err(|_| unsafe_file("The render could not be copied into scratch."))?;
+            }
+            if copied != length || !same(&before, &information(&source)?) {
+                return Err(unsafe_file("The render changed while being copied."));
+            }
+            let copied_path = final_path(&output)?;
+            if copied_path.parent() != Some(final_path(&_scratch)?.as_path()) {
+                return Err(unsafe_file("The scratch directory changed during the copy."));
+            }
+            let seconds = wav_seconds(&mut output).map_err(|_| unsafe_file("The rendered file is not a complete PCM WAV."))?;
+            let warning = remove_handle(&source, &before)?;
+            if !seconds.is_finite() || seconds > 65. {
+                return Err(HearFailure::Unsure { reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into() }.into());
+            }
+            Ok(Staged { path: copied_path, seconds, warning })
+        })();
+        if result.is_err() {
+            if let Ok(info) = information(&output) { let _ = remove_handle(&output, &info); }
+        }
+        drop(output);
+        result
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn deletion_uses_the_verified_handle_and_preserves_neighbors() {
+            let home = tempfile::tempdir().unwrap();
+            let cache = home.path().join("cache");
+            let scratch = home.path().join("scratch");
+            for path in [&cache, &scratch] { daw_bridge::owner::create_owner_only_dir(path).unwrap(); }
+            let source = cache.join("this-call.wav");
+            let neighbor = cache.join("neighbor.wav");
+            let wav = kumi_media::audio::decode::float_wav(&[vec![0.; 10]], 10);
+            daw_bridge::owner::write_owner_only(&source, &wav).unwrap();
+            daw_bridge::owner::write_owner_only(&neighbor, &wav).unwrap();
+            let staged = copy(&cache, &scratch, &home.path().join("quarantine"), &source, &Signal::new()).unwrap();
+            assert_eq!(staged.seconds, 1.);
+            assert!(staged.warning.is_none());
+            assert!(!source.exists());
+            assert_eq!(std::fs::read(&neighbor).unwrap(), wav);
+            assert_eq!(std::fs::read(&staged.path).unwrap(), wav);
+        }
+
+        #[test]
+        fn an_open_verified_source_cannot_be_substituted_before_handle_deletion() {
+            let home = tempfile::tempdir().unwrap();
+            let source = home.path().join("source.wav");
+            daw_bridge::owner::write_owner_only(&source, b"owned").unwrap();
+            let opened = open(&source, false).unwrap();
+            let before = information(&opened).unwrap();
+            assert!(std::fs::rename(&source, home.path().join("moved.wav")).is_err());
+            assert!(remove_handle(&opened, &before).unwrap().is_none());
+            drop(opened);
+            assert!(!source.exists());
+        }
     }
 }

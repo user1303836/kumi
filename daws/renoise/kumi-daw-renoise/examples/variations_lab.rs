@@ -195,7 +195,7 @@ fn main() {
     let home = PathBuf::from(home);
     let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().expect("a runtime");
     tokio::task::LocalSet::new().block_on(&runtime, async {
-        let host = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, &home)), id: Cell::new(0) });
+        let host = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, &home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
         let endpoint = host.clone();
         let connect: Connect = Rc::new(move |_| {
             let endpoint = endpoint.clone();
@@ -373,7 +373,7 @@ return {synth = synth, brk = brk, t = m, p = p, q = q}
         daw.close().await.ok();
 
         // D: Kumi again (another run, the same folder): the sets are there, "rest" reaches no kept take, numbers go on.
-        let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, &home)), id: Cell::new(0) });
+        let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Renoise, &home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
         let connect: Connect = Rc::new(move |_| {
             let endpoint = endpoint.clone();
             async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()

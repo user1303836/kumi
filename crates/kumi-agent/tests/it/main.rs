@@ -14,6 +14,7 @@ mod gaps;
 mod goal_rig;
 mod goal_store;
 mod hidden;
+mod host_policy;
 mod kernel_turns;
 mod latency_budgets;
 mod local_servers;

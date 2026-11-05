@@ -199,7 +199,7 @@ impl AppLab {
         ]);
         let host_home = kumi_home.clone();
         let own_host = OwnHosts(Rc::new(move |_| {
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(bridge, &host_home)), id: Cell::new(0) });
+            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(bridge, &host_home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
             Rc::new(move |_| {
                 let endpoint = endpoint.clone();
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()

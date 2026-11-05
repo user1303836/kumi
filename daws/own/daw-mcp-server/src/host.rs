@@ -66,6 +66,15 @@ pub enum CallError {
 /// nothing). A write is never sent twice.
 const RESENT: [&str; 7] = ["read", "snapshot", "focus", "focus_body", "status", "change_preview", "digest"];
 
+/// Whether this host may maintain shared listening and work folders. Chosen before startup maintenance.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ListeningMode {
+    /// Standalone Kumi keeps its existing cache pruning and Renoise work sweep.
+    Standalone,
+    /// An adopted bridge's folders are staging only: no shared-folder sweeps.
+    Restricted,
+}
+
 /// The host for one DAW.
 pub struct Host {
     daw: Daw,
@@ -79,6 +88,7 @@ pub struct Host {
     catchup: crate::catchup::Catchup,
     /// The listening jobs started through this host (M5).
     jobs: crate::listening::Jobs,
+    pub(crate) listening_mode: ListeningMode,
     /// How the host starts the DAW's bridge, for a DAW whose bridge runs beside it; None for one that loads its bridge.
     spawn: Option<Spawn>,
     /// The least time a listening call is given ([`Host::with_listening_timeout`]); zero keeps each call's own limit.
@@ -154,9 +164,9 @@ fn no_listener(error: &std::io::Error) -> bool {
 }
 
 impl Host {
-    /// The host for `daw`'s bridges in Kumi's folder. Renoise's: the instrument files left in Kumi's work folder an hour
-    /// or more ago are removed first.
-    pub fn new(daw: Daw, kumi_home: &Path) -> Self {
+    /// The host for `daw`'s bridges in Kumi's folder. Only standalone mode removes Renoise instrument files left in
+    /// the shared work folder an hour or more ago; restricted mode leaves all pre-existing staging files alone.
+    pub fn new(daw: Daw, kumi_home: &Path, listening_mode: ListeningMode) -> Self {
         let host = Self {
             daw,
             paths: BridgePaths::new(kumi_home, daw),
@@ -165,10 +175,11 @@ impl Host {
             journal: std::sync::Arc::new(crate::changes::Journal::for_daw(daw)),
             catchup: crate::catchup::Catchup::new(BridgePaths::new(kumi_home, daw).snapshots()),
             jobs: crate::listening::Jobs::default(),
+            listening_mode,
             spawn: Spawn::of(daw, kumi_home),
             listening_floor: Duration::ZERO,
         };
-        if daw == Daw::Renoise {
+        if daw == Daw::Renoise && listening_mode == ListeningMode::Standalone {
             crate::renoise::instruments::sweep_work(&host.paths.root.join("work"), std::time::SystemTime::now());
         }
         host

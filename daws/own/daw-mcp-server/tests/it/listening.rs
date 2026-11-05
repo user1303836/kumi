@@ -9,6 +9,7 @@ use common::Session;
 use daw_bridge::files::ensure_secret;
 use daw_bridge::paths::BridgePaths;
 use daw_bridge::Daw;
+use daw_mcp_server::host::{Host, ListeningMode, Pick};
 use daw_mcp_server::reaper::simulator::ReaperScript;
 use daw_mcp_server::renoise::simulator::RenoiseScript;
 use daw_mcp_server::simulator::{Simulator, SimulatorConfig};
@@ -112,6 +113,98 @@ async fn a_render_is_a_job_followed_to_its_files_in_kumis_folder_with_what_each_
         assert!(bytes > 6 * 48_000 * 8, "{file}: {bytes} bytes");
     }
     assert_eq!(script.listening().restored(), 1, "what the render changed is put back");
+}
+
+/// CC-2: restricted hosts do not maintain an adopted cache, including the separate `audio_file` path. Tiny stale
+/// fixtures exercise age pruning without allocating a multi-gigabyte cache; standalone still removes those files.
+#[tokio::test]
+async fn listening_maintenance_respects_the_startup_policy_and_keeps_per_call_cleanup() {
+    for daw in [Daw::Reaper, Daw::Renoise] {
+        for mode in [ListeningMode::Standalone, ListeningMode::Restricted] {
+            let home = tempfile::tempdir().unwrap();
+            let paths = BridgePaths::new(home.path(), daw);
+            let folder = paths.root.join("listening");
+            std::fs::create_dir_all(&folder).unwrap();
+            let unrelated = folder.join("unrelated-old.wav");
+            let plant = || {
+                std::fs::write(&unrelated, b"old cache audio").unwrap();
+                std::fs::File::options()
+                    .write(true)
+                    .open(&unrelated)
+                    .unwrap()
+                    .set_modified(std::time::SystemTime::now() - std::time::Duration::from_secs(3 * 3600))
+                    .unwrap();
+            };
+            let check = || {
+                assert_eq!(unrelated.exists(), mode == ListeningMode::Restricted, "{daw:?} {mode:?}");
+                if mode == ListeningMode::Restricted {
+                    assert_eq!(std::fs::read(&unrelated).unwrap(), b"old cache audio");
+                }
+            };
+            plant();
+            let secret = ensure_secret(&paths.secret()).unwrap();
+            let reaper = ReaperScript::new(3, 0);
+            let renoise = RenoiseScript::new();
+            let listening = if daw == Daw::Reaper { reaper.listening() } else { renoise.listening() };
+            listening.set_render_preflight(true);
+            listening.set_folder(&folder);
+            let mut config =
+                if daw == Daw::Reaper { reaper.config(secret, "/lab/REAPER") } else { renoise.config(secret, "/lab/Renoise") };
+            config.discovery_dir = Some(paths.discovery());
+            let _simulator = Simulator::start(config).await.unwrap();
+            let host = Host::new(daw, home.path(), mode);
+            assert!(unrelated.exists(), "startup does not prune the listening folder");
+
+            let snapshot = host.call("snapshot", json!({}), &Pick::default(), std::time::Duration::from_secs(5)).await.unwrap();
+            let render = json!({"sources": [{"id": "mix", "what": "master"}], "range": {"fromBeat": 0, "beats": 0.25}, "epoch": snapshot["epoch"]});
+            let (job, failed) = host.render(&render).await;
+            assert!(!failed, "{job}");
+            check();
+            let asked = &listening.renders()[0];
+            assert!(asked["freeBytes"].as_u64().is_some_and(|free| free > 0), "{mode:?}: {asked}");
+            let mut ended = false;
+            for _ in 0..20 {
+                let (status, failed) = host.listen_job(&json!({"jobId": job["jobId"], "waitMs": 1000})).await;
+                assert!(!failed, "{status}");
+                if status["state"] == "done" {
+                    ended = true;
+                    break;
+                }
+                assert_eq!(status["state"], "running", "{status}");
+            }
+            assert!(ended, "the render never ended");
+            check();
+
+            // Exporting a sample (or resolving an item's audio) has its own maintenance entrypoint.
+            plant();
+            let audio_ref = if daw == Daw::Reaper { "r:item:{I-T0001}" } else { "1:sample:1.1" };
+            let (audio, failed) = host.audio_file(&json!({"ref": audio_ref})).await;
+            assert!(!failed, "{audio}");
+            check();
+
+            // The policy skips shared maintenance, not cancellation's cleanup of this job's own files.
+            plant();
+            listening.set_steps(1000);
+            let (job, failed) = if daw == Daw::Reaper {
+                listening.set_playing(true);
+                host.hear(&json!({"seconds": 1})).await
+            } else {
+                host.audio_file(&json!({"ref": "1:pattern:1"})).await
+            };
+            assert!(!failed, "{job}");
+            check();
+            // Model the partial output already written by a running native job.
+            for file in job["files"].as_array().unwrap() {
+                std::fs::write(file["file"].as_str().unwrap(), b"partial capture").unwrap();
+            }
+            let (cancelled, failed) = host.listen_cancel(&json!({"jobId": job["jobId"]})).await;
+            assert!(!failed && cancelled["state"] == "cancelled", "{cancelled}");
+            for file in job["files"].as_array().unwrap() {
+                assert!(!PathBuf::from(file["file"].as_str().unwrap()).exists(), "{file}");
+            }
+            check();
+        }
+    }
 }
 
 #[tokio::test]

@@ -79,6 +79,9 @@ struct State {
     /// The song's tempo commands, when a test gives it some: each render plays them into the transport and leaves its
     /// tempo at this BPM (no undo step), as Renoise's does.
     render_bpm: Option<f64>,
+    render_lpb: Option<u64>,
+    /// A failed native put-back leaves this actual track mute behind after the next successful render start.
+    render_mute_residue: Option<(u64, bool)>,
     /// (M7) What Kumi's variations made: phrases with their lines, slots of variation patterns.
     takes: Takes,
     /// Renoise plays, as its focus says (a test sets it).
@@ -219,12 +222,14 @@ impl RenoiseScript {
                 undo: vec![],
                 run_start: VECTORS_EPOCH,
                 names: Default::default(),
-                song: json!({"bpm": 128, "loop": {"first": 0, "last": 0}, "patternLoop": false, "metronome": false}),
+                song: json!({"bpm": 128, "lpb": 4, "loop": {"first": 0, "last": 0}, "patternLoop": false, "metronome": false}),
                 solo: Default::default(),
                 statuses: vec![],
                 lines: Default::default(),
                 chains: Chains::default(),
                 render_bpm: None,
+                render_lpb: None,
+                render_mute_residue: None,
                 takes: Takes::default(),
                 transport_playing: false,
             })),
@@ -498,6 +503,85 @@ impl RenoiseScript {
         self.state.lock().unwrap().render_bpm = bpm;
     }
 
+    /// A rendered ZL command leaves this LPB in the transport after a successful render start.
+    pub fn set_render_lpb(&self, lpb: Option<u64>) {
+        assert!(lpb.is_none_or(|value| (1..=256).contains(&value)), "LPB must be between 1 and 256");
+        self.state.lock().unwrap().render_lpb = lpb;
+    }
+
+    /// Leave a real mute change behind the next render, so restoration checks must detect it.
+    pub fn set_render_mute_residue(&self, track: u64, muted: bool) {
+        self.state.lock().unwrap().render_mute_residue = Some((track, muted));
+    }
+
+    fn render_preflight(state: &State, params: &Value) -> Result<Value, (String, String)> {
+        let bad = |message: &str| ("bad-params".to_string(), message.to_string());
+        let unsupported = || ("unsupported".to_string(), "the simulated song has no complete render state".to_string());
+        let epoch = state.epoch.to_string();
+        if params["epoch"].as_str() != Some(epoch.as_str()) {
+            return Err(("stale".into(), "render preflight needs the current epoch".into()));
+        }
+        if state.transport_playing || state.song["editMode"] == true {
+            return Err(("busy".into(), "guarded listening requires stopped playback and recording".into()));
+        }
+        let from = params["range"]["fromBeat"].as_f64().filter(|n| n.is_finite() && *n >= 0.).ok_or_else(|| bad("invalid fromBeat"))?;
+        let beats = params["range"]["beats"].as_f64().filter(|n| n.is_finite() && *n > 0.).ok_or_else(|| bad("invalid beats"))?;
+        let end = from + beats;
+        if !end.is_finite() {
+            return Err(bad("invalid range end"));
+        }
+        let rows = |kind: &str| {
+            state.cases.iter().find(|case| {
+                case.method == "read" && case.params["kind"] == kind && case.params.get("cursor").is_none()
+                    && (kind != "track" || case.params["limit"] == MAX_LIMIT)
+            }).and_then(|case| case.response.as_ref().ok()).and_then(|page| page["items"].as_array())
+        };
+        let song = rows("song").and_then(|rows| rows.first()).ok_or_else(unsupported)?;
+        let bpm = state.song["bpm"].as_f64().filter(|n| n.is_finite() && *n > 0.).ok_or_else(unsupported)?;
+        let lpb = state.song.get("lpb").unwrap_or(&song["lpb"]).as_f64().filter(|n| n.is_finite() && *n > 0.).ok_or_else(unsupported)?;
+        let patterns = rows("pattern").ok_or_else(unsupported)?;
+        let mut total_lines = 0.;
+        for slot in rows("sequence").ok_or_else(unsupported)? {
+            let pattern = patterns.iter().find(|row| row["ref"] == slot["patternRef"]).ok_or_else(unsupported)?;
+            total_lines += if pattern["number"] == 0 && state.bulk.is_some() {
+                state.bulk.unwrap_or_default() as f64
+            } else {
+                pattern["lines"].as_f64().ok_or_else(unsupported)?
+            };
+        }
+        let song_end = total_lines / lpb;
+        if from >= song_end {
+            return Err(bad("fromBeat must be before the song end"));
+        }
+        let first = (from * lpb + 1e-9).floor();
+        let last = ((end.min(song_end) * lpb - 1e-9).ceil()).max(first + 1.);
+        let line_seconds = 60. / (bpm * lpb);
+        let boundary = |beat: f64| (beat - (beat * lpb).round() / lpb).abs() <= 1e-9;
+        let tracks = rows("track").ok_or_else(unsupported)?.iter().filter(|row| row["type"] != "master").map(|row| {
+            let track = row["index"].as_u64().ok_or_else(unsupported)?;
+            let mute = match state.mute.get(&track) {
+                Some(true) => 3,
+                Some(false) => 1,
+                None => match row["mute"].as_str() {
+                    Some("active") => 1,
+                    Some("off") => 2,
+                    Some("muted") => 3,
+                    _ => return Err(unsupported()),
+                },
+            };
+            let solo = state.solo.get(&track).copied().or_else(|| row["solo"].as_bool()).ok_or_else(unsupported)?;
+            Ok(json!({"ref": format!("{epoch}:track:{track}"), "mute": mute, "solo": solo}))
+        }).collect::<Result<Vec<_>, (String, String)>>()?;
+        Ok(json!({
+            "schema": 1, "seconds": (last - first) * line_seconds,
+            "offset": (from - first / lpb).max(0.) * 60. / bpm,
+            "aligned": boundary(from) && boundary(end) && end <= song_end + 1e-9,
+            "irregular": false, "clipped": end > song_end + 1e-9,
+            "render_state": {"bpm": state.song["bpm"], "lpb": state.song.get("lpb").unwrap_or(&song["lpb"]), "tracks": tracks},
+            "epoch": epoch, "layout": 0,
+        }))
+    }
+
     /// M6: the digest the tool answered for the demo song, with what was changed since (each track's volume, mute, name and
     /// the devices added to it, the tempo).
     fn digest_now(state: &State, mut page: Value) -> Value {
@@ -597,7 +681,7 @@ impl RenoiseScript {
             value["layout"] = 0.into();
             return Ok(value);
         }
-        if matches!(kind, "song-bpm" | "loop-range" | "loop-pattern" | "metronome-switch" | "track-solo") {
+        if matches!(kind, "song-bpm" | "song-lpb" | "loop-range" | "loop-pattern" | "metronome-switch" | "track-solo") {
             return Self::phrase_change(state, method, params);
         }
         // `device-delete {ref: device}` on a track a test gave a chain: by the device's place in this epoch only (a
@@ -745,7 +829,7 @@ impl RenoiseScript {
     }
 
     /// (m6-places) What the fixed phrases change, as the tool makes it (contract §3b), each fenced by its value as the
-    /// preview saw it: the song's tempo (`song-bpm {bpm}`, a step of Renoise's undo); the sequence's loop (`loop-range
+    /// preview saw it: the song's tempo (`song-bpm {bpm}` or `song-lpb {lpb}`, steps of Renoise's undo); the sequence's loop (`loop-range
     /// {first, last}`), the pattern loop (`loop-pattern {on}`), the metronome (`metronome-switch {on}`) and a track's solo
     /// (`track-solo {ref, solo}`), none of them steps of Renoise's undo.
     fn phrase_change(state: &mut State, method: &str, params: &Value) -> Result<Value, (String, String)> {
@@ -761,6 +845,7 @@ impl RenoiseScript {
         };
         let field = match kind {
             "song-bpm" => "bpm",
+            "song-lpb" => "lpb",
             "loop-range" => "loop",
             "loop-pattern" => "patternLoop",
             "metronome-switch" => "metronome",
@@ -769,6 +854,7 @@ impl RenoiseScript {
         let wanted = match (method, kind) {
             ("change_restore", _) => params["prior"][field].clone(),
             (_, "song-bpm") => params["input"]["bpm"].clone(),
+            (_, "song-lpb") => params["input"]["lpb"].clone(),
             (_, "loop-range") => {
                 json!({"first": params["input"]["first"].as_u64().unwrap_or(0), "last": params["input"]["last"].as_u64().unwrap_or(0)})
             }
@@ -778,13 +864,18 @@ impl RenoiseScript {
         if wanted.is_null() {
             return Err(bad(&format!("{kind}: its input is missing")));
         }
+        if kind == "song-lpb" && !wanted.as_u64().is_some_and(|lpb| (1..=256).contains(&lpb)) {
+            return Err(bad("song-lpb: lpb must be a whole number from 1 to 256"));
+        }
         let now = match track {
             Some(track) => json!(state.solo.get(&track).copied().unwrap_or(false)),
+            None if field == "lpb" => state.song.get(field).cloned().unwrap_or_else(|| json!(4)),
             None => state.song[field].clone(),
         };
         let on_off = |value: &Value| if value == &Value::Bool(true) { "on" } else { "off" };
         let title = match kind {
             "song-bpm" => format!("Tempo {} BPM", wanted.as_f64().unwrap_or_default()),
+            "song-lpb" => format!("Lines per beat {}", wanted.as_u64().unwrap_or_default()),
             "loop-range" if wanted["first"] == 0 => "Loop cleared".to_string(),
             "loop-range" => format!("Loop slots {} to {}", wanted["first"], wanted["last"]),
             "loop-pattern" => format!("Pattern loop {}", on_off(&wanted)),
@@ -800,7 +891,7 @@ impl RenoiseScript {
             None => state.song[field] = value.clone(),
         };
         // Only the tempo is a step of Renoise's undo.
-        let entry = kind == "song-bpm";
+        let entry = matches!(kind, "song-bpm" | "song-lpb");
         let target = match track {
             Some(_) => json!({"ref": params["input"]["ref"], "kind": "track"}),
             None => json!({"ref": format!("{}:song:1", state.epoch), "kind": "song"}),
@@ -916,12 +1007,32 @@ impl RenoiseScript {
         if LISTENING_METHODS.contains(&method) {
             let (epoch, run_start) = {
                 let mut state = self.state.lock().unwrap();
+                if method == "render_start" && params.get("maxSeconds").is_some() {
+                    if !self.listening.supports_render_preflight() {
+                        return Some(Err(("unsupported".into(), "native render preflight is unavailable".into())));
+                    }
+                    let planning = match Self::render_preflight(&state, params) {
+                        Ok(planning) => planning,
+                        Err(error) => return Some(Err(error)),
+                    };
+                    if planning["aligned"] != true || planning["clipped"] == true || planning["offset"] != 0. {
+                        return Some(Err(("bad-params".into(), "guarded render needs an unclipped line-aligned range".into())));
+                    }
+                    self.listening.set_tempo(state.song["bpm"].as_f64().unwrap_or_default());
+                }
                 // (a pattern's or a slot's audio is a render too: it plays the song's tempo commands as one does)
                 let part = method == "audio_file"
                     && params["ref"].as_str().is_some_and(|reference| [":pattern:", ":seq:"].iter().any(|kind| reference.contains(kind)));
-                if let Some(after) = state.render_bpm.filter(|_| method == "render_start" || part) {
-                    let before = std::mem::replace(&mut state.song["bpm"], after.into());
-                    self.listening.tempo_next(json!({"before": {"bpm": before, "lpb": 4}, "bpm": after, "lpb": 4}));
+                let changes_lpb = method == "render_start" && state.render_lpb.is_some();
+                if (method == "render_start" || part) && (state.render_bpm.is_some() || changes_lpb) {
+                    let before = state.song["bpm"].clone();
+                    let after = state.render_bpm.map(Value::from).unwrap_or_else(|| before.clone());
+                    let lpb = state.song.get("lpb").cloned().unwrap_or_else(|| json!(4));
+                    let after_lpb = if changes_lpb { json!(state.render_lpb) } else { lpb.clone() };
+                    if !(method == "render_start" && self.listening.supports_render_preflight()) && state.render_bpm.is_some() {
+                        state.song["bpm"] = after.clone();
+                    }
+                    self.listening.tempo_next(json!({"before": {"bpm": before, "lpb": lpb}, "bpm": after, "lpb": after_lpb}));
                 }
                 (state.epoch, state.run_start)
             };
@@ -934,7 +1045,22 @@ impl RenoiseScript {
             // Any track of the song's epoch (the sim's song has its tracks numbered from 1).
             let prefix = format!("{epoch}:track:");
             let known = |reference: &str| reference.strip_prefix(&prefix).is_some_and(|n| n.parse::<u32>().is_ok_and(|n| n >= 1));
-            return self.listening.answer(method, params, &epoch.to_string(), &known);
+            let result = self.listening.answer(method, params, &epoch.to_string(), &known);
+            if method == "render_start" && result.as_ref().is_some_and(Result::is_ok) {
+                let mut state = self.state.lock().unwrap();
+                if self.listening.supports_render_preflight() {
+                    if let Some(after) = state.render_bpm {
+                        state.song["bpm"] = after.into();
+                    }
+                }
+                if let Some(after) = state.render_lpb {
+                    state.song["lpb"] = after.into();
+                }
+                if let Some((track, muted)) = state.render_mute_residue.take() {
+                    state.mute.insert(track, muted);
+                }
+            }
+            return result;
         }
         if !METHODS.contains(&method) && !CHANGE_METHODS.contains(&method) {
             return None;
@@ -948,6 +1074,13 @@ impl RenoiseScript {
         }
         if state.empty {
             return Self::empty_song(&state, method, params);
+        }
+        if method == "read" && params["kind"] == "render_preflight" {
+            return Some(if self.listening.supports_render_preflight() {
+                Self::render_preflight(&state, params)
+            } else {
+                Err(("unsupported".into(), "native render preflight is unavailable".into()))
+            });
         }
         // (M5) A scratch copy kept as a track: the listening side knows the copies.
         if method.starts_with("change_") && params["kind"] == "scratch-keep" {
@@ -1074,6 +1207,23 @@ impl RenoiseScript {
             }
         }
         let wanted = normal(&asked);
+        if method == "focus" && self.listening.supports_render_preflight() {
+            if let Some(Ok(mut page)) =
+                state.cases.iter().find(|case| case.method == method && case.params == wanted).map(|case| case.response.clone())
+            {
+                page["transport"]["playing"] = state.transport_playing.into();
+                page["transport"]["bpm"] = state.song["bpm"].clone();
+                page["transport"]["tempo"] = state.song["bpm"].clone();
+                if let Some(lpb) = state.song.get("lpb") {
+                    page["transport"]["lpb"] = lpb.clone();
+                }
+                if let Some(edit_mode) = state.song.get("editMode") {
+                    page["transport"]["editMode"] = edit_mode.clone();
+                    page["transport"]["recording"] = edit_mode.clone();
+                }
+                return Some(Ok(restarted(retag(&page, VECTORS_EPOCH, epoch, None), restarts)));
+            }
+        }
         if method == "focus" && state.transport_playing {
             if let Some(Ok(mut page)) =
                 state.cases.iter().find(|case| case.method == method && case.params == wanted).map(|case| case.response.clone())
@@ -1181,4 +1331,67 @@ fn full_page(lines: usize, params: &Value, keeps_bound: bool) -> Result<Value, (
         page["nextCursor"] = format!("{EPOCH}.0.{number}").into();
     }
     Ok(page)
+}
+
+#[cfg(test)]
+mod preflight_tests {
+    use super::*;
+
+    fn read(script: &RenoiseScript, from: f64, beats: f64) -> Result<Value, (String, String)> {
+        script.answer("read", &json!({"kind": "render_preflight", "range": {"fromBeat": from, "beats": beats}, "epoch": "1"})).unwrap()
+    }
+
+    #[test]
+    fn preflight_reads_current_state_without_rendering() {
+        let script = RenoiseScript::new();
+        assert_eq!(read(&script, 0., 4.).unwrap_err().0, "unsupported");
+        script.listening().set_render_preflight(true);
+        script.set_bpm(60.);
+        script.set_song("lpb", json!(8));
+        {
+            let mut state = script.state.lock().unwrap();
+            state.mute.insert(1, true);
+            state.solo.insert(2, true);
+        }
+        let answer = read(&script, 0., 4.).unwrap();
+        assert_eq!(answer["schema"], 1);
+        assert_eq!(answer["seconds"], 4.);
+        assert_eq!(answer["offset"], 0.);
+        assert_eq!(answer["aligned"], true);
+        assert_eq!(answer["render_state"]["bpm"], 60.);
+        assert_eq!(answer["render_state"]["lpb"], 8.);
+        let tracks = answer["render_state"]["tracks"].as_array().unwrap();
+        assert_eq!(tracks.len(), 6);
+        assert_eq!(tracks[0], json!({"ref": "1:track:1", "mute": 3, "solo": false}));
+        assert_eq!(tracks[1], json!({"ref": "1:track:2", "mute": 1, "solo": true}));
+        assert_eq!(tracks[5]["ref"], "1:track:7");
+        assert!(script.listening().renders().is_empty());
+        assert!(script.undo_history().is_empty());
+        let focus = script.answer("focus", &json!({})).unwrap().unwrap();
+        assert_eq!(focus["transport"]["bpm"], 60.);
+        assert_eq!(focus["transport"]["lpb"], 8);
+        assert_eq!(focus["transport"]["loop"]["on"], false);
+        script.switch_song();
+        assert_eq!(read(&script, 0., 4.).unwrap_err().0, "stale");
+    }
+
+    #[test]
+    fn preflight_expands_fractional_bounds_and_marks_clipping() {
+        let script = RenoiseScript::new();
+        script.listening().set_render_preflight(true);
+        script.set_bpm(120.);
+        let leading = read(&script, 0.125, 0.875).unwrap();
+        assert_eq!(leading["aligned"], false);
+        assert_eq!(leading["offset"], 0.0625);
+        assert_eq!(leading["seconds"], 0.5);
+        let trailing = read(&script, 0., 1.125).unwrap();
+        assert_eq!(trailing["aligned"], false);
+        assert_eq!(trailing["offset"], 0.);
+        assert_eq!(trailing["seconds"], 0.625);
+        assert_eq!(read(&script, 31., 1.).unwrap()["aligned"], true);
+        assert_eq!(read(&script, 31., 2.).unwrap()["clipped"], true);
+        script.set_transport_playing(true);
+        assert_eq!(read(&script, 0., 4.).unwrap_err().0, "busy");
+        assert!(script.listening().renders().is_empty());
+    }
 }

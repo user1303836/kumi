@@ -40,7 +40,7 @@ struct Seen {
 
 /// A run of Kumi: a host of its own (as each Kumi starts one) on the shared folder, and the DAW's integration over it.
 fn kumi(daw: Daw, home: &Path, seen: Rc<Seen>) -> Rc<dyn Integration> {
-    let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(daw, home)), id: Cell::new(0) });
+    let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(daw, home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
     let connect: Connect = Rc::new(move |_| {
         let endpoint = endpoint.clone();
         async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()

@@ -16,7 +16,7 @@ fn main() {
         }
     };
     let runtime = tokio::runtime::Builder::new_multi_thread().worker_threads(2).enable_all().build().expect("tokio runtime");
-    let host = Arc::new(daw_mcp_server::host::Host::new(options.daw, &options.kumi_home));
+    let host = Arc::new(daw_mcp_server::host::Host::new(options.daw, &options.kumi_home, options.listening));
     let served = runtime.block_on(daw_mcp_server::stdio::serve(host, tokio::io::stdin(), tokio::io::stdout()));
     if let Err(error) = served {
         eprintln!("mcp-host: {error}");

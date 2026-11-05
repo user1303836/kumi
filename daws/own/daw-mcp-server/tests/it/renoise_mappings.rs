@@ -343,8 +343,8 @@ async fn the_host_removes_its_instrument_files_when_the_tool_cant() {
     assert_eq!((lab.loads(), lab.left_in_work()), (2, 0), "{refused}");
 }
 
-/// #399 (N-N9): instrument files left in Kumi's work folder an hour ago or more are removed as Renoise's host starts;
-/// newer ones (a change in flight in another Kumi) and anything else stay, and REAPER's host leaves the folder alone.
+/// #399 (N-N9): standalone startup sweeps old instruments, but restricted startup must preserve even stale files.
+/// Newer ones (a change in flight in another Kumi), anything else, and another DAW's work folder always stay.
 #[test]
 fn renoises_host_sweeps_old_instrument_files_from_kumis_work_folder() {
     let home = tempfile::tempdir().unwrap();
@@ -368,9 +368,11 @@ fn renoises_host_sweeps_old_instrument_files_from_kumis_work_folder() {
         names
     };
     let all = left();
-    let _reaper = daw_mcp_server::host::Host::new(Daw::Reaper, home.path());
+    let _reaper = daw_mcp_server::host::Host::new(Daw::Reaper, home.path(), daw_mcp_server::host::ListeningMode::Standalone);
     assert_eq!(left(), all, "REAPER's host leaves Renoise's work folder alone");
-    let _renoise = daw_mcp_server::host::Host::new(Daw::Renoise, home.path());
+    let _restricted = daw_mcp_server::host::Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Restricted);
+    assert_eq!(left(), all, "restricted startup leaves all pre-existing Renoise work files alone");
+    let _renoise = daw_mcp_server::host::Host::new(Daw::Renoise, home.path(), daw_mcp_server::host::ListeningMode::Standalone);
     assert_eq!(left(), ["instrument-1700007000-2.kumi.xrni", "notes.txt"]);
 }
 
