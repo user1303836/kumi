@@ -503,20 +503,25 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
                 "folders and files you let it read",
                 "Kumi doesn't download or install ffmpeg. Without it, Kumi reads WAV and AIFF only.", _RESTART])
     elif dry["state"] == "other_owner":
-        plan.update(step="owned_elsewhere", paths=dry["paths"], effects=[*dry["effects"], *_TAGGING.get(daw, ())],
+        plan.update(step="owned_elsewhere", paths=dry["paths"], effects=[*dry["effects"], *_tagging(daw, dry)],
                     component=dry)
     else:
-        plan.update(step="daw_component", paths=dry["paths"], effects=[*dry["effects"], *_TAGGING.get(daw, ())],
+        plan.update(step="daw_component", paths=dry["paths"], effects=[*dry["effects"], *_tagging(daw, dry)],
                     component=dry)
     return plan
 
 
-# CC-8: what REAPER's and Renoise's components write into a project by themselves, said in every DAW step until a
-# component that stops it is released (agent-s names its versions then).
+# CC-8: what REAPER's and Renoise's components write into a project by themselves, said in their DAW step.
 _TAGGING = {
     "reaper": ("REAPER: Kumi's extension keeps an id for each saved project in the project (ext state), saved with it.",),
     "renoise": ("Renoise: Kumi's tool keeps an id for each song in the song's tool data, saved with it.",),
 }
+
+
+def _tagging(daw: str, component: Mapping[str, Any]) -> tuple[str, ...]:
+    """CC-8's line for `daw`, unless the component reports `keep_identity: true` (8c): a component from the shared
+    bridge bump keeps an id only while a standalone Kumi asks it to, which the plugin's runtime never does."""
+    return () if component.get("keep_identity") is True else _TAGGING.get(daw, ())
 
 
 def plan(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir: Path | None = None,
@@ -586,7 +591,7 @@ def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str]
         return [f"Kumi: use the existing Kumi installation at {home} for {DAWS[daw]}",
                 "Kumi's runtime will read that installation's DAW connection files and write its own connection state "
                 "there (never its sign-in, settings or account)",
-                f"The {component} it installed stays as it is", _RESTART, *_TAGGING.get(daw, ())]
+                f"The {component} it installed stays as it is", _RESTART, *_tagging(daw, plan["component"])]
     if action != "install" or plan.get("step") not in ("runtime", "daw_component", "ffmpeg"):
         return None
     title = {"runtime": f"Kumi: set up Kumi {plan['version']}'s runtime",

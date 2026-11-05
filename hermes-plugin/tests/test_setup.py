@@ -412,6 +412,16 @@ class SetupTest(unittest.TestCase):
                 setup.plan(daw, setup_daw=Runtime("other_owner", owner=owner), data_dir=self.data,
                            plugin_dir=self.plugin, target=TARGET)
                 self.assertIn(words, setup.approval(daw, action="adopt", data_dir=self.data)["message"])
+                setup.plan(daw, setup_daw=Runtime(keep_identity=True), data_dir=self.data, plugin_dir=self.plugin,
+                           target=TARGET)
+                self.assertNotIn(words, setup.approval(daw, data_dir=self.data)["message"],
+                                 "a component from the bridge bump reports keep_identity, and keeps no id (CC-8 8c)")
+                setup.plan(daw, setup_daw=Runtime("other_owner", owner=owner, keep_identity=True), data_dir=self.data,
+                           plugin_dir=self.plugin, target=TARGET)
+                self.assertNotIn(words, setup.approval(daw, action="adopt", data_dir=self.data)["message"])
+                setup.plan(daw, setup_daw=Runtime(keep_identity="true"), data_dir=self.data, plugin_dir=self.plugin,
+                           target=TARGET)
+                self.assertIn(words, setup.approval(daw, data_dir=self.data)["message"], "only a real true drops it")
         self.plan(setup_daw=Runtime())
         self.assertNotIn("keeps an id", setup.approval("ableton", data_dir=self.data)["message"], "Live's doesn't")
 
