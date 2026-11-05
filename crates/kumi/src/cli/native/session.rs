@@ -204,7 +204,7 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
         };
         emit(SessionEvent::Notice { message });
     }
-    let mut tries = 0;
+    let mut tries = 0_u32;
     let mut next: Option<tokio::time::Instant> = Some(tokio::time::Instant::now());
     let mut failure_said: Option<String> = None;
     // When a failed start is next looked for: at the usual pace, quick looks or not.
