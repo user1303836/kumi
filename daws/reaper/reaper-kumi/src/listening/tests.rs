@@ -280,6 +280,7 @@ fn render_preflight_is_a_complete_pure_snapshot_and_reads_restored_state() {
 fn render_preflight_uses_the_exact_tempo_map_across_the_window() {
     let rig = Rig::with_project(|| fake::with(|s| {
         s.bpm = 120.0;
+        s.integrate_tempo_map = true;
         s.tempo_markers = vec![
             fake::FakeTempo { time: 0.0, bpm: 120.0, num: 4, denom: 4, linear: false },
             fake::FakeTempo { time: 2.0, bpm: 60.0, num: 4, denom: 4, linear: false },

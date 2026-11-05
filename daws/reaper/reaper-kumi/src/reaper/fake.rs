@@ -501,6 +501,9 @@ pub struct State {
     pub tracks: Vec<FakeTrack>,
     pub markers: Vec<FakeMarker>,
     pub tempo_markers: Vec<FakeTempo>,
+    /// Historical fixtures set the transport tempo independently of the marker rows they read.
+    /// Opt in when exercising the SDK's piecewise tempo-map conversions.
+    pub integrate_tempo_map: bool,
     pub length: f64,
     pub cursor: f64,
     pub play_position: f64,
@@ -603,6 +606,7 @@ impl Default for State {
             tracks: vec![],
             markers: vec![],
             tempo_markers: vec![],
+            integrate_tempo_map: false,
             length: 0.0,
             cursor: 0.0,
             play_position: 0.0,
@@ -1020,6 +1024,9 @@ unsafe extern "C" fn time_map_get_time_sig_at_time(_proj: *mut ReaProject, time:
 }
 /// Integrate the fake tempo map, including a marker's linear ramp to the next one.
 fn tempo_time(s: &State, value: f64, to_time: bool) -> f64 {
+    if !s.integrate_tempo_map {
+        return if to_time { value * 60.0 / s.bpm } else { value * s.bpm / 60.0 };
+    }
     let mut at = 0.0;
     let mut beat = 0.0;
     let mut bpm = s.bpm;
@@ -1062,7 +1069,7 @@ unsafe extern "C" fn time_map2_time_to_beats(
     denom: *mut c_int,
 ) -> f64 {
     counted(|s| {
-        let qn = time * s.bpm / 60.0;
+        let qn = tempo_time(s, time, false);
         // A measure is `num` beats of 1/`denom` notes long: 3 quarter notes in 6/8, counted by eighths as REAPER does.
         let per_measure = s.time_signature.0 as f64 * 4.0 / s.time_signature.1 as f64;
         let whole = (qn / per_measure).floor();
