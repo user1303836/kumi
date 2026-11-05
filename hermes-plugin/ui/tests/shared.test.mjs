@@ -31,10 +31,13 @@ test('undo is offered only while Kumi is connected, answering and sure, for an u
   assert.equal(format.canUndo(null, row), false)
 })
 
-test('the other requests name the DAW, and words from the backend stay on one line', () => {
+test('the other requests name the DAW, and words from the backend stay on one plain line', () => {
   assert.equal(format.setupRequest('ableton'), 'Set up Kumi for Live')
   assert.equal(format.connectRequest('renoise'), 'Connect Kumi to Renoise')
   assert.equal(format.clean('x'.repeat(100), 10), `${'x'.repeat(9)}…`)
+  // Controls and line separators become spaces; bidi controls, zero-width and tag characters, which could make a
+  // name read as other words, are dropped.
+  assert.equal(format.clean('Demo\u202eranS\u200b \u0007Snare\u2028kit\u0085\u{e0041}\ufeff'), 'DemoranS Snare kit')
 })
 
 test('numbers carry a true minus and the chip says what is connected, stale or missing', () => {
@@ -408,15 +411,17 @@ test('the chip, a job and the time read in Japanese and Chinese; requests to the
   assert.equal(format.jobWords({ kind: 'scan', state: 'done', result: { sounds: 637, failed: 3 } }, ja).detail, '637 個のサウンド · 3 個は読み込めませんでした')
   assert.equal(format.ago(0, 5 * 60_000, zh), '5 分钟前')
   assert.equal(format.undoRequest({ id: 'h-1' }), 'Undo Kumi change h-1')
-  // A language Kumi doesn't have reads English, never a raw key.
+  // A language Kumi doesn't have reads English, never a raw key; so does Traditional Chinese, never the Simplified words.
   assert.equal(i18n.translator('fr-FR')('pane.undo'), 'Undo')
+  assert.deepEqual(['zh-Hant-TW', 'zh-TW', 'zh_HK', 'zh-Hans', 'zh'].map(i18n.localeOf), ['en', 'en', 'en', 'zh', 'zh'])
 })
 
 test('every catalog key the UI names has words in English, Japanese and Chinese, so no raw key ever shows', async () => {
   const { readdirSync, readFileSync } = await import('node:fs')
   const { join } = await import('node:path')
+  const { fileURLToPath } = await import('node:url')
   const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(entry => (entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]))
-  const sources = walk(new URL('../src', import.meta.url).pathname).filter(file => /\.(ts|tsx)$/.test(file) && !file.endsWith('i18n.ts'))
+  const sources = walk(fileURLToPath(new URL('../src', import.meta.url))).filter(file => /\.(ts|tsx)$/.test(file) && !file.endsWith('i18n.ts'))
   const keys = new Set()
   // Keys are written in single quotes (`t('pane.undo')`, and the state maps); backticks in comments name events.
   const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|palette|notify|dashboard)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g

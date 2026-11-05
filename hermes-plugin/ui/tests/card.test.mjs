@@ -290,3 +290,14 @@ test('a Japanese window reads FOCUS and HISTORY in Japanese; the rows keep their
   const focus = inJapanese(createElement(FocusView, { focus: { stale: true, running: false, focus: { track: { name: 'Drums' } }, transport: { playing: false } }, now: 0 }))
   for (const text of ['Drums', '■ 停止中', 'Kumi は停止中']) assert.ok(focus.includes(text), `${text} in ${focus}`)
 })
+
+test("a track listen's capture note shows as plain text under the capture line, and nothing shows for an empty one", () => {
+  const capture = { method: 'ears', from_beat: 17, beats: 8, seconds: 6.1, cleanup: 'restored' }
+  const card = note => renderToStaticMarkup(createElement(ListenCard, {
+    media: { file: { kind: 'audio' }, result: { metrics: { file: 'Drums (beats 17–25).wav', loudness: { integratedLufs: -12.1 } }, capture: { ...capture, note } }, fallback: null },
+    audition: new Audition(async () => ({ data_url: 'data:audio/wav;base64,' }))
+  }))
+  const html = card('Captured 6.1 s of the 7.9 s window; <b>Live</b> was put back.')
+  assert.ok(html.includes('Captured 6.1 s of the 7.9 s window; &lt;b&gt;Live&lt;/b&gt; was put back.'), 'the note is text, never markup')
+  assert.equal(card('  '), card(undefined), 'an empty note adds nothing')
+})

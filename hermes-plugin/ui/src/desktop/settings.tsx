@@ -74,8 +74,11 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
             )}
             {component && (
               <Line label={t('settings.part', dawName(daw, t))}>
-                {clean(component.name ?? t('settings.dawComponent'), 40)}:{' '}
-                {COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace('_', ' ')}
+                {t(
+                  'settings.componentLine',
+                  clean(component.name ?? t('settings.dawComponent'), 40),
+                  COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace('_', ' ')
+                )}
                 {component.path && <div style={{ ...S.faint, marginTop: 2 }}>{clean(component.path, 200)}</div>}
               </Line>
             )}

@@ -28,6 +28,8 @@ export interface ListenView {
   interpretationError?: string
   /** How a track or the mix was captured (CC-2): never a change, nothing to undo. */
   capture?: string
+  /** The runtime's one-line note about the capture, as plain untrusted text. */
+  captureNote?: string
 }
 
 // A track listen that didn't complete (CC-2): no measurements, no file, nothing the card could draw.
@@ -123,7 +125,9 @@ export function listenView(result: ListenResult, t: Translate = english): Listen
     bandsAre: differenceBands.length ? 'difference' : 'level',
     headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter(line => typeof line === 'string').map(line => clean(line, 140)) : [],
     verdict: typeof result.verdict_text === 'string' && result.verdict_text ? clean(result.verdict_text, 400) : undefined,
-    capture: captureWords(result.capture, t)
+    capture: captureWords(result.capture, t),
+    // CC-2 A3: one line of at most 200 characters, shown as it is and never read for a decision.
+    captureNote: typeof result.capture?.note === 'string' && result.capture.note.trim() ? clean(result.capture.note, 200) : undefined
   }
   if (compare) {
     view.referenceTitle = fileName(reference, t('listen.reference'))

@@ -210,6 +210,7 @@ export interface ListenResult {
   error?: string
   /** `refused`, `cancelled` or `unsure` for a track listen that didn't complete (CC-2); those carry no measurements. */
   state?: string
-  /** How a track or the mix was captured (CC-2): the beat window, the measured seconds, and whether all was put back. */
-  capture?: { method?: string; from_beat?: number; beats?: number; seconds?: number; cleanup?: string }
+  /** How a track or the mix was captured (CC-2): the beat window, the measured seconds, whether all was put back, and
+   *  the runtime's one-line note (a restored capture's or a staging cleanup's warning). */
+  capture?: { method?: string; from_beat?: number; beats?: number; seconds?: number; cleanup?: string; note?: string }
 }
