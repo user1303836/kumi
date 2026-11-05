@@ -48,7 +48,12 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
   2. Offer the two or three likeliest by name. Measure them if the producer wants to compare them (skill `kumi:listening`).
   3. Look (`kumi_observe` with `scope: focus`) for the Drum Rack's ref, and whether that pad already holds a Simpler.
   4. **Name the pad by its note.** A pad's note is the reliable name: "pad 3" counted from the first is `note` 38 (D1), since the first pad is 36 (C1), row by row. When the producer's numbering could mean another pad, ask.
-  5. Place the pick with one `kumi_change`: `load_sample_to_pad` for an empty pad, or `replace_sample` for the pad's Simpler. Then report the pad, the sound and the HISTORY id.
+  5. Place the pick with one `kumi_change`:
+     - for an empty pad, `load_sample_to_pad`;
+     - for a pad holding a Simpler, `replace_sample` on that Simpler.
+     - If the pad holds anything else (another instrument, or several devices), say so and ask. Never clear a pad to make room.
+
+     Then report the pad, the sound and the HISTORY id.
 - **The producer approves the exact placement,** and HISTORY lets them undo it.
 - **When a producer picks a sound on the map,** Desktop puts a request in the chat ("Use sound s-… on the selected track"). Treat it like any other request: observe, then make an approved change.
 
