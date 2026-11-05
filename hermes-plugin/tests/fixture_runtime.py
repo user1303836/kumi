@@ -581,9 +581,11 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
 
 
 def job(fixture: Fixture, args: dict, host: dict) -> dict:
-    """A scan's job. It settles when it's next read: a cancelled one as cancelled, any other as done, its map then the
-    current one."""
+    """A generation's job, or a scan's: a scan settles when it's next read, a cancelled one as cancelled, any other as
+    done, its map then the current one."""
     job_id = args.get("job_id")
+    if job_id in fixture.generations:
+        return generation_job(fixture, job_id)
     state = fixture.scans.get(job_id)
     if state is None:
         return error("not_found", f"no job {job_id!r}")
@@ -674,27 +676,35 @@ def generate(fixture: Fixture, args: dict, host: dict) -> dict:
             return error("not_submitted", "Mirelo refused it before anything was sent")
         job_id = f"g-{os.getpid()}-{len(fixture.generations) + 1}"
         fixture.generations[job_id] = {"quote": quote, "reserved": sealed.get("reserved_credits")}
+        fixture.record(f"jobs/{job_id}.json", {"schema": 1, "seq": fixture.next_seq(), "at": now(), "job_id": job_id,
+                                               "kind": "generate", "state": "running"})  # as kumi serve lists its jobs
         return {"state": "running", "job_id": job_id, "quote_id": quote["quote_id"], "kind": quote["kind"],
                 "prompt": quote["prompt"], "seconds": quote["seconds"], "estimate": quote["estimate"],
                 "credit_unit": "mirelo_credits"}
     if action == "job":
-        made = fixture.generations.get(args.get("job_id"))
-        if made is None:
-            return error("not_found", f"no job {args.get('job_id')!r}")
-        quote, artifact = made["quote"], f"a-{args['job_id']}"
-        actual = fixture.options.generate_actual
-        tag = kept(fixture, artifact)
-        return {"job_id": args["job_id"], "kind": "generate", "state": "done", "progress": {"done": 1, "total": 1},
-                "result": {"quote_id": quote["quote_id"], "kind": quote["kind"], "prompt": quote["prompt"],
-                           "seconds": quote["seconds"], "provider": "mirelo", "provider_job_id": "v-1",
-                           "submission": "submitted", "artifact_id": artifact, "file": f"{artifact}.wav",
-                           "output_type": "audio", "media_tag": tag,
-                           "outputs": [{"artifact_id": artifact, "file": f"{artifact}.wav", "type": "audio",
-                                        "mime": "audio/wav", "bytes": len(WAV)}],
-                           "credits": {"estimate": quote["estimate"]["credits"], "reserved": made["reserved"],
-                                       "actual": None if actual < 0 else actual},
-                           "credit_unit": "mirelo_credits"}}
+        return generation_job(fixture, args.get("job_id"))
     return error("invalid_request", "action is quote, create or job")
+
+
+def generation_job(fixture: Fixture, job_id: object) -> dict:
+    """A generation job's envelope, as `generate`'s job action and the plain `job` tool both give it (C3's one job
+    store): its checkpointed result names its quote, whatever became of the create's answer."""
+    made = fixture.generations.get(job_id)
+    if made is None:
+        return error("not_found", f"no job {job_id!r}")
+    quote, artifact = made["quote"], f"a-{job_id}"
+    actual = fixture.options.generate_actual
+    tag = kept(fixture, artifact)
+    return {"job_id": job_id, "kind": "generate", "state": "done", "progress": {"done": 1, "total": 1},
+            "result": {"quote_id": quote["quote_id"], "kind": quote["kind"], "prompt": quote["prompt"],
+                       "seconds": quote["seconds"], "provider": "mirelo", "provider_job_id": "v-1",
+                       "submission": "submitted", "artifact_id": artifact, "file": f"{artifact}.wav",
+                       "output_type": "audio", "media_tag": tag,
+                       "outputs": [{"artifact_id": artifact, "file": f"{artifact}.wav", "type": "audio",
+                                    "mime": "audio/wav", "bytes": len(WAV)}],
+                       "credits": {"estimate": quote["estimate"]["credits"], "reserved": made["reserved"],
+                                   "actual": None if actual < 0 else actual},
+                       "credit_unit": "mirelo_credits"}}
 
 
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,

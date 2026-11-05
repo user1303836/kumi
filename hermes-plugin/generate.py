@@ -236,13 +236,10 @@ def _bind(ledger: Any, reservation_id: str, job_id: str) -> bool:
     return False
 
 
-def job(host: Any, args: dict, identity: dict, timeout: float) -> dict | None:
-    """A generation job for kumi_job, or None when `job_id` isn't one (the ledger doesn't route it, or this profile
-    never used Mirelo and has no ledger, which isn't opened then). Its runtime reads the saved state, and with the
-    producer's key and switches still on, may only GET an already identified vendor job (never a create). Every answer
-    goes to the ledger (a finished one settles its reservation), and the result carries the fresh totals; an unknown
-    charge stays reserved."""
-    job_id = args.get("job_id")
+def find(host: Any, job_id: Any) -> tuple[Any, dict] | None:
+    """The ledger and its record of generation job `job_id`, or None: not a job id, a profile that never used Mirelo
+    (no ledger, which isn't opened then), or a job the ledger hasn't bound (kumi_job then reads it plainly, and
+    `adopt` may still claim it)."""
     if snapshots.file_id(job_id) is None or not (Path(host.data_dir()) / LEDGER_FILE).is_file():
         return None
     try:
@@ -250,8 +247,38 @@ def job(host: Any, args: dict, identity: dict, timeout: float) -> dict | None:
         found = ledger.find_job(job_id)
     except Exception:
         return None
-    if not isinstance(found, dict):
+    return (ledger, found) if isinstance(found, dict) else None
+
+
+def adopt(host: Any, job_id: Any, plain: Any) -> tuple[Any, dict] | None:
+    """A generation job the ledger never bound, because the create's answer was lost (`unsure`) while the runtime went
+    on and made it: the runtime's own job record (`plain`, kumi_job's plain read) names its quote, and the one unsettled
+    reservation of that quote is bound to it, so it's followed and settled like any other (W3's calls, agent-m's C7
+    check). Nothing is created or sent again. None for any other job, or when the quote doesn't name exactly one."""
+    if not isinstance(plain, dict) or plain.get("kind") != "generate" or plain.get("job_id") != job_id \
+            or snapshots.file_id(job_id) is None or not (Path(host.data_dir()) / LEDGER_FILE).is_file():
         return None
+    result = plain.get("result") if isinstance(plain.get("result"), dict) else {}
+    quote_id = result.get("quote_id")
+    try:
+        ledger = host.ledger()
+        held = [row for row in ledger.reservations()
+                if isinstance(row, dict) and row.get("quote_id") == quote_id and row.get("job_id") in (None, job_id)]
+        if not isinstance(quote_id, str) or len(held) != 1:
+            return None
+        ledger.bind(held[0]["reservation_id"], job_id)
+        found = ledger.find_job(job_id)
+    except Exception:
+        log.warning("Kumi couldn't bind a generation job it found to its credit reservation")
+        return None
+    return (ledger, found) if isinstance(found, dict) else None
+
+
+def follow(host: Any, ledger: Any, found: dict, job_id: str, identity: dict, timeout: float) -> dict:
+    """Generation job `job_id` as kumi_job gives it. Its runtime reads the saved state, and with the producer's key
+    and switches still on, may only GET an already identified vendor job (never a create). Every answer goes to the
+    ledger (a finished one settles its reservation), and the result carries the fresh totals; an unknown charge stays
+    reserved."""
     key = host.mirelo_key()
     sealed = private(key) if ready(host, found.get("kind"), key) is None else None
     envelope = host.live().call("generate", {"action": "job", "job_id": job_id}, identity, timeout=timeout,

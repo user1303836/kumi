@@ -179,6 +179,24 @@ class Generation(unittest.TestCase):
         self.assertEqual((stuck["error"]["code"], stuck["ledger"]["reserved"]), ("not_submitted", 15), stuck)
         self.assertIn("hint", stuck, "not freed: the model is told its credits stay reserved, and how they can go")
 
+    def test_a_generation_whose_create_answer_was_lost_is_found_by_its_quote_and_settled(self):
+        host, _, data = self.host(None, "--slow", "generate=2")
+        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        with mock.patch.object(generate, "TIMEOUT", 0.3):  # the answer is lost; the runtime goes on and makes the job
+            unsure = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
+        self.assertEqual(unsure["state"], "unsure")
+        jobs = data / "state" / "jobs"
+        self.assertTrue(support.eventually(lambda: any(jobs.glob("g-*.json"))), "the runtime lists the job it made")
+        [listed] = jobs.glob("g-*.json")
+        job_id = json.loads(listed.read_text(encoding="utf-8"))["job_id"]
+        [held] = host.ledger().reservations()
+        self.assertIsNone(held["job_id"], "never bound: its answer never came")
+        done = support.call(host, "kumi_job", {"job_id": job_id}, session_id="s1")
+        self.assertEqual({key: done["result"]["ledger"][key] for key in ("spent", "reserved")},
+                         {"spent": 12, "reserved": 0}, "settled as charged, never left looking unknown")
+        self.assertEqual(host.ledger().reservations(), [], "so it can't be released by hand as unknown")
+        self.assertEqual(len(self.sent(data, "create")), 1, "nothing was created again")
+
     def test_a_create_kumi_can_not_send_holds_no_credits(self):
         host, _, data = self.host()
         quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]

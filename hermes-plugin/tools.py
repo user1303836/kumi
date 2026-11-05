@@ -876,12 +876,18 @@ def kumi_generate(host: Host, args: dict, **kwargs: Any) -> dict:
 
 
 def kumi_job(host: Host, args: dict, **kwargs: Any) -> dict:
-    """A long job by its id: a generation's from its runtime's `generate`, settled in the credit ledger when it has
-    finished (CC-13), its MEDIA: line only for its kept file; any other job from the runtime's `job`."""
+    """A long job by its id: a generation's from its runtime's `generate`, settled in the credit ledger (CC-13), its
+    MEDIA: line only for its kept file; any other job from the runtime's `job`. A generation the ledger never bound
+    (its create's answer was lost) is recognized in that plain read and adopted by its quote (generate.adopt)."""
     identity = host.identity(kwargs)
-    found = generate.job(host, args, identity, READ_TIMEOUT)
-    if found is None:
-        return host.live().call("job", args, identity, timeout=READ_TIMEOUT)
+    job_id = args.get("job_id")
+    routed = generate.find(host, job_id)
+    if routed is None:
+        plain = host.live().call("job", args, identity, timeout=READ_TIMEOUT)
+        routed = generate.adopt(host, job_id, plain)
+        if routed is None:
+            return plain
+    found = generate.follow(host, *routed, job_id, identity, READ_TIMEOUT)
     result = found.get("result")
     if isinstance(result, dict) and "media_tag" in result:
         found = {**found, "result": kept_media(host, result)}
