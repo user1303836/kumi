@@ -110,20 +110,25 @@ test('a HISTORY row Kumi is unsure of says why, what it put back, and offers no 
   assert.ok(!html.includes('Undo'))
 })
 
-test("a device load only Live's own undo can take back (#1101) says how, by its key or by hand, and offers no Undo", async () => {
+test("a change only Live's own Undo can take back (CC-20) says how, with the DAW machine's key or by hand, and offers no Undo", async () => {
   const { HistoryView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
-  const note = "Live's own undo (Cmd+Z) takes this back; Kumi can't yet (#1101)"
+  const note = "Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back while it's still Live's latest step."
   const shown = note.replaceAll("'", '&#x27;')
-  const row = how => ({ id: 'h-1', title: 'Operator added to Bass', family: 'device', state: 'applied', undo_available: false, note, daw_undo: how })
-  const draw = how => renderToStaticMarkup(createElement(HistoryView, { history: { items: [row(how)] }, daw: 'ableton', live: true, action: () => createElement('button', null, 'Undo') }))
-  const next = draw('next')
+  const row = how => ({ id: 'h-1', title: 'Chain added to Drum Rack', family: 'device', state: 'applied', undo_available: false, reason: 'daw_undo', note, daw_undo: how })
+  const draw = (how, target) => renderToStaticMarkup(createElement(HistoryView, { history: { items: [row(how)] }, daw: 'ableton', live: true, target, action: () => createElement('button', null, 'Undo') }))
+  // The key is the one on the machine Kumi and Live run on, whatever machine the page is open on.
+  const next = draw('next', 'aarch64-apple-darwin')
   assert.ok(next.includes(shown), next)
-  assert.ok(/Undo in Live \((Cmd|Ctrl)\+Z\), if nothing has changed there since/.test(next), next)
+  assert.ok(next.includes(english('history.dawUndo', 'Live', 'Cmd+Z')), next)
+  assert.ok(draw('next', 'x86_64-pc-windows-msvc').includes(english('history.dawUndo', 'Live', 'Ctrl+Z')))
   assert.ok(!next.includes('<button'), 'words, never a request Kumi would refuse')
-  // Something changed since: Live's undo would take the producer's later work back first, so no key is offered.
-  const buried = draw('buried')
+  // A later Kumi change sits above it: Live's undo would take that back first, so no key is offered.
+  const buried = draw('buried', 'aarch64-apple-darwin')
   assert.ok(buried.includes(english('history.byHand', 'Live')) && !/\+Z/.test(buried.replace(shown, '')), buried)
-  // An undone row, or one without daw_undo, keeps the surface's own action.
+  // Serve doesn't know (after a restart): the note alone, still no Undo.
+  const unknown = draw(undefined, 'aarch64-apple-darwin')
+  assert.ok(unknown.includes(shown) && !unknown.includes(english('history.dawUndo', 'Live', 'Cmd+Z')))
+  // A row without daw_undo that Kumi can undo keeps the surface's own action.
   assert.ok(renderToStaticMarkup(createElement(HistoryView, { history: { items: [{ ...row(undefined), undo_available: true }] }, action: () => createElement('button', null, 'Undo') })).includes('<button'))
 })
 

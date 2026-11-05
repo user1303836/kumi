@@ -1312,11 +1312,14 @@
       focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
     ] });
   }
-  function DawUndo({ daw, how }) {
+  function undoKeys(target) {
+    const on = typeof target === "string" && target ? target : globalThis.navigator?.userAgent ?? "";
+    return /apple-darwin|Mac/.test(on) ? "Cmd+Z" : "Ctrl+Z";
+  }
+  function DawUndo({ daw, how, keys }) {
     const t = useT();
     const app = dawName(daw, t);
     if (how === "buried") return /* @__PURE__ */ jsx(Chip, { title: t("history.byHandTitle", app), children: t("history.byHand", app) });
-    const keys = /Mac/.test(globalThis.navigator?.userAgent ?? "") ? "Cmd+Z" : "Ctrl+Z";
     return /* @__PURE__ */ jsx(Chip, { title: t("history.dawUndoTitle", app, keys), children: t("history.dawUndo", app, keys) });
   }
   function HistoryView({
@@ -1324,7 +1327,8 @@
     now,
     action,
     live = false,
-    daw
+    daw,
+    target
   }) {
     const t = useT();
     const items = history?.items ?? [];
@@ -1347,7 +1351,7 @@
             item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
           )
         ] }),
-        item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? /* @__PURE__ */ jsx(DawUndo, { daw, how: item.daw_undo }) : action?.(item)
+        item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? /* @__PURE__ */ jsx(DawUndo, { daw, how: item.daw_undo, keys: undoKeys(target) }) : action?.(item)
       ] }, item.id);
     }) });
   }
@@ -2250,7 +2254,8 @@
               daw: state.status?.daw,
               history: state.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,
-              now
+              now,
+              target: state.setup?.target
             }
           ) })
         ] }),

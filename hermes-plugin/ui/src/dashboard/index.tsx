@@ -130,6 +130,7 @@ function Dashboard() {
               history={state.history}
               live={Boolean(state.status?.connected) && state.status?.stale !== true}
               now={now}
+              target={state.setup?.target}
             />
           </Section>
         </div>

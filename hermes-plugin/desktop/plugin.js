@@ -2170,11 +2170,14 @@ function FocusView({ focus, now }) {
     focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx3("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
   ] });
 }
-function DawUndo({ daw, how }) {
+function undoKeys(target) {
+  const on = typeof target === "string" && target ? target : globalThis.navigator?.userAgent ?? "";
+  return /apple-darwin|Mac/.test(on) ? "Cmd+Z" : "Ctrl+Z";
+}
+function DawUndo({ daw, how, keys }) {
   const t = useT();
   const app = dawName(daw, t);
   if (how === "buried") return /* @__PURE__ */ jsx3(Chip, { title: t("history.byHandTitle", app), children: t("history.byHand", app) });
-  const keys = /Mac/.test(globalThis.navigator?.userAgent ?? "") ? "Cmd+Z" : "Ctrl+Z";
   return /* @__PURE__ */ jsx3(Chip, { title: t("history.dawUndoTitle", app, keys), children: t("history.dawUndo", app, keys) });
 }
 function HistoryView({
@@ -2182,7 +2185,8 @@ function HistoryView({
   now,
   action,
   live = false,
-  daw
+  daw,
+  target
 }) {
   const t = useT();
   const items = history?.items ?? [];
@@ -2205,7 +2209,7 @@ function HistoryView({
           item.note ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) }) : restartedSince(item, live) && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
         )
       ] }),
-      item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? /* @__PURE__ */ jsx3(DawUndo, { daw, how: item.daw_undo }) : action?.(item)
+      item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? /* @__PURE__ */ jsx3(DawUndo, { daw, how: item.daw_undo, keys: undoKeys(target) }) : action?.(item)
     ] }, item.id);
   }) });
 }
@@ -2354,6 +2358,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
               history: state.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,
               now,
+              target: state.setup?.target,
               action: (item) => {
                 const rows = changeOf.get(item);
                 if (!rows || undoRowOf(rows) !== item || !canUndoChange(state.status, rows)) return null;
