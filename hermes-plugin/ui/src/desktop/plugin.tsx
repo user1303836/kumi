@@ -33,6 +33,7 @@ import { callId, Calls, forAnotherProfile, forChatInFront, forThisProfile, paylo
 import { MapWorkspace } from './map.tsx'
 import { MeasurementsWorkspace } from './measurements.tsx'
 import { KumiPane, ownerSession } from './pane.tsx'
+import { PET_LINES, petLine } from './pet.ts'
 import { OPEN_MAP_ON_FIND, SettingsPage } from './settings.tsx'
 export const PLUGIN_ID = 'kumi'
 export const MAP_WORKSPACE = 'kumi-sound-map'
@@ -233,6 +234,21 @@ const plugin: HermesPlugin = {
       closeMeasurements?.()
       audition.dispose()
     })
+
+    // The pet's bubble (newer Desktops): a finished change or job, once the producer turned it on in Kumi's settings.
+    // A store reset (another profile or connection) reads HISTORY afresh, which holds nothing new to say.
+    const pet = ctx.pet
+    if (pet && typeof pet.say === 'function') {
+      let last = store.get()
+      ctx.onDispose(
+        store.subscribe(() => {
+          const now = store.get()
+          const line = ctx.storage.get(PET_LINES, false) && pet.visible.get() ? petLine(last, now, wordsOf(ctx)) : null
+          last = now
+          if (line) pet.say(line.text, { id: line.id, tone: line.tone, ttlMs: 8000 })
+        })
+      )
+    }
 
     const contributions: PluginContribution[] = [
       {

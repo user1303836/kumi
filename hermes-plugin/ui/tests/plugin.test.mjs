@@ -379,3 +379,30 @@ test("with Desktop's plugin i18n it registers Kumi's words, and labels the palet
   assert.equal(palette().length, 3, 'the old labels are gone, not doubled')
   assert.equal(palette()[0], 'Kumi：打开采样地图')
 })
+
+test('the pet says a change as it lands, an undo as it lands, and a job as it ends; nothing on a first read', async () => {
+  const { petLine } = await load('src/desktop/pet.ts')
+  const { english } = await load('src/shared/i18n.ts')
+  const state = (items, jobs = {}) => ({ history: items === null ? null : { items }, jobs })
+  const fader = { id: 'h-1', label: 'c1', title: 'Drums volume −6.0 → −4.0 dB', state: 'applied' }
+  const sample = { id: 'h-2', label: 'c2', title: 'Dusty Snare 04.wav on Drums', state: 'applied' }
+  // The first read of HISTORY (on load, or after another profile) is what was there: nothing just landed.
+  assert.equal(petLine(state(null), state([fader]), english), null)
+  assert.deepEqual(petLine(state([fader]), state([sample, fader]), english), { id: 'change', text: 'Dusty Snare 04.wav on Drums', tone: 'info' })
+  // An undo of a change further down the list.
+  assert.deepEqual(petLine(state([sample, fader]), state([sample, { ...fader, state: 'undone' }]), english), {
+    id: 'change',
+    text: 'Undone: Drums volume −6.0 → −4.0 dB',
+    tone: 'info'
+  })
+  assert.equal(petLine(state([sample, fader]), state([sample, fader]), english), null, 'nothing new, nothing said')
+  // A new row that didn't land isn't announced as one.
+  assert.equal(petLine(state([fader]), state([{ ...sample, state: 'refused' }, fader]), english), null)
+  // A job seen running, then ended.
+  const scan = { job_id: 'j-scan-1', kind: 'scan', state: 'running', ended_at: null }
+  const scanned = { ...scan, state: 'done', ended_at: 1, result: { sounds: 640 } }
+  assert.deepEqual(petLine(state([], { 'j-scan-1': scan }), state([], { 'j-scan-1': scanned }), english), { id: 'job', text: 'Scan done · 640 sounds', tone: 'info' })
+  const failed = { ...scan, state: 'failed', ended_at: 1, error: { reason: 'The folder is gone.' } }
+  assert.equal(petLine(state([], { 'j-scan-1': scan }), state([], { 'j-scan-1': failed }), english).tone, 'error')
+  assert.equal(petLine(state([], { 'j-scan-1': scanned }), state([], { 'j-scan-1': scanned }), english), null, 'said once, not on every read')
+})
