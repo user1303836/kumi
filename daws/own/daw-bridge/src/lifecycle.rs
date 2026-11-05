@@ -333,6 +333,22 @@ pub struct Status {
     pub secret: bool,
 }
 
+/// What an install would do ([`Lifecycle::plan`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Planned {
+    /// The copy in place is this one already, with its reference and Kumi's secret as they should be, and every other
+    /// copy of this home's is this one too: nothing changes.
+    pub in_place: bool,
+    /// Each file or folder it writes in the DAW's folders, whole: the target (unless it's this one already), its
+    /// reference, and each other copy of this home's it brings along with that copy's reference.
+    pub writes: Vec<PathBuf>,
+    /// The copies of this home's it replaces: the target when it's there and isn't this one, and each other copy it
+    /// brings along. Their versions are for the caller to check first (never a downgrade).
+    pub replaced: Vec<PathBuf>,
+    /// What an interrupted action left that it removes first ([`Lifecycle::leftovers`]).
+    pub leftovers: Vec<PathBuf>,
+}
+
 /// One DAW's bridge lifecycle, over Kumi's folder for it.
 pub struct Lifecycle {
     pub paths: BridgePaths,
@@ -365,8 +381,8 @@ impl Lifecycle {
         Ok(self.others(Some(&receipt)).into_iter().find(|other| tree_sha256(&other.path()).is_ok_and(|sha| ours.contains(&sha))))
     }
 
-    /// Every other place there may be a copy of Kumi's bridge, besides the target: the receipt's copies, its target when
-    /// that was elsewhere, and the places given; each once.
+    /// Every other place there may be a copy of this home's bridge, besides the target: the receipt's copies, its target
+    /// when that was elsewhere, and the places given; each once, and only where the copy's reference names this home.
     fn others(&self, receipt: Option<&Receipt>) -> Vec<Target> {
         let here = self.target.path();
         let mut others: Vec<Target> = vec![];
@@ -382,6 +398,7 @@ impl Lifecycle {
                 others.push(target);
             }
         }
+        others.retain(|other| self.owned_here(other));
         others
     }
 
@@ -630,14 +647,38 @@ impl Lifecycle {
         if let Some(parent) = at.reference.parent() {
             std::fs::create_dir_all(parent)?;
         }
+        // Written beside, then renamed into place; one that can't be renamed goes, so nothing is left beside it.
         let temporary = owner::temporary_beside(&at.reference);
-        std::fs::write(&temporary, reference.to_json())?;
-        std::fs::rename(&temporary, &at.reference)?;
+        let written = std::fs::write(&temporary, reference.to_json()).and_then(|()| std::fs::rename(&temporary, &at.reference));
+        if let Err(error) = written {
+            let _ = std::fs::remove_file(&temporary);
+            return Err(error.into());
+        }
         Ok(())
     }
 
+    /// The version of the copy at `path` as this home's receipt knows it: the version in place when the copy is that
+    /// one, else the version of a generation kept with the same files (named `<version>-<ms>`). None when the receipt
+    /// knows no copy with those files.
+    pub fn known_version(&self, path: &Path) -> Option<String> {
+        let receipt = self.receipt().ok().flatten()?;
+        let sha = tree_sha256(path).ok()?;
+        if receipt.sha256.as_deref() == Some(sha.as_str()) && receipt.version.is_some() {
+            return receipt.version;
+        }
+        receipt
+            .generation
+            .iter()
+            .chain(receipt.previous.iter())
+            .find(|generation| {
+                tree_sha256(&self.paths.generations().join(generation).join(&self.target.name)).ok().as_deref() == Some(sha.as_str())
+            })
+            .and_then(|generation| generation.rsplit_once('-').map(|(version, _)| version.to_string()))
+    }
+
     /// Brings each other copy that's still Kumi's (one of `ours`) to `generation` (whose hash is `sha`): the copies kept,
-    /// each now holding it. One gone, or one the producer changed since, is left as it is and no longer counted.
+    /// each now holding it. One gone, or one the producer changed since, is left as it is and no longer counted; so is
+    /// one that isn't this home's (`others` holds only this home's).
     fn follow_copies(&self, others: &[Target], generation: &str, sha: &str, ours: &[String]) -> Result<Vec<Copy>, LifecycleError> {
         let mut copies = vec![];
         for other in others {
@@ -652,6 +693,47 @@ impl Lifecycle {
             copies.push(other.copy());
         }
         Ok(copies)
+    }
+
+    /// Whether the copy at `at` is this home's: the reference beside it names this home's secret (its folder compared
+    /// on disk, links resolved, so another spelling of the same folder is the same). Another Kumi home's copy (its
+    /// reference names that home's), or one whose reference is gone, is never followed, replaced or removed, whatever
+    /// its files: an equal payload isn't ownership.
+    fn owned_here(&self, at: &Target) -> bool {
+        let canonical = |secret: &Path| {
+            let folder = secret.parent().and_then(|folder| std::fs::canonicalize(folder).ok());
+            folder.zip(secret.file_name()).map(|(folder, name)| folder.join(name))
+        };
+        Reference::read(&at.reference).is_ok_and(|reference| {
+            let (named, ours) = (Path::new(&reference.secret_file), self.paths.secret());
+            named == ours || canonical(named).is_some_and(|named| Some(named) == canonical(&ours))
+        })
+    }
+
+    /// What [`recover`](Self::recover) removes before an action, found without removing anything: an interrupted
+    /// action's leftovers (its journal's), old copies a running DAW held (`<name>.kumi-old-*` beside the target), and
+    /// Kumi's folder made aside and never put in place.
+    pub fn leftovers(&self) -> Vec<PathBuf> {
+        let there = |path: &Path| std::fs::symlink_metadata(path).is_ok();
+        let mut found: Vec<PathBuf> = std::fs::read_to_string(self.paths.journal())
+            .ok()
+            .and_then(|text| serde_json::from_str::<Journal>(&text).ok())
+            .map(|journal| journal.leftovers.into_iter().map(PathBuf::from).filter(|path| there(path)).collect())
+            .unwrap_or_default();
+        let mut named = |dir: &Path, prefix: &str| {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                found.extend(
+                    entries.flatten().filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix)).map(|entry| entry.path()),
+                );
+            }
+        };
+        named(&self.target.dir, &format!("{}.kumi-old-", self.target.name));
+        if let (Some(parent), Some(name)) = (self.paths.root.parent(), self.paths.root.file_name()) {
+            named(parent, &format!(".{}.tmp-", name.to_string_lossy()));
+        }
+        found.sort();
+        found.dedup();
+        found
     }
 
     fn prune(&self, receipt: &Receipt) {
@@ -684,6 +766,55 @@ impl Lifecycle {
         self.write_receipt(&receipt)?;
         self.prune(&receipt);
         Ok(receipt)
+    }
+
+    /// What [`install`](Self::install) of `source` would do, read from files alone: nothing is made, locked, recovered
+    /// or written. Kumi's own folder of the bridge (`<kumi home>/bridges/<daw>`) is written besides.
+    pub fn plan(&self, source: &Path) -> Result<Planned, LifecycleError> {
+        let before = self.receipt()?.filter(|receipt| receipt.status == "installed");
+        let sha = tree_sha256(source)?;
+        let here = self.target.path();
+        let ours = before.as_ref().map(|before| self.ours(before)).unwrap_or_default();
+        let others = self.others(before.as_ref());
+        let found = |other: &Target| tree_sha256(&other.path()).ok();
+        let behind = |other: &Target| found(other).is_some_and(|found| found != sha && ours.contains(&found));
+        let in_place =
+            before.as_ref().is_some_and(|before| before.target == here.to_string_lossy() && before.sha256.as_deref() == Some(sha.as_str()))
+                && tree_sha256(&here).ok().as_deref() == Some(sha.as_str());
+        // What the bridge needs beside its files to reach Kumi: `put` writes them even when the copy is in place.
+        let ready = Reference::read(&self.target.reference)
+            .is_ok_and(|reference| reference == Reference::new(self.target.daw, &self.paths))
+            && crate::files::read_secret(&self.paths.secret()).is_ok();
+        if in_place && ready && !others.iter().any(behind) {
+            return Ok(Planned { in_place: true, writes: vec![], replaced: vec![], leftovers: vec![] });
+        }
+        let (mut writes, mut replaced) = (vec![], vec![]);
+        let mut add = |path: PathBuf| {
+            if !writes.iter().any(|written: &PathBuf| path.starts_with(written)) {
+                writes.push(path);
+            }
+        };
+        if !in_place {
+            add(here.clone());
+            if std::fs::symlink_metadata(&here).is_ok() {
+                replaced.push(here.clone());
+            }
+        }
+        add(self.target.reference.clone());
+        // As `follow_copies` does, over this home's copies only: each one that's this one already gets its reference;
+        // one that's an earlier copy of Kumi's is replaced; any other is left as it is.
+        for other in &others {
+            match found(other) {
+                Some(found) if found == sha => add(other.reference.clone()),
+                Some(_) if behind(other) => {
+                    add(other.path());
+                    add(other.reference.clone());
+                    replaced.push(other.path());
+                }
+                _ => {}
+            }
+        }
+        Ok(Planned { in_place: false, writes, replaced, leftovers: self.leftovers() })
     }
 
     /// Installs `source` (the bridge's file or folder) as `version`, or upgrades to it when installed already: the
@@ -1100,6 +1231,61 @@ mod tests {
         assert_eq!(read(changed.target.path().join("main.lua")), "-- the producer's\n");
     }
 
+    // Standalone `kumi bridge` too: uninstalling leaves another Kumi home's copy in another Renoise folder (its reference
+    // names that home), and a copy whose reference is gone, as they are; an equal payload isn't this home's.
+    #[test]
+    fn uninstall_leaves_another_homes_copy_and_one_that_names_no_home() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = |name: &str| {
+            let tools = root.path().join("prefs").join(name).join("Scripts").join("Tools");
+            std::fs::create_dir_all(&tools).unwrap();
+            Target {
+                dir: tools.clone(),
+                reference: tools.join("com.kumi.Bridge.xrnx").join("bridge-reference.json"),
+                ..renoise(root.path()).target
+            }
+        };
+        let (mine, theirs, bare) = (folder("V3.5.4"), folder("V3.5.5"), folder("V3.5.6"));
+        let source = bridge_folder(root.path(), "1.0");
+        Lifecycle::new(&root.path().join("other-kumi"), theirs.clone()).install(&source, "1.0").unwrap();
+        let life = Lifecycle::new(&root.path().join("kumi"), mine.clone()).with_elsewhere(vec![theirs.clone(), bare.clone()]);
+        life.install(&source, "1.0").unwrap();
+        assert!(life.receipt().unwrap().unwrap().copies.is_empty(), "the other home's copy wasn't taken over");
+        copy_tree(&mine.path(), &bare.path(), false, false).unwrap();
+        std::fs::remove_file(&bare.reference).unwrap();
+        let their_reference = read(theirs.reference.clone());
+        life.uninstall(false).unwrap();
+        assert!(!mine.path().exists());
+        assert_eq!(read(theirs.reference.clone()), their_reference, "the other home's copy still names it");
+        assert!(theirs.path().join("main.lua").is_file());
+        assert!(bare.path().join("main.lua").is_file(), "a copy that names no home stays");
+    }
+
+    // A home reached through a link is the same home: a copy whose reference names it the other way (the tool Renoise
+    // carried into its newer folder, the first folder gone) is still this home's, and an update finds it.
+    #[cfg(unix)]
+    #[test]
+    fn a_copy_naming_this_home_through_a_link_is_still_this_homes() {
+        let root = tempfile::tempdir().unwrap();
+        let real = root.path().join("kumi");
+        std::fs::create_dir_all(&real).unwrap();
+        let alias = root.path().join("kumi-link");
+        std::os::unix::fs::symlink(&real, &alias).unwrap();
+        let first = renoise(root.path());
+        Lifecycle::new(&alias, first.target.clone()).install(&bridge_folder(root.path(), "1.0"), "1.0").unwrap();
+        let tools = root.path().join("prefs").join("V3.5.5").join("Scripts").join("Tools");
+        std::fs::create_dir_all(&tools).unwrap();
+        let newer = Target {
+            dir: tools.clone(),
+            reference: tools.join("com.kumi.Bridge.xrnx").join("bridge-reference.json"),
+            ..first.target.clone()
+        };
+        copy_tree(&first.target.path(), &newer.path(), false, false).unwrap();
+        remove_tree(&first.target.path()).unwrap();
+        let found = Lifecycle::new(&real, first.target.clone()).with_elsewhere(vec![newer.clone()]).found().unwrap();
+        assert_eq!(found.map(|target| target.path()), Some(newer.path()), "the copy names this home through its link");
+    }
+
     // Review H13: a link in the tool folder once stopped an upgrade that would keep it.
     #[cfg(unix)]
     #[test]
@@ -1154,6 +1340,59 @@ mod tests {
         // (the install, its folder taken, may fail: what it would have done doesn't matter here)
         let _ = first.join().unwrap();
         assert!(owner::is_owner_only(&taken));
+    }
+
+    // A reference that can't be renamed into place (a folder is where it goes) fails the action, and the temporary
+    // written beside it goes too: nothing is left beside the bridge.
+    #[test]
+    fn a_reference_that_cant_be_put_back_leaves_nothing_beside_it() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("REAPER").join("UserPlugins");
+        let target = Target {
+            daw: Daw::Reaper,
+            dir: plugins.clone(),
+            name: "reaper_kumi.dylib".into(),
+            folder: false,
+            reference: plugins.join("kumi-bridge-reference.json"),
+        };
+        let life = Lifecycle::new(&root.path().join("kumi"), target.clone());
+        let source = root.path().join("reaper_kumi.dylib");
+        std::fs::write(&source, b"one").unwrap();
+        life.install(&source, "1.0").unwrap();
+        std::fs::remove_file(&target.reference).unwrap();
+        std::fs::create_dir(&target.reference).unwrap();
+        std::fs::write(target.reference.join("a file"), b"so it isn't empty").unwrap();
+        assert!(life.install(&source, "1.0").is_err());
+        let beside: Vec<String> =
+            std::fs::read_dir(&plugins).unwrap().flatten().map(|entry| entry.file_name().to_string_lossy().into_owned()).collect();
+        assert!(beside.iter().all(|name| !name.contains(".tmp-")), "{beside:?}");
+    }
+
+    // A copy's version is what the receipt knows of exactly its files: the one in place, else a generation kept with
+    // the same files (an earlier version's copy left in another folder); files it doesn't know have none.
+    #[test]
+    fn a_copys_version_is_the_one_the_receipt_knows_its_files_by() {
+        let root = tempfile::tempdir().unwrap();
+        let plugins = root.path().join("REAPER").join("UserPlugins");
+        let target = Target {
+            daw: Daw::Reaper,
+            dir: plugins.clone(),
+            name: "reaper_kumi.dylib".into(),
+            folder: false,
+            reference: plugins.join("kumi-bridge-reference.json"),
+        };
+        let life = Lifecycle::new(&root.path().join("kumi"), target.clone());
+        let source = root.path().join("reaper_kumi.dylib");
+        std::fs::write(&source, b"one").unwrap();
+        life.install(&source, "1.0.0").unwrap();
+        std::fs::write(&source, b"two").unwrap();
+        life.install(&source, "2.0.0").unwrap();
+        assert_eq!(life.known_version(&target.path()).as_deref(), Some("2.0.0"));
+        let copy = root.path().join("elsewhere.dylib");
+        std::fs::write(&copy, b"one").unwrap();
+        assert_eq!(life.known_version(&copy).as_deref(), Some("1.0.0"), "a kept generation's files");
+        std::fs::write(&copy, b"three").unwrap();
+        assert_eq!(life.known_version(&copy), None, "files the receipt doesn't know");
     }
 
     #[test]

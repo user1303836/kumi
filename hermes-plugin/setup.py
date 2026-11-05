@@ -547,6 +547,9 @@ def _component(result: Any) -> dict:
     if (home is not None and not _plain(home, _MAX_PATH)) or not all(_plain(name, 200) for name in named):
         raise SetupError("bad_runtime_reply", "Kumi's runtime named its DAW component or its owner in text setup "
                                               "can't show.")
+    digest = result.get("digest")
+    if digest is not None and not (isinstance(digest, str) and re.fullmatch(r"[0-9a-f]{64}", digest)):
+        raise SetupError("bad_runtime_reply", "Kumi's runtime gave its DAW step a digest setup can't check.")
     return result
 
 
@@ -948,8 +951,12 @@ def _allow_ffmpeg(approved: Mapping[str, Any], data_dir: Path) -> str:
 def _install_component(approved: dict, setup_daw: Callable[[dict], Any] | None, data_dir: Path) -> str:
     if setup_daw is None:
         raise SetupError("needs_runtime_client", "Setup needs Kumi's runtime for the DAW step.")
-    done = _ask_runtime(setup_daw, {"daw": approved["daw"], "dry_run": False},
-                        f"Installing Kumi's part in {DAWS[approved['daw']]} failed")
+    # The runtime installs only the plan that was approved (C8): it plans again under the DAW's lease, and refuses
+    # (`changed`) when that plan's digest isn't the approved one's.
+    args = {"daw": approved["daw"], "dry_run": False}
+    if (approved.get("component") or {}).get("digest"):
+        args["expected"] = approved["component"]["digest"]
+    done = _ask_runtime(setup_daw, args, f"Installing Kumi's part in {DAWS[approved['daw']]} failed")
     _record_component(data_dir, approved["daw"], done, installed_at=done.get("installed_at") or _now_ms())
     after = {"choose_control_surface": " In Live, choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI).",
              "restart_daw": f" Restart {DAWS[approved['daw']]} to load it.",

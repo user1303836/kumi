@@ -17,6 +17,7 @@ pub mod lease;
 pub mod mcp;
 pub mod read;
 pub mod registry;
+pub mod setup;
 pub mod snapshots;
 
 mod core;

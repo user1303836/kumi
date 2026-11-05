@@ -63,6 +63,7 @@ mod print;
 mod report;
 mod serve;
 mod serve_daw;
+mod serve_setup;
 mod session;
 mod session_thread;
 mod spinner;

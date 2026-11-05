@@ -3,6 +3,7 @@
 //! for the DAW to answer, and chatting without it in its words. What a DAW says back is data (words, setup's step, the
 //! doctor's checks); its install, update, rollback and removal steps run through the app's ports ([`DawIo`]).
 use crate::check::{Check, Probe};
+use crate::component::{ApplyError, ComponentPlan};
 use crate::io::{Answers, DawIo};
 use crate::setup::{DawSetup, SetupSession};
 use futures::future::LocalBoxFuture;
@@ -23,6 +24,7 @@ use kumi_types::{
 };
 use std::{
     cell::RefCell,
+    path::Path,
     rc::{Rc, Weak},
 };
 
@@ -297,4 +299,19 @@ pub trait DawProvider {
     fn toggle_words(&self) -> Option<ToggleWords>;
     /// Chatting without the DAW, in its words.
     fn without_daw(&self, on_connection: Rc<dyn Fn(ConnectionState)>) -> Rc<dyn Integration>;
+    /// Kumi's part in the DAW for the Kumi home `home` (an agent host's, `kumi serve --kumi-home`), as that host's setup
+    /// puts it there: how it stands and every path putting it in writes, read from files alone (nothing is written,
+    /// unpacked or started). Its owner is told as [`DawProvider::bridge_owner`] tells it. Err: why it can't be planned
+    /// here (the DAW isn't on this computer, this Kumi brings no part for it), in words. None by default.
+    fn component_plan(&self, io: &DawIo, home: &Path) -> Result<ComponentPlan, String> {
+        let _ = (io, home);
+        Err(format!("Kumi can't set up {} for an agent host yet.", self.profile().words.app))
+    }
+    /// Carries out `plan`, just made by [`DawProvider::component_plan`] for `home`: writes exactly its paths and
+    /// nothing else, asks nothing, and neither starts, quits nor waits for the DAW. A plan with no paths writes nothing.
+    fn component_apply<'a>(&'a self, io: &'a DawIo, home: &'a Path, plan: &'a ComponentPlan) -> LocalBoxFuture<'a, Result<(), ApplyError>> {
+        let _ = (io, home, plan);
+        let app = self.profile().words.app;
+        Box::pin(async move { Err(ApplyError::Failed(format!("Kumi can't set up {app} for an agent host yet."))) })
+    }
 }
