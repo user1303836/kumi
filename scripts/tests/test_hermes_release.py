@@ -104,7 +104,9 @@ USAGE = (f'kumi serve: unknown argument "{pin.PROBE}" (try --help)\n'
 OPTIONS = ["--daw", "--hermes-home", "--hermes-root", "--kumi-home", "--library-root", "--media-root", "--state-dir",
            "--stdio", "--tool"]
 LISTING = {"serve_operations": ["change", "connect", "generate", "status"],
-           "generate_kinds": ["audio_to_midi", "sfx"], "ledger_policy_keys": ["audio_to_midi", "sfx"]}
+           "generate_kinds": ["audio_to_midi", "sfx"], "ledger_policy_keys": ["audio_to_midi", "sfx"],
+           "listen_sources": {"ableton": ["artifact", "file", "sound"], "reaper": ["artifact", "file", "sound", "track"],
+                              "renoise": []}}
 
 
 def run(github: FakeGitHub, *args: str, probe=None, lister=None) -> tuple[int, str]:
@@ -128,9 +130,32 @@ def generate(kinds: list[str] | None, keys: list[str] | None) -> dict:
     return tool
 
 
-# Each DAW lists something the others don't, so only a union over the three gets it all.
-TOOLS = {"ableton": [{"name": "status"}, {"name": "change"}],
-         "reaper": [{"name": "status"}, {"name": "connect"}, generate(["sfx", "audio_to_midi"], ["sfx", "audio_to_midi"])],
+# serve's listen as tools/list describes it: a source that's a file, a revision-scoped sound or an artifact, and since
+# CC-2 also one with a track or the mix over a beat window.
+FILE_SOURCE = {"type": "object", "properties": {"file": {"type": "string"}, "sound_id": {"type": "string"},
+                                                "map_revision": {"type": "string"}, "artifact_id": {"type": "string"}}}
+FILES_ONLY = {"type": "object", "required": ["source"], "properties": {"source": FILE_SOURCE, "compare_to": FILE_SOURCE}}
+WITH_TRACK = {"type": "object", "oneOf": [FILES_ONLY, {
+    "type": "object", "required": ["source"], "properties": {"source": {
+        "type": "object", "required": ["track", "from_beat", "beats"],
+        "properties": {"track": {"oneOf": [{"required": ["ref"]}, {"required": ["mix"]}]},
+                       "from_beat": {"type": "number"}, "beats": {"type": "number"}}}}}]}
+
+
+def listen(schema: dict, sources: object = None) -> dict:
+    """A `listen` tool with `schema` as its input schema and `sources` as its `_meta` kumi/listen_sources (`None`: left
+    out, as a runtime from before core-gap item 2 does)."""
+    tool: dict = {"name": "listen", "inputSchema": schema}
+    if sources is not None:
+        tool["_meta"] = {"kumi/listen_sources": sources}
+    return tool
+
+
+# Each DAW lists something the others don't, so only a union over the three gets it all. Each DAW's listen is its own:
+# Live's from a runtime that declares nothing (files only, from the schema), REAPER's declared with a track.
+TOOLS = {"ableton": [{"name": "status"}, {"name": "change"}, listen(FILES_ONLY)],
+         "reaper": [{"name": "status"}, {"name": "connect"}, generate(["sfx", "audio_to_midi"], ["sfx", "audio_to_midi"]),
+                    listen(WITH_TRACK, ["track", "file", "sound", "artifact"])],
          "renoise": [{"name": "status"}, generate(["video_to_sfx", "sfx"], ["video_to_sfx"])]}
 
 
@@ -233,13 +258,16 @@ class PinTest(unittest.TestCase):
         self.assertEqual(run(self.github, VERSION, "--out", str(self.out))[0], 0)
         self.assertEqual(run(self.github, VERSION, "--out", str(self.out), "--check")[0], 0)
         written = json.loads(self.out.read_text())
-        for edit in ("sha256", "serve_options", "serve_operations", "generate_kinds", "ledger_policy_keys"):
+        for edit in ("sha256", "serve_options", "serve_operations", "generate_kinds", "ledger_policy_keys",
+                     "listen_sources"):
             with self.subTest(edit):
                 edited = copy.deepcopy(written)
                 if edit == "sha256":
                     edited["targets"]["x86_64-apple-darwin"]["sha256"] = "e" * 64
                 elif edit == "serve_options":
                     edited["serve_options"] = [*OPTIONS, "--newer-than-the-release"]
+                elif edit == "listen_sources":
+                    edited["listen_sources"]["ableton"] = ["artifact", "file", "sound", "track"]
                 else:
                     edited[edit] = [*LISTING[edit], "newer_than_the_release"]
                 self.out.write_text(json.dumps(edited))
@@ -292,9 +320,14 @@ class PinTest(unittest.TestCase):
         written = json.loads(self.out.read_text())
         self.assertEqual(written["serve_options"], OPTIONS)
         self.assertEqual((written["serve_operations"], written["generate_kinds"], written["ledger_policy_keys"]),
-                         (["change", "connect", "generate", "status"], ["audio_to_midi", "sfx", "video_to_sfx"],
-                          ["audio_to_midi", "sfx", "video_to_sfx"]),
+                         (["change", "connect", "generate", "listen", "status"],
+                          ["audio_to_midi", "sfx", "video_to_sfx"], ["audio_to_midi", "sfx", "video_to_sfx"]),
                          "sorted unions over the DAWs: what one DAW lists counts")
+        self.assertEqual(written["listen_sources"],
+                         {"ableton": ["artifact", "file", "sound"], "reaper": ["artifact", "file", "sound", "track"],
+                          "renoise": []},
+                         "each DAW's own, sorted: Live's read from its files-only schema, REAPER's as it declares "
+                         "them, nothing where no listen is listed")
         self.github = FakeGitHub()
         self.github.replace_bundle(target, tar_xz({**files(target), pin.executable(target): stand_in(
             tools={daw: [{"name": "status"}] for daw in pin.DAWS})}))
@@ -302,9 +335,10 @@ class PinTest(unittest.TestCase):
                              lister=pin.serve_listing)[0], 0)
         written = json.loads(self.out.read_text())
         self.assertEqual((written["generate_kinds"], written["ledger_policy_keys"]), ([], []), "no generate: none")
+        self.assertEqual(written["listen_sources"], {daw: [] for daw in pin.DAWS}, "no listen: nothing")
 
     @unittest.skipIf(os.name == "nt", "the stand-in runtime is a POSIX script")
-    def test_a_runtime_that_isnt_the_pinned_one_or_doesnt_list_its_operations_kinds_and_keys_is_refused(self) -> None:
+    def test_a_runtime_that_isnt_the_pinned_one_or_doesnt_say_what_its_operations_take_is_refused(self) -> None:
         target = pin.host_target()
         status = [{"name": "status"}]
         for runtime, said in ((stand_in(version="1.24.65"), "not kumi-serve 1.24.66"),
@@ -316,7 +350,15 @@ class PinTest(unittest.TestCase):
                               (stand_in(tools={**TOOLS, "renoise": [*status, generate(["sfx"], None)]}),
                                "names no kumi/ledger_policy_keys"),
                               (stand_in(tools={**TOOLS, "renoise": [*status, generate(["sfx"], [])]}),
-                               "names no kumi/ledger_policy_keys")):
+                               "names no kumi/ledger_policy_keys"),
+                              (stand_in(tools={**TOOLS, "renoise": [*status, listen(WITH_TRACK)]}),
+                               "offers a track or the mix but doesn't say"),
+                              (stand_in(tools={**TOOLS, "renoise": [*status, listen(FILES_ONLY, [])]}),
+                               "names no kumi/listen_sources"),
+                              (stand_in(tools={**TOOLS, "renoise": [*status, listen(FILES_ONLY, ["file", "stems"])]}),
+                               "sources this script doesn't know: stems"),
+                              (stand_in(tools={**TOOLS, "renoise": [*status, listen({"type": "object"})]}),
+                               "names no source it takes")):
             with self.subTest(said):
                 self.github = FakeGitHub()
                 self.out.unlink(missing_ok=True)
