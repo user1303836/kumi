@@ -1509,10 +1509,10 @@ fn candidates_go_back_to_where_the_goal_first_found_them_across_a_leap() {
     });
 }
 
-/// (#399) A candidate tidied away or deleted has nothing to go back to, and that needs no word. Nothing goes to the track now at
-/// its old place either, though that track's devices have the same names, and though Live says nothing of who they are.
+/// (#399) A candidate tidied away or deleted is untouched, as is the track now at its old place. When Live gives no device
+/// identities, that reused position is indistinguishable from a rename: the uncertainty is said, with no device changed.
 #[test]
-fn a_track_thats_gone_is_skipped_without_a_word() {
+fn a_track_thats_gone_is_untouched_and_an_unidentified_old_position_is_reported() {
     for (gone_first, identities) in [(false, true), (true, true), (true, false)] {
         on_a_paused_clock(async {
             let case = format!("gone first {gone_first}, identities {identities}");
@@ -1520,6 +1520,7 @@ fn a_track_thats_gone_is_skipped_without_a_word() {
             let live = Live::new(&if gone_first { [gone, other] } else { [other, gone] }).await;
             live.set.identities.set(identities);
             live.set.turn("Other", "Synth", "Tone", 0.3);
+            live.set.turn("Other", "Limiter", "Gain", 0.1);
             let goal = live.goal(&["Gone"]).await;
             let slot = slot_named(&goal, "Gone");
             goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
@@ -1528,9 +1529,17 @@ fn a_track_thats_gone_is_skipped_without_a_word() {
 
             let said = goal.put_back(Signal::new()).await;
 
-            assert!(said.is_empty(), "{case}: {said:?}");
+            if identities || !gone_first {
+                assert!(said.is_empty(), "{case}: {said:?}");
+            } else {
+                // Without device identities a deletion followed by a track at the old place is indistinguishable
+                // from a rename: report the uncertainty without claiming that anything definitely remains.
+                assert_eq!(said.len(), 1, "{case}: {said:?}");
+                assert!(said[0].contains("didn't identify the devices from “Gone”") && said[0].contains("may still"), "{case}: {said:?}");
+            }
             assert_eq!(live.set.knob("Other", "Synth", "Tone"), 0.3, "{case}: the track now at its place");
             assert_eq!(live.set.chain("Other"), ["Synth", "Limiter"], "{case}: and its own Limiter");
+            assert_eq!(live.set.knob("Other", "Limiter", "Gain"), 0.1, "{case}: its own Limiter's gain is untouched too");
         });
     }
 }
@@ -1701,24 +1710,46 @@ fn a_knob_first_moved_after_a_leap_goes_back_to_its_own_value() {
     });
 }
 
-/// (#399) A candidate renamed during the search is still there at the search's values: its knobs are found at its old place by
-/// who their devices are, and it goes back. Nothing else at that place would answer to them.
+/// (#399, #789) A candidate renamed during the search goes back by its devices' identities. Without them, both the values
+/// and the limiter that may remain are said, and devices that could belong to another track are left untouched.
 #[test]
-fn a_candidate_renamed_during_the_search_still_goes_back() {
-    on_a_paused_clock(async {
-        let live = Live::new(&[("Candidate", &["Synth"])]).await;
-        let goal = live.goal(&["Candidate"]).await;
-        let slot = slot_named(&goal, "Candidate");
-        goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
-        goal.close().await.unwrap();
-        live.set.rename_track("Candidate", "Renamed");
+fn a_renamed_candidate_goes_back_by_its_devices_identities_or_says_what_may_remain() {
+    for (identities, moved) in [(true, true), (false, true), (false, false)] {
+        on_a_paused_clock(async {
+            let live = Live::new(&[("Candidate", &["Synth"])]).await;
+            live.set.identities.set(identities);
+            let goal = live.goal(&["Candidate"]).await;
+            if moved {
+                let slot = slot_named(&goal, "Candidate");
+                goal.generation(&[trial(&slot, &[("Synth", "Tone", 0.6)])], Signal::new(), None).await.unwrap();
+            }
+            goal.close().await.unwrap();
+            live.set.rename_track("Candidate", "Renamed");
+            let writes = live.set.asked_for("live_device_parameter_apply");
+            let deletes = live.set.asked_for("live_device_delete_apply");
 
-        let said = goal.put_back(Signal::new()).await;
+            let said = goal.put_back(Signal::new()).await;
 
-        assert!(said.is_empty(), "{said:?}");
-        assert_eq!(live.set.knob("Renamed", "Synth", "Tone"), 0.5);
-        assert_eq!(live.set.chain("Renamed"), ["Synth"]);
-    });
+            if identities {
+                assert!(said.is_empty(), "{said:?}");
+                assert_eq!(live.set.knob("Renamed", "Synth", "Tone"), 0.5);
+                assert_eq!(live.set.chain("Renamed"), ["Synth"]);
+            } else {
+                assert_eq!(said.len(), 1, "the uncertainty is said once: {said:?}");
+                assert!(
+                    said[0].contains("didn't identify the devices from “Candidate”")
+                        && said[0].contains("Limiter may still be turned down"),
+                    "{said:?}"
+                );
+                assert_eq!(said[0].contains("Synth Tone may still have the search's values"), moved, "{said:?}");
+                assert_eq!(live.set.knob("Renamed", "Synth", "Tone"), if moved { 0.6 } else { 0.5 });
+                assert_eq!(live.set.chain("Renamed"), ["Synth", "Limiter"]);
+                assert_eq!(live.set.knob("Renamed", "Limiter", "Gain"), 0.25);
+                assert_eq!(live.set.asked_for("live_device_parameter_apply"), writes, "no unidentified device is written");
+                assert_eq!(live.set.asked_for("live_device_delete_apply"), deletes, "no unidentified device is deleted");
+            }
+        });
+    }
 }
 
 /// A goal without Kumi Ears holds its recording between passes, so nothing waits on stopping it: Live shows a take only once it

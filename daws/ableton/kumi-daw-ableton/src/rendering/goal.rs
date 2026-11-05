@@ -75,6 +75,10 @@ struct Back {
     turned: Vec<String>,
     /// The knobs Live wouldn't take back.
     refused: Vec<String>,
+    /// A renamed or missing track was found only at its old position, and Live gave no device identity for these knobs.
+    unidentified: Vec<String>,
+    /// The same uncertainty for a safety limiter recorded without a device identity.
+    unidentified_limiter: bool,
 }
 #[derive(Clone)]
 struct Knobs {
@@ -645,13 +649,20 @@ impl Goal {
         let mut names = HashMap::new();
         let mut leaving = vec![];
         for (word, moved) in &candidate.moved {
+            let name = format!("{} {}", device_of(&moved.knob), moved.knob.name);
+            if only_its_own && moved.knob.device_id.is_none() {
+                if !near(&moved.knob, moved.from, moved.to) {
+                    said.unidentified.push(name);
+                }
+                leaving.push(word.clone());
+                continue;
+            }
             // (a knob with no place now can't be put back, and its device going was someone's choice)
-            let found = knob_now(&read, &moved.knob).filter(|_| !only_its_own || moved.knob.device_id.is_some());
+            let found = knob_now(&read, &moved.knob);
             let Some((_, now)) = found else {
                 leaving.push(word.clone());
                 continue;
             };
-            let name = format!("{} {}", device_of(&moved.knob), moved.knob.name);
             if !near(now, now.value, moved.to) {
                 said.turned.push(name);
             } else if !near(now, moved.from, moved.to) {
@@ -673,6 +684,7 @@ impl Goal {
         said.refused.sort();
         candidate.moved.retain(|word, _| !leaving.contains(word));
         // Last, from the end of the chain. One that won't come off doesn't stay turned down, and it's said.
+        said.unidentified_limiter = only_its_own && candidate.limiters.iter().any(String::is_empty);
         let mine: Vec<String> = candidate.limiters.iter().filter(|identity| !only_its_own || !identity.is_empty()).cloned().collect();
         let mut stuck = vec![];
         for identity in mine.iter().rev() {
@@ -1049,7 +1061,11 @@ impl GoalRig for Goal {
             match self.put_candidate_back(reference, &mut candidate, only_its_own, signal.clone()).await {
                 Ok(back) => {
                     if !back.turned.is_empty() {
-                        said.push(format!("“{name}” is back as it was, except that {}.", you_turned(&name, &back.turned)));
+                        said.push(if !back.unidentified.is_empty() || back.unidentified_limiter {
+                            format!("“{name}” could only be put back in part: {}.", you_turned(&name, &back.turned))
+                        } else {
+                            format!("“{name}” is back as it was, except that {}.", you_turned(&name, &back.turned))
+                        });
                     }
                     if !back.refused.is_empty() {
                         said.push(format!(
@@ -1057,6 +1073,19 @@ impl GoalRig for Goal {
                             back.refused.join(", "),
                             if back.refused.len() == 1 { "it" } else { "them" },
                             if back.refused.len() == 1 { "it" } else { "them" }
+                        ));
+                    }
+                    if !back.unidentified.is_empty() || back.unidentified_limiter {
+                        let mut left = vec![];
+                        if !back.unidentified.is_empty() {
+                            left.push(format!("{} may still have the search's values", back.unidentified.join(", ")));
+                        }
+                        if back.unidentified_limiter {
+                            left.push("Kumi's safety Limiter may still be turned down".to_string());
+                        }
+                        said.push(format!(
+                            "Live didn't identify the devices from “{name}” at its old track position, so {}. Check the former candidate.",
+                            left.join("; ")
                         ));
                     }
                     if !candidate.limiters.is_empty() {
