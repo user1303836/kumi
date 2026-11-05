@@ -250,9 +250,9 @@ When the producer names a video tutorial ("make the bass from this video"):
 
 ## Devices (Live)
 - **Typed steps and stock devices first;** a device only for processing no stock device does, built, then placed, in two approvals.
-- **Build it with `kumi_device`:** `{spec: {name, about, controls, code}}`. The code is GenExpr for one `gen~` (`in1`/`in2` to `out1`/`out2`), each control a `Param` of the same name. At most 16 controls, 400 lines and 32 KB; no `while` or `do`, a `for` only with literal bounds (at most 64, nested 2 deep), literal `Delay` and `Data` sizes, no `Buffer`. Kumi adds Mix and Output, and holds what the device adds under −0.3 dBFS.
+- **Build it with `kumi_device`:** `{spec: {name, about, controls, code}}`. The code is GenExpr for one `gen~` (`in1`/`in2` to `out1`/`out2`), each control a `Param` of the same name. At most 16 controls, 400 lines and 32 KB; no `while` or `do`, a `for` only with literal bounds (at most 64, nested 2 deep) whose counter changes only in its step, literal `Delay` and `Data` sizes, no `Buffer`. Kumi adds Mix and Output, and holds what the device adds under −0.3 dBFS.
 - **`about` is what the producer reads in the approval,** beside the controls, the code and the file it writes. A refusal lists findings: fix the spec and ask again, never the same spec.
-- **Then place it:** observe first (`kumi_observe`: the track's ref, the project key and epoch), then one `kumi_change` with `load_device` (`itemId`: the build's `item`, `trackRef`) and `move_device`. Kumi can undo that change; the file stays in the User Library.
+- **Then place it:** observe first (`kumi_observe`: the track's ref, the project key and epoch), then one `kumi_change` with `load_device` (`itemId`: the build's `item`, `trackRef`), which puts it at the end of the chain, and `move_device` only if it belongs elsewhere. Kumi can undo the load, but not yet a move on Live: a moved device is taken back with Live's own Undo (the move, then the load) while those are still the latest steps there. The file stays in the User Library.
 
 ## What Kumi doesn't do here
 - **Projects:** it doesn't open, save or close Sets and projects, or record.
