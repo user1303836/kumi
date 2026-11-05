@@ -11,6 +11,7 @@ import support
 
 policy = support.module("policy")
 runtime = support.module("runtime")
+tools = support.module("tools")
 
 PROJECT = {"expected_project_key": "live:night-drive", "expected_epoch": "1"}
 
@@ -50,7 +51,7 @@ class Approvals(unittest.TestCase):
         self.ctx.cron_execution = object()  # Hermes's ctx.current_cron_execution(): a cron run is executing now
         for tool, args in calls.items():  # with the producer's chat's runtime running, whatever Hermes would allow
             decision = self.hook(tool, args)
-            self.assertEqual((decision["action"], decision["message"]), ("block", policy.SCHEDULED), tool)
+            self.assertEqual((decision["action"], decision["message"]), ("block", tools.SCHEDULED), tool)
         self.assertIsNone(self.hook("kumi_status", {}))
         published = support.call(self.host, "kumi_status", {}, session_id="cron-1")
         self.assertEqual((published["connected"], published["project"]["name"]), (True, "Night Drive"))
@@ -68,6 +69,26 @@ class Approvals(unittest.TestCase):
             self.assertIsNone(self.hook("kumi_connect", {}), "a one-shot query still connects")
             self.assertIsNone(self.hook("kumi_observe", {"scope": "focus"}), "and reads")
 
+    def test_an_api_call_or_a_webhook_never_runs_what_needs_an_approval_and_desktop_still_asks(self):
+        for surface in ("api_server", "webhook", "msgraph_webhook"):  # Hermes's ctx.session_surface()
+            with self.subTest(surface=surface):
+                self.ctx.surface = surface
+                self.assertEqual(self.hook("kumi_change", change())["message"], policy.UNATTENDED)
+                self.assertIsNone(self.hook("kumi_observe", {"scope": "focus"}), "reads still answer")
+        self.ctx.surface = "desktop"
+        self.assertEqual(self.hook("kumi_change", change())["action"], "approve")
+
+    def test_when_hermes_cant_say_whether_its_a_scheduled_job_its_taken_as_one(self):
+        self.ctx.cron_execution = RuntimeError("the plugin host's channel is gone")
+        self.assertEqual(self.hook("kumi_change", change())["message"], tools.SCHEDULED)
+
+    def test_a_scheduled_job_is_refused_by_the_handler_too_when_the_hook_didnt_run(self):
+        before = support.requests(self.data / "state")
+        self.ctx.cron_execution = object()
+        answer = support.handle(self.host, "kumi_observe", {"scope": "focus"}, session_id="cron-1")
+        self.assertEqual(answer["error"]["code"], "scheduled")
+        self.assertEqual(support.requests(self.data / "state"), before)
+
     def test_hermess_own_session_variables_tell_a_scheduled_job_and_a_webhook(self):
         try:
             from gateway.session_context import set_session_vars  # only where Hermes is importable
@@ -80,8 +101,9 @@ class Approvals(unittest.TestCase):
                 return self.hook("kumi_change", change())
             return contextvars.copy_context().run(run)
 
-        self.assertEqual(deciding(cron_session="1")["message"], policy.SCHEDULED)
+        self.assertEqual(deciding(cron_session="1")["message"], tools.SCHEDULED)
         self.assertEqual(deciding(platform="webhook")["message"], policy.UNATTENDED)
+        self.assertEqual(deciding(platform="api_server")["message"], policy.UNATTENDED)
         self.assertEqual(deciding(platform="telegram")["action"], "approve")
 
     def test_a_change_is_approved_in_the_runtimes_words_and_nothing_runs_first(self):

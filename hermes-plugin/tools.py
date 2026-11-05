@@ -134,22 +134,29 @@ class Host:
 
     def unattended(self) -> str | None:
         """Who can answer for this call: "scheduled" in a Hermes cron job (no chat, and nobody there), "unattended"
-        where nobody can answer an approval (a one-shot `hermes -q`, a webhook), else None (a chat).
+        where nobody can answer an approval (a one-shot `hermes -q`, a webhook, Hermes's API server), else None (a
+        chat). Hermes's `ctx` methods are answered in the calling context, under `plugins.isolation: host` too.
 
-        A cron job is told first by Hermes's `ctx.current_cron_execution()`, bound for each fire and, under
-        `plugins.isolation: host`, answered in the calling context; then, like the others, by Hermes's session
-        variables (`gateway.session_context.get_session_env`, which falls back to the process environment), or by the
-        environment itself when that isn't importable."""
+        A cron job is told by `ctx.current_cron_execution()`, bound for each fire; when Hermes can't say, it's taken as
+        one (nobody is assumed there). A webhook or an API call is told by `ctx.session_surface()`. Hermes's session
+        variables (`gateway.session_context.get_session_env`, which falls back to the process environment, or the
+        environment itself when that isn't importable) are read too: they're how `hermes -q` says it's one-shot."""
         try:
             if self._ctx.current_cron_execution() is not None:
                 return "scheduled"
         except Exception:
-            log.warning("Kumi couldn't ask Hermes whether this call is a scheduled job", exc_info=True)
+            log.warning("Kumi couldn't ask Hermes whether this call is a scheduled job: taken as one", exc_info=True)
+            return "scheduled"
+        try:
+            surface = str(self._ctx.session_surface() or "")
+        except Exception:
+            log.warning("Kumi couldn't ask Hermes which surface this call comes from", exc_info=True)
+            surface = ""
         cron, single, platform = _session_values("HERMES_CRON_SESSION", "HERMES_SINGLE_QUERY_SESSION",
                                                  "HERMES_SESSION_PLATFORM")
         if _truthy(cron):
             return "scheduled"
-        if _truthy(single) or platform in UNATTENDED_PLATFORMS:
+        if _truthy(single) or surface in UNATTENDED_SURFACES or platform in UNATTENDED_SURFACES:
             return "unattended"
         return None
 
@@ -169,9 +176,14 @@ class Host:
         self.runtimes.stop_session(session_id)
 
 
-# Hermes's platforms where no person ever answers an approval (`tools/approval_context.py`'s notifier-blind ones). The
-# API server isn't one: Hermes lets its turns say whether someone can answer.
-UNATTENDED_PLATFORMS = frozenset({"webhook", "msgraph_webhook"})
+# Hermes's surfaces where nobody answers an approval: webhooks, and its OpenAI-compatible API server, whose callers
+# can't answer one either (Desktop's chats are its own surface, `desktop`).
+UNATTENDED_SURFACES = frozenset({"webhook", "msgraph_webhook", "api_server"})
+# What a scheduled job may call: reads answered from what Kumi last published, never from the runtime, whose every
+# call makes its caller the runtime's holder (C3's owner).
+SCHEDULED_READS = frozenset({"kumi_status"})
+SCHEDULED = ("A scheduled job reads only Kumi's status, as Kumi last published it: it never starts or calls Kumi's "
+             "runtime, or changes anything. Open a chat with Kumi for that.")
 
 
 def _session_values(*names: str) -> list[str]:
@@ -608,13 +620,15 @@ def approved_only(name: str, args: dict) -> bool:
 def handler(name: str, function: Callable[..., dict], host: Host) -> Callable[..., str]:
     """`function` as Hermes calls tool `name`: `(args, **context) -> str`, never raising. The approval hook's record of
     the call (CC-5) gives it the model's tool-call id; a call the producer approves runs only with the arguments the
-    approval saw, and never without it."""
+    approval saw, and never without it. In a scheduled job, only the published reads run, whatever reached here."""
 
     def call(args: Any = None, **kwargs: Any) -> str:
         args = args if isinstance(args, dict) else {}
         record = host.calls.take(name, args, kwargs)
         try:
-            if approved_only(name, args) and not (record and record.extra.get("approved")):
+            if name not in SCHEDULED_READS and host.unattended() == "scheduled":
+                result = {"error": {"code": "scheduled", "reason": SCHEDULED}}
+            elif approved_only(name, args) and not (record and record.extra.get("approved")):
                 result = {"error": {"code": "not_approved", "reason": (
                     "Kumi didn't run this: it isn't the call the producer approved (its arguments changed after the "
                     "approval, or it came without Hermes's approval step).")}}

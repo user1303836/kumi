@@ -35,13 +35,10 @@ LINE = 120
 PLAYBACK_LINE = 600
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
-# What a scheduled job (Hermes's cron) may call: reads answered from what Kumi last published, never from the runtime,
-# whose every call makes its caller the runtime's holder (C3's owner). And what the producer always approves first.
-SCHEDULED_READS = {"kumi_status"}
+# What the producer always approves first. What a scheduled job may call is tools.SCHEDULED_READS.
 ASKED = {"kumi_change", "kumi_undo", "kumi_setup"}
-SCHEDULED = ("A scheduled job reads only Kumi's status, as Kumi last published it: it never starts or calls Kumi's "
-             "runtime, or changes anything. Open a chat with Kumi for that.")
-UNATTENDED = "Nobody is here to approve this (a one-shot query or a webhook), so Kumi didn't run it. Ask in a chat."
+UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
+              "in a chat.")
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
@@ -85,8 +82,8 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     looked at. Where nobody can answer an approval, a call that needs one is blocked whatever Hermes's settings or an
     earlier "Always" say: before the runtime is asked when it always needs one, else after its decision."""
     unattended = host.unattended()
-    if unattended == "scheduled" and tool not in SCHEDULED_READS:
-        return block(SCHEDULED), {}
+    if unattended == "scheduled" and tool not in tools.SCHEDULED_READS:
+        return block(tools.SCHEDULED), {}
     if unattended and tool in ASKED:
         return block(UNATTENDED), {}
     decision, extra = _decide(host, tool, args, kwargs)
