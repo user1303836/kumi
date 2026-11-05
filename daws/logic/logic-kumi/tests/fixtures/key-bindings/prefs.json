@@ -1,0 +1,5142 @@
+{
+ "KeyCommands": {
+  "10": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 0
+  },
+  "100": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 32
+  },
+  "1001": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 18,
+   "Modifier": 0
+  },
+  "1002": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 19,
+   "Modifier": 0
+  },
+  "1003": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 20,
+   "Modifier": 0
+  },
+  "1004": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 21,
+   "Modifier": 0
+  },
+  "1005": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 23,
+   "Modifier": 0
+  },
+  "1006": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 22,
+   "Modifier": 0
+  },
+  "1007": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 26,
+   "Modifier": 0
+  },
+  "1008": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 28,
+   "Modifier": 0
+  },
+  "1009": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 25,
+   "Modifier": 0
+  },
+  "101": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 4
+  },
+  "1012": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 36
+  },
+  "1015": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 36
+  },
+  "1019": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 37
+  },
+  "102": {
+   "CharCode": 113,
+   "Flags": 0,
+   "Key": 113,
+   "Modifier": 4
+  },
+  "1020": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 37
+  },
+  "1021": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 37
+  },
+  "1022": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 37
+  },
+  "103": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 4
+  },
+  "1030": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 44
+  },
+  "1031": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 1
+  },
+  "1032": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 36
+  },
+  "1037": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 36
+  },
+  "1038": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 37
+  },
+  "104": {
+   "CharCode": 92,
+   "Flags": 0,
+   "Key": 92,
+   "Modifier": 4
+  },
+  "1040": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 8
+  },
+  "1041": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 5
+  },
+  "1043": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 36
+  },
+  "1044": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 36
+  },
+  "1045": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 37
+  },
+  "1046": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 37
+  },
+  "105": {
+   "CharCode": 92,
+   "Flags": 0,
+   "Key": 92,
+   "Modifier": 0
+  },
+  "106": {
+   "CharCode": 92,
+   "Flags": 0,
+   "Key": 92,
+   "Modifier": 1
+  },
+  "11": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 47,
+   "Modifier": 0
+  },
+  "110": {
+   "CharCode": 113,
+   "Flags": 0,
+   "Key": 113,
+   "Modifier": 0
+  },
+  "111": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 0
+  },
+  "1122": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 44
+  },
+  "114": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 8
+  },
+  "1151": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 32
+  },
+  "1158": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 8
+  },
+  "116": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 0
+  },
+  "117": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 4
+  },
+  "1170": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 8
+  },
+  "1178": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 32
+  },
+  "1179": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 33
+  },
+  "118": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 5
+  },
+  "1186": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 33
+  },
+  "119": {
+   "CharCode": 91,
+   "Flags": 0,
+   "Key": 91,
+   "Modifier": 8
+  },
+  "1191": {
+   "CharCode": 39,
+   "Flags": 0,
+   "Key": 39,
+   "Modifier": 9
+  },
+  "1192": {
+   "CharCode": 39,
+   "Flags": 0,
+   "Key": 39,
+   "Modifier": 1
+  },
+  "1193": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 5
+  },
+  "1194": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 40
+  },
+  "12": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 1
+  },
+  "1208": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 40
+  },
+  "121": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 4
+  },
+  "1212": {
+   "CharCode": 93,
+   "Flags": 0,
+   "Key": 93,
+   "Modifier": 0
+  },
+  "1213": {
+   "CharCode": 91,
+   "Flags": 0,
+   "Key": 91,
+   "Modifier": 0
+  },
+  "1214": {
+   "CharCode": 93,
+   "Flags": 0,
+   "Key": 93,
+   "Modifier": 1
+  },
+  "1215": {
+   "CharCode": 91,
+   "Flags": 0,
+   "Key": 91,
+   "Modifier": 1
+  },
+  "1216": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 40
+  },
+  "1217": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 40
+  },
+  "1221": {
+   "CharCode": 63275,
+   "Flags": 0,
+   "Key": 4,
+   "Modifier": 4
+  },
+  "1222": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 0
+  },
+  "123": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 0
+  },
+  "1231": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 0
+  },
+  "1232": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 0
+  },
+  "1234": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 4
+  },
+  "1235": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 5
+  },
+  "1240": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 8
+  },
+  "1249": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 36
+  },
+  "1252": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 32
+  },
+  "1253": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 0
+  },
+  "1254": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 0
+  },
+  "1255": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 0
+  },
+  "1256": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 4
+  },
+  "1258": {
+   "CharCode": 49,
+   "Flags": 0,
+   "Key": 49,
+   "Modifier": 37
+  },
+  "1259": {
+   "CharCode": 50,
+   "Flags": 0,
+   "Key": 50,
+   "Modifier": 37
+  },
+  "1261": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 18,
+   "Modifier": 1
+  },
+  "1262": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 19,
+   "Modifier": 1
+  },
+  "1263": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 20,
+   "Modifier": 1
+  },
+  "1264": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 21,
+   "Modifier": 1
+  },
+  "1265": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 23,
+   "Modifier": 1
+  },
+  "1266": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 22,
+   "Modifier": 1
+  },
+  "1267": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 26,
+   "Modifier": 1
+  },
+  "1268": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 28,
+   "Modifier": 1
+  },
+  "1269": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 25,
+   "Modifier": 1
+  },
+  "1272": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 0
+  },
+  "1273": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 0
+  },
+  "1274": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 0
+  },
+  "1280": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 9
+  },
+  "1282": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 5
+  },
+  "1285": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 4
+  },
+  "1286": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 4
+  },
+  "129": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 41
+  },
+  "1290": {
+   "CharCode": 47,
+   "Flags": 0,
+   "Key": 47,
+   "Modifier": 1
+  },
+  "1291": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 1
+  },
+  "1293": {
+   "CharCode": 47,
+   "Flags": 0,
+   "Key": 47,
+   "Modifier": 32
+  },
+  "1296": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 0
+  },
+  "1297": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 36
+  },
+  "13": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 1
+  },
+  "1301": {
+   "CharCode": 49,
+   "Flags": 0,
+   "Key": 49,
+   "Modifier": 36
+  },
+  "1302": {
+   "CharCode": 50,
+   "Flags": 0,
+   "Key": 50,
+   "Modifier": 36
+  },
+  "1304": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 32
+  },
+  "1318": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 12
+  },
+  "1319": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 12
+  },
+  "1333": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 5
+  },
+  "1334": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 8
+  },
+  "1337": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 13
+  },
+  "1345": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 9
+  },
+  "1349": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 12
+  },
+  "1365": {
+   "CharCode": 63273,
+   "Flags": 0,
+   "Key": 1,
+   "Modifier": 32
+  },
+  "1369": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 44
+  },
+  "1385": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 8
+  },
+  "1388": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 41
+  },
+  "1389": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 41
+  },
+  "1390": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 8
+  },
+  "1394": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 8
+  },
+  "1395": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 8
+  },
+  "15": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 0
+  },
+  "1500": {
+   "CharCode": 91,
+   "Flags": 0,
+   "Key": 91,
+   "Modifier": 32
+  },
+  "1501": {
+   "CharCode": 93,
+   "Flags": 0,
+   "Key": 93,
+   "Modifier": 32
+  },
+  "1506": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 5
+  },
+  "1520": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 9
+  },
+  "1521": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 9
+  },
+  "1522": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 13
+  },
+  "1526": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 12
+  },
+  "1527": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 9
+  },
+  "1528": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 9
+  },
+  "1539": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 13
+  },
+  "154": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 4
+  },
+  "1540": {
+   "CharCode": 49,
+   "Flags": 0,
+   "Key": 49,
+   "Modifier": 13
+  },
+  "1541": {
+   "CharCode": 50,
+   "Flags": 0,
+   "Key": 50,
+   "Modifier": 13
+  },
+  "1542": {
+   "CharCode": 51,
+   "Flags": 0,
+   "Key": 51,
+   "Modifier": 13
+  },
+  "1543": {
+   "CharCode": 52,
+   "Flags": 0,
+   "Key": 52,
+   "Modifier": 13
+  },
+  "1544": {
+   "CharCode": 53,
+   "Flags": 0,
+   "Key": 53,
+   "Modifier": 13
+  },
+  "1573": {
+   "CharCode": 49,
+   "Flags": 0,
+   "Key": 49,
+   "Modifier": 12
+  },
+  "1578": {
+   "CharCode": 48,
+   "Flags": 0,
+   "Key": 48,
+   "Modifier": 12
+  },
+  "16": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 44
+  },
+  "1602": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 0
+  },
+  "1603": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 0
+  },
+  "1604": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 0
+  },
+  "1605": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 0
+  },
+  "1606": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 4
+  },
+  "1607": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 4
+  },
+  "1608": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 4
+  },
+  "1609": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 32
+  },
+  "161": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 4
+  },
+  "1610": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 36
+  },
+  "1611": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 4
+  },
+  "1612": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 36
+  },
+  "1613": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 4
+  },
+  "1614": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 4
+  },
+  "1615": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 4
+  },
+  "1617": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 32
+  },
+  "1618": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 32
+  },
+  "162": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 1
+  },
+  "1620": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 4
+  },
+  "1621": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 5
+  },
+  "1622": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 4
+  },
+  "1623": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 5
+  },
+  "1628": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 0
+  },
+  "1629": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 33
+  },
+  "1630": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 4
+  },
+  "1631": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 4
+  },
+  "1632": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 32
+  },
+  "1634": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 4
+  },
+  "166": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 4
+  },
+  "168": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 8
+  },
+  "169": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 8
+  },
+  "170": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 8
+  },
+  "1705": {
+   "CharCode": 45,
+   "Flags": 0,
+   "Key": 45,
+   "Modifier": 32
+  },
+  "1706": {
+   "CharCode": 61,
+   "Flags": 0,
+   "Key": 61,
+   "Modifier": 32
+  },
+  "1707": {
+   "CharCode": 92,
+   "Flags": 0,
+   "Key": 92,
+   "Modifier": 32
+  },
+  "171": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 8
+  },
+  "1710": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 0
+  },
+  "1711": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 40
+  },
+  "1712": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 40
+  },
+  "1713": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 4
+  },
+  "1715": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 40
+  },
+  "1717": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 36
+  },
+  "172": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 9
+  },
+  "1728": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 32
+  },
+  "1729": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 44
+  },
+  "173": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 9
+  },
+  "1733": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 36
+  },
+  "1734": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 36
+  },
+  "1735": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 36
+  },
+  "1736": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 36
+  },
+  "1737": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 8
+  },
+  "1738": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 9
+  },
+  "1739": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 8
+  },
+  "174": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 9
+  },
+  "1740": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 1
+  },
+  "1741": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 9
+  },
+  "1744": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 8
+  },
+  "1745": {
+   "CharCode": 113,
+   "Flags": 0,
+   "Key": 113,
+   "Modifier": 8
+  },
+  "1748": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 4
+  },
+  "1749": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 36
+  },
+  "175": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 9
+  },
+  "1750": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 4
+  },
+  "1753": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 32
+  },
+  "1754": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 33
+  },
+  "1755": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 33
+  },
+  "1757": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 4
+  },
+  "1758": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 44
+  },
+  "176": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 4
+  },
+  "1761": {
+   "CharCode": 91,
+   "Flags": 0,
+   "Key": 91,
+   "Modifier": 5
+  },
+  "1762": {
+   "CharCode": 93,
+   "Flags": 0,
+   "Key": 93,
+   "Modifier": 5
+  },
+  "1763": {
+   "CharCode": 91,
+   "Flags": 0,
+   "Key": 91,
+   "Modifier": 4
+  },
+  "1764": {
+   "CharCode": 93,
+   "Flags": 0,
+   "Key": 93,
+   "Modifier": 4
+  },
+  "1765": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 5
+  },
+  "177": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 1
+  },
+  "1770": {
+   "CharCode": 93,
+   "Flags": 0,
+   "Key": 93,
+   "Modifier": 8
+  },
+  "1775": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 33
+  },
+  "1776": {
+   "CharCode": 49,
+   "Flags": 0,
+   "Key": 49,
+   "Modifier": 5
+  },
+  "1777": {
+   "CharCode": 50,
+   "Flags": 0,
+   "Key": 50,
+   "Modifier": 5
+  },
+  "1778": {
+   "CharCode": 51,
+   "Flags": 0,
+   "Key": 51,
+   "Modifier": 5
+  },
+  "1779": {
+   "CharCode": 52,
+   "Flags": 0,
+   "Key": 52,
+   "Modifier": 5
+  },
+  "1780": {
+   "CharCode": 53,
+   "Flags": 0,
+   "Key": 53,
+   "Modifier": 5
+  },
+  "1781": {
+   "CharCode": 54,
+   "Flags": 0,
+   "Key": 54,
+   "Modifier": 5
+  },
+  "1782": {
+   "CharCode": 55,
+   "Flags": 0,
+   "Key": 55,
+   "Modifier": 5
+  },
+  "1783": {
+   "CharCode": 56,
+   "Flags": 0,
+   "Key": 56,
+   "Modifier": 5
+  },
+  "1784": {
+   "CharCode": 57,
+   "Flags": 0,
+   "Key": 57,
+   "Modifier": 5
+  },
+  "1785": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 1
+  },
+  "1786": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 1
+  },
+  "1789": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 41
+  },
+  "179": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 1
+  },
+  "1790": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 41
+  },
+  "1791": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 33
+  },
+  "1792": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 33
+  },
+  "1793": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 33
+  },
+  "1794": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 33
+  },
+  "1795": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 40
+  },
+  "1796": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 40
+  },
+  "1797": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 40
+  },
+  "1798": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 40
+  },
+  "1799": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 1
+  },
+  "180": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 32
+  },
+  "1800": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 4
+  },
+  "1802": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 4
+  },
+  "1803": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 8
+  },
+  "1805": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 40
+  },
+  "1806": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 4
+  },
+  "1807": {
+   "CharCode": 119,
+   "Flags": 0,
+   "Key": 119,
+   "Modifier": 4
+  },
+  "1810": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 4
+  },
+  "1813": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 13
+  },
+  "1814": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 13
+  },
+  "1815": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 8
+  },
+  "1816": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 8
+  },
+  "1817": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 1
+  },
+  "1818": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 1
+  },
+  "1819": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 0
+  },
+  "182": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 4
+  },
+  "1820": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 0
+  },
+  "1821": {
+   "CharCode": 61,
+   "Flags": 0,
+   "Key": 61,
+   "Modifier": 4
+  },
+  "1822": {
+   "CharCode": 45,
+   "Flags": 0,
+   "Key": 45,
+   "Modifier": 4
+  },
+  "1823": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 4
+  },
+  "1827": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 33
+  },
+  "1828": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 33
+  },
+  "1829": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 40
+  },
+  "1830": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 40
+  },
+  "1831": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 1
+  },
+  "1832": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 40
+  },
+  "1833": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 32
+  },
+  "1834": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 40
+  },
+  "1835": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 41
+  },
+  "1836": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 32
+  },
+  "1837": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 13
+  },
+  "1838": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 12
+  },
+  "1839": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 5
+  },
+  "1845": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 8
+  },
+  "1900": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 33
+  },
+  "1901": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 29,
+   "Modifier": 4
+  },
+  "1902": {
+   "CharCode": 59,
+   "Flags": 0,
+   "Key": 59,
+   "Modifier": 32
+  },
+  "1903": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 8
+  },
+  "1904": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 4
+  },
+  "1905": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 9
+  },
+  "1906": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 12
+  },
+  "191": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 1
+  },
+  "192": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "193": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "194": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "195": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "20": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 75,
+   "Modifier": 0
+  },
+  "200": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 4
+  },
+  "2007": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 1
+  },
+  "2008": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 4
+  },
+  "2009": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 9
+  },
+  "201": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 4
+  },
+  "2010": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 1
+  },
+  "2011": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 1
+  },
+  "2012": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 1
+  },
+  "2013": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 1
+  },
+  "2014": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 1
+  },
+  "2015": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 1
+  },
+  "2016": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 1
+  },
+  "2017": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 4
+  },
+  "202": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 4
+  },
+  "2021": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 44
+  },
+  "2022": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 44
+  },
+  "204": {
+   "CharCode": 47,
+   "Flags": 0,
+   "Key": 47,
+   "Modifier": 4
+  },
+  "2052": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 0
+  },
+  "2053": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 0
+  },
+  "2069": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 8
+  },
+  "208": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 5
+  },
+  "209": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 5
+  },
+  "21": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 44,
+   "Modifier": 0
+  },
+  "210": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 41
+  },
+  "213": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 0
+  },
+  "214": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 0
+  },
+  "215": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 0
+  },
+  "216": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 0
+  },
+  "217": {
+   "CharCode": 121,
+   "Flags": 0,
+   "Key": 121,
+   "Modifier": 5
+  },
+  "218": {
+   "CharCode": 121,
+   "Flags": 0,
+   "Key": 121,
+   "Modifier": 4
+  },
+  "220": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 5
+  },
+  "221": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 4
+  },
+  "2225": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 0
+  },
+  "2228": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 40
+  },
+  "2229": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 40
+  },
+  "224": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 12
+  },
+  "2244": {
+   "CharCode": 39,
+   "Flags": 0,
+   "Key": 39,
+   "Modifier": 0
+  },
+  "2248": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 9
+  },
+  "225": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 12
+  },
+  "2255": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 40
+  },
+  "2269": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 4
+  },
+  "2273": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 4
+  },
+  "2274": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 36
+  },
+  "2275": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 36
+  },
+  "2276": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 32
+  },
+  "2277": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 5
+  },
+  "2278": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 5
+  },
+  "228": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 13
+  },
+  "229": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 13
+  },
+  "230": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 4
+  },
+  "231": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 4
+  },
+  "2312": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 32
+  },
+  "2313": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 40
+  },
+  "2314": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 40
+  },
+  "2315": {
+   "CharCode": 9,
+   "Flags": 0,
+   "Key": 9,
+   "Modifier": 0
+  },
+  "2316": {
+   "CharCode": 9,
+   "Flags": 0,
+   "Key": 9,
+   "Modifier": 1
+  },
+  "2318": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 0
+  },
+  "2319": {
+   "CharCode": 106,
+   "Flags": 0,
+   "Key": 106,
+   "Modifier": 0
+  },
+  "232": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 4
+  },
+  "2320": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 0
+  },
+  "2321": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 1
+  },
+  "2322": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 1
+  },
+  "2323": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 0
+  },
+  "2324": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 0
+  },
+  "2325": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 0
+  },
+  "2326": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 0
+  },
+  "2327": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 0
+  },
+  "2328": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 0
+  },
+  "2329": {
+   "CharCode": 121,
+   "Flags": 0,
+   "Key": 121,
+   "Modifier": 0
+  },
+  "2330": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 0
+  },
+  "2331": {
+   "CharCode": 45,
+   "Flags": 0,
+   "Key": 45,
+   "Modifier": 0
+  },
+  "2332": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 0
+  },
+  "2333": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 0
+  },
+  "2334": {
+   "CharCode": 113,
+   "Flags": 0,
+   "Key": 113,
+   "Modifier": 0
+  },
+  "2335": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 0
+  },
+  "2336": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 0
+  },
+  "2337": {
+   "CharCode": 119,
+   "Flags": 0,
+   "Key": 119,
+   "Modifier": 0
+  },
+  "2338": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 0
+  },
+  "2339": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 0
+  },
+  "2340": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 0
+  },
+  "2344": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 12
+  },
+  "2345": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 44
+  },
+  "2346": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 44
+  },
+  "2349": {
+   "CharCode": 63272,
+   "Flags": 0,
+   "Key": 127,
+   "Modifier": 44
+  },
+  "2350": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 4
+  },
+  "2354": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 12
+  },
+  "2357": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 44
+  },
+  "2366": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 12
+  },
+  "2367": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 12
+  },
+  "2370": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 36
+  },
+  "239": {
+   "CharCode": 51,
+   "Flags": 0,
+   "Key": 51,
+   "Modifier": 1
+  },
+  "240": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 1
+  },
+  "248": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 13
+  },
+  "249": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 13
+  },
+  "250": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 13
+  },
+  "2502": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 1
+  },
+  "2504": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 32
+  },
+  "251": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 13
+  },
+  "252": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 13
+  },
+  "254": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 13
+  },
+  "255": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 13
+  },
+  "256": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 36
+  },
+  "2563": {
+   "CharCode": 63275,
+   "Flags": 0,
+   "Key": 4,
+   "Modifier": 32
+  },
+  "257": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 5
+  },
+  "2577": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 0
+  },
+  "258": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 5
+  },
+  "2583": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 12
+  },
+  "2584": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 12
+  },
+  "2585": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 44
+  },
+  "2586": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 44
+  },
+  "2587": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 0
+  },
+  "2588": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 0
+  },
+  "2589": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 1
+  },
+  "2590": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 1
+  },
+  "2593": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 32
+  },
+  "2599": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 8
+  },
+  "2651": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 0
+  },
+  "2652": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 0
+  },
+  "2653": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 0
+  },
+  "2655": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "2656": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "2657": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 1
+  },
+  "2658": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 1
+  },
+  "2659": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "2660": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "2661": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 8
+  },
+  "2662": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 1
+  },
+  "2663": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 4
+  },
+  "2664": {
+   "CharCode": 96,
+   "Flags": 0,
+   "Key": 96,
+   "Modifier": 0
+  },
+  "2665": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 87,
+   "Modifier": 0
+  },
+  "2666": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 84,
+   "Modifier": 0
+  },
+  "2667": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 0
+  },
+  "2668": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 8
+  },
+  "2669": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 8
+  },
+  "2670": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 4
+  },
+  "2681": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 9
+  },
+  "2683": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 0
+  },
+  "2700": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 8
+  },
+  "2701": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 8
+  },
+  "2800": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 4
+  },
+  "2802": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 44
+  },
+  "2803": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 45
+  },
+  "2804": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 36
+  },
+  "2807": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 40
+  },
+  "2808": {
+   "CharCode": 63277,
+   "Flags": 0,
+   "Key": 12,
+   "Modifier": 32
+  },
+  "2809": {
+   "CharCode": 63276,
+   "Flags": 0,
+   "Key": 11,
+   "Modifier": 32
+  },
+  "2810": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 12
+  },
+  "2811": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 1
+  },
+  "2850": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 32
+  },
+  "2851": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 33
+  },
+  "2857": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 40
+  },
+  "2858": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 44
+  },
+  "2859": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 13
+  },
+  "2862": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 40
+  },
+  "2864": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 1
+  },
+  "2865": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 8
+  },
+  "2866": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 37
+  },
+  "2867": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 1
+  },
+  "2872": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "2873": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "2874": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "2875": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 0,
+   "Modifier": 0
+  },
+  "2876": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 8
+  },
+  "2877": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 4
+  },
+  "2878": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 4
+  },
+  "2879": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 9
+  },
+  "2880": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 13
+  },
+  "2881": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 5
+  },
+  "2882": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 32
+  },
+  "2883": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 4
+  },
+  "2884": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 36
+  },
+  "2885": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 37
+  },
+  "2886": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 8
+  },
+  "2887": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 8
+  },
+  "2888": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 9
+  },
+  "2889": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 9
+  },
+  "2891": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 33
+  },
+  "2892": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 32
+  },
+  "2893": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 33
+  },
+  "2895": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 9
+  },
+  "2896": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 9
+  },
+  "2897": {
+   "CharCode": 93,
+   "Flags": 0,
+   "Key": 93,
+   "Modifier": 12
+  },
+  "2898": {
+   "CharCode": 91,
+   "Flags": 0,
+   "Key": 91,
+   "Modifier": 12
+  },
+  "2899": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 12
+  },
+  "290": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 5
+  },
+  "2909": {
+   "CharCode": 51,
+   "Flags": 0,
+   "Key": 51,
+   "Modifier": 32
+  },
+  "291": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 5
+  },
+  "295": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 44
+  },
+  "2950": {
+   "CharCode": 92,
+   "Flags": 0,
+   "Key": 92,
+   "Modifier": 12
+  },
+  "2951": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 44
+  },
+  "2952": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 44
+  },
+  "2953": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 5
+  },
+  "2954": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 5
+  },
+  "2955": {
+   "CharCode": 93,
+   "Flags": 0,
+   "Key": 93,
+   "Modifier": 4
+  },
+  "2956": {
+   "CharCode": 91,
+   "Flags": 0,
+   "Key": 91,
+   "Modifier": 4
+  },
+  "2957": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 4
+  },
+  "2958": {
+   "CharCode": 92,
+   "Flags": 0,
+   "Key": 92,
+   "Modifier": 4
+  },
+  "2959": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 40
+  },
+  "296": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 44
+  },
+  "2960": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 40
+  },
+  "2961": {
+   "CharCode": 61,
+   "Flags": 0,
+   "Key": 61,
+   "Modifier": 12
+  },
+  "2962": {
+   "CharCode": 45,
+   "Flags": 0,
+   "Key": 45,
+   "Modifier": 12
+  },
+  "2963": {
+   "CharCode": 61,
+   "Flags": 0,
+   "Key": 61,
+   "Modifier": 40
+  },
+  "2964": {
+   "CharCode": 45,
+   "Flags": 0,
+   "Key": 45,
+   "Modifier": 40
+  },
+  "2966": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 33
+  },
+  "2967": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 36
+  },
+  "2968": {
+   "CharCode": 39,
+   "Flags": 0,
+   "Key": 39,
+   "Modifier": 0
+  },
+  "2969": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 36
+  },
+  "297": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 44
+  },
+  "2970": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 37
+  },
+  "2971": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 37
+  },
+  "2972": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 40
+  },
+  "2973": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 44
+  },
+  "2974": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 9
+  },
+  "2975": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 9
+  },
+  "2976": {
+   "CharCode": 96,
+   "Flags": 0,
+   "Key": 96,
+   "Modifier": 8
+  },
+  "2977": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 12
+  },
+  "2978": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 12
+  },
+  "2979": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 12
+  },
+  "298": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 44
+  },
+  "2980": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 12
+  },
+  "2981": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 12
+  },
+  "2982": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 12
+  },
+  "2983": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 12
+  },
+  "2984": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 12
+  },
+  "2985": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 12
+  },
+  "2986": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 12
+  },
+  "2987": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 12
+  },
+  "2988": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 12
+  },
+  "299": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 13
+  },
+  "2991": {
+   "CharCode": 61,
+   "Flags": 0,
+   "Key": 61,
+   "Modifier": 5
+  },
+  "2992": {
+   "CharCode": 45,
+   "Flags": 0,
+   "Key": 45,
+   "Modifier": 5
+  },
+  "2993": {
+   "CharCode": 61,
+   "Flags": 0,
+   "Key": 61,
+   "Modifier": 4
+  },
+  "2994": {
+   "CharCode": 45,
+   "Flags": 0,
+   "Key": 45,
+   "Modifier": 4
+  },
+  "3": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 76,
+   "Modifier": 0
+  },
+  "30": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 32
+  },
+  "300": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 0
+  },
+  "301": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 0
+  },
+  "302": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 12
+  },
+  "303": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 5
+  },
+  "3048": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 9
+  },
+  "305": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 5
+  },
+  "3096": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 32
+  },
+  "311": {
+   "CharCode": 92,
+   "Flags": 0,
+   "Key": 92,
+   "Modifier": 0
+  },
+  "312": {
+   "CharCode": 92,
+   "Flags": 0,
+   "Key": 92,
+   "Modifier": 1
+  },
+  "314": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 5
+  },
+  "315": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 1
+  },
+  "316": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 32
+  },
+  "32": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 33
+  },
+  "320": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 1
+  },
+  "321": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 1
+  },
+  "327": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 13
+  },
+  "328": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 13
+  },
+  "33": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 9
+  },
+  "332": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 8
+  },
+  "333": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 8
+  },
+  "3333": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 41
+  },
+  "3334": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 41
+  },
+  "3336": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 44
+  },
+  "334": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 12
+  },
+  "335": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 12
+  },
+  "336": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 12
+  },
+  "337": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 12
+  },
+  "338": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 12
+  },
+  "339": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 12
+  },
+  "340": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 1
+  },
+  "341": {
+   "CharCode": 108,
+   "Flags": 0,
+   "Key": 108,
+   "Modifier": 1
+  },
+  "343": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 1
+  },
+  "344": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 1
+  },
+  "345": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 1
+  },
+  "346": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 1
+  },
+  "347": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 1
+  },
+  "348": {
+   "CharCode": 63273,
+   "Flags": 0,
+   "Key": 1,
+   "Modifier": 1
+  },
+  "349": {
+   "CharCode": 63275,
+   "Flags": 0,
+   "Key": 4,
+   "Modifier": 1
+  },
+  "35": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 8
+  },
+  "3503": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 5
+  },
+  "354": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 0
+  },
+  "355": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 0
+  },
+  "356": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 1
+  },
+  "357": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 1
+  },
+  "358": {
+   "CharCode": 59,
+   "Flags": 0,
+   "Key": 59,
+   "Modifier": 0
+  },
+  "359": {
+   "CharCode": 59,
+   "Flags": 0,
+   "Key": 59,
+   "Modifier": 1
+  },
+  "361": {
+   "CharCode": 63276,
+   "Flags": 0,
+   "Key": 11,
+   "Modifier": 32
+  },
+  "362": {
+   "CharCode": 63277,
+   "Flags": 0,
+   "Key": 12,
+   "Modifier": 32
+  },
+  "363": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 1
+  },
+  "364": {
+   "CharCode": 96,
+   "Flags": 0,
+   "Key": 96,
+   "Modifier": 1
+  },
+  "381": {
+   "CharCode": 113,
+   "Flags": 0,
+   "Key": 113,
+   "Modifier": 40
+  },
+  "383": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 33
+  },
+  "39": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 9
+  },
+  "391": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 8
+  },
+  "392": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 8
+  },
+  "399": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 1
+  },
+  "4": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 65,
+   "Modifier": 0
+  },
+  "40": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 0
+  },
+  "400": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 0
+  },
+  "401": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 0
+  },
+  "402": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 0
+  },
+  "403": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 4
+  },
+  "404": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 4
+  },
+  "405": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 0
+  },
+  "407": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 1
+  },
+  "408": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 32
+  },
+  "409": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 4
+  },
+  "41": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 32
+  },
+  "410": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 8
+  },
+  "411": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 8
+  },
+  "412": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 4
+  },
+  "413": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 4
+  },
+  "414": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 4
+  },
+  "416": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 4
+  },
+  "417": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 4
+  },
+  "419": {
+   "CharCode": 63276,
+   "Flags": 0,
+   "Key": 11,
+   "Modifier": 0
+  },
+  "42": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 32
+  },
+  "420": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 0
+  },
+  "421": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 4
+  },
+  "422": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 4
+  },
+  "423": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 4
+  },
+  "424": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 4
+  },
+  "425": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 4
+  },
+  "426": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 5
+  },
+  "427": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 5
+  },
+  "428": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 5
+  },
+  "429": {
+   "CharCode": 63277,
+   "Flags": 0,
+   "Key": 12,
+   "Modifier": 0
+  },
+  "43": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 32
+  },
+  "430": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 44
+  },
+  "432": {
+   "CharCode": 63273,
+   "Flags": 0,
+   "Key": 1,
+   "Modifier": 4
+  },
+  "433": {
+   "CharCode": 63275,
+   "Flags": 0,
+   "Key": 4,
+   "Modifier": 4
+  },
+  "434": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 4
+  },
+  "435": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 4
+  },
+  "436": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 4
+  },
+  "439": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 4
+  },
+  "44": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 32
+  },
+  "440": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 4
+  },
+  "441": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 44
+  },
+  "443": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 40
+  },
+  "444": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 1
+  },
+  "445": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 1
+  },
+  "446": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 12
+  },
+  "447": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 12
+  },
+  "448": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 12
+  },
+  "45": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 0
+  },
+  "46": {
+   "CharCode": 63276,
+   "Flags": 0,
+   "Key": 11,
+   "Modifier": 0
+  },
+  "47": {
+   "CharCode": 63277,
+   "Flags": 0,
+   "Key": 12,
+   "Modifier": 0
+  },
+  "474": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 0
+  },
+  "475": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 8
+  },
+  "48": {
+   "CharCode": 63273,
+   "Flags": 0,
+   "Key": 1,
+   "Modifier": 0
+  },
+  "483": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 8
+  },
+  "484": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 9
+  },
+  "486": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 0
+  },
+  "487": {
+   "CharCode": 55,
+   "Flags": 0,
+   "Key": 55,
+   "Modifier": 32
+  },
+  "488": {
+   "CharCode": 53,
+   "Flags": 0,
+   "Key": 53,
+   "Modifier": 32
+  },
+  "489": {
+   "CharCode": 52,
+   "Flags": 0,
+   "Key": 52,
+   "Modifier": 32
+  },
+  "49": {
+   "CharCode": 63275,
+   "Flags": 0,
+   "Key": 4,
+   "Modifier": 0
+  },
+  "491": {
+   "CharCode": 119,
+   "Flags": 0,
+   "Key": 119,
+   "Modifier": 32
+  },
+  "495": {
+   "CharCode": 48,
+   "Flags": 0,
+   "Key": 48,
+   "Modifier": 32
+  },
+  "497": {
+   "CharCode": 56,
+   "Flags": 0,
+   "Key": 56,
+   "Modifier": 32
+  },
+  "498": {
+   "CharCode": 54,
+   "Flags": 0,
+   "Key": 54,
+   "Modifier": 32
+  },
+  "5": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 82,
+   "Modifier": 0
+  },
+  "505": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 44
+  },
+  "506": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 44
+  },
+  "509": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 45
+  },
+  "51": {
+   "CharCode": 96,
+   "Flags": 0,
+   "Key": 96,
+   "Modifier": 0
+  },
+  "510": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 45
+  },
+  "513": {
+   "CharCode": 39,
+   "Flags": 0,
+   "Key": 39,
+   "Modifier": 8
+  },
+  "514": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 8
+  },
+  "515": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 8
+  },
+  "516": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 8
+  },
+  "520": {
+   "CharCode": 47,
+   "Flags": 0,
+   "Key": 47,
+   "Modifier": 8
+  },
+  "521": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 83,
+   "Modifier": 0
+  },
+  "522": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 84,
+   "Modifier": 0
+  },
+  "523": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 85,
+   "Modifier": 0
+  },
+  "524": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 86,
+   "Modifier": 0
+  },
+  "525": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 87,
+   "Modifier": 0
+  },
+  "528": {
+   "CharCode": 39,
+   "Flags": 0,
+   "Key": 39,
+   "Modifier": 12
+  },
+  "529": {
+   "CharCode": 119,
+   "Flags": 0,
+   "Key": 119,
+   "Modifier": 32
+  },
+  "53": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 8
+  },
+  "532": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 35,
+   "Modifier": 0
+  },
+  "535": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 0
+  },
+  "542": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 1
+  },
+  "544": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 1
+  },
+  "545": {
+   "CharCode": 96,
+   "Flags": 0,
+   "Key": 96,
+   "Modifier": 32
+  },
+  "546": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 88,
+   "Modifier": 0
+  },
+  "547": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 89,
+   "Modifier": 0
+  },
+  "548": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 91,
+   "Modifier": 0
+  },
+  "549": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 92,
+   "Modifier": 0
+  },
+  "553": {
+   "CharCode": 106,
+   "Flags": 0,
+   "Key": 106,
+   "Modifier": 0
+  },
+  "554": {
+   "CharCode": 121,
+   "Flags": 0,
+   "Key": 121,
+   "Modifier": 33
+  },
+  "558": {
+   "CharCode": 121,
+   "Flags": 0,
+   "Key": 121,
+   "Modifier": 8
+  },
+  "560": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 9
+  },
+  "564": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 8
+  },
+  "566": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 8
+  },
+  "569": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 9
+  },
+  "571": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 1
+  },
+  "574": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 32
+  },
+  "577": {
+   "CharCode": 121,
+   "Flags": 0,
+   "Key": 121,
+   "Modifier": 32
+  },
+  "578": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 9
+  },
+  "579": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 40
+  },
+  "581": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 4
+  },
+  "582": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 40
+  },
+  "583": {
+   "CharCode": 119,
+   "Flags": 0,
+   "Key": 119,
+   "Modifier": 1
+  },
+  "584": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 5
+  },
+  "585": {
+   "CharCode": 92,
+   "Flags": 0,
+   "Key": 92,
+   "Modifier": 8
+  },
+  "587": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 1
+  },
+  "588": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 1
+  },
+  "589": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 44
+  },
+  "590": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 44
+  },
+  "591": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 44
+  },
+  "592": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 45
+  },
+  "593": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 4
+  },
+  "597": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 44
+  },
+  "598": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 4
+  },
+  "599": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 4
+  },
+  "60": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 4
+  },
+  "607": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 5
+  },
+  "608": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 5
+  },
+  "609": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 5
+  },
+  "615": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 0
+  },
+  "616": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 0
+  },
+  "617": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 5
+  },
+  "618": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 1
+  },
+  "63": {
+   "CharCode": 49,
+   "Flags": 0,
+   "Key": 49,
+   "Modifier": 44
+  },
+  "632": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 4
+  },
+  "633": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 4
+  },
+  "634": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 4
+  },
+  "635": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 41
+  },
+  "64": {
+   "CharCode": 50,
+   "Flags": 0,
+   "Key": 50,
+   "Modifier": 44
+  },
+  "640": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 8
+  },
+  "641": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 8
+  },
+  "642": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 9
+  },
+  "643": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 9
+  },
+  "644": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 4
+  },
+  "65": {
+   "CharCode": 51,
+   "Flags": 0,
+   "Key": 51,
+   "Modifier": 44
+  },
+  "650": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 40
+  },
+  "651": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 32
+  },
+  "654": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 4
+  },
+  "655": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 4
+  },
+  "658": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 4
+  },
+  "66": {
+   "CharCode": 49,
+   "Flags": 0,
+   "Key": 49,
+   "Modifier": 45
+  },
+  "663": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 0
+  },
+  "664": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 0
+  },
+  "67": {
+   "CharCode": 50,
+   "Flags": 0,
+   "Key": 50,
+   "Modifier": 45
+  },
+  "670": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 82,
+   "Modifier": 4
+  },
+  "671": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 83,
+   "Modifier": 4
+  },
+  "672": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 84,
+   "Modifier": 4
+  },
+  "673": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 85,
+   "Modifier": 4
+  },
+  "674": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 86,
+   "Modifier": 4
+  },
+  "675": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 87,
+   "Modifier": 4
+  },
+  "676": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 88,
+   "Modifier": 4
+  },
+  "677": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 89,
+   "Modifier": 4
+  },
+  "678": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 91,
+   "Modifier": 4
+  },
+  "679": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 92,
+   "Modifier": 4
+  },
+  "68": {
+   "CharCode": 51,
+   "Flags": 0,
+   "Key": 51,
+   "Modifier": 45
+  },
+  "682": {
+   "CharCode": 63273,
+   "Flags": 0,
+   "Key": 1,
+   "Modifier": 4
+  },
+  "683": {
+   "CharCode": 3,
+   "Flags": 0,
+   "Key": 3,
+   "Modifier": 1
+  },
+  "686": {
+   "CharCode": 49,
+   "Flags": 0,
+   "Key": 49,
+   "Modifier": 32
+  },
+  "690": {
+   "CharCode": 50,
+   "Flags": 0,
+   "Key": 50,
+   "Modifier": 32
+  },
+  "695": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 12
+  },
+  "696": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 12
+  },
+  "697": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 12
+  },
+  "698": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 81,
+   "Modifier": 0
+  },
+  "699": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 33
+  },
+  "7": {
+   "CharCode": 114,
+   "Flags": 0,
+   "Key": 114,
+   "Modifier": 0
+  },
+  "70": {
+   "CharCode": 63277,
+   "Flags": 0,
+   "Key": 12,
+   "Modifier": 8
+  },
+  "700": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 33
+  },
+  "706": {
+   "CharCode": 119,
+   "Flags": 0,
+   "Key": 119,
+   "Modifier": 8
+  },
+  "71": {
+   "CharCode": 63276,
+   "Flags": 0,
+   "Key": 11,
+   "Modifier": 8
+  },
+  "72": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 8
+  },
+  "731": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 8
+  },
+  "735": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 0
+  },
+  "736": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 0
+  },
+  "743": {
+   "CharCode": 119,
+   "Flags": 0,
+   "Key": 119,
+   "Modifier": 0
+  },
+  "748": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 0
+  },
+  "749": {
+   "CharCode": 121,
+   "Flags": 0,
+   "Key": 121,
+   "Modifier": 0
+  },
+  "751": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 32
+  },
+  "752": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 32
+  },
+  "753": {
+   "CharCode": 119,
+   "Flags": 0,
+   "Key": 119,
+   "Modifier": 40
+  },
+  "754": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 32
+  },
+  "757": {
+   "CharCode": 112,
+   "Flags": 0,
+   "Key": 112,
+   "Modifier": 32
+  },
+  "758": {
+   "CharCode": 105,
+   "Flags": 0,
+   "Key": 105,
+   "Modifier": 32
+  },
+  "759": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 40
+  },
+  "76": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 9
+  },
+  "760": {
+   "CharCode": 113,
+   "Flags": 0,
+   "Key": 113,
+   "Modifier": 32
+  },
+  "761": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 32
+  },
+  "762": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 32
+  },
+  "763": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 32
+  },
+  "764": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 32
+  },
+  "766": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 32
+  },
+  "77": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 5
+  },
+  "772": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 36
+  },
+  "775": {
+   "CharCode": 57,
+   "Flags": 0,
+   "Key": 57,
+   "Modifier": 32
+  },
+  "78": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 8
+  },
+  "785": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 33
+  },
+  "79": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 1
+  },
+  "796": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 33
+  },
+  "797": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 40
+  },
+  "799": {
+   "CharCode": 96,
+   "Flags": 0,
+   "Key": 96,
+   "Modifier": 33
+  },
+  "8": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 67,
+   "Modifier": 0
+  },
+  "80": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 0
+  },
+  "81": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 0
+  },
+  "811": {
+   "CharCode": 63232,
+   "Flags": 0,
+   "Key": 30,
+   "Modifier": 40
+  },
+  "812": {
+   "CharCode": 63233,
+   "Flags": 0,
+   "Key": 31,
+   "Modifier": 40
+  },
+  "816": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 13
+  },
+  "817": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 13
+  },
+  "82": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 0
+  },
+  "83": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 0
+  },
+  "84": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 13
+  },
+  "85": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 37
+  },
+  "87": {
+   "CharCode": 13,
+   "Flags": 0,
+   "Key": 13,
+   "Modifier": 5
+  },
+  "879": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 24,
+   "Modifier": 0
+  },
+  "88": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 32
+  },
+  "880": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 27,
+   "Modifier": 0
+  },
+  "881": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 24,
+   "Modifier": 1
+  },
+  "882": {
+   "CharCode": 0,
+   "Flags": 1,
+   "Key": 27,
+   "Modifier": 1
+  },
+  "883": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 8
+  },
+  "884": {
+   "CharCode": 96,
+   "Flags": 0,
+   "Key": 96,
+   "Modifier": 4
+  },
+  "886": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 33
+  },
+  "887": {
+   "CharCode": 111,
+   "Flags": 0,
+   "Key": 111,
+   "Modifier": 33
+  },
+  "888": {
+   "CharCode": 107,
+   "Flags": 0,
+   "Key": 107,
+   "Modifier": 33
+  },
+  "89": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 33
+  },
+  "893": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 0
+  },
+  "895": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 33
+  },
+  "896": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 33
+  },
+  "897": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 33
+  },
+  "899": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 33
+  },
+  "9": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 32
+  },
+  "90": {
+   "CharCode": 106,
+   "Flags": 0,
+   "Key": 106,
+   "Modifier": 32
+  },
+  "900": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 0
+  },
+  "901": {
+   "CharCode": 119,
+   "Flags": 0,
+   "Key": 119,
+   "Modifier": 0
+  },
+  "902": {
+   "CharCode": 115,
+   "Flags": 0,
+   "Key": 115,
+   "Modifier": 0
+  },
+  "903": {
+   "CharCode": 101,
+   "Flags": 0,
+   "Key": 101,
+   "Modifier": 0
+  },
+  "904": {
+   "CharCode": 100,
+   "Flags": 0,
+   "Key": 100,
+   "Modifier": 0
+  },
+  "905": {
+   "CharCode": 102,
+   "Flags": 0,
+   "Key": 102,
+   "Modifier": 0
+  },
+  "906": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 0
+  },
+  "907": {
+   "CharCode": 103,
+   "Flags": 0,
+   "Key": 103,
+   "Modifier": 0
+  },
+  "908": {
+   "CharCode": 121,
+   "Flags": 0,
+   "Key": 121,
+   "Modifier": 0
+  },
+  "909": {
+   "CharCode": 104,
+   "Flags": 0,
+   "Key": 104,
+   "Modifier": 0
+  },
+  "91": {
+   "CharCode": 116,
+   "Flags": 0,
+   "Key": 116,
+   "Modifier": 36
+  },
+  "910": {
+   "CharCode": 117,
+   "Flags": 0,
+   "Key": 117,
+   "Modifier": 0
+  },
+  "911": {
+   "CharCode": 106,
+   "Flags": 0,
+   "Key": 106,
+   "Modifier": 0
+  },
+  "912": {
+   "CharCode": 32,
+   "Flags": 0,
+   "Key": 32,
+   "Modifier": 0
+  },
+  "920": {
+   "CharCode": 49,
+   "Flags": 0,
+   "Key": 49,
+   "Modifier": 0
+  },
+  "921": {
+   "CharCode": 50,
+   "Flags": 0,
+   "Key": 50,
+   "Modifier": 0
+  },
+  "922": {
+   "CharCode": 51,
+   "Flags": 0,
+   "Key": 51,
+   "Modifier": 0
+  },
+  "923": {
+   "CharCode": 52,
+   "Flags": 0,
+   "Key": 52,
+   "Modifier": 0
+  },
+  "924": {
+   "CharCode": 53,
+   "Flags": 0,
+   "Key": 53,
+   "Modifier": 0
+  },
+  "925": {
+   "CharCode": 54,
+   "Flags": 0,
+   "Key": 54,
+   "Modifier": 0
+  },
+  "926": {
+   "CharCode": 55,
+   "Flags": 0,
+   "Key": 55,
+   "Modifier": 0
+  },
+  "927": {
+   "CharCode": 56,
+   "Flags": 0,
+   "Key": 56,
+   "Modifier": 0
+  },
+  "930": {
+   "CharCode": 99,
+   "Flags": 0,
+   "Key": 99,
+   "Modifier": 0
+  },
+  "931": {
+   "CharCode": 118,
+   "Flags": 0,
+   "Key": 118,
+   "Modifier": 0
+  },
+  "932": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 0
+  },
+  "933": {
+   "CharCode": 110,
+   "Flags": 0,
+   "Key": 110,
+   "Modifier": 0
+  },
+  "934": {
+   "CharCode": 109,
+   "Flags": 0,
+   "Key": 109,
+   "Modifier": 0
+  },
+  "935": {
+   "CharCode": 44,
+   "Flags": 0,
+   "Key": 44,
+   "Modifier": 0
+  },
+  "936": {
+   "CharCode": 46,
+   "Flags": 0,
+   "Key": 46,
+   "Modifier": 0
+  },
+  "937": {
+   "CharCode": 47,
+   "Flags": 0,
+   "Key": 47,
+   "Modifier": 0
+  },
+  "940": {
+   "CharCode": 63235,
+   "Flags": 0,
+   "Key": 29,
+   "Modifier": 0
+  },
+  "941": {
+   "CharCode": 127,
+   "Flags": 0,
+   "Key": 8,
+   "Modifier": 4
+  },
+  "942": {
+   "CharCode": 63234,
+   "Flags": 0,
+   "Key": 28,
+   "Modifier": 0
+  },
+  "943": {
+   "CharCode": 48,
+   "Flags": 0,
+   "Key": 48,
+   "Modifier": 0
+  },
+  "944": {
+   "CharCode": 57,
+   "Flags": 0,
+   "Key": 57,
+   "Modifier": 0
+  },
+  "945": {
+   "CharCode": 98,
+   "Flags": 0,
+   "Key": 98,
+   "Modifier": 1
+  },
+  "946": {
+   "CharCode": 51,
+   "Flags": 0,
+   "Key": 51,
+   "Modifier": 1
+  },
+  "948": {
+   "CharCode": 96,
+   "Flags": 0,
+   "Key": 96,
+   "Modifier": 0
+  },
+  "96": {
+   "CharCode": 97,
+   "Flags": 0,
+   "Key": 97,
+   "Modifier": 4
+  },
+  "960": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 1
+  },
+  "961": {
+   "CharCode": 122,
+   "Flags": 0,
+   "Key": 122,
+   "Modifier": 0
+  },
+  "962": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 0
+  },
+  "963": {
+   "CharCode": 120,
+   "Flags": 0,
+   "Key": 120,
+   "Modifier": 1
+  },
+  "964": {
+   "CharCode": 45,
+   "Flags": 0,
+   "Key": 45,
+   "Modifier": 0
+  },
+  "965": {
+   "CharCode": 113,
+   "Flags": 0,
+   "Key": 113,
+   "Modifier": 0
+  }
+ },
+ "lastSelectedKeyCommandsPath": "/Applications/Logic Pro.app/Contents/Resources/Key Commands/U.S..logikcs",
+ "lastSelectedKeyCommandsTouched": true
+}
