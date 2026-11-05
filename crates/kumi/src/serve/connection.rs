@@ -112,9 +112,9 @@ pub struct Link {
     ref_names: RefCell<HashMap<String, String>>,
     /// A write whose outcome is unsure, until the next look (CC-2's R6): `{at, op, reason, cleanup}`.
     unsure: RefCell<Option<Value>>,
-    /// The own bridge's epoch the last look read, from that look's own snapshot: a page of another (a tab switched
-    /// since) isn't the looked project's. Taken with the look, never read again after it, so a switch between the two
-    /// can't pair the looked project's key with another's epoch.
+    /// The DAW's own epoch the last look read, taken with that look: an own bridge's page of another epoch (a tab
+    /// switched since) isn't the looked project's. Never read again after the look, so a switch between the two can't
+    /// pair the looked project's key with another's epoch.
     page_epoch: RefCell<Option<String>>,
 }
 
@@ -211,8 +211,9 @@ impl Link {
         project
     }
 
-    /// The DAW's own epoch the last look read (an own bridge's), from that look's snapshot: None when the DAW gives none
-    /// or no look read the project. A capture names it, so another project's state is never taken for the looked one.
+    /// The DAW's own epoch the last look read, taken with that look (an own bridge's from its snapshot): None when the
+    /// DAW gave none or no look read the project. A capture names it, so another project's state is never taken for the
+    /// looked one.
     pub fn observed_native_epoch(&self) -> Option<String> {
         self.page_epoch.borrow().clone()
     }
@@ -688,7 +689,7 @@ mod tests {
         assert_ne!(a.key, b.key);
         assert_eq!(link.observed_native_epoch().as_deref(), Some("eB"));
         assert!(!link.page_is_looked(Some("eA")));
-        // A look that gave no epoch (Live, or a look that couldn't read): no page is taken on trust.
+        // A look that gave no epoch (one that couldn't read the project): no page is taken on trust.
         link.saw(&looked("4242:2", None));
         assert_eq!(link.observed_native_epoch(), None);
         assert!(!link.page_is_looked(Some("eB")));

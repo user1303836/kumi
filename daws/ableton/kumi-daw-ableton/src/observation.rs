@@ -918,7 +918,9 @@ impl Observer {
                     .filter(|_| !more_tracks)
                     .map(|tracks| tracks.iter().filter_map(|t| t.get("name").and_then(Value::as_str).map(str::to_owned)).collect()),
                 saved_at,
-                native_epoch: None,
+                // The epoch this look read (published above, before its later reads): a concurrent look may refresh
+                // the connection's while this observation is still the one held.
+                native_epoch: Some(epoch.to_string()),
                 context: stringify(&Value::Object(context)),
             })
         }.await;

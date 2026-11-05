@@ -292,9 +292,9 @@ pub struct Observation {
     pub saved_at: Option<f64>,
     /// The project as the DAW knows it, its name for the app to show; None when the DAW wasn't read.
     pub identity: Option<ProjectIdentity>,
-    /// The DAW's own epoch for the state this observation read, from the same snapshot (an own bridge's), so a project
-    /// switch after the look can't be taken for the looked state, as a second read would. None when the DAW gives none
-    /// (Live) or wasn't read.
+    /// The DAW's own epoch for the state this observation read, taken with it (an own bridge's from the same snapshot,
+    /// Live's from the same look), so a project switch after the look can't be taken for the looked state, as a second
+    /// read would. None when the DAW wasn't read.
     pub native_epoch: Option<String>,
 }
 
