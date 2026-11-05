@@ -116,6 +116,55 @@ export function pick(model: MapModel, view: MapViewport, size: number, px: numbe
   return best
 }
 
+/** The point an arrow key moves to: from point `from` (an index), the nearest visible one in `direction` (screen
+ *  `[dx, dy]`, e.g. `[1, 0]` for right). One within 45° of that way wins; failing any, the nearest anywhere on that side,
+ *  so no sound is out of the keyboard's reach. Nearer in line beats nearer off to the side. -1 when there's none that
+ *  way. With no point yet (`from` undefined), the visible point nearest the middle of the screen `[cx, cy]`. */
+export function step(
+  model: MapModel,
+  view: MapViewport,
+  size: number,
+  from: number | undefined,
+  direction: [number, number],
+  middle: [number, number],
+  visible?: (index: number) => boolean
+): number {
+  const origin = from === undefined ? middle : toScreen(view, size, model.points[from].x, model.points[from].y)
+  // [within 45°, anywhere on that side]
+  const best = [-1, -1]
+  const bestScore = [Infinity, Infinity]
+  model.points.forEach((point, index) => {
+    if (index === from || (visible && !visible(index))) return
+    const [x, y] = toScreen(view, size, point.x, point.y)
+    const ox = x - origin[0]
+    const oy = y - origin[1]
+    let score: number
+    let side = 0
+    if (from === undefined) {
+      score = ox * ox + oy * oy
+    } else {
+      const along = ox * direction[0] + oy * direction[1]
+      if (along <= 0.5) return
+      const across = Math.abs(ox * direction[1] - oy * direction[0])
+      score = along + 2 * across
+      side = across <= along ? 0 : 1
+    }
+    if (score < bestScore[side]) {
+      best[side] = index
+      bestScore[side] = score
+    }
+  })
+  return best[0] >= 0 ? best[0] : best[1]
+}
+
+/** The view moved just enough that screen point (`px`, `py`) sits inside a `width`×`height` box with `margin` around
+ *  it; the same view when it already does. */
+export function keepInView(view: MapViewport, px: number, py: number, width: number, height: number, margin = 24): MapViewport {
+  const shiftX = px < margin ? margin - px : px > width - margin ? width - margin - px : 0
+  const shiftY = py < margin ? margin - py : py > height - margin ? height - margin - py : 0
+  return shiftX || shiftY ? { ...view, dx: view.dx + shiftX, dy: view.dy + shiftY } : view
+}
+
 /** A sound's name as the canvas draws it beside its point: `clean()`ed and cut at 28 characters. `fillText` applies
  *  the bidi algorithm, so a raw name holding a bidi control could reorder its own label. */
 export function mapLabel(name: unknown): string {

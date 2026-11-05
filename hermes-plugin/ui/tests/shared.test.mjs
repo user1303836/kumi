@@ -133,6 +133,33 @@ test("a map label is the sound's name with nothing that reorders it, cut to 28 c
   assert.equal(map.mapLabel(undefined), '')
 })
 
+test('the arrow keys move to the nearest sound that way, in line before off to the side, and every sound stays in reach', () => {
+  const model = map.buildModel({
+    revision: 'r1',
+    points: [['mid', 0.5, 0.5, 0], ['right', 0.75, 0.5, 0], ['up-right', 0.6, 0.3, 0], ['left', 0.2, 0.52, 0], ['down', 0.5, 0.9, 1]],
+    groups: { 0: { name: 'snare', color: '#f59e0b' }, 1: { name: 'kick', color: '#ef4444' } },
+    sounds: {}
+  })
+  const view = { scale: 1, dx: 0, dy: 0 }
+  const at = id => model.points.findIndex(point => point.id === id)
+  const move = (from, direction, visible) => model.points[map.step(model, view, 100, at(from), direction, [50, 50], visible)]?.id
+  // Right of the middle: the one 25 px along, in line, over the one 10 px along but 20 px up.
+  assert.equal(move('mid', [1, 0]), 'right')
+  assert.equal(move('mid', [-1, 0]), 'left')
+  assert.equal(move('mid', [0, -1]), 'up-right')
+  assert.equal(move('mid', [0, 1]), 'down')
+  assert.equal(move('right', [1, 0]), undefined, 'nothing further right')
+  // A hidden group's sound isn't a stop. With nothing within 45° below, down goes to the nearest sound below at all.
+  assert.equal(move('mid', [0, 1], index => model.points[index].group !== 1), 'left')
+  // With nothing picked yet, the first key picks the sound nearest the middle of the screen.
+  assert.equal(model.points[map.step(model, view, 100, undefined, [1, 0], [74, 50])].id, 'right')
+
+  // A sound moved to off the edge brings the view with it, by just enough; one in view moves nothing.
+  assert.deepEqual(map.keepInView(view, 130, 50, 100, 100), { scale: 1, dx: -54, dy: 0 })
+  assert.deepEqual(map.keepInView(view, 10, -5, 100, 100), { scale: 1, dx: 14, dy: 29 })
+  assert.equal(map.keepInView(view, 50, 50, 100, 100), view)
+})
+
 test('the map keeps valid points, colours each group, and picks the nearest point under the pointer', () => {
   const model = map.buildModel(sample)
   assert.equal(model.points.length, 3)

@@ -278,13 +278,15 @@ test('what the agent found, or a search, is also listed by name above the map, f
     sounds: { ...Object.fromEntries(ids.map((id, index) => [id, { name: `Dusty Snare ${index + 1}.wav`, class: 'snare' }])), 's-r7-0099': { name: 'Kick 1.wav', class: 'kick' } }
   }
   const draw = (found, selected = null) =>
-    renderToStaticMarkup(createElement(MapCanvas, { map, found, playing: null, selected, onPick: () => {}, empty: 'none' }))
+    renderToStaticMarkup(createElement(MapCanvas, { map, found, playing: null, selected, onPick: () => {}, onSelect: () => {}, empty: 'none' }))
+  // The listed rows: after the list's label, before the canvas (the legend's toggles are pressed buttons too).
+  const rows = html => html.slice(html.indexOf('role="group"'), html.indexOf('<canvas'))
   const html = draw({ revision: 'r7', ids: ids.slice(0, 2) }, ids[1])
   assert.ok(html.includes('aria-label="Sounds Kumi found"'), html)
   assert.ok(html.includes('Dusty Snare 1.wav') && html.includes('Dusty Snare 2.wav') && !html.includes('Kick 1.wav'), html)
-  assert.equal(html.split('aria-pressed="true"').length - 1, 1, 'the picked sound is the pressed row')
+  assert.equal(rows(html).split('aria-pressed="true"').length - 1, 1, 'the picked sound is the pressed row')
   const many = draw({ revision: 'r7', ids })
-  assert.equal(many.split('<button aria-pressed').length - 1, 6)
+  assert.equal(rows(many).split('<button aria-pressed').length - 1, 6)
   assert.ok(many.includes('and 2 more on the map'), many)
   // A find from another map revision names sounds this map may not have: no list.
   assert.ok(!draw({ revision: 'r6', ids }).includes('Sounds Kumi found'))

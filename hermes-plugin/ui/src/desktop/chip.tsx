@@ -6,7 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { chipWords } from '../shared/format.ts'
 import { useKumi } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
-import { useT } from '../shared/ui.tsx'
+import { FOCUSABLE, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { nextStep, ownerSession } from './pane.tsx'
 
@@ -33,6 +33,7 @@ export function StatusChip({
       <DropdownMenuTrigger asChild>
         <button
           aria-label={t('chip.label', words.text)}
+          className={FOCUSABLE}
           title="Kumi"
           type="button"
           style={{

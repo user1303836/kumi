@@ -53,7 +53,13 @@ export function Wave({ audition, id, label, caption = label }: { audition: Audit
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 160px', minWidth: 140 }}>
       <div style={{ ...S.row, justifyContent: 'space-between' }}>
         <span style={{ ...S.faint, ...S.ellipsis }}>{caption}</span>
-        <TextButton onClick={() => (playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)))}>{playing ? '■' : '▶'}</TextButton>
+        <TextButton
+          label={playing ? t('listen.stop', label) : t('listen.play', label)}
+          onClick={() => (playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)))}
+          pressed={playing}
+        >
+          {playing ? '■' : '▶'}
+        </TextButton>
       </div>
       <svg aria-label={t('listen.waveform', label)} height={36} preserveAspectRatio="none" role="img" viewBox="0 0 96 36" width="100%">
         {(peaks ?? []).map((peak, index) => (

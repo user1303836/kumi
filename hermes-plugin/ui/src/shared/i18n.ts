@@ -51,6 +51,7 @@ const en = {
     undoable: (n: number) => `· ${n} can be undone`,
     undo: 'Undo',
     undoTitle: 'Ask Kumi to undo this change',
+    undoLabel: (change: string) => `Undo ${change}`,
     openMap: 'Open the sound map',
     undoNeedsConnection: 'Undo needs a connected Kumi.'
   },
@@ -109,6 +110,8 @@ const en = {
   map: {
     tab: 'Sound map',
     canvas: 'Sound map',
+    roledescription: 'sound map',
+    keys: 'Arrow keys move between sounds, Enter or Space plays the one picked, Escape lets it go, plus and minus zoom, 0 shows the whole map.',
     agentOff: "Kumi's agent half is off in this profile, so there's no map to show.",
     reading: 'Reading the sound map…',
     empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there.",
@@ -141,6 +144,8 @@ const en = {
     measuredTitle: 'Measured on this computer by Kumi, from the audio file itself',
     captureTitle: "Kumi played this window and measured it; it isn't a change, so there's nothing to undo",
     waveform: (label: string) => `Waveform of ${label}`,
+    play: (label: string) => `Play ${label}`,
+    stop: (label: string) => `Stop ${label}`,
     audioGone: "The audio isn't available any more.",
     this: 'This',
     reference: 'Reference',
@@ -299,6 +304,7 @@ const ja: Shape<typeof en> = {
     undoable: n => `· ${n} 件取り消せます`,
     undo: '取り消す',
     undoTitle: 'この変更の取り消しを Kumi に頼む',
+    undoLabel: change => `${change} を取り消す`,
     openMap: 'サンプルマップを開く',
     undoNeedsConnection: '取り消すには Kumi の接続が必要です。'
   },
@@ -357,6 +363,8 @@ const ja: Shape<typeof en> = {
   map: {
     tab: 'サンプルマップ',
     canvas: 'サンプルマップ',
+    roledescription: 'サンプルマップ',
+    keys: '矢印キーでサウンドを移動、Enter かスペースで選んだサウンドを再生、Escape で選択を解除、プラスとマイナスでズーム、0 でマップ全体を表示します。',
     agentOff: 'このプロファイルでは Kumi のエージェント側がオフのため、表示できるマップがありません。',
     reading: 'サンプルマップを読み込み中…',
     empty: 'まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Kumi にスキャンを頼んでください。見つかったサウンドからマップが作られます。',
@@ -389,6 +397,8 @@ const ja: Shape<typeof en> = {
     measuredTitle: 'Kumi がこのコンピュータ上で、オーディオファイルそのものから測定しました',
     captureTitle: 'Kumi はこの区間を再生して測定しました。変更ではないので、取り消すものはありません',
     waveform: label => `${label} の波形`,
+    play: label => `${label} を再生`,
+    stop: label => `${label} を停止`,
     audioGone: 'このオーディオはもう利用できません。',
     this: 'これ',
     reference: 'リファレンス',
@@ -546,6 +556,7 @@ const zh: Shape<typeof en> = {
     undoable: n => `· ${n} 项可撤销`,
     undo: '撤销',
     undoTitle: '让 Kumi 撤销这次改动',
+    undoLabel: change => `撤销 ${change}`,
     openMap: '打开采样地图',
     undoNeedsConnection: '撤销需要 Kumi 已连接。'
   },
@@ -604,6 +615,8 @@ const zh: Shape<typeof en> = {
   map: {
     tab: '采样地图',
     canvas: '采样地图',
+    roledescription: '采样地图',
+    keys: '方向键在声音之间移动，Enter 或空格播放选中的声音，Escape 取消选择，加号和减号缩放，0 显示整张地图。',
     agentOff: '此配置中 Kumi 的 Agent 部分已关闭，没有可显示的地图。',
     reading: '正在读取采样地图…',
     empty: '还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Kumi 扫描；地图会根据找到的声音生成。',
@@ -636,6 +649,8 @@ const zh: Shape<typeof en> = {
     measuredTitle: '由 Kumi 在这台电脑上根据音频文件本身测量',
     captureTitle: 'Kumi 播放并测量了这个片段；这不是改动，所以没有需要撤销的内容',
     waveform: label => `${label} 的波形`,
+    play: label => `播放 ${label}`,
+    stop: label => `停止 ${label}`,
     audioGone: '这段音频已不可用。',
     this: '当前',
     reference: '参考',
