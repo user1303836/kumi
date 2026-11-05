@@ -514,7 +514,7 @@ fn artifact_id(id: &str) -> bool {
         && (3..=80).contains(&id.len())
         && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
-fn open_regular(path: &Path) -> io::Result<File> {
+pub(crate) fn open_regular(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
