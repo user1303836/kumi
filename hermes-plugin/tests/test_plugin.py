@@ -41,7 +41,7 @@ class Register(unittest.TestCase):
         self.assertEqual(set(ctx.commands), {"kumi"})
         self.assertEqual(set(ctx.cli), {"kumi"})
         self.assertEqual(set(ctx.references), {"kumi"})
-        self.assertEqual(set(ctx.skills), {"daw", "sounds", "listening"})
+        self.assertEqual(set(ctx.skills), {"daw", "sounds", "listening", "generate"})
         self.assertIn("kumi:daw", ctx.prompt["kumi"])
 
     def test_only_status_setup_and_connect_are_shown_before_kumi_is_set_up(self):

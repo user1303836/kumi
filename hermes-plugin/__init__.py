@@ -56,7 +56,7 @@ def register(ctx) -> None:
     commands.register_cli(ctx, host)
     ctx.register_auxiliary_task(listening.AUX_TASK_KEY, **listening.AUX_TASK)  # CC-1; ctx.llm is read only per call
     ctx.register_context_reference(references.provider(lambda: Path(host.data_dir()) / "state"))
-    for skill in ("daw", "sounds", "listening"):
+    for skill in ("daw", "sounds", "listening", "generate"):
         ctx.register_skill(skill, SKILLS / skill / "SKILL.md")
     ctx.register_system_prompt_section("kumi", PROMPT)
     blueprints.register(ctx)

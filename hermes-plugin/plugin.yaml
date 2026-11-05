@@ -11,7 +11,7 @@ homepage: https://github.com/user1303836/kumi/tree/main/hermes-plugin
 license: MIT
 requires_hermes: ">=0.22.7"
 provides_tools: [kumi_status, kumi_setup, kumi_connect, kumi_observe, kumi_read, kumi_change, kumi_undo,
-                 kumi_history, kumi_listen, kumi_sounds, kumi_library, kumi_job]
+                 kumi_history, kumi_listen, kumi_sounds, kumi_library, kumi_job, kumi_generate]
 provides_hooks: [pre_tool_call, post_approval_response, post_tool_call, pre_llm_call, post_compaction,
                  on_session_finalize, agent_loop_stopped]
 config_schema:
@@ -36,3 +36,28 @@ config_schema:
     default: false
     label: Interpret measurements with a model
     description: "After Kumi measures audio, the model set for Kumi listening interpretation in Hermes's model settings (it follows Vision unless you change it, and must accept images) reads the numbers and a coarse band-energy image, never the audio. Its reading is added beside the measurements, which stay either way. The model or Hermes's fallback providers for that task may cost tokens."
+  mirelo_acknowledged:
+    type: bool
+    default: false
+    label: Use Mirelo for paid generation
+    description: "Lets the agent ask for paid sound effects and audio-to-MIDI from Mirelo, each approved by you with its estimate in Mirelo API credits (never a price). Your prompt, and for MIDI the audio file you approve, go to Mirelo."
+  mirelo_sfx_enabled:
+    type: bool
+    default: false
+    label: Mirelo sound effects
+    description: "Allows paid sound effects from a prompt, each quoted and approved first."
+  mirelo_midi_enabled:
+    type: bool
+    default: false
+    label: Mirelo audio to MIDI
+    description: "Allows paid audio-to-MIDI from an audio file, which is sent to Mirelo only after you approve it."
+  mirelo_credit_cap:
+    type: int
+    default: 0
+    label: Mirelo credit cap
+    description: "The most Mirelo API credits Kumi may reserve, over its whole life. 0 refuses every paid generation."
+  mirelo_api_key:
+    type: secret
+    env: MIRELO_API_KEY
+    label: Mirelo API key
+    description: "Your Mirelo API key, kept as a Hermes secret. Kumi sends it only to Mirelo, with a generation you approved."
