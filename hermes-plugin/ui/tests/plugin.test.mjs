@@ -110,7 +110,7 @@ test('it reads /status at once, polls it every 5 s, and listens for what Kumi an
   assert.ok(h.calls.rest.includes('/focus') && h.calls.rest.includes('/history?limit=50'))
   // The map is read only when something shows it.
   assert.ok(!h.calls.rest.includes('/map'))
-  assert.deepEqual(h.intervals, [5000])
+  assert.deepEqual(h.intervals, [5000, 2000])
   for (const event of ['status', 'focus', 'history', 'map', 'settings'].map(name => `plugin.kumi.${name}.changed`).concat('plugin.kumi.job.progress', 'tool.complete')) {
     assert.ok(h.events.has(event), event)
   }
@@ -192,6 +192,25 @@ test('a kumi_sounds result opens the map on what it found; other tools only refr
   assert.equal(h.calls.workspaces.length, 0)
   complete({ payload: { name: 'kumi_sounds', result: JSON.stringify({ map_revision: 'r7', items: [{ sound_id: 's-r7-0091' }, { sound_id: 's-r7-0092' }] }) } })
   assert.deepEqual(h.calls.workspaces, [['kumi-sound-map', 'Sound map']])
+})
+
+test('a call that starts a job, or a job.progress event, has the pane follow that job until it ends', async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  let state = 'running'
+  const h = harness({
+    routes: {
+      ...ROUTES,
+      '/job?id=j-scan-1': { job_id: 'j-scan-1', kind: 'scan', get state() { return state }, progress: { done: 412, total: 1200, message: 'Drums' } },
+      '/job?id=j-scan-2': { job_id: 'j-scan-2', kind: 'scan', state: 'running', progress: { done: 3 } }
+    }
+  })
+  plugin.register(h.ctx)
+  await settle()
+  h.events.get('tool.complete')({ payload: { name: 'kumi_library', result: JSON.stringify({ job_id: 'j-scan-1', state: 'running' }) } })
+  h.events.get('plugin.kumi.job.progress')({ payload: { job_id: 'j-scan-2', state: 'running', progress: { done: 3 } } })
+  h.events.get('plugin.kumi.job.progress')({ payload: { job_id: '../owner' } })
+  await settle()
+  assert.deepEqual(h.calls.rest.filter(path => path.startsWith('/job')).sort(), ['/job?id=j-scan-1', '/job?id=j-scan-2'])
 })
 
 test('the built Desktop file uses only the SDK and React, and none of the doors rule 8 closes', () => {

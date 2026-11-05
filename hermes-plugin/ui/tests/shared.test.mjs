@@ -322,3 +322,42 @@ test('a runtime that went quiet and then stopped has FOCUS read again, so the ch
   assert.ok(reads.includes('/focus'), reads.join(' '))
   assert.equal(kumi.get().focus.running, false)
 })
+
+test('a tracked job is read while it runs, kept a minute after it ends, and dropped when its runtime knows nothing of it', async () => {
+  const reads = []
+  let job = { job_id: 'j-1', kind: 'scan', state: 'running', progress: { done: 412, total: 1200, message: 'Drums' } }
+  const kumi = new store.KumiStore(async path => {
+    reads.push(path)
+    if (path === '/job?id=j-1') return job
+    if (path === '/job?id=j-gone') throw new Error('404: {"detail":"Kumi has no job with that id here."}')
+    return {}
+  })
+  kumi.trackJob('j-1')
+  kumi.trackJob('j-gone')
+  kumi.trackJob('not an id')
+  await new Promise(resolve => setTimeout(resolve, 10))
+  assert.deepEqual(Object.keys(kumi.get().jobs), ['j-1'])
+  assert.equal(kumi.get().jobs['j-1'].ended_at, null)
+  job = { ...job, state: 'done', result: { sounds: 640 } }
+  await kumi.refreshJobs()
+  const ended = kumi.get().jobs['j-1'].ended_at
+  assert.equal(typeof ended, 'number')
+  reads.length = 0
+  await kumi.refreshJobs()
+  assert.deepEqual(reads, [], 'a finished job is never read again')
+  await kumi.refreshJobs(ended + store.JOB_KEPT_MS + 1)
+  assert.deepEqual(kumi.get().jobs, {})
+})
+
+test("a job's words say what it does, how far it got and how it ended", () => {
+  assert.deepEqual(format.jobWords({ kind: 'scan', state: 'running', progress: { done: 412, total: 1200, message: 'Drums' } }), {
+    title: 'Scanning',
+    detail: 'Drums · 412 of 1,200',
+    fraction: 412 / 1200,
+    tone: 'muted'
+  })
+  assert.equal(format.jobWords({ kind: 'scan', state: 'done', result: { sounds: 640 } }).detail, '640 sounds')
+  assert.deepEqual(format.jobWords({ kind: 'scan', state: 'failed', error: { reason: 'the folder went away' } }).title, 'Scan failed')
+  assert.equal(format.jobWords({ kind: 'scan', state: 'interrupted' }).tone, 'warn')
+  assert.equal(format.jobWords({ kind: 'render', state: 'running' }).title, 'render running')
+})

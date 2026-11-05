@@ -1,7 +1,8 @@
 // One store per UI half over Kumi's read-only routes (contract C4), shared by every view in it. It never writes: it
 // reads `/status` on a poll and on events, and reads FOCUS, HISTORY and the map again when their revision isn't the
 // one it holds, or when the runtime's liveness changed (the routes say per read whether anything can be undone).
-import type { Focus, History, SetupStatus, SoundMap, Status } from './types.ts'
+import { plainId } from './format.ts'
+import type { Focus, History, Job, SetupStatus, SoundMap, Status } from './types.ts'
 
 export type Fetch = <T>(path: string) => Promise<T>
 
@@ -19,9 +20,23 @@ export interface KumiState {
   setup: SetupStatus | null
   /** Sounds the agent just found (`kumi_sounds`), to light up on the map. */
   found: { revision: string | null; ids: string[]; at: number } | null
+  /** Background jobs this window was told of (a library scan), by id: read while they run, kept a minute after. */
+  jobs: Record<string, TrackedJob>
 }
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null }
+export interface TrackedJob extends Job {
+  /** When this window saw it finish (ms, this window's clock); null while it runs. */
+  ended_at: number | null
+}
+
+/** How long a finished job stays in view. */
+export const JOB_KEPT_MS = 60_000
+
+const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {} }
+
+function finished(job: Job): boolean {
+  return typeof job.state === 'string' && job.state !== 'running'
+}
 
 /** The HTTP status a failed read carries: Desktop's `ctx.rest` rejects with "<status>: <body>". */
 export function statusOf(error: unknown): number {
@@ -159,6 +174,54 @@ export class KumiStore {
   found(revision: string | null, ids: string[]): void {
     this.set({ found: { revision, ids: ids.slice(0, 200), at: Date.now() } })
   }
+
+  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
+  trackJob(id: unknown): void {
+    const jobId = plainId(id)
+    if (!jobId) return
+    if (!this.state.jobs[jobId]) this.set({ jobs: { ...this.state.jobs, [jobId]: { job_id: jobId, state: 'running', ended_at: null } } })
+    void this.refreshJob(jobId)
+  }
+
+  /** Read every job still running (not while the runtime is quiet: nothing moves then), and forget the finished
+   *  ones kept long enough. */
+  refreshJobs(now = Date.now()): Promise<void> {
+    const kept = Object.entries(this.state.jobs).filter(([, job]) => job.ended_at === null || now - job.ended_at < JOB_KEPT_MS)
+    if (kept.length !== Object.keys(this.state.jobs).length) this.set({ jobs: Object.fromEntries(kept) })
+    if (this.state.status?.stale) return Promise.resolve()
+    return Promise.all(kept.filter(([, job]) => job.ended_at === null).map(([id]) => this.refreshJob(id))).then(() => undefined)
+  }
+
+  private refreshJob(id: string): Promise<void> {
+    return this.once(`job:${id}`, async () => {
+      const generation = this.generation
+      try {
+        const job = await this.fetch<Job>(`/job?id=${encodeURIComponent(id)}`)
+        if (generation !== this.generation || !this.state.jobs[id]) return
+        const before = this.state.jobs[id]
+        const ended_at = finished(job) ? (before.ended_at ?? Date.now()) : null
+        this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at } } })
+      } catch (error) {
+        if (generation !== this.generation || statusOf(error) !== 404) return
+        // No such job in this profile (another runtime's, or long gone): nothing to follow.
+        const { [id]: _gone, ...rest } = this.state.jobs
+        this.set({ jobs: rest })
+      }
+    })
+  }
+}
+
+/** The job a tool's result started or reports (`{job_id}`), however the event carried the result. */
+export function jobOf(result: unknown): string | null {
+  let value = result
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return null
+    }
+  }
+  return value && typeof value === 'object' && 'job_id' in value ? plainId(value.job_id) : null
 }
 
 /** Sound ids out of a `kumi_sounds` result (`{map_revision, items: [{sound_id}]}`), however the event carried it. */

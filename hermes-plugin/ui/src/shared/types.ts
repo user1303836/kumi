@@ -145,6 +145,19 @@ export interface AudioReply {
   data_url: string
 }
 
+/** A background job as `/job` answers it (#947's `jobs/<id>.json`): a library scan, say. */
+export interface Job {
+  job_id?: string
+  /** What it does: `scan`. */
+  kind?: string
+  /** `running`, then `done`, `failed`, `cancelled`, or `interrupted` when the runtime stopped first. */
+  state?: string
+  /** How far it got; `message` names what it's on (MCP progress's word). */
+  progress?: { done?: number; total?: number; message?: string } | null
+  result?: unknown
+  error?: { code?: string; reason?: string } | null
+}
+
 export interface SetupStatus {
   state?: string
   target?: string

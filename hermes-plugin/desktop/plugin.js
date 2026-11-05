@@ -74,6 +74,28 @@ function seconds(value) {
   if (typeof value !== "number" || !(value >= 0)) return "";
   return value < 10 ? `${num(value, 2)} s` : value < 60 ? `${num(value, 1)} s` : `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
 }
+var JOB_KINDS = { scan: { running: "Scanning", noun: "Scan" } };
+function jobWords(job) {
+  const kind = typeof job.kind === "string" && job.kind ? job.kind : "";
+  const named = JOB_KINDS[kind] ?? { running: `${clean(kind || "Job", 24)} running`, noun: clean(kind || "Job", 24) };
+  const progress = job.progress ?? {};
+  const done = typeof progress.done === "number" && Number.isFinite(progress.done) ? progress.done : null;
+  const total = typeof progress.total === "number" && Number.isFinite(progress.total) && progress.total > 0 ? progress.total : null;
+  const message = typeof progress.message === "string" ? clean(progress.message, 60) : "";
+  if (job.state === "running" || job.state === void 0) {
+    const count = done === null ? "" : total === null ? num(done, 0) : `${num(done, 0)} of ${num(total, 0)}`;
+    return { title: named.running, detail: [message, count].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
+  }
+  if (job.state === "done") {
+    const result = job.result && typeof job.result === "object" ? job.result : {};
+    const sounds = typeof result.sounds === "number" ? `${num(result.sounds, 0)} sound${result.sounds === 1 ? "" : "s"}` : "";
+    return { title: `${named.noun} done`, detail: sounds, fraction: 1, tone: "good" };
+  }
+  if (job.state === "failed") return { title: `${named.noun} failed`, detail: clean(job.error?.reason ?? "", 120), fraction: null, tone: "bad" };
+  if (job.state === "cancelled") return { title: `${named.noun} stopped`, detail: "", fraction: null, tone: "muted" };
+  if (job.state === "interrupted") return { title: `${named.noun} interrupted`, detail: "Kumi stopped before it finished.", fraction: null, tone: "warn" };
+  return { title: named.noun, detail: clean(job.state ?? "", 24), fraction: null, tone: "muted" };
+}
 var ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 function plainId(value) {
   return typeof value === "string" && ID.test(value) ? value : null;
@@ -226,7 +248,11 @@ function usePlaying(audition) {
 }
 
 // src/shared/store.ts
-var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null };
+var JOB_KEPT_MS = 6e4;
+var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {} };
+function finished(job) {
+  return typeof job.state === "string" && job.state !== "running";
+}
 function statusOf(error) {
   const text = error instanceof Error ? error.message : String(error ?? "");
   const match = /^(\d{3})\b/.exec(text.trim()) ?? /\b(\d{3})\b/.exec(text);
@@ -350,7 +376,49 @@ var KumiStore = class {
   found(revision, ids) {
     this.set({ found: { revision, ids: ids.slice(0, 200), at: Date.now() } });
   }
+  /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
+  trackJob(id) {
+    const jobId = plainId(id);
+    if (!jobId) return;
+    if (!this.state.jobs[jobId]) this.set({ jobs: { ...this.state.jobs, [jobId]: { job_id: jobId, state: "running", ended_at: null } } });
+    void this.refreshJob(jobId);
+  }
+  /** Read every job still running (not while the runtime is quiet: nothing moves then), and forget the finished
+   *  ones kept long enough. */
+  refreshJobs(now = Date.now()) {
+    const kept = Object.entries(this.state.jobs).filter(([, job]) => job.ended_at === null || now - job.ended_at < JOB_KEPT_MS);
+    if (kept.length !== Object.keys(this.state.jobs).length) this.set({ jobs: Object.fromEntries(kept) });
+    if (this.state.status?.stale) return Promise.resolve();
+    return Promise.all(kept.filter(([, job]) => job.ended_at === null).map(([id]) => this.refreshJob(id))).then(() => void 0);
+  }
+  refreshJob(id) {
+    return this.once(`job:${id}`, async () => {
+      const generation = this.generation;
+      try {
+        const job = await this.fetch(`/job?id=${encodeURIComponent(id)}`);
+        if (generation !== this.generation || !this.state.jobs[id]) return;
+        const before = this.state.jobs[id];
+        const ended_at = finished(job) ? before.ended_at ?? Date.now() : null;
+        this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at } } });
+      } catch (error) {
+        if (generation !== this.generation || statusOf(error) !== 404) return;
+        const { [id]: _gone, ...rest } = this.state.jobs;
+        this.set({ jobs: rest });
+      }
+    });
+  }
 };
+function jobOf(result) {
+  let value = result;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  return value && typeof value === "object" && "job_id" in value ? plainId(value.job_id) : null;
+}
 function foundSounds(result) {
   let value = result;
   if (typeof value === "string") {
@@ -814,8 +882,45 @@ function HistoryView({ history, now, action }) {
   }) });
 }
 
+// src/desktop/jobs.tsx
+import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
+var TONE2 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
+function JobsView({ jobs }) {
+  const shown = Object.entries(jobs);
+  if (!shown.length) return null;
+  return /* @__PURE__ */ jsx4("ul", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }, children: shown.map(([id, job]) => {
+    const words = jobWords(job);
+    return /* @__PURE__ */ jsxs4("li", { style: { display: "flex", flexDirection: "column", gap: 3 }, children: [
+      /* @__PURE__ */ jsxs4("span", { style: { ...S.row, gap: 6 }, children: [
+        /* @__PURE__ */ jsx4("span", { style: { ...S.text, color: job.ended_at === null ? T.text : TONE2[words.tone] }, children: words.title }),
+        words.detail && /* @__PURE__ */ jsx4("span", { style: { ...S.faint, ...S.ellipsis }, children: words.detail })
+      ] }),
+      job.ended_at === null && /* @__PURE__ */ jsx4(
+        "span",
+        {
+          "aria-label": words.fraction === null ? `${words.title}: under way` : `${words.title}: ${Math.round(words.fraction * 100)}%`,
+          role: "progressbar",
+          style: { display: "block", height: 3, borderRadius: 2, background: T.border, overflow: "hidden" },
+          children: /* @__PURE__ */ jsx4(
+            "span",
+            {
+              style: {
+                display: "block",
+                height: "100%",
+                width: words.fraction === null ? "30%" : `${Math.max(2, Math.round(words.fraction * 100))}%`,
+                background: T.accent,
+                opacity: words.fraction === null ? 0.5 : 1
+              }
+            }
+          )
+        }
+      )
+    ] }, id);
+  }) });
+}
+
 // src/desktop/pane.tsx
-import { Fragment, jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
+import { Fragment, jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
 function useNow(every = 3e4) {
   const [now, setNow] = useState2(() => Date.now());
   useEffect3(() => {
@@ -838,18 +943,18 @@ function nextStep(state) {
   if (setup?.state === "ready" && !state.status?.connected) return { label: `Connect to ${dawName(daw)}`, request: connectRequest(daw) };
   return null;
 }
-var TONE2 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
+var TONE3 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
 function KumiPane({ ctx, store, onOpenMap }) {
   const state = useKumi(store);
   const now = useNow();
   if (state.available === false) {
-    return /* @__PURE__ */ jsxs4("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 8 }, children: [
-      /* @__PURE__ */ jsx4("span", { style: S.text, children: "Kumi's agent half is off in this profile." }),
-      /* @__PURE__ */ jsx4("span", { style: S.muted, children: "Turn on the kumi plugin's Agent switch in Capabilities → Plugins, then restart the gateway. This pane shows your DAW's FOCUS and Kumi's HISTORY once it's on." })
+    return /* @__PURE__ */ jsxs5("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 8 }, children: [
+      /* @__PURE__ */ jsx5("span", { style: S.text, children: "Kumi's agent half is off in this profile." }),
+      /* @__PURE__ */ jsx5("span", { style: S.muted, children: "Turn on the kumi plugin's Agent switch in Capabilities → Plugins, then restart the gateway. This pane shows your DAW's FOCUS and Kumi's HISTORY once it's on." })
     ] });
   }
   if (state.available === null) {
-    return /* @__PURE__ */ jsx4("div", { style: { ...S.muted, padding: 14 }, children: "Reading Kumi's state…" });
+    return /* @__PURE__ */ jsx5("div", { style: { ...S.muted, padding: 14 }, children: "Reading Kumi's state…" });
   }
   const words = chipWords(state.status, state.focus?.transport?.tempo);
   const step = nextStep(state);
@@ -858,23 +963,23 @@ function KumiPane({ ctx, store, onOpenMap }) {
   const setupState = state.setup?.state;
   const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" ? state.setup.message : null;
   const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
-  return /* @__PURE__ */ jsxs4("div", { style: { height: "100%", overflowY: "auto", overflowX: "hidden", color: T.text }, children: [
-    /* @__PURE__ */ jsxs4("div", { style: { ...S.section, gap: 8 }, children: [
-      /* @__PURE__ */ jsxs4("div", { style: { ...S.row, gap: 8 }, children: [
-        /* @__PURE__ */ jsx4(Dot, { color: TONE2[words.tone], size: 8 }),
-        /* @__PURE__ */ jsx4("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600, flex: 1 }, children: words.text }),
-        state.status?.runtime?.version && /* @__PURE__ */ jsxs4("span", { style: S.faint, children: [
+  return /* @__PURE__ */ jsxs5("div", { style: { height: "100%", overflowY: "auto", overflowX: "hidden", color: T.text }, children: [
+    /* @__PURE__ */ jsxs5("div", { style: { ...S.section, gap: 8 }, children: [
+      /* @__PURE__ */ jsxs5("div", { style: { ...S.row, gap: 8 }, children: [
+        /* @__PURE__ */ jsx5(Dot, { color: TONE3[words.tone], size: 8 }),
+        /* @__PURE__ */ jsx5("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600, flex: 1 }, children: words.text }),
+        state.status?.runtime?.version && /* @__PURE__ */ jsxs5("span", { style: S.faint, children: [
           "Kumi ",
           state.status.runtime.version
         ] })
       ] }),
-      setupMessage && /* @__PURE__ */ jsx4("span", { style: S.muted, children: setupMessage }),
-      state.error && /* @__PURE__ */ jsxs4("span", { style: { ...S.muted, color: T.warn }, children: [
+      setupMessage && /* @__PURE__ */ jsx5("span", { style: S.muted, children: setupMessage }),
+      state.error && /* @__PURE__ */ jsxs5("span", { style: { ...S.muted, color: T.warn }, children: [
         "Kumi's backend didn't answer: ",
         state.error
       ] }),
-      state.status?.unsure && /* @__PURE__ */ jsxs4("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
-        /* @__PURE__ */ jsxs4("span", { style: { ...S.muted, color: T.warn }, children: [
+      state.status?.unsure && /* @__PURE__ */ jsxs5("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
+        /* @__PURE__ */ jsxs5("span", { style: { ...S.muted, color: T.warn }, children: [
           "Kumi isn't sure your project is as it was after ",
           clean(state.status.unsure.op ?? "its last action", 40),
           state.status.unsure.reason ? `: ${clean(state.status.unsure.reason, 160)}` : "",
@@ -882,37 +987,38 @@ function KumiPane({ ctx, store, onOpenMap }) {
           cleanupWords(state.status.unsure.cleanup),
           " It needs a fresh look before another change."
         ] }),
-        /* @__PURE__ */ jsx4("div", { style: S.row, children: /* @__PURE__ */ jsx4(TextButton, { onClick: () => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: "Ask Kumi to look again" }) })
+        /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: "Ask Kumi to look again" }) })
       ] }),
-      step && /* @__PURE__ */ jsx4("div", { style: S.row, children: /* @__PURE__ */ jsx4(TextButton, { onClick: () => void ask(ctx, step.request, { send: true, session: connected ? session : null }), strong: true, children: step.label }) })
+      step && /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, step.request, { send: true, session: connected ? session : null }), strong: true, children: step.label }) })
     ] }),
-    /* @__PURE__ */ jsx4(Section, { title: "Focus", children: /* @__PURE__ */ jsx4(FocusView, { focus: state.focus, now }) }),
-    /* @__PURE__ */ jsx4(
+    /* @__PURE__ */ jsx5(Section, { title: "Focus", children: /* @__PURE__ */ jsx5(FocusView, { focus: state.focus, now }) }),
+    Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx5(Section, { title: "Jobs", children: /* @__PURE__ */ jsx5(JobsView, { jobs: state.jobs }) }),
+    /* @__PURE__ */ jsx5(
       Section,
       {
-        title: /* @__PURE__ */ jsxs4(Fragment, { children: [
+        title: /* @__PURE__ */ jsxs5(Fragment, { children: [
           "History ",
-          /* @__PURE__ */ jsx4("span", { style: { textTransform: "none", letterSpacing: 0 }, children: undoable ? `· ${undoable} can be undone` : "" })
+          /* @__PURE__ */ jsx5("span", { style: { textTransform: "none", letterSpacing: 0 }, children: undoable ? `· ${undoable} can be undone` : "" })
         ] }),
-        children: /* @__PURE__ */ jsx4(
+        children: /* @__PURE__ */ jsx5(
           HistoryView,
           {
             history: state.history,
             now,
-            action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx4(TextButton, { onClick: () => void ask(ctx, undoRequest(item), { send: true, session }), title: "Ask Kumi to undo this change", children: "Undo" }) : null
+            action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, undoRequest(item), { send: true, session }), title: "Ask Kumi to undo this change", children: "Undo" }) : null
           }
         )
       }
     ),
-    /* @__PURE__ */ jsxs4("div", { style: { ...S.row, padding: "10px 12px", gap: 8 }, children: [
-      /* @__PURE__ */ jsx4(TextButton, { onClick: onOpenMap, children: "Open the sound map" }),
-      !connected && state.status?.owner && /* @__PURE__ */ jsx4("span", { style: S.faint, children: "Undo needs a connected Kumi." })
+    /* @__PURE__ */ jsxs5("div", { style: { ...S.row, padding: "10px 12px", gap: 8 }, children: [
+      /* @__PURE__ */ jsx5(TextButton, { onClick: onOpenMap, children: "Open the sound map" }),
+      !connected && state.status?.owner && /* @__PURE__ */ jsx5("span", { style: S.faint, children: "Undo needs a connected Kumi." })
     ] })
   ] });
 }
 
 // src/desktop/composer.tsx
-import { jsx as jsx5, jsxs as jsxs5 } from "react/jsx-runtime";
+import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
 var noChange = () => () => {
 };
 function useFocusedChat() {
@@ -934,15 +1040,15 @@ function FocusHint({ store }) {
   if (!path.length) return null;
   const tempo = bpm(state.focus?.transport?.tempo);
   const unsure = Boolean(state.status?.unsure);
-  return /* @__PURE__ */ jsxs5(
+  return /* @__PURE__ */ jsxs6(
     "div",
     {
       "data-unsure": unsure || void 0,
       style: { ...S.row, gap: 6, padding: "2px 10px", maxWidth: "100%", opacity: unsure ? 0.5 : 1 },
       title: unsure ? "What Kumi last saw selected in your DAW. It isn't sure your project is as it was: ask it to look again." : "What Kumi sees selected in your DAW: words like “this track” in this chat mean it.",
       children: [
-        /* @__PURE__ */ jsx5(Dot, { color: unsure ? T.faint : colorOf(state.focus?.focus?.track) ?? T.faint, size: 7 }),
-        /* @__PURE__ */ jsx5("span", { style: { ...S.faint, ...S.ellipsis }, children: `${unsure ? "Kumi last saw" : "Kumi sees"} ${path.join(" › ")}${tempo ? ` · ${tempo}` : ""}` })
+        /* @__PURE__ */ jsx6(Dot, { color: unsure ? T.faint : colorOf(state.focus?.focus?.track) ?? T.faint, size: 7 }),
+        /* @__PURE__ */ jsx6("span", { style: { ...S.faint, ...S.ellipsis }, children: `${unsure ? "Kumi last saw" : "Kumi sees"} ${path.join(" › ")}${tempo ? ` · ${tempo}` : ""}` })
       ]
     }
   );
@@ -950,7 +1056,7 @@ function FocusHint({ store }) {
 
 // src/desktop/chip.tsx
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, StatusDot } from "@hermes/plugin-sdk";
-import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 function StatusChip({
   ctx,
   store,
@@ -962,8 +1068,8 @@ function StatusChip({
   const words = chipWords(state.status, state.focus?.transport?.tempo);
   const step = nextStep(state);
   const connected = Boolean(state.status?.connected);
-  return /* @__PURE__ */ jsxs6(DropdownMenu, { children: [
-    /* @__PURE__ */ jsx6(DropdownMenuTrigger, { asChild: true, children: /* @__PURE__ */ jsxs6(
+  return /* @__PURE__ */ jsxs7(DropdownMenu, { children: [
+    /* @__PURE__ */ jsx7(DropdownMenuTrigger, { asChild: true, children: /* @__PURE__ */ jsxs7(
       "button",
       {
         "aria-label": `Kumi: ${words.text}`,
@@ -985,16 +1091,16 @@ function StatusChip({
           whiteSpace: "nowrap"
         },
         children: [
-          /* @__PURE__ */ jsx6(StatusDot, { tone: words.tone }),
+          /* @__PURE__ */ jsx7(StatusDot, { tone: words.tone }),
           words.text
         ]
       }
     ) }),
-    /* @__PURE__ */ jsxs6(DropdownMenuContent, { align: "end", side: "top", children: [
-      /* @__PURE__ */ jsx6(DropdownMenuItem, { onSelect: onOpenMap, children: "Open the sound map" }),
-      step && /* @__PURE__ */ jsx6(DropdownMenuItem, { onSelect: () => void ask(ctx, step.request, { send: true, session: connected ? ownerSession(state) : null }), children: step.label }),
-      /* @__PURE__ */ jsx6(DropdownMenuSeparator, {}),
-      /* @__PURE__ */ jsx6(DropdownMenuItem, { onSelect: onOpenSettings, children: "Kumi settings" })
+    /* @__PURE__ */ jsxs7(DropdownMenuContent, { align: "end", side: "top", children: [
+      /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: onOpenMap, children: "Open the sound map" }),
+      step && /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: () => void ask(ctx, step.request, { send: true, session: connected ? ownerSession(state) : null }), children: step.label }),
+      /* @__PURE__ */ jsx7(DropdownMenuSeparator, {}),
+      /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: onOpenSettings, children: "Kumi settings" })
     ] })
   ] });
 }
@@ -1102,7 +1208,7 @@ function frame(model, ids, width, height, margin = 48) {
 }
 
 // src/shared/MapCanvas.tsx
-import { jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
 function resolve(canvas) {
   const style = getComputedStyle(canvas);
   const read = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
@@ -1216,15 +1322,15 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
   };
   if (!model.points.length) {
-    return /* @__PURE__ */ jsx7("div", { style: { ...S.muted, padding: 16 }, children: empty });
+    return /* @__PURE__ */ jsx8("div", { style: { ...S.muted, padding: 16 }, children: empty });
   }
   const chosen = selected ? model.sounds[selected] : void 0;
   const hovered = hover ? model.points[hover.index] : void 0;
   const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
   const shown = model.points.reduce((count, _, index) => count + (visible(index) ? 1 : 0), 0);
-  return /* @__PURE__ */ jsxs7("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
-    /* @__PURE__ */ jsxs7("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
-      /* @__PURE__ */ jsx7(
+  return /* @__PURE__ */ jsxs8("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
+    /* @__PURE__ */ jsxs8("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
+      /* @__PURE__ */ jsx8(
         "input",
         {
           "aria-label": "Search sounds",
@@ -1234,14 +1340,14 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           value: query
         }
       ),
-      /* @__PURE__ */ jsxs7("span", { style: S.faint, children: [
+      /* @__PURE__ */ jsxs8("span", { style: S.faint, children: [
         shown === model.points.length ? `${model.points.length} sounds` : `${shown} of ${model.points.length} sounds`,
         model.revision ? ` · map ${model.revision}` : ""
       ] })
     ] }),
-    /* @__PURE__ */ jsx7("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
+    /* @__PURE__ */ jsx8("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
       const off = hidden.has(group.key);
-      return /* @__PURE__ */ jsxs7(
+      return /* @__PURE__ */ jsxs8(
         "button",
         {
           onClick: () => setHidden((current) => {
@@ -1254,17 +1360,17 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           type: "button",
           style: { ...S.row, gap: 4, font: "inherit", fontSize: 11, padding: "1px 6px", borderRadius: 10, border: `1px solid ${T.border}`, background: "transparent", color: off ? T.faint : T.secondary, cursor: "pointer", opacity: off ? 0.6 : 1 },
           children: [
-            /* @__PURE__ */ jsx7("span", { style: { width: 8, height: 8, borderRadius: "50%", background: group.color, opacity: off ? 0.3 : 1 } }),
+            /* @__PURE__ */ jsx8("span", { style: { width: 8, height: 8, borderRadius: "50%", background: group.color, opacity: off ? 0.3 : 1 } }),
             group.name,
             " ",
-            /* @__PURE__ */ jsx7("span", { style: { color: T.faint }, children: group.count })
+            /* @__PURE__ */ jsx8("span", { style: { color: T.faint }, children: group.count })
           ]
         },
         group.key
       );
     }) }),
-    /* @__PURE__ */ jsxs7("div", { ref: boxRef, style: { position: "relative", flex: 1, minHeight: 160, overflow: "hidden" }, children: [
-      /* @__PURE__ */ jsx7(
+    /* @__PURE__ */ jsxs8("div", { ref: boxRef, style: { position: "relative", flex: 1, minHeight: 160, overflow: "hidden" }, children: [
+      /* @__PURE__ */ jsx8(
         "canvas",
         {
           ref: canvasRef,
@@ -1300,14 +1406,14 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           style: { position: "absolute", inset: 0, width: "100%", height: "100%", cursor: hover ? "pointer" : drag.current?.moved ? "grabbing" : "grab", touchAction: "none" }
         }
       ),
-      hovered && hoveredSound && hover && /* @__PURE__ */ jsxs7(
+      hovered && hoveredSound && hover && /* @__PURE__ */ jsxs8(
         "div",
         {
           style: { position: "absolute", left: Math.min(hover.x + 12, Math.max(0, size.width - 220)), top: Math.max(0, hover.y - 34), maxWidth: 220, pointerEvents: "none", padding: "3px 7px", borderRadius: 3, background: T.card, border: `1px solid ${T.border}`, fontSize: 11.5, color: T.text, ...S.ellipsis },
           children: [
             clean(hoveredSound.name, 48),
             " ",
-            /* @__PURE__ */ jsxs7("span", { style: { color: T.muted }, children: [
+            /* @__PURE__ */ jsxs8("span", { style: { color: T.muted }, children: [
               "· ",
               clean(hoveredSound.class ?? "", 16)
             ] })
@@ -1315,23 +1421,23 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
         }
       )
     ] }),
-    selected && chosen && /* @__PURE__ */ jsxs7("div", { style: { ...S.row, justifyContent: "space-between", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
-      /* @__PURE__ */ jsxs7("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
-        /* @__PURE__ */ jsx7("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: clean(chosen.name, 80) }),
-        /* @__PURE__ */ jsxs7("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
-          chosen.class && /* @__PURE__ */ jsx7(Chip, { children: clean(chosen.class, 16) }),
-          chosen.kind && /* @__PURE__ */ jsx7(Chip, { children: clean(chosen.kind, 16) }),
-          typeof chosen.duration === "number" && /* @__PURE__ */ jsx7(Chip, { children: seconds(chosen.duration) }),
-          chosen.folder && /* @__PURE__ */ jsx7("span", { style: { ...S.faint, ...S.ellipsis }, children: clean(chosen.folder, 60) })
+    selected && chosen && /* @__PURE__ */ jsxs8("div", { style: { ...S.row, justifyContent: "space-between", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
+      /* @__PURE__ */ jsxs8("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
+        /* @__PURE__ */ jsx8("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: clean(chosen.name, 80) }),
+        /* @__PURE__ */ jsxs8("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
+          chosen.class && /* @__PURE__ */ jsx8(Chip, { children: clean(chosen.class, 16) }),
+          chosen.kind && /* @__PURE__ */ jsx8(Chip, { children: clean(chosen.kind, 16) }),
+          typeof chosen.duration === "number" && /* @__PURE__ */ jsx8(Chip, { children: seconds(chosen.duration) }),
+          chosen.folder && /* @__PURE__ */ jsx8("span", { style: { ...S.faint, ...S.ellipsis }, children: clean(chosen.folder, 60) })
         ] })
       ] }),
-      /* @__PURE__ */ jsx7("div", { style: { ...S.row, gap: 6 }, children: actions?.(selected, chosen) })
+      /* @__PURE__ */ jsx8("div", { style: { ...S.row, gap: 6 }, children: actions?.(selected, chosen) })
     ] })
   ] });
 }
 
 // src/desktop/map.tsx
-import { Fragment as Fragment2, jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
 function errorText(error) {
   const text = error instanceof Error ? error.message : String(error ?? "");
   const json = text.indexOf("{");
@@ -1354,14 +1460,14 @@ function MapWorkspace({ ctx, store, audition }) {
   };
   const map = state.map;
   const empty = state.available === false ? "Kumi's agent half is off in this profile, so there's no map to show." : map === null ? "Reading the sound map…" : "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there.";
-  return /* @__PURE__ */ jsx8(
+  return /* @__PURE__ */ jsx9(
     MapCanvas,
     {
       actions: (id, sound) => {
         const request = soundRequest(id, sound.name);
-        return /* @__PURE__ */ jsxs8(Fragment2, { children: [
-          /* @__PURE__ */ jsx8(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: "Play it here (nothing changes in your DAW)", children: playing === id ? "■ Stop" : "▶ Play" }),
-          request && /* @__PURE__ */ jsx8(
+        return /* @__PURE__ */ jsxs9(Fragment2, { children: [
+          /* @__PURE__ */ jsx9(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: "Play it here (nothing changes in your DAW)", children: playing === id ? "■ Stop" : "▶ Play" }),
+          request && /* @__PURE__ */ jsx9(
             TextButton,
             {
               onClick: () => void ask(ctx, request, { send: false, session: ownerSession(state) }),
@@ -1388,7 +1494,7 @@ function MapWorkspace({ ctx, store, audition }) {
 // src/desktop/settings.tsx
 import { host as host4 } from "@hermes/plugin-sdk";
 import { useState as useState5 } from "react";
-import { Fragment as Fragment3, jsx as jsx9, jsxs as jsxs9 } from "react/jsx-runtime";
+import { Fragment as Fragment3, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATE_WORDS = {
   ready: "Ready",
@@ -1401,9 +1507,9 @@ var STATE_WORDS = {
   unknown: "Unknown"
 };
 function Line({ label, children }) {
-  return /* @__PURE__ */ jsxs9("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
-    /* @__PURE__ */ jsx9("span", { style: S.muted, children: label }),
-    /* @__PURE__ */ jsx9("span", { style: { ...S.text, minWidth: 0 }, children })
+  return /* @__PURE__ */ jsxs10("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
+    /* @__PURE__ */ jsx10("span", { style: S.muted, children: label }),
+    /* @__PURE__ */ jsx10("span", { style: { ...S.text, minWidth: 0 }, children })
   ] });
 }
 function megabytes(bytes) {
@@ -1418,60 +1524,60 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const daw = state.status?.daw ?? setup?.daw;
   const runtime = setup?.runtime;
   const component = setup?.daw_component;
-  return /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
-    /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
-      /* @__PURE__ */ jsx9("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
-      /* @__PURE__ */ jsxs9("span", { style: S.muted, children: [
+  return /* @__PURE__ */ jsxs10("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
+    /* @__PURE__ */ jsxs10("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
+      /* @__PURE__ */ jsx10("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
+      /* @__PURE__ */ jsxs10("span", { style: S.muted, children: [
         "Kumi reads and changes your ",
         dawName(daw),
         " project through typed changes you approve, keeps HISTORY with undo, measures audio on this computer, and maps the sample folders you allow."
       ] })
     ] }),
-    state.available === false ? /* @__PURE__ */ jsx9("span", { style: S.text, children: "Kumi's agent half is off in this profile. Turn on the kumi plugin's Agent switch in Capabilities → Plugins and restart the gateway; its settings form appears under Agent settings." }) : /* @__PURE__ */ jsxs9(Fragment3, { children: [
-      /* @__PURE__ */ jsxs9("div", { children: [
-        /* @__PURE__ */ jsx9("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Setup" }),
-        /* @__PURE__ */ jsx9(Line, { label: "State", children: STATE_WORDS[setup?.state ?? "unknown"] ?? clean(setup?.state ?? "", 40) }),
-        setup?.message && /* @__PURE__ */ jsx9(Line, { label: "Next", children: clean(setup.message, 300) }),
-        runtime && /* @__PURE__ */ jsxs9(Line, { label: "Kumi runtime", children: [
+    state.available === false ? /* @__PURE__ */ jsx10("span", { style: S.text, children: "Kumi's agent half is off in this profile. Turn on the kumi plugin's Agent switch in Capabilities → Plugins and restart the gateway; its settings form appears under Agent settings." }) : /* @__PURE__ */ jsxs10(Fragment3, { children: [
+      /* @__PURE__ */ jsxs10("div", { children: [
+        /* @__PURE__ */ jsx10("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Setup" }),
+        /* @__PURE__ */ jsx10(Line, { label: "State", children: STATE_WORDS[setup?.state ?? "unknown"] ?? clean(setup?.state ?? "", 40) }),
+        setup?.message && /* @__PURE__ */ jsx10(Line, { label: "Next", children: clean(setup.message, 300) }),
+        runtime && /* @__PURE__ */ jsxs10(Line, { label: "Kumi runtime", children: [
           runtime.installed ? `Kumi ${clean(runtime.version ?? "", 20)}` : "Not installed",
-          setup?.pinned_version && /* @__PURE__ */ jsxs9("span", { style: S.faint, children: [
+          setup?.pinned_version && /* @__PURE__ */ jsxs10("span", { style: S.faint, children: [
             " · pinned ",
             clean(setup.pinned_version, 20)
           ] }),
-          setup?.target && /* @__PURE__ */ jsxs9("span", { style: S.faint, children: [
+          setup?.target && /* @__PURE__ */ jsxs10("span", { style: S.faint, children: [
             " · ",
             clean(setup.target, 40)
           ] })
         ] }),
-        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs9(Line, { label: "Download", children: [
+        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs10(Line, { label: "Download", children: [
           megabytes(setup?.download_bytes),
-          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs9("span", { style: S.faint, children: [
+          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs10("span", { style: S.faint, children: [
             " (",
             megabytes(setup?.unpacked_bytes),
             " unpacked)"
           ] })
         ] }),
-        component && /* @__PURE__ */ jsxs9(Line, { label: `${dawName(daw)} part`, children: [
+        component && /* @__PURE__ */ jsxs10(Line, { label: `${dawName(daw)} part`, children: [
           clean(component.name ?? "DAW component", 40),
           ": ",
           clean(component.state ?? "unknown", 20).replace("_", " "),
-          component.path && /* @__PURE__ */ jsx9("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
+          component.path && /* @__PURE__ */ jsx10("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
-        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs9(Line, { label: "Standalone Kumi", children: [
+        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs10(Line, { label: "Standalone Kumi", children: [
           clean(setup.existing_kumi.path, 120),
-          /* @__PURE__ */ jsx9("span", { style: S.faint, children: setup.existing_kumi.adopted ? " · adopted" : " · left as it is" })
+          /* @__PURE__ */ jsx10("span", { style: S.faint, children: setup.existing_kumi.adopted ? " · adopted" : " · left as it is" })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs9("div", { children: [
-        /* @__PURE__ */ jsx9("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Connection" }),
-        /* @__PURE__ */ jsx9(Line, { label: "Now", children: (() => {
+      /* @__PURE__ */ jsxs10("div", { children: [
+        /* @__PURE__ */ jsx10("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Connection" }),
+        /* @__PURE__ */ jsx10(Line, { label: "Now", children: (() => {
           const words = chipWords(state.status, state.focus?.transport?.tempo);
-          return /* @__PURE__ */ jsx9(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
+          return /* @__PURE__ */ jsx10(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
         })() }),
-        state.status?.owner?.session_id && /* @__PURE__ */ jsx9(Line, { label: "Kumi's chat", children: clean(state.status.owner.session_id, 80) })
+        state.status?.owner?.session_id && /* @__PURE__ */ jsx10(Line, { label: "Kumi's chat", children: clean(state.status.owner.session_id, 80) })
       ] }),
-      /* @__PURE__ */ jsxs9("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-        step && /* @__PURE__ */ jsx9(
+      /* @__PURE__ */ jsxs10("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+        step && /* @__PURE__ */ jsx10(
           TextButton,
           {
             onClick: () => void ask(ctx, step.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
@@ -1479,14 +1585,14 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             children: step.label
           }
         ),
-        /* @__PURE__ */ jsx9(TextButton, { onClick: onOpenMap, children: "Open the sound map" }),
-        /* @__PURE__ */ jsx9(TextButton, { onClick: () => host4.navigate("/settings?tab=plugins&agent=kumi"), children: "Agent settings" })
+        /* @__PURE__ */ jsx10(TextButton, { onClick: onOpenMap, children: "Open the sound map" }),
+        /* @__PURE__ */ jsx10(TextButton, { onClick: () => host4.navigate("/settings?tab=plugins&agent=kumi"), children: "Agent settings" })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs9("div", { children: [
-      /* @__PURE__ */ jsx9("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "This window" }),
-      /* @__PURE__ */ jsxs9("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
-        /* @__PURE__ */ jsx9(
+    /* @__PURE__ */ jsxs10("div", { children: [
+      /* @__PURE__ */ jsx10("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "This window" }),
+      /* @__PURE__ */ jsxs10("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
+        /* @__PURE__ */ jsx10(
           "input",
           {
             checked: openOnFind,
@@ -1497,17 +1603,18 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             type: "checkbox"
           }
         ),
-        /* @__PURE__ */ jsx9("span", { style: S.text, children: "Open the sound map when Kumi finds sounds" })
+        /* @__PURE__ */ jsx10("span", { style: S.text, children: "Open the sound map when Kumi finds sounds" })
       ] })
     ] })
   ] });
 }
 
 // src/desktop/plugin.tsx
-import { jsx as jsx10 } from "react/jsx-runtime";
+import { jsx as jsx11 } from "react/jsx-runtime";
 var PLUGIN_ID = "kumi";
 var MAP_WORKSPACE = "kumi-sound-map";
 var POLL_MS = 5e3;
+var JOB_POLL_MS = 2e3;
 var plugin = {
   id: PLUGIN_ID,
   name: "Kumi",
@@ -1522,7 +1629,7 @@ var plugin = {
         closeMap = host5.openWorkspace(MAP_WORKSPACE, {
           title: "Sound map",
           minWidth: "26rem",
-          render: () => /* @__PURE__ */ jsx10(MapWorkspace, { audition, ctx, store }),
+          render: () => /* @__PURE__ */ jsx11(MapWorkspace, { audition, ctx, store }),
           onClose: () => {
             closeMap = null;
           }
@@ -1534,7 +1641,7 @@ var plugin = {
         area: PANES_AREA,
         title: "Sound map",
         data: { placement: "main" },
-        render: () => /* @__PURE__ */ jsx10(MapWorkspace, { audition, ctx, store })
+        render: () => /* @__PURE__ */ jsx11(MapWorkspace, { audition, ctx, store })
       });
     };
     const openSettings = () => host5.navigate(typeof sdk.pluginSettingsHref === "function" ? sdk.pluginSettingsHref(PLUGIN_ID) : "/settings?tab=plugins");
@@ -1547,7 +1654,13 @@ var plugin = {
     ctx.onEvent(`plugin.${PLUGIN_ID}.focus.changed`, () => void store.refresh("focus"));
     ctx.onEvent(`plugin.${PLUGIN_ID}.history.changed`, () => void store.refresh("history"));
     ctx.onEvent(`plugin.${PLUGIN_ID}.map.changed`, () => void store.refresh("map"));
-    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, refresh);
+    ctx.setInterval(() => {
+      if (document.visibilityState !== "hidden") void store.refreshJobs();
+    }, JOB_POLL_MS);
+    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, (event) => {
+      const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
+      store.trackJob("job_id" in payload ? payload.job_id : void 0);
+    });
     ctx.onEvent(`plugin.${PLUGIN_ID}.settings.changed`, () => {
       refresh();
       void store.refresh("setup");
@@ -1557,8 +1670,10 @@ var plugin = {
       const name = "name" in payload && typeof payload.name === "string" ? payload.name : "";
       if (!name.startsWith("kumi_")) return;
       refresh();
+      const result = "result" in payload ? payload.result : void 0;
+      store.trackJob(jobOf(result));
       if (name !== "kumi_sounds") return;
-      const found = foundSounds("result" in payload ? payload.result : void 0);
+      const found = foundSounds(result);
       if (!found?.ids.length) return;
       store.found(found.revision, found.ids);
       if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap();
@@ -1581,13 +1696,13 @@ var plugin = {
         area: PANES_AREA,
         title: "Kumi",
         data: { placement: "right", width: "320px" },
-        render: () => /* @__PURE__ */ jsx10(KumiPane, { ctx, onOpenMap: openMap, store })
+        render: () => /* @__PURE__ */ jsx11(KumiPane, { ctx, onOpenMap: openMap, store })
       },
       {
         id: "status",
         area: STATUSBAR_AREAS.right,
         order: 60,
-        render: () => /* @__PURE__ */ jsx10(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store })
+        render: () => /* @__PURE__ */ jsx11(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store })
       },
       {
         id: "open-map",
@@ -1628,24 +1743,25 @@ var plugin = {
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_listen"],
-          render: (props) => /* @__PURE__ */ jsx10(ListenCard, { audition, media: props })
+          render: (props) => /* @__PURE__ */ jsx11(ListenCard, { audition, media: props })
         }
       });
     }
     if (typeof sdk.COMPOSER_AREAS?.underside === "string") {
-      contributions.push({ id: "focus-hint", area: sdk.COMPOSER_AREAS.underside, render: () => /* @__PURE__ */ jsx10(FocusHint, { store }) });
+      contributions.push({ id: "focus-hint", area: sdk.COMPOSER_AREAS.underside, render: () => /* @__PURE__ */ jsx11(FocusHint, { store }) });
     }
     ctx.registerMany(contributions);
     ctx.registerSettingsPage?.({
       id: "kumi",
       title: "Kumi",
       icon: "pulse",
-      render: () => /* @__PURE__ */ jsx10(SettingsPage, { ctx, onOpenMap: openMap, store })
+      render: () => /* @__PURE__ */ jsx11(SettingsPage, { ctx, onOpenMap: openMap, store })
     });
   }
 };
 var plugin_default = plugin;
 export {
+  JOB_POLL_MS,
   MAP_WORKSPACE,
   PLUGIN_ID,
   POLL_MS,
