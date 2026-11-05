@@ -791,9 +791,11 @@ pub trait Integration {
         let _ = spec;
         Err(absent())
     }
-    /// Builds `spec` (whose bytes hash to `sha256`) as a new file in the library, never over one, as the preview named it
-    /// (`file`), and waits for the DAW's browser to list it. `Err` inside carries the findings that refuse it (a spec
-    /// refused, or a free name that's no longer `file`); nothing is written then.
+    /// Builds `spec` as a new file in the library, never over one, as the preview named it (`file`), and waits for the
+    /// DAW's browser to list it. `sha256` is the spec's approved hash, for the integration's own record: the caller (serve)
+    /// checks it against the bytes it was given and has already refused a mismatch, so the integration doesn't check it.
+    /// `Err` inside carries the findings that refuse it (a spec refused, or a free name that's no longer `file`); nothing
+    /// is written then.
     async fn device_build(
         &self,
         spec: &serde_json::Value,

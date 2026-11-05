@@ -64,7 +64,7 @@ pub fn check(code: &str) -> Vec<String> {
     if !found.is_empty() {
         return found;
     }
-    let mut reader = Reader { tokens: &tokens, at: 0, found: Vec::new(), memory: 0 };
+    let mut reader = Reader { tokens: &tokens, at: 0, found: Vec::new(), memory: 0, loops: Vec::new() };
     let program = match reader.program() {
         Ok(program) => program,
         Err(why) => {
@@ -73,6 +73,7 @@ pub fn check(code: &str) -> Vec<String> {
         }
     };
     found.append(&mut reader.found);
+    found.extend(reader.counters_changed());
     if reader.memory > MOST_DEVICE_SAMPLES {
         found.push(format!(
             "code: its Delays and Datas hold {} samples together, past the {MOST_DEVICE_SAMPLES} a device may: make them smaller.",
@@ -134,6 +135,8 @@ struct Reader<'a> {
     found: Vec<String>,
     /// Samples the Delays and Datas hold together.
     memory: u64,
+    /// Each `for` with literal bounds: its counter and its body, as a range of tokens.
+    loops: Vec<(String, usize, usize)>,
 }
 
 fn is(token: Option<&Token>, symbol: &str) -> bool {
@@ -326,7 +329,6 @@ impl Reader<'_> {
         self.at = close + 1;
         let body_start = self.at;
         let body = self.statement()?;
-        let body_tokens = &tokens[body_start..self.at];
         let bounds = match parts.as_slice() {
             [init, test, step] => bounds(init, test, step),
             _ => None,
@@ -335,13 +337,7 @@ impl Reader<'_> {
             self.found.push("code: a for loop without literal bounds: Kumi builds a for only as for (i = 0; i < 16; i += 1), with numbers for its start, end and step, so it's known to end.".into());
             return Ok(Node::For { times: 1, body: Box::new(body) });
         };
-        let assigned = body_tokens.windows(2).any(|pair| {
-            matches!(&pair[0], Token::Word(w) if *w == counter)
-                && matches!(&pair[1], Token::Symbol(s) if ["=", "+=", "-=", "*=", "/="].contains(&s.as_str()))
-        });
-        if assigned {
-            self.found.push(format!("code: a for loop changes its own counter {counter} in its body, so its bounds aren't what it runs: change {counter} only in the loop's step."));
-        }
+        self.loops.push((counter.clone(), body_start, self.at));
         match times {
             None => self.found.push("code: a for loop never ends (its step never reaches its end): Live's audio thread would stop.".into()),
             Some(times) if times > MOST_ITERATIONS => self.found.push(format!(
@@ -351,6 +347,53 @@ impl Reader<'_> {
         }
         Ok(Node::For { times: times.unwrap_or(1), body: Box::new(body) })
     }
+}
+
+impl Reader<'_> {
+    /// A finding for each `for` whose body, nested blocks included, has its own counter among an assignment's targets,
+    /// whatever the operator: its bounds are then not what it runs, and it may never end. A function the body calls
+    /// can't change it: GenExpr scopes a function's variables to the function.
+    fn counters_changed(&self) -> Vec<String> {
+        self.loops
+            .iter()
+            .filter(|(counter, start, end)| assigned(&self.tokens[*start..*end]).contains(&counter.as_str()))
+            .map(|(counter, _, _)| {
+                format!(
+                    "code: a for loop's counter {counter} is assigned in its body, so its bounds aren't what it runs and it may never end: change {counter} only in the loop's step."
+                )
+            })
+            .collect()
+    }
+}
+
+/// Every name `tokens` assign, whatever the operator: `x = …`, `x += …` and every compound operator, written as one
+/// token or apart (`x % = …`), and each target of a list (`x, y = …`).
+fn assigned(tokens: &[Token]) -> Vec<&str> {
+    const COMPOUND: [&str; 4] = ["+=", "-=", "*=", "/="];
+    let mut names = Vec::new();
+    for (at, token) in tokens.iter().enumerate() {
+        let mut left = match token {
+            Token::Symbol(s) if s == "=" || COMPOUND.contains(&s.as_str()) => at,
+            _ => continue,
+        };
+        // A compound operator written apart from its `=` (`%=` reads as `%` then `=`).
+        if is(Some(token), "=") {
+            while left > 0 && matches!(&tokens[left - 1], Token::Symbol(s) if OPERATORS.contains(&s.as_str())) {
+                left -= 1;
+            }
+        }
+        // The targets, back to the statement's start: a name, then more after commas.
+        while let Some(Token::Word(name)) = left.checked_sub(1).map(|before| &tokens[before]) {
+            names.push(name.as_str());
+            left -= 1;
+            if left > 0 && is(tokens.get(left - 1), ",") {
+                left -= 1;
+            } else {
+                break;
+            }
+        }
+    }
+    names
 }
 
 /// A literal number, maybe negative.
@@ -523,13 +566,42 @@ mod tests {
         refused("Param n(4);\nfor (i = 0; i < n; i += 1) { out1 = i; }\n", "without literal bounds");
         refused("for (i = 0; i < 65; i += 1) { out1 = i; }\n", "runs 65 times");
         refused("for (i = 0; i < 4; i -= 1) { out1 = i; }\n", "never ends");
-        refused("for (i = 0; i < 4; i += 1) { i = 0; }\n", "changes its own counter");
         refused("for (i = 0; i < 4; i += 1) { for (j = 0; j < 4; j += 1) { for (k = 0; k < 4; k += 1) { out1 = k; } } }\n", "nest 3 deep");
         refused(
             "inner(x) { s = 0; for (k = 0; k < 4; k += 1) { s += x; } return s; }\nfor (i = 0; i < 4; i += 1) { for (j = 0; j < 4; j += 1) { out1 = inner(j); } }\n",
             "nest 3 deep",
         );
         assert_eq!(check("for (i = 64; i > 0; i = i - 1) { out1 = i; }\n"), Vec::<String>::new(), "64 times, counting down");
+    }
+
+    #[test]
+    fn a_for_whose_body_assigns_its_counter_is_refused_whatever_the_assignment() {
+        let loop_with = |body: &str| format!("for (i = 0; i < 4; i += 1) {{ {body} }}\nout1 = in1; out2 = in2;\n");
+        for body in [
+            "i = 0;",
+            "i %= 2;",
+            "i % = 2;",
+            "i  +=  1;",
+            "i\t-=\n1;",
+            "i * = 0.5;",
+            "i, y = reset();",
+            "y, i = reset();",
+            "x, y , i = reset();",
+            "if (in1 > 0) { y = 1; } else { i = 0; }",
+            "for (i = 0; i < 2; i += 1) { y = i; }",
+            "{ { i /= 1; } }",
+            "y = i = 0;",
+        ] {
+            refused(&loop_with(body), "counter i is assigned in its body");
+        }
+        // A function's variables are its own (GenExpr scopes them to it): one counting with its own i leaves the
+        // caller's i alone.
+        let sum = "sum(x) { s = 0; for (i = 0; i < 4; i += 1) { s += x; } return s; }\n";
+        assert_eq!(check(&format!("{sum}{}", loop_with("y = sum(in1);"))), Vec::<String>::new(), "a function's own i");
+        // Reading the counter, or assigning anything else, is the loop's own.
+        for body in ["y = i * 2;", "y = i == 2 ? 1 : 0;", "y, z = f(i);", "j = i; j %= 2;", "y = in1 != i;"] {
+            assert_eq!(check(&loop_with(body)), Vec::<String>::new(), "{body}");
+        }
     }
 
     #[test]
