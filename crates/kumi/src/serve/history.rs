@@ -255,9 +255,10 @@ impl History {
         })))
     }
 
-    fn publish(&self, snapshots: &Snapshots) {
+    /// `history.json`: this runtime's generation (a row with another is an earlier runtime's) and the rows.
+    pub fn publish(&self, snapshots: &Snapshots) {
         let items: Vec<Value> = self.rows.borrow().iter().filter_map(|row| serde_json::to_value(row).ok()).collect();
-        if let Err(error) = snapshots.write_owned("history", json!({"items": items})) {
+        if let Err(error) = snapshots.write_owned("history", json!({"generation": self.generation, "items": items})) {
             say(&format!("kumi serve: history.json not written: {error}"));
         }
     }

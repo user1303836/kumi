@@ -40,6 +40,11 @@ const INVALID_REQUEST: i64 = -32600;
 const METHOD_NOT_FOUND: i64 = -32601;
 /// MCP's "Resource not found".
 const RESOURCE_NOT_FOUND: i64 = -32002;
+/// A resource bigger than one answer carries (a server error of the runtime's own).
+const RESOURCE_TOO_LARGE: i64 = -32003;
+/// The most of a snapshot a `resources/read` gives. Put in a JSON string, a JSON text at most doubles (each quote or
+/// backslash is escaped), so the answer stays a line the host takes (as [`MAX_MESSAGE`] is).
+const RESOURCE_MOST: usize = MAX_MESSAGE / 2 - 64 * 1024;
 
 /// C2's resources: each the snapshot (C3) the runtime keeps of it, read as it's on disk, and the snapshot's name, whose
 /// landing tells a subscriber the resource changed. `kumi://map` is the map's current revision, by its pointer.
@@ -77,7 +82,11 @@ where
     ctx.offer(operations);
     let (outbox, outgoing) = tokio::sync::mpsc::unbounded_channel();
     let mut writer = Some(tokio::task::spawn_local(write_out(output, outgoing)));
+    // What an earlier runtime left on disk is published again as this one has it: its HISTORY rows can't be undone
+    // here, and nothing is connected yet.
     core::publish_status(&ctx, false).await;
+    ctx.history().publish(ctx.snapshots());
+    super::connection::publish_focus(&ctx.handle());
     let heartbeat = tokio::task::spawn_local(beat(ctx.clone()));
     let mut landed = ctx.snapshots().landed();
     let server = Rc::new(Server {
@@ -95,8 +104,16 @@ where
         let server = Rc::downgrade(&server);
         tokio::task::spawn_local(async move {
             while let Some(name) = landed.recv().await {
+                // What landed meanwhile goes with it: one word for each resource, however often it was written.
+                let mut names = vec![name];
+                while let Ok(more) = landed.try_recv() {
+                    if !names.contains(&more) {
+                        names.push(more);
+                    }
+                }
                 let Some(server) = server.upgrade() else { break };
-                if let Some((uri, _, _)) = RESOURCES.iter().find(|(_, snapshot, _)| *snapshot == name) {
+                for name in names {
+                    let Some((uri, _, _)) = RESOURCES.iter().find(|(_, snapshot, _)| *snapshot == name) else { continue };
                     if server.subscribed.borrow().contains(*uri) {
                         server.send(json!({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": uri}}));
                     }
@@ -317,10 +334,26 @@ impl Server {
                 self.send_result(id, json!({"resources": resources}));
             }
             "resources/read" => match self.resource(params) {
-                Ok((uri, _)) => match read_resource(&self.ctx.paths().state_dir, uri) {
-                    Some(text) => self.send_result(id, json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": text}]})),
-                    None => self.send_error(id, RESOURCE_NOT_FOUND, &format!("{uri} has no snapshot yet")),
-                },
+                Ok((uri, _)) => {
+                    // Read off the runtime's thread: the map's revision can be tens of MiB.
+                    let (server, state_dir) = (self.clone(), self.ctx.paths().state_dir.clone());
+                    tokio::task::spawn_local(async move {
+                        match tokio::task::spawn_blocking(move || read_resource(&state_dir, uri, RESOURCE_MOST)).await {
+                            Ok(Ok(Some(text))) => {
+                                server.send_result(id, json!({"contents": [{"uri": uri, "mimeType": "application/json", "text": text}]}));
+                            }
+                            Ok(Ok(None)) => server.send_error(id, RESOURCE_NOT_FOUND, &format!("{uri} has no snapshot yet")),
+                            Ok(Err(TooLarge)) => {
+                                let reason = format!(
+                                    "{uri} is more than one answer carries ({} MiB): search the sound map with sounds instead",
+                                    RESOURCE_MOST >> 20
+                                );
+                                server.send_error(id, RESOURCE_TOO_LARGE, &reason);
+                            }
+                            Err(_) => server.send_error(id, RESOURCE_NOT_FOUND, &format!("{uri} couldn't be read")),
+                        }
+                    });
+                }
                 Err(message) => self.send_error(id, RESOURCE_NOT_FOUND, &message),
             },
             "resources/subscribe" | "resources/unsubscribe" => match self.resource(params) {
@@ -722,20 +755,40 @@ fn momentary(answer: &Value) -> bool {
     matches!(code, Some("leased" | "busy" | "not_connected" | "stale"))
 }
 
-/// Writes the messages out, one line each, until told to close (or the host stops reading).
-/// A resource's snapshot as it's on disk: `kumi://map`'s by the revision its pointer names. None before there's one.
-fn read_resource(state_dir: &std::path::Path, uri: &str) -> Option<String> {
+/// A snapshot bigger than a resource read gives.
+struct TooLarge;
+
+/// A resource's snapshot as it's on disk, at most `most` bytes: `kumi://map`'s by the revision its pointer names. None
+/// before there's one.
+fn read_resource(state_dir: &std::path::Path, uri: &str, most: usize) -> Result<Option<String>, TooLarge> {
+    use std::io::Read;
     let name = match uri {
         "kumi://map" => {
-            let revision = std::fs::read_to_string(state_dir.join("map/current")).ok()?;
+            let Ok(revision) = std::fs::read_to_string(state_dir.join("map/current")) else { return Ok(None) };
             let revision = revision.trim();
-            let named = !revision.is_empty() && revision.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
-            format!("map/{}", Some(revision).filter(|_| named)?)
+            if revision.is_empty() || !revision.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') {
+                return Ok(None);
+            }
+            format!("map/{revision}")
         }
-        _ => RESOURCES.iter().find(|(known, _, _)| *known == uri)?.1.to_owned(),
+        _ => match RESOURCES.iter().find(|(known, _, _)| *known == uri) {
+            Some((_, name, _)) => (*name).to_owned(),
+            None => return Ok(None),
+        },
     };
-    std::fs::read_to_string(state_dir.join(format!("{name}.json"))).ok()
+    let Ok(file) = std::fs::File::open(state_dir.join(format!("{name}.json"))) else { return Ok(None) };
+    // One byte past the most tells a bigger one, whatever the file grew to since it was opened.
+    let mut text = String::new();
+    if file.take(most as u64 + 1).read_to_string(&mut text).is_err() {
+        return Ok(None);
+    }
+    if text.len() > most {
+        return Err(TooLarge);
+    }
+    Ok(Some(text))
 }
+
+/// Writes the messages out, one line each, until told to close (or the host stops reading).
 
 async fn write_out<O: AsyncWrite + Unpin>(mut output: O, mut outgoing: UnboundedReceiver<Out>) -> std::io::Result<()> {
     while let Some(Out::Message(message)) = outgoing.recv().await {
@@ -1094,6 +1147,51 @@ mod tests {
             session.end().await;
         })
         .await;
+    }
+
+    /// After a restart, focus and HISTORY are this runtime's from the start, not as the last one left them: nothing is
+    /// connected, and the earlier runtime's rows can't be undone here.
+    #[tokio::test]
+    async fn a_new_runtime_publishes_focus_and_history_as_it_has_them() {
+        local(async {
+            let first = Session::start().initialized().await;
+            let folders = first.stopped().await;
+            let state = folders.path().join("state");
+            let row = json!({"id": "h-old-c1", "label": "c1", "project_key": "p-1", "runtime_generation": "old", "title": "Drums",
+                "family": "mixer", "at": 1, "state": "applied", "undo_available": true});
+            std::fs::write(state.join("history.json"), json!({"schema": 1, "seq": 9, "items": [row]}).to_string()).unwrap();
+            std::fs::write(state.join("focus.json"), json!({"schema": 1, "seq": 9, "connected": true}).to_string()).unwrap();
+            let mut session = Session::at(folders).initialized().await;
+            session.ctx.snapshots().flush();
+            let read = |uri: &str| json!({"jsonrpc": "2.0", "id": uri, "method": "resources/read", "params": {"uri": uri}});
+            let mut text =
+                |answer: Value| -> Value { serde_json::from_str(answer["result"]["contents"][0]["text"].as_str().unwrap()).unwrap() };
+            session.send(read("kumi://focus")).await;
+            assert_eq!(text(session.next().await.unwrap())["connected"], false);
+            session.send(read("kumi://history")).await;
+            let history = text(session.next().await.unwrap());
+            session.send(read("kumi://status")).await;
+            let status = text(session.next().await.unwrap());
+            assert_eq!(
+                (history["items"][0]["id"].clone(), history["items"][0]["undo_available"].clone()),
+                (json!("h-old-c1"), json!(false))
+            );
+            assert_eq!(history["generation"], status["runtime"]["generation"]);
+            assert_ne!(history["generation"], history["items"][0]["runtime_generation"], "the row is an earlier runtime's");
+            session.end().await;
+        })
+        .await;
+    }
+
+    #[test]
+    fn a_resource_read_gives_at_most_what_one_answer_carries() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("map")).unwrap();
+        std::fs::write(dir.path().join("map/current"), "r1\n").unwrap();
+        std::fs::write(dir.path().join("map/r1.json"), "[0123456789]").unwrap();
+        assert!(matches!(read_resource(dir.path(), "kumi://map", 12), Ok(Some(text)) if text == "[0123456789]"));
+        assert!(matches!(read_resource(dir.path(), "kumi://map", 11), Err(TooLarge)), "one byte over");
+        assert!(matches!(read_resource(dir.path(), "kumi://status", 12), Ok(None)), "none yet");
     }
 
     #[tokio::test]

@@ -433,22 +433,24 @@ pub async fn refs(connection: &Connection, signal: kumi_common::abort::Signal) -
 
 /// `focus.json` (C3, as CC-7 words it): whether the DAW answers (`connected`), and while it does, the project as of the
 /// last look (`seen_at`: the focus may have moved to another since), the focus and the transport; and what changed
-/// while no one looked (as it stands, not taken). A DAW that doesn't answer has no project, focus or transport here.
+/// while no one looked (as it stands, not taken). A DAW that doesn't answer, or no connection yet, has no project,
+/// focus or transport here.
 pub fn publish_focus(ctx: &Weak<Ctx>) {
     let Some(ctx) = ctx.upgrade() else { return };
-    let Some(connection) = ctx.link().connection() else { return };
-    let connected = connection.answering();
+    let connection = ctx.link().connection();
+    let connected = connection.as_ref().is_some_and(|connection| connection.answering());
     let project = ctx
         .link()
         .project()
         .filter(|_| connected)
         .map(|project| json!({"name": project.name, "key": project.key, "epoch": project.epoch, "seen_at": project.seen_at}));
+    let answering = connection.as_ref().filter(|_| connected);
     let body = json!({
         "connected": connected,
         "project": project,
-        "focus": connection.focus().filter(|_| connected).map(|focus| focus_value(&focus)),
-        "transport": connection.transport().filter(|_| connected).as_ref().map(transport_value),
-        "catch_up": bounded_catch_up(connection.reported.catch_up.borrow().clone()),
+        "focus": answering.and_then(|connection| connection.focus()).map(|focus| focus_value(&focus)),
+        "transport": answering.and_then(|connection| connection.transport()).as_ref().map(transport_value),
+        "catch_up": connection.as_ref().map(|connection| bounded_catch_up(connection.reported.catch_up.borrow().clone())).unwrap_or_default(),
     });
     if let Err(error) = ctx.snapshots().write("focus", &body) {
         say(&format!("kumi serve: focus.json not written: {error}"));
