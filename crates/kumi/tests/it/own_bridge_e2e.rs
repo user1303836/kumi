@@ -399,8 +399,9 @@ async fn reapers_changes_go_through_kumis_host_into_history_and_back_out_as_new_
             // The producer moved the fader since: Kumi leaves it, says why, and HISTORY keeps the change.
             script.set_volume(1, -3.0);
             let volume = told.borrow()[0].id.clone();
-            let refused = reaper.undo(Some(&volume), Signal::new()).await.expect_err("an undo refusal is not success in the app");
-            assert!(refused.message().contains("changed since Kumi set it"), "{}", refused.message());
+            let kept = reaper.undo(Some(&volume), Signal::new()).await.unwrap();
+            assert_eq!(kept.state, ChangeState::Kept, "the caller receives the updated refusal state");
+            assert!(kept.note.as_deref().is_some_and(|note| note.contains("changed since Kumi set it")), "{:?}", kept.note);
             let kept = undo.execute(input(json!({"change": volume})), Signal::new()).await.unwrap();
             assert!(kept.is_error && kept.text.contains("changed since Kumi set it"), "{}", kept.text);
             assert_eq!(script.volume(1), -3.0);

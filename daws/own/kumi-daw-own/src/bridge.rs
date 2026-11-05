@@ -1829,9 +1829,6 @@ impl<S: RefScheme + 'static> Integration for OwnIntegration<S> {
         }
         let target = crate::changes::undo_target(&self.changes.history, id.unwrap_or("last"));
         let outcome = self.changes.history.undo(&target, signal, false).await?;
-        if outcome.is_error {
-            return Err(KumiError::new(FailureKind::Request, outcome.text).into());
-        }
         outcome.record.ok_or_else(|| KumiError::new(FailureKind::Request, outcome.text).into())
     }
     fn first_heard(&self, since: i64) -> Option<i64> {
