@@ -419,7 +419,7 @@ mod tests {
                 steps.extend(run(&mut device, &mut live, 20_000, |_, _, _| {}));
                 assert!(steps.iter().all(|step| step.sample < stopped_at), "stop {stop}: a step after the stop: {steps:?}");
                 let (read, _) = live.tick();
-                let transport = device.transport.tick(&read, 6);
+                let transport = device.transport.tick(&read, 6).unwrap();
                 assert_eq!((transport[1], transport[2]), (0.0, 0.0), "stop {stop}: the transport says stopped");
                 steps
             });
@@ -688,8 +688,8 @@ mod tests {
         // And told of a loop Live doesn't have: the steps go back at its end, then on with Live within a vector.
         let mut live = Live::new();
         let mut device = Device::new(TRANSPORT, CLOCK, false, 0.25, 16.0);
-        device.transport.set("loop_on", 1.0);
-        device.transport.set("loop_length", 3.5);
+        device.transport.set("loop_on", 1.0).unwrap();
+        device.transport.set("loop_length", 3.5).unwrap();
         live.change(Change::Play);
         let steps = run(&mut device, &mut live, (RATE * 3.0) as usize, |_, _, _| {});
         let late: Vec<&Step> = steps.iter().filter(|step| step.sample > (3.5 / 2.0 * RATE) as usize + VECTOR).collect();
@@ -718,8 +718,8 @@ mod tests {
         live.change(Change::Play);
         let steps = run(&mut device, &mut live, 64 * 20_000, |device, _, sample| {
             let (division, swing) = picks[sample / 64];
-            device.clock.set("division", division);
-            device.clock.set("swing", swing);
+            device.clock.set("division", division).unwrap();
+            device.clock.set("swing", swing).unwrap();
         });
         assert!(steps.len() > 100, "{}", steps.len());
         let per_beat = RATE / 2.0;
@@ -750,7 +750,7 @@ mod tests {
         let change = (1.0 / 2.0 * RATE) as usize / 64 * 64;
         let steps = run(&mut device, &mut live, (2.0 * RATE) as usize, |device, _, sample| {
             if sample == change {
-                device.clock.set("division", 0.5);
+                device.clock.set("division", 0.5).unwrap();
             }
         });
         let after: Vec<f64> = steps.iter().filter(|step| step.sample >= change).map(|step| (step.position * 2.0).round() / 2.0).collect();
@@ -765,7 +765,7 @@ mod tests {
         live.change(Change::Play);
         let steps = run(&mut device, &mut live, (RATE * 4.0) as usize, |device, _, sample| {
             if sample == (2.6 / 2.0 * RATE) as usize / 64 * 64 {
-                device.clock.set("length", 8.0);
+                device.clock.set("length", 8.0).unwrap();
             }
         });
         let indices: Vec<usize> = steps.iter().map(|step| step.index).collect();
@@ -782,7 +782,7 @@ mod tests {
         let raise = (0.26 / 2.0 * RATE) as usize / VECTOR * VECTOR;
         let steps = run(&mut device, &mut live, (RATE * 1.0) as usize, |device, _, sample| {
             if sample == raise {
-                device.clock.set("swing", 0.5);
+                device.clock.set("swing", 0.5).unwrap();
             }
         });
         let first_pair: Vec<f64> = steps.iter().filter(|step| step.position < 0.49).map(|step| step.position).collect();
@@ -802,7 +802,7 @@ mod tests {
         let change = (0.4 / 2.0 * RATE) as usize / VECTOR * VECTOR;
         let steps = run(&mut device, &mut live, (RATE * 0.6) as usize, |device, _, sample| {
             if sample == change {
-                device.clock.set("division", 1.0 / 3.0);
+                device.clock.set("division", 1.0 / 3.0).unwrap();
             }
         });
         let positions: Vec<f64> = steps.iter().map(|step| step.position).collect();
@@ -891,14 +891,14 @@ mod tests {
         for division in [0.25, 1.0 / 6.0] {
             let mut device = Device::new(TRANSPORT, CLOCK, false, division, 16.0);
             if let Some((start, length)) = looped {
-                device.transport.set("loop_on", 1.0);
-                device.transport.set("loop_start", start);
-                device.transport.set("loop_length", length);
+                device.transport.set("loop_on", 1.0).unwrap();
+                device.transport.set("loop_start", start).unwrap();
+                device.transport.set("loop_length", length).unwrap();
             }
             let mut steps: Vec<(usize, f64)> = Vec::new();
             for (i, sample) in read.iter().enumerate() {
-                let transport = device.transport.tick(sample, 6);
-                let clock = device.clock.tick(&transport, 4);
+                let transport = device.transport.tick(sample, 6).unwrap();
+                let clock = device.clock.tick(&transport, 4).unwrap();
                 if clock[0] > 0.5 {
                     steps.push((i, clock[1]));
                 }

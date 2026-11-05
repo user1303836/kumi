@@ -1,7 +1,7 @@
 [package]
 name = "kumi-genexpr"
 version = "1.19.2"
-description = "A GenExpr interpreter for the tests of Kumi's Max for Live building blocks, built optimized even in tests."
+description = "A GenExpr interpreter for the tests of Kumi's Max for Live building blocks and the proof of a built device's output stage, with GenExpr's limits on Live's audio thread; built optimized even in tests."
 edition.workspace = true
 license.workspace = true
 repository.workspace = true

@@ -163,6 +163,15 @@ impl Link {
         self.connection.borrow().clone()
     }
 
+    /// A connection to `integration` that answers, as `connect` makes one: for an operation's tests.
+    #[cfg(test)]
+    pub(super) fn connected_to(&self, integration: Rc<dyn Integration>) {
+        let reported = Rc::new(Reported::default());
+        reported.connected.set(true);
+        reported.answered.set(true);
+        *self.connection.borrow_mut() = Some(Rc::new(Connection { integration, reported }));
+    }
+
     pub fn project(&self) -> Option<Project> {
         self.project.borrow().clone()
     }

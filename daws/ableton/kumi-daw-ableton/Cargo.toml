@@ -20,6 +20,9 @@ daw-bridge.workspace = true
 kumi-ai.workspace = true
 kumi-common.workspace = true
 kumi-daw.workspace = true
+# GenExpr's limits and the guarded output stage's proof, for a device built for Hermes; the building blocks' tests run
+# their gen~ code in it too (optimized even in tests).
+kumi-genexpr.workspace = true
 kumi-library.workspace = true
 kumi-listening.workspace = true
 kumi-media.workspace = true
@@ -53,8 +56,6 @@ libc.workspace = true
 
 [dev-dependencies]
 kumi-agent = { workspace = true, features = ["test-support"] }
-# The GenExpr interpreter the building blocks' tests run their gen~ code in (optimized even in tests).
-kumi-genexpr.workspace = true
 kumi-media = { workspace = true, features = ["test-support"] }
 kumi-net = { workspace = true, features = ["test-support"] }
 kumi-testkit.workspace = true

@@ -189,6 +189,30 @@ impl Ableton {
     fn combined(&self, signal: Signal) -> Signal {
         abort::any([signal, self.connection.lifetime.clone()])
     }
+    /// What make_device and a device built for Hermes write with: Live's User Library, this integration's devices, and
+    /// Live's Browser asked whether it lists one yet.
+    fn device_options(&self) -> DeviceToolOptions {
+        let owner = self.weak.upgrade().unwrap();
+        DeviceToolOptions {
+            user_library: self.user_library(),
+            wait_ms: None,
+            made: self.made.clone(),
+            browser_sees: Rc::new(move |item, signal| {
+                let owner = owner.clone();
+                async move {
+                    let Some(tools) = owner.connection.tools() else { return Ok(false) };
+                    Ok(tools
+                        .call("live_browser_inspect", object(&json!({"itemId":item}))?, signal, CallOptions::default())
+                        .await
+                        .is_ok_and(|r| r.is_error != Some(true)))
+                }
+                .boxed_local()
+            }),
+        }
+    }
+    fn user_library(&self) -> String {
+        self.options.user_library.clone().unwrap_or_else(|| samples::user_library(None, None))
+    }
     fn tool(&self, name: &str, description: &str, schema: JsonObject) -> Rc<dyn KernelTool> {
         Rc::new(LiveTool {
             owner: self.weak.upgrade().unwrap(),
@@ -580,23 +604,7 @@ impl ObservationHost for Ableton {
             offered.push(self.static_tool("read_notes"));
         }
         if tools.has("live_browser_inspect") && tools.has("live_browser_load_preview") {
-            let owner = self.weak.upgrade().unwrap();
-            offered.push(device_tool(DeviceToolOptions {
-                user_library: self.options.user_library.clone().unwrap_or_else(|| samples::user_library(None, None)),
-                wait_ms: None,
-                made: self.made.clone(),
-                browser_sees: Rc::new(move |item, signal| {
-                    let owner = owner.clone();
-                    async move {
-                        let Some(tools) = owner.connection.tools() else { return Ok(false) };
-                        Ok(tools
-                            .call("live_browser_inspect", object(&json!({"itemId":item}))?, signal, CallOptions::default())
-                            .await
-                            .is_ok_and(|r| r.is_error != Some(true)))
-                    }
-                    .boxed_local()
-                }),
-            }));
+            offered.push(device_tool(self.device_options()));
         }
         // make_changes runs every change and action as a step; those that aren't tools of their own get a line each in
         // its description, with their input.
@@ -727,7 +735,7 @@ impl Integration for Ableton {
         }
         // The file only: the conversation that loads it finds it in Live's Browser then.
         vec![device_tool(DeviceToolOptions {
-            user_library: self.options.user_library.clone().unwrap_or_else(|| samples::user_library(None, None)),
+            user_library: self.user_library(),
             wait_ms: Some(0),
             made: self.made.clone(),
             browser_sees: Rc::new(|_, _| async { Ok(false) }.boxed_local()),
@@ -929,6 +937,22 @@ impl Integration for Ableton {
     async fn hear(&self, request: &HearRequest, signal: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let _live = self.rendering.hold(&signal).await?;
         self.rendering.hear_in_set(request, signal).await
+    }
+    fn has_device_build(&self) -> bool {
+        true
+    }
+    async fn device_preview(&self, spec: &Value) -> Result<Result<DevicePreview, Vec<String>>, RuntimeError> {
+        Ok(crate::devices::build::preview(std::path::Path::new(&self.user_library()), spec))
+    }
+    /// `sha256` is serve's to check against the bytes it was given; the build is of `spec` as given.
+    async fn device_build(
+        &self,
+        spec: &Value,
+        _sha256: &str,
+        file: &str,
+        signal: Signal,
+    ) -> Result<Result<BuiltDevice, Vec<String>>, RuntimeError> {
+        crate::devices::build::build(&self.device_options(), spec, file, &self.combined(signal)).await
     }
 }
 
