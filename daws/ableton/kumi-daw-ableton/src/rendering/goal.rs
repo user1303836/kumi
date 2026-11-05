@@ -1,4 +1,4 @@
-use super::super::{bridge_version::GOAL_BRIDGE, concurrent::eager_all, connection::NO_CURRENT_LIVE};
+use super::super::{bridge_version::GOAL_BRIDGE, connection::NO_CURRENT_LIVE};
 use super::ears::object_identity;
 use super::rig::{Held, Rig, Source, Window};
 use super::*;
@@ -6,15 +6,15 @@ use async_trait::async_trait;
 use kumi_agent::core::{
     evolve::Knob,
     goal_rig::{
-        best_plays_beside, best_waits_muted, check_slots, device_label, device_of, given_values, knob_key as key, last_best_beside,
-        limiter_stays, moved as moved_knobs, moved_or_went, near, not_in_the_search, tell_generation, you_turned, GoalDaw,
+        best_plays_beside, best_waits_muted, device_label, device_of, given_values, knob_key as key, last_best_beside, limiter_stays,
+        moved_or_went, near, not_in_the_search, you_turned, GoalBackend, GoalCore, GoalDaw, GoalPass, GoalScreen as Screen, HearOrder,
+        SetOrder,
     },
 };
 use kumi_listening::{
     engine::Listening,
-    goal::{hear, screen_pick, tell, tell_timing, trial_key, HeardCache, Told},
+    goal::{screen_pick, Told},
 };
-use kumi_media::audio::analyze::Analysis;
 use std::collections::{HashMap, HashSet};
 /// What a goal has done to a candidate's own track. It's kept on the renderer, because a leap closes the goal's rig and opens
 /// another, which reads the search's values and Kumi's limiter as if they'd always been there.
@@ -87,31 +87,130 @@ struct Knobs {
     devices: Vec<JsonObject>,
     knobs: Vec<Knob>,
 }
-struct Screen {
-    offset: f64,
-    beats: f64,
-    reference: Analysis,
-}
 struct Goal {
     render: Rc<LiveRenderer>,
     rig: tokio::sync::Mutex<Rig>,
     slots: RefCell<Vec<GoalSlotInfo>>,
-    current: RefCell<IndexMap<String, IndexMap<String, f64>>>,
+    core: GoalCore<LiveGoal>,
     known: RefCell<IndexMap<String, (u64, Knobs)>>,
     /// Each slot's track as last read: where it stays while another track shares its name.
     places: RefCell<HashMap<String, String>>,
     /// The Set's tempo as the goal opened: what a render is heard at when a look since can't say what it is now.
     tempo: f64,
-    reference: Analysis,
-    focus: Option<Focus>,
-    screen: Option<Screen>,
-    heard: RefCell<HeardCache<Told>>,
     /// The safety limiters this rig added, each with its candidate: they come off if the goal never opens.
     limiters_added: RefCell<Vec<(String, String)>>,
     /// The finished goal's candidates were tidied (the top ones muted for an A/B): its best plays on its own.
     tidied: Cell<bool>,
     /// Why the best just kept is beside the last one, when it is.
     beside: RefCell<Option<String>>,
+}
+
+struct LiveGoal;
+impl GoalBackend for LiveGoal {
+    type Cached = Told;
+    const SET_ORDER: SetOrder = SetOrder::ReadAllThenSet;
+    const HEAR_ORDER: HearOrder = HearOrder::AsCompleted;
+    fn cached_told(told: Told) -> Told {
+        told
+    }
+    fn cache(told: Told, _: &Render) -> Told {
+        told
+    }
+}
+
+struct LivePlan {
+    fresh: Knobs,
+    devices: IndexMap<String, Vec<Value>>,
+    lost: Vec<Knob>,
+}
+
+/// The held native rig belongs to this pass; the core never owns taps, clips, device refs or restore records.
+struct LivePass<'a> {
+    goal: &'a Goal,
+    rendering: Option<RenderingNow<'a>>,
+    rig: Option<tokio::sync::MutexGuard<'a, Rig>>,
+}
+
+#[async_trait(?Send)]
+impl GoalPass<LiveGoal> for LivePass<'_> {
+    type Plan = LivePlan;
+    fn signal(&self, given: Signal) -> Signal {
+        self.goal.signal(given)
+    }
+    fn begin(&mut self) -> Result<(), RuntimeError> {
+        if self.goal.render.is_rendering() {
+            return Err(observation("Another render is running."));
+        }
+        self.rendering = Some(self.goal.render.rendering_now());
+        Ok(())
+    }
+    async fn before_set(&mut self, signal: Signal) -> Result<Vec<String>, RuntimeError> {
+        let mut rig = self.goal.rig.lock().await;
+        let gone = self.goal.retire_gone(&mut rig, signal).await?;
+        self.rig = Some(rig);
+        Ok(gone)
+    }
+    async fn before_render(&mut self, signal: Signal) -> Result<Vec<String>, RuntimeError> {
+        self.goal.retire_gone(self.rig.as_mut().expect("a generation holds its rig"), signal).await
+    }
+    async fn plan(&mut self, slot: &str, moved: &[(Knob, f64)], signal: Signal) -> Result<Option<LivePlan>, RuntimeError> {
+        // A track can go between availability and this read; the check before rendering retires its source.
+        let Some(fresh) = self.goal.knobs_now(slot, signal).await? else { return Ok(None) };
+        let (devices, lost) = by_device(&fresh, moved);
+        Ok(Some(LivePlan { fresh, devices, lost }))
+    }
+    async fn set(&mut self, slot: &str, moved: &[(Knob, f64)], plan: LivePlan, signal: Signal) -> Result<HashSet<String>, RuntimeError> {
+        let LivePlan { fresh, devices, lost } = plan;
+        let r = &self.goal.render;
+        let mut refused: HashSet<String> = lost.iter().map(key).collect();
+        r.history
+            .quietly(None, async {
+                for (reference, values) in devices {
+                    if r.step("set_device_parameters", json!({"deviceRef":reference,"values":values}), signal.clone()).await.is_ok() {
+                        continue;
+                    }
+                    signal.check()?;
+                    for value in values {
+                        if r.step("set_device_parameters", json!({"deviceRef":reference,"values":[value]}), signal.clone()).await.is_err() {
+                            signal.check()?;
+                            if let Some((knob, _)) = moved.iter().find(|(knob, _)| {
+                                knob_now(&fresh, knob).is_some_and(|(_, now)| Some(now.r#ref.as_str()) == value["parameterRef"].as_str())
+                            }) {
+                                refused.insert(key(knob));
+                            }
+                        }
+                    }
+                }
+                Ok::<_, RuntimeError>(())
+            })
+            .await?;
+        for (knob, value) in moved.iter().filter(|(knob, _)| !refused.contains(&key(knob))) {
+            let was = knob_now(&fresh, knob).map_or(knob.value, |(_, now)| now.value);
+            self.goal.remember_candidate(slot, knob, *value, was);
+        }
+        Ok(refused)
+    }
+    async fn render(
+        &mut self,
+        _fresh: &[&GenerationTrial],
+        screen: Option<&Screen>,
+        signal: Signal,
+    ) -> Result<IndexMap<String, Render>, RuntimeError> {
+        // A fresh trial renders the whole held rig, including other candidates, exactly as the native pass did.
+        let rig = self.rig.as_mut().expect("a generation holds its rig");
+        rig.window = screen.map(|screen| Window { from: rig.from + screen.offset, beats: screen.beats });
+        self.goal.render.render_pass(rig, signal).await
+    }
+    fn rendered(&mut self) {
+        self.rendering.take();
+    }
+    fn hearing_window(&mut self, screen: Option<&Screen>) -> (f64, f64) {
+        let rig = self.rig.take().expect("a generation holds its rig");
+        let tempo = heard_tempo(self.goal.render.observer.tempo.get(), self.goal.tempo);
+        let beats = screen.map_or(rig.beats, |screen| screen.beats);
+        drop(rig);
+        (beats, tempo)
+    }
 }
 pub(super) fn left_search(name: &str) -> String {
     format!("“{name}” is no longer available under that name, so it left the search.")
@@ -335,14 +434,10 @@ impl LiveRenderer {
             render: self.clone(),
             rig: tokio::sync::Mutex::new(rig),
             slots: RefCell::new(vec![]),
-            current: RefCell::new(IndexMap::new()),
+            core: GoalCore::new(reference, request.focus),
             known: RefCell::new(IndexMap::new()),
             places: RefCell::default(),
             tempo,
-            reference,
-            focus: request.focus,
-            screen: None,
-            heard: RefCell::new(HeardCache::default()),
             limiters_added: RefCell::new(vec![]),
             tidied: Cell::new(false),
             beside: RefCell::new(None),
@@ -355,7 +450,7 @@ impl LiveRenderer {
             }
         }
         let rig = goal.rig.get_mut();
-        if let Some(pick) = screen_pick(&goal.reference.over_time.lufs, goal.reference.seconds, tempo, rig.beats) {
+        if let Some(pick) = screen_pick(&goal.core.reference.over_time.lufs, goal.core.reference.seconds, tempo, rig.beats) {
             // A stop or a failed read here leaves the rig as much as one before: it's taken down, as above.
             let reference = match listening.heard_reference(named, &pick.request(request, tempo), signal).await {
                 Ok(reference) => reference,
@@ -365,7 +460,7 @@ impl LiveRenderer {
                     return Err(error);
                 }
             };
-            goal.screen = Some(Screen { offset: pick.offset, beats: pick.beats, reference });
+            goal.core.screen = Some(Screen { offset: pick.offset, beats: pick.beats, reference });
         }
         Ok(Ok(Rc::new(goal)))
     }
@@ -415,7 +510,7 @@ impl Goal {
         }
         self.slots.borrow_mut().retain(|slot| !gone.contains(&slot.name));
         for name in &gone {
-            self.current.borrow_mut().shift_remove(name);
+            self.core.current.borrow_mut().shift_remove(name);
             self.known.borrow_mut().shift_remove(name);
         }
         // Keep the old positions for `put_back`: a renamed track can still have the devices Kumi moved, which are
@@ -460,7 +555,7 @@ impl Goal {
             r.goal_candidates.borrow_mut().entry(name.into()).or_default().limiters.push(identity.clone());
             self.limiters_added.borrow_mut().push((name.into(), identity));
         }
-        self.current.borrow_mut().insert(name.into(), read.knobs.iter().map(|knob| (key(knob), knob.value)).collect());
+        self.core.current.borrow_mut().insert(name.into(), read.knobs.iter().map(|knob| (key(knob), knob.value)).collect());
         self.places.borrow_mut().insert(name.into(), read.reference.clone());
         self.carry_over(name, &read);
         let devices = identities(&read);
@@ -545,16 +640,20 @@ impl Goal {
         let Some(candidate) = candidates.get_mut(name) else { return };
         candidate.moved.retain(|_, moved| knob_now(read, &moved.knob).is_some_and(|(_, now)| near(now, now.value, moved.to)));
         candidate.limiters.retain(|identity| identity.is_empty() || read.devices.iter().any(|device| object_identity(device) == *identity));
-        if let Some(current) = self.current.borrow_mut().get_mut(name) {
+        if let Some(current) = self.core.current.borrow_mut().get_mut(name) {
             current.extend(candidate.moved.iter().map(|(word, moved)| (word.clone(), moved.to)));
         }
     }
     /// A knob the search just set on a slot: where the next trial moves it from, and what goes back when the goal ends. `was` is
     /// where it was as read just before.
     fn remember(&self, slot: &str, knob: &Knob, value: f64, was: f64) {
-        if let Some(last) = self.current.borrow_mut().get_mut(slot) {
+        if let Some(last) = self.core.current.borrow_mut().get_mut(slot) {
             last.insert(key(knob), value);
         }
+        self.remember_candidate(slot, knob, value, was);
+    }
+    /// Native restore ownership stays on the renderer; the shared engine records accepted generation values.
+    fn remember_candidate(&self, slot: &str, knob: &Knob, value: f64, was: f64) {
         let mut candidates = self.render.goal_candidates.borrow_mut();
         candidates.entry(slot.into()).or_default().moved.entry(key(knob)).and_modify(|moved| moved.to = value).or_insert_with(|| Moved {
             knob: knob.clone(),
@@ -610,7 +709,7 @@ impl Goal {
         Ok(refused)
     }
     async fn set_slot(&self, slot: &str, knobs: &[Knob], values: &[f64], signal: Signal) -> Result<Knobs, RuntimeError> {
-        if !self.current.borrow().contains_key(slot) {
+        if !self.core.current.borrow().contains_key(slot) {
             return Err(RuntimeError::plain(not_in_the_search(slot)));
         }
         let fresh = self.render.read_knobs(slot, signal.clone()).await?;
@@ -765,7 +864,7 @@ impl GoalRig for Goal {
         self.slots.borrow().clone()
     }
     fn screens(&self) -> bool {
-        self.screen.is_some()
+        self.core.screen.is_some()
     }
     fn kept_only(&self) -> Option<String> {
         self.beside.borrow().clone()
@@ -815,130 +914,7 @@ impl GoalRig for Goal {
         given: Signal,
         options: Option<GenerationOptions>,
     ) -> Result<Generation, RuntimeError> {
-        check_slots(trials, |slot| self.current.borrow().contains_key(slot))?;
-        let signal = self.signal(given);
-        let r = &self.render;
-        let screened = options.and_then(|v| v.screen) == Some(true) && self.screen.is_some();
-        let cache_key = |trial: &GenerationTrial| trial_key(&trial.slot, screened, &trial.values);
-        if r.is_rendering() {
-            return Err(observation("Another render is running."));
-        }
-        let rendering = r.rendering_now();
-        let set_from = now_ms();
-        let mut render_from = set_from;
-        let mut generation = Generation { screened, ..Default::default() };
-        let mut rig = self.rig.lock().await;
-        generation.gone = self.retire_gone(&mut rig, signal.clone()).await?;
-        let mut trials: Vec<_> = trials.iter().filter(|trial| !generation.gone.contains(&trial.slot)).collect();
-        let result: Result<IndexMap<String, Render>, RuntimeError> = async {
-            let mut plans = vec![];
-            for trial in &trials {
-                let moved = moved_knobs(trial, self.current.borrow().get(&trial.slot));
-                if moved.is_empty() {
-                    continue;
-                }
-                // A track can go between the availability check and this read: the check before rendering retires it.
-                let Some(fresh) = self.knobs_now(&trial.slot, signal.clone()).await? else {
-                    generation.frozen.insert(trial.slot.clone(), moved.iter().map(|(knob, _)| key(knob)).collect());
-                    continue;
-                };
-                let (devices, lost) = by_device(&fresh, &moved);
-                plans.push((trial, moved, fresh, devices, lost));
-            }
-            for (trial, moved, fresh, devices, lost) in plans {
-                // (a knob whose device moved or went can't be set: the search leaves it be)
-                let mut refused: HashSet<String> = lost.iter().map(key).collect();
-                r.history
-                    .quietly(None, async {
-                        for (reference, values) in devices {
-                            if r.step("set_device_parameters", json!({"deviceRef":reference,"values":values}), signal.clone()).await.is_ok()
-                            {
-                                continue;
-                            }
-                            signal.check()?;
-                            for value in values {
-                                if r.step("set_device_parameters", json!({"deviceRef":reference,"values":[value]}), signal.clone())
-                                    .await
-                                    .is_err()
-                                {
-                                    signal.check()?;
-                                    if let Some((knob, _)) = moved.iter().find(|(knob, _)| {
-                                        knob_now(&fresh, knob)
-                                            .is_some_and(|(_, now)| Some(now.r#ref.as_str()) == value["parameterRef"].as_str())
-                                    }) {
-                                        refused.insert(key(knob));
-                                    }
-                                }
-                            }
-                        }
-                        Ok::<_, RuntimeError>(())
-                    })
-                    .await?;
-                for (knob, value) in moved {
-                    if !refused.contains(&key(&knob)) {
-                        let was = knob_now(&fresh, &knob).map_or(knob.value, |(_, now)| now.value);
-                        self.remember(&trial.slot, &knob, value, was);
-                    }
-                }
-                if !refused.is_empty() {
-                    generation.frozen.insert(trial.slot.clone(), refused);
-                }
-            }
-            generation.gone.extend(self.retire_gone(&mut rig, signal.clone()).await?);
-            trials.retain(|trial| !generation.gone.contains(&trial.slot));
-            render_from = now_ms();
-            if trials.is_empty() || trials.iter().all(|trial| trial.fresh != Some(true) && self.heard.borrow().contains(&cache_key(trial)))
-            {
-                Ok(IndexMap::new())
-            } else {
-                rig.window = if screened {
-                    self.screen.as_ref().map(|screen| Window { from: rig.from + screen.offset, beats: screen.beats })
-                } else {
-                    None
-                };
-                r.render_pass(&mut rig, signal.clone()).await
-            }
-        }
-        .await;
-        drop(rendering);
-        let files = result?;
-        let heard_from = now_ms();
-        let tempo = heard_tempo(r.observer.tempo.get(), self.tempo);
-        let against = if screened { &self.screen.as_ref().unwrap().reference } else { &self.reference };
-        let beats = if screened { self.screen.as_ref().unwrap().beats } else { rig.beats };
-        drop(rig);
-        let generation = RefCell::new(generation);
-        eager_all(trials.iter().map(|trial| {
-            let signal = signal.clone();
-            let generation = &generation;
-            let files = &files;
-            let cache_key = &cache_key;
-            async move {
-                let cache_key = cache_key(trial);
-                let known = if trial.fresh != Some(true) { self.heard.borrow().get(&cache_key) } else { None };
-                if let Some(known) = known {
-                    tell_generation(&mut generation.borrow_mut(), &trial.slot, known, true);
-                    return Ok::<_, RuntimeError>(());
-                }
-                let Some(rendered) = files.get(&trial.slot) else {
-                    generation.borrow_mut().silent.push(trial.slot.clone());
-                    return Ok(());
-                };
-                let heard = hear(rendered, beats, tempo, self.focus, signal).await.map_err(|e| RuntimeError::plain(e.to_string()))?;
-                // (each slot is told as its hearing ends, as Live's goal has always told them)
-                match tell(&heard, against, self.focus) {
-                    None => generation.borrow_mut().silent.push(trial.slot.clone()),
-                    Some(told) => {
-                        tell_generation(&mut generation.borrow_mut(), &trial.slot, told.clone(), false);
-                        self.heard.borrow_mut().insert(cache_key, told);
-                    }
-                }
-                Ok(())
-            }
-        }))
-        .await?;
-        tell_timing(trials.len(), render_from - set_from, heard_from - render_from, now_ms() - heard_from);
-        Ok(generation.into_inner())
+        self.core.generation(LivePass { goal: self, rendering: None, rig: None }, trials, given, options).await
     }
     async fn settle(&self, slot: &str, knobs: &[Knob], values: &[f64], given: Signal) -> Result<Option<String>, RuntimeError> {
         let signal = self.signal(given);
