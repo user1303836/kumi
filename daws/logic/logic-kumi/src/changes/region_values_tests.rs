@@ -352,6 +352,55 @@ fn full_observable_fences_refuse_replacements_unknowns_and_producer_edits_even_f
         ))
         .is_err());
     assert!(lab.native.calls.is_empty());
+    // Shape is validated without native calls; only structurally complete records proceed to fresh semantic
+    // comparison. Empty version-one containers must not turn a malformed journal into a UI observation request.
+    for mode in [Mode::Rename, Mode::Loop] {
+        let mut lab = Lab::new();
+        let complete = lab.with(|ctx| preview(ctx, &input(mode), mode)).ok().unwrap().prior;
+        for (pointer, replacement) in [
+            ("/identity/project", json!({})),
+            ("/identity/project/path", Value::Null),
+            ("/identity/project/id", Value::Null),
+            ("/identity/project/name", json!("")),
+            ("/identity/headers", json!([])),
+            ("/identity/lanes", json!([])),
+            ("/identity/headers/0", json!({})),
+            ("/identity/lanes/0/node", json!({})),
+            ("/identity/lanes/0/regions", json!([])),
+            ("/identity/lanes/0/regions/0/start", json!({})),
+            ("/identity/owner", json!({})),
+            ("/identity/owner/strip", json!({})),
+            ("/identity/owner/strip/children", json!([])),
+            ("/identity/inspector", json!({})),
+            ("/identity/inspector/children", json!([])),
+            ("/identity/target", json!(0)),
+            ("/identity/target", json!(99)),
+        ] {
+            let mut malformed = complete.clone();
+            *malformed.pointer_mut(pointer).unwrap() = replacement;
+            let mut lab = Lab::new();
+            assert!(lab.with(|ctx| apply(ctx, &input(mode), &malformed, mode)).is_err(), "{mode:?} {pointer}");
+            assert!(
+                lab.with(|ctx| restore(
+                    ctx,
+                    &Restore {
+                        target: &json!({"ref":"1:region:1"}),
+                        prior: &malformed,
+                        applied: &malformed,
+                        created: None,
+                        material: None,
+                        discard: true,
+                        desc: "undo",
+                        key: "x".into()
+                    },
+                    mode
+                ))
+                .is_err(),
+                "{mode:?} {pointer}"
+            );
+            assert!(lab.native.calls.is_empty(), "malformed {mode:?} {pointer} never calls the helper");
+        }
+    }
 }
 
 #[test]

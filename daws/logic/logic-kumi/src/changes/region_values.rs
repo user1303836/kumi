@@ -470,19 +470,88 @@ fn wanted(input: &Value, mode: Mode) -> Done<Value> {
     }
 }
 
+/// Pure version-one shape validation rejects incomplete journals before helper calls. This does not authenticate
+/// captured facts: structurally valid evidence is compared with fresh native observations before every write.
 fn saved(value: &Value, mode: Mode) -> Done<usize> {
+    fn text(value: &Value) -> bool {
+        value.as_str().is_some_and(|s| !s.trim().is_empty())
+    }
+    fn marker(value: &Value) -> bool {
+        *value == json!({"controlled":"name"}) || *value == json!({"controlled":"loop"})
+    }
+    fn tree(node: &Value, depth: usize) -> bool {
+        let Some(fields) = node.as_object() else { return false };
+        depth <= 16
+            && text(&node["role"])
+            && fields.contains_key("value")
+            && fields
+                .keys()
+                .all(|key| ["role", "subrole", "id", "title", "desc", "value", "valueDesc", "help", "children"].contains(&key.as_str()))
+            && ["subrole", "id", "title", "desc", "valueDesc", "help"]
+                .iter()
+                .all(|key| node.get(*key).is_none_or(|v| v.is_string() || marker(v)))
+            && node["children"].as_array().is_some_and(|children| children.len() <= 256 && children.iter().all(|n| tree(n, depth + 1)))
+    }
+    fn populated(node: &Value, role: &str) -> bool {
+        node["role"] == role && tree(node, 0) && node["children"].as_array().is_some_and(|children| !children.is_empty())
+    }
+    fn position(value: &Value) -> bool {
+        value.as_object().is_some_and(|fields| fields.len() == 4)
+            && ["bar", "beat", "division", "tick"].iter().all(|key| value[*key].as_u64().is_some_and(|n| (1..=1_000_000).contains(&n)))
+    }
     let proof = &value["identity"];
     let place = proof["target"].as_u64().and_then(|n| usize::try_from(n).ok()).filter(|n| *n > 0).ok_or_else(|| failed(LEGACY))?;
-    if value["name"].as_str().is_none_or(str::is_empty)
+    let project = &proof["project"];
+    let path = project["path"].as_str().filter(|p| p.starts_with('/') && p.len() <= crate::logic::MAX_PATH);
+    let headers = proof["headers"].as_array().ok_or_else(|| failed(LEGACY))?;
+    let lanes = proof["lanes"].as_array().ok_or_else(|| failed(LEGACY))?;
+    let owner = &proof["owner"];
+    if value.as_object().is_none_or(|fields| fields.len() != 3)
+        || !text(&value["name"])
         || value["loop"].as_bool().is_none()
+        || proof.as_object().is_none_or(|fields| fields.len() != 8)
         || proof["version"] != 1
         || proof["mode"] != mode.name()
-        || !proof["project"].is_object()
-        || !proof["headers"].is_array()
-        || !proof["lanes"].is_array()
-        || !proof["owner"].is_object()
-        || !proof["inspector"].is_object()
+        || project.as_object().is_none_or(|fields| fields.len() != 3)
+        || !text(&project["name"])
+        || path.is_none_or(|path| project["id"].as_str() != Some(crate::logic::project_id(path).as_str()))
+        || headers.is_empty()
+        || headers.len() > 256
+        || headers.len() != lanes.len()
+        || headers.iter().any(|header| !populated(header, "AXLayoutItem"))
+        || owner.as_object().is_none_or(|fields| fields.len() != 3)
+        || !text(&owner["name"])
+        || !matches!(owner["kind"].as_str(), Some("audio" | "instrument" | "aux"))
+        || !populated(&owner["strip"], "AXLayoutItem")
+        || !populated(&proof["inspector"], "AXGroup")
+        || serde_json::to_vec(value).map_or(true, |bytes| bytes.len() > MAX_PROOF)
     {
+        return Err(failed(LEGACY));
+    }
+    let mut count = 0usize;
+    for lane in lanes {
+        if lane.as_object().is_none_or(|fields| fields.len() != 2)
+            || lane["node"]["role"] != "AXLayoutArea"
+            || !tree(&lane["node"], 0)
+            || lane["node"]["children"] != json!([])
+        {
+            return Err(failed(LEGACY));
+        }
+        let regions = lane["regions"].as_array().filter(|items| items.len() <= 256).ok_or_else(|| failed(LEGACY))?;
+        for region in regions {
+            if region.as_object().is_none_or(|fields| fields.len() != 4)
+                || !populated(&region["node"], "AXLayoutItem")
+                || !text(&region["node"]["help"])
+                || !position(&region["start"])
+                || !position(&region["end"])
+                || !matches!(region["kind"].as_str(), Some("midi" | "audio"))
+            {
+                return Err(failed(LEGACY));
+            }
+            count += 1;
+        }
+    }
+    if place > count {
         return Err(failed(LEGACY));
     }
     Ok(place)
