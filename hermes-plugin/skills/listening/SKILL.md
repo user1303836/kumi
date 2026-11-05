@@ -21,7 +21,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **Several candidates against one reference:** the first `kumi_listen` with `compare_to` returns `compare.artifact_id`, Kumi's kept copy of the reference. Pass `{"artifact_id": …}` as `compare_to` for the next candidates: every candidate is measured against the same reference audio, even if the original moves or the map changes.
 - **Which files Kumi can measure:** a file inside one of the producer's approved sample folders or this profile's media, a map sound, or a file Kumi made. A mixdown exported anywhere else is refused: ask the producer to export it into an approved folder, or to add its folder (`kumi_library` `add_folder`).
 - **How far from a loudness target** (−14 LUFS for streaming, or the producer's figure): measure the file, then report its integrated LUFS against the target, and its true peak against −1 dBTP.
-  - This recipe only measures: say what's off, and by how much.
+  - This recipe only measures: say what's off, and by how much. To bring the mix to a reference, see "Mastering against a reference" below.
   - Where a level change is the fix, offer one, as an approved `kumi_change`.
   - Measuring the same file again can't show that change: it measures as before. To check it, the producer exports or bounces again into an approved folder, and you measure the new file. Otherwise say Kumi can't check the result itself.
 
