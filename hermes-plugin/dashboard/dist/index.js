@@ -113,11 +113,12 @@
   function undoRequest(item) {
     return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
   }
-  function soundRequest(soundId, name) {
+  function soundRequest(soundId, name, revision) {
     const id = plainId(soundId);
     if (!id) return null;
+    const from = revision ? plainId(revision) : null;
     const said = clean(name ?? "", 80);
-    return said ? `Use sound ${id} (“${said}”) on the selected track` : `Use sound ${id} on the selected track`;
+    return `Use sound ${id}${from ? ` from map ${from}` : ""}${said ? ` (“${said}”)` : ""} on the selected track`;
   }
   var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
   function cleanupWords(cleanup) {
@@ -963,7 +964,7 @@
           MapCanvas,
           {
             actions: (id, sound) => {
-              const request = soundRequest(id, sound.name);
+              const request = soundRequest(id, sound.name, state.map?.revision);
               return /* @__PURE__ */ jsxs(Fragment2, { children: [
                 /* @__PURE__ */ jsx(TextButton, { onClick: () => playing === id ? audition.stop() : void audition.play(id).catch(() => void 0), children: playing === id ? "■ Stop" : "▶ Play" }),
                 request && /* @__PURE__ */ jsx(CopyButton, { label: "Copy request", text: request })

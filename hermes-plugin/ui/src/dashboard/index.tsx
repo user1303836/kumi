@@ -111,7 +111,7 @@ function KumiDashboard() {
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', minHeight: 420, display: 'flex', flexDirection: 'column' }}>
           <MapCanvas
             actions={(id, sound) => {
-              const request = soundRequest(id, sound.name)
+              const request = soundRequest(id, sound.name, state.map?.revision)
               return (
                 <>
                   <TextButton onClick={() => (playing === id ? audition.stop() : void audition.play(id).catch(() => undefined))}>{playing === id ? '■ Stop' : '▶ Play'}</TextButton>

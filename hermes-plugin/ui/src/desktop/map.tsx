@@ -45,7 +45,7 @@ export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; sto
   return (
     <MapCanvas
       actions={(id, sound) => {
-        const request = soundRequest(id, sound.name)
+        const request = soundRequest(id, sound.name, map?.revision)
         return (
           <>
             <TextButton onClick={() => (playing === id ? audition.stop() : play(id))} title="Play it here (nothing changes in your DAW)">

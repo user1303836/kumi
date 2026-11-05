@@ -106,11 +106,12 @@ function canUndo(status, item) {
 function undoRequest(item) {
   return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
 }
-function soundRequest(soundId, name) {
+function soundRequest(soundId, name, revision) {
   const id = plainId(soundId);
   if (!id) return null;
+  const from = revision ? plainId(revision) : null;
   const said = clean(name ?? "", 80);
-  return said ? `Use sound ${id} (“${said}”) on the selected track` : `Use sound ${id} on the selected track`;
+  return `Use sound ${id}${from ? ` from map ${from}` : ""}${said ? ` (“${said}”)` : ""} on the selected track`;
 }
 function setupRequest(daw) {
   return `Set up Kumi for ${dawName(daw)}`;
@@ -1468,7 +1469,7 @@ function MapWorkspace({ ctx, store, audition }) {
     MapCanvas,
     {
       actions: (id, sound) => {
-        const request = soundRequest(id, sound.name);
+        const request = soundRequest(id, sound.name, map?.revision);
         return /* @__PURE__ */ jsxs9(Fragment2, { children: [
           /* @__PURE__ */ jsx9(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: "Play it here (nothing changes in your DAW)", children: playing === id ? "■ Stop" : "▶ Play" }),
           request && /* @__PURE__ */ jsx9(
