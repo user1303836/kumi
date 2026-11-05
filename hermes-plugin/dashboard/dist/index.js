@@ -122,7 +122,11 @@
       lookFirst: "Ask Hermes to look again before another change.",
       restored: "Kumi put back what it changed meanwhile.",
       restoreUnsure: "Kumi isn’t sure it put everything back.",
-      restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`
+      restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
+      dawUndo: (daw, keys) => `Undo in ${daw} (${keys})`,
+      dawUndoTitle: (daw) => `${daw}'s own undo takes this back; Kumi can't yet (#1101)`,
+      byHand: (daw) => `Remove it by hand in ${daw}`,
+      byHandTitle: (daw) => `${daw}'s undo would take back your later work first, so remove this by hand; Kumi can't undo it yet (#1101)`
     },
     job: {
       scanning: "Scanning",
@@ -411,7 +415,11 @@
       lookFirst: "次の変更の前に、Hermes にもう一度確認してもらってください。",
       restored: "その間に変えたものは Kumi が元に戻しました。",
       restartedSince: (daw) => `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
-      restoreUnsure: "すべて元に戻せたか Kumi は確信できません。"
+      restoreUnsure: "すべて元に戻せたか Kumi は確信できません。",
+      dawUndo: (daw, keys) => `${daw} で取り消す（${keys}）`,
+      dawUndoTitle: (daw) => `${daw} 自身の取り消しで戻せます。Kumi はまだ戻せません（#1101）`,
+      byHand: (daw) => `${daw} で手動で削除`,
+      byHandTitle: (daw) => `${daw} の取り消しはその後の作業を先に戻してしまうため、手動で削除してください。Kumi はまだ取り消せません（#1101）`
     },
     job: {
       scanning: "スキャン中",
@@ -699,7 +707,11 @@
       lookFirst: "下一次改动之前，请让 Hermes 重新查看。",
       restored: "Kumi 已还原期间做出的改动。",
       restartedSince: (daw) => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
-      restoreUnsure: "Kumi 不确定是否已全部还原。"
+      restoreUnsure: "Kumi 不确定是否已全部还原。",
+      dawUndo: (daw, keys) => `在 ${daw} 中撤销（${keys}）`,
+      dawUndoTitle: (daw) => `${daw} 自己的撤销可以还原这一步；Kumi 暂时还不能（#1101）`,
+      byHand: (daw) => `在 ${daw} 中手动删除`,
+      byHandTitle: (daw) => `${daw} 的撤销会先撤回你之后的操作，所以请手动删除；Kumi 暂时还不能撤销（#1101）`
     },
     job: {
       scanning: "正在扫描",
@@ -1300,6 +1312,13 @@
       focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
     ] });
   }
+  function DawUndo({ daw, how }) {
+    const t = useT();
+    const app = dawName(daw, t);
+    if (how === "buried") return /* @__PURE__ */ jsx(Chip, { title: t("history.byHandTitle", app), children: t("history.byHand", app) });
+    const keys = /Mac/.test(globalThis.navigator?.userAgent ?? "") ? "Cmd+Z" : "Ctrl+Z";
+    return /* @__PURE__ */ jsx(Chip, { title: t("history.dawUndoTitle", app), children: t("history.dawUndo", app, keys) });
+  }
   function HistoryView({
     history,
     now,
@@ -1328,7 +1347,7 @@
             item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
           )
         ] }),
-        action?.(item)
+        item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? /* @__PURE__ */ jsx(DawUndo, { daw, how: item.daw_undo }) : action?.(item)
       ] }, item.id);
     }) });
   }

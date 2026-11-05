@@ -91,7 +91,11 @@ const en = {
     restored: 'Kumi put back what it changed meanwhile.',
     restoreUnsure: 'Kumi isn’t sure it put everything back.',
     restartedSince: (daw: string) =>
-      `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`
+      `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
+    dawUndo: (daw: string, keys: string) => `Undo in ${daw} (${keys})`,
+    dawUndoTitle: (daw: string) => `${daw}'s own undo takes this back; Kumi can't yet (#1101)`,
+    byHand: (daw: string) => `Remove it by hand in ${daw}`,
+    byHandTitle: (daw: string) => `${daw}'s undo would take back your later work first, so remove this by hand; Kumi can't undo it yet (#1101)`
   },
   job: {
     scanning: 'Scanning',
@@ -386,7 +390,11 @@ const ja: Shape<typeof en> = {
     restored: 'その間に変えたものは Kumi が元に戻しました。',
     restartedSince: daw =>
       `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
-    restoreUnsure: 'すべて元に戻せたか Kumi は確信できません。'
+    restoreUnsure: 'すべて元に戻せたか Kumi は確信できません。',
+    dawUndo: (daw, keys) => `${daw} で取り消す（${keys}）`,
+    dawUndoTitle: daw => `${daw} 自身の取り消しで戻せます。Kumi はまだ戻せません（#1101）`,
+    byHand: daw => `${daw} で手動で削除`,
+    byHandTitle: daw => `${daw} の取り消しはその後の作業を先に戻してしまうため、手動で削除してください。Kumi はまだ取り消せません（#1101）`
   },
   job: {
     scanning: 'スキャン中',
@@ -677,7 +685,11 @@ const zh: Shape<typeof en> = {
     lookFirst: '下一次改动之前，请让 Hermes 重新查看。',
     restored: 'Kumi 已还原期间做出的改动。',
     restartedSince: daw => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
-    restoreUnsure: 'Kumi 不确定是否已全部还原。'
+    restoreUnsure: 'Kumi 不确定是否已全部还原。',
+    dawUndo: (daw, keys) => `在 ${daw} 中撤销（${keys}）`,
+    dawUndoTitle: daw => `${daw} 自己的撤销可以还原这一步；Kumi 暂时还不能（#1101）`,
+    byHand: daw => `在 ${daw} 中手动删除`,
+    byHandTitle: daw => `${daw} 的撤销会先撤回你之后的操作，所以请手动删除；Kumi 暂时还不能撤销（#1101）`
   },
   job: {
     scanning: '正在扫描',

@@ -87,6 +87,17 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
   )
 }
 
+/** How to take back a row only the DAW's own undo can reverse (#1101): its key while that's the DAW's next undo, or
+ *  by hand once later work sits above it there (the DAW's undo would take that back first). Words, never a request:
+ *  Kumi would refuse it. */
+function DawUndo({ daw, how }: { daw: unknown; how: 'next' | 'buried' }) {
+  const t = useT()
+  const app = dawName(daw, t)
+  if (how === 'buried') return <Chip title={t('history.byHandTitle', app)}>{t('history.byHand', app)}</Chip>
+  const keys = /Mac/.test(globalThis.navigator?.userAgent ?? '') ? 'Cmd+Z' : 'Ctrl+Z'
+  return <Chip title={t('history.dawUndoTitle', app)}>{t('history.dawUndo', app, keys)}</Chip>
+}
+
 /** HISTORY's rows. `live`: the runtime answers now (connected, not stale), so a row without undo was a restart's;
  *  `daw` names where to undo it then. */
 export function HistoryView({
@@ -142,7 +153,7 @@ export function HistoryView({
                 )
               )}
             </span>
-            {action?.(item)}
+            {item.state === 'applied' && (item.daw_undo === 'next' || item.daw_undo === 'buried') ? <DawUndo daw={daw} how={item.daw_undo} /> : action?.(item)}
           </li>
         )
       })}
