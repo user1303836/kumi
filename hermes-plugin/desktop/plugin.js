@@ -906,18 +906,16 @@ function FocusHint({ store }) {
   const path = focusPath(state.focus);
   if (!path.length) return null;
   const tempo = bpm(state.focus?.transport?.tempo);
+  const unsure = Boolean(state.status?.unsure);
   return /* @__PURE__ */ jsxs5(
     "div",
     {
-      style: { ...S.row, gap: 6, padding: "2px 10px", maxWidth: "100%" },
-      title: "What Kumi sees selected in your DAW: words like “this track” in this chat mean it.",
+      "data-unsure": unsure || void 0,
+      style: { ...S.row, gap: 6, padding: "2px 10px", maxWidth: "100%", opacity: unsure ? 0.5 : 1 },
+      title: unsure ? "What Kumi last saw selected in your DAW. It isn't sure your project is as it was: ask it to look again." : "What Kumi sees selected in your DAW: words like “this track” in this chat mean it.",
       children: [
-        /* @__PURE__ */ jsx5(Dot, { color: colorOf(state.focus?.focus?.track) ?? T.faint, size: 7 }),
-        /* @__PURE__ */ jsxs5("span", { style: { ...S.faint, ...S.ellipsis }, children: [
-          "Kumi sees ",
-          path.join(" › "),
-          tempo ? ` · ${tempo}` : ""
-        ] })
+        /* @__PURE__ */ jsx5(Dot, { color: unsure ? T.faint : colorOf(state.focus?.focus?.track) ?? T.faint, size: 7 }),
+        /* @__PURE__ */ jsx5("span", { style: { ...S.faint, ...S.ellipsis }, children: `${unsure ? "Kumi last saw" : "Kumi sees"} ${path.join(" › ")}${tempo ? ` · ${tempo}` : ""}` })
       ]
     }
   );

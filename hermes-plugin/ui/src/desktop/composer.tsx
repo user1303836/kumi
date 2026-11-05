@@ -32,16 +32,20 @@ export function FocusHint({ store }: { store: KumiStore }) {
   const path = focusPath(state.focus)
   if (!path.length) return null
   const tempo = bpm(state.focus?.transport?.tempo)
+  // While Kumi isn't sure the project is as it was (CC-2 R6), what it last saw may not be what's there: say so, dimmed.
+  const unsure = Boolean(state.status?.unsure)
   return (
     <div
-      style={{ ...S.row, gap: 6, padding: '2px 10px', maxWidth: '100%' }}
-      title="What Kumi sees selected in your DAW: words like “this track” in this chat mean it."
+      data-unsure={unsure || undefined}
+      style={{ ...S.row, gap: 6, padding: '2px 10px', maxWidth: '100%', opacity: unsure ? 0.5 : 1 }}
+      title={
+        unsure
+          ? "What Kumi last saw selected in your DAW. It isn't sure your project is as it was: ask it to look again."
+          : 'What Kumi sees selected in your DAW: words like “this track” in this chat mean it.'
+      }
     >
-      <Dot color={colorOf(state.focus?.focus?.track) ?? T.faint} size={7} />
-      <span style={{ ...S.faint, ...S.ellipsis }}>
-        Kumi sees {path.join(' › ')}
-        {tempo ? ` · ${tempo}` : ''}
-      </span>
+      <Dot color={unsure ? T.faint : (colorOf(state.focus?.focus?.track) ?? T.faint)} size={7} />
+      <span style={{ ...S.faint, ...S.ellipsis }}>{`${unsure ? 'Kumi last saw' : 'Kumi sees'} ${path.join(' › ')}${tempo ? ` · ${tempo}` : ''}`}</span>
     </div>
   )
 }

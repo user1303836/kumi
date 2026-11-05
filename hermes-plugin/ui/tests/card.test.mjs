@@ -136,3 +136,21 @@ test("under the composer, the FOCUS hint shows what Kumi sees only in Kumi's own
   assert.equal(hint('another-chat'), '')
   assert.equal(hint(null), '')
 })
+
+test("while Kumi isn't sure of the project, the hint says what it last saw, dimmed", async () => {
+  const { FocusHint } = await load('src/desktop/composer.tsx', { react: 'real' })
+  const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
+  const unsure = { op: 'listen_track', reason: 'Live stopped answering', cleanup: 'unsure' }
+  const store = new KumiStore(async path => {
+    if (path.startsWith('/status')) return { connected: true, daw: 'ableton', owner: { session_id: 's1' }, revisions: { focus: 3 }, unsure }
+    if (path.startsWith('/focus')) return { focus: { track: { name: 'Drums' }, device: { name: 'Drum Rack' } } }
+    throw Object.assign(new Error('not here'), { status: 404 })
+  })
+  store.want('focus')
+  await store.refreshStatus()
+  await new Promise(resolve => setTimeout(resolve, 20))
+  globalThis.__kumiTestHost = { state: { focusedStoredSessionId: { get: () => 's1', subscribe: () => () => {}, listen: () => () => {} } } }
+  const html = renderToStaticMarkup(createElement(FocusHint, { store }))
+  assert.ok(html.includes('Kumi last saw Drums › Drum Rack'), html)
+  assert.ok(html.includes('opacity:0.5'), html)
+})
