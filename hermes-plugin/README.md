@@ -107,8 +107,9 @@ Kumi's runtime, its DAW bridge and its library workers run on the machine that r
 when the chat ends, when the plugin unloads, or after 15 minutes idle; your DAW keeps running. Kumi reads the open
 project, the sample folders you list, and finished audio other Hermes plugins saved in Hermes's generated-audio folder
 (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates), to place or measure it. Changes to your project go
-through Hermes's approval (unless Hermes's
-approvals are off: `--yolo`, a chat's `/yolo` or `approvals.mode: off` run them without asking, and `/kumi` says so),
+through Hermes's approval (unless Hermes's approvals are off: `--yolo`, a chat's `/yolo` or `approvals.mode: off`
+run them without asking, and `/kumi` says so; a one-shot `hermes -z` turn is yolo too, and Kumi can't tell it apart,
+while a `hermes -q` turn refuses them by default),
 and HISTORY records what actually happened, including when an outcome is uncertain; undo is available only while the
 recorded change can still be reversed. Listening to a track or the mix also asks first: it plays only the beat window
 you approve (60 seconds at most), only while the DAW is stopped, and may change routing and transport briefly,

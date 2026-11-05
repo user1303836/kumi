@@ -40,7 +40,7 @@ hermes plugins enable kumi
 - “真的更暗了吗？”Kumi 测量两个文件：响度、真峰值、频谱。
 - “撤销军鼓那次修改。”只要还能撤销，Kumi 就撤销那一条。
 
-Hermes 会在每次修改前征求同意，因为它的确认功能是开启的。使用 `--yolo`、对话中的 `/yolo` 或 `approvals.mode: off` 时，Hermes 会不经询问直接执行 Kumi 的修改、音轨聆听和设置步骤；`/kumi` 会说明这一点。
+Hermes 会在每次修改前征求同意，因为它的确认功能是开启的。使用 `--yolo`、对话中的 `/yolo` 或 `approvals.mode: off` 时，Hermes 会不经询问直接执行 Kumi 的修改、音轨聆听和设置步骤；`/kumi` 会说明这一点。一次性的 `hermes -z` 也等同于 yolo：Kumi 的修改会不经询问直接执行，而且 Kumi 无法把它与普通对话区分开。`hermes -q` 默认会拒绝这些修改。
 
 ## 东西在哪里
 

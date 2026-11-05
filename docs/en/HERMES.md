@@ -50,7 +50,9 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - "Undo the snare change." Kumi undoes that entry while it can still be undone.
 
 Hermes asks before each change because its approvals are on. With `--yolo`, a chat's `/yolo` or `approvals.mode: off`,
-Hermes runs Kumi's changes, track listens and setup steps without asking; `/kumi` says so.
+Hermes runs Kumi's changes, track listens and setup steps without asking; `/kumi` says so. A one-shot `hermes -z` turn
+is yolo too: Kumi's changes run without asking there, and Kumi can't tell it from a chat. A `hermes -q` turn refuses
+them by default.
 
 ## Where things are
 
