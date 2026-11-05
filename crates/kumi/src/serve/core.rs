@@ -88,6 +88,7 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             .await
             .map_err(|error| OpError::Failed { reason: format!("Kumi couldn't look at the project: {error}") })?;
         let project = ctx.link().saw(&observation);
+        ctx.link().clear_unsure();
         let (focus, transport, catch_up) = (connection.focus(), connection.transport(), connection.take_catch_up());
         let scope = call.args.get("scope").and_then(Value::as_str).unwrap_or("project");
         let text = match scope {
@@ -102,6 +103,7 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         };
         let most = call.args.get("max_chars").and_then(Value::as_u64).unwrap_or(MAX_CHARS.0);
         let refs = connection::refs(&connection, call.signal.clone()).await;
+        ctx.link().keep_refs(&refs);
         connection::publish_focus(&ctx.handle());
         publish_status(ctx, false).await;
         Ok(json!({
@@ -214,7 +216,7 @@ pub fn publish_owner(ctx: &Ctx, running: bool) {
         "since": ctx.started(),
         "heartbeat": kumi_common::time::now_ms(),
         "running": running,
-        "lease": "free",
+        "lease": if ctx.lease().held() { "held" } else { "free" },
     });
     if let Err(error) = ctx.snapshots().write("owner", &body) {
         super::say(&format!("kumi serve: owner.json not written: {error}"));
@@ -242,7 +244,45 @@ pub async fn status(ctx: &Ctx) -> Value {
         "setup": {"component": {"installed": installed, "version": version, "bundled": bundled}, "daw_open": daw_open},
         "connected": connected,
         "project": ctx.link().project().as_ref().map(project_value),
-        "owner": null,
+        "owner": ctx.lease().held().then(|| json!({"pid": std::process::id(), "profile": ctx.snapshots().owner().profile_id})),
+        "unsure": ctx.link().unsure(),
+        "quarantine": quarantined(&ctx.paths().state_dir.join("quarantine")),
         "capabilities": capabilities,
+    })
+}
+
+/// How often the quarantine is counted again: `status` is asked often, and the count walks a folder tree.
+const RECOUNT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// What the quarantine keeps (CC-2: files a listen couldn't put back safely, kept for the producer, never deleted by
+/// the runtime): how many and their bytes, counted again at most every [`RECOUNT`].
+fn quarantined(folder: &std::path::Path) -> Value {
+    type Counted = Option<(std::path::PathBuf, std::time::Instant, Value)>;
+    thread_local! {
+        static COUNTED: std::cell::RefCell<Counted> = const { std::cell::RefCell::new(None) };
+    }
+    COUNTED.with(|counted| {
+        if let Some((path, at, value)) = counted.borrow().as_ref() {
+            if path == folder && at.elapsed() < RECOUNT {
+                return value.clone();
+            }
+        }
+        let (mut items, mut bytes) = (0u64, 0u64);
+        let mut folders = vec![folder.to_path_buf()];
+        while let Some(folder) = folders.pop() {
+            let Ok(entries) = std::fs::read_dir(&folder) else { continue };
+            for entry in entries.filter_map(Result::ok) {
+                let Ok(kind) = entry.file_type() else { continue };
+                if kind.is_dir() {
+                    folders.push(entry.path());
+                } else {
+                    items += 1;
+                    bytes += entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+                }
+            }
+        }
+        let value = json!({"items": items, "bytes": bytes});
+        *counted.borrow_mut() = Some((folder.to_path_buf(), std::time::Instant::now(), value.clone()));
+        value
     })
 }

@@ -71,6 +71,21 @@ pub fn reads(_: &JsonObject) -> Effect {
     Effect::Read
 }
 
+/// The schema of an epoch a call names (`expected_epoch`): a whole number, or its decimal digits as a string, which is
+/// how the host sends it (CC-2).
+pub fn epoch_schema() -> Value {
+    json!({"type": ["integer", "string"], "minimum": 0, "pattern": "^[0-9]{1,20}$"})
+}
+
+/// The epoch a call names in `field`, in either form; None when it's missing or neither.
+pub fn epoch_of(args: &JsonObject, field: &str) -> Option<u64> {
+    match args.get(field)? {
+        Value::Number(number) => number.as_u64(),
+        Value::String(digits) => digits.parse().ok(),
+        _ => None,
+    }
+}
+
 /// Who asked, as the host says it (`_host` in the arguments, CC-5): the profile, its session, the turn's task, the
 /// tool call and the request. Identity for deduplication, ownership and the snapshots' envelope; never permission.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -254,6 +269,11 @@ impl Scratch {
     pub fn path(&self) -> &Path {
         &self.path
     }
+
+    /// Kept where it is, not removed: for what the next start reads (an unsettled call's record, R4).
+    pub fn keep(self) {
+        std::mem::forget(self);
+    }
 }
 
 impl Drop for Scratch {
@@ -287,6 +307,8 @@ pub struct Ctx {
     /// The DAW's stand-ins a test gives (as the app's `run` takes them); none otherwise.
     answers: kumi_daw::io::Answers,
     link: Link,
+    lease: super::lease::Lease,
+    history: super::history::History,
 }
 
 impl Ctx {
@@ -299,6 +321,11 @@ impl Ctx {
         let state_dir = std::fs::canonicalize(&args.state_dir).map_err(unmade)?;
         let snapshots = Snapshots::new(state_dir.clone());
         let jobs = Jobs::new(&snapshots, &state_dir);
+        let started = kumi_common::time::now_ms();
+        // This runtime's own, among every runtime's: HISTORY ids and the epochs it gives out start from it.
+        let generation = format!("{:x}", started.max(0));
+        let history = super::history::History::new(&state_dir, generation);
+        let lease = super::lease::Lease::new(&args.kumi_home, args.daw.as_str());
         let ctx = Rc::new_cyclic(|me| Ctx {
             me: me.clone(),
             daw: args.daw,
@@ -312,12 +339,46 @@ impl Ctx {
             shutdown: Signal::new(),
             offered: Cell::new(super::registry::OPERATIONS),
             scratches: Cell::new(0),
-            started: kumi_common::time::now_ms(),
+            started,
             answers,
-            link: Link::new(kumi_common::time::now_ms().max(0) as u64),
+            link: Link::new(started.max(0) as u64),
+            lease,
+            history,
         });
         ctx.project_library_roots();
+        ctx.recover_unsettled();
         Ok(ctx)
+    }
+
+    /// Each call an earlier runtime didn't see settle (R4) becomes an audit row in HISTORY (W1-b), in that runtime's
+    /// generation, and the runtime's `unsure` (R6) until the next look. A record left half written was a call that
+    /// never ran: its row says so, and nothing is unsure. Each record goes once HISTORY has it on disk.
+    fn recover_unsettled(&self) {
+        let left = super::inflight::left_over(&self.paths.state_dir);
+        if left.is_empty() {
+            return;
+        }
+        for (record, _) in &left {
+            let op = record["op"].as_str().unwrap_or("a call");
+            let title = record["title"].as_str().map_or_else(|| format!("{op} (interrupted)"), str::to_string);
+            let identity = super::history::CallIdentity {
+                tool_call_id: record["tool_call_id"].as_str(),
+                digest: record["digest"].as_str().unwrap_or_default(),
+            };
+            let project = record["project_key"].as_str().unwrap_or_default();
+            let generation = record["generation"].as_str().unwrap_or(self.history.generation()).to_string();
+            if record["unread"] == true {
+                let reason = "Kumi's runtime stopped as this call was about to run: it was interrupted before it ran.";
+                self.history.audit_in(&generation, &title, project, reason, identity, &self.snapshots);
+                continue;
+            }
+            let reason = "Kumi's runtime stopped while this was running, so the DAW may have changed: look at the project \
+                          before another change.";
+            self.history.audit_in(&generation, &title, project, reason, identity, &self.snapshots);
+            self.link.note_unsure(op, reason, "interrupted");
+        }
+        self.snapshots.flush();
+        super::inflight::clear(&left.into_iter().map(|(_, folder)| folder).collect::<Vec<_>>());
     }
 
     pub fn daw(&self) -> DawId {
@@ -423,6 +484,16 @@ impl Ctx {
     /// The connection to the DAW and the project last seen (none before `connect`).
     pub fn link(&self) -> &Link {
         &self.link
+    }
+
+    /// The DAW endpoint's write lease: a call that writes, plays or imports holds it while it runs.
+    pub fn lease(&self) -> &super::lease::Lease {
+        &self.lease
+    }
+
+    /// The runtime's HISTORY.
+    pub fn history(&self) -> &super::history::History {
+        &self.history
     }
 
     /// The connection to the DAW: `connect` first.
