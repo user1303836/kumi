@@ -192,6 +192,22 @@ class Runtimes(unittest.TestCase):
         self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "then, idle, it stopped")
         self.assertTrue(eventually(lambda: not live.client.running), "and its process ended")
 
+    def test_a_runtime_connected_to_the_daw_for_a_chat_waits_longer_before_its_idle_stop(self):
+        runtimes = self.make(idle_after=0.3, idle_connected=3600)
+        connected = self.start(session="s1", runtimes=runtimes)  # looked at first in each pass: started first
+        connected.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
+        other = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        support.install(other)
+        self.addCleanup(support.stopped, runtimes, other)
+        idle = runtimes.start(other, runtime.installed(other, support.VERSION), "ableton", "s2", profile="other")
+        self.assertTrue(eventually(lambda: runtimes.get(other) is None), "a chat's runtime that isn't connected stops")
+        self.assertIs(runtimes.get(self.data), connected,
+                      "the connected one, idle longer and looked at in the same pass, still runs (kumi-adv's D2)")
+        status = json.loads((self.data / "state" / "status.json").read_text(encoding="utf-8"))
+        (self.data / "state" / "status.json").write_text(json.dumps({**status, "connected": False}), encoding="utf-8")
+        self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "once the DAW is gone, the short wait")
+        self.assertTrue(eventually(lambda: not idle.client.running and not connected.client.running))
+
     def test_an_idle_runtime_is_stopped_in_the_context_of_the_profile_that_started_it(self):
         profile = contextvars.ContextVar("profile")
         heard: list[tuple[object, object]] = []

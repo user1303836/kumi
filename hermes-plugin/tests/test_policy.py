@@ -216,7 +216,19 @@ class Approvals(unittest.TestCase):
             "message": f"Kumi: Undo Louder drums on Drums\n{policy.CHAT_ONLY}"})
         self.assertEqual(support.call(self.host, "kumi_undo", undo, session_id="s1")["state"], "undone")
         decision = self.hook("kumi_undo", undo)
-        self.assertEqual((decision["action"], decision["message"]), ("block", "Kumi didn't undo anything: expired"))
+        self.assertEqual((decision["action"], decision["message"]),
+                         ("block", "Kumi didn't undo anything: It can't be undone any more."), "words, never a code")
+
+    def test_a_change_from_before_kumi_restarted_says_why_it_cant_be_undone_and_what_to_do(self):
+        applied = support.call(self.host, "kumi_change", change(), session_id="s1")
+        undo = {"history_id": applied["history_ids"][0]}
+        self.host.runtimes.stop_all()  # its chat ended, or it was idle: the change's undo went with it
+        support.install(self.data, "--generation", "g2")
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        restarted = ("Kumi restarted since this change, so it can't undo it safely: undo it in Live if it's still the "
+                     "latest step there, or ask Hermes to set it back.")
+        self.assertEqual(self.hook("kumi_undo", undo), {"action": "block",
+                                                        "message": f"Kumi didn't undo anything: {restarted}"})
 
     def test_a_folder_is_approved_as_kumi_will_keep_it_and_never_a_whole_disk_or_home(self):
         written = os.path.join(str(support.SAMPLES), "Pads", "..", "Drums") + os.sep

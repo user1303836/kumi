@@ -266,6 +266,16 @@ _QUOTE_MARKS = re.compile('["\u201c\u201d\u201e\u201f\u2033\u2036\u3003\uff02\u0
                           '\u301d\u301e\u301f\uff62\uff63\ufe41\ufe42\ufe43\ufe44]')
 
 
+# CC-3's reasons a change can't be undone, as an undo's preview gives them, in the runtime's own words for each (serve/
+# change.rs). The restart's are kumi-adv's D2, the same on every surface.
+UNDO_REFUSED = {
+    "restarted": ("Kumi restarted since this change, so it can't undo it safely: undo it in {daw} if it's still the "
+                  "latest step there, or ask Hermes to set it back."),
+    "expired": "It can't be undone any more.",
+    "kept": "That change can't be undone now (see its state in HISTORY).",
+}
+
+
 def _undo(host: Any, args: dict, kwargs: dict) -> dict:
     try:
         answer = _ask(host, "undo", {key: value for key, value in args.items() if key != "preview"} | {"preview": True},
@@ -273,7 +283,10 @@ def _undo(host: Any, args: dict, kwargs: dict) -> dict:
     except (runtime.Unavailable, runtime.Refused) as failure:
         return block(f"Kumi didn't undo anything: {_reason(failure)}")
     if answer.get("state") != "preview" or not answer.get("undo_available"):
-        return block(f"Kumi didn't undo anything: {answer.get('reason') or 'that change can no longer be undone.'}")
+        reason = answer.get("reason") if isinstance(answer.get("reason"), str) else ""
+        words = (UNDO_REFUSED[reason].format(daw=setup.DAWS.get(host.daw(), "the DAW")) if reason in UNDO_REFUSED
+                 else reason or "that change can no longer be undone.")
+        return block(f"Kumi didn't undo anything: {words}")
     return approve([f"Kumi: {answer.get('text') or 'undo a Kumi change'}"], "kumi:write:undo")
 
 
