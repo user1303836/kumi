@@ -25,6 +25,29 @@ const OUTPUT: usize = 4_000;
 /// The most characters of a script's purpose, as the preview and its HISTORY row say it.
 const PURPOSE: usize = 200;
 
+/// How long a run may take before its DAW stops it (CC-19's r9), in ms: Live's `python.run` (its tracer) and REAPER's
+/// run_lua (its count hook) are given 10 s; Renoise's tool stops a chunk at 800 ms at most (its own count hook), which
+/// is stricter and stays. Scripts run on the DAW's main thread: the bridge's own bound is what keeps one from hanging it.
+fn deadline_ms(daw: DawId) -> u64 {
+    match daw {
+        DawId::Renoise => 800,
+        _ => 10_000,
+    }
+}
+
+/// The deadline in seconds, as the preview gives it and the stop's words say it: `10`, `0.8`.
+fn deadline_seconds(daw: DawId) -> Value {
+    let ms = deadline_ms(daw);
+    if ms % 1000 == 0 {
+        json!(ms / 1000)
+    } else {
+        json!(ms as f64 / 1000.0)
+    }
+}
+
+/// What each bridge says when it stopped a script at its deadline: Live's `python.run`, REAPER's wrapper, Renoise's tool.
+const STOPPED: &[&str] = &["Python exceeded timeoutMs", "ms (the chunk's time limit)", "Kumi stopped it: it ran longer than"];
+
 pub static SCRIPT: Operation = Operation {
     name: "script",
     description: "Runs a script in the DAW, once, under its write lease: Python in Live, Lua in REAPER and Renoise, for \
@@ -147,9 +170,7 @@ fn first_hidden(code: &str) -> Option<(char, usize)> {
         let shown = match c {
             '\n' | '\t' => true,
             '\r' => chars.peek() == Some(&'\n'),
-            '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{200E}' | '\u{200F}' | '\u{061C}' => false,
-            '\u{200B}'..='\u{200D}' | '\u{2060}' | '\u{FEFF}' => false,
-            '\u{2028}' | '\u{2029}' => false,
+            c if hides(c) => false,
             '\u{0000}'..='\u{001F}' | '\u{007F}'..='\u{009F}' => false,
             _ => true,
         };
@@ -161,6 +182,24 @@ fn first_hidden(code: &str) -> Option<(char, usize)> {
         }
     }
     None
+}
+
+/// r7's characters that hide or reorder text without being control characters: bidi controls, zero-width and invisible
+/// ones, and the line and paragraph separators.
+fn hides(c: char) -> bool {
+    matches!(
+        c,
+        '\u{202A}'..='\u{202E}'
+            | '\u{2066}'..='\u{2069}'
+            | '\u{200E}'
+            | '\u{200F}'
+            | '\u{061C}'
+            | '\u{200B}'..='\u{200D}'
+            | '\u{2060}'
+            | '\u{FEFF}'
+            | '\u{2028}'
+            | '\u{2029}'
+    )
 }
 
 /// Where `code` first names `entry` as a whole name (or dotted name): never inside a longer one (`mysocket_name`,
@@ -243,6 +282,7 @@ async fn script(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             "sha256": checked.sha256,
             "lines": checked.lines,
             "bytes": checked.bytes,
+            "deadline_seconds": deadline_seconds(ctx.daw()),
             "project": {"key": project.key, "epoch": project.epoch},
         }));
     }
@@ -259,17 +299,26 @@ async fn script(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let history = ctx.history();
     history.begin_script(&title, &run);
     let app = ctx.daw().profile().words.app;
+    // The bridge stops a run at the deadline (r9), so an accidental hang (a loop that never ends) can't hold the DAW.
+    // It bounds accidents, not intent: in Live a script that calls `sys.settrace(None)` takes off python.run's tracer,
+    // and Python can't be stubbed reliably against that; the approval of the code is the boundary for it. A single
+    // long call into C isn't stopped either, nor is memory capped.
+    let deadline = deadline_ms(ctx.daw());
     let ran = match &runner {
         Runner::Python(tool) => {
-            let input: Map<String, Value> = [("code".to_string(), json!(code)), ("mode".to_string(), json!("exec"))].into_iter().collect();
+            let input: Map<String, Value> =
+                [("code".to_string(), json!(code)), ("mode".to_string(), json!("exec")), ("timeoutMs".to_string(), json!(deadline))]
+                    .into_iter()
+                    .collect();
             python_ran(app, tool.execute(input, call.signal.clone()).await)
         }
         Runner::Lua(plan) => {
-            let steps = json!([{"tool": "run_lua", "input": {"code": code}}]);
+            let steps = json!([{"tool": "run_lua", "input": {"code": code, "timeoutMs": deadline}}]);
             let input: Map<String, Value> = [("steps".to_string(), steps)].into_iter().collect();
             lua_ran(app, plan.execute(input, call.signal.clone()).await)
         }
-    };
+    }
+    .stopped_at_deadline(ctx.daw());
     let (row_state, unsure) = match ran.state {
         "ran" => ("applied", None),
         "failed" => ("failed", None),
@@ -278,8 +327,10 @@ async fn script(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     // Every script row says why Kumi can't undo it: a readout takes an applied row it can't undo, with no note, for one
     // from before Kumi restarted.
     let words = cant_undo(ctx.daw());
-    let note = match &unsure {
-        Some(reason) if !reason.is_empty() => format!("{} {words}", reason.trim_end()),
+    let note = match (&unsure, ran.state) {
+        (Some(reason), _) if !reason.is_empty() => format!("{} {words}", reason.trim_end()),
+        // A stop at the deadline says so on the row, as in the answer.
+        (_, "failed") if ran.error == Some(json!(stopped_words(ctx.daw()))) => format!("{} {words}", stopped_words(ctx.daw())),
         _ => words,
     };
     let row = history.end_script(identity, &project.key, row_state, note, ctx.snapshots());
@@ -367,6 +418,16 @@ impl Ran {
         Ran { state: "unsure", result: None, stdout: None, error: Some(json!(reason)) }
     }
 
+    /// A run its DAW's bridge stopped at the deadline (what [`STOPPED`] lists, in its error) is `failed`, with Kumi's
+    /// words for it.
+    fn stopped_at_deadline(mut self, daw: DawId) -> Ran {
+        let said = self.error.as_ref().map(Value::to_string).unwrap_or_default();
+        if self.state == "failed" && STOPPED.iter().any(|stop| said.contains(stop)) {
+            self.error = Some(json!(stopped_words(daw)));
+        }
+        self
+    }
+
     /// `{result?, stdout?, error?}`: each a text of at most [`OUTPUT`] characters, with no control character but tab and
     /// newline.
     fn output(&self) -> Value {
@@ -380,6 +441,11 @@ impl Ran {
     }
 }
 
+/// What a run stopped at its deadline says: "Kumi stopped the script after 10 seconds."
+fn stopped_words(daw: DawId) -> String {
+    format!("Kumi stopped the script after {} seconds.", deadline_seconds(daw))
+}
+
 /// A field of what a run said, as its output gives it: a text as it is, lines printed one to a line, any other value as
 /// JSON; nothing when it's empty.
 fn said(value: &Value) -> Option<String> {
@@ -389,7 +455,8 @@ fn said(value: &Value) -> Option<String> {
         Value::Array(lines) if lines.iter().all(Value::is_string) => lines.iter().filter_map(Value::as_str).collect::<Vec<_>>().join("\n"),
         other => other.to_string(),
     };
-    let text: String = text.chars().filter(|c| !c.is_control() || matches!(c, '\t' | '\n')).collect();
+    // What a script said is shown to the model and the producer: nothing in it may hide text either (r7).
+    let text: String = text.chars().filter(|c| !hides(*c) && (!c.is_control() || matches!(c, '\t' | '\n'))).collect();
     if text.is_empty() {
         return None;
     }
@@ -545,6 +612,16 @@ mod tests {
                 "{class}"
             );
         }
+        // A precompiled chunk (Lua's bytecode starts with ESC, "\27Lua") is refused here, before Renoise's tool, whose
+        // loadstring would take it, could see it.
+        let bytecode = "\u{1b}LuaQ\u{0}\u{1}\u{4}\u{8}";
+        assert_eq!(
+            refused_as(bytecode, "lua", DawId::Renoise),
+            refuse(
+                "hidden_characters",
+                "The script has a hidden or direction-changing character (U+001B on line 1), which can make code read differently than it runs, so Kumi won't run it."
+            )
+        );
         let lone = refused_as("local a = 1\rlocal b = 2", "lua", DawId::Renoise);
         assert_eq!((lone.code, lone.reason.contains("U+000D on line 1")), ("hidden_characters", true), "a lone carriage return");
         assert!(check("local a = 1\r\n\tlocal b = 2\r\n", "lua", DawId::Renoise).is_ok(), "tabs and CRLF line ends are fine");
@@ -637,6 +714,14 @@ mod tests {
         assert_eq!(stdout.chars().count(), OUTPUT);
         assert!(stdout.ends_with('…'));
         assert!(output.get("error").is_none(), "nothing said, no field");
+        // Nothing that hides or reorders text either (r7's classes): what a script said reads as it is.
+        let hidden = Ran {
+            state: "ran",
+            result: Some(json!("ok\u{202E}gnp.exe\u{2066}\u{200B}\u{2060}\u{FEFF}\u{061C}")),
+            stdout: Some(json!("line one\u{2028}line two\u{2029}\u{200E}end")),
+            error: None,
+        };
+        assert_eq!(hidden.output(), json!({"result": "okgnp.exe", "stdout": "line oneline twoend"}));
         let live =
             python_error(&json!({"type": "NameError", "message": "name 'x' is not defined", "traceback": "Traceback…\nNameError: …"}));
         assert_eq!(live, json!("NameError: name 'x' is not defined\nTraceback…\nNameError: …"));
@@ -802,7 +887,7 @@ mod tests {
             assert_eq!(
                 preview,
                 json!({"state": "preview", "daw": "ableton", "language": "python", "purpose": "Name the drums", "sha256": ABC,
-                       "lines": 1, "bytes": 3, "project": {"key": key, "epoch": epoch}})
+                       "lines": 1, "bytes": 3, "deadline_seconds": 10, "project": {"key": key, "epoch": epoch}})
             );
             assert!(given.borrow().is_empty(), "nothing ran");
             assert!(ctx.history().rows(10).is_empty(), "nothing in HISTORY");
@@ -868,7 +953,7 @@ mod tests {
             put(&format!("{}.genexpr", "5".repeat(64)), true);
             let args = json!({"language": "python", "purpose": "Name the drums", "code": "abc", "expected_project_key": key, "expected_sha256": ABC});
             let ran = call(&ctx, &SCRIPT, args).await;
-            assert_eq!(*given.borrow(), [json!({"code": "abc", "mode": "exec"})], "once, in exec mode");
+            assert_eq!(*given.borrow(), [json!({"code": "abc", "mode": "exec", "timeoutMs": 10_000})], "once, in exec mode, stopped at 10 s");
             let id = ran["history_id"].as_str().unwrap().to_string();
             assert_eq!(
                 ran,
@@ -950,7 +1035,11 @@ mod tests {
             let sha = sha256(code);
             let args = json!({"language": "lua", "purpose": "Add three tracks", "code": code, "expected_project_key": key, "expected_sha256": sha});
             let ran = call(&ctx, &SCRIPT, args).await;
-            assert_eq!(*given.borrow(), [json!({"steps": [{"tool": "run_lua", "input": {"code": code}}]})], "one step, outside the allowlist");
+            assert_eq!(
+                *given.borrow(),
+                [json!({"steps": [{"tool": "run_lua", "input": {"code": code, "timeoutMs": 10_000}}]})],
+                "one step, outside the allowlist, stopped at 10 s"
+            );
             assert_eq!((ran["state"].clone(), ran["output"].clone()), (json!("ran"), json!({"result": "3", "stdout": "made 3 tracks"})));
             let rows = ctx.history().rows(10);
             assert_eq!(rows.len(), 1, "no second row");
@@ -970,6 +1059,59 @@ mod tests {
             // Python isn't REAPER's.
             let python = json!({"language": "python", "purpose": "x", "code": "x = 1", "expected_project_key": key, "preview": true});
             assert_eq!(call(&ctx, &SCRIPT, python).await["code"], "invalid");
+        })
+        .await;
+    }
+
+    /// Each DAW's deadline (r9) as the preview gives it, the bridge is given it, and its stop is said: 10 s for Live and
+    /// REAPER, Renoise's tool's own 800 ms.
+    #[tokio::test]
+    async fn each_daws_deadline_is_in_the_preview_and_its_stop_is_a_failed_run_in_kumis_words() {
+        local(async {
+            assert_eq!((deadline_seconds(DawId::Ableton), deadline_seconds(DawId::Reaper)), (json!(10), json!(10)));
+            assert_eq!((deadline_ms(DawId::Renoise), deadline_seconds(DawId::Renoise)), (800, json!(0.8)));
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = runtime(dir.path(), DawId::Renoise);
+            let given = Rc::new(RefCell::new(Vec::new()));
+            let key = looked(&ctx, Rc::new(Plan { ctx: ctx.handle(), given }));
+            let preview = json!({"language": "lua", "purpose": "x", "code": "return 1", "expected_project_key": key, "preview": true});
+            assert_eq!(call(&ctx, &SCRIPT, preview).await["deadline_seconds"], 0.8);
+            // Each bridge's stop: Live's python.run (raised in the script, or after it ran), REAPER's wrapper, Renoise's tool.
+            let stopped = |daw, error: Value| Ran::failed(error).stopped_at_deadline(daw).error;
+            let live = python_error(&json!({"type": "TimeoutError", "message": "Python exceeded timeoutMs (10000 ms)", "traceback": "…"}));
+            let ten = Some(json!("Kumi stopped the script after 10 seconds."));
+            assert_eq!(stopped(DawId::Ableton, live), ten);
+            let after = json!({"type": "PythonRan", "message": "The code ran, so Live may have changed, but then TimeoutError: Python exceeded timeoutMs (10000 ms)"});
+            assert_eq!(stopped(DawId::Ableton, python_error(&after)), ten);
+            assert_eq!(stopped(DawId::Reaper, json!({"message": "stopped after 10000 ms (the chunk's time limit)"})), ten);
+            let renoise = json!({"message": "kumi:3: Kumi stopped it: it ran longer than 800 ms"});
+            assert_eq!(stopped(DawId::Renoise, renoise), Some(json!("Kumi stopped the script after 0.8 seconds.")));
+            // Any other error is the script's own.
+            assert_eq!(stopped(DawId::Reaper, json!({"message": "attempt to call a nil value", "line": 2})), Some(json!({"message": "attempt to call a nil value", "line": 2})));
+            let ran = Ran { state: "ran", result: None, stdout: Some(json!("Python exceeded timeoutMs")), error: None };
+            assert_eq!(ran.stopped_at_deadline(DawId::Ableton).state, "ran", "a script that printed the words wasn't stopped");
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_live_script_stopped_at_its_deadline_failed_and_its_row_says_so() {
+        local(async {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = runtime(dir.path(), DawId::Ableton);
+            let given = Rc::new(RefCell::new(Vec::new()));
+            let error = json!({"type": "TimeoutError", "message": "Python exceeded timeoutMs (10000 ms)", "traceback": "Traceback…"});
+            let key = looked(&ctx, Rc::new(Python { answer: Some(json!({"ok": false, "result": null, "stdout": "", "error": error})), given }));
+            let args = json!({"language": "python", "purpose": "Loop", "code": "abc", "expected_project_key": key, "expected_sha256": ABC});
+            let ran = call(&ctx, &SCRIPT, args).await;
+            let words = "Kumi stopped the script after 10 seconds.";
+            assert_eq!((ran["state"].clone(), ran["output"].clone()), (json!("failed"), json!({"error": words})));
+            let row = ctx.history().row(ran["history_id"].as_str().unwrap()).unwrap();
+            assert_eq!(row.state, "failed");
+            assert_eq!(
+                row.note.as_deref(),
+                Some("Kumi stopped the script after 10 seconds. Kumi can't undo a script: Live's own Undo may, if its step is still the latest there.")
+            );
         })
         .await;
     }
