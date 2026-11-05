@@ -132,6 +132,16 @@ class Host:
         """The Hermes profile this call runs in (its plugin data is that profile's)."""
         return str(getattr(self._ctx, "profile_name", "") or "")
 
+    def scheduled(self) -> bool:
+        """Whether this call runs in a Hermes scheduled job (cron), with no chat and nobody there: Hermes's own session
+        variable, read as Hermes reads it (`gateway.session_context.get_session_env`, `utils.is_truthy_value`)."""
+        try:
+            from gateway.session_context import get_session_env  # Hermes's
+            from utils import is_truthy_value  # Hermes's
+        except Exception:
+            return False
+        return is_truthy_value(get_session_env("HERMES_CRON_SESSION", ""))
+
     def identity(self, kwargs: dict) -> dict:
         """Hermes's identity for one call, which the runtime records and dedups on (C2 `_host`, CC-5). Hermes gives a
         tool handler its session and task; the model's tool-call id comes from the approval hook's record of this

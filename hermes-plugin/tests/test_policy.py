@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest import mock
 
 import support
 
@@ -37,6 +38,19 @@ class Approvals(unittest.TestCase):
         self.assertIsNone(self.hook("kumi_library", {"action": "status"}))
         self.assertIsNone(self.hook("kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"},
                                                     "compare_to": {"file": "/Samples/a.wav"}}))
+
+    def test_a_scheduled_job_never_starts_connects_or_sets_up_kumi(self):
+        try:
+            import gateway.session_context  # noqa: F401  (only where Hermes is importable: CI's Hermes job)
+        except ImportError:
+            self.skipTest("Hermes isn't importable here")
+        with mock.patch.dict(os.environ, {"HERMES_CRON_SESSION": "1"}):  # Hermes's cron marks its runs so
+            for tool in ("kumi_connect", "kumi_setup"):
+                decision = self.hook(tool, {})
+                self.assertEqual(decision["action"], "block", tool)
+                self.assertIn("from a scheduled job", decision["message"])
+            self.assertIsNone(self.hook("kumi_history", {}), "a scheduled job still reads")
+        self.assertIsNone(self.hook("kumi_connect", {}), "in a chat, connecting needs no approval")
 
     def test_a_change_is_approved_in_the_runtimes_words_and_nothing_runs_first(self):
         decision = self.hook("kumi_change", change())

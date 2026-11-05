@@ -6,7 +6,8 @@ approval.
 Reads and kumi_connect pass. A change or an undo is described by the runtime's own preview (CC-3: the targets by their
 current names, values as just read), and a plan the runtime would refuse is blocked before anyone is asked. A folder the
 producer adds, and a scan of the folders the runtime reads, are approved by name; setup's install and adopt in the
-words of the plan they carry out (C8). Anything else of Kumi's is blocked.
+words of the plan they carry out (C8). Anything else of Kumi's is blocked. A scheduled job (Hermes's cron) never starts,
+connects or sets up Kumi: there's no chat to hold the runtime and its change lease, and nobody there.
 
 The hook runs for every tool call in Hermes, and one that's slow or blocked stops them all: a call that isn't Kumi's
 returns at once, the runtime is never waited for, and a preview gets at most half of Hermes's hook timeout.
@@ -30,6 +31,8 @@ LINE = 120
 PLAYBACK_LINE = 600
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
+# What starts Kumi's runtime for the calling chat (and with it the change lease), or sets Kumi up.
+STARTS = {"kumi_connect", "kumi_setup"}
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
@@ -69,6 +72,9 @@ def post_tool_call(host: Any, tool_name: str = "", tool_call_id: Any = None, **k
 
 
 def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
+    if tool in STARTS and host.scheduled():
+        return block("Kumi doesn't start, connect or set up from a scheduled job: there's no chat to hold it. Open a "
+                     "chat with Kumi for that."), {}
     if tool in PASS:
         return None, {}
     if tool == "kumi_listen":
