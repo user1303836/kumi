@@ -389,7 +389,9 @@ impl Set {
             None => vec![],
         };
         let epoch = self.bounded.borrow().as_ref().map_or(7., |state| state.prepared(&transaction));
-        Ok(json!({"transactionId":transaction,"epoch":epoch,"confirmation":"apply","prior":{"tracks":prior,"scenes":[]},"proposed":proposed}))
+        Ok(
+            json!({"transactionId":transaction,"epoch":epoch,"confirmation":"apply","prior":{"tracks":prior,"scenes":[]},"proposed":proposed}),
+        )
     }
     fn apply(&self, args: &JsonObject) -> Value {
         let transaction = text(&args["transactionId"]).to_owned();
@@ -536,7 +538,9 @@ impl McpEndpoint for Set {
             "live_song_state" if self.bounded.borrow().is_some() => self.bounded.borrow().as_ref().unwrap().song_state(),
             "live_undo" => self.undo(&args),
             "live_run_python" => self.python(&args),
-            "live_status" => json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":self.bounded.borrow().as_ref().map_or(7., |state| state.epoch())}),
+            "live_status" => {
+                json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":self.bounded.borrow().as_ref().map_or(7., |state| state.epoch())})
+            }
             "live_transaction_release" => json!({}),
             _ => match (name.strip_suffix("_preview"), name.strip_suffix("_apply")) {
                 (Some(tool), _) => self.preview(tool, &args)?,

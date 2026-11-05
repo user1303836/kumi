@@ -38,7 +38,11 @@ pub(super) fn is_track(args: &JsonObject) -> bool {
 }
 
 pub fn effect(args: &JsonObject) -> Effect {
-    if is_track(args) && args.get("preview") != Some(&Value::Bool(true)) { Effect::Playback } else { Effect::Read }
+    if is_track(args) && args.get("preview") != Some(&Value::Bool(true)) {
+        Effect::Playback
+    } else {
+        Effect::Read
+    }
 }
 
 fn invalid() -> OpError {
@@ -48,32 +52,53 @@ fn invalid() -> OpError {
 fn request(args: &JsonObject) -> Result<HearRequest, OpError> {
     if args.keys().any(|key| !matches!(key.as_str(), "source" | "compare_to" | "expected_project_key" | "expected_epoch" | "preview"))
         || args.get("preview").is_some_and(|value| !value.is_boolean())
-    { return Err(invalid()); }
+    {
+        return Err(invalid());
+    }
     let source = args.get("source").and_then(Value::as_object).filter(|source| source.len() == 3).ok_or_else(invalid)?;
     let track = source.get("track").and_then(Value::as_object).filter(|track| track.len() == 1).ok_or_else(invalid)?;
     let from = source.get("from_beat").and_then(Value::as_f64).filter(|from| from.is_finite() && *from >= 0.).ok_or_else(invalid)?;
-    let beats = source.get("beats").and_then(Value::as_f64).filter(|beats| beats.is_finite() && *beats > 0. && *beats <= 256.).ok_or_else(invalid)?;
-    if !(from + beats).is_finite() || from + beats <= from { return Err(invalid()); }
+    let beats = source
+        .get("beats")
+        .and_then(Value::as_f64)
+        .filter(|beats| beats.is_finite() && *beats > 0. && *beats <= 256.)
+        .ok_or_else(invalid)?;
+    if !(from + beats).is_finite() || from + beats <= from {
+        return Err(invalid());
+    }
     let (tracks, mix) = if track.get("mix") == Some(&Value::Bool(true)) {
         (vec![], Some(true))
     } else {
-        let reference = track.get("ref").and_then(Value::as_str).filter(|value| !value.trim().is_empty() && value.len() <= 256).ok_or_else(invalid)?;
+        let reference =
+            track.get("ref").and_then(Value::as_str).filter(|value| !value.trim().is_empty() && value.len() <= 256).ok_or_else(invalid)?;
         (vec![reference.to_owned()], None)
     };
     Ok(HearRequest { tracks, mix, from_beat: Some(from), beats: Some(beats), ..Default::default() })
 }
 
 fn approval(call: &Call) -> Result<(HearApproval, u64), OpError> {
-    let missing = || OpError::Refused { code: "not_approved", reason: "This capture has no host-approved window and deadlines; preview it again.".into(), owner: None };
-    let invalid = || OpError::Invalid { reason: "_listen requires estimated_seconds in (0, 60], integer prepare_seconds in 0–120 and integer deadline_seconds in 1–360.".into() };
-    let given = call.host.private.get("_listen").ok_or_else(missing)?
-        .as_object().filter(|given| given.len() == 3).ok_or_else(invalid)?;
-    let seconds = given.get("estimated_seconds").and_then(Value::as_f64)
-        .filter(|seconds| seconds.is_finite() && *seconds > 0. && *seconds <= 60.).ok_or_else(invalid)?;
-    let deadline = given.get("deadline_seconds").and_then(Value::as_u64)
-        .filter(|deadline| (1..=360).contains(deadline)).ok_or_else(invalid)?;
-    let prepare = given.get("prepare_seconds").and_then(Value::as_u64)
-        .filter(|prepare| *prepare <= 120 && (call.args.contains_key("compare_to") || *prepare == 0)).ok_or_else(invalid)?;
+    let missing = || OpError::Refused {
+        code: "not_approved",
+        reason: "This capture has no host-approved window and deadlines; preview it again.".into(),
+        owner: None,
+    };
+    let invalid = || OpError::Invalid {
+        reason: "_listen requires estimated_seconds in (0, 60], integer prepare_seconds in 0–120 and integer deadline_seconds in 1–360."
+            .into(),
+    };
+    let given = call.host.private.get("_listen").ok_or_else(missing)?.as_object().filter(|given| given.len() == 3).ok_or_else(invalid)?;
+    let seconds = given
+        .get("estimated_seconds")
+        .and_then(Value::as_f64)
+        .filter(|seconds| seconds.is_finite() && *seconds > 0. && *seconds <= 60.)
+        .ok_or_else(invalid)?;
+    let deadline =
+        given.get("deadline_seconds").and_then(Value::as_u64).filter(|deadline| (1..=360).contains(deadline)).ok_or_else(invalid)?;
+    let prepare = given
+        .get("prepare_seconds")
+        .and_then(Value::as_u64)
+        .filter(|prepare| *prepare <= 120 && (call.args.contains_key("compare_to") || *prepare == 0))
+        .ok_or_else(invalid)?;
     Ok((HearApproval { seconds, deadline_seconds: deadline as u16 }, prepare))
 }
 
@@ -123,7 +148,12 @@ fn hearing_error(ctx: &Ctx, error: RuntimeError, dispatched: bool) -> Result<Val
         }
         RuntimeError::Hear(HearFailure::Unsure { reason }) => Ok(outcome("unsure", "restoration_unknown", &reason, false)),
         RuntimeError::Aborted => Ok(outcome("cancelled", "cancelled", "Listening was cancelled; temporary DAW state is restored.", true)),
-        _ if dispatched => Ok(outcome("unsure", "capture_failed", "The capture did not return a verified restoration result. Observe again before another action.", false)),
+        _ if dispatched => Ok(outcome(
+            "unsure",
+            "capture_failed",
+            "The capture did not return a verified restoration result. Observe again before another action.",
+            false,
+        )),
         _ => Err(OpError::Failed { reason: "The DAW could not provide a complete capture preflight; no capture started.".into() }),
     }
 }
@@ -143,15 +173,24 @@ pub fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
 
 async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let mut request = request(&call.args)?;
-    let key = call.args.get("expected_project_key").and_then(Value::as_str).filter(|key| !key.is_empty() && key.len() <= 64).ok_or_else(invalid)?;
+    let key = call
+        .args
+        .get("expected_project_key")
+        .and_then(Value::as_str)
+        .filter(|key| !key.is_empty() && key.len() <= 64)
+        .ok_or_else(invalid)?;
     let epoch = epoch_of(&call.args, "expected_epoch").ok_or_else(invalid)?;
     let project = ctx.link().expect(key, epoch)?;
     request.expected_native_epoch = project.native_epoch;
     let connection = ctx.connection()?;
-    if call.signal.is_cancelled() { return hearing_error(ctx, RuntimeError::Aborted, false); }
+    if call.signal.is_cancelled() {
+        return hearing_error(ctx, RuntimeError::Aborted, false);
+    }
     let preview_only = call.args.get("preview") == Some(&Value::Bool(true));
     let approved = if !preview_only || call.host.private.get("_listen").is_some() { Some(approval(&call)?) } else { None };
-    if !preview_only { request.approval = approved.map(|(native, _)| native); }
+    if !preview_only {
+        request.approval = approved.map(|(native, _)| native);
+    }
     let reference = match call.args.get("compare_to") {
         Some(source) if preview_only => {
             listen::resolve_source(ctx, source, &call.signal).await?;
@@ -166,9 +205,14 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             Ok(preview) => preview,
             Err(error) => return hearing_error(ctx, error, false),
         };
-        if !preview.seconds.is_finite() || preview.seconds <= 0. || preview.seconds > 60.
-            || !(1..=360).contains(&preview.deadline_seconds)
-        { return Err(OpError::Refused { code:"unsupported", reason:"The DAW did not provide a bounded capture plan.".into(), owner:None }); }
+        if !preview.seconds.is_finite() || preview.seconds <= 0. || preview.seconds > 60. || !(1..=360).contains(&preview.deadline_seconds)
+        {
+            return Err(OpError::Refused {
+                code: "unsupported",
+                reason: "The DAW did not provide a bounded capture plan.".into(),
+                owner: None,
+            });
+        }
         return Ok(json!({"state":"preview","project":{"key":project.key,"epoch":project.epoch.to_string()},
             "text":preview_text(&request, &preview),"estimated_seconds":preview.seconds,
             "method":preview.method,"deadline_seconds":preview.deadline_seconds,
@@ -191,22 +235,50 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         match directory.create(ctx.paths().state_dir.join("quarantine")) {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-            Err(_) => return Err(OpError::Failed { reason: "The runtime could not prepare its private quarantine; no capture started.".into() }),
+            Err(_) => {
+                return Err(OpError::Failed { reason: "The runtime could not prepare its private quarantine; no capture started.".into() })
+            }
         }
     }
     call.progress.report(0., Some(3.), Some("Capturing the approved window; temporary DAW state will be restored."));
     let takes = match tokio::time::timeout_at(deadline, connection.integration.hear(&request, call.signal.clone())).await {
         Ok(Ok(Ok(takes))) => takes,
-        Ok(Ok(Err(_))) => return Ok(outcome("unsure", "capture_failed", "The DAW returned no verified restoration outcome. Observe again before another action.", false)),
+        Ok(Ok(Err(_))) => {
+            return Ok(outcome(
+                "unsure",
+                "capture_failed",
+                "The DAW returned no verified restoration outcome. Observe again before another action.",
+                false,
+            ))
+        }
         Ok(Err(error)) => return hearing_error(ctx, error, true),
-        Err(_) => return Ok(outcome("unsure", "capture_timeout", "The approved native deadline expired before restoration was verified. Observe again before another action.", false)),
+        Err(_) => {
+            return Ok(outcome(
+                "unsure",
+                "capture_timeout",
+                "The approved native deadline expired before restoration was verified. Observe again before another action.",
+                false,
+            ))
+        }
     };
-    if call.signal.is_cancelled() { return hearing_error(ctx, RuntimeError::Aborted, true); }
+    if call.signal.is_cancelled() {
+        return hearing_error(ctx, RuntimeError::Aborted, true);
+    }
     let [take] = takes.as_slice() else {
-        return Ok(outcome("unsure", "capture_failed", "The DAW returned an unexpected number of capture files; none was published.", false));
+        return Ok(outcome(
+            "unsure",
+            "capture_failed",
+            "The DAW returned an unexpected number of capture files; none was published.",
+            false,
+        ));
     };
     if take.start != 0. || !take.seconds.is_some_and(|seconds| seconds.is_finite() && seconds > 0. && seconds <= 65.) {
-        return Ok(outcome("unsure", "capture_bounds", "The DAW returned audio outside the approved capture bound; none was published.", false));
+        return Ok(outcome(
+            "unsure",
+            "capture_bounds",
+            "The DAW returned audio outside the approved capture bound; none was published.",
+            false,
+        ));
     }
     call.progress.report(1., Some(3.), Some("DAW restoration verified; measuring the private capture."));
     // Everything after `hear` is local. A failure here must preserve its known restoration,
@@ -219,25 +291,38 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     };
     let measured = match tokio::time::timeout_at(deadline, measured).await {
         Ok(Ok(measured)) => measured,
-        Ok(Err(error)) => return Ok(outcome(if call.signal.is_cancelled() {"cancelled"} else {"refused"}, error.code(), error.reason(), true)),
+        Ok(Err(error)) => {
+            return Ok(outcome(if call.signal.is_cancelled() { "cancelled" } else { "refused" }, error.code(), error.reason(), true))
+        }
         Err(_) => {
             stop.cancel();
-            return Ok(outcome("refused", "measure_timeout", "The native deadline expired during local measurement; DAW state is restored and no audio was published.", true));
+            return Ok(outcome(
+                "refused",
+                "measure_timeout",
+                "The native deadline expired during local measurement; DAW state is restored and no audio was published.",
+                true,
+            ));
         }
     };
     let seconds = measured.metrics.seconds;
     call.progress.report(2., Some(3.), Some("Measurements complete; retaining the approved capture."));
     let mut result = match listen::retain(ctx, measured, reference, &call.signal).await {
         Ok(result) => result,
-        Err(error) => return Ok(outcome(if call.signal.is_cancelled() {"cancelled"} else {"refused"}, error.code(), error.reason(), true)),
+        Err(error) => {
+            return Ok(outcome(if call.signal.is_cancelled() { "cancelled" } else { "refused" }, error.code(), error.reason(), true))
+        }
     };
     result["state"] = json!("done");
     result["capture"] = json!({"method":if take.live {HearMethod::Ears} else {HearMethod::Offline},"from_beat":request.from_beat,"beats":request.beats,
         "seconds":seconds,"cleanup":"restored"});
-    if take.marked_modified { result["capture"]["marked_modified"] = json!(true); }
+    if take.marked_modified {
+        result["capture"]["marked_modified"] = json!(true);
+    }
     if let Some(note) = &take.note {
         let note = one_line(note, 200);
-        if !note.is_empty() { result["capture"]["note"] = json!(note); }
+        if !note.is_empty() {
+            result["capture"]["note"] = json!(note);
+        }
     }
     call.progress.report(3., Some(3.), Some("Capture retained; temporary DAW state is restored."));
     Ok(result)

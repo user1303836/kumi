@@ -959,7 +959,15 @@ async fn listening_texts_stay_word_for_word() {
     let take = |label: &str, hz: f64| {
         let file = dir.path().join(format!("{label}.wav"));
         sine(&file, hz);
-        HeardTake { label: label.into(), file: file.to_string_lossy().into(), start: 0.0, seconds: None, live: true, note: None, marked_modified: false }
+        HeardTake {
+            label: label.into(),
+            file: file.to_string_lossy().into(),
+            start: 0.0,
+            seconds: None,
+            live: true,
+            note: None,
+            marked_modified: false,
+        }
     };
     let together = listening_tools(hearing(Ok(vec![take("Bass", 110.0), take("Pad", 440.0)]))).remove(0);
     let heard: Value =

@@ -545,11 +545,18 @@ impl SimListening {
             if !state.render_preflight {
                 return Err(("unsupported".into(), "This component has no guarded render preflight.".into()));
             }
-            let cap = value.as_f64().filter(|cap| cap.is_finite() && *cap > 0.0 && *cap <= 60.0)
+            let cap = value
+                .as_f64()
+                .filter(|cap| cap.is_finite() && *cap > 0.0 && *cap <= 60.0)
                 .ok_or_else(|| bad("maxSeconds: finite, more than 0 and at most 60"))?;
-            let from = params.pointer("/range/fromBeat").and_then(Value::as_f64)
-                .filter(|from| from.is_finite() && *from >= 0.0).ok_or_else(|| bad("range.fromBeat is invalid"))?;
-            let beats = params.pointer("/range/beats").and_then(Value::as_f64)
+            let from = params
+                .pointer("/range/fromBeat")
+                .and_then(Value::as_f64)
+                .filter(|from| from.is_finite() && *from >= 0.0)
+                .ok_or_else(|| bad("range.fromBeat is invalid"))?;
+            let beats = params
+                .pointer("/range/beats")
+                .and_then(Value::as_f64)
                 .filter(|beats| beats.is_finite() && *beats > 0.0 && (from + *beats).is_finite())
                 .ok_or_else(|| bad("range.beats is invalid"))?;
             if params.get("preRollBeats").is_some_and(|v| v.as_f64() != Some(0.0)) {

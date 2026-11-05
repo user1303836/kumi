@@ -96,7 +96,10 @@ fn bounded_hear_transport(transport: &Value) -> Result<(), RuntimeError> {
     if playing != Some(false) || recording != Some(false) {
         return Err(hear_refused("transport_unknown", "The bridge did not establish that playback and recording are stopped."));
     }
-    transport.get("tempo").and_then(Value::as_f64).filter(|tempo| tempo.is_finite() && *tempo > 0.)
+    transport
+        .get("tempo")
+        .and_then(Value::as_f64)
+        .filter(|tempo| tempo.is_finite() && *tempo > 0.)
         .ok_or_else(|| hear_refused("tempo_unknown", "The bridge did not report a finite positive current tempo."))?;
     Ok(())
 }
@@ -111,10 +114,29 @@ struct RestrictedPreflight {
 }
 
 const RENDER_NUMBERS: &[&str] = &[
-    "RENDER_SETTINGS", "RENDER_BOUNDSFLAG", "RENDER_CHANNELS", "RENDER_SRATE", "RENDER_STARTPOS", "RENDER_ENDPOS",
-    "RENDER_TAILFLAG", "RENDER_TAILMS", "RENDER_ADDTOPROJ", "RENDER_DITHER", "RENDER_NORMALIZE", "RENDER_NORMALIZE_TARGET",
-    "RENDER_BRICKWALL", "RENDER_FADEIN", "RENDER_FADEOUT", "RENDER_FADEINSHAPE", "RENDER_FADEOUTSHAPE", "RENDER_FADELPF",
-    "RENDER_PADSTART", "RENDER_PADEND", "RENDER_TRIMSTART", "RENDER_TRIMEND", "RENDER_DELAY",
+    "RENDER_SETTINGS",
+    "RENDER_BOUNDSFLAG",
+    "RENDER_CHANNELS",
+    "RENDER_SRATE",
+    "RENDER_STARTPOS",
+    "RENDER_ENDPOS",
+    "RENDER_TAILFLAG",
+    "RENDER_TAILMS",
+    "RENDER_ADDTOPROJ",
+    "RENDER_DITHER",
+    "RENDER_NORMALIZE",
+    "RENDER_NORMALIZE_TARGET",
+    "RENDER_BRICKWALL",
+    "RENDER_FADEIN",
+    "RENDER_FADEOUT",
+    "RENDER_FADEINSHAPE",
+    "RENDER_FADEOUTSHAPE",
+    "RENDER_FADELPF",
+    "RENDER_PADSTART",
+    "RENDER_PADEND",
+    "RENDER_TRIMSTART",
+    "RENDER_TRIMEND",
+    "RENDER_DELAY",
 ];
 const RENDER_TEXTS: &[&str] = &["RENDER_FILE", "RENDER_PATTERN", "RENDER_FORMAT", "RENDER_FORMAT2", "RENDER_EXTRAFILEDIR"];
 
@@ -125,28 +147,40 @@ fn finite(value: &Value) -> bool {
 fn render_state_complete(daw: Option<DawId>, state: &Value) -> bool {
     let unique_refs = |rows: &[Value]| {
         let mut seen = std::collections::HashSet::with_capacity(rows.len());
-        rows.iter().all(|row| row.get("ref").and_then(Value::as_str).is_some_and(|reference| !reference.is_empty() && seen.insert(reference)))
+        rows.iter()
+            .all(|row| row.get("ref").and_then(Value::as_str).is_some_and(|reference| !reference.is_empty() && seen.insert(reference)))
     };
     match daw {
         Some(DawId::Reaper) => {
             let (Some(selection), Some(mutes), Some(time)) =
-                (state["selection"].as_array(), state["mutes"].as_array(), state["time_selection"].as_array()) else { return false };
-            state["numbers"].as_object().is_some_and(|numbers| numbers.len() == RENDER_NUMBERS.len()
-                && RENDER_NUMBERS.iter().all(|key| numbers.get(*key).is_some_and(finite)))
-                && state["texts"].as_object().is_some_and(|texts| texts.len() == RENDER_TEXTS.len()
-                    && RENDER_TEXTS.iter().all(|key| texts.get(*key).is_some_and(Value::is_string)))
-                && state["projrenderlimit"].as_f64().is_some_and(|speed| speed.is_finite() && speed.fract() == 0.
-                    && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&speed))
-                && state["dirty"].is_boolean() && finite(&state["master_fx"])
-                && time.len() == 2 && time.iter().all(finite)
-                && !selection.is_empty() && selection.len() == mutes.len() && unique_refs(selection)
+                (state["selection"].as_array(), state["mutes"].as_array(), state["time_selection"].as_array())
+            else {
+                return false;
+            };
+            state["numbers"].as_object().is_some_and(|numbers| {
+                numbers.len() == RENDER_NUMBERS.len() && RENDER_NUMBERS.iter().all(|key| numbers.get(*key).is_some_and(finite))
+            }) && state["texts"].as_object().is_some_and(|texts| {
+                texts.len() == RENDER_TEXTS.len() && RENDER_TEXTS.iter().all(|key| texts.get(*key).is_some_and(Value::is_string))
+            }) && state["projrenderlimit"].as_f64().is_some_and(|speed| {
+                speed.is_finite() && speed.fract() == 0. && (f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&speed)
+            }) && state["dirty"].is_boolean()
+                && finite(&state["master_fx"])
+                && time.len() == 2
+                && time.iter().all(finite)
+                && !selection.is_empty()
+                && selection.len() == mutes.len()
+                && unique_refs(selection)
                 && selection.iter().zip(mutes).all(|(a, b)| a["ref"] == b["ref"] && finite(&a["value"]) && finite(&b["value"]))
         }
         Some(DawId::Renoise) => {
             state["bpm"].as_f64().is_some_and(|bpm| bpm.is_finite() && bpm > 0.)
                 && state["lpb"].as_f64().is_some_and(|lpb| lpb.is_finite() && (1.0..=256.0).contains(&lpb) && lpb.fract() == 0.)
-                && state["tracks"].as_array().is_some_and(|tracks| unique_refs(tracks)
-                    && tracks.iter().all(|track| track["mute"].as_u64().is_some_and(|mute| (1..=3).contains(&mute)) && track["solo"].is_boolean()))
+                && state["tracks"].as_array().is_some_and(|tracks| {
+                    unique_refs(tracks)
+                        && tracks
+                            .iter()
+                            .all(|track| track["mute"].as_u64().is_some_and(|mute| (1..=3).contains(&mute)) && track["solo"].is_boolean())
+                })
         }
         _ => false,
     }
@@ -154,8 +188,12 @@ fn render_state_complete(daw: Option<DawId>, state: &Value) -> bool {
 
 fn focus_state(mut focus: Value) -> Result<Value, RuntimeError> {
     let transport = &focus["transport"];
-    if !focus["selection"].is_object() || !finite(&transport["beat"])
-        || !transport["loop"]["on"].is_boolean() || !finite(&transport["loop"]["start"]) || !finite(&transport["loop"]["end"]) {
+    if !focus["selection"].is_object()
+        || !finite(&transport["beat"])
+        || !transport["loop"]["on"].is_boolean()
+        || !finite(&transport["loop"]["start"])
+        || !finite(&transport["loop"]["end"])
+    {
         return Err(hear_refused("unsupported", "The bridge did not expose a complete transport and selection snapshot."));
     }
     focus.as_object_mut().expect("validated focus snapshot").retain(|key, _| matches!(key.as_str(), "epoch" | "transport" | "selection"));
@@ -167,14 +205,23 @@ fn render_deadline_seconds(seconds: f64) -> u64 {
 }
 
 fn exact_render_seconds(read: &Value, approval: Option<HearApproval>) -> Result<f64, RuntimeError> {
-    if read["schema"].as_u64() != Some(1) || !read["aligned"].is_boolean() || !read["irregular"].is_boolean()
-        || !read["clipped"].is_boolean() || !finite(&read["offset"]) {
+    if read["schema"].as_u64() != Some(1)
+        || !read["aligned"].is_boolean()
+        || !read["irregular"].is_boolean()
+        || !read["clipped"].is_boolean()
+        || !finite(&read["offset"])
+    {
         return Err(hear_refused("unsupported", "The bridge did not return render preflight schema 1."));
     }
     if read["aligned"] != true || read["irregular"] != false || read["clipped"] != false || read["offset"].as_f64() != Some(0.) {
-        return Err(hear_refused("window_unrenderable", "This interval cannot be rendered exactly without extra, clipped or irregular material."));
+        return Err(hear_refused(
+            "window_unrenderable",
+            "This interval cannot be rendered exactly without extra, clipped or irregular material.",
+        ));
     }
-    let seconds = read["seconds"].as_f64().filter(|seconds| seconds.is_finite() && *seconds > 0.)
+    let seconds = read["seconds"]
+        .as_f64()
+        .filter(|seconds| seconds.is_finite() && *seconds > 0.)
         .ok_or_else(|| hear_refused("unsupported", "The bridge did not provide a finite positive exact render duration."))?;
     if approval.is_some_and(|approved| !approved.covers(seconds, render_deadline_seconds(seconds))) {
         return Err(hear_refused("stale", "The current window exceeds its approved duration or deadline; preview again before listening."));
@@ -192,10 +239,13 @@ fn restored_state(daw: Option<DawId>, before: &Value, after: &Value) -> Result<b
     let expected = before.as_object().expect("validated render state");
     let observed = after.as_object().expect("validated render state");
     let marked_modified = daw == Some(DawId::Reaper) && before["dirty"] == false && after["dirty"] == true;
-    if expected.len() != observed.len() || expected.iter().any(|(key, value)| {
-        !(daw == Some(DawId::Reaper) && key == "dirty") && observed.get(key) != Some(value)
-    }) {
-        return Err(HearFailure::Unsure { reason: "The state read after rendering did not match the state before it. Observe again before another action.".into() }.into());
+    if expected.len() != observed.len()
+        || expected.iter().any(|(key, value)| !(daw == Some(DawId::Reaper) && key == "dirty") && observed.get(key) != Some(value))
+    {
+        return Err(HearFailure::Unsure {
+            reason: "The state read after rendering did not match the state before it. Observe again before another action.".into(),
+        }
+        .into());
     }
     Ok(marked_modified)
 }
@@ -2418,15 +2468,14 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         // An acknowledgment is not a restoration observation. The waiter still polls the job,
         // and the caller must read the touched state after its terminal status.
         let signal = abort::timeout(10_000);
-        let _ = tokio::time::timeout(
-            Duration::from_secs(10),
-            self.renderer.link.call("listen_cancel", json!({"jobId": id}), signal),
-        ).await;
+        let _ = tokio::time::timeout(Duration::from_secs(10), self.renderer.link.call("listen_cancel", json!({"jobId": id}), signal)).await;
     }
 
     async fn restricted_wait(&self, started: &Value, seconds: f64, original: &Signal) -> Result<(Value, bool), RuntimeError> {
         let Some(id) = started.get("jobId").and_then(Value::as_str).filter(|id| !id.is_empty()) else {
-            return Err(HearFailure::Unsure { reason: "The render may have started, but the bridge returned no job identity.".into() }.into());
+            return Err(
+                HearFailure::Unsure { reason: "The render may have started, but the bridge returned no job identity.".into() }.into()
+            );
         };
         let deadline = tokio::time::Instant::now() + Duration::from_secs_f64((seconds * 4.).max(120.).min(240.));
         let mut cancelled = false;
@@ -2452,12 +2501,18 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                     Some("running" | "queued") => {}
                     _ => {
                         self.restricted_cancel(id).await;
-                        return Err(HearFailure::Unsure { reason: "The bridge returned an unknown render state; restoration is unverified.".into() }.into());
+                        return Err(HearFailure::Unsure {
+                            reason: "The bridge returned an unknown render state; restoration is unverified.".into(),
+                        }
+                        .into());
                     }
                 },
                 _ => {
                     self.restricted_cancel(id).await;
-                    return Err(HearFailure::Unsure { reason: "The render could not be observed through completion; restoration is unverified. Observe again.".into() }.into());
+                    return Err(HearFailure::Unsure {
+                        reason: "The render could not be observed through completion; restoration is unverified. Observe again.".into(),
+                    }
+                    .into());
                 }
             }
         }
@@ -2534,9 +2589,18 @@ impl<S: RefScheme + 'static> OwnListening<S> {
     }
 
     async fn render_preflight_read(&self, window: Window, epoch: &str, signal: Signal) -> Result<Value, RuntimeError> {
-        let read = self.renderer.link.call("read", json!({
-            "kind": "render_preflight", "range": {"fromBeat": window.from, "beats": window.beats}, "epoch": epoch,
-        }), signal).await?.map_err(|refused| hear_refused("unsupported", refused.why))?;
+        let read = self
+            .renderer
+            .link
+            .call(
+                "read",
+                json!({
+                    "kind": "render_preflight", "range": {"fromBeat": window.from, "beats": window.beats}, "epoch": epoch,
+                }),
+                signal,
+            )
+            .await?
+            .map_err(|refused| hear_refused("unsupported", refused.why))?;
         if read["schema"].as_u64() != Some(1) || !render_state_complete(self.renderer.profile().id, &read["render_state"]) {
             return Err(hear_refused("unsupported", "The bridge did not provide a complete schema-1 render-state snapshot."));
         }
@@ -2547,7 +2611,10 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         signal.check()?;
         let window = bounded_hear_window(request)?;
         let renderer = &self.renderer;
-        let status = renderer.link.call("status", json!({}), signal.clone()).await?
+        let status = renderer
+            .link
+            .call("status", json!({}), signal.clone())
+            .await?
             .map_err(|refused| hear_refused("render_unavailable", refused.why))?;
         let flags = Flags::of(&status);
         if !flags.known || !flags.render || flags.demo {
@@ -2556,11 +2623,17 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         if status["busy"] != false && !status["busy"].is_null() {
             return Err(hear_refused("render_busy", "The DAW is busy; no render was started."));
         }
-        let focus = renderer.link.call("focus", json!({}), signal.clone()).await?
+        let focus = renderer
+            .link
+            .call("focus", json!({}), signal.clone())
+            .await?
             .map_err(|refused| hear_refused("transport_unknown", refused.why))?;
         bounded_hear_transport(&focus["transport"])?;
-        let epoch = focus["epoch"].as_str().filter(|epoch| !epoch.is_empty())
-            .ok_or_else(|| hear_refused("stale_ref", "The bridge did not establish the current project epoch."))?.to_owned();
+        let epoch = focus["epoch"]
+            .as_str()
+            .filter(|epoch| !epoch.is_empty())
+            .ok_or_else(|| hear_refused("stale_ref", "The bridge did not establish the current project epoch."))?
+            .to_owned();
         if matches!(self.policy, ListeningPolicy::Restricted { .. }) && request.expected_native_epoch.as_deref() != Some(epoch.as_str()) {
             return Err(hear_refused("stale", "The capture is not bound to this observed project epoch; observe again before listening."));
         }
@@ -2572,14 +2645,20 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             if renderer.link.seen_in.borrow().get(&long).map(String::as_str) != Some(epoch.as_str()) {
                 return Err(hear_refused("stale_ref", "The track was not observed in the current project epoch; observe again."));
             }
-            let read = renderer.link.call("read", renderer.read_placed(json!({"ref": long})), signal.clone()).await?
+            let read = renderer
+                .link
+                .call("read", renderer.read_placed(json!({"ref": long})), signal.clone())
+                .await?
                 .map_err(|refused| hear_refused("stale_ref", refused.why))?;
-            let row = read["items"].as_array().and_then(|rows| rows.iter().find(|row| row["ref"].as_str() == Some(long.as_str())))
+            let row = read["items"]
+                .as_array()
+                .and_then(|rows| rows.iter().find(|row| row["ref"].as_str() == Some(long.as_str())))
                 .ok_or_else(|| hear_refused("stale_ref", "The track is no longer present; observe again."))?;
             if row["type"] == "master" || row["master"] == true {
                 return Err(hear_refused("invalid_source", "Use mix: true for the master output."));
             }
-            let label = row["name"].as_str().ok_or_else(|| hear_refused("unsupported", "The bridge did not provide the current track name."))?;
+            let label =
+                row["name"].as_str().ok_or_else(|| hear_refused("unsupported", "The bridge did not provide the current track name."))?;
             (label.to_owned(), json!({"id": "bounded", "what": "track", "ref": long, "stage": "pre-fader"}))
         } else {
             ("The whole mix".to_owned(), json!({"id": "bounded", "what": "master"}))
@@ -2595,10 +2674,21 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         signal.check()?;
         Ok(RestrictedPreflight {
             preview: HearPreview {
-                label, seconds, method: HearMethod::Offline, deadline_seconds: render_deadline_seconds(seconds),
-                disclosure: if renderer.profile().id == Some(DawId::Reaper) { "REAPER may show the project as modified after a listen." } else { "" },
+                label,
+                seconds,
+                method: HearMethod::Offline,
+                deadline_seconds: render_deadline_seconds(seconds),
+                disclosure: if renderer.profile().id == Some(DawId::Reaper) {
+                    "REAPER may show the project as modified after a listen."
+                } else {
+                    ""
+                },
             },
-            window, source, epoch, state: read.get_mut("render_state").expect("validated preflight state").take(), focus,
+            window,
+            source,
+            epoch,
+            state: read.get_mut("render_state").expect("validated preflight state").take(),
+            focus,
         })
     }
 
@@ -2615,40 +2705,61 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                 for (key, tool) in [("bpm", "song_bpm"), ("lpb", "song_lpb")] {
                     if after["render_state"][key] != before.state[key] {
                         let mut input = serde_json::Map::new();
-                        input.insert(key.into(), if key == "lpb" {
-                            json!(before.state[key].as_f64().expect("validated integer LPB") as u32)
-                        } else { before.state[key].clone() });
+                        input.insert(
+                            key.into(),
+                            if key == "lpb" {
+                                json!(before.state[key].as_f64().expect("validated integer LPB") as u32)
+                            } else {
+                                before.state[key].clone()
+                            },
+                        );
                         // The write result is not proof: the independent read below is mandatory.
-                        let _ = renderer.plan.history.quietly(
-                            None, renderer.change(tool, Value::Object(input), abort::timeout(10_000)),
-                        ).await;
+                        let _ =
+                            renderer.plan.history.quietly(None, renderer.change(tool, Value::Object(input), abort::timeout(10_000))).await;
                     }
                 }
                 after = self.render_preflight_read(probe, &before.epoch, abort::timeout(15_000)).await?;
             }
             let marked_modified = restored_state(renderer.profile().id, &before.state, &after["render_state"])?;
-            let status = renderer.link.call("status", json!({}), abort::timeout(5_000)).await?
+            let status = renderer
+                .link
+                .call("status", json!({}), abort::timeout(5_000))
+                .await?
                 .map_err(|_| hear_refused("render_unavailable", "The DAW's rendering state could not be read."))?;
             if status["busy"] != false {
-                return Err(HearFailure::Unsure { reason: "The DAW still reports busy after the render; restoration is unverified.".into() }.into());
+                return Err(HearFailure::Unsure {
+                    reason: "The DAW still reports busy after the render; restoration is unverified.".into(),
+                }
+                .into());
             }
-            let focus = renderer.link.call("focus", json!({}), abort::timeout(5_000)).await?
+            let focus = renderer
+                .link
+                .call("focus", json!({}), abort::timeout(5_000))
+                .await?
                 .map_err(|_| hear_refused("transport_unknown", "The transport could not be read after rendering."))?;
             bounded_hear_transport(&focus["transport"])?;
             if focus_state(focus)? != before.focus {
-                return Err(HearFailure::Unsure { reason: "Transport or selection differs from the before-render snapshot. Observe again.".into() }.into());
+                return Err(HearFailure::Unsure {
+                    reason: "Transport or selection differs from the before-render snapshot. Observe again.".into(),
+                }
+                .into());
             }
             Ok::<bool, RuntimeError>(marked_modified)
         };
         match tokio::time::timeout(Duration::from_secs(60), cleanup).await {
             Ok(Ok(marked)) => Ok(marked),
-            _ => Err(HearFailure::Unsure { reason: "The render ended, but complete restoration could not be verified. Observe again before another action.".into() }.into()),
+            _ => Err(HearFailure::Unsure {
+                reason: "The render ended, but complete restoration could not be verified. Observe again before another action.".into(),
+            }
+            .into()),
         }
     }
 
     fn restricted_discard(&self, done: &Value, scratch: &std::path::Path, quarantine_root: &std::path::Path) {
         let Some(files) = done["files"].as_array() else { return };
-        if files.is_empty() { return; }
+        if files.is_empty() {
+            return;
+        }
         if files.len() != 1 || files[0]["id"] != "bounded" {
             self.renderer.tell_app("The bridge returned unexpected staging files; they were left untouched.");
             return;
@@ -2664,7 +2775,9 @@ impl<S: RefScheme + 'static> OwnListening<S> {
     async fn restricted_hear(&self, request: &HearRequest, original: Signal) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         let _held = self.hold(&original).await?;
         let before = self.restricted_preflight(request, original.clone()).await?;
-        let approval = request.approval.ok_or_else(|| hear_refused("not_approved", "A restricted render needs the host's approved window and native deadline."))?;
+        let approval = request
+            .approval
+            .ok_or_else(|| hear_refused("not_approved", "A restricted render needs the host's approved window and native deadline."))?;
         let scratch = self.policy.scratch_dir(request).await?;
         let ListeningPolicy::Restricted { quarantine_root, .. } = &self.policy else {
             return Err(hear_refused("unsupported", "Restricted listening requires an explicit host policy."));
@@ -2689,9 +2802,17 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         let started = match self.renderer.link.call("render", args, abort::timeout(10_000)).await {
             Ok(Ok(started)) => started,
             Ok(Err(refused)) if refused.code.as_deref() == Some("stale") => {
-                return Err(hear_refused("stale", "The native renderer refused a changed window or project before starting; preview again."));
+                return Err(hear_refused(
+                    "stale",
+                    "The native renderer refused a changed window or project before starting; preview again.",
+                ));
             }
-            _ => return Err(HearFailure::Unsure { reason: "The render start could not be resolved; its effects and restoration are unknown. Observe again.".into() }.into()),
+            _ => {
+                return Err(HearFailure::Unsure {
+                    reason: "The render start could not be resolved; its effects and restoration are unknown. Observe again.".into(),
+                }
+                .into())
+            }
         };
         let (done, cancelled) = self.restricted_wait(&started, before.preview.seconds, &original).await?;
         // REAPER reports `stale` only from its pre-execution guards, before touching DAW
@@ -2711,7 +2832,9 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             let code = if done["code"] == "stale" { "stale" } else { "render_failed" };
             return Err(hear_refused(code, done["error"].as_str().unwrap_or("The offline render failed after its state was restored.")));
         }
-        let files = done["files"].as_array().filter(|files| files.len() == 1)
+        let files = done["files"]
+            .as_array()
+            .filter(|files| files.len() == 1)
             .ok_or_else(|| hear_refused("invalid_render_result", "The completed render did not return exactly this call's one source."))?;
         let file = &files[0];
         if file["id"] != "bounded" || file.get("start").is_some_and(|start| start.as_f64() != Some(0.)) {
@@ -2729,8 +2852,13 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             notes.push(warning);
         }
         Ok(Ok(vec![HeardTake {
-            label: before.preview.label, file: staged.path.to_string_lossy().into_owned(), start: 0., seconds: Some(staged.seconds),
-            live: false, note: (!notes.is_empty()).then(|| notes.join(" ")), marked_modified,
+            label: before.preview.label,
+            file: staged.path.to_string_lossy().into_owned(),
+            start: 0.,
+            seconds: Some(staged.seconds),
+            live: false,
+            note: (!notes.is_empty()).then(|| notes.join(" ")),
+            marked_modified,
         }]))
     }
 
@@ -2897,7 +3025,15 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         if stretches.len() <= 1 {
             let (start, seconds) = stretches.first().map_or((0., held), |(start, seconds, _)| (*start, Some(*seconds)));
             let note = (!notes.is_empty()).then(|| notes.join(" "));
-            return Ok(Ok(vec![HeardTake { label: "The whole mix".into(), file: path, start, seconds, live: true, note, marked_modified: false }]));
+            return Ok(Ok(vec![HeardTake {
+                label: "The whole mix".into(),
+                file: path,
+                start,
+                seconds,
+                live: true,
+                note,
+                marked_modified: false,
+            }]));
         }
         // The playhead jumped (a loop, a seek): what's measured is the longest stretch it played straight through (the
         // stretches aren't parts heard at once).
@@ -2910,7 +3046,15 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             stretches.iter().map(|(_, _, label)| label.as_str()).collect::<Vec<_>>().join(", "),
             seconds
         ));
-        Ok(Ok(vec![HeardTake { label, file: path, start, seconds: Some(seconds), live: true, note: Some(notes.join(" ")), marked_modified: false }]))
+        Ok(Ok(vec![HeardTake {
+            label,
+            file: path,
+            start,
+            seconds: Some(seconds),
+            live: true,
+            note: Some(notes.join(" ")),
+            marked_modified: false,
+        }]))
     }
 }
 
@@ -2987,10 +3131,16 @@ mod tests {
         let request = HearRequest { mix: Some(true), from_beat: Some(0.), beats: Some(8.), ..Default::default() };
         assert!(bounded_hear_window(&request).is_ok());
         for (from_beat, beats) in [
-            (None, Some(8.)), (Some(0.), None), (Some(-1.), Some(8.)),
-            (Some(f64::NAN), Some(8.)), (Some(f64::INFINITY), Some(8.)),
-            (Some(0.), Some(f64::NAN)), (Some(0.), Some(f64::INFINITY)),
-            (Some(0.), Some(0.)), (Some(0.), Some(-1.)), (Some(0.), Some(257.)),
+            (None, Some(8.)),
+            (Some(0.), None),
+            (Some(-1.), Some(8.)),
+            (Some(f64::NAN), Some(8.)),
+            (Some(f64::INFINITY), Some(8.)),
+            (Some(0.), Some(f64::NAN)),
+            (Some(0.), Some(f64::INFINITY)),
+            (Some(0.), Some(0.)),
+            (Some(0.), Some(-1.)),
+            (Some(0.), Some(257.)),
         ] {
             assert!(bounded_hear_window(&HearRequest { from_beat, beats, ..request.clone() }).is_err(), "{from_beat:?} {beats:?}");
         }
@@ -3036,9 +3186,14 @@ mod tests {
         let exact = json!({"schema": 1, "seconds": 60., "offset": 0., "aligned": true, "irregular": false, "clipped": false});
         assert_eq!(exact_render_seconds(&exact, None).unwrap(), 60.);
         for (key, value) in [
-            ("seconds", json!(60.001)), ("seconds", json!(0.)), ("seconds", Value::Null),
-            ("offset", json!(0.001)), ("aligned", json!(false)), ("irregular", json!(true)),
-            ("clipped", json!(true)), ("schema", json!(2)),
+            ("seconds", json!(60.001)),
+            ("seconds", json!(0.)),
+            ("seconds", Value::Null),
+            ("offset", json!(0.001)),
+            ("aligned", json!(false)),
+            ("irregular", json!(true)),
+            ("clipped", json!(true)),
+            ("schema", json!(2)),
         ] {
             let mut invalid = exact.clone();
             invalid[key] = value;
@@ -3053,7 +3208,7 @@ mod tests {
 
     #[test]
     fn restricted_restoration_compares_every_snapshot_field_but_reports_reaper_dirty_residue() {
-        use super::{DawId, HearFailure, RuntimeError, RENDER_NUMBERS, RENDER_TEXTS, restored_state};
+        use super::{restored_state, DawId, HearFailure, RuntimeError, RENDER_NUMBERS, RENDER_TEXTS};
         let numbers: serde_json::Map<String, Value> = RENDER_NUMBERS.iter().map(|key| ((*key).into(), json!(0.))).collect();
         let texts: serde_json::Map<String, Value> = RENDER_TEXTS.iter().map(|key| ((*key).into(), json!("before"))).collect();
         let before = json!({
@@ -3067,19 +3222,31 @@ mod tests {
         dirty["dirty"] = true.into();
         assert!(restored_state(Some(DawId::Reaper), &before, &dirty).unwrap());
         for pointer in [
-            "/numbers/RENDER_SETTINGS", "/numbers/RENDER_STARTPOS", "/texts/RENDER_FILE", "/projrenderlimit",
-            "/selection/0/value", "/mutes/1/value", "/master_fx", "/time_selection/1",
+            "/numbers/RENDER_SETTINGS",
+            "/numbers/RENDER_STARTPOS",
+            "/texts/RENDER_FILE",
+            "/projrenderlimit",
+            "/selection/0/value",
+            "/mutes/1/value",
+            "/master_fx",
+            "/time_selection/1",
         ] {
             let mut changed = before.clone();
             *changed.pointer_mut(pointer).unwrap() = json!(99);
-            assert!(matches!(restored_state(Some(DawId::Reaper), &before, &changed), Err(RuntimeError::Hear(HearFailure::Unsure { .. }))), "{pointer}");
+            assert!(
+                matches!(restored_state(Some(DawId::Reaper), &before, &changed), Err(RuntimeError::Hear(HearFailure::Unsure { .. }))),
+                "{pointer}"
+            );
         }
         let renoise = json!({"bpm": 120., "lpb": 4, "tracks": [{"ref": "track", "mute": 1, "solo": false}]});
         assert!(!restored_state(Some(DawId::Renoise), &renoise, &renoise).unwrap());
         for pointer in ["/bpm", "/lpb", "/tracks/0/mute", "/tracks/0/solo"] {
             let mut changed = renoise.clone();
             *changed.pointer_mut(pointer).unwrap() = json!(2);
-            assert!(matches!(restored_state(Some(DawId::Renoise), &renoise, &changed), Err(RuntimeError::Hear(HearFailure::Unsure { .. }))), "{pointer}");
+            assert!(
+                matches!(restored_state(Some(DawId::Renoise), &renoise, &changed), Err(RuntimeError::Hear(HearFailure::Unsure { .. }))),
+                "{pointer}"
+            );
         }
     }
 
@@ -3341,13 +3508,19 @@ mod tests {
 /// just that directory entry privately before deleting it; never sweep or repair the cache.
 #[cfg(unix)]
 mod restricted_staging {
-    use super::{hear_refused, HearFailure, RuntimeError, Signal, SignalExt};
     use super::wav_seconds;
+    use super::{hear_refused, HearFailure, RuntimeError, Signal, SignalExt};
     use std::{
         ffi::{CStr, CString},
         fs::{File, Metadata, OpenOptions},
         io::{Read, Write},
-        os::{fd::{AsRawFd, FromRawFd}, unix::{ffi::OsStrExt, fs::{MetadataExt, OpenOptionsExt}}},
+        os::{
+            fd::{AsRawFd, FromRawFd},
+            unix::{
+                ffi::OsStrExt,
+                fs::{MetadataExt, OpenOptionsExt},
+            },
+        },
         path::{Path, PathBuf},
     };
 
@@ -3372,8 +3545,12 @@ mod restricted_staging {
     }
 
     fn stable(a: &Metadata, b: &Metadata) -> bool {
-        same_inode(a, b) && a.len() == b.len() && a.mtime() == b.mtime() && a.mtime_nsec() == b.mtime_nsec()
-            && a.ctime() == b.ctime() && a.ctime_nsec() == b.ctime_nsec()
+        same_inode(a, b)
+            && a.len() == b.len()
+            && a.mtime() == b.mtime()
+            && a.mtime_nsec() == b.mtime_nsec()
+            && a.ctime() == b.ctime()
+            && a.ctime_nsec() == b.ctime_nsec()
     }
 
     fn private(meta: &Metadata) -> bool {
@@ -3381,7 +3558,10 @@ mod restricted_staging {
     }
 
     fn directory(path: &Path) -> Result<File, RuntimeError> {
-        let file = OpenOptions::new().read(true).custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW).open(path)
+        let file = OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_DIRECTORY | libc::O_NOFOLLOW)
+            .open(path)
             .map_err(|_| unsafe_file("The staging directory could not be opened without following a symlink."))?;
         let meta = file.metadata().map_err(|_| unsafe_file("The staging directory could not be inspected."))?;
         if !meta.is_dir() || !private(&meta) {
@@ -3391,8 +3571,13 @@ mod restricted_staging {
     }
 
     fn open_at(dir: &File, leaf: &CStr) -> std::io::Result<File> {
-        let fd = unsafe { libc::openat(dir.as_raw_fd(), leaf.as_ptr(), libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC) };
-        if fd < 0 { Err(std::io::Error::last_os_error()) } else { Ok(unsafe { File::from_raw_fd(fd) }) }
+        let fd =
+            unsafe { libc::openat(dir.as_raw_fd(), leaf.as_ptr(), libc::O_RDONLY | libc::O_NOFOLLOW | libc::O_NONBLOCK | libc::O_CLOEXEC) };
+        if fd < 0 {
+            Err(std::io::Error::last_os_error())
+        } else {
+            Ok(unsafe { File::from_raw_fd(fd) })
+        }
     }
 
     /// The installed bridges produce flat cache files, so no intermediate path may be traversed.
@@ -3411,7 +3596,11 @@ mod restricted_staging {
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
         return Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "atomic no-replace rename is unavailable"));
         #[cfg(any(target_os = "macos", target_os = "linux"))]
-        if result == 0 { Ok(()) } else { Err(std::io::Error::last_os_error()) }
+        if result == 0 {
+            Ok(())
+        } else {
+            Err(std::io::Error::last_os_error())
+        }
     }
 
     /// A race may replace the named entry. In that case put it back only if the old name is
@@ -3428,10 +3617,13 @@ mod restricted_staging {
             let raw = leaf.to_string_lossy();
             let mut chars = raw.chars();
             let mut name: String = chars.by_ref().take(48).map(|c| if c == '"' { '\'' } else { c }).collect();
-            if chars.next().is_some() { name.push('…'); }
+            if chars.next().is_some() {
+                name.push('…');
+            }
             Some(format!("Source \"{name}\" remains in the owning Kumi listening cache: {why}."))
         };
-        let current = open_at(cache, leaf).and_then(|file| file.metadata())
+        let current = open_at(cache, leaf)
+            .and_then(|file| file.metadata())
             .map_err(|_| unsafe_file("The returned staging file disappeared or became unsafe before cleanup."))?;
         if !stable(original, &current) {
             return Err(unsafe_file("The returned staging file was replaced or modified; it was not deleted."));
@@ -3447,27 +3639,35 @@ mod restricted_staging {
             libc::openat(root.as_raw_fd(), call.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
         };
         if fd < 0 {
-            unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR); }
+            unsafe {
+                libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR);
+            }
             return Ok(left("private quarantine could not be opened"));
         }
         let claimed = unsafe { File::from_raw_fd(fd) };
         let slot = c"source";
         let kept_at = quarantine_root.join(std::ffi::OsStr::from_bytes(call.to_bytes())).join("source");
         if let Err(error) = claim(cache, leaf, &claimed, slot) {
-            unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR); }
+            unsafe {
+                libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR);
+            }
             return Ok(left(if error.raw_os_error() == Some(libc::EXDEV) { "another filesystem" } else { "cleanup claim failed" }));
         }
         // The permanent private quarantine is never auto-deleted on cancellation or restart.
         // In particular, a crash before this comparison cannot make Scratch delete a replacement.
         let captured = std::fs::symlink_metadata(&kept_at);
         let ours = captured.as_ref().is_ok_and(|now| {
-            same_inode(original, now) && original.len() == now.len()
-                && original.mtime() == now.mtime() && original.mtime_nsec() == now.mtime_nsec()
+            same_inode(original, now)
+                && original.len() == now.len()
+                && original.mtime() == now.mtime()
+                && original.mtime_nsec() == now.mtime_nsec()
         });
         if !ours {
             let restored = rename_new(&claimed, slot, cache, leaf).is_ok();
             if restored {
-                unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR); }
+                unsafe {
+                    libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR);
+                }
             }
             return Err(unsafe_file(if restored {
                 "The staging file changed during cleanup; its replacement was put back and nothing was deleted."
@@ -3486,7 +3686,6 @@ mod restricted_staging {
         Ok(None)
     }
 
-
     fn verified_source(cache: &Path, returned: &Path) -> Result<(File, CString, File, Metadata), RuntimeError> {
         let cache_handle = directory(cache)?;
         let canonical_cache = std::fs::canonicalize(cache).map_err(|_| unsafe_file("The bridge cache cannot be resolved."))?;
@@ -3500,7 +3699,8 @@ mod restricted_staging {
             return Err(unsafe_file("The cache directory was replaced while it was being opened."));
         }
         let leaf = name(Path::new(returned.file_name().ok_or_else(|| unsafe_file("The returned render has no filename."))?))?;
-        let source = open_at(&cache_handle, &leaf).map_err(|_| unsafe_file("The returned render is a symlink or cannot be opened safely."))?;
+        let source =
+            open_at(&cache_handle, &leaf).map_err(|_| unsafe_file("The returned render is a symlink or cannot be opened safely."))?;
         let before = source.metadata().map_err(|_| unsafe_file("The opened render cannot be inspected."))?;
         if !before.is_file() || !private(&before) || before.nlink() != 1 || before.len() > MAX_BYTES {
             return Err(unsafe_file("The returned render must be an owner-only regular file, not hard-linked, and at most 50 MiB."));
@@ -3519,15 +3719,30 @@ mod restricted_staging {
         }
         let call = name(Path::new(scratch.file_name().ok_or_else(|| unsafe_file("The call scratch has no name."))?))?;
         let warning = remove_exact(&cache, &leaf, &before, quarantine_root, &call, rename_new)?;
-        if let Some(warning) = &warning { eprintln!("kumi listen: {warning} Source: {}", returned.display()); }
+        if let Some(warning) = &warning {
+            eprintln!("kumi listen: {warning} Source: {}", returned.display());
+        }
         Ok(warning)
     }
 
-    pub(super) fn copy(cache: &Path, scratch: &Path, quarantine_root: &Path, returned: &Path, signal: &Signal) -> Result<Staged, RuntimeError> {
+    pub(super) fn copy(
+        cache: &Path,
+        scratch: &Path,
+        quarantine_root: &Path,
+        returned: &Path,
+        signal: &Signal,
+    ) -> Result<Staged, RuntimeError> {
         copy_after_open(cache, scratch, quarantine_root, returned, signal, || {})
     }
 
-    fn copy_after_open(cache: &Path, scratch: &Path, quarantine_root: &Path, returned: &Path, signal: &Signal, after_open: impl FnOnce()) -> Result<Staged, RuntimeError> {
+    fn copy_after_open(
+        cache: &Path,
+        scratch: &Path,
+        quarantine_root: &Path,
+        returned: &Path,
+        signal: &Signal,
+        after_open: impl FnOnce(),
+    ) -> Result<Staged, RuntimeError> {
         let (cache_handle, leaf, mut source, before) = verified_source(cache, returned)?;
         let scratch_handle = directory(scratch)?;
         let scratch_named = std::fs::symlink_metadata(scratch).map_err(|_| unsafe_file("The scratch directory disappeared."))?;
@@ -3538,10 +3753,16 @@ mod restricted_staging {
         let call = name(Path::new(scratch.file_name().ok_or_else(|| unsafe_file("The call scratch has no name."))?))?;
         let target = CString::new(format!("render-{}.wav", uuid::Uuid::new_v4())).expect("UUID has no NUL");
         let fd = unsafe {
-            libc::openat(scratch_handle.as_raw_fd(), target.as_ptr(),
-                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC, 0o600)
+            libc::openat(
+                scratch_handle.as_raw_fd(),
+                target.as_ptr(),
+                libc::O_RDWR | libc::O_CREAT | libc::O_EXCL | libc::O_NOFOLLOW | libc::O_CLOEXEC,
+                0o600,
+            )
         };
-        if fd < 0 { return Err(unsafe_file("A private scratch copy could not be created.")); }
+        if fd < 0 {
+            return Err(unsafe_file("A private scratch copy could not be created."));
+        }
         let mut output = unsafe { File::from_raw_fd(fd) };
         after_open();
         let result = (|| {
@@ -3550,9 +3771,13 @@ mod restricted_staging {
             loop {
                 signal.check()?;
                 let count = source.read(&mut buffer).map_err(|_| unsafe_file("The render could not be read."))?;
-                if count == 0 { break; }
+                if count == 0 {
+                    break;
+                }
                 copied += count as u64;
-                if copied > before.len() || copied > MAX_BYTES { return Err(unsafe_file("The render grew while it was being copied.")); }
+                if copied > before.len() || copied > MAX_BYTES {
+                    return Err(unsafe_file("The render grew while it was being copied."));
+                }
                 output.write_all(&buffer[..count]).map_err(|_| unsafe_file("The render could not be copied into scratch."))?;
             }
             let after = source.metadata().map_err(|_| unsafe_file("The render could not be rechecked."))?;
@@ -3566,15 +3791,24 @@ mod restricted_staging {
             let output_meta = output.metadata().map_err(|_| unsafe_file("The scratch copy could not be inspected."))?;
             let named_output = std::fs::symlink_metadata(scratch.join(target.to_str().expect("UUID filename is UTF-8")))
                 .map_err(|_| unsafe_file("The scratch copy disappeared."))?;
-            if !same_inode(&output_meta, &named_output) || named_output.file_type().is_symlink()
-                || output_meta.nlink() != 1 || !private(&output_meta) || output_meta.len() != before.len() {
+            if !same_inode(&output_meta, &named_output)
+                || named_output.file_type().is_symlink()
+                || output_meta.nlink() != 1
+                || !private(&output_meta)
+                || output_meta.len() != before.len()
+            {
                 return Err(unsafe_file("The scratch copy was replaced before it could be returned."));
             }
             let seconds = wav_seconds(&mut output).map_err(|_| unsafe_file("The rendered file is not a complete PCM WAV."))?;
             let warning = remove_exact(&cache_handle, &leaf, &before, quarantine_root, &call, rename_new)?;
-            if let Some(warning) = &warning { eprintln!("kumi listen: {warning} Source: {}", returned.display()); }
+            if let Some(warning) = &warning {
+                eprintln!("kumi listen: {warning} Source: {}", returned.display());
+            }
             if !seconds.is_finite() || seconds > 65. {
-                return Err(HearFailure::Unsure { reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into() }.into());
+                return Err(HearFailure::Unsure {
+                    reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into(),
+                }
+                .into());
             }
             Ok(Staged { path: scratch.join(target.to_str().expect("UUID filename is UTF-8")), seconds, warning })
         })();
@@ -3582,11 +3816,15 @@ mod restricted_staging {
             match remove_exact(&cache_handle, &leaf, &before, quarantine_root, &call, rename_new) {
                 Ok(None) => {}
                 Ok(Some(warning)) => eprintln!("kumi listen: {warning} Source: {}", returned.display()),
-                Err(error) => eprintln!("kumi listen: cancelled staging left its source untouched: {error}; source: {}", returned.display()),
+                Err(error) => {
+                    eprintln!("kumi listen: cancelled staging left its source untouched: {error}; source: {}", returned.display())
+                }
             }
         }
         if result.is_err() {
-            unsafe { libc::unlinkat(scratch_handle.as_raw_fd(), target.as_ptr(), 0); }
+            unsafe {
+                libc::unlinkat(scratch_handle.as_raw_fd(), target.as_ptr(), 0);
+            }
         }
         result
     }
@@ -3705,8 +3943,15 @@ mod restricted_staging {
             std::fs::rename(&source, &kept).unwrap();
             wav(&source, 2);
             let replacement = std::fs::read(&source).unwrap();
-            assert!(remove_exact(&directory(&cache).unwrap(), c"this-call.wav", &before,
-                &_home.path().join("quarantine"), c"replacement", rename_new).is_err());
+            assert!(remove_exact(
+                &directory(&cache).unwrap(),
+                c"this-call.wav",
+                &before,
+                &_home.path().join("quarantine"),
+                c"replacement",
+                rename_new
+            )
+            .is_err());
             assert_eq!(std::fs::read(&source).unwrap(), replacement);
             assert!(kept.exists());
             let signal = Signal::new();
@@ -3725,21 +3970,23 @@ mod restricted_staging {
                 wav(&source, 1);
                 let before = std::fs::metadata(&source).unwrap();
                 let quarantine = home.path().join("quarantine");
-                let outcome = remove_exact(
-                    &directory(&cache).unwrap(), c"this-call.wav", &before, &quarantine, c"call-id",
-                    |from, old, to, new| {
+                let outcome =
+                    remove_exact(&directory(&cache).unwrap(), c"this-call.wav", &before, &quarantine, c"call-id", |from, old, to, new| {
                         std::fs::rename(&source, &original_kept).unwrap();
                         wav(&source, 2);
                         rename_new(from, old, to, new)?;
-                        if occupied { wav(&source, 3); }
+                        if occupied {
+                            wav(&source, 3);
+                        }
                         Ok(())
-                    },
-                );
+                    });
                 assert!(outcome.is_err(), "a substituted file must never be accepted as this render");
                 assert!(original_kept.exists());
                 let preserved = if occupied { quarantine.join("call-id").join("source") } else { source.clone() };
                 assert_eq!(wav_seconds(&mut File::open(&preserved).unwrap()).unwrap(), 2.);
-                if occupied { assert_eq!(wav_seconds(&mut File::open(&source).unwrap()).unwrap(), 3.); }
+                if occupied {
+                    assert_eq!(wav_seconds(&mut File::open(&source).unwrap()).unwrap(), 3.);
+                }
                 assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
             }
         }
@@ -3751,9 +3998,15 @@ mod restricted_staging {
             wav(&source, 1);
             let before = std::fs::metadata(&source).unwrap();
             let warning = remove_exact(
-                &directory(&cache).unwrap(), c"this-call.wav", &before, &home.path().join("quarantine"), c"call-id",
+                &directory(&cache).unwrap(),
+                c"this-call.wav",
+                &before,
+                &home.path().join("quarantine"),
+                c"call-id",
                 |_, _, _, _| Err(std::io::Error::from_raw_os_error(libc::EXDEV)),
-            ).unwrap().unwrap();
+            )
+            .unwrap()
+            .unwrap();
             assert!(warning.contains("this-call.wav"), "the notice identifies the remaining source");
             assert!(!warning.contains('/') && !warning.contains('\\'), "only a basename, never a local path: {warning}");
             assert!(same_inode(&before, &std::fs::metadata(&source).unwrap()));
@@ -3771,68 +4024,94 @@ mod restricted_staging {
         }
     }
 }
-    /// Read only the PCM WAV's layout, without invoking a converter or measuring its audio.
-    fn wav_seconds(file: &mut File) -> std::io::Result<f64> {
-        let invalid = || std::io::Error::new(std::io::ErrorKind::InvalidData, "the render is not a complete PCM WAV");
-        let length = file.metadata()?.len();
-        file.seek(SeekFrom::Start(0))?;
-        let mut header = [0; 12];
-        file.read_exact(&mut header)?;
-        if &header[..4] != b"RIFF" || &header[8..] != b"WAVE" { return Err(invalid()); }
-        let end = u32::from_le_bytes(header[4..8].try_into().unwrap()) as u64 + 8;
-        if end > length || end < 12 { return Err(invalid()); }
-        let mut format = None;
-        let mut data = None;
-        let mut at = 12;
-        while at + 8 <= end {
-            file.seek(SeekFrom::Start(at))?;
-            let mut chunk = [0; 8];
-            file.read_exact(&mut chunk)?;
-            let size = u32::from_le_bytes(chunk[4..].try_into().unwrap()) as u64;
-            if size > end - at - 8 { return Err(invalid()); }
-            match &chunk[..4] {
-                b"fmt " if size >= 16 => {
-                    if format.is_some() { return Err(invalid()); }
-                    let mut fmt = [0; 16];
-                    file.read_exact(&mut fmt)?;
-                    let mut encoding = u16::from_le_bytes(fmt[..2].try_into().unwrap());
-                    let channels = u16::from_le_bytes(fmt[2..4].try_into().unwrap());
-                    let rate = u32::from_le_bytes(fmt[4..8].try_into().unwrap());
-                    let align = u16::from_le_bytes(fmt[12..14].try_into().unwrap());
-                    let bits = u16::from_le_bytes(fmt[14..16].try_into().unwrap());
-                    if encoding == 65534 {
-                        if size < 40 { return Err(invalid()); }
-                        let mut extension = [0u8; 24];
-                        file.read_exact(&mut extension)?;
-                        let extra = u16::from_le_bytes(extension[..2].try_into().unwrap());
-                        let valid_bits = u16::from_le_bytes(extension[2..4].try_into().unwrap());
-                        if extra < 22 || u64::from(extra) + 18 > size || valid_bits == 0 || valid_bits > bits
-                            || extension[12..] != [0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71] {
-                            return Err(invalid());
-                        }
-                        encoding = match u32::from_le_bytes(extension[8..12].try_into().unwrap()) {
-                            1 => 1, 3 => 3, _ => return Err(invalid()),
-                        };
-                    }
-                    if !matches!(encoding, 1 | 3) || channels == 0 || channels > 64 || rate == 0
-                        || bits == 0 || bits % 8 != 0 || (encoding == 3 && !matches!(bits, 32 | 64))
-                        || u32::from(align) != u32::from(channels) * u32::from(bits / 8) {
+/// Read only the PCM WAV's layout, without invoking a converter or measuring its audio.
+fn wav_seconds(file: &mut File) -> std::io::Result<f64> {
+    let invalid = || std::io::Error::new(std::io::ErrorKind::InvalidData, "the render is not a complete PCM WAV");
+    let length = file.metadata()?.len();
+    file.seek(SeekFrom::Start(0))?;
+    let mut header = [0; 12];
+    file.read_exact(&mut header)?;
+    if &header[..4] != b"RIFF" || &header[8..] != b"WAVE" {
+        return Err(invalid());
+    }
+    let end = u32::from_le_bytes(header[4..8].try_into().unwrap()) as u64 + 8;
+    if end > length || end < 12 {
+        return Err(invalid());
+    }
+    let mut format = None;
+    let mut data = None;
+    let mut at = 12;
+    while at + 8 <= end {
+        file.seek(SeekFrom::Start(at))?;
+        let mut chunk = [0; 8];
+        file.read_exact(&mut chunk)?;
+        let size = u32::from_le_bytes(chunk[4..].try_into().unwrap()) as u64;
+        if size > end - at - 8 {
+            return Err(invalid());
+        }
+        match &chunk[..4] {
+            b"fmt " if size >= 16 => {
+                if format.is_some() {
+                    return Err(invalid());
+                }
+                let mut fmt = [0; 16];
+                file.read_exact(&mut fmt)?;
+                let mut encoding = u16::from_le_bytes(fmt[..2].try_into().unwrap());
+                let channels = u16::from_le_bytes(fmt[2..4].try_into().unwrap());
+                let rate = u32::from_le_bytes(fmt[4..8].try_into().unwrap());
+                let align = u16::from_le_bytes(fmt[12..14].try_into().unwrap());
+                let bits = u16::from_le_bytes(fmt[14..16].try_into().unwrap());
+                if encoding == 65534 {
+                    if size < 40 {
                         return Err(invalid());
                     }
-                    format = Some((rate, align));
+                    let mut extension = [0u8; 24];
+                    file.read_exact(&mut extension)?;
+                    let extra = u16::from_le_bytes(extension[..2].try_into().unwrap());
+                    let valid_bits = u16::from_le_bytes(extension[2..4].try_into().unwrap());
+                    if extra < 22
+                        || u64::from(extra) + 18 > size
+                        || valid_bits == 0
+                        || valid_bits > bits
+                        || extension[12..] != [0, 0, 0x10, 0, 0x80, 0, 0, 0xaa, 0, 0x38, 0x9b, 0x71]
+                    {
+                        return Err(invalid());
+                    }
+                    encoding = match u32::from_le_bytes(extension[8..12].try_into().unwrap()) {
+                        1 => 1,
+                        3 => 3,
+                        _ => return Err(invalid()),
+                    };
                 }
-                b"data" => {
-                    if data.replace(size).is_some() { return Err(invalid()); }
+                if !matches!(encoding, 1 | 3)
+                    || channels == 0
+                    || channels > 64
+                    || rate == 0
+                    || bits == 0
+                    || bits % 8 != 0
+                    || (encoding == 3 && !matches!(bits, 32 | 64))
+                    || u32::from(align) != u32::from(channels) * u32::from(bits / 8)
+                {
+                    return Err(invalid());
                 }
-                _ => {}
+                format = Some((rate, align));
             }
-            at += 8 + size + (size & 1);
+            b"data" => {
+                if data.replace(size).is_some() {
+                    return Err(invalid());
+                }
+            }
+            _ => {}
         }
-        let (rate, align) = format.ok_or_else(invalid)?;
-        let bytes = data.ok_or_else(invalid)?;
-        if bytes == 0 || bytes % u64::from(align) != 0 { return Err(invalid()); }
-        Ok((bytes / u64::from(align)) as f64 / f64::from(rate))
+        at += 8 + size + (size & 1);
     }
+    let (rate, align) = format.ok_or_else(invalid)?;
+    let bytes = data.ok_or_else(invalid)?;
+    if bytes == 0 || bytes % u64::from(align) != 0 {
+        return Err(invalid());
+    }
+    Ok((bytes / u64::from(align)) as f64 / f64::from(rate))
+}
 
 #[cfg(test)]
 #[test]
@@ -3862,7 +4141,11 @@ fn restricted_wave_extensible_rejects_compressed_subformats_before_duration_clai
         let mut file = tempfile::tempfile().unwrap();
         file.write_all(&wave).unwrap();
         let seconds = wav_seconds(&mut file);
-        if accepted { assert_eq!(seconds.unwrap(), 1.); } else { assert!(seconds.is_err()); }
+        if accepted {
+            assert_eq!(seconds.unwrap(), 1.);
+        } else {
+            assert!(seconds.is_err());
+        }
     }
 }
 
@@ -3872,16 +4155,20 @@ mod restricted_staging {
     use std::{
         fs::{File, OpenOptions},
         io::{Read, Write},
-        os::windows::{ffi::{OsStrExt, OsStringExt}, fs::OpenOptionsExt, io::{AsRawHandle, FromRawHandle}},
+        os::windows::{
+            ffi::{OsStrExt, OsStringExt},
+            fs::OpenOptionsExt,
+            io::{AsRawHandle, FromRawHandle},
+        },
         path::{Path, PathBuf},
     };
     use windows_sys::Win32::{
         Foundation::{GENERIC_READ, GENERIC_WRITE, INVALID_HANDLE_VALUE},
         Storage::FileSystem::{
-            CreateFileW, GetFileInformationByHandle, GetFinalPathNameByHandleW, SetFileInformationByHandle, FileDispositionInfo,
-            BY_HANDLE_FILE_INFORMATION, FILE_DISPOSITION_INFO, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT,
-            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
-            FILE_NAME_NORMALIZED, VOLUME_NAME_DOS,
+            CreateFileW, FileDispositionInfo, GetFileInformationByHandle, GetFinalPathNameByHandleW, SetFileInformationByHandle,
+            BY_HANDLE_FILE_INFORMATION, DELETE, FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_DISPOSITION_INFO,
+            FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_NAME_NORMALIZED, FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
+            FILE_SHARE_WRITE, OPEN_EXISTING, VOLUME_NAME_DOS,
         },
     };
 
@@ -3906,30 +4193,45 @@ mod restricted_staging {
     }
 
     fn same(a: &BY_HANDLE_FILE_INFORMATION, b: &BY_HANDLE_FILE_INFORMATION) -> bool {
-        a.dwVolumeSerialNumber == b.dwVolumeSerialNumber && a.nFileIndexHigh == b.nFileIndexHigh && a.nFileIndexLow == b.nFileIndexLow
-            && a.nFileSizeHigh == b.nFileSizeHigh && a.nFileSizeLow == b.nFileSizeLow
+        a.dwVolumeSerialNumber == b.dwVolumeSerialNumber
+            && a.nFileIndexHigh == b.nFileIndexHigh
+            && a.nFileIndexLow == b.nFileIndexLow
+            && a.nFileSizeHigh == b.nFileSizeHigh
+            && a.nFileSizeLow == b.nFileSizeLow
             && a.ftLastWriteTime.dwHighDateTime == b.ftLastWriteTime.dwHighDateTime
             && a.ftLastWriteTime.dwLowDateTime == b.ftLastWriteTime.dwLowDateTime
     }
 
     fn open(path: &Path, directory: bool) -> Result<File, RuntimeError> {
         let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
-        if wide.contains(&0) { return Err(unsafe_file("A staging path contains a NUL.")); }
+        if wide.contains(&0) {
+            return Err(unsafe_file("A staging path contains a NUL."));
+        }
         wide.push(0);
         // Holding the cache directory without delete sharing prevents replacement. Holding a
         // source without write/delete sharing prevents a writer changing it during the copy.
         let access = if directory { FILE_READ_ATTRIBUTES } else { GENERIC_READ | DELETE };
         let sharing = if directory { FILE_SHARE_READ | FILE_SHARE_WRITE } else { FILE_SHARE_READ };
         let handle = unsafe {
-            CreateFileW(wide.as_ptr(), access, sharing, std::ptr::null(), OPEN_EXISTING,
-                FILE_FLAG_OPEN_REPARSE_POINT | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 }, std::ptr::null_mut())
+            CreateFileW(
+                wide.as_ptr(),
+                access,
+                sharing,
+                std::ptr::null(),
+                OPEN_EXISTING,
+                FILE_FLAG_OPEN_REPARSE_POINT | if directory { FILE_FLAG_BACKUP_SEMANTICS } else { 0 },
+                std::ptr::null_mut(),
+            )
         };
-        if handle == INVALID_HANDLE_VALUE { return Err(unsafe_file("The staging path could not be opened safely.")); }
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(unsafe_file("The staging path could not be opened safely."));
+        }
         let file = unsafe { File::from_raw_handle(handle) };
         let info = information(&file)?;
         if info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT != 0
             || (info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY != 0) != directory
-            || !daw_bridge::lifecycle::is_owner_only(path) {
+            || !daw_bridge::lifecycle::is_owner_only(path)
+        {
             return Err(unsafe_file("The staging path must already be owner-only and must not be a reparse point."));
         }
         Ok(file)
@@ -3948,8 +4250,12 @@ mod restricted_staging {
         }
         let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
         let deleted = unsafe {
-            SetFileInformationByHandle(file.as_raw_handle(), FileDispositionInfo, (&disposition as *const FILE_DISPOSITION_INFO).cast(),
-                std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32)
+            SetFileInformationByHandle(
+                file.as_raw_handle(),
+                FileDispositionInfo,
+                (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+                std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+            )
         };
         Ok((deleted == 0).then(|| "The verified bridge staging file could not be deleted by handle; it was left in place.".into()))
     }
@@ -3957,10 +4263,14 @@ mod restricted_staging {
     fn final_path(file: &File) -> Result<PathBuf, RuntimeError> {
         let flags = FILE_NAME_NORMALIZED | VOLUME_NAME_DOS;
         let size = unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), std::ptr::null_mut(), 0, flags) };
-        if size == 0 || size > 32768 { return Err(unsafe_file("The opened file's final path could not be established.")); }
+        if size == 0 || size > 32768 {
+            return Err(unsafe_file("The opened file's final path could not be established."));
+        }
         let mut buffer = vec![0u16; size as usize];
         let written = unsafe { GetFinalPathNameByHandleW(file.as_raw_handle(), buffer.as_mut_ptr(), size, flags) };
-        if written == 0 || written >= size { return Err(unsafe_file("The opened file's final path changed while being read.")); }
+        if written == 0 || written >= size {
+            return Err(unsafe_file("The opened file's final path changed while being read."));
+        }
         Ok(PathBuf::from(std::ffi::OsString::from_wide(&buffer[..written as usize])))
     }
 
@@ -3992,7 +4302,9 @@ mod restricted_staging {
             let mut chars = raw.chars();
             warning.push_str(" Source \"");
             warning.extend(chars.by_ref().take(48).map(|c| if c == '"' { '\'' } else { c }));
-            if chars.next().is_some() { warning.push('…'); }
+            if chars.next().is_some() {
+                warning.push('…');
+            }
             warning.push_str("\".");
             eprintln!("kumi listen: {warning} Source: {}", returned.display());
             warning
@@ -4004,17 +4316,35 @@ mod restricted_staging {
         remove_handle(&source, &before).map(|warning| source_warning(warning, returned))
     }
 
-    pub(super) fn copy(cache: &Path, scratch: &Path, _quarantine_root: &Path, returned: &Path, signal: &Signal) -> Result<Staged, RuntimeError> {
+    pub(super) fn copy(
+        cache: &Path,
+        scratch: &Path,
+        _quarantine_root: &Path,
+        returned: &Path,
+        signal: &Signal,
+    ) -> Result<Staged, RuntimeError> {
         copy_after_open(cache, scratch, returned, signal, || {})
     }
 
-    fn copy_after_open(cache: &Path, scratch: &Path, returned: &Path, signal: &Signal, after_open: impl FnOnce()) -> Result<Staged, RuntimeError> {
+    fn copy_after_open(
+        cache: &Path,
+        scratch: &Path,
+        returned: &Path,
+        signal: &Signal,
+        after_open: impl FnOnce(),
+    ) -> Result<Staged, RuntimeError> {
         let (_cache, mut source, before) = verified_source(cache, returned)?;
         let _scratch = open(scratch, true)?;
         let length = (u64::from(before.nFileSizeHigh) << 32) | u64::from(before.nFileSizeLow);
         let target = scratch.join(format!("render-{}.wav", uuid::Uuid::new_v4()));
-        let mut output = OpenOptions::new().read(true).write(true).access_mode(GENERIC_READ | GENERIC_WRITE | DELETE).create_new(true).share_mode(0)
-            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(&target)
+        let mut output = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .access_mode(GENERIC_READ | GENERIC_WRITE | DELETE)
+            .create_new(true)
+            .share_mode(0)
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .open(&target)
             .map_err(|_| unsafe_file("A private scratch copy could not be created."))?;
         after_open();
         let result = (|| {
@@ -4026,9 +4356,13 @@ mod restricted_staging {
             loop {
                 signal.check()?;
                 let count = source.read(&mut buffer).map_err(|_| unsafe_file("The render could not be read."))?;
-                if count == 0 { break; }
+                if count == 0 {
+                    break;
+                }
                 copied += count as u64;
-                if copied > length || copied > MAX_BYTES { return Err(unsafe_file("The render grew while being copied.")); }
+                if copied > length || copied > MAX_BYTES {
+                    return Err(unsafe_file("The render grew while being copied."));
+                }
                 output.write_all(&buffer[..count]).map_err(|_| unsafe_file("The render could not be copied into scratch."))?;
             }
             if copied != length || !same(&before, &information(&source)?) {
@@ -4041,18 +4375,27 @@ mod restricted_staging {
             let seconds = wav_seconds(&mut output).map_err(|_| unsafe_file("The rendered file is not a complete PCM WAV."))?;
             let warning = source_warning(remove_handle(&source, &before)?, returned);
             if !seconds.is_finite() || seconds > 65. {
-                return Err(HearFailure::Unsure { reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into() }.into());
+                return Err(HearFailure::Unsure {
+                    reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into(),
+                }
+                .into());
             }
             Ok(Staged { path: copied_path, seconds, warning })
         })();
         if matches!(result, Err(RuntimeError::Aborted)) {
             match remove_handle(&source, &before) {
-                Ok(warning) => { source_warning(warning, returned); }
-                Err(error) => eprintln!("kumi listen: cancelled staging left its source untouched: {error}; source: {}", returned.display()),
+                Ok(warning) => {
+                    source_warning(warning, returned);
+                }
+                Err(error) => {
+                    eprintln!("kumi listen: cancelled staging left its source untouched: {error}; source: {}", returned.display())
+                }
             }
         }
         if result.is_err() {
-            if let Ok(info) = information(&output) { let _ = remove_handle(&output, &info); }
+            if let Ok(info) = information(&output) {
+                let _ = remove_handle(&output, &info);
+            }
         }
         drop(output);
         result
@@ -4067,7 +4410,9 @@ mod restricted_staging {
             let home = tempfile::tempdir().unwrap();
             let cache = home.path().join("cache");
             let scratch = home.path().join("scratch");
-            for path in [&cache, &scratch] { daw_bridge::owner::create_owner_only_dir(path).unwrap(); }
+            for path in [&cache, &scratch] {
+                daw_bridge::owner::create_owner_only_dir(path).unwrap();
+            }
             let source = cache.join("this-call.wav");
             let neighbor = cache.join("neighbor.wav");
             let wav = kumi_media::audio::decode::float_wav(&[vec![0.; 10]], 10);
@@ -4086,7 +4431,9 @@ mod restricted_staging {
             let home = tempfile::tempdir().unwrap();
             let cache = home.path().join("cache");
             let scratch = home.path().join("scratch");
-            for path in [&cache, &scratch] { daw_bridge::owner::create_owner_only_dir(path).unwrap(); }
+            for path in [&cache, &scratch] {
+                daw_bridge::owner::create_owner_only_dir(path).unwrap();
+            }
             let source = cache.join("this-call.wav");
             let neighbor = cache.join("neighbor.wav");
             let wav = kumi_media::audio::decode::float_wav(&[vec![0.; 10]], 10);

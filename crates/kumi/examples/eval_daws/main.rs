@@ -360,7 +360,10 @@ struct Dirs {
 async fn run_scenario(model: &Model, scenario: &Scenario, home: &Path, dirs: &Dirs) -> Result<Outcome, RuntimeError> {
     let started = Instant::now();
     let failure = |e: String| RuntimeError::plain(e);
-    let host = Rc::new(InProcess { host: Arc::new(Host::new(scenario.daw, home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
+    let host = Rc::new(InProcess {
+        host: Arc::new(Host::new(scenario.daw, home, daw_mcp_server::host::ListeningMode::Standalone)),
+        id: Cell::new(0),
+    });
     // (a DAW just started takes a while to load its bridge)
     let mut status = Value::Null;
     for _ in 0..60 {

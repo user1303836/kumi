@@ -135,7 +135,8 @@ async fn session(daw: Daw, home: &Path, steps: Vec<Step>, question: &str) -> (Ve
 
 /// [`session`], with listening on when `listen` is (the listen tool and the DAW's own listening tools).
 async fn session_with(daw: Daw, home: &Path, steps: Vec<Step>, question: &str, listen: bool) -> (Vec<String>, Vec<SessionEvent>) {
-    let host = Rc::new(InProcess { host: Arc::new(Host::new(daw, home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
+    let host =
+        Rc::new(InProcess { host: Arc::new(Host::new(daw, home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
     let (profile, create): (DawProfile, fn(OwnOptions) -> Rc<dyn Integration>) = match daw {
         Daw::Reaper => (DawProfile::REAPER, kumi_daw_reaper::create_reaper_integration),
         Daw::Renoise => (DawProfile::RENOISE, kumi_daw_renoise::create_renoise_integration),

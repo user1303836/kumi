@@ -367,19 +367,31 @@ impl RenoiseScript {
     fn track_read(state: &State, asked: &Value) -> Option<Result<Value, (String, String)>> {
         let reference = asked.get("ref")?.as_str()?;
         let number = reference.strip_prefix(EPOCH)?.strip_prefix(":track:")?.parse::<u64>().ok()?;
-        let page = state.cases.iter().find(|case| {
-            case.method == "read" && case.params["kind"] == "track"
-                && case.params["limit"] == MAX_LIMIT && case.params.get("cursor").is_none()
-        })?.response.as_ref().ok()?;
+        let page = state
+            .cases
+            .iter()
+            .find(|case| {
+                case.method == "read"
+                    && case.params["kind"] == "track"
+                    && case.params["limit"] == MAX_LIMIT
+                    && case.params.get("cursor").is_none()
+            })?
+            .response
+            .as_ref()
+            .ok()?;
         let Some(mut row) = page["items"].as_array()?.iter().find(|row| row["ref"] == reference).cloned() else {
             return Some(Err(("bad-params".into(), "nothing is at that track ref".into())));
         };
-        if let Some(name) = state.names.get(&number) { row["name"] = json!(name); }
+        if let Some(name) = state.names.get(&number) {
+            row["name"] = json!(name);
+        }
         if let Some(db) = state.volume.get(&number) {
             row["volumeDb"] = json!(db);
             row["preVolumeDb"] = json!(db);
         }
-        if let Some(muted) = state.mute.get(&number) { row["mute"] = json!(if *muted { "muted" } else { "active" }); }
+        if let Some(muted) = state.mute.get(&number) {
+            row["mute"] = json!(if *muted { "muted" } else { "active" });
+        }
         if let Some(added) = state.devices.get(&number) {
             row["deviceCount"] = json!(row["deviceCount"].as_u64().unwrap_or(0) + added);
         }
@@ -564,10 +576,17 @@ impl RenoiseScript {
             return Err(bad("invalid range end"));
         }
         let rows = |kind: &str| {
-            state.cases.iter().find(|case| {
-                case.method == "read" && case.params["kind"] == kind && case.params.get("cursor").is_none()
-                    && (kind != "track" || case.params["limit"] == MAX_LIMIT)
-            }).and_then(|case| case.response.as_ref().ok()).and_then(|page| page["items"].as_array())
+            state
+                .cases
+                .iter()
+                .find(|case| {
+                    case.method == "read"
+                        && case.params["kind"] == kind
+                        && case.params.get("cursor").is_none()
+                        && (kind != "track" || case.params["limit"] == MAX_LIMIT)
+                })
+                .and_then(|case| case.response.as_ref().ok())
+                .and_then(|page| page["items"].as_array())
         };
         let song = rows("song").and_then(|rows| rows.first()).ok_or_else(unsupported)?;
         let bpm = state.song["bpm"].as_f64().filter(|n| n.is_finite() && *n > 0.).ok_or_else(unsupported)?;
@@ -590,21 +609,26 @@ impl RenoiseScript {
         let last = ((end.min(song_end) * lpb - 1e-9).ceil()).max(first + 1.);
         let line_seconds = 60. / (bpm * lpb);
         let boundary = |beat: f64| (beat - (beat * lpb).round() / lpb).abs() <= 1e-9;
-        let tracks = rows("track").ok_or_else(unsupported)?.iter().filter(|row| row["type"] != "master").map(|row| {
-            let track = row["index"].as_u64().ok_or_else(unsupported)?;
-            let mute = match state.mute.get(&track) {
-                Some(true) => 3,
-                Some(false) => 1,
-                None => match row["mute"].as_str() {
-                    Some("active") => 1,
-                    Some("off") => 2,
-                    Some("muted") => 3,
-                    _ => return Err(unsupported()),
-                },
-            };
-            let solo = state.solo.get(&track).copied().or_else(|| row["solo"].as_bool()).ok_or_else(unsupported)?;
-            Ok(json!({"ref": format!("{epoch}:track:{track}"), "mute": mute, "solo": solo}))
-        }).collect::<Result<Vec<_>, (String, String)>>()?;
+        let tracks = rows("track")
+            .ok_or_else(unsupported)?
+            .iter()
+            .filter(|row| row["type"] != "master")
+            .map(|row| {
+                let track = row["index"].as_u64().ok_or_else(unsupported)?;
+                let mute = match state.mute.get(&track) {
+                    Some(true) => 3,
+                    Some(false) => 1,
+                    None => match row["mute"].as_str() {
+                        Some("active") => 1,
+                        Some("off") => 2,
+                        Some("muted") => 3,
+                        _ => return Err(unsupported()),
+                    },
+                };
+                let solo = state.solo.get(&track).copied().or_else(|| row["solo"].as_bool()).ok_or_else(unsupported)?;
+                Ok(json!({"ref": format!("{epoch}:track:{track}"), "mute": mute, "solo": solo}))
+            })
+            .collect::<Result<Vec<_>, (String, String)>>()?;
         Ok(json!({
             "schema": 1, "seconds": (last - first) * line_seconds,
             "offset": (from - first / lpb).max(0.) * 60. / bpm,

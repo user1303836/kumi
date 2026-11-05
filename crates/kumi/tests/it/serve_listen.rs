@@ -67,7 +67,10 @@ case!(preview_is_read_only_and_a_restored_capture_is_retained_once, async {
         assert_eq!(preview["prepare_seconds"], 0);
         no_audio(&preview);
         assert!(listening.renders().is_empty());
-        assert!(!lab.ctx.paths().kumi_home.join("serve").join(format!("{}.lease", daw.id())).exists(), "preview never takes the writer lease");
+        assert!(
+            !lab.ctx.paths().kumi_home.join("serve").join(format!("{}.lease", daw.id())).exists(),
+            "preview never takes the writer lease"
+        );
         assert!(!lab.home.path().join("state/scratch/listen").exists());
         assert!(!lab.home.path().join("state/quarantine").exists());
         assert!(lab.ctx.history().rows(10).is_empty());
@@ -202,11 +205,17 @@ case!(capture_refuses_missing_or_invalid_host_bounds_before_rendering, async {
     no_audio(&missing);
     let args = approved_args(&mut wire, args).await;
     for (index, (field, value)) in [
-        ("estimated_seconds", json!(0)), ("estimated_seconds", json!(60.001)),
-        ("deadline_seconds", json!(0)), ("deadline_seconds", json!(361)),
-        ("prepare_seconds", json!(121)), ("prepare_seconds", json!(0.5)),
+        ("estimated_seconds", json!(0)),
+        ("estimated_seconds", json!(60.001)),
+        ("deadline_seconds", json!(0)),
+        ("deadline_seconds", json!(361)),
+        ("prepare_seconds", json!(121)),
+        ("prepare_seconds", json!(0.5)),
         ("prepare_seconds", json!(1)),
-    ].into_iter().enumerate() {
+    ]
+    .into_iter()
+    .enumerate()
+    {
         let mut invalid = args.clone();
         invalid["_listen"][field] = value;
         let (refused, error) = wire.call("listen", invalid, Some(&format!("invalid-budget-{index}"))).await;
@@ -260,15 +269,22 @@ case!(a_native_queued_window_refusal_keeps_the_producers_new_tempo, async {
     let listening = script.listening();
     listening.set_render_preflight(true);
     let bridge = script.clone();
-    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| {
-        let mut config = bridge.config(secret, "/lab/REAPER");
-        let inner = config.respond.take().unwrap();
-        config.respond = Some(Arc::new(move |method, params| {
-            if method == "listen_status" { bridge.set_tempo(60.); }
-            inner(method, params)
-        }));
-        config
-    }))).await;
+    let lab = Lab::new(
+        DawId::Reaper,
+        Daw::Reaper,
+        Some(Box::new(move |secret| {
+            let mut config = bridge.config(secret, "/lab/REAPER");
+            let inner = config.respond.take().unwrap();
+            config.respond = Some(Arc::new(move |method, params| {
+                if method == "listen_status" {
+                    bridge.set_tempo(60.);
+                }
+                inner(method, params)
+            }));
+            config
+        })),
+    )
+    .await;
     listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Reaper).root.join("listening"));
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (key, epoch, _, _) = looked(&mut wire).await;

@@ -266,10 +266,14 @@ fn render_preflight_is_a_complete_pure_snapshot_and_reads_restored_state() {
             assert_eq!(state["mutes"][index], json!({"ref": reference, "value": if track.mute { 1.0 } else { 0.0 }}));
         }
     });
-    rig.ask("render_start", json!({
-        "jobId": "preflight-restore", "sources": [{"id": "mix", "what": "master", "beforeChain": true}],
-        "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60, "epoch": epoch,
-    })).unwrap();
+    rig.ask(
+        "render_start",
+        json!({
+            "jobId": "preflight-restore", "sources": [{"id": "mix", "what": "master", "beforeChain": true}],
+            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60, "epoch": epoch,
+        }),
+    )
+    .unwrap();
     assert_eq!(rig.until_ended("preflight-restore")["state"], "done");
     assert_eq!(rig.ask("read", preflight_request(&epoch, 0.0, 1.0)).unwrap(), before);
     fake::with(|s| s.dirty = true);
@@ -278,14 +282,16 @@ fn render_preflight_is_a_complete_pure_snapshot_and_reads_restored_state() {
 
 #[test]
 fn render_preflight_uses_the_exact_tempo_map_across_the_window() {
-    let rig = Rig::with_project(|| fake::with(|s| {
-        s.bpm = 120.0;
-        s.integrate_tempo_map = true;
-        s.tempo_markers = vec![
-            fake::FakeTempo { time: 0.0, bpm: 120.0, num: 4, denom: 4, linear: false },
-            fake::FakeTempo { time: 2.0, bpm: 60.0, num: 4, denom: 4, linear: false },
-        ];
-    }));
+    let rig = Rig::with_project(|| {
+        fake::with(|s| {
+            s.bpm = 120.0;
+            s.integrate_tempo_map = true;
+            s.tempo_markers = vec![
+                fake::FakeTempo { time: 0.0, bpm: 120.0, num: 4, denom: 4, linear: false },
+                fake::FakeTempo { time: 2.0, bpm: 60.0, num: 4, denom: 4, linear: false },
+            ];
+        })
+    });
     let epoch = rig.epoch();
     let writes = crate::reaper::writes();
     // Beat 2 is second 1; beat 8 is second 6. Six beats at the current 120 BPM would be wrong (3 s).
@@ -297,9 +303,19 @@ fn render_preflight_uses_the_exact_tempo_map_across_the_window() {
 #[test]
 fn render_preflight_refuses_missing_readers_partial_state_and_stale_epochs() {
     for name in [
-        "GetSetProjectInfo", "GetSetProjectInfo_String", "projectconfig_var_getoffs", "projectconfig_var_addr",
-        "CountTracks", "GetTrack", "GetMasterTrack", "GetMediaTrackInfo_Value", "GetSetMediaTrackInfo_String",
-        "GetSet_LoopTimeRange2", "IsProjectDirty", "GetPlayStateEx", "TimeMap2_QNToTime",
+        "GetSetProjectInfo",
+        "GetSetProjectInfo_String",
+        "projectconfig_var_getoffs",
+        "projectconfig_var_addr",
+        "CountTracks",
+        "GetTrack",
+        "GetMasterTrack",
+        "GetMediaTrackInfo_Value",
+        "GetSetMediaTrackInfo_String",
+        "GetSet_LoopTimeRange2",
+        "IsProjectDirty",
+        "GetPlayStateEx",
+        "TimeMap2_QNToTime",
     ] {
         fake::lab_project();
         let api = fake::api_without(&[name]);
@@ -307,7 +323,11 @@ fn render_preflight_refuses_missing_readers_partial_state_and_stale_epochs() {
         let reads = Reads::default();
         let writes = crate::reaper::writes();
         assert!(!render::preflight_supported(&reaper), "{name}");
-        assert_eq!(reads.read(&reaper, &json!({"kind": "render_preflight", "range": {"fromBeat": 0, "beats": 1}})).unwrap_err().0, "unsupported", "{name}");
+        assert_eq!(
+            reads.read(&reaper, &json!({"kind": "render_preflight", "range": {"fromBeat": 0, "beats": 1}})).unwrap_err().0,
+            "unsupported",
+            "{name}"
+        );
         assert_eq!(crate::reaper::writes(), writes);
     }
     let rig = Rig::new();
@@ -335,10 +355,15 @@ fn render_preflight_and_guarded_planning_refuse_running_transport_without_writes
         fake::with(|s| s.play_bits = bits);
         let writes = crate::reaper::writes();
         assert!(rig.ask("read", preflight_request(&epoch, 0.0, 1.0)).is_err());
-        assert!(rig.ask("render_start", json!({
-            "jobId": "running", "sources": [{"id": "mix", "what": "master"}],
-            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
-        })).is_err());
+        assert!(rig
+            .ask(
+                "render_start",
+                json!({
+                    "jobId": "running", "sources": [{"id": "mix", "what": "master"}],
+                    "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
+                })
+            )
+            .is_err());
         assert_eq!(crate::reaper::writes(), writes);
         assert!(rig.board().active().is_none());
         assert_eq!(fake::with(|s| s.play_bits), bits);
@@ -351,42 +376,66 @@ fn guarded_render_cap_and_invalid_caps_refuse_before_files_jobs_or_daw_writes() 
     let writes = crate::reaper::writes();
     let existed = rig.folder().exists();
     for (cap, beats, pre_roll) in [
-        (json!(60), 121.0, 0.0), (json!(0), 1.0, 0.0), (json!(-1), 1.0, 0.0),
-        (json!(61), 1.0, 0.0), (Value::Null, 1.0, 0.0), (json!("60"), 1.0, 0.0),
+        (json!(60), 121.0, 0.0),
+        (json!(0), 1.0, 0.0),
+        (json!(-1), 1.0, 0.0),
+        (json!(61), 1.0, 0.0),
+        (Value::Null, 1.0, 0.0),
+        (json!("60"), 1.0, 0.0),
         (json!(60), 1.0, 1.0),
     ] {
-        assert!(rig.ask("render_start", json!({
-            "jobId": "cap", "sources": [{"id": "mix", "what": "master"}],
-            "range": {"fromBeat": 0, "beats": beats}, "maxSeconds": cap, "preRollBeats": pre_roll,
-        })).is_err());
+        assert!(rig
+            .ask(
+                "render_start",
+                json!({
+                    "jobId": "cap", "sources": [{"id": "mix", "what": "master"}],
+                    "range": {"fromBeat": 0, "beats": beats}, "maxSeconds": cap, "preRollBeats": pre_roll,
+                })
+            )
+            .is_err());
         assert_eq!(crate::reaper::writes(), writes);
         assert_eq!(rig.folder().exists(), existed);
         assert!(rig.board().active().is_none());
     }
     // The ordinary renderer still accepts this duration with no cap.
-    assert!(rig.ask("render_start", json!({
-        "jobId": "standalone-cap", "sources": [{"id": "mix", "what": "master"}],
-        "range": {"fromBeat": 0, "beats": 121},
-    })).is_ok());
+    assert!(rig
+        .ask(
+            "render_start",
+            json!({
+                "jobId": "standalone-cap", "sources": [{"id": "mix", "what": "master"}],
+                "range": {"fromBeat": 0, "beats": 121},
+            })
+        )
+        .is_ok());
 }
 
 #[test]
 fn guarded_render_rechecks_queued_tempo_and_transport_before_any_execution_effect() {
     for play_bits in [0, 1, 4] {
         let rig = Rig::with_project(|| fake::with(|s| s.bpm = 120.0));
-        rig.ask("render_start", json!({
-            "jobId": "queued-cap", "sources": [{"id": "mix", "what": "master"}],
-            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 0.5,
-        })).unwrap();
+        rig.ask(
+            "render_start",
+            json!({
+                "jobId": "queued-cap", "sources": [{"id": "mix", "what": "master"}],
+                "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 0.5,
+            }),
+        )
+        .unwrap();
         fake::with(|s| {
-            if play_bits == 0 { s.bpm = 60.; } else { s.play_bits = play_bits; }
+            if play_bits == 0 {
+                s.bpm = 60.;
+            } else {
+                s.play_bits = play_bits;
+            }
         });
         let writes = crate::reaper::writes();
         let settings = render_settings();
         let files = files_in(&rig.folder());
         rig.tick();
         assert_eq!(rig.status("queued-cap")["state"], "failed");
-        if play_bits == 0 { assert_eq!(rig.status("queued-cap")["code"], "stale"); }
+        if play_bits == 0 {
+            assert_eq!(rig.status("queued-cap")["code"], "stale");
+        }
         assert_eq!(crate::reaper::writes(), writes);
         assert_eq!(render_settings(), settings);
         assert_eq!(files_in(&rig.folder()), files);
@@ -398,10 +447,14 @@ fn guarded_render_rechecks_queued_tempo_and_transport_before_any_execution_effec
 #[test]
 fn guarded_render_replans_queued_beats_instead_of_rendering_stale_seconds() {
     let rig = Rig::with_project(|| fake::with(|s| s.bpm = 120.0));
-    rig.ask("render_start", json!({
-        "jobId": "replanned", "sources": [{"id": "mix", "what": "master"}],
-        "range": {"fromBeat": 2, "beats": 1}, "maxSeconds": 60,
-    })).unwrap();
+    rig.ask(
+        "render_start",
+        json!({
+            "jobId": "replanned", "sources": [{"id": "mix", "what": "master"}],
+            "range": {"fromBeat": 2, "beats": 1}, "maxSeconds": 60,
+        }),
+    )
+    .unwrap();
     fake::with(|s| s.bpm = 60.0);
     assert_eq!(rig.until_ended("replanned")["state"], "done");
     fake::with(|s| {
@@ -419,18 +472,28 @@ fn guarded_render_accepts_the_exact_cap_and_rechecks_items_before_accessor_creat
     let reaper = Reaper::new(&api);
     let reads = Reads::default();
     let dir = tempfile::tempdir().unwrap();
-    let plan = render::plan(&reaper, &reads, &json!({
-        "jobId": "exact-cap", "sources": [{"id": "mix", "what": "master"}],
-        "range": {"fromBeat": 0, "beats": 120}, "maxSeconds": 60,
-    }), dir.path()).unwrap();
+    let plan = render::plan(
+        &reaper,
+        &reads,
+        &json!({
+            "jobId": "exact-cap", "sources": [{"id": "mix", "what": "master"}],
+            "range": {"fromBeat": 0, "beats": 120}, "maxSeconds": 60,
+        }),
+        dir.path(),
+    )
+    .unwrap();
     assert_eq!(plan.seconds(), 60.0);
 
     let rig = Rig::with_project(|| fake::with(|s| s.bpm = 120.0));
     let epoch = rig.epoch();
-    rig.ask("render_start", json!({
-        "jobId": "queued-items", "sources": [{"id": "items", "what": "track", "ref": "r:track:{BBBB}", "stage": "items"}],
-        "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60, "epoch": epoch,
-    })).unwrap();
+    rig.ask(
+        "render_start",
+        json!({
+            "jobId": "queued-items", "sources": [{"id": "items", "what": "track", "ref": "r:track:{BBBB}", "stage": "items"}],
+            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60, "epoch": epoch,
+        }),
+    )
+    .unwrap();
     fake::with(|s| s.bpm = 0.5);
     let writes = crate::reaper::writes();
     rig.tick();
@@ -472,10 +535,15 @@ fn guarded_render_refuses_unsafe_cache_without_repairing_permissions() {
     let target = rig.dir.path().join("elsewhere");
     daw_bridge::owner::create_owner_only_dir(&target).unwrap();
     symlink(&target, rig.folder()).unwrap();
-    assert!(rig.ask("render_start", json!({
-        "jobId": "symlink-cache", "sources": [{"id": "mix", "what": "master"}],
-        "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
-    })).is_err());
+    assert!(rig
+        .ask(
+            "render_start",
+            json!({
+                "jobId": "symlink-cache", "sources": [{"id": "mix", "what": "master"}],
+                "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
+            })
+        )
+        .is_err());
     assert!(files_in(&target).is_empty());
 }
 

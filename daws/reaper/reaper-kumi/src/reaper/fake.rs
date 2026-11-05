@@ -1051,7 +1051,11 @@ fn tempo_time(s: &State, value: f64, to_time: bool) -> f64 {
         bpm = marker.bpm;
         linear = marker.linear;
     }
-    if to_time { at + (value - beat) * 60.0 / bpm } else { beat + (value - at) * bpm / 60.0 }
+    if to_time {
+        at + (value - beat) * 60.0 / bpm
+    } else {
+        beat + (value - at) * bpm / 60.0
+    }
 }
 
 unsafe extern "C" fn time_map2_time_to_qn(_proj: *mut ReaProject, time: f64) -> f64 {

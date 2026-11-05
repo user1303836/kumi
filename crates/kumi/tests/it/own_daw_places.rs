@@ -182,7 +182,10 @@ impl Own {
         let mut config = config(ensure_secret(&paths.secret()).unwrap());
         config.discovery_dir = Some(paths.discovery());
         let simulator = Simulator::start(config).await.unwrap();
-        let host = Rc::new(in_process::InProcess { host: Arc::new(Host::new(daw, dir, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) });
+        let host = Rc::new(in_process::InProcess {
+            host: Arc::new(Host::new(daw, dir, daw_mcp_server::host::ListeningMode::Standalone)),
+            id: Cell::new(0),
+        });
         let home = dir.to_path_buf();
         let changes: Rc<RefCell<Vec<ChangeRecord>>> = Rc::default();
         let into = changes.clone();

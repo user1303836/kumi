@@ -72,8 +72,10 @@ mod tests {
         assert_eq!(
             parse_args(&strings(&["--daw", "renoise"]), &none, home.clone()).unwrap(),
             Options {
-                daw: Daw::Renoise, kumi_home: PathBuf::from("/h/.kumi"),
-                listening: host::ListeningMode::Standalone, keep_identity: false,
+                daw: Daw::Renoise,
+                kumi_home: PathBuf::from("/h/.kumi"),
+                listening: host::ListeningMode::Standalone,
+                keep_identity: false,
             }
         );
         let env = |name: &str| (name == "KUMI_DAW").then(|| "reaper".to_string());

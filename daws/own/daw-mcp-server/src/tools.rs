@@ -28,8 +28,23 @@ pub fn kinds(daw: Daw) -> Kinds {
     match daw {
         Daw::Reaper => Kinds {
             read: &[
-                "project", "track", "item", "take", "fx", "param", "send", "marker", "region", "note", "event", "envelope", "point",
-                "autoitem", "call", "spans", "render_preflight",
+                "project",
+                "track",
+                "item",
+                "take",
+                "fx",
+                "param",
+                "send",
+                "marker",
+                "region",
+                "note",
+                "event",
+                "envelope",
+                "point",
+                "autoitem",
+                "call",
+                "spans",
+                "render_preflight",
             ],
             bodies: &["arrange", "midi", "fx", "routing", "mixer", "levels"],
             // (r-tracks) The project's notes, grid and timebase make no step in REAPER's history either (7.82 lab).

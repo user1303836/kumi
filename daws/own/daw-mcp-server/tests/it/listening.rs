@@ -148,8 +148,7 @@ async fn listening_maintenance_respects_the_startup_policy_and_keeps_per_call_cl
             let listening = if daw == Daw::Reaper { reaper.listening() } else { renoise.listening() };
             listening.set_render_preflight(true);
             listening.set_folder(&folder);
-            let mut config =
-                if daw == Daw::Reaper { reaper.config(secret, "/lab/REAPER") } else { renoise.config(secret, "/lab/Renoise") };
+            let mut config = if daw == Daw::Reaper { reaper.config(secret, "/lab/REAPER") } else { renoise.config(secret, "/lab/Renoise") };
             config.discovery_dir = Some(paths.discovery());
             let _simulator = Simulator::start(config).await.unwrap();
             let host = Host::new(daw, home.path(), mode);

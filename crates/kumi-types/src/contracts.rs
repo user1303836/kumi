@@ -234,10 +234,15 @@ pub struct HearApproval {
 impl HearApproval {
     /// A fresh plan must fit the approved duration and native budget, even after a tempo change.
     pub fn covers(&self, seconds: f64, deadline_seconds: u64) -> bool {
-        self.seconds.is_finite() && self.seconds > 0. && self.seconds <= 60.
+        self.seconds.is_finite()
+            && self.seconds > 0.
+            && self.seconds <= 60.
             && (1..=360).contains(&self.deadline_seconds)
-            && seconds.is_finite() && seconds > 0. && seconds <= self.seconds
-            && deadline_seconds > 0 && deadline_seconds <= u64::from(self.deadline_seconds)
+            && seconds.is_finite()
+            && seconds > 0.
+            && seconds <= self.seconds
+            && deadline_seconds > 0
+            && deadline_seconds <= u64::from(self.deadline_seconds)
     }
 }
 

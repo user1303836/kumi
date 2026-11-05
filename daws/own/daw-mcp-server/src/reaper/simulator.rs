@@ -20,11 +20,29 @@ pub const LISTENING_METHODS: [&str; 8] =
     ["render_start", "capture_start", "listen_status", "listen_cancel", "audition", "audition_stop", "audio_file", "scratch"];
 const BODIES: [&str; 6] = ["arrange", "midi", "fx", "routing", "mixer", "levels"];
 const RENDER_NUMBERS: [&str; 23] = [
-    "RENDER_SETTINGS", "RENDER_BOUNDSFLAG", "RENDER_CHANNELS", "RENDER_SRATE", "RENDER_STARTPOS", "RENDER_ENDPOS",
-    "RENDER_TAILFLAG", "RENDER_TAILMS", "RENDER_ADDTOPROJ", "RENDER_DITHER", "RENDER_NORMALIZE",
-    "RENDER_NORMALIZE_TARGET", "RENDER_BRICKWALL", "RENDER_FADEIN", "RENDER_FADEOUT", "RENDER_FADEINSHAPE",
-    "RENDER_FADEOUTSHAPE", "RENDER_FADELPF", "RENDER_PADSTART", "RENDER_PADEND", "RENDER_TRIMSTART",
-    "RENDER_TRIMEND", "RENDER_DELAY",
+    "RENDER_SETTINGS",
+    "RENDER_BOUNDSFLAG",
+    "RENDER_CHANNELS",
+    "RENDER_SRATE",
+    "RENDER_STARTPOS",
+    "RENDER_ENDPOS",
+    "RENDER_TAILFLAG",
+    "RENDER_TAILMS",
+    "RENDER_ADDTOPROJ",
+    "RENDER_DITHER",
+    "RENDER_NORMALIZE",
+    "RENDER_NORMALIZE_TARGET",
+    "RENDER_BRICKWALL",
+    "RENDER_FADEIN",
+    "RENDER_FADEOUT",
+    "RENDER_FADEINSHAPE",
+    "RENDER_FADEOUTSHAPE",
+    "RENDER_FADELPF",
+    "RENDER_PADSTART",
+    "RENDER_PADEND",
+    "RENDER_TRIMSTART",
+    "RENDER_TRIMEND",
+    "RENDER_DELAY",
 ];
 const RENDER_TEXTS: [&str; 5] = ["RENDER_FILE", "RENDER_PATTERN", "RENDER_FORMAT", "RENDER_FORMAT2", "RENDER_EXTRAFILEDIR"];
 
@@ -1570,15 +1588,20 @@ impl ReaperScript {
         }
         let mut render_state = state.render_state.clone();
         if RENDER_NUMBERS.iter().any(|key| render_state["numbers"][*key].as_f64().is_none_or(|n| !n.is_finite()))
-            || RENDER_TEXTS.iter().any(|key| !render_state["texts"][*key].is_string()) {
+            || RENDER_TEXTS.iter().any(|key| !render_state["texts"][*key].is_string())
+        {
             return Err(unsupported());
         }
         let values = |field: &str| -> Result<Vec<Value>, (String, String)> {
-            state.tracks.iter().map(|track| {
-                let reference = track["ref"].as_str().filter(|r| r.starts_with("r:track:")).ok_or_else(unsupported)?;
-                let value = track[field].as_bool().ok_or_else(unsupported)?;
-                Ok(json!({"ref": reference, "value": if value { 1.0 } else { 0.0 }}))
-            }).collect()
+            state
+                .tracks
+                .iter()
+                .map(|track| {
+                    let reference = track["ref"].as_str().filter(|r| r.starts_with("r:track:")).ok_or_else(unsupported)?;
+                    let value = track[field].as_bool().ok_or_else(unsupported)?;
+                    Ok(json!({"ref": reference, "value": if value { 1.0 } else { 0.0 }}))
+                })
+                .collect()
         };
         render_state["selection"] = json!(values("selected")?);
         render_state["mutes"] = json!(values("mute")?);

@@ -205,8 +205,7 @@ fn beat_range(params: &Value) -> Result<(f64, f64), Fault> {
 
 fn beat_times(reaper: &Reaper, proj: Project, from: f64, beats: f64, pre_roll: f64) -> Result<(f64, f64, f64), Fault> {
     let time = |qn: f64| {
-        reaper.time_at_quarter_notes(proj, qn).filter(|n| n.is_finite())
-            .ok_or_else(|| failed("this REAPER can't place beats in time"))
+        reaper.time_at_quarter_notes(proj, qn).filter(|n| n.is_finite()).ok_or_else(|| failed("this REAPER can't place beats in time"))
     };
     let start = time((from - pre_roll).max(0.0))?;
     let at = time(from)?;
@@ -384,8 +383,12 @@ pub fn plan(reaper: &Reaper, reads: &Reads, params: &Value, folder: &Path) -> Re
     }
     let max_seconds = match params.get("maxSeconds") {
         None => None,
-        Some(value) => Some(value.as_f64().filter(|n| n.is_finite() && *n > 0.0 && *n <= 60.0)
-            .ok_or_else(|| bad("maxSeconds: a finite number greater than 0 and at most 60"))?),
+        Some(value) => Some(
+            value
+                .as_f64()
+                .filter(|n| n.is_finite() && *n > 0.0 && *n <= 60.0)
+                .ok_or_else(|| bad("maxSeconds: a finite number greater than 0 and at most 60"))?,
+        ),
     };
     if max_seconds.is_some() {
         if pre_roll != 0.0 {
@@ -510,7 +513,8 @@ impl Plan {
     pub(super) fn recheck_start(&mut self, reaper: &Reaper, reads: &Reads) -> Result<(), Fault> {
         let Some((from, beats, cap)) = self.guarded_range else { return Ok(()) };
         if reaper.current_project().is_none_or(|info| info.ptr != self.proj)
-            || !(reads.epoch() == self.epoch || reads.epoch_is_of(&self.epoch, self.proj)) {
+            || !(reads.epoch() == self.epoch || reads.epoch_is_of(&self.epoch, self.proj))
+        {
             return Err(stale("the project changed before guarded rendering began"));
         }
         stopped(reaper, self.proj)?;

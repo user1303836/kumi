@@ -2246,20 +2246,21 @@ async fn restricted_reaper_refuses_old_bridges_without_rendering_or_auditioning(
             std::fs::write(&neighbor, b"not this call's file").unwrap();
             let since = script.asked().len();
             let request = HearRequest {
-                mix: Some(true), from_beat: Some(0.), beats: Some(8.),
+                mix: Some(true),
+                from_beat: Some(0.),
+                beats: Some(8.),
                 expected_native_epoch: observed.native_epoch.clone(),
-                scratch_dir: Some(scratch_root.join("not-created")), ..Default::default()
+                scratch_dir: Some(scratch_root.join("not-created")),
+                ..Default::default()
             };
-            restricted_preflight_cases(reaper.as_ref(), &request, "unsupported", "r:track:{MISSING}", |playing| script.set_playing(playing)).await;
-            let track = HearRequest {
-                mix: None, tracks: vec![context["tracks"][2]["ref"].as_str().unwrap().into()], ..request.clone()
-            };
+            restricted_preflight_cases(reaper.as_ref(), &request, "unsupported", "r:track:{MISSING}", |playing| {
+                script.set_playing(playing)
+            })
+            .await;
+            let track = HearRequest { mix: None, tracks: vec![context["tracks"][2]["ref"].as_str().unwrap().into()], ..request.clone() };
             assert_hear_refusal(reaper.preview_hear(&track, Signal::new()).await, "unsupported");
             assert_hear_refusal(reaper.hear(&track, Signal::new()).await, "unsupported");
-            assert_hear_refusal(
-                reaper.hear(&HearRequest { beats: Some(256.), ..request.clone() }, Signal::new()).await,
-                "unsupported",
-            );
+            assert_hear_refusal(reaper.hear(&HearRequest { beats: Some(256.), ..request.clone() }, Signal::new()).await, "unsupported");
             // Even a missing or outside scratch is never accessed by a refused capture or its preview.
             let outside = HearRequest { scratch_dir: Some(home.path().join("outside")), ..request };
             assert_hear_refusal(reaper.hear(&outside, Signal::new()).await, "unsupported");
@@ -2300,13 +2301,17 @@ async fn restricted_renoise_refuses_old_bridges_without_exact_duration_preflight
             script.listening().set_steps(u32::MAX);
             script.listening().set_slow_stop(true);
             let request = HearRequest {
-                mix: Some(true), from_beat: Some(0.), beats: Some(8.),
+                mix: Some(true),
+                from_beat: Some(0.),
+                beats: Some(8.),
                 expected_native_epoch: observed.native_epoch.clone(),
-                scratch_dir: Some(scratch_root.join("not-created")), ..Default::default()
+                scratch_dir: Some(scratch_root.join("not-created")),
+                ..Default::default()
             };
             restricted_preflight_cases(renoise.as_ref(), &request, "unsupported", "999:track:1", |playing| {
                 script.set_transport_playing(playing);
-            }).await;
+            })
+            .await;
             assert!(!scratch_root.exists());
             assert_eq!(std::fs::read(&neighbor).unwrap(), b"leave this alone");
             assert!(script.listening().renders().is_empty());
@@ -2344,8 +2349,12 @@ impl RestrictedFixture {
 
     async fn request(&self, observed: &Observation) -> HearRequest {
         let mut request = HearRequest {
-            mix: Some(true), from_beat: Some(0.), beats: Some(8.), scratch_dir: Some(self.scratch.path().into()),
-            expected_native_epoch: observed.native_epoch.clone(), ..Default::default()
+            mix: Some(true),
+            from_beat: Some(0.),
+            beats: Some(8.),
+            scratch_dir: Some(self.scratch.path().into()),
+            expected_native_epoch: observed.native_epoch.clone(),
+            ..Default::default()
         };
         let preview = self.integration.preview_hear(&request, Signal::new()).await.unwrap();
         request.approval = Some(HearApproval { seconds: preview.seconds, deadline_seconds: preview.deadline_seconds as u16 });
@@ -2359,297 +2368,334 @@ async fn wait_for_render(started: impl Fn() -> bool) {
         while !started() {
             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         }
-    }).await.expect("the guarded call dispatched its render");
+    })
+    .await
+    .expect("the guarded call dispatched its render");
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn restricted_reaper_returns_only_private_scratch_audio_without_preroll_or_audition() {
-    tokio::task::LocalSet::new().run_until(async {
-        use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-        let home = tempfile::tempdir().unwrap();
-        let script = ReaperScript::new(3, 0);
-        script.listening().set_render_preflight(true);
-        let simulator = reaper_lab(&script, home.path(), |_| {}).await;
-        let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
-        fixture.integration.start(Signal::new()).await.unwrap();
-        let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let context: Value = serde_json::from_str(&observed.context).unwrap();
-        let request = HearRequest {
-            mix: None, tracks: vec![context["tracks"][2]["ref"].as_str().unwrap().into()], ..fixture.request(&observed).await
-        };
-        let cache = script.listening().folder();
-        assert!(!cache.exists(), "preflight must work before the native cache exists");
-        let preview = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
-        assert_eq!(preview.method, HearMethod::Offline);
-        assert_eq!(preview.seconds, 4.);
-        assert_eq!(preview.deadline_seconds, 240);
-        assert!(!cache.exists(), "preview created no native cache");
-        assert!(script.listening().renders().is_empty());
-        assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
-        std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&cache).unwrap();
-        let neighbor = cache.join("another-call.wav");
-        std::fs::write(&neighbor, b"not our source").unwrap();
-        let takes = fixture.integration.hear(&request, Signal::new()).await.unwrap().unwrap();
-        assert_eq!(takes.len(), 1);
-        assert_eq!(takes[0].label, preview.label);
-        assert_eq!(takes[0].start, 0.);
-        assert_eq!(takes[0].seconds, Some(4.));
-        assert!(!takes[0].live);
-        let copied = Path::new(&takes[0].file);
-        assert_eq!(copied.parent(), Some(fixture.scratch.path().canonicalize().unwrap().as_path()));
-        assert_eq!(std::fs::metadata(copied).unwrap().permissions().mode() & 0o777, 0o600);
-        let rendered = script.listening().renders();
-        assert_eq!(rendered.len(), 1);
-        assert!(script.listening().previews().is_empty(), "never audition after rendering");
-        assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1, "only this call's source was removed");
-        assert_eq!(std::fs::read(neighbor).unwrap(), b"not our source");
-        assert!(std::fs::read_dir(fixture.quarantine.path()).unwrap().next().is_none());
-        fixture.integration.close().await.unwrap();
-        simulator.stop();
-    }).await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            script.listening().set_render_preflight(true);
+            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
+            fixture.integration.start(Signal::new()).await.unwrap();
+            let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
+            let context: Value = serde_json::from_str(&observed.context).unwrap();
+            let request = HearRequest {
+                mix: None,
+                tracks: vec![context["tracks"][2]["ref"].as_str().unwrap().into()],
+                ..fixture.request(&observed).await
+            };
+            let cache = script.listening().folder();
+            assert!(!cache.exists(), "preflight must work before the native cache exists");
+            let preview = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
+            assert_eq!(preview.method, HearMethod::Offline);
+            assert_eq!(preview.seconds, 4.);
+            assert_eq!(preview.deadline_seconds, 240);
+            assert!(!cache.exists(), "preview created no native cache");
+            assert!(script.listening().renders().is_empty());
+            assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
+            std::fs::DirBuilder::new().recursive(true).mode(0o700).create(&cache).unwrap();
+            let neighbor = cache.join("another-call.wav");
+            std::fs::write(&neighbor, b"not our source").unwrap();
+            let takes = fixture.integration.hear(&request, Signal::new()).await.unwrap().unwrap();
+            assert_eq!(takes.len(), 1);
+            assert_eq!(takes[0].label, preview.label);
+            assert_eq!(takes[0].start, 0.);
+            assert_eq!(takes[0].seconds, Some(4.));
+            assert!(!takes[0].live);
+            let copied = Path::new(&takes[0].file);
+            assert_eq!(copied.parent(), Some(fixture.scratch.path().canonicalize().unwrap().as_path()));
+            assert_eq!(std::fs::metadata(copied).unwrap().permissions().mode() & 0o777, 0o600);
+            let rendered = script.listening().renders();
+            assert_eq!(rendered.len(), 1);
+            assert!(script.listening().previews().is_empty(), "never audition after rendering");
+            assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1, "only this call's source was removed");
+            assert_eq!(std::fs::read(neighbor).unwrap(), b"not our source");
+            assert!(std::fs::read_dir(fixture.quarantine.path()).unwrap().next().is_none());
+            fixture.integration.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn restricted_reaper_revalidates_bounds_transport_and_scratch_before_dispatch() {
-    tokio::task::LocalSet::new().run_until(async {
-        let home = tempfile::tempdir().unwrap();
-        let script = ReaperScript::new(3, 0);
-        script.listening().set_render_preflight(true);
-        let simulator = reaper_lab(&script, home.path(), |_| {}).await;
-        let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
-        fixture.integration.start(Signal::new()).await.unwrap();
-        let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let request = fixture.request(&observed).await;
-        fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
-        script.set_playing(true);
-        assert_hear_refusal(fixture.integration.hear(&request, Signal::new()).await, "transport_running");
-        script.set_playing(false);
-        script.set_recording(true);
-        assert_hear_refusal(fixture.integration.preview_hear(&request, Signal::new()).await, "transport_running");
-        script.set_recording(false);
-        assert_hear_refusal(fixture.integration.hear(&HearRequest { beats: Some(256.), ..request.clone() }, Signal::new()).await, "stale");
-        for scratch_dir in [None, Some(home.path().into()), Some(fixture.scratch_root.path().into()), Some(home.path().join("absent"))] {
-            let invalid = HearRequest { scratch_dir, ..request.clone() };
-            assert!(matches!(fixture.integration.hear(&invalid, Signal::new()).await,
-                Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Refused { .. }))));
-        }
-        let alias = fixture.scratch_root.path().join("symlink-call");
-        std::os::unix::fs::symlink(fixture.scratch.path(), &alias).unwrap();
-        assert!(matches!(fixture.integration.hear(&HearRequest { scratch_dir: Some(alias), ..request }, Signal::new()).await,
-            Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Refused { .. }))));
-        assert!(script.listening().renders().is_empty());
-        assert!(script.listening().previews().is_empty());
-        assert!(!script.listening().folder().exists());
-        fixture.integration.close().await.unwrap();
-        simulator.stop();
-    }).await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            script.listening().set_render_preflight(true);
+            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
+            fixture.integration.start(Signal::new()).await.unwrap();
+            let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
+            let request = fixture.request(&observed).await;
+            fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
+            script.set_playing(true);
+            assert_hear_refusal(fixture.integration.hear(&request, Signal::new()).await, "transport_running");
+            script.set_playing(false);
+            script.set_recording(true);
+            assert_hear_refusal(fixture.integration.preview_hear(&request, Signal::new()).await, "transport_running");
+            script.set_recording(false);
+            assert_hear_refusal(
+                fixture.integration.hear(&HearRequest { beats: Some(256.), ..request.clone() }, Signal::new()).await,
+                "stale",
+            );
+            for scratch_dir in [None, Some(home.path().into()), Some(fixture.scratch_root.path().into()), Some(home.path().join("absent"))]
+            {
+                let invalid = HearRequest { scratch_dir, ..request.clone() };
+                assert!(matches!(
+                    fixture.integration.hear(&invalid, Signal::new()).await,
+                    Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Refused { .. }))
+                ));
+            }
+            let alias = fixture.scratch_root.path().join("symlink-call");
+            std::os::unix::fs::symlink(fixture.scratch.path(), &alias).unwrap();
+            assert!(matches!(
+                fixture.integration.hear(&HearRequest { scratch_dir: Some(alias), ..request }, Signal::new()).await,
+                Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Refused { .. }))
+            ));
+            assert!(script.listening().renders().is_empty());
+            assert!(script.listening().previews().is_empty());
+            assert!(!script.listening().folder().exists());
+            fixture.integration.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn restricted_renoise_restores_near_end_bpm_and_lpb_without_replaying() {
-    tokio::task::LocalSet::new().run_until(async {
-        let home = tempfile::tempdir().unwrap();
-        let script = RenoiseScript::new();
-        script.listening().set_render_preflight(true);
-        script.set_bpm(120.);
-        script.set_render_bpm(Some(173.));
-        script.set_render_lpb(Some(8));
-        let simulator = renoise_lab(&script, home.path()).await;
-        let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
-        fixture.integration.start(Signal::new()).await.unwrap();
-        let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        // The fixture is 128 lines: 32 beats at LPB4, but only 16 at the temporary
-        // LPB8. Reusing this approved range for restoration reads would now fail.
-        let request = HearRequest { from_beat: Some(28.), beats: Some(4.), ..fixture.request(&observed).await };
-        let preview = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
-        let takes = fixture.integration.hear(&request, Signal::new()).await.unwrap().unwrap();
-        assert_eq!(takes.len(), 1);
-        assert_eq!(takes[0].seconds, Some(preview.seconds));
-        assert_eq!(Path::new(&takes[0].file).parent(), Some(fixture.scratch.path().canonicalize().unwrap().as_path()));
-        assert!(!takes[0].live);
-        assert!(script.listening().previews().is_empty());
-        assert!(script.asked().iter().any(|(method, args)| method == "change_apply" && args["kind"] == "song-bpm"),
-            "the adapter restored the actual changed BPM");
-        assert!(script.asked().iter().any(|(method, args)| method == "change_apply" && args["kind"] == "song-lpb"),
-            "the adapter restored the actual changed LPB with an integer input");
-        let after = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
-        assert_eq!(after.seconds, preview.seconds);
-        assert_eq!(script.listening().renders().len(), 1);
-        assert!(std::fs::read_dir(script.listening().folder()).unwrap().next().is_none());
-        fixture.integration.close().await.unwrap();
-        simulator.stop();
-    }).await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = RenoiseScript::new();
+            script.listening().set_render_preflight(true);
+            script.set_bpm(120.);
+            script.set_render_bpm(Some(173.));
+            script.set_render_lpb(Some(8));
+            let simulator = renoise_lab(&script, home.path()).await;
+            let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
+            fixture.integration.start(Signal::new()).await.unwrap();
+            let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
+            // The fixture is 128 lines: 32 beats at LPB4, but only 16 at the temporary
+            // LPB8. Reusing this approved range for restoration reads would now fail.
+            let request = HearRequest { from_beat: Some(28.), beats: Some(4.), ..fixture.request(&observed).await };
+            let preview = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
+            let takes = fixture.integration.hear(&request, Signal::new()).await.unwrap().unwrap();
+            assert_eq!(takes.len(), 1);
+            assert_eq!(takes[0].seconds, Some(preview.seconds));
+            assert_eq!(Path::new(&takes[0].file).parent(), Some(fixture.scratch.path().canonicalize().unwrap().as_path()));
+            assert!(!takes[0].live);
+            assert!(script.listening().previews().is_empty());
+            assert!(
+                script.asked().iter().any(|(method, args)| method == "change_apply" && args["kind"] == "song-bpm"),
+                "the adapter restored the actual changed BPM"
+            );
+            assert!(
+                script.asked().iter().any(|(method, args)| method == "change_apply" && args["kind"] == "song-lpb"),
+                "the adapter restored the actual changed LPB with an integer input"
+            );
+            let after = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
+            assert_eq!(after.seconds, preview.seconds);
+            assert_eq!(script.listening().renders().len(), 1);
+            assert!(std::fs::read_dir(script.listening().folder()).unwrap().next().is_none());
+            fixture.integration.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn restricted_renoise_cancellation_waits_for_terminal_state_and_independent_restoration_reads() {
-    tokio::task::LocalSet::new().run_until(async {
-        let home = tempfile::tempdir().unwrap();
-        let script = RenoiseScript::new();
-        script.listening().set_render_preflight(true);
-        script.listening().set_steps(1000);
-        script.listening().set_slow_stop(true);
-        script.set_render_bpm(Some(173.));
-        script.set_render_lpb(Some(8));
-        let simulator = renoise_lab(&script, home.path()).await;
-        let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
-        fixture.integration.start(Signal::new()).await.unwrap();
-        let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let request = fixture.request(&observed).await;
-        let signal = Signal::new();
-        let (heard, ()) = tokio::join!(
-            fixture.integration.hear(&request, signal.clone()),
-            async {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = RenoiseScript::new();
+            script.listening().set_render_preflight(true);
+            script.listening().set_steps(1000);
+            script.listening().set_slow_stop(true);
+            script.set_render_bpm(Some(173.));
+            script.set_render_lpb(Some(8));
+            let simulator = renoise_lab(&script, home.path()).await;
+            let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
+            fixture.integration.start(Signal::new()).await.unwrap();
+            let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
+            let request = fixture.request(&observed).await;
+            let signal = Signal::new();
+            let (heard, ()) = tokio::join!(fixture.integration.hear(&request, signal.clone()), async {
                 wait_for_render(|| !script.listening().renders().is_empty()).await;
                 signal.cancel();
-            },
-        );
-        assert!(matches!(heard, Err(RuntimeError::Aborted)), "{heard:?}");
-        assert_eq!(script.listening().restored(), 1);
-        let calls: Vec<Value> = simulator.transcript().into_iter().filter(|line| line.from_host)
-            .map(|line| serde_json::from_str(&line.text).unwrap()).collect();
-        let cancelled = calls.iter().position(|call| call["method"] == "listen_cancel").unwrap();
-        assert!(calls[cancelled + 1..].iter().any(|call| call["method"] == "read" && call["params"]["kind"] == "render_preflight"));
-        assert!(calls[cancelled + 1..].iter().any(|call| call["method"] == "focus"));
-        assert!(script.listening().previews().is_empty());
-        assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
-        fixture.integration.close().await.unwrap();
-        simulator.stop();
-    }).await;
+            },);
+            assert!(matches!(heard, Err(RuntimeError::Aborted)), "{heard:?}");
+            assert_eq!(script.listening().restored(), 1);
+            let calls: Vec<Value> = simulator
+                .transcript()
+                .into_iter()
+                .filter(|line| line.from_host)
+                .map(|line| serde_json::from_str(&line.text).unwrap())
+                .collect();
+            let cancelled = calls.iter().position(|call| call["method"] == "listen_cancel").unwrap();
+            assert!(calls[cancelled + 1..].iter().any(|call| call["method"] == "read" && call["params"]["kind"] == "render_preflight"));
+            assert!(calls[cancelled + 1..].iter().any(|call| call["method"] == "focus"));
+            assert!(script.listening().previews().is_empty());
+            assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
+            fixture.integration.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn restricted_renoise_mute_residue_is_unsure_even_when_job_reports_restored() {
-    tokio::task::LocalSet::new().run_until(async {
-        let home = tempfile::tempdir().unwrap();
-        let script = RenoiseScript::new();
-        script.listening().set_render_preflight(true);
-        script.set_render_mute_residue(1, true);
-        script.listening().note_next(&["Everything was restored"]);
-        let simulator = renoise_lab(&script, home.path()).await;
-        let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
-        fixture.integration.start(Signal::new()).await.unwrap();
-        let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let heard = fixture.integration.hear(&fixture.request(&observed).await, Signal::new()).await;
-        assert!(matches!(heard, Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Unsure { .. }))), "{heard:?}");
-        assert_eq!(script.listening().restored(), 1, "job bookkeeping cannot establish restoration");
-        assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
-        assert!(std::fs::read_dir(script.listening().folder()).unwrap().next().is_none());
-        assert!(script.listening().previews().is_empty());
-        fixture.integration.close().await.unwrap();
-        simulator.stop();
-    }).await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = RenoiseScript::new();
+            script.listening().set_render_preflight(true);
+            script.set_render_mute_residue(1, true);
+            script.listening().note_next(&["Everything was restored"]);
+            let simulator = renoise_lab(&script, home.path()).await;
+            let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
+            fixture.integration.start(Signal::new()).await.unwrap();
+            let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
+            let heard = fixture.integration.hear(&fixture.request(&observed).await, Signal::new()).await;
+            assert!(matches!(heard, Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Unsure { .. }))), "{heard:?}");
+            assert_eq!(script.listening().restored(), 1, "job bookkeeping cannot establish restoration");
+            assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
+            assert!(std::fs::read_dir(script.listening().folder()).unwrap().next().is_none());
+            assert!(script.listening().previews().is_empty());
+            fixture.integration.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn restricted_offline_timeout_is_unsure_not_success_from_a_cancel_acknowledgment() {
-    tokio::task::LocalSet::new().run_until(async {
-        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
-        let home = tempfile::tempdir().unwrap();
-        let script = ReaperScript::new(3, 0);
-        script.listening().set_render_preflight(true);
-        script.listening().set_steps(1000);
-        let polled = Arc::new(AtomicBool::new(false));
-        let marked = polled.clone();
-        let simulator = reaper_lab(&script, home.path(), |config| {
-            let inner = config.respond.take().unwrap();
-            config.respond = Some(Arc::new(move |method, args| {
-                if method == "listen_status" { marked.store(true, SeqCst); }
-                inner(method, args)
-            }));
-        }).await;
-        let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
-        fixture.integration.start(Signal::new()).await.unwrap();
-        let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let request = fixture.request(&observed).await;
-        let (heard, ()) = tokio::join!(fixture.integration.hear(&request, Signal::new()), async {
-            wait_for_render(|| polled.load(SeqCst)).await;
-            tokio::time::pause();
-            tokio::time::advance(std::time::Duration::from_secs(121)).await;
-            tokio::time::resume();
-        });
-        match heard {
-            Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Unsure { .. })) => {}
-            other => panic!("timeout must be typed unsure, never restored takes: {other:?}"),
-        }
-        assert!(script.listening().previews().is_empty());
-        assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
-        fixture.integration.close().await.unwrap();
-        simulator.stop();
-    }).await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(3, 0);
+            script.listening().set_render_preflight(true);
+            script.listening().set_steps(1000);
+            let polled = Arc::new(AtomicBool::new(false));
+            let marked = polled.clone();
+            let simulator = reaper_lab(&script, home.path(), |config| {
+                let inner = config.respond.take().unwrap();
+                config.respond = Some(Arc::new(move |method, args| {
+                    if method == "listen_status" {
+                        marked.store(true, SeqCst);
+                    }
+                    inner(method, args)
+                }));
+            })
+            .await;
+            let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
+            fixture.integration.start(Signal::new()).await.unwrap();
+            let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
+            let request = fixture.request(&observed).await;
+            let (heard, ()) = tokio::join!(fixture.integration.hear(&request, Signal::new()), async {
+                wait_for_render(|| polled.load(SeqCst)).await;
+                tokio::time::pause();
+                tokio::time::advance(std::time::Duration::from_secs(121)).await;
+                tokio::time::resume();
+            });
+            match heard {
+                Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Unsure { .. })) => {}
+                other => panic!("timeout must be typed unsure, never restored takes: {other:?}"),
+            }
+            assert!(script.listening().previews().is_empty());
+            assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
+            fixture.integration.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn restricted_reaper_rejects_a_swapped_returned_file_without_following_or_deleting_it() {
-    tokio::task::LocalSet::new().run_until(async {
-        use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
-        let home = tempfile::tempdir().unwrap();
-        let outside = home.path().join("private-neighbor");
-        std::fs::write(&outside, b"never copy or delete this").unwrap();
-        let script = ReaperScript::new(3, 0);
-        script.listening().set_render_preflight(true);
-        let substituted = Arc::new(AtomicBool::new(false));
-        let swapped = substituted.clone();
-        let target = outside.clone();
-        let simulator = reaper_lab(&script, home.path(), |config| {
-            let inner = config.respond.take().unwrap();
-            config.respond = Some(Arc::new(move |method, args| {
-                let answer = inner(method, args);
-                if method == "listen_status" {
-                    if let Some(Ok(done)) = &answer {
-                        if done["state"] == "done" && !swapped.swap(true, SeqCst) {
-                            let file = done["files"][0]["file"].as_str().unwrap();
-                            std::fs::remove_file(file).unwrap();
-                            std::os::unix::fs::symlink(&target, file).unwrap();
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
+            let home = tempfile::tempdir().unwrap();
+            let outside = home.path().join("private-neighbor");
+            std::fs::write(&outside, b"never copy or delete this").unwrap();
+            let script = ReaperScript::new(3, 0);
+            script.listening().set_render_preflight(true);
+            let substituted = Arc::new(AtomicBool::new(false));
+            let swapped = substituted.clone();
+            let target = outside.clone();
+            let simulator = reaper_lab(&script, home.path(), |config| {
+                let inner = config.respond.take().unwrap();
+                config.respond = Some(Arc::new(move |method, args| {
+                    let answer = inner(method, args);
+                    if method == "listen_status" {
+                        if let Some(Ok(done)) = &answer {
+                            if done["state"] == "done" && !swapped.swap(true, SeqCst) {
+                                let file = done["files"][0]["file"].as_str().unwrap();
+                                std::fs::remove_file(file).unwrap();
+                                std::os::unix::fs::symlink(&target, file).unwrap();
+                            }
                         }
                     }
-                }
-                answer
-            }));
-        }).await;
-        let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
-        fixture.integration.start(Signal::new()).await.unwrap();
-        let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        assert_hear_refusal(fixture.integration.hear(&fixture.request(&observed).await, Signal::new()).await, "unsafe_render_file");
-        assert!(substituted.load(SeqCst));
-        assert_eq!(std::fs::read(outside).unwrap(), b"never copy or delete this");
-        assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
-        assert!(script.listening().previews().is_empty());
-        fixture.integration.close().await.unwrap();
-        simulator.stop();
-    }).await;
+                    answer
+                }));
+            })
+            .await;
+            let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
+            fixture.integration.start(Signal::new()).await.unwrap();
+            let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
+            assert_hear_refusal(fixture.integration.hear(&fixture.request(&observed).await, Signal::new()).await, "unsafe_render_file");
+            assert!(substituted.load(SeqCst));
+            assert_eq!(std::fs::read(outside).unwrap(), b"never copy or delete this");
+            assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
+            assert!(script.listening().previews().is_empty());
+            fixture.integration.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
 }
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
 async fn restricted_mix_requires_the_exact_observed_epoch_and_recovers_after_a_new_look() {
-    tokio::task::LocalSet::new().run_until(async {
-        let home = tempfile::tempdir().unwrap();
-        let script = ReaperScript::new(2, 0);
-        script.listening().set_render_preflight(true);
-        let simulator = reaper_lab(&script, home.path(), |_| {}).await;
-        let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
-        fixture.integration.start(Signal::new()).await.unwrap();
-        let first = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        let request = fixture.request(&first).await;
-        let missing = HearRequest { expected_native_epoch: None, ..request.clone() };
-        assert_hear_refusal(fixture.integration.preview_hear(&missing, Signal::new()).await, "stale");
-        script.switch_tab();
-        assert_hear_refusal(fixture.integration.preview_hear(&request, Signal::new()).await, "stale");
-        assert_hear_refusal(fixture.integration.hear(&request, Signal::new()).await, "stale");
-        assert!(script.listening().renders().is_empty());
-        assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
-        let second = fixture.integration.observe(Signal::new(), None).await.unwrap();
-        assert_ne!(first.native_epoch, second.native_epoch);
-        fixture.integration.preview_hear(&fixture.request(&second).await, Signal::new()).await.unwrap();
-        fixture.integration.close().await.unwrap();
-        simulator.stop();
-    }).await;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let script = ReaperScript::new(2, 0);
+            script.listening().set_render_preflight(true);
+            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            let fixture = RestrictedFixture::new(Daw::Reaper, home.path(), create_reaper_integration);
+            fixture.integration.start(Signal::new()).await.unwrap();
+            let first = fixture.integration.observe(Signal::new(), None).await.unwrap();
+            let request = fixture.request(&first).await;
+            let missing = HearRequest { expected_native_epoch: None, ..request.clone() };
+            assert_hear_refusal(fixture.integration.preview_hear(&missing, Signal::new()).await, "stale");
+            script.switch_tab();
+            assert_hear_refusal(fixture.integration.preview_hear(&request, Signal::new()).await, "stale");
+            assert_hear_refusal(fixture.integration.hear(&request, Signal::new()).await, "stale");
+            assert!(script.listening().renders().is_empty());
+            assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
+            let second = fixture.integration.observe(Signal::new(), None).await.unwrap();
+            assert_ne!(first.native_epoch, second.native_epoch);
+            fixture.integration.preview_hear(&fixture.request(&second).await, Signal::new()).await.unwrap();
+            fixture.integration.close().await.unwrap();
+            simulator.stop();
+        })
+        .await;
 }

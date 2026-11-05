@@ -114,7 +114,9 @@ fn guarded_folder(folder: &Path, create: bool) -> Result<(), Fault> {
                 meta.permissions().mode() & 0o777 == 0o700
             }
             #[cfg(not(unix))]
-            { true }
+            {
+                true
+            }
         })
     };
     let parent = folder.parent().ok_or_else(refuse)?;
@@ -133,7 +135,11 @@ fn guarded_folder(folder: &Path, create: bool) -> Result<(), Fault> {
             #[cfg(not(unix))]
             let made = std::fs::create_dir(folder);
             made.map_err(|error| failed(format!("couldn't create the private render cache: {error}")))?;
-            if private(folder) { Ok(()) } else { Err(refuse()) }
+            if private(folder) {
+                Ok(())
+            } else {
+                Err(refuse())
+            }
         }
         Err(_) => Err(refuse()),
     }

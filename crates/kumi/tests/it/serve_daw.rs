@@ -126,7 +126,8 @@ impl Lab {
         let own_host = OwnHosts(Rc::new(move |_| {
             let host_home = host_home.clone();
             Rc::new(move |start: HostStart| {
-                let host = Host::new(bridge, &host_home, daw_mcp_server::host::ListeningMode::Restricted).with_keep_identity(start.keep_identity);
+                let host =
+                    Host::new(bridge, &host_home, daw_mcp_server::host::ListeningMode::Restricted).with_keep_identity(start.keep_identity);
                 let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
             })
@@ -314,7 +315,8 @@ case!(serve_daw_standalone_kumi_asks_reaper_to_keep_the_projects_id_and_it_is_wr
     let simulator = Simulator::start(config).await.unwrap();
     let host_home = home.path().to_path_buf();
     let connect: kumi_daw_own::bridge::Connect = Rc::new(move |start: HostStart| {
-        let host = Host::new(Daw::Reaper, &host_home, daw_mcp_server::host::ListeningMode::Standalone).with_keep_identity(start.keep_identity);
+        let host =
+            Host::new(Daw::Reaper, &host_home, daw_mcp_server::host::ListeningMode::Standalone).with_keep_identity(start.keep_identity);
         let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
         async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
     });

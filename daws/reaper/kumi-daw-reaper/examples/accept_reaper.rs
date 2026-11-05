@@ -192,7 +192,10 @@ struct Ran {
 impl Session {
     async fn open(home: &Path, lab: Lab) -> Session {
         let tap = Rc::new(Tap {
-            inner: InProcess { host: Arc::new(Host::new(Daw::Reaper, home, daw_mcp_server::host::ListeningMode::Standalone)), id: Cell::new(0) },
+            inner: InProcess {
+                host: Arc::new(Host::new(Daw::Reaper, home, daw_mcp_server::host::ListeningMode::Standalone)),
+                id: Cell::new(0),
+            },
             answers: RefCell::default(),
             hooks: RefCell::default(),
         });

@@ -257,7 +257,6 @@ impl Link {
         self.native_epoch.borrow().clone()
     }
 
-
     /// Whether an own bridge's page with this epoch is of the state of the project the last look saw: both known, and
     /// the same.
     pub fn page_is_looked(&self, epoch: Option<&str>) -> bool {
@@ -399,10 +398,7 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
         })
     };
     let mut context = IntegrationContext::new(on_connection);
-    context.policy = HostPolicy::plugin(
-        ctx.paths().state_dir.join("scratch").join("listen"),
-        ctx.paths().state_dir.join("quarantine"),
-    );
+    context.policy = HostPolicy::plugin(ctx.paths().state_dir.join("scratch").join("listen"), ctx.paths().state_dir.join("quarantine"));
     // Polled about once a second: nothing draws it as it moves.
     context.focus_drawn = false;
     context.on_focus = Some({
