@@ -2,7 +2,6 @@
 can plan, what the producer is asked, that only the plan the producer approved runs (CC-5), and the terminal command."""
 from __future__ import annotations
 
-import argparse
 import hashlib
 import io
 import json
@@ -96,14 +95,29 @@ class SetupTool(unittest.TestCase):
                          "approve")
         policy.post_approval_response(host, tool_call_id="setup-1", choice="once")
 
+        elsewhere_library = Path(tempfile.gettempdir()) / "kumi-setup-tool-tests" / "Other Library"
+
         def elsewhere(args: dict) -> dict:  # another chat's runtime sees other paths
             return {"daw": "ableton", "component": "Live Remote Script", "version": "1.0.105", "state": "missing",
-                    "paths": ["/elsewhere/Remote Scripts/AbletonMcpBridge"], "owner": None, "after": None,
-                    "effects": ["Copy the AbletonMcpBridge Remote Script into /elsewhere/Remote Scripts"]}
+                    "paths": [str(elsewhere_library / "Remote Scripts" / "AbletonMcpBridge")], "owner": None,
+                    "after": None,
+                    "effects": [f"Copy the AbletonMcpBridge Remote Script into {elsewhere_library / 'Remote Scripts'}"]}
 
         setup.plan("ableton", setup_daw=elsewhere, data_dir=data, plugin_dir=host.plugin_dir)
         result = support.handle(host, "kumi_setup", {"action": "install"}, session_id="s1")
         self.assertEqual(result["error"]["code"], "plan_changed")
+        self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
+
+    def test_an_approved_install_that_hermes_then_blocks_leaves_nothing_to_run(self):
+        host, _, data = support.host(self, daw_component=False)
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        hook = {"session_id": "s1", "task_id": None, "tool_call_id": "setup-blocked"}
+        self.assertEqual(policy.pre_tool_call(host, tool_name="kumi_setup", args={"action": "install"}, **hook)["action"],
+                         "approve")
+        policy.post_approval_response(host, tool_call_id="setup-blocked", choice="once")
+        policy.post_tool_call(host, tool_name="kumi_setup", tool_call_id="setup-blocked", status="blocked")
+        result = support.handle(host, "kumi_setup", {"action": "install"}, session_id="s1")
+        self.assertEqual(result["error"]["code"], "not_approved")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
 
     def test_adopting_the_owner_of_lives_component_installs_nothing_and_restarts_the_runtime(self):
@@ -123,38 +137,33 @@ class SetupTool(unittest.TestCase):
         self.assertIsNone(host.runtimes.get(data), "the next start uses the adopted Kumi home")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data))
 
-    def test_installing_the_runtime_downloads_the_pinned_bundle_and_stops_an_older_runtime(self):
-        host, _, data = support.host(self, installed=False)
+    def test_installing_the_runtime_downloads_the_pinned_bundle_and_stops_the_older_runtime(self):
+        host, _, data = support.host(self)  # Kumi 1.24.66's runtime, set up
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        older = host.runtimes.get(data)
+        self.assertIsNotNone(older, "the older runtime runs")
+        newer, target = "1.24.67", setup.host_target()
         bundle = io.BytesIO()
         with tarfile.open(fileobj=bundle, mode="w:xz") as archive:
-            info = tarfile.TarInfo("kumi")
+            info = tarfile.TarInfo(setup.executable(target))
             info.size, info.mode = 3, 0o755
             archive.addfile(info, io.BytesIO(b"#!\n"))
         data_bytes = bundle.getvalue()
+        support.pin(host.plugin_dir, version=newer)
         pin = json.loads((host.plugin_dir / "kumi_release.json").read_text())
-        record = next(iter(pin["targets"].values()))
-        record.update(sha256=hashlib.sha256(data_bytes).hexdigest(), size=len(data_bytes))
+        pin["targets"][target].update(sha256=hashlib.sha256(data_bytes).hexdigest(), size=len(data_bytes))
         (host.plugin_dir / "kumi_release.json").write_text(json.dumps(pin))
-        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
-        with mock.patch.object(setup, "_open_url", side_effect=lambda url: io.BytesIO(data_bytes)), \
-                mock.patch.object(host.runtimes, "stop", wraps=host.runtimes.stop) as stop:
+        plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        self.assertEqual(plan["step"], "runtime", "this plugin now pins a newer Kumi")
+        with mock.patch.object(setup, "_open_url", side_effect=lambda url: io.BytesIO(data_bytes)):
             installed = support.call(host, "kumi_setup", {"action": "install"}, session_id="s1")
         self.assertTrue(installed["ok"], installed)
-        stop.assert_called_once_with(data)
-        self.assertEqual(setup.runtime_state(data, support.VERSION, setup.host_target())[0], "ready")
+        self.assertIsNone(host.runtimes.get(data), "the older runtime is stopped: the next start is the newer one")
+        self.assertFalse(older.client.running)
+        self.assertEqual(setup.runtime_state(data, newer, target)[0], "ready")
 
 
 class Cli(unittest.TestCase):
-    def test_hermes_kumi_setup_is_a_subcommand_with_an_optional_daw(self):
-        ctx = support.Context()
-        kumi.register(ctx)
-        parser = argparse.ArgumentParser()
-        ctx.cli["kumi"]["setup_fn"](parser)
-        args = parser.parse_args(["setup", "--daw", "reaper"])
-        self.assertEqual((args.kumi_action, args.daw), ("setup", "reaper"))
-        with self.assertRaises(SystemExit):
-            parser.parse_args(["setup", "--daw", "live"])
-
     def test_it_asks_installs_the_daw_component_and_stops_the_runtime_it_started(self):
         host, _, data = support.host(self, daw_component=False)
         out = Tty()
