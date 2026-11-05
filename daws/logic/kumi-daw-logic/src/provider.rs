@@ -20,6 +20,7 @@ use std::{
 };
 
 pub static PROVIDER: Own = Own {
+    experimental: true,
     id: DawId::Logic,
     daw: Daw::Logic,
     profile: &DawProfile::LOGIC,

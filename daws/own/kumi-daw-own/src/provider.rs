@@ -61,6 +61,8 @@ pub struct Own {
     pub daw: Daw,
     pub profile: &'static DawProfile,
     pub lifecycle: OwnLifecycle,
+    /// An experimental integration is reached only by an explicit DAW choice, independent of its read/write support.
+    pub experimental: bool,
     pub reads_only: bool,
     pub enable_step: Option<EnableStep>,
     pub enabled: Option<fn(&Own, &Env) -> LocalBoxFuture<'static, Option<bool>>>,
@@ -477,6 +479,9 @@ impl DawProvider for Own {
     }
     fn watch_words(&self) -> WatchWords {
         self.watch_words
+    }
+    fn experimental(&self) -> bool {
+        self.experimental
     }
     fn reads_only(&self) -> bool {
         self.reads_only

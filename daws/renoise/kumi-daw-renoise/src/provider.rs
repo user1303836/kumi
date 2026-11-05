@@ -12,6 +12,7 @@ use kumi_types::daw::{DawId, DawProfile};
 
 /// Renoise, through Kumi's own bridge: its tool, a folder in the preferences of the Renoise it goes in.
 pub static PROVIDER: Own = Own {
+    experimental: false,
     lifecycle: kumi_daw_own::provider::OwnLifecycle::Loaded,
     reads_only: false,
     enable_step: None,

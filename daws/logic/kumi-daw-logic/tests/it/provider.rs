@@ -48,6 +48,16 @@ fn app(dir: &Path, version: &str) -> PathBuf {
 
 #[tokio::test(flavor = "current_thread")]
 async fn logics_bridge_is_installed_in_kumis_folder_without_restarting_logic() {
+    struct RefusingAsk(Rc<std::cell::RefCell<Vec<(String, Option<String>)>>>);
+    impl kumi_daw::io::Ask for RefusingAsk {
+        fn answers(&self) -> bool {
+            true
+        }
+        fn yes_no<'a>(&'a self, question: &'a str, ahead: Option<&'a str>) -> futures::future::LocalBoxFuture<'a, bool> {
+            self.0.borrow_mut().push((question.to_string(), ahead.map(str::to_owned)));
+            Box::pin(async { false })
+        }
+    }
     let dir = tempfile::tempdir().unwrap();
     let mut env = home(dir.path());
     let source = source(dir.path());
@@ -55,16 +65,28 @@ async fn logics_bridge_is_installed_in_kumis_folder_without_restarting_logic() {
     let out = Rc::new(Kept::default());
     let mut io = DawIo::new(env.clone());
     io.out = out.clone();
+    let questions = Rc::new(std::cell::RefCell::new(vec![]));
+    io.ask = Rc::new(RefusingAsk(questions.clone()));
     assert!(!PROVIDER.bridge_installed(&env));
     assert!(!PROVIDER.reads_only());
+    assert!(PROVIDER.experimental(), "Logic is selected explicitly until native acceptance");
+    assert!(
+        kumi_daw_own::provider::Own { reads_only: false, ..PROVIDER }.experimental(),
+        "experimental status is independent of support for changes"
+    );
     assert_eq!(PROVIDER.id(), DawId::Logic);
     assert_eq!(PROVIDER.setup_bridge(io.clone(), BridgeCommand::default()).await.unwrap(), 1);
-    assert!(out.text().contains("Kumi's own folder"), "{}", out.text());
     let paths = BridgePaths::new(&dir.path().join(".kumi"), Daw::Logic);
     let installed = paths.bridge().join("logic-kumi");
+    assert_eq!(
+        questions.borrow().as_slice(),
+        &[(format!("Set up Kumi's Logic Pro bridge in Kumi's own folder ({})?", installed.display()), Some("add --yes".to_string()))]
+    );
+    assert!(out.text().contains("Nothing was changed"), "{}", out.text());
     assert!(!installed.exists());
     assert_eq!(PROVIDER.setup_bridge(io.clone(), BridgeCommand { yes: true, ..Default::default() }).await.unwrap(), 0);
     assert!(PROVIDER.bridge_installed(&env));
+    assert_eq!(questions.borrow().len(), 1, "--yes authorizes the install without asking again");
     for name in ["logic-kumi", "kumi-logic-hands-test", "version", "bridge-reference.json"] {
         assert!(installed.join(name).is_file(), "{name}");
     }

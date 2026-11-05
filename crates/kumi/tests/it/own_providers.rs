@@ -264,6 +264,7 @@ async fn among_several_bridges_the_running_daw_then_the_last_used_is_chosen() {
     assert_eq!(chosen_with(None, &env, &none).0.id(), DawId::Reaper, "none running, none used: the first installed");
     remember_used(DawId::Renoise, &env);
     assert_eq!(chosen_with(None, &env, &none).0.id(), DawId::Renoise, "none running: the one used last");
+    // Experimental bridges may also run, but only supported automatic choices are named or selected.
     let both = |provider: &dyn DawProvider| provider.id() != DawId::Ableton;
     assert_eq!(chosen_with(None, &env, &both).0.id(), DawId::Renoise, "both running: the one used last");
     assert_eq!(chosen_with(Some(DawId::Reaper), &env, &none).0.id(), DawId::Reaper, "asked for, always");
@@ -300,6 +301,11 @@ fn daw_says_which_daw_kumi_works_with_and_switches_by_name() {
         assert_eq!(daw_command(typed), DawCommand::Switch(DawId::Ableton, "Kumi closes and opens again with Live.".into()), "{typed}");
     }
     assert_eq!(daw_command("reaper"), DawCommand::Say("Kumi works with REAPER already.".into()));
+    assert_eq!(
+        daw_command("logic"),
+        DawCommand::Switch(DawId::Logic, "Kumi closes and opens again with Logic Pro.".into()),
+        "experimental DAWs remain reachable by name"
+    );
     assert_eq!(daw_command("bitwig"), DawCommand::Say("Kumi doesn't know bitwig: /daw live, /daw reaper, /daw renoise.".into()));
     work_with(DawId::Ableton);
 }
