@@ -966,20 +966,16 @@ impl Own {
                 let (copy, found) = kept.as_ref().map(|(copy, found)| (copy.display().to_string(), found.clone())).unwrap_or_default();
                 effects.push(match found.as_deref() {
                     Some(found) if orderable(found) => format!(
-                        "{} in {name} ({copy}) is {found}, newer than this Kumi's {version}: it stays as it is. Update Kumi for Hermes to match it",
+                        "{} in {name} ({copy}) is {found}, newer than this Kumi's {version}: it stays as it is. Update the Kumi plugin (hermes plugins update kumi) to match it, then set Kumi up again",
                         self.bridge
                     ),
                     Some(found) => format!(
-                        "{} in {name} ({copy}) says it's {found}, which can't be ordered against this Kumi's {version}: it stays as it is. Run {} --daw {} bridge to replace it",
-                        self.bridge,
-                        *kumi_types::command::KUMI,
-                        self.id.as_str()
+                        "{} in {name} ({copy}) says it's {found}, a version that can't be compared with this Kumi's {version}: it stays as it is. To replace it, delete that copy, then set Kumi up again",
+                        self.bridge
                     ),
                     None => format!(
-                        "{} in {name} ({copy}) has no receipt and doesn't say its version, so it stays as it is: run {} --daw {} bridge to replace it",
-                        self.bridge,
-                        *kumi_types::command::KUMI,
-                        self.id.as_str()
+                        "{} in {name} ({copy}) doesn't say its version, so it stays as it is. To replace it, delete that copy, then set Kumi up again",
+                        self.bridge
                     ),
                 });
             }
