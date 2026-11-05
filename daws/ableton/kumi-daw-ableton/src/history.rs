@@ -389,7 +389,7 @@ impl LiveHistory for History {
                 if let Some(body) = body.filter(|body| body["code"] == "changed_since") {
                     let reason = body["reason"].as_str().map(str::to_owned).unwrap_or_else(|| result_text(&result));
                     self.host.guard.refuse(reason.clone());
-                    return Ok(Some(UndoResult::error(reason)));
+                    return Ok(Some(UndoResult::refused(reason)));
                 }
             }
             let text = result_text(&result);
@@ -402,7 +402,9 @@ impl LiveHistory for History {
             let lower = message.to_ascii_lowercase();
             let refused = ["modified after apply", "changed before deletion", "undo refused"].iter().any(|s| lower.contains(s));
             let record = if uncertain(&result) && !refused {
-                self.update(entry, ChangeState::Unsure, Some(bridge_undo_note(&message)))
+                // Extract the semantic reason from the complete reply. Cutting serialized JSON first can remove its
+                // closing delimiter and turn a useful reason into a fragment of escaped wire text.
+                self.update(entry, ChangeState::Unsure, Some(bridge_undo_note(&text, result.structured_content.as_ref())))
             } else {
                 self.update(entry, ChangeState::Kept, Some(undo_note(&message)))
             };
@@ -411,7 +413,11 @@ impl LiveHistory for History {
         let body = context::payload(&result)?;
         if body.get("state").and_then(Value::as_str) != Some("undone") {
             let message = stringify(&json!(body));
-            return Ok(Some(UndoResult::with(self.update(entry, ChangeState::Unsure, Some(bridge_undo_note(&message))), message, true)));
+            return Ok(Some(UndoResult::with(
+                self.update(entry, ChangeState::Unsure, Some(bridge_undo_note(&message, Some(&body)))),
+                message,
+                true,
+            )));
         }
         // Undone: nothing is left to check of it.
         self.host.guard.forget(&snapshot.record.id);
@@ -663,9 +669,13 @@ impl LiveChanges {
 }
 /// The integration returns the record to `kumi serve`, not UndoResult's text. Keep the bridge's reason with that
 /// record so an unsure undo's audit can explain what failed, without terminal or hidden text controls.
-fn bridge_undo_note(message: &str) -> String {
+fn bridge_undo_note(message: &str, structured: Option<&JsonObject>) -> String {
     let body = serde_json::from_str::<Value>(message).ok();
-    let cause = body.as_ref().and_then(|body| body.get("reason")).and_then(Value::as_str).unwrap_or(message);
+    let cause = structured
+        .and_then(|body| body.get("reason"))
+        .and_then(Value::as_str)
+        .or_else(|| body.as_ref().and_then(|body| body.get("reason")).and_then(Value::as_str))
+        .unwrap_or(message);
     // CSI/OSC escape sequences can contain ordinary characters after the initial escape. Remove the whole sequence
     // before flattening the remaining controls and formatting characters.
     static ESCAPES: std::sync::LazyLock<regex::Regex> =

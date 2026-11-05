@@ -121,13 +121,25 @@ pub struct UndoResult {
     /// What the model is told when they were: the DAW's words.
     #[serde(skip)]
     refs_retired: &'static str,
+    /// A fenced guard proved this undo refused before any write. Groups may propagate that proof only while no
+    /// earlier child has been asked to undo. A generic error, including one without a record, carries no such proof.
+    #[serde(skip)]
+    pub refused: bool,
+    /// A fenced refusal stopped this undo or one of its descendants. Ancestors stop too, even when this group had
+    /// already undone earlier children and therefore cannot propagate `refused`'s no-write proof.
+    #[serde(skip)]
+    pub stopped: bool,
 }
 impl UndoResult {
     pub fn error(text: impl Into<String>) -> Self {
-        Self { record: None, text: text.into(), is_error: true, retired: false, refs_retired: "" }
+        Self { record: None, text: text.into(), is_error: true, retired: false, refs_retired: "", refused: false, stopped: false }
     }
     pub fn with(record: ChangeRecord, text: impl Into<String>, is_error: bool) -> Self {
-        Self { record: Some(record), text: text.into(), is_error, retired: false, refs_retired: "" }
+        Self { record: Some(record), text: text.into(), is_error, retired: false, refs_retired: "", refused: false, stopped: false }
+    }
+    /// A refusal whose guard proved that nothing was written by this undo.
+    pub fn refused(text: impl Into<String>) -> Self {
+        Self { refused: true, stopped: true, ..Self::error(text) }
     }
     /// The undo's text as the model reads it: with what to do about Kumi's refs when they were retired with it.
     pub fn for_model(&self) -> String {
@@ -592,16 +604,41 @@ impl<H: ChangeHost> History<H> {
             let undo_key = entry.borrow_mut().undo_key.get_or_insert_with(|| uuid::Uuid::new_v4().to_string()).clone();
             if let Some(members) = snapshot.members {
                 let mut hidden = Vec::new();
+                let mut attempted = 0;
+                let mut stopped = None;
+                let mut unsettled = false;
                 let standing =
                     |id: &String| self.entries.borrow().get(id).is_some_and(|entry| entry.borrow().record.state != ChangeState::Undone);
                 self.quietly(Some(&mut hidden), async {
                     for id in members.iter().rev() {
                         if standing(id) {
-                            let _ = self.undo(id, signal.clone(), false).await;
+                            let undone = self.undo(id, signal.clone(), false).await;
+                            match undone {
+                                Ok(undone) => {
+                                    if undone.stopped {
+                                        if !undone.refused {
+                                            attempted += 1;
+                                            unsettled |= undone.record.as_ref().is_none_or(|record| record.state == ChangeState::Unsure);
+                                        }
+                                        stopped = Some(undone);
+                                        break;
+                                    }
+                                    unsettled |= undone.record.as_ref().is_none_or(|record| record.state == ChangeState::Unsure);
+                                }
+                                Err(_) => unsettled = true,
+                            }
+                            attempted += 1;
                         }
                     }
                 })
                 .await;
+                // A group's first child can refuse without changing it, including a one-member group. Once any
+                // earlier child ran, keep its completed work truthful and leave every later child untouched.
+                if attempted == 0 {
+                    if let Some(stopped) = stopped.take() {
+                        return Ok(stopped);
+                    }
+                }
                 // Its first steps past the most changes Kumi keeps, when it was recorded or since (the oldest go first).
                 let past = snapshot.trimmed.unwrap_or(0) + members.iter().filter(|id| !self.entries.borrow().contains_key(*id)).count();
                 let left = members.iter().filter(|id| standing(id)).count();
@@ -612,7 +649,9 @@ impl<H: ChangeHost> History<H> {
                 let them = |count: usize| if count == 1 { "it" } else { "them" };
                 let mut why = Vec::new();
                 if left > 0 {
-                    why.push(if past == 0 {
+                    why.push(if stopped.is_some() {
+                        "undo stopped, so Kumi left the remaining changes in place".into()
+                    } else if past == 0 {
                         format!("the rest changed in {} since, so Kumi left them", profile.words.app)
                     } else {
                         format!("{} changed in {} since, so Kumi left {}", thousands(left), profile.words.app, them(left))
@@ -627,13 +666,21 @@ impl<H: ChangeHost> History<H> {
                         them(past)
                     ));
                 }
+                if stopped.is_some() && unsettled {
+                    why.push("an earlier undo wasn't confirmed, so inspect the project before another change".into());
+                }
                 let note = format!(
                     "Kumi took back {} of its {} changes; {}.",
                     thousands(total - past - left),
                     thousands(total),
                     why.join(", and ")
                 );
-                return Ok(UndoResult::with(self.update(&entry, ChangeState::Kept, Some(note.clone())), note, true));
+                let state = if stopped.is_some() && unsettled { ChangeState::Unsure } else { ChangeState::Kept };
+                let was_stopped = stopped.is_some();
+                let note = if let Some(stopped) = stopped { format!("{note} Undo stopped: {}", stopped.text) } else { note };
+                let mut result = UndoResult::with(self.update(&entry, state, Some(note.clone())), note, true);
+                result.stopped = was_stopped;
+                return Ok(result);
             }
             if let Some(material) = snapshot.material.clone() {
                 return self.host.undo_material(self, &entry, &snapshot, material, &undo_key, discard, signal).await;

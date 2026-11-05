@@ -184,9 +184,13 @@ fn eq(actual: &Value, expected: &Value, label: &str) {
 #[tokio::test(flavor = "current_thread")]
 async fn an_unsure_undo_keeps_the_bridge_cause_in_its_record_for_the_serve_audit() {
     tokio::task::LocalSet::new().run_until(async {
-        let cause = format!("device move was not confirmed\n\t\u{202e}\u{200b}\x1b[31mactual index 1\x1b[0m {}", "é".repeat(500));
+        // More than the text response's 2,048 UTF-16 units: the cause must be extracted before wire text is bounded.
+        let cause = format!("device move was not confirmed\n\t\u{202e}\u{200b}\x1b[31mactual index 1\x1b[0m {}", "é".repeat(2_500));
+        let plain_prefix = "device move was not confirmed actual index 1 ";
+        let expected_cause = format!("{plain_prefix}{}…", "é".repeat(399 - plain_prefix.chars().count()));
         let replies = [
             json!({"isError":true,"content":[{"type":"text","text":json!({"reason":cause,"remediation":"Device undo is uncertain"}).to_string()}],"structuredContent":{"state":"uncertain"}}),
+            json!({"isError":true,"content":[],"structuredContent":{"state":"uncertain","reason":cause}}),
             json!({"content":[{"type":"text","text":json!({"state":"pending","reason":"device move confirmation is pending"}).to_string()}]}),
         ];
         for (index, reply) in replies.into_iter().enumerate() {
@@ -206,15 +210,15 @@ async fn an_unsure_undo_keeps_the_bridge_cause_in_its_record_for_the_serve_audit
             assert_eq!(record.state, kumi_types::contracts::ChangeState::Unsure);
             let note = record.note.unwrap();
             assert!(note.starts_with("Live didn't confirm the undo; inspect the Set before another change. Bridge: "), "{note}");
-            if index == 0 {
-                assert!(note.contains("device move was not confirmed actual index 1"), "{note}");
-                assert!(note.ends_with('…'), "bounded diagnostic: {note}");
+            if index < 2 {
+                assert_eq!(note, format!("Live didn't confirm the undo; inspect the Set before another change. Bridge: {expected_cause}"));
+                assert_eq!(note.split_once(" Bridge: ").unwrap().1.chars().count(), 400);
             } else {
                 assert!(note.contains("device move confirmation is pending"), "{note}");
             }
             assert!(note.chars().count() <= 500, "{}", note.chars().count());
             assert!(!note.chars().any(|c| c.is_control() || matches!(c, '\u{202e}' | '\u{200b}')));
-            assert!(!note.contains("[31m") && !note.contains("remediation"));
+            assert!(!note.contains("[31m") && !note.contains("remediation") && !note.contains("{\"reason\"") && !note.contains("\\u"));
             assert_eq!(endpoint.calls.borrow().len(), 1, "an uncertain write is never retried automatically");
             connection.close().await.unwrap();
         }
