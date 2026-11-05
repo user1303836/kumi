@@ -136,7 +136,8 @@ class SetupTool(unittest.TestCase):
         self.assertEqual(asked["message"].splitlines(), [shown["title"], *(f"• {line}" for line in shown["effects"])],
                          "setup's lines verbatim: nothing cut or collapsed")
         for path in paths:
-            self.assertIn(f"• Writes: {path}", asked["message"].splitlines(), "each path it writes, on its own line")
+            self.assertEqual(sum(path in line for line in asked["message"].splitlines()), 1,
+                             f"each path it writes, whole, once (F10): {path}")
         self.assertEqual(asked["rule_key"], f"kumi:setup:{plan['digest']}", "'always' covers this exact plan only")
 
     def test_install_or_adopt_without_a_plan_is_blocked_before_anyone_is_asked(self):

@@ -122,8 +122,8 @@ class Fixture:
             self.running = False
             if self.owner is None:
                 return
-            self.record("status.json", {"schema": 1, "seq": self.next_seq(), "at": now(), "owner": self.owner,
-                                        **self.status(), "stale": True, "connected": False})
+            self.record("status.json", {**self.status(), "stale": True, "connected": False, "schema": 1,
+                                        "seq": self.next_seq(), "at": now(), "owner": self.owner})
             beat(self)
 
     def answer(self, method: str, params: dict) -> dict:
@@ -176,7 +176,7 @@ class Fixture:
         for name in names:
             seq = self.next_seq()
             body = {"status": self.status, "focus": self.focus, "history": self.history_snapshot}[name]()
-            self.record(f"{name}.json", {"schema": 1, "seq": seq, "at": now(), "owner": self.owner, **body})
+            self.record(f"{name}.json", {**body, "schema": 1, "seq": seq, "at": now(), "owner": self.owner})
             self.landed(f"kumi://{name}")
 
     def publish_map(self, revision: str) -> None:
@@ -200,9 +200,12 @@ class Fixture:
         return {"name": self.set["name"], "key": self.set["key"], "epoch": self.epoch} if self.connected else None
 
     def status(self) -> dict:
+        """The status tool's answer, as kumi serve's (serve/core.rs): `owner` is the DAW's write lease while a call
+        holds it (pid and profile, never a chat), so None between this fixture's calls. A snapshot's envelope names
+        the chat (`owner`, set after the body, as serve/snapshots.rs does)."""
         return {"runtime": {"version": self.options.server_version, "protocol": self.options.protocol},
                 "connected": self.connected, "stale": False, "daw": self.daw, "project": self.project(),
-                "owner": self.owner, "capabilities": ["observe", "read", "change", "undo", "history"]}
+                "owner": None, "capabilities": ["observe", "read", "change", "undo", "history"]}
 
     def focus(self) -> dict:
         """focus.json as kumi serve writes it (CC-7): `project` with its epoch as a number (W1's u64) and `seen_at`,

@@ -201,8 +201,9 @@ class SetupTest(unittest.TestCase):
         self.assertIn(URL, asked["message"])
         self.assertEqual(asked["digest"], plan["digest"])
         self.assertEqual((asked["title"], asked["effects"]),
-                         (f"Kumi: download and install Kumi {VERSION}", [*plan["effects"], f"Writes: {plan['paths'][0]}"]),
-                         "each effect is its own line, its URL and folder in full, then the folder it writes")
+                         (f"Kumi: download and install Kumi {VERSION}", plan["effects"]),
+                         "each effect is its own line, its URL and folder in full; the folder isn't said twice")
+        self.assertIn(plan["paths"][0], asked["message"])
         self.assertIn("reconnects at its next Kumi call", asked["message"], "it says a running runtime stops")
         self.assertIsNone(setup.approval("reaper", data_dir=self.data), "a plan for Live doesn't approve REAPER")
         later = plan["made_at"] + setup.PLAN_TTL_MS + 1
@@ -270,6 +271,13 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(asked["effects"], ["Copy the Remote Script into your User Library",
                                             *(f"Writes: {path}" for path in paths)],
                          "every path the plan writes, whatever the runtime's words, each whole and as it is")
+        named = str(FAKE_LIBRARY / "UserPlugins" / "reaper_kumi.dylib")
+        longer = str(FAKE_LIBRARY / "Scripts" / "Kumi")
+        self.plan(setup_daw=Runtime(paths=[named, longer[:-5]], effects=[f"Copy Kumi's extension to {named}",
+                                                                         f"Make the folder {longer}"]))
+        self.assertEqual(setup.approval("ableton", data_dir=self.data)["effects"],
+                         [f"Copy Kumi's extension to {named}", f"Make the folder {longer}", f"Writes: {longer[:-5]}"],
+                         "a path an effect already names whole isn't said twice (F10); the start of a longer one is")
 
     def test_runtime_text_setup_couldnt_show_as_it_is_is_refused_not_cleaned(self) -> None:
         self.install_runtime()
@@ -696,7 +704,7 @@ class SetupTest(unittest.TestCase):
         code, said = cli("n\n")
         self.assertEqual(code, 1)
         self.assertIn(URL, said)
-        self.assertIn(f"Writes: {self.data / 'runtime' / VERSION}", said, "the terminal asks with the approval's lines")
+        self.assertIn(f"into {self.data / 'runtime' / VERSION}", said, "the terminal asks with the approval's lines")
         self.assertFalse((self.data / "runtime" / "current.json").exists())
         code, said = cli("y\n")
         self.assertEqual(code, 0, said)
