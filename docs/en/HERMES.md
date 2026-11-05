@@ -48,6 +48,8 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 
 - "What am I looking at?" Kumi reads the track, device and clip you have selected.
 - "Find me a darker snare." Kumi searches the sample folders you listed; in Hermes Desktop the sound map opens.
+- "Stop the scan." A long scan of your sample folders stops when you ask. You keep the sound map you had, unless the
+  scan had already begun saving its new one.
 - "Put it on pad 2." Hermes shows exactly what will change and asks; Kumi makes the change and adds it to HISTORY.
 - "Is it actually darker?" Kumi measures both files: loudness, true peak, spectrum.
 - "Undo the snare change." Kumi undoes that entry while it can still be undone.
@@ -76,7 +78,7 @@ run without asking there, and Kumi can't tell it from a chat.
 | Setting | Default | What it does |
 |---|---|---|
 | DAW | Live | Which DAW Kumi connects to |
-| Sample folders | none | The folders Kumi may read for your sound map. Nothing else is scanned. A folder can't be a whole drive or volume, your home folder or a folder above it, or a folder inside or above Hermes's own (`HERMES_HOME`); `~/` works |
+| Sample folders | none | The folders Kumi may read for your sound map. Nothing else is scanned. A folder can't be a whole drive or volume, your home folder or a folder above it, or a folder inside or above Hermes's own (`HERMES_HOME`); `~/` works. Links and junctions never lead Kumi outside the folders you list, and on Windows it skips cloud placeholder files (OneDrive's, for example) |
 | Tell the agent what you're looking at | on | Adds a short FOCUS and catch-up note to each turn while Kumi is connected |
 | Interpret measurements | off | Also sends measurements and a small band-energy image to your Hermes model for a plain-words reading |
 
@@ -115,11 +117,16 @@ run without asking there, and Kumi can't tell it from a chat.
   measure it.
 - Kumi reads WAV and AIFF itself. For MP3, FLAC and other compressed audio it uses an ffmpeg already on your
   computer, if you allow it at setup; it never downloads one. Before each start Kumi checks that it's still the ffmpeg
-  file you allowed (not the libraries it loads, which an upgrade can change). A file it measures can be up to 50 MB.
+  file you allowed (not the libraries it loads, which an upgrade can change). ffmpeg gets only the one file Kumi is
+  reading: never a URL or a playlist, and nothing from the network. A file Kumi reads can be up to 50 MiB, and it
+  measures at most 12 minutes of it.
 - Kumi's REAPER extension keeps an id for each saved project in the project (ext state), and its Renoise tool one for
   each song in the song's tool data, saved with them.
 - On Windows, a sample in a network folder (`\\server\share`, or a share reached through a link) can't be played in
   Hermes Desktop or the dashboard: they play only files on this computer's own drives.
+- Stop in Hermes Desktop or Hermes's terminal UI, or `/stop` or `/new` in a chat app, cancels a Kumi change, undo or
+  track listen still running. Kumi can't then tell whether it finished, so check HISTORY before asking again. In the
+  classic `hermes chat` CLI, Stop doesn't reach Kumi: the call runs until it finishes or reaches its time limit.
 - Kumi in Hermes leaves out what would act without Hermes's approval: running code inside the DAW, driving Live's
   menus, recording, and saving or opening projects.
 

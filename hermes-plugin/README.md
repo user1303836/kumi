@@ -106,7 +106,7 @@ Live Remote Script with its Kumi Ears device, a REAPER extension or a Renoise to
 Kumi's runtime, its DAW bridge and its library workers run on the machine that runs Hermes, on loopback only, and stop
 when the chat ends, when the plugin unloads, or after 15 minutes idle; your DAW keeps running. Kumi reads the open
 project, the sample folders you list (never a whole drive or volume, your home folder or above, or inside or above
-HERMES_HOME), and finished audio other Hermes plugins saved in Hermes's generated-audio folder
+HERMES_HOME; links never lead it outside them), and finished audio other Hermes plugins saved in Hermes's generated-audio folder
 (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates), to place or measure it. Changes to your project go
 through Hermes's approval. Kumi's approvals apply to one chat, including a one-shot run that resumes it
 (`hermes chat -q --resume`); a scheduled job, a new one-shot run or another chat always asks or is refused. Choosing
@@ -127,7 +127,8 @@ includes the listen's temporary device steps: Undo in Live can bring Kumi Ears b
 id for each saved project in the project (ext state),
 and its Renoise tool one for each song in the song's tool data, saved with them. With your approval at setup, Kumi's
 runtime runs an ffmpeg already on this computer to decode compressed audio; Kumi never downloads one, and checks the
-ffmpeg file you allowed before each start (not the libraries it loads, which an upgrade can change). Audio is measured
+ffmpeg file you allowed before each start (not the libraries it loads, which an upgrade can change); it hands ffmpeg
+only the one file it's reading, never a URL or a playlist, and ffmpeg reads nothing from the network. Audio is measured
 on this computer and is never sent to a model; in a messaging chat (Telegram, Discord…), a sound or measured audio you
 ask Hermes to send you goes to that chat as an attachment, through that app. The project details Kumi notes for FOCUS,
 and the measurements it returns, go to the model you use in Hermes as part of the conversation; Kumi's status names no
