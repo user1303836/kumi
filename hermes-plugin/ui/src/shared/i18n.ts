@@ -136,6 +136,10 @@ const en = {
     useTitle: 'Put a request to use this sound in the chat, to finish and send',
     moreLike: 'More like this',
     moreLikeTitle: 'Put a request for sounds like this one in the chat, to send when you like',
+    useOnPad: 'Use on pad…',
+    useOnPadTitle: 'Pick a drum pad, an empty one included: the request goes in the chat, to send when you like',
+    pads: 'Drum pads',
+    pad: (name: string, note: number) => (name === String(note) ? `Pad for note ${note}` : `Pad ${name}, note ${note}`),
     playFailed: (error: string) => `Kumi couldn't play that sound: ${error}`
   },
   measurements: {
@@ -431,6 +435,10 @@ const ja: Shape<typeof en> = {
     useTitle: 'このサウンドを使う依頼をチャットに入れます。仕上げて送信してください',
     moreLike: '似たサウンド',
     moreLikeTitle: 'これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で',
+    useOnPad: 'パッドに使う…',
+    useOnPadTitle: 'ドラムパッドを選びます（空のパッドも可）。依頼はチャットに入り、送信はご自身で',
+    pads: 'ドラムパッド',
+    pad: (name, note) => (name === String(note) ? `ノート ${note} のパッド` : `パッド ${name}（ノート ${note}）`),
     playFailed: error => `Kumi はそのサウンドを再生できませんでした: ${error}`
   },
   measurements: {
@@ -722,6 +730,10 @@ const zh: Shape<typeof en> = {
     useTitle: '把使用这个声音的请求放进对话，补充完整后发送',
     moreLike: '更多类似的',
     moreLikeTitle: '把寻找类似声音的请求放进对话，由你决定何时发送',
+    useOnPad: '用在打击垫上…',
+    useOnPadTitle: '选择一个打击垫（空的也可以）：请求放进对话，由你决定何时发送',
+    pads: '打击垫',
+    pad: (name, note) => (name === String(note) ? `音符 ${note} 的打击垫` : `打击垫 ${name}（音符 ${note}）`),
     playFailed: error => `Kumi 无法播放这个声音：${error}`
   },
   measurements: {
