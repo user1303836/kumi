@@ -159,7 +159,7 @@ For "make some variations of this clip" (a Live clip, a REAPER MIDI item, a Reno
   - The producer approves the exact takes the preview drew, by V number and direction.
   - Where there's no empty place for every take, Kumi refuses rather than make fewer: say so, and offer fewer.
 - **"Make the second and third chords jazzier, but keep it resolving":** `make` with one take per idea, whose direction names those chords and the resolution. It is never a rewrite of the source.
-- **`change`** rewrites named takes, never a kept take or the source, and never one the producer has edited since. **`keep`** marks the takes the producer likes. **`list`** shows the set.
+- **`change`** rewrites named takes, never a kept take or the source. A take the producer has edited since can't be rewritten (`changed_since`): make a new take instead. **`keep`** marks the takes the producer likes. **`list`** shows the set.
 - **A take they don't want:** `kumi_undo` with its HISTORY id. "Undo that" right after a make takes the whole make back. Kumi for Hermes never drops takes another way.
 
 ## Tutorials
