@@ -280,7 +280,7 @@ test('the store reads what moved: FOCUS and HISTORY again only when their revisi
   assert.equal(kumi.get().available, true)
 })
 
-test('when the runtime goes quiet, FOCUS and HISTORY are read again, and nothing stays undoable', async () => {
+test('when the runtime goes quiet, FOCUS, HISTORY and setup are read again, and nothing stays undoable', async () => {
   const reads = []
   let status = { connected: true, stale: false, revisions: { focus: 1, history: 1 } }
   const kumi = new store.KumiStore(async path => {
@@ -294,8 +294,29 @@ test('when the runtime goes quiet, FOCUS and HISTORY are read again, and nothing
   reads.length = 0
   status = { ...status, connected: false, stale: true }
   await kumi.refreshStatus()
-  assert.deepEqual(reads.sort(), ['/focus', '/history?limit=50', '/status'])
+  assert.deepEqual(reads.sort(), ['/focus', '/history?limit=50', '/setup', '/status'])
   assert.deepEqual([kumi.get().focus.stale, kumi.get().history.items[0].undo_available], [true, false])
+})
+
+test("until Kumi connects, setup is read on every poll, so the next step follows what a chat just installed", async () => {
+  const reads = []
+  let setup = { state: 'needs_daw_component', next_step: 'install_daw_component' }
+  let connected = false
+  const kumi = new store.KumiStore(async path => {
+    reads.push(path)
+    if (path === '/status') return { connected, stale: !connected, revisions: { focus: 1, history: 1 } }
+    if (path === '/setup') return setup
+    return { seq: 1, items: [] }
+  })
+  await kumi.refreshStatus()
+  setup = { state: 'ready', next_step: 'restart_daw', message: 'restart REAPER' }
+  await kumi.refreshStatus()
+  assert.equal(kumi.get().setup.next_step, 'restart_daw', 'read again while not connected')
+  connected = true
+  await kumi.refreshStatus()
+  reads.length = 0
+  await kumi.refreshStatus()
+  assert.deepEqual(reads, ['/status'], 'once connected, only what moved is read')
 })
 
 test('a failed /status read shows the last state as not answering, with nothing to undo', async () => {

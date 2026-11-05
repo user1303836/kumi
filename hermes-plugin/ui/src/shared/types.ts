@@ -170,6 +170,8 @@ export interface SetupStatus {
   unpacked_bytes?: number
   runtime?: { installed?: boolean; version?: string; path?: string }
   daw?: string
+  /** Whether a DAW is chosen in Kumi's settings (`/setup` adds it). Unset, setup reads as its default DAW. */
+  daw_chosen?: boolean
   daw_component?: { state?: string; name?: string; path?: string | null; version?: string | null }
   existing_kumi?: { path?: string; adopted?: boolean } | null
   /** CC-10: whether Kumi's runtime can decode MP3, FLAC and other compressed audio, with the line to show. */

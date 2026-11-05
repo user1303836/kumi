@@ -109,7 +109,7 @@ var en = {
     keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
     agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
     reading: "Reading the sound map…",
-    empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Hermes to scan it; the map is made from what it finds there.",
+    empty: "No sound map yet. Ask Hermes to add a sample folder and scan it: the map is made from what it finds there.",
     search: "Search sounds",
     searchHint: "Search the map: name, kind or folder",
     count: (n) => `${n} sounds`,
@@ -266,7 +266,7 @@ var en = {
     copied: "Copied",
     copyRequest: "Copy request",
     copyUndo: "Copy undo",
-    mapEmpty: "No sound map yet: add a sample folder in Kumi's settings and ask Hermes to scan it.",
+    mapEmpty: "No sound map yet: ask Hermes to add a sample folder and scan it.",
     askLook: "Ask Hermes in your chat to look again before another change."
   }
 };
@@ -374,7 +374,7 @@ var ja = {
     keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
     agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
     reading: "サンプルマップを読み込み中…",
-    empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
+    empty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。見つかったサウンドからマップが作られます。",
     search: "サウンドを検索",
     searchHint: "マップを検索: 名前・種類・フォルダ",
     count: (n) => `${n} 個のサウンド`,
@@ -531,7 +531,7 @@ var ja = {
     copied: "コピーしました",
     copyRequest: "依頼をコピー",
     copyUndo: "取り消しをコピー",
-    mapEmpty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。",
+    mapEmpty: "まだサンプルマップがありません。Hermes にサンプルフォルダの追加とスキャンを頼んでください。",
     askLook: "次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。"
   }
 };
@@ -639,7 +639,7 @@ var zh = {
     keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
     agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
     reading: "正在读取采样地图…",
-    empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描；地图会根据找到的声音生成。",
+    empty: "还没有采样地图。请让 Hermes 添加一个采样文件夹并扫描；地图会根据找到的声音生成。",
     search: "搜索声音",
     searchHint: "搜索地图：名称、种类或文件夹",
     count: (n) => `${n} 个声音`,
@@ -796,7 +796,7 @@ var zh = {
     copied: "已复制",
     copyRequest: "复制请求",
     copyUndo: "复制撤销",
-    mapEmpty: "还没有采样地图：请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描。",
+    mapEmpty: "还没有采样地图：请让 Hermes 添加一个采样文件夹并扫描。",
     askLook: "下一次改动之前，请在对话中让 Hermes 重新查看。"
   }
 };
@@ -1309,7 +1309,7 @@ var KumiStore = class {
       if (liveness || moved("focus")) reads.push(this.refresh("focus"));
       if (liveness || moved("history")) reads.push(this.refresh("history"));
       if ((this.wanted.get("map") ?? 0) > 0 && moved("map")) reads.push(this.refresh("map"));
-      if (first || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
+      if (first || liveness || !status.connected || (this.wanted.get("setup") ?? 0) > 0) reads.push(this.refresh("setup"));
       await Promise.all(reads);
     });
   }
@@ -1533,6 +1533,7 @@ function wordsOf(ctx) {
 }
 var OPEN_WAIT_MS = 1e3;
 var OPEN_POLL_MS = 100;
+var NEW_CHAT = "/";
 async function ask(ctx, text, options) {
   const t = wordsOf(ctx);
   const composer = host.composer;
@@ -1546,7 +1547,7 @@ async function ask(ctx, text, options) {
     return { outcome: copied ? "copied" : "none" };
   }
   if (!session) {
-    if (await composer.insertText(null, text)) return { outcome: "drafted" };
+    if (await composer.insertText(null, text) || await inNewChat(ctx, composer, text)) return { outcome: "drafted" };
     host.notify({ kind: "warning", message: t("notify.openChat") });
     return { outcome: "none" };
   }
@@ -1570,6 +1571,20 @@ async function ask(ctx, text, options) {
   }
   host.notify({ kind: "warning", message: t("notify.openChat") });
   return { outcome: "none" };
+}
+async function inNewChat(ctx, composer, text) {
+  try {
+    host.navigate(NEW_CHAT);
+  } catch {
+    return false;
+  }
+  for (let waited = 0; waited < OPEN_WAIT_MS; waited += OPEN_POLL_MS) {
+    const tick = Promise.withResolvers();
+    ctx.setTimeout(tick.resolve, OPEN_POLL_MS);
+    await tick.promise;
+    if (await composer.insertText(null, text)) return true;
+  }
+  return false;
 }
 
 // src/desktop/card.tsx
@@ -1985,14 +2000,27 @@ function ownerSession(state) {
   return typeof session === "string" && session ? session : null;
 }
 var NEEDS_SETUP = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true, needs_daw_component: true };
-function nextStep(state, t = english) {
+var IN_DAW = { choose_control_surface: true, restart_daw: true, enable_tool: true };
+var SETUP_DAWS = ["ableton", "reaper", "renoise"];
+function dawChosen(state) {
+  return state.setup?.daw_chosen !== false;
+}
+function nextSteps(state, t = english) {
   const setup = state.setup;
   const daw = state.status?.daw ?? setup?.daw;
   if (setup && !dawPartWorks(state) && (NEEDS_SETUP[setup.state ?? ""] || setup.next_step === "install_runtime" || setup.next_step === "install_daw_component")) {
-    return { label: t("step.setup", dawName(daw, t)), request: setupRequest(daw) };
+    return (dawChosen(state) ? [daw] : SETUP_DAWS).map((each) => ({ label: t("step.setup", dawName(each, t)), request: setupRequest(each) }));
   }
-  if (setup?.state === "ready" && !state.status?.connected) return { label: t("step.connect", dawName(daw, t)), request: connectRequest(daw) };
-  return null;
+  if (setup?.state === "ready" && !state.status?.connected) return [{ label: t("step.connect", dawName(daw, t)), request: connectRequest(daw) }];
+  return [];
+}
+function setupWords(state) {
+  const setup = state.setup;
+  const said = setup?.state;
+  if (typeof setup?.message !== "string" || !setup.message || !said || said === "unknown" || dawPartWorks(state)) return null;
+  if (said === "ready") return !state.status?.connected && IN_DAW[setup.next_step ?? ""] ? setup.message : null;
+  if (said === "needs_daw_component" && !dawChosen(state)) return null;
+  return setup.message;
 }
 var TONE3 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
 function KumiPane({ ctx, store, onOpenMap }) {
@@ -2009,11 +2037,10 @@ function KumiPane({ ctx, store, onOpenMap }) {
     return /* @__PURE__ */ jsx5("div", { style: { ...S.muted, padding: 14 }, children: t("pane.reading") });
   }
   const words = chipWords(state.status, state.focus?.transport?.tempo, t);
-  const step2 = nextStep(state, t);
+  const steps = nextSteps(state, t);
   const session = ownerSession(state);
   const connected = Boolean(state.status?.connected);
-  const setupState = state.setup?.state;
-  const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" && !dawPartWorks(state) ? state.setup.message : null;
+  const setupMessage = setupWords(state);
   const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
   return /* @__PURE__ */ jsxs5("div", { style: { height: "100%", overflowY: "auto", overflowX: "hidden", color: T.text }, children: [
     /* @__PURE__ */ jsxs5("div", { style: { ...S.section, gap: 8 }, children: [
@@ -2035,11 +2062,11 @@ function KumiPane({ ctx, store, onOpenMap }) {
         ].filter(Boolean).join(" ") }),
         /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: t("pane.lookAgain") }) })
       ] }),
-      step2 && /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: connected ? session : null }), strong: true, children: step2.label }) })
+      steps.length > 0 && /* @__PURE__ */ jsx5("div", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: steps.map((step2) => /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: connected ? session : null }), strong: steps.length === 1, children: step2.label }, step2.request)) })
     ] }),
     /* @__PURE__ */ jsx5(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx5(FocusView, { focus: state.focus, now }) }),
     Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx5(Section, { title: t("pane.jobs"), children: /* @__PURE__ */ jsx5(JobsView, { jobs: state.jobs, onRequest: (request) => void ask(ctx, request, { send: false, session }) }) }),
-    /* @__PURE__ */ jsx5(
+    /* @__PURE__ */ jsxs5(
       Section,
       {
         title: /* @__PURE__ */ jsxs5(Fragment, { children: [
@@ -2047,30 +2074,30 @@ function KumiPane({ ctx, store, onOpenMap }) {
           " ",
           /* @__PURE__ */ jsx5("span", { style: { textTransform: "none", letterSpacing: 0 }, children: undoable ? t("pane.undoable", undoable) : "" })
         ] }),
-        children: /* @__PURE__ */ jsx5(
-          HistoryView,
-          {
-            daw: state.status?.daw,
-            history: state.history,
-            live: Boolean(state.status?.connected) && state.status?.stale !== true,
-            now,
-            action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(
-              TextButton,
-              {
-                label: t("pane.undoLabel", clean(item.title ?? item.label ?? item.id, 120)),
-                onClick: () => void ask(ctx, undoRequest(item), { send: true, session }),
-                title: t("pane.undoTitle"),
-                children: t("pane.undo")
-              }
-            ) : null
-          }
-        )
+        children: [
+          /* @__PURE__ */ jsx5(
+            HistoryView,
+            {
+              daw: state.status?.daw,
+              history: state.history,
+              live: Boolean(state.status?.connected) && state.status?.stale !== true,
+              now,
+              action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(
+                TextButton,
+                {
+                  label: t("pane.undoLabel", clean(item.title ?? item.label ?? item.id, 120)),
+                  onClick: () => void ask(ctx, undoRequest(item), { send: true, session }),
+                  title: t("pane.undoTitle"),
+                  children: t("pane.undo")
+                }
+              ) : null
+            }
+          ),
+          !connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && /* @__PURE__ */ jsx5("span", { style: S.faint, children: t("pane.undoNeedsConnection") })
+        ]
       }
     ),
-    /* @__PURE__ */ jsxs5("div", { style: { ...S.row, padding: "10px 12px", gap: 8 }, children: [
-      /* @__PURE__ */ jsx5(TextButton, { onClick: onOpenMap, children: t("pane.openMap") }),
-      !connected && state.status?.owner && /* @__PURE__ */ jsx5("span", { style: S.faint, children: t("pane.undoNeedsConnection") })
-    ] })
+    /* @__PURE__ */ jsx5("div", { style: { ...S.row, padding: "10px 12px", gap: 8 }, children: /* @__PURE__ */ jsx5(TextButton, { onClick: onOpenMap, children: t("pane.openMap") }) })
   ] });
 }
 
@@ -2179,7 +2206,7 @@ function StatusChip({
   const state = useKumi(store);
   if (state.available !== true) return null;
   const words = chipWords(state.status, state.focus?.transport?.tempo, t);
-  const step2 = nextStep(state, t);
+  const steps = nextSteps(state, t);
   const connected = Boolean(state.status?.connected);
   return /* @__PURE__ */ jsxs8(DropdownMenu, { children: [
     /* @__PURE__ */ jsx8(DropdownMenuTrigger, { asChild: true, children: /* @__PURE__ */ jsxs8(
@@ -2212,7 +2239,7 @@ function StatusChip({
     ) }),
     /* @__PURE__ */ jsxs8(DropdownMenuContent, { align: "end", side: "top", children: [
       /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: onOpenMap, children: t("chip.openMap") }),
-      step2 && /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: () => void ask(ctx, step2.request, { send: true, session: connected ? ownerSession(state) : null }), children: step2.label }),
+      steps.map((step2) => /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: () => void ask(ctx, step2.request, { send: true, session: connected ? ownerSession(state) : null }), children: step2.label }, step2.request)),
       /* @__PURE__ */ jsx8(DropdownMenuSeparator, {}),
       /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: onOpenSettings, children: t("chip.settings") })
     ] })
@@ -2916,13 +2943,15 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const [openOnFind, setOpenOnFind] = useState5(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
   const [petLines, setPetLines] = useState5(() => ctx.storage.get(PET_LINES, false));
   const setup = state.setup;
-  const step2 = nextStep(state, t);
-  const daw = state.status?.daw ?? setup?.daw;
+  const steps = nextSteps(state, t);
   const runtime = setup?.runtime;
   const component = setup?.daw_component;
   const partWorks = dawPartWorks(state);
   const setupState = partWorks ? "ready" : setup?.state ?? "unknown";
   const componentState = component?.state ?? "unknown";
+  const named = dawChosen(state) || partWorks || componentState === "installed" || Boolean(state.status?.connected);
+  const daw = named ? state.status?.daw ?? setup?.daw : null;
+  const next = setup?.message && !partWorks && (named || setupState !== "needs_daw_component") ? setup.message : null;
   return /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
     /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
       /* @__PURE__ */ jsx12("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
@@ -2932,7 +2961,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       /* @__PURE__ */ jsxs12("div", { children: [
         /* @__PURE__ */ jsx12("h3", { style: HEADING, children: t("settings.setup") }),
         /* @__PURE__ */ jsx12(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
-        setup?.message && !partWorks && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
+        next && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(next, 300) }),
         runtime && /* @__PURE__ */ jsxs12(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
           setup?.pinned_version && setup.pinned_version !== runtime.version && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
@@ -2976,14 +3005,15 @@ function SettingsPage({ ctx, store, onOpenMap }) {
         state.status?.owner?.session_id && /* @__PURE__ */ jsx12(Line, { label: t("settings.chat"), children: host5.state.focusedStoredSessionId?.get() === state.status.owner.session_id ? t("settings.chatHere") : t("settings.chatElsewhere") })
       ] }),
       /* @__PURE__ */ jsxs12("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-        step2 && /* @__PURE__ */ jsx12(
+        steps.map((step2) => /* @__PURE__ */ jsx12(
           TextButton,
           {
             onClick: () => void ask(ctx, step2.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
-            strong: true,
+            strong: steps.length === 1,
             children: step2.label
-          }
-        ),
+          },
+          step2.request
+        )),
         /* @__PURE__ */ jsx12(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
         /* @__PURE__ */ jsx12(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: t("settings.agentSettings") })
       ] })

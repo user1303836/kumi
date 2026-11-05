@@ -458,6 +458,14 @@ def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: 
         result.update(state="ready", next_step="choose_control_surface",
                       message="In Live, choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI), "
                               "then ask Hermes to connect to it.")
+    elif after == "restart_daw":  # REAPER loads its part when it starts: one open during the install hasn't
+        result.update(state="ready", next_step="restart_daw",
+                      message=f"Kumi's part in {DAWS[daw]} is installed. If {DAWS[daw]} is open, restart it so it "
+                              "loads the part, then ask Hermes to connect.")
+    elif after == "enable_tool":
+        result.update(state="ready", next_step="enable_tool",
+                      message=f"Kumi's part in {DAWS[daw]} is installed. Turn on the Kumi tool in {DAWS[daw]}'s Tool "
+                              "Browser if it's off, then ask Hermes to connect.")
     else:
         result.update(state="ready", next_step="connect",
                       message=f"Kumi is set up: open {DAWS[daw]}, then ask Hermes to connect to it.")

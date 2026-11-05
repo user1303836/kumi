@@ -152,6 +152,47 @@ test('a request with no chat owning Kumi yet waits unsent in the input in front,
   assert.deepEqual([h.calls.submit, h.calls.insert], [[], [[null, 'Set up Kumi for Live']]])
 })
 
+test('with no input in front (Settings, a profile with no chat yet), the request goes unsent into a new chat', async () => {
+  const { ask } = await load('src/desktop/actions.ts')
+  const h = harness()
+  const routes = []
+  globalThis.__kumiTestHost.navigate = path => routes.push(path)
+  // An input exists only once Desktop shows the new chat.
+  globalThis.__kumiTestHost.composer.insertText = async (session, text) => (routes.length > 0 ? (h.calls.insert.push([session, text]), true) : false)
+  assert.deepEqual(await ask(h.ctx, 'Set up Kumi for REAPER', { send: true, session: null }), { outcome: 'drafted' })
+  assert.deepEqual([routes, h.calls.insert, h.calls.submit], [['/'], [[null, 'Set up Kumi for REAPER']], []])
+  // No input comes even then: nothing is sent, and the producer is told.
+  globalThis.__kumiTestHost.composer.insertText = async () => false
+  assert.deepEqual(await ask(h.ctx, 'Set up Kumi for REAPER', { send: true, session: null }), { outcome: 'none' })
+  assert.equal(h.calls.notify.at(-1).kind, 'warning')
+})
+
+test('until a DAW is chosen, setup is offered for each DAW and nothing names the default one', async () => {
+  const pane = await load('src/desktop/pane.tsx')
+  const needsPart = { state: 'needs_daw_component', next_step: 'install_daw_component', message: "next, setup installs Kumi's part in Live." }
+  const fresh = { status: { connected: false }, setup: { ...needsPart, daw: 'ableton', daw_chosen: false } }
+  assert.deepEqual(pane.nextSteps(fresh).map(step => step.request), ['Set up Kumi for Live', 'Set up Kumi for REAPER', 'Set up Kumi for Renoise'])
+  assert.equal(pane.setupWords(fresh), null)
+  // Chosen in Kumi's settings (or a backend from before the flag): that DAW alone, and setup's words.
+  for (const setup of [{ ...needsPart, daw: 'reaper', daw_chosen: true }, { ...needsPart, daw: 'reaper' }]) {
+    const state = { status: { connected: false, daw: 'reaper' }, setup }
+    assert.deepEqual(pane.nextSteps(state).map(step => step.request), ['Set up Kumi for REAPER'])
+    assert.equal(pane.setupWords(state), needsPart.message)
+  }
+})
+
+test("once the DAW's part is in, its own step (a restart) shows with a connect until Kumi connects", async () => {
+  const pane = await load('src/desktop/pane.tsx')
+  const setup = { state: 'ready', next_step: 'restart_daw', daw: 'reaper', daw_chosen: true, message: 'restart REAPER if it’s open' }
+  const away = { status: { connected: false, daw: 'reaper' }, setup }
+  assert.deepEqual(pane.nextSteps(away).map(step => step.request), ['Connect Kumi to REAPER'])
+  assert.equal(pane.setupWords(away), setup.message)
+  const connected = { status: { connected: true, daw: 'reaper' }, setup }
+  assert.deepEqual([pane.nextSteps(connected), pane.setupWords(connected)], [[], null])
+  // Plain "open REAPER and connect" is the button's to say.
+  assert.equal(pane.setupWords({ status: { connected: false }, setup: { ...setup, next_step: 'connect' } }), null)
+})
+
 test('nothing is undone when Kumi is not connected', async () => {
   const { default: plugin } = await load('src/desktop/plugin.tsx')
   const h = harness({ routes: { ...ROUTES, '/status': { ...ROUTES['/status'], connected: false, stale: true } } })

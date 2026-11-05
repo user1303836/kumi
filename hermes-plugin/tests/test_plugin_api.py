@@ -167,7 +167,10 @@ class Routes(unittest.TestCase):
         try:
             self.api._setting = lambda key: "reaper" if key == "daw" else None
             sys.modules[name] = types.SimpleNamespace(status=status)
-            self.assertEqual((self.api.setup(), asked), (ready, ["reaper"]))
+            self.assertEqual((self.api.setup(), asked), ({**ready, "daw_chosen": True}, ["reaper"]))
+            self.api._setting = lambda key: None
+            self.assertEqual((self.api.setup()["daw_chosen"], asked[-1]), (False, None),
+                             "with no DAW chosen, setup reads as its default and the page offers each DAW")
             sys.modules[name] = types.SimpleNamespace(status=broken)
             with self.assertLogs(self.api._log.name, "WARNING"):
                 failed = self.api.setup()
@@ -183,6 +186,20 @@ class Routes(unittest.TestCase):
                 sys.modules.pop(name, None)
             else:
                 sys.modules[name] = module
+
+    def test_before_a_runtime_names_its_daw_status_names_the_one_chosen_in_kumis_settings(self) -> None:
+        saved = self.api._setting
+        try:
+            self.api._setting = lambda key: "reaper" if key == "daw" else None
+            self.assertEqual(self.api.status()["daw"], "ableton", "a runtime's own word comes first")
+            fresh = Path(self.tmp.name) / "fresh" / "state"
+            self.api.snapshots.state_dir = lambda: fresh
+            self.assertEqual(self.api.status()["daw"], "reaper")
+            for unset in (None, "logic"):
+                self.api._setting = lambda key, unset=unset: unset if key == "daw" else None
+                self.assertIsNone(self.api.status().get("daw"), unset)
+        finally:
+            self.api._setting = saved
 
     def test_a_job_is_read_by_its_id_and_an_unknown_one_is_404(self) -> None:
         from fastapi import HTTPException
