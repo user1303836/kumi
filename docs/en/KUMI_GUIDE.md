@@ -500,6 +500,9 @@ adding a rack chain). HISTORY marks them **kept**, and Live's own undo still
 takes them back. Kumi deletes things when you ask, or when the request implies
 it ("start over", "replace the drums").
 
+**Known issue.** Kumi can't take back a device it loaded yet: use Live's own undo
+(Cmd-Z, or Ctrl-Z on Windows) right away (#1101).
+
 **A copy before big changes.** When a plan reaches its third step, or a step
 that deletes something, Kumi copies the Set as last saved next to it
 (`Song.backup-<date>.als`) and says so, once for each saved version. Unsaved
