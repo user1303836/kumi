@@ -214,7 +214,8 @@ async fn native_mac_helper_compiles_and_answers_without_requesting_access() {
     std::fs::write(&source, mac::MAC_SOURCE).unwrap();
     let result = tokio::process::Command::new("xcrun").args(["swiftc", "-O", "-o"]).arg(&command).arg(&source).output().await.unwrap();
     assert!(result.status.success(), "{}", String::from_utf8_lossy(&result.stderr));
-    let hands = persistent(command.to_string_lossy().into(), vec![], Some(4000));
+    // This checks a native reply, not cold-start latency on the shared CI host.
+    let hands = persistent(command.to_string_lossy().into(), vec![], Some(30_000));
     let _allowed = hands.trusted(false).await.unwrap();
     hands.close();
 }
