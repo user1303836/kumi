@@ -179,6 +179,10 @@ function M.identity(memory, bundle_path)
   }
 end
 
+-- What the tool carries in this file for setup to read before Renoise has run it: it keeps the song's id in its tool_data
+-- only while a connected host asks (CC-8). Word for word daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED.
+M.KEEPS_IDENTITY_ONLY_WHEN_ASKED = "kumi-daw/1 keeps a project's id only while a connection asks"
+
 -- status: the identity plus busy, and keep_identity: the tool keeps the song's id in its tool_data only while a connected
 -- host asks (the hello's keepIdentity).
 function M.status(memory, bundle_path)

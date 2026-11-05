@@ -320,6 +320,13 @@ pub struct Extension {
     listening: crate::listening::Listening,
 }
 
+/// That the extension keeps a project's id in the project only while a connected client asks it to (CC-8), as its status
+/// says and as its library carries [`daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED`] for setup to read before
+/// REAPER has run it: the mark is in the library because this reads it.
+fn keeps_identity_only_when_asked() -> bool {
+    !std::hint::black_box(daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED).is_empty()
+}
+
 impl Extension {
     pub fn new(api: Api, jobs: Receiver<Job>, out: Box<dyn Outbox>, snapshot: Arc<Mutex<Snapshot>>) -> Extension {
         let board = snapshot.lock().unwrap_or_else(|e| e.into_inner()).listening.clone();
@@ -328,7 +335,7 @@ impl Extension {
         let mut status_static = json!({
             "sdk": api::SDK_VERSION,
             "api": {"resolved": api.resolved(), "total": api::FUNCTION_COUNT},
-            "keep_identity": true,
+            "keep_identity": keeps_identity_only_when_asked(),
         });
         let missing = Reaper::new(&api).missing_features();
         if !missing.is_empty() {
