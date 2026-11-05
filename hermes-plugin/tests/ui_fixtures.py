@@ -119,7 +119,9 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
             **_envelope(12, now),
             "connected": True,
             "daw": "ableton",
-            "setup": {"installed": True, "version": "1.24.70", "daw": "ableton", "daw_component": {"state": "installed"}},
+            # What `kumi serve` sees of Live's part (W1); `/setup` answers from setup.py's `status()` instead.
+            "setup": {"component": {"installed": True, "version": "1.0.104", "bundled": "1.0.104"}, "daw_open": True},
+            "stale": False,
             "runtime": {"version": "1.24.70", "protocol": "kumi-serve/1"},
             "project": dict(PROJECT),
             "capabilities": ["observe", "read", "change", "undo", "history", "listen", "sounds", "library", "map"],
@@ -222,7 +224,7 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
             },
         },
     )
-    _write_json(state / "jobs" / "j-scan-1.json", {**_envelope(30, now), "state": "running", "progress": {"done": 412, "total": 1200, "label": "Scanning Drums"}})
+    _write_json(state / "jobs" / "j-scan-1.json", {**_envelope(30, now), "state": "running", "progress": {"done": 412, "total": 1200, "message": "Scanning Drums"}})
     return state
 
 

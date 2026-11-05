@@ -1,0 +1,12 @@
+{
+  "name": "kumi",
+  "label": "Kumi",
+  "description": "Kumi's connection to your DAW, FOCUS, HISTORY and sound map, read from the Kumi runtime this profile runs. Also the backend Kumi's Desktop half reads.",
+  "icon": "Activity",
+  "tab": {
+    "path": "/kumi",
+    "position": "after:sessions"
+  },
+  "entry": "dist/index.js",
+  "api": "plugin_api.py"
+}
