@@ -25,16 +25,20 @@ def register(ctx) -> None:
     host = tools.Host(ctx, runtimes)
     shown = tools.installed_check(host)
     for name, schema, function, emoji in tools.TOOLS:
-        ctx.register_tool(name=name, toolset=tools.TOOLSET, schema=schema, handler=tools.handler(function, host),
+        ctx.register_tool(name=name, toolset=tools.TOOLSET, schema=schema, handler=tools.handler(name, function, host),
                           check_fn=None if name in tools.ALWAYS_SHOWN else shown, emoji=emoji)
 
     def approval(**kwargs):
         return policy.pre_tool_call(host, **kwargs)
 
+    def approval_outcome(**kwargs):
+        policy.post_approval_response(host, **kwargs)
+
     def kumi_command(raw_args: str = "", **kwargs):
         return commands.kumi(host, raw_args, **kwargs)
 
     ctx.register_hook("pre_tool_call", approval)
+    ctx.register_hook("post_approval_response", approval_outcome)
     ctx.register_hook("on_session_finalize", host.on_session_finalize)
     ctx.register_command("kumi", kumi_command, description=commands.DESCRIPTION)
     for skill in ("daw", "sounds", "listening"):

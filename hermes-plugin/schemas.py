@@ -68,7 +68,8 @@ KUMI_CHANGE = _tool(
     "before it runs. Pass the project key and epoch from your latest kumi_observe or kumi_read: a changed project is "
     "refused, not guessed. Placing a sound, a generated file or a library sample on a track is an import_audio step. "
     "Returns applied, partial, unsure or refused, with HISTORY ids; never retry an unsure change, check kumi_history.",
-    {"title": {"type": "string", "description": "What the change does, in a few words the producer will see."},
+    {"title": {"type": "string", "maxLength": 120,
+               "description": "What the change does, in a few words the producer will see."},
      "steps": {"type": "array", "minItems": 1, "maxItems": MAX_STEPS, "items": {
          "type": "object",
          "properties": {"tool": {"type": "string"}, "input": {"type": "object"},
@@ -76,7 +77,7 @@ KUMI_CHANGE = _tool(
          "required": ["tool", "input"], "additionalProperties": False}},
      "expected_project_key": {"type": "string"},
      "expected_epoch": {"type": "string"},
-     "note": {"type": "string", "description": "Why, kept with the HISTORY entry."}},
+     "note": {"type": "string", "maxLength": 500, "description": "Why, kept with the HISTORY entry."}},
     ("title", "steps", "expected_project_key", "expected_epoch"))
 
 KUMI_UNDO = _tool(

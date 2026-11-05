@@ -49,8 +49,9 @@ class Tools(unittest.TestCase):
         self.host, self.ctx, self.data = support.host(self)
 
     def received(self, tool: str) -> list[dict]:
+        """The runtime's calls of `tool`, the approval hook's previews left out."""
         return [m["params"]["arguments"] for m in support.requests(self.data / "state")
-                if m.get("params", {}).get("name") == tool]
+                if m.get("params", {}).get("name") == tool and not m["params"]["arguments"].get("preview")]
 
     def test_status_before_setup_says_so_and_starts_nothing(self):
         host, _, data = support.host(self, installed=False)
@@ -65,14 +66,15 @@ class Tools(unittest.TestCase):
         self.assertEqual(support.call(host, "kumi_observe", {"scope": "focus"})["error"]["code"], "not_connected")
 
     def test_connect_starts_this_chats_runtime_and_status_then_reads_it(self):
-        connected = support.call(self.host, "kumi_connect", {}, session_id="s1", tool_call_id="call-1")
+        connected = support.call(self.host, "kumi_connect", {}, session_id="s1", task_id="t1", user_task="connect")
         self.assertEqual((connected["connected"], connected["owner"]["session_id"]), (True, "s1"))
         self.assertEqual(connected["project"], {"name": "Night Drive", "key": "live:night-drive", "epoch": "1"})
         status = support.call(self.host, "kumi_status", {}, session_id="s2")
         self.assertEqual((status["connected"], status["runtime"]["protocol"]), (True, "kumi-serve/1"))
         host = self.received("connect")[0]["_host"]
-        self.assertEqual({key: host[key] for key in ("profile_id", "session_id", "tool_call_id")},
-                         {"profile_id": "default", "session_id": "s1", "tool_call_id": "call-1"})
+        self.assertEqual({key: host[key] for key in ("profile_id", "session_id", "task_id")},
+                         {"profile_id": "default", "session_id": "s1", "task_id": "t1"})
+        self.assertRegex(host["tool_call_id"], r"^call-\d+$", "the id Hermes gave the hook (CC-5)")
         self.host.on_session_finalize(session_id="s1", platform="cli")
         self.assertIsNone(self.host.runtimes.get(self.data), "the chat that started it ended")
 
@@ -100,7 +102,8 @@ class Tools(unittest.TestCase):
             unsure = support.call(host, "kumi_change", LOUDER, session_id="s1")
         self.assertEqual(unsure["state"], "unsure")
         self.assertIn("Don't send it again", unsure["hint"])
-        sent = [m for m in support.requests(data / "state") if m.get("params", {}).get("name") == "change"]
+        sent = [m for m in support.requests(data / "state") if m.get("params", {}).get("name") == "change"
+                and not m["params"]["arguments"].get("preview")]
         self.assertEqual(len(sent), 1)
 
     def test_an_approved_folder_is_kept_for_the_next_runtime(self):
@@ -110,8 +113,8 @@ class Tools(unittest.TestCase):
         self.assertEqual(self.ctx.settings["library_folders"], ["/Samples/Drums"])
         support.call(self.host, "kumi_library", {"action": "add_folder", "folder": "/Samples/Drums"})
         self.assertEqual(self.ctx.settings["library_folders"], ["/Samples/Drums"], "kept once")
-        self.assertEqual(support.call(self.host, "kumi_library", {"action": "add_folder", "folder": "Drums"})
-                         ["error"]["code"], "invalid")
+        self.assertIn("isn't a full path", support.call(self.host, "kumi_library", {"action": "add_folder",
+                                                                                   "folder": "Drums"})["blocked"])
         self.host.runtimes.stop_all()
         support.call(self.host, "kumi_connect", {}, session_id="s1")
         started = json.loads((self.data / "state" / "fixture-start.json").read_text(encoding="utf-8"))

@@ -107,7 +107,7 @@ def requests(state_dir: Path) -> list[dict]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines()] if path.exists() else []
 
 
-def host(test, settings: dict | None = None, *fixture_args: str, installed: bool = True):
+def host(test, settings: dict | None = None, *fixture_args: str, installed: bool = True, hook_timeout: float = 30.0):
     """A plugin host as the tools see it, on a fresh plugin-data folder with the fixture runtime set up (unless
     `installed` is false). Returns (host, context, data folder); everything is cleaned up after `test`."""
     import tempfile
@@ -119,11 +119,33 @@ def host(test, settings: dict | None = None, *fixture_args: str, installed: bool
     ctx = Context(settings if settings is not None else {"daw": "ableton"})
     runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10)
     test.addCleanup(runtimes.stop_all)
-    return module("tools").Host(ctx, runtimes, data_dir=lambda: data, pinned=lambda: VERSION), ctx, data
+    return (module("tools").Host(ctx, runtimes, data_dir=lambda: data, pinned=lambda: VERSION,
+                                 hook_timeout=lambda: hook_timeout), ctx, data)
 
 
-def call(host, name: str, args=None, **context) -> dict:
-    """A tool called as Hermes calls it, its JSON answer read back."""
+_IDS = iter(range(1, 1 << 30))
+
+
+def call(host, name: str, args=None, *, answer: str = "once", **context) -> dict:
+    """A tool called as Hermes calls it: Kumi's pre_tool_call hook with a fresh tool-call id (as Hermes gives a hook),
+    the producer giving `answer` when the hook asks, then the handler with the session and task only. A blocked or
+    denied call comes back as {"blocked": message}."""
+    policy = module("policy")
+    ident = f"call-{next(_IDS)}"
+    hook = {"session_id": context.get("session_id"), "task_id": context.get("task_id"), "tool_call_id": ident,
+            "turn_id": "u1", "api_request_id": "a1", "middleware_trace": []}
+    decision = policy.pre_tool_call(host, tool_name=name, args=args if isinstance(args, dict) else {}, **hook)
+    if decision is not None and decision["action"] == "block":
+        return {"blocked": decision["message"]}
+    if decision is not None:
+        policy.post_approval_response(host, tool_call_id=ident, choice=answer)
+        if answer not in policy.APPROVED:
+            return {"blocked": decision["message"], "answer": answer}
+    return handle(host, name, args, **context)
+
+
+def handle(host, name: str, args=None, **context) -> dict:
+    """A tool's handler called as Hermes calls it, its JSON answer read back (no hook: for a call that skipped it)."""
     tools = module("tools")
     function = next(function for tool, _, function, _ in tools.TOOLS if tool == name)
-    return json.loads(tools.handler(function, host)(args, **context))
+    return json.loads(tools.handler(name, function, host)(args, **context))
