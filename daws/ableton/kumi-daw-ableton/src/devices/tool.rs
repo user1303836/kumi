@@ -1,4 +1,4 @@
-//! Build a checked Max for Live device in Live's User Library, then wait for its Browser.
+//! Build a checked Max for Live device in Live's User Library; loading it waits for its Browser.
 
 use super::{
     amxd::{encode_amxd, DeviceType},
@@ -29,12 +29,12 @@ use std::{
     path::{Path, PathBuf},
     rc::Rc,
     sync::{Arc, LazyLock},
-    time::Duration,
 };
 use tokio::io::AsyncWriteExt;
 use uuid::Uuid;
 
 pub const MAKE_DEVICE_TOOL: &str = "make_device";
+const BROWSER_LOADS: &str = "load_device waits for Live's Browser to list this file; it can be called now.";
 /// How many objects one call can ask about.
 const MOST_OBJECTS: usize = 16;
 /// How many replaced devices' files are kept, the newest.
@@ -44,7 +44,9 @@ pub type BrowserSees = Rc<dyn Fn(String, Signal) -> LocalBoxFuture<'static, Resu
 #[derive(Clone)]
 pub struct DeviceToolOptions {
     pub user_library: String,
+    /// Kept for source compatibility. Making a file no longer reads the Browser; load_device waits for it instead.
     pub browser_sees: BrowserSees,
+    /// Kept for source compatibility; ignored. Making a device never waits for Live's Browser.
     pub wait_ms: Option<u64>,
     /// The devices this conversation made: the tool is made anew each turn, and these are kept for the conversation.
     pub made: Rc<RefCell<Made>>,
@@ -65,8 +67,7 @@ pub struct Made {
     devices: Vec<MadeDevice>,
     /// Where a replaced device's file is kept, if anywhere.
     kept: Option<PathBuf>,
-    /// Devices written that Live's Browser hadn't listed yet (made by a background job, which doesn't wait for it), by
-    /// item id: loading one waits for the Browser first.
+    /// Devices written without asking Live's Browser, by item id: loading one waits for the Browser first.
     unlisted: Vec<String>,
 }
 
@@ -115,7 +116,7 @@ impl Made {
         self.unlisted.retain(|item| item != item_id);
     }
 
-    /// A device written that Live's Browser hasn't listed yet.
+    /// A device written whose presence in Live's Browser hasn't been checked yet.
     pub fn written_unlisted(&mut self, item_id: &str) {
         if !self.unlisted(item_id) {
             self.unlisted.push(item_id.to_string());
@@ -288,8 +289,6 @@ struct Saved {
     ours: Option<MadeDevice>,
     /// Where the replaced device's file is kept.
     kept: Option<PathBuf>,
-    /// Whether Live's Browser listed it before the wait was over.
-    seen: bool,
 }
 
 /// A new file put in place from `temporary` without replacing a file at `file`: a hard link, which fails when one's there
@@ -326,8 +325,8 @@ async fn beside<T: Send + 'static>(signal: &Signal, work: impl FnOnce() -> T + S
 
 impl DeviceTool {
     /// Writes a device of `kind` to Kumi's folder in the User Library under its name (`make` makes its file for the name
-    /// it's given, and says what it found, or why it can't), records it for this conversation, and waits for Live's
-    /// Browser to list it. Err is the answer when it can't be made or written: nothing is written then. A device that
+    /// it's given, and says what it found, or why it can't), and records it for this conversation. Loading it waits for
+    /// Live's Browser to list it. Err is the answer when it can't be made or written: nothing is written then. A device that
     /// isn't this conversation's to replace is put in place without replacing any file there.
     async fn save<Making: Future<Output = Result<(Vec<u8>, Findings), String>>>(
         &self,
@@ -432,21 +431,8 @@ impl DeviceTool {
         let written = tokio::task::spawn_blocking(move || hashed(&bytes)).await.unwrap_or_default();
         self.options.made.borrow_mut().made(MadeDevice { asked: naming.asked, file: name.clone(), kind, written });
         let item_id = format!("user_library/Kumi/{}/{name}", kind_folder(kind));
-        let deadline = now_ms().saturating_add(self.options.wait_ms.unwrap_or(20_000) as i64);
-        let mut seen = false;
-        while !seen && now_ms() < deadline {
-            seen = (self.options.browser_sees)(item_id.clone(), signal.clone()).await.unwrap_or(false);
-            if !seen {
-                tokio::time::sleep(Duration::from_millis(400)).await;
-            }
-            signal.check()?;
-        }
-        if seen {
-            self.options.made.borrow_mut().listed(&item_id);
-        } else {
-            self.options.made.borrow_mut().written_unlisted(&item_id);
-        }
-        Ok(Ok(Saved { name, file, item_id, ours, kept, seen }))
+        self.options.made.borrow_mut().written_unlisted(&item_id);
+        Ok(Ok(Saved { name, file, item_id, ours, kept }))
     }
 
     /// A device that's already there (`from`): opened and said in the notation when nothing's asked of it; else a new
@@ -570,7 +556,7 @@ impl DeviceTool {
                 }
             }
         };
-        let Saved { name, file, item_id, ours, kept, seen } = match self.save(kind, naming, make, &mut found, &signal).await? {
+        let Saved { name, file, item_id, ours, kept } = match self.save(kind, naming, make, &mut found, &signal).await? {
             Ok(saved) => saved,
             Err(refused) => return Ok(refused),
         };
@@ -605,9 +591,7 @@ impl DeviceTool {
                 fields.insert(key.into(), json!(said));
             }
         }
-        if !seen {
-            fields.insert("browser".into(), json!("Live's Browser hasn't listed it yet; load it in a moment."));
-        }
+        fields.insert("browser".into(), json!(BROWSER_LOADS));
         let load = match kind {
             DeviceType::MidiEffect => "load_device with this itemId on the MIDI track",
             DeviceType::AudioEffect => "load_device with this itemId on the track, then hear it with audition",
@@ -639,12 +623,8 @@ impl DeviceTool {
 #[async_trait(?Send)]
 impl KernelTool for DeviceTool {
     fn reach(&self) -> Reach {
-        // Writing the file is away from the DAW; waiting for its Browser to list the device reads it.
-        if self.options.wait_ms == Some(0) {
-            Reach::AwayFromDaw
-        } else {
-            Reach::DawRead
-        }
+        // Making and opening a device use files on disk; load_device owns every read of Live's Browser.
+        Reach::AwayFromDaw
     }
     fn name(&self) -> &str {
         MAKE_DEVICE_TOOL
@@ -779,7 +759,7 @@ impl KernelTool for DeviceTool {
                 }
             })
         };
-        let Saved { name, file, item_id, ours, kept, seen } = match self.save(spec.kind(), naming, make, &mut found, &signal).await? {
+        let Saved { name, file, item_id, ours, kept } = match self.save(spec.kind(), naming, make, &mut found, &signal).await? {
             Ok(saved) => saved,
             Err(refused) => return Ok(refused),
         };
@@ -811,9 +791,7 @@ impl KernelTool for DeviceTool {
                 fields.insert(key.into(), json!(said));
             }
         }
-        if !seen {
-            fields.insert("browser".into(), json!("Live's Browser hasn't listed it yet; load it in a moment."));
-        }
+        fields.insert("browser".into(), json!(BROWSER_LOADS));
         let again = format!("call make_device again in this conversation with the name \"{name}\", which replaces this device");
         let next = if found.wrong.is_empty() {
             format!("{next} To change it, {again}.")

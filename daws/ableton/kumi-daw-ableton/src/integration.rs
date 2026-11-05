@@ -33,7 +33,6 @@ use futures::{
 use kumi_agent::{
     core::{contracts::*, variations::tool::Variations},
     integrations::shared::steps,
-    mcp::allowed_tools::CallOptions,
 };
 use kumi_ai::timing;
 use kumi_common::{
@@ -580,22 +579,11 @@ impl ObservationHost for Ableton {
             offered.push(self.static_tool("read_notes"));
         }
         if tools.has("live_browser_inspect") && tools.has("live_browser_load_preview") {
-            let owner = self.weak.upgrade().unwrap();
             offered.push(device_tool(DeviceToolOptions {
                 user_library: self.options.user_library.clone().unwrap_or_else(|| samples::user_library(None, None)),
                 wait_ms: None,
                 made: self.made.clone(),
-                browser_sees: Rc::new(move |item, signal| {
-                    let owner = owner.clone();
-                    async move {
-                        let Some(tools) = owner.connection.tools() else { return Ok(false) };
-                        Ok(tools
-                            .call("live_browser_inspect", object(&json!({"itemId":item}))?, signal, CallOptions::default())
-                            .await
-                            .is_ok_and(|r| r.is_error != Some(true)))
-                    }
-                    .boxed_local()
-                }),
+                browser_sees: Rc::new(|_, _| async { Ok(false) }.boxed_local()),
             }));
         }
         // make_changes runs every change and action as a step; those that aren't tools of their own get a line each in

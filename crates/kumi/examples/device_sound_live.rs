@@ -2,8 +2,8 @@
 //! a melody and reads its output meter dry. Then, each made with make_device: a MIDI effect loads before Drift and the
 //! melody still plays; an instrument plays on a MIDI track of its own and is refused on Drift's track (Live would replace
 //! Drift); each audio effect (as code, and as a patch of Max's own objects) loads after Drift and lets the sound
-//! through; gens with code of their own, at once and given their code in their text, are as loud as two [gen~]. Each make
-//! says whether Live's Browser listed the device before make_device answered, and each load whether it had to wait for
+//! through; gens with code of their own, at once and given their code in their text, are as loud as two [gen~]. Making
+//! a device never asks Live's Browser; its immediate load must succeed on the first call, which waits for
 //! the Browser. A device file can be checked too (--file <path>.amxd): a copy goes in its kind's folder. No model and no
 //! sign-in. It works in the open Set (it never opens or closes one): name it, and use a
 //! disposable one. It plays about 5 seconds of sound for each device, and takes everything back, the kind folders it
@@ -239,10 +239,9 @@ fn at_once(stamp: u128) -> Vec<(String, Vec<Value>)> {
     ]
 }
 
-/// A device make_device made: its Browser item, and whether the Browser listed it before make_device answered.
+/// A device make_device made: its Browser item. Loading it waits for the Browser to list the file.
 struct Made {
     item: String,
-    listed: bool,
 }
 
 struct Run {
@@ -250,6 +249,8 @@ struct Run {
     observation: RefCell<Option<Observation>>,
     records: Rc<RefCell<Vec<ChangeRecord>>>,
     made: RefCell<Vec<PathBuf>>,
+    /// Made devices not loaded yet: their first load must wait inside the mutation, without another call.
+    unloaded: RefCell<Vec<String>>,
     failed: RefCell<Vec<String>>,
     /// The kind folders the User Library didn't have before the run.
     fresh: RefCell<Vec<PathBuf>>,
@@ -276,6 +277,7 @@ async fn device_sound_live(wanted: String, files: Vec<String>, bridge_config: St
         observation: RefCell::default(),
         records,
         made: RefCell::default(),
+        unloaded: RefCell::default(),
         failed: RefCell::default(),
         fresh: RefCell::default(),
     };
@@ -408,8 +410,7 @@ impl Run {
         tracks.iter().rfind(|row| row["name"] == name).cloned().ok_or_else(|| RuntimeError::plain("the track is gone"))
     }
 
-    /// A device made with make_device, its findings said, and whether Live's Browser listed it before make_device
-    /// answered (the `browser` key says it didn't).
+    /// A device made with make_device, its findings said. Load it at once: the load waits for the Browser.
     async fn make(&self, spec: Value) -> Option<Made> {
         let began = Instant::now();
         match self.call("make_device", spec).await {
@@ -422,10 +423,11 @@ impl Run {
                 if let Some(file) = made["file"].as_str() {
                     self.made.borrow_mut().push(PathBuf::from(file));
                 }
-                let listed = made.get("browser").is_none();
                 let browser = made.get("browser").map_or("absent".to_string(), Value::to_string);
                 println!("    made {} in {:.1} s; browser key: {browser}", made["itemId"], began.elapsed().as_secs_f64());
-                Some(Made { item: made["itemId"].as_str().unwrap_or_default().to_string(), listed })
+                let item = made["itemId"].as_str().unwrap_or_default().to_string();
+                self.unloaded.borrow_mut().push(item.clone());
+                Some(Made { item })
             }
             Err(why) => {
                 println!("    make_device refused: {}", head(&why, 300));
@@ -439,11 +441,21 @@ impl Run {
     async fn load(&self, name: &str, item: &str) -> Result<Vec<String>, String> {
         let began = Instant::now();
         let mut tries = 0;
+        let newly_made = {
+            let mut unloaded = self.unloaded.borrow_mut();
+            unloaded.iter().position(|pending| pending == item).map(|at| unloaded.remove(at)).is_some()
+        };
         loop {
             let track = self.track(name).await.map_err(|error| error.message())?;
             tries += 1;
             let before: Vec<String> = self.records.borrow().iter().map(|record| record.id.clone()).collect();
-            match self.call("load_device", json!({"itemId": item, "trackRef": track["ref"]})).await {
+            let loaded = self.call("load_device", json!({"itemId": item, "trackRef": track["ref"]})).await;
+            if newly_made && tries == 1 {
+                if let Err(why) = &loaded {
+                    self.fail(&format!("{item}: its immediate load failed: {why}"));
+                }
+            }
+            match loaded {
                 Ok(_) => {
                     println!("    loaded on {name} {}", if tries == 1 { "at once".to_string() } else { format!("after {tries} tries") });
                     let made = self
@@ -564,9 +576,6 @@ impl Run {
         println!("\n{label}");
         match self.make(spec).await {
             Some(made) => {
-                if !made.listed {
-                    self.fail(&format!("{label}: Live's Browser hadn't listed it when make_device answered"));
-                }
                 self.effect(&label, &drift, &made.item, dry).await?;
             }
             None => self.fail(&label),
@@ -578,9 +587,6 @@ impl Run {
         println!("\n{label}");
         match self.make(spec).await {
             Some(made) => {
-                if !made.listed {
-                    self.fail(&format!("{label}: Live's Browser hadn't listed it when make_device answered"));
-                }
                 let own = format!("Kumi Synth {stamp}");
                 self.part(&own, false).await?;
                 match self.load(&own, &made.item).await {
@@ -616,9 +622,6 @@ impl Run {
             println!("\n{label}");
             match self.make(spec).await {
                 Some(made) => {
-                    if !made.listed {
-                        self.fail(&format!("{label}: Live's Browser hadn't listed it when make_device answered"));
-                    }
                     self.effect(&label, &drift, &made.item, dry).await?;
                 }
                 None => self.fail(&label),

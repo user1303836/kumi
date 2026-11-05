@@ -107,12 +107,11 @@ fn use_own_kumi_folder() {
 
 /// The tool, making devices in `library` for a conversation of its own.
 fn tool_in(library: &std::path::Path, made: Rc<RefCell<Made>>) -> Rc<dyn kumi_types::contracts::KernelTool> {
-    use futures::FutureExt;
     use_own_kumi_folder();
     device_tool(DeviceToolOptions {
         user_library: library.to_string_lossy().into(),
-        wait_ms: Some(0),
-        browser_sees: Rc::new(|_, _| async { Ok(true) }.boxed_local()),
+        wait_ms: None,
+        browser_sees: Rc::new(|_, _| panic!("opening or making a device must never read Live's Browser")),
         made,
     })
 }
@@ -917,29 +916,19 @@ async fn a_midi_effect_that_runs_free_an_lfo_a_clock_passes_with_runs_free_witho
 // ported with devices/tool.rs: "make_device makes an audio effect and an instrument, with Kumi's own knobs, and says to hear them"
 
 #[tokio::test(flavor = "current_thread")]
-async fn make_device_reads_guide_makes_a_device_and_waits_for_live_browser() {
-    use futures::FutureExt;
+async fn make_device_reads_guide_and_makes_a_device_without_reading_live_browser() {
     use kumi_common::abort::Signal;
-    use std::cell::Cell;
     use_built_harness();
     use_own_kumi_folder();
     let folder = tempfile::tempdir().unwrap();
-    let seen = Rc::new(RefCell::new(Vec::new()));
-    let calls = Rc::new(Cell::new(0));
+    let made_cache = Rc::new(RefCell::new(Made::default()));
     let tool = device_tool(DeviceToolOptions {
         user_library: folder.path().to_string_lossy().into(),
-        wait_ms: Some(5_000),
-        browser_sees: Rc::new({
-            let seen = seen.clone();
-            move |item, _| {
-                seen.borrow_mut().push(item);
-                calls.set(calls.get() + 1);
-                let listed = calls.get() > 1;
-                async move { Ok(listed) }.boxed_local()
-            }
-        }),
-        made: Default::default(),
+        wait_ms: None,
+        browser_sees: Rc::new(|_, _| panic!("making a device must never read Live's Browser")),
+        made: made_cache.clone(),
     });
+    assert_eq!(tool.reach(), kumi_types::contracts::Reach::AwayFromDaw, "the foreground call can move to a background job");
     let guide = tool.execute(json!({"guide":true}).as_object().unwrap().clone(), Signal::new()).await.unwrap();
     assert!(guide.text.starts_with("Making a MIDI effect"));
     assert!(guide.text.contains("Every note-on the device sends gets a note-off"));
@@ -950,8 +939,8 @@ async fn make_device_reads_guide_makes_a_device_and_waits_for_live_browser() {
     assert_eq!(result["file"], folder.path().join("Kumi").join("MIDI Effects").join("Lowest Note.amxd").to_string_lossy().as_ref());
     assert_eq!(result["controls"], json!(["Window (1–50 ms; 15)"]));
     assert!(result["checks"].as_str().unwrap().contains("4 of 4"));
-    assert!(result.get("browser").is_none());
-    assert_eq!(*seen.borrow(), ["user_library/Kumi/MIDI Effects/Lowest Note", "user_library/Kumi/MIDI Effects/Lowest Note"]);
+    assert!(result["browser"].is_string());
+    assert!(made_cache.borrow().unlisted(result["itemId"].as_str().unwrap()), "the load will wait for the Browser");
     let decoded = decode_amxd(&std::fs::read(folder.path().join("Kumi/MIDI Effects/Lowest Note.amxd")).unwrap()).unwrap();
     assert_eq!(decoded.kind, DeviceType::MidiEffect);
     assert_eq!(decoded.patcher["patcher"]["title"], "Lowest Note");

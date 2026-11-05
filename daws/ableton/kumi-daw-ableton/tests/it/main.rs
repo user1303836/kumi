@@ -7,6 +7,7 @@ mod audition_menu;
 mod bridge_start;
 mod changes;
 mod copies_script;
+mod device_background;
 mod devices;
 mod focus_stream;
 mod groove;
