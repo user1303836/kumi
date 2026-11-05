@@ -207,14 +207,16 @@ class Host:
         return None
 
     def identity(self, kwargs: dict) -> dict:
-        """Hermes's identity for one call, which the runtime records and dedups on (C2 `_host`, CC-5). Hermes gives a
-        tool handler its session and task; the model's tool-call id comes from the approval hook's record of this
-        call, and is null without one (never made up)."""
+        """Hermes's identity for one call, which the runtime records and dedups on (C2 `_host`, CC-5), and keys a
+        preview's pins on, so a hook's preview and its dispatch name the same call. Hermes gives the approval hook the
+        model's tool-call id (`tool_call_id`), and a tool handler only its session and task, so a handler takes the id
+        from the hook's record of this call (`kumi_call`). Null without either (never made up)."""
         call = kwargs.get("kumi_call")
+        ident = call.tool_call_id if isinstance(call, calls.Entry) else kwargs.get("tool_call_id")
         return {"profile_id": self.profile(),
                 "session_id": kwargs.get("session_id") or None,
                 "task_id": kwargs.get("task_id") or None,
-                "tool_call_id": call.tool_call_id if isinstance(call, calls.Entry) else None,
+                "tool_call_id": ident if isinstance(ident, str) and ident else None,
                 "request_id": uuid.uuid4().hex}
 
     def on_session_finalize(self, session_id: str | None = None, **kwargs: Any) -> None:
