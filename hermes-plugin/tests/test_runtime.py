@@ -152,19 +152,22 @@ class Runtimes(unittest.TestCase):
         self.assertIn({"jsonrpc": "2.0", "method": "notifications/cancelled",
                        "params": {"requestId": asked, "reason": "Hermes stopped waiting"}}, received)
 
-    def snapshot_events(self) -> set[tuple[str, int]]:
-        """The (event, seq) each of status, focus and history has on disk now."""
-        return {(f"{name}.changed", json.loads((self.data / "state" / f"{name}.json").read_text(encoding="utf-8"))["seq"])
-                for name in ("status", "focus", "history")}
+    def on_disk(self, *names: str) -> set[tuple[str, int]]:
+        """The (event, seq) each named snapshot (status, focus, history by default) has on disk now."""
+        state = self.data / "state"
+        return {(f"{name}.changed", json.loads((state / f"{name}.json").read_text(encoding="utf-8"))["seq"])
+                for name in names or ("status", "focus", "history")}
+
+    def reported(self) -> set[tuple[str, object]]:
+        return {(event, payload.get("seq")) for event, payload in self.events}
 
     def test_each_snapshot_the_runtime_says_has_landed_is_a_desktop_event_at_once(self):
         with mock.patch.object(runtime, "WATCH_EVERY", 3600):  # nothing is polled: only what the runtime says
             live = self.start()  # it offers C2's resources
             self.events.clear()
             live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
-            expected = self.snapshot_events()
-            self.assertTrue(eventually(lambda: expected <= {(event, payload.get("seq")) for event, payload in self.events}),
-                            self.events)
+            expected = self.on_disk()
+            self.assertTrue(eventually(lambda: expected <= self.reported()), self.events)
             live.call("library", {"action": "scan"}, self.host(), timeout=10)
             self.assertEqual(live.call("job", {"job_id": "j-scan-1"}, self.host(), timeout=10)["state"], "done")
             seq = json.loads((self.data / "state" / "map" / "r1.json").read_text(encoding="utf-8"))["seq"]
@@ -176,19 +179,40 @@ class Runtimes(unittest.TestCase):
         live = self.start()
         self.events.clear()
         live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
-        expected = self.snapshot_events()
+        expected = self.on_disk()
         live.call("library", {"action": "scan"}, self.host(), timeout=10)  # a job's file: only the polling sees it
         self.assertTrue(eventually(lambda: any(event == "job.progress" for event, _ in self.events)), self.events)
         told = [(event, payload.get("seq")) for event, payload in self.events if event != "job.progress"]
         self.assertEqual(sorted(told), sorted(expected), "a pass that polled after them reported none again")
 
+    def test_what_the_runtime_writes_as_it_starts_is_reported_at_once(self):
+        with mock.patch.object(runtime, "WATCH_EVERY", 3600):  # one look, at once, and no polling after it
+            self.start("--publish-at-start")  # a new runtime's HISTORY and FOCUS, before anything subscribed
+            published = self.on_disk("history", "focus")
+            self.assertTrue(eventually(lambda: published <= self.reported()), self.events)
+
+    def test_a_snapshot_the_runtime_wont_tell_of_is_still_found_and_each_change_is_reported_once(self):
+        with mock.patch.object(runtime, "WATCH_EVERY", 0.02):  # the backstop looks every 0.2 s
+            live = self.start("--refuse-subscribe", "kumi://focus", "--quiet", "kumi://history")
+            self.events.clear()
+            live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
+            expected = self.on_disk()  # status told, focus polled, history found by the backstop
+            self.assertTrue(eventually(lambda: expected <= self.reported()), self.events)
+            louder = {"title": "Louder drums", "expected_project_key": "live:night-drive", "expected_epoch": "1",
+                      "steps": [{"tool": "set_track_volume", "input": {"track_ref": "t1", "volume_db": -4}}]}
+            self.assertEqual(live.call("change", louder, self.host(), timeout=10)["state"], "applied")
+            expected = self.on_disk()
+            self.assertTrue(eventually(lambda: expected <= self.reported()),
+                            "the change's HISTORY too, which only a later backstop look can find")
+        said = [(event, payload["seq"]) for event, payload in self.events if payload.get("seq") is not None]
+        self.assertEqual(len(said), len(set(said)), f"each change once, however it was found: {said}")
+
     def test_a_runtime_that_offers_no_resources_has_each_snapshot_it_writes_found_and_reported(self):
         live = self.start("--no-resources")  # kumi serve before #1047
         self.events.clear()
         live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)
-        expected = self.snapshot_events()
-        self.assertTrue(eventually(lambda: expected <= {(event, payload.get("seq")) for event, payload in self.events}),
-                        self.events)
+        expected = self.on_disk()
+        self.assertTrue(eventually(lambda: expected <= self.reported()), self.events)
         live.call("library", {"action": "scan"}, self.host(), timeout=10)
         job = ("job.progress", {"job_id": "j-scan-1", "state": "running", "progress": {"done": 0, "total": 2},
                                 "profile": "studio"})

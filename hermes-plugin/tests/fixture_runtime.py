@@ -93,6 +93,8 @@ class Fixture:
             sys.stdout.flush()
 
     def serve(self) -> None:
+        if self.options.publish_at_start:  # as #1047's kumi serve: a new runtime's HISTORY and FOCUS, before any call
+            self.publish("history", "focus")
         for line in sys.stdin:
             message = json.loads(line)
             with open(self.state / "fixture-requests.jsonl", "a", encoding="utf-8") as log:
@@ -134,7 +136,7 @@ class Fixture:
         if method == "tools/call":
             return self.call(params["name"], dict(params.get("arguments") or {}))
         if method in ("resources/subscribe", "resources/unsubscribe") and not self.options.no_resources:
-            if params.get("uri") not in RESOURCES:
+            if params.get("uri") not in RESOURCES or params.get("uri") in self.options.refuse_subscribe:
                 raise LookupError(f"no resource {params.get('uri')!r}")
             (self.subscribed.add if method == "resources/subscribe" else self.subscribed.discard)(params["uri"])
             return {}
@@ -191,7 +193,7 @@ class Fixture:
 
     def landed(self, uri: str) -> None:
         """A resource's snapshot is on disk anew: a subscriber hears of it (notifications/resources/updated)."""
-        if uri in self.subscribed:
+        if uri in self.subscribed and uri not in self.options.quiet:
             self.send({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": uri}})
 
     def project(self) -> dict | None:
@@ -634,6 +636,9 @@ def main() -> None:
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
     parser.add_argument("--generation", default="g1", help="this runtime's generation, as HISTORY's ids carry it")
     parser.add_argument("--no-resources", action="store_true", help="offer no resources, as kumi serve before #1047")
+    parser.add_argument("--refuse-subscribe", action="append", default=[], help="refuse a subscription to this URI")
+    parser.add_argument("--quiet", action="append", default=[], help="never tell a subscriber this URI changed")
+    parser.add_argument("--publish-at-start", action="store_true", help="write HISTORY and FOCUS as it starts")
     parser.add_argument("--library-root", action="append", default=[])
     parser.add_argument("--hermes-home", help="the profile's Hermes home, as kumi serve takes it (#985)")
     parser.add_argument("--hermes-root", help="the root holding every Hermes profile, as kumi serve takes it (#985)")

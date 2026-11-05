@@ -595,11 +595,13 @@ class Runtime:
     # profile, stops this runtime in them, so what it logs lands in this profile's logs (research-1's review, item 12).
     context: contextvars.Context = field(default_factory=contextvars.copy_context)
     gone: threading.Event = field(default_factory=threading.Event)
-    # The snapshots the runtime tells of as they land (its resources, subscribed at the handshake): never polled. Those
-    # it has told of since the watcher last looked, and what wakes it.
+    # The snapshots the runtime tells of as they land (its resources, subscribed at the handshake), those it has told
+    # of since the watcher last looked, and what wakes it. What each snapshot's last event said (its seq, and the map's
+    # revision), so a change is reported once, whichever way it was found.
     subscribed: frozenset[str] = frozenset()
     told: set[str] = field(default_factory=set)
     wake: threading.Event = field(default_factory=threading.Event)
+    reported: dict[str, Any] = field(default_factory=dict)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     @property
@@ -726,6 +728,7 @@ class Runtimes:
             client = None
             try:
                 install.kumi_home.mkdir(parents=True, exist_ok=True)
+                baseline = _baseline(state)  # what was there before it started isn't news; what it writes from now is
                 holder: dict[str, Runtime] = {}
                 started: dict[str, Runtime] = {}
                 client = self._spawn(serve_argv(install, state, daw, library_roots, media_roots, self._hermes()),
@@ -757,7 +760,7 @@ class Runtimes:
                 raise
         if watch:
             _thread(self._watch_idle, "kumi-runtime-idle").start()
-        _thread(self._watch_snapshots, "kumi-runtime-snapshots", runtime).start()
+        _thread(self._watch_snapshots, "kumi-runtime-snapshots", runtime, baseline).start()
         self._emit("status.changed", {"seq": None, "profile": runtime.profile})
         return runtime
 
@@ -863,31 +866,42 @@ class Runtimes:
         capabilities = result.get("capabilities") if isinstance(result.get("capabilities"), dict) else {}
         offered = capabilities.get("resources")
         if isinstance(offered, dict) and offered.get("subscribe") is True:
-            for uri in RESOURCES:
-                client.request("resources/subscribe", {"uri": uri}, timeout=left())
-            runtime.subscribed = frozenset(RESOURCES.values())
+            subscribed = set()
+            for uri, name in RESOURCES.items():  # each on its own: one it refuses is polled instead (rgzm, #1051)
+                try:
+                    client.request("resources/subscribe", {"uri": uri}, timeout=left())
+                except Unavailable as refused:
+                    if refused.code != "protocol":
+                        raise
+                    log.warning("Kumi's runtime refused a subscription to %s (%s): it's polled", uri, refused.reason)
+                    continue
+                subscribed.add(name)
+            runtime.subscribed = frozenset(subscribed)
         return info
 
-    def _watch_snapshots(self, runtime: Runtime) -> None:
-        """C5's events from the snapshots the runtime publishes (C3): one it tells of (its resources, C2) at once, and
-        every `WATCH_EVERY` seconds while it runs, each other file that changed since (a job's, and every snapshot of
-        a runtime that offers no resources). What's there when it starts isn't news."""
-        seen: dict[str, tuple] = {}
-        try:
-            seen = _snapshot_marks(runtime.state_dir)
-        except Exception:
-            log.exception("Kumi couldn't look at its runtime's snapshots")
+    def _watch_snapshots(self, runtime: Runtime, baseline: dict[str, tuple]) -> None:
+        """C5's events from the snapshots the runtime publishes (C3). At once: what it wrote while it started (against
+        `baseline`, what was there before), then each snapshot it tells of (its resources, C2). Every `WATCH_EVERY`
+        seconds, each other file that changed (a job's, a snapshot it doesn't tell of); every `BACKSTOP` passes, the
+        ones it tells of too, in case a word went missing (rgzm, #1051). A snapshot's seq is reported once."""
+        seen, checked, passes = baseline, baseline, 0
         while True:
-            runtime.wake.wait(WATCH_EVERY)
+            if passes:  # the first pass looks at once
+                runtime.wake.wait(WATCH_EVERY)
             if runtime.gone.is_set():
                 return
             runtime.wake.clear()  # before taking what it was told: what's told after wakes it again
             with runtime._lock:
                 changed, runtime.told = runtime.told, set()
+            backstop, passes = passes % BACKSTOP == 0, passes + 1
             try:  # one bad pass (a file mid-replace, an unreadable folder) mustn't end the events
                 marks = _snapshot_marks(runtime.state_dir)
                 changed |= {name for name, mark in marks.items()
-                            if seen.get(name) != mark and name not in runtime.subscribed}
+                            if name not in runtime.subscribed and seen.get(name) != mark}
+                if backstop:
+                    changed |= {name for name, mark in marks.items()
+                                if name in runtime.subscribed and checked.get(name) != mark}
+                    checked = marks
                 seen = marks
             except Exception:
                 log.exception("Kumi couldn't look at its runtime's snapshots")
@@ -896,18 +910,24 @@ class Runtimes:
 
     def _snapshot_changed(self, runtime: Runtime, name: str) -> None:
         state, profile = runtime.state_dir, runtime.profile
-        if name == "map":
-            revision = _read_text(state / "map" / "current")
-            snapshot = _read_json(state / "map" / f"{revision}.json") if revision else None
-            self._emit("map.changed", {"revision": revision, "seq": (snapshot or {}).get("seq"), "profile": profile})
-        elif name.startswith("jobs/"):
+        if name.startswith("jobs/"):
             job = _read_json(state / f"{name}.json")
             if job is not None and isinstance(job.get("job_id"), str):
                 self._emit("job.progress", {"job_id": job["job_id"], "state": job.get("state"),
                                             "progress": job.get("progress"), "profile": profile})
+            return
+        if name == "map":
+            revision = _read_text(state / "map" / "current")
+            snapshot = _read_json(state / "map" / f"{revision}.json") if revision else None
+            event = "map.changed"
+            payload = {"revision": revision, "seq": (snapshot or {}).get("seq"), "profile": profile}
         else:
             snapshot = _read_json(state / f"{name}.json")
-            self._emit(f"{name}.changed", {"seq": (snapshot or {}).get("seq"), "profile": profile})
+            event, payload = f"{name}.changed", {"seq": (snapshot or {}).get("seq"), "profile": profile}
+        said = (payload.get("revision"), payload["seq"])
+        if runtime.reported.get(name, _NEVER) != said:  # the runtime's word and a poll can find the same change
+            runtime.reported[name] = said
+            self._emit(event, payload)
 
     def _exited(self, holder: dict[str, Runtime]) -> None:
         runtime = holder.get("runtime")
@@ -979,7 +999,18 @@ def _job_running(state: Path) -> bool:
 
 
 WATCH_EVERY = 0.5  # how often a running runtime's snapshots are looked at (C5)
+BACKSTOP = 10  # every this many looks, the snapshots the runtime tells of are compared too (rgzm, #1051)
 SNAPSHOTS = ("status", "focus", "history")
+_NEVER = object()  # a snapshot no event has reported yet
+
+
+def _baseline(state: Path) -> dict[str, tuple]:
+    """The snapshots' marks before a runtime starts; none when they can't be read (each is then news)."""
+    try:
+        return _snapshot_marks(state)
+    except Exception:
+        log.exception("Kumi couldn't look at its runtime's snapshots")
+        return {}
 
 
 def _snapshot_marks(state: Path) -> dict[str, tuple]:
