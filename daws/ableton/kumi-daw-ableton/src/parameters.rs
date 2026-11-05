@@ -425,7 +425,12 @@ impl Parameters {
             Some(&applied),
         );
         let record = new_record(kind, summary.clone(), ChangeState::Applied, connection.now().timestamp_millis());
+        // The plugin host keeps what Live read as it set each value, for its undo to check against (`undo_guard`).
+        if self.history.host.guard.on.get() {
+            self.history.host.guard.keep(&record.id, super::undo_guard::fast(&targets, &rows));
+        }
         self.history.remember(record.clone(), String::new(), None);
+        self.history.made_by(&record.id, &kind.tool);
         curve_later(&self.history, kind, Some(&json!(device)), &record.id, summary.picture.as_ref());
         let mut revert = Vec::new();
         for (index, target) in targets.iter().enumerate() {

@@ -110,6 +110,7 @@ impl Ableton {
             let remember = Remember::new(connection.clone(), options.project_store.clone(), options.on_catch_up.clone());
             remember.persist_identity.set(options.policy.persist_identity);
             let history = Rc::new(History::new(connection.clone(), remember.clone(), options.change_timeout_ms, options.on_change.clone()));
+            history.host.guard.on.set(options.policy.guards_undo);
             let observer = Rc::new(Observer::new(connection.clone(), remember.clone()));
             let shown = Rc::downgrade(&observer);
             *history.on_shift.borrow_mut() = Some(Rc::new(move |shift| {
@@ -778,6 +779,46 @@ impl Integration for Ableton {
         let _live = self.rendering.hold(&signal).await?;
         let outcome = self.history.undo(id.unwrap_or("last"), signal, false).await?;
         outcome.record.ok_or_else(|| KumiError::new(FailureKind::Request, outcome.text).into())
+    }
+    async fn guarded_undo(&self, id: &str, signal: Signal) -> Result<Result<ChangeRecord, UndoRefusal>, RuntimeError> {
+        if !self.connection.started.get() || self.connection.closed.get() {
+            return Err(KumiError::new(FailureKind::Request, "Kumi isn't connected to Live, so it can't undo.").into());
+        }
+        let _live = self.rendering.hold(&signal).await?;
+        let guard = &self.history.host.guard;
+        guard.take_refusal();
+        // A group's guarded changes are all read first, so one changed since leaves the whole group as it is; each is read
+        // again right before Live is asked to undo it.
+        let members = self.history.entries.borrow().get(id).and_then(|entry| entry.borrow().members.clone()).unwrap_or_default();
+        for member in members {
+            let Some(member) = self.history.entries.borrow().get(&member).map(|entry| entry.borrow().clone()) else { continue };
+            if member.record.state == ChangeState::Applied && super::undo_guard::guarded(&self.history, &member) {
+                if let Some(reason) = super::undo_guard::refusal(&self.history, &member, &signal).await {
+                    return Ok(Err(UndoRefusal { code: "changed_since", reason }));
+                }
+            }
+        }
+        let outcome = self.history.undo(id, signal, false).await?;
+        let refused = guard.take_refusal();
+        match outcome.record {
+            Some(record) => {
+                if record.state == ChangeState::Undone {
+                    guard.forget(id);
+                }
+                Ok(Ok(record))
+            }
+            None => match refused {
+                Some(refusal) => Ok(Err(refusal)),
+                None => Err(KumiError::new(FailureKind::Request, outcome.text).into()),
+            },
+        }
+    }
+    async fn undo_preview(&self, id: &str, signal: Signal) -> Result<Option<UndoPreview>, RuntimeError> {
+        let Some(entry) = self.history.entries.borrow().get(id).map(|entry| entry.borrow().clone()) else { return Ok(None) };
+        if !super::undo_guard::guarded(&self.history, &entry) {
+            return Ok(None);
+        }
+        Ok(Some(super::undo_guard::preview(&self.history, id, &entry.record.title, &signal).await))
     }
     async fn audio_file(&self, named: &str, signal: Signal) -> Result<Option<String>, RuntimeError> {
         self.mutations.clip_file(named, signal).await

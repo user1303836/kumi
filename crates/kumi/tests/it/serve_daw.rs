@@ -1188,3 +1188,138 @@ case!(serve_refuses_a_path_in_renoises_file_field_before_anything_runs, async {
     assert_eq!(lab.methods_sent(), sent, "nothing reached Renoise");
     wire.end().await;
 });
+
+/// Live whose undo is guarded, as Live's integration is on the plugin host: it says what an undo would do from fresh
+/// reads, and refuses one whose values changed since (`refuse`), counting the undos it lets through. Whether the
+/// runtime's write lease was held as it checked goes to `held`.
+struct Guarded {
+    on_connection: kumi_agent::core::contracts::ConnectionListener,
+    state: Rc<GuardedState>,
+}
+
+struct GuardedState {
+    refuse: Cell<bool>,
+    undos: Cell<usize>,
+    lease: std::cell::RefCell<std::rc::Weak<Ctx>>,
+    held: Cell<Option<bool>>,
+}
+
+#[async_trait(?Send)]
+impl kumi_agent::core::contracts::Integration for Guarded {
+    async fn start(&self, _: Signal) -> Result<(), RuntimeError> {
+        (self.on_connection)(kumi_agent::core::contracts::ConnectionState::Connected, None);
+        Ok(())
+    }
+    async fn observe(
+        &self,
+        _: Signal,
+        _: Option<kumi_agent::core::contracts::ObserveHints>,
+    ) -> Result<kumi_agent::core::contracts::Observation, RuntimeError> {
+        Ok(kumi_agent::core::contracts::Observation {
+            native_epoch: None,
+            key: "live:demo".into(),
+            revision: None,
+            label: "Live — Demo".into(),
+            context: "Drums".into(),
+            instructions: String::new(),
+            tools: vec![],
+            project: None,
+            set: Some("set-1".into()),
+            tracks: None,
+            saved_at: None,
+            identity: None,
+        })
+    }
+    async fn close(&self) -> Result<(), RuntimeError> {
+        Ok(())
+    }
+    fn has_undo(&self) -> bool {
+        true
+    }
+    async fn guarded_undo(
+        &self,
+        id: &str,
+        _: Signal,
+    ) -> Result<Result<kumi_types::contracts::ChangeRecord, kumi_agent::core::contracts::UndoRefusal>, RuntimeError> {
+        let state = &self.state;
+        state.held.set(state.lease.borrow().upgrade().map(|ctx| ctx.lease().held()));
+        if state.refuse.get() {
+            let reason = "volume changed in Live since Kumi set it, so Kumi left the change as it is.".into();
+            return Ok(Err(kumi_agent::core::contracts::UndoRefusal { code: "changed_since", reason }));
+        }
+        state.undos.set(state.undos.get() + 1);
+        Ok(Ok(serde_json::from_value(json!({"id": id, "family": "mixer", "title": "Drums volume", "state": "undone", "at": 2})).unwrap()))
+    }
+    async fn undo_preview(&self, _: &str, _: Signal) -> Result<Option<kumi_agent::core::contracts::UndoPreview>, RuntimeError> {
+        let refusal = self.state.refuse.get().then(|| kumi_agent::core::contracts::UndoRefusal {
+            code: "changed_since",
+            reason: "volume changed in Live since Kumi set it, so Kumi left the change as it is.".into(),
+        });
+        Ok(Some(kumi_agent::core::contracts::UndoPreview { text: "Undo volume -4.0 dB → -6.0 dB".into(), refusal }))
+    }
+}
+
+case!(serve_answers_a_guarded_undos_refusal_with_nothing_recorded_audited_or_moved_on, async {
+    let home = tempfile::tempdir().unwrap();
+    let transport = home.path().join("kumi-home");
+    let config = transport.join("bridge/state/bridge-config.json");
+    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, "{}").unwrap();
+    let scripts = home.path().join("Remote Scripts");
+    std::fs::create_dir_all(scripts.join("AbletonMcpBridge")).unwrap();
+    std::fs::write(scripts.join("AbletonMcpBridge/bridge-reference.json"), json!({"config": config}).to_string()).unwrap();
+    let env = Env::from([
+        ("HOME".into(), home.path().display().to_string()),
+        ("KUMI_HOME".into(), transport.display().to_string()),
+        ("KUMI_REMOTE_SCRIPTS_DIR".into(), scripts.display().to_string()),
+        ("KUMI_PROCESSES".into(), "none".into()),
+    ]);
+    let live = Rc::new(GuardedState { refuse: Cell::new(true), undos: Cell::new(0), lease: Default::default(), held: Cell::new(None) });
+    let factory = {
+        let live = live.clone();
+        AbletonFactory(Rc::new(move |options| {
+            Rc::new(Guarded { on_connection: options.on_connection.clone(), state: live.clone() })
+                as Rc<dyn kumi_agent::core::contracts::Integration>
+        }))
+    };
+    let args = Args {
+        state_dir: home.path().join("state"),
+        kumi_home: transport,
+        hermes_home: None,
+        hermes_root: None,
+        daw: DawId::Ableton,
+        library_roots: vec![],
+        media_roots: vec![],
+        tools: BTreeMap::new(),
+    };
+    let ctx = Ctx::new(args, env, kumi_daw::io::Answers::default().with(factory)).unwrap();
+    *live.lease.borrow_mut() = Rc::downgrade(&ctx);
+    let mut wire = Wire::start(ctx.clone()).await;
+    let (connected, refused) = wire.call("connect", json!({}), None).await;
+    assert!(!refused, "{connected}");
+    let (seen, _) = wire.call("observe", json!({"scope": "focus"}), None).await;
+    let key = seen["project_key"].as_str().unwrap().to_owned();
+    // A change of Kumi's to that mixer, as the integration's record of it reaches HISTORY.
+    let made = json!({"id": "c1", "family": "mixer", "title": "Drums volume -6.0 dB → -4.0 dB", "state": "applied", "at": 1});
+    let row = ctx.history().record(&serde_json::from_value(made).unwrap(), &key, ctx.snapshots());
+    let before = (wire.call("history", json!({}), None).await.0, wire.call("status", json!({}), None).await.0["project"].clone());
+    // Its preview is the integration's fresh read, with why it won't go: never the title the change was made with.
+    let (preview, _) = wire.call("undo", json!({"history_id": row.id, "preview": true}), None).await;
+    assert_eq!((preview["undo_available"].clone(), preview["reason"].clone()), (json!(false), json!("changed_since")), "{preview}");
+    assert!(preview["text"].as_str().unwrap().contains("-4.0 dB → -6.0 dB"), "{preview}");
+    // The undo: refused, and nothing recorded, audited, or moved on.
+    let (undone, error) = wire.call("undo", json!({"history_id": row.id}), Some("tc-undo")).await;
+    assert!(!error, "{undone}");
+    assert_eq!(
+        (undone["state"].clone(), undone["code"].clone(), undone.get("history_ids")),
+        (json!("refused"), json!("changed_since"), None)
+    );
+    let after = (wire.call("history", json!({}), None).await.0, wire.call("status", json!({}), None).await.0["project"].clone());
+    assert_eq!(after, before, "HISTORY and the epoch as they were");
+    assert_eq!((live.undos.get(), live.held.get()), (0, Some(true)), "checked under the endpoint's write lease");
+    // Untouched since: undone.
+    live.refuse.set(false);
+    let (undone, _) = wire.call("undo", json!({"history_id": row.id}), Some("tc-undo-2")).await;
+    assert_eq!((undone["state"].clone(), live.undos.get()), (json!("undone"), 1), "{undone}");
+    wire.end().await;
+});

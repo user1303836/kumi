@@ -585,6 +585,22 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         if let Err(error) = here {
             return Ok(json!({"state": "refused", "code": error.code(), "reason": error.reason()}));
         }
+        // A value Kumi set is read fresh: what it is now and what the undo would put back, in the DAW's own words, and
+        // why the undo would be refused.
+        if why_not.is_none() {
+            if let Ok(Some(fresh)) = connection.integration.undo_preview(&row.label, call.signal.clone()).await {
+                let track = on_track(&fresh.text, row.track.as_deref());
+                let said = match &fresh.refusal {
+                    Some(refusal) => format!("{}{track}. {}", fresh.text, refusal.reason),
+                    None => format!("{}{track}", fresh.text),
+                };
+                let mut preview = json!({"state": "preview", "text": one_line(&said, 600), "undo_available": fresh.refusal.is_none()});
+                if let Some(refusal) = fresh.refusal {
+                    preview["reason"] = json!(refusal.code);
+                }
+                return Ok(preview);
+            }
+        }
         let text = format!("Undo {}{}", row.title, on_track(&row.title, row.track.as_deref()));
         let mut preview = json!({"state": "preview", "text": text, "undo_available": why_not.is_none()});
         if let Some((reason, _, _)) = why_not {
@@ -598,7 +614,13 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     if let Err(error) = here {
         return Ok(json!({"state": "refused", "code": error.code(), "reason": error.reason()}));
     }
-    let undone = connection.integration.undo(Some(&row.label), call.signal.clone()).await;
+    // The DAW reads again what the change set right before it's asked: one changed since is refused with nothing asked
+    // and nothing recorded, audited or moved on.
+    let undone = match connection.integration.guarded_undo(&row.label, call.signal.clone()).await {
+        Ok(Err(refusal)) => return Ok(json!({"state": "refused", "code": refusal.code, "reason": one_line(&refusal.reason, 600)})),
+        Ok(Ok(record)) => Ok(record),
+        Err(error) => Err(error),
+    };
     let (state, reason) = match undone {
         Ok(record) => {
             let after = ctx.history().record(&record, &row.project_key, ctx.snapshots());

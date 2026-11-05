@@ -66,6 +66,8 @@ pub struct LiveChanges {
     pub connection: Rc<LiveConnection>,
     pub remember: Rc<Remember>,
     pub remade: snapshots::Remade,
+    /// What the values a change set read back as, for the plugin host's guarded undo.
+    pub guard: super::undo_guard::Guard,
 }
 #[async_trait(?Send)]
 impl ChangeHost for LiveChanges {
@@ -220,7 +222,7 @@ impl LiveHistory for History {
         timeout_ms: Option<u64>,
         on_change: Option<Rc<dyn Fn(ChangeRecord)>>,
     ) -> Self {
-        Self::over(LiveChanges { connection, remember, remade: Default::default() }, timeout_ms, on_change)
+        Self::over(LiveChanges { connection, remember, remade: Default::default(), guard: Default::default() }, timeout_ms, on_change)
     }
     fn observed(&self) -> Vec<ObservedChange> {
         self.entries
@@ -260,6 +262,11 @@ impl LiveHistory for History {
             return Ok(UndoResult::error(cant_reach_to_undo(self.host.profile())));
         }
         signal.check()?;
+        // The plugin host's guard, the last thing before Live is asked: a value changed since Kumi set it leaves them all.
+        let snapshot = entry.borrow().clone();
+        if let Some(refused) = super::undo_guard::before_undo(self, &snapshot).await {
+            return Ok(refused);
+        }
         let done = self
             .run_fast(
                 revert_script(&json!(revert)),
@@ -329,6 +336,10 @@ impl LiveHistory for History {
         let mut args = object(json!({"transactionId":snapshot.transaction_id,"confirmation":"undo","idempotencyKey":undo_key}));
         if discard {
             args.insert("discard".into(), json!(true));
+        }
+        // The plugin host's guard, the last thing before Live is asked: a value changed since Kumi set it is left.
+        if let Some(refused) = super::undo_guard::before_undo(self, snapshot).await {
+            return Ok(Some(refused));
         }
         let bound = abort::any([self.connection.lifetime.clone(), abort::timeout(self.timeout_ms)]);
         let result = match self.connection.call("live_undo", args, bound).await {

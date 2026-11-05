@@ -556,6 +556,22 @@ pub struct ObserveHints {
     pub references: Vec<PinnedNode>,
 }
 
+/// Why a guarded undo ([`Integration::guarded_undo`]) wasn't asked of the DAW: `changed_since` (a value changed since
+/// Kumi set it, can't be read, or Kumi kept nothing to check it by), in plain words without a path.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndoRefusal {
+    pub code: &'static str,
+    pub reason: String,
+}
+
+/// What a guarded undo would do now ([`Integration::undo_preview`]): each value as it is and as the undo would put it,
+/// in the DAW's own words, and the refusal it would meet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UndoPreview {
+    pub text: String,
+    pub refusal: Option<UndoRefusal>,
+}
+
 /// Optional methods (`undo?()` and so on) have a `has_…` flag, which the profile's capabilities answer by default.
 #[async_trait(?Send)]
 pub trait Integration {
@@ -601,6 +617,19 @@ pub trait Integration {
     async fn undo(&self, id: Option<&str>, signal: Signal) -> Result<ChangeRecord, RuntimeError> {
         let _ = (id, signal);
         Err(absent())
+    }
+    /// [`Integration::undo`] of the change `id` for a host whose policy guards undo (`HostPolicy::guards_undo`): a value
+    /// Kumi set is read again right before the DAW is asked, and the undo refused when it's changed since. `Ok(Err)` is
+    /// that refusal: nothing was asked of the DAW and nothing changed. An integration that keeps nothing to check by
+    /// undoes as `undo` does.
+    async fn guarded_undo(&self, id: &str, signal: Signal) -> Result<Result<ChangeRecord, UndoRefusal>, RuntimeError> {
+        self.undo(Some(id), signal).await.map(Ok)
+    }
+    /// What [`Integration::guarded_undo`] of the change `id` would do now, read fresh: each value as it is and as the
+    /// undo would put it, or why it won't. None when the integration keeps nothing to say it by.
+    async fn undo_preview(&self, id: &str, signal: Signal) -> Result<Option<UndoPreview>, RuntimeError> {
+        let _ = (id, signal);
+        Ok(None)
     }
     /// The open Set's fingerprint, for what Kumi logs of the producer's reactions: its name, tempo, meter and scale,
     /// the roles its tracks play, its devices and the words in its track names. None before Kumi has read the Set.
