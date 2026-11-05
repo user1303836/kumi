@@ -31,6 +31,49 @@ fn recorded_fx_identity() -> Value {
     })
 }
 
+/// Full material newly retained by the port, derived from the original Marker List's four visible columns.
+/// The old public read row says text:""; identity explicitly records that no Text column was exposed.
+fn recorded_marker_identity(name: &str, bar: u32, length: impl Into<Value>) -> Value {
+    let length: Value = length.into();
+    json!({"position": {"bar": bar, "beat": 1, "division": 1, "tick": 1}, "name": name, "length": length,
+        "text": null, "columns": ["Lock", "Position", "Name", "Length"], "ax": {"role": "AXRow", "subrole": "AXTableRow"},
+        "other": {"Lock": {"role": "AXCell", "children": []}}})
+}
+
+fn recorded_marker_before(kind: &str) -> Value {
+    let first = recorded_marker_identity("Marker 1", 9, 32.0);
+    if kind == "marker-delete" {
+        json!([first, recorded_marker_identity("Marker 2", 17, "infinite")])
+    } else {
+        json!([first])
+    }
+}
+
+fn recorded_marker_material(kind: &str) -> Value {
+    let prior = recorded_marker_before(kind);
+    let mut material = if kind == "marker-add" {
+        let marker = recorded_marker_identity("Marker 2", 17, "infinite");
+        json!({"marker": marker, "prior": prior, "applied": [recorded_marker_identity("Marker 1", 9, 32.0), marker]})
+    } else {
+        let marker = recorded_marker_identity("Marker 1", 10, 32.0);
+        json!({"marker": marker, "priorMarker": recorded_marker_identity("Marker 1", 9, 32.0), "prior": prior, "applied": [marker]})
+    };
+    material["undo"] = manual_hint(marker_unknown_reason());
+    material
+}
+
+fn marker_unknown_reason() -> &'static str {
+    "Kumi can't verify the marker's complete original contents because Logic Pro didn't expose every required field. Use Logic Pro's own undo manually; showing a field now can't recover its earlier value."
+}
+
+fn track_add_reason() -> &'static str {
+    "Kumi can't safely remove a track it added because Logic Pro doesn't expose all of its contents. Use Logic Pro's own undo manually."
+}
+
+fn manual_hint(reason: &str) -> Value {
+    json!({"mode": "manual", "reason": reason, "guidance": "Use Logic Pro's own undo manually."})
+}
+
 /// Every change scene, by its name.
 const SCENES: [&str; 19] = [
     "change-track-volume",
@@ -71,15 +114,16 @@ impl Step {
 }
 
 /// A scene replayed: its steps, the requests it couldn't answer, and the undo watch's events.
-struct NativeUndoBoundary {
+struct RestoreBoundary {
     index: usize,
     /// Kept explicitly: these recorded requests depend on native Undo actually having run, so are not replay coverage.
     unconsumed: Vec<Value>,
     helper_calls: usize,
+    refusal: String,
 }
 
 struct Replayed {
-    boundary: Option<NativeUndoBoundary>,
+    boundary: Option<RestoreBoundary>,
     calls: Vec<(String, Value)>,
     steps: Vec<Step>,
     unrecorded: Vec<(String, Value)>,
@@ -127,6 +171,18 @@ fn replay_scene(scene: &Scene) -> Replayed {
                 _ => {}
             }
         }
+        let kind = step["params"]["kind"].as_str().unwrap_or_default().to_string();
+        let method = step["method"].as_str().unwrap_or_default().to_string();
+        if matches!(kind.as_str(), "marker-add" | "marker-move" | "marker-delete") {
+            if method == "change_apply" {
+                step["params"]["fence"]["identity"] = recorded_marker_before(&kind);
+            } else if method == "change_restore" && kind != "marker-delete" {
+                step["params"]["material"] = recorded_marker_material(&kind);
+                if kind == "marker-move" {
+                    step["params"]["prior"]["identity"] = recorded_marker_before(&kind);
+                }
+            }
+        }
         let answer = if let Some(method) = step.get("method").and_then(Value::as_str) {
             let params = step["params"].clone();
             if serve::CHANGE_METHODS.contains(&method) {
@@ -151,12 +207,22 @@ fn replay_scene(scene: &Scene) -> Replayed {
             Err((code, message)) => json!({"ok": false, "error": {"code": code, "message": message}}),
         };
         let native_undo = record["answer"]["result"]["undo"]["how"] == "undo";
+        let refusal = if native_undo {
+            Some(changes::NATIVE_UNDO_REFUSAL)
+        } else if method == "change_restore" && kind == "track-add" {
+            Some(track_add_reason())
+        } else if method == "change_restore" && matches!(kind.as_str(), "marker-add" | "marker-move") {
+            Some(marker_unknown_reason())
+        } else {
+            None
+        };
         steps.push(Step { step, recorded: record["answer"].clone(), replayed });
-        if native_undo {
-            boundary = Some(NativeUndoBoundary {
+        if let Some(refusal) = refusal {
+            boundary = Some(RestoreBoundary {
                 index,
                 unconsumed: records[index + 1..].to_vec(),
                 helper_calls: hands.calls().len() - calls_before,
+                refusal: refusal.into(),
             });
             break;
         }
@@ -175,18 +241,24 @@ fn replay(name: &str) -> Replayed {
         "change-track-delete" => Some((5, 4)),
         "change-marker-delete" => Some((5, 3)),
         "change-carry" => Some((6, 4)),
+        "change-track-add" => Some((3, 0)),
+        "change-marker-add" => Some((3, 1)),
+        "change-marker-move" => Some((2, 0)),
         _ => None,
     };
     assert_eq!(
         replayed.boundary.as_ref().map(|b| (b.index, b.unconsumed.len())),
         expected_boundary,
-        "{name}: the unsupported native Undo boundary and its unconsumed recorded suffix are explicit"
+        "{name}: the unsupported restore boundary and its unconsumed recorded suffix are explicit"
     );
     for (index, step) in replayed.steps.iter().enumerate() {
         if replayed.boundary.as_ref().is_some_and(|b| b.index == index) {
-            assert_eq!(step.recorded["result"]["undo"]["how"], "undo", "the historical scene really used native Undo");
-            assert_eq!(step.replayed, json!({"ok": false, "error": {"code": "failed", "message": changes::NATIVE_UNDO_REFUSAL}}));
-            assert_eq!(replayed.boundary.as_ref().unwrap().helper_calls, 0, "a refused native Undo consumes no helper request");
+            assert_eq!(step.recorded["ok"], true, "the historical recording really claimed a successful restore");
+            assert_eq!(
+                step.replayed,
+                json!({"ok": false, "error": {"code": "failed", "message": replayed.boundary.as_ref().unwrap().refusal}})
+            );
+            assert_eq!(replayed.boundary.as_ref().unwrap().helper_calls, 0, "a refused restore consumes no helper request");
             continue;
         }
         let mut expected = step.recorded.clone();
@@ -194,6 +266,21 @@ fn replay(name: &str) -> Replayed {
             // Only the intentionally extended opaque target/fence differ from the original wire recording.
             expected["result"]["target"]["identity"] = recorded_fx_identity();
             expected["result"]["fence"]["identity"] = recorded_fx_identity();
+        }
+        let kind = step.step["params"]["kind"].as_str().unwrap_or_default();
+        if matches!(kind, "marker-add" | "marker-move" | "marker-delete") && step.method() == "change_preview" {
+            expected["result"]["fence"]["identity"] = recorded_marker_before(kind);
+            if kind != "marker-add" {
+                expected["result"]["prior"]["identity"] = recorded_marker_before(kind);
+            }
+        }
+        if matches!(kind, "marker-add" | "marker-move") && step.method() == "change_apply" {
+            expected["result"]["material"] = recorded_marker_material(kind);
+            expected["result"]["display"]["note"] = marker_unknown_reason().into();
+        }
+        if kind == "track-add" && step.method() == "change_apply" {
+            expected["result"]["material"] = json!({"undo": manual_hint(track_add_reason())});
+            expected["result"]["display"]["note"] = track_add_reason().into();
         }
         if name == "change-plan" && step.step["poll"] == true {
             // The historical scene attributes a track deletion by names/title alone. That evidence cannot prove
@@ -213,7 +300,7 @@ fn of<'a>(replayed: &'a Replayed, method: &str) -> Vec<&'a Step> {
 }
 
 #[test]
-fn original_change_scenes_replay_with_explicit_native_undo_refusal_boundaries() {
+fn original_change_scenes_replay_with_explicit_unsupported_restore_boundaries() {
     let sources: Value = serde_json::from_str(include_str!("../fixtures/change-sources.json")).unwrap();
     assert_eq!(sources["commit"], "8d609d6a051e4a6f040431bf64c4b9712214094e");
     let files = sources["files"].as_array().unwrap();
@@ -275,7 +362,7 @@ fn a_rename_goes_through_the_inspector_moves_the_epoch_and_is_a_step_of_logics_u
 }
 
 #[test]
-fn a_track_added_below_a_track_answers_the_new_epoch_and_its_restore_deletes_it() {
+fn a_track_added_below_a_track_answers_the_new_epoch_and_its_restore_requires_manual_undo() {
     let replayed = replay("change-track-add");
     let preview = of(&replayed, "change_preview")[0].result().clone();
     assert_eq!(preview["fence"], json!({"tracks": 2, "names": ["Vocal", "Keys"]}));
@@ -290,9 +377,8 @@ fn a_track_added_below_a_track_answers_the_new_epoch_and_its_restore_deletes_it(
         read["items"].as_array().unwrap().iter().map(|t| t["name"].as_str().unwrap()).collect::<Vec<_>>(),
         ["Vocal", "Bass", "Keys"]
     );
-    let restored = of(&replayed, "change_restore")[0].result().clone();
-    assert_eq!((restored["restored"]["deleted"].as_str(), restored["epoch"].as_str()), (Some("2:track:2"), Some("3")));
-    assert_eq!(restored["display"]["title"], "“Bass” taken away again");
+    assert_eq!(of(&replayed, "change_restore")[0].replayed["error"]["message"], track_add_reason());
+    assert!(replayed.boundary.as_ref().unwrap().unconsumed.is_empty());
 }
 
 #[test]
@@ -325,14 +411,15 @@ fn markers_are_made_at_the_playhead_moved_by_their_segments_and_deleted_by_their
     assert_eq!(applied["applied"]["name"], "Marker 2");
     assert_eq!(applied["undo"]["title"], "Undo Create Marker");
     assert_eq!(of(&added, "read")[0].result()["items"].as_array().unwrap().len(), 2);
-    assert_eq!(of(&added, "change_restore")[0].result()["restored"], json!({"deleted": "1:marker:2"}));
-    assert_eq!(of(&added, "read")[1].result()["items"].as_array().unwrap().len(), 1);
+    assert_eq!(of(&added, "change_restore")[0].replayed["error"]["message"], marker_unknown_reason());
+    assert_eq!(added.boundary.as_ref().unwrap().unconsumed.len(), 1);
 
     let moved = replay("change-marker-move");
     let applied = of(&moved, "change_apply")[0].result().clone();
     assert_eq!(applied["applied"]["position"]["bar"], 10);
     assert_eq!(applied["undo"]["title"], "Undo Value Change");
-    assert_eq!(of(&moved, "change_restore")[0].result()["restored"]["position"]["bar"], 9);
+    assert_eq!(of(&moved, "change_restore")[0].replayed["error"]["message"], marker_unknown_reason());
+    assert!(moved.boundary.as_ref().unwrap().unconsumed.is_empty());
 
     let deleted = replay("change-marker-delete");
     let applies = of(&deleted, "change_apply");

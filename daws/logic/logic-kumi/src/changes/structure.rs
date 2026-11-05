@@ -1,8 +1,11 @@
 //! Adding and deleting a track, through the Track menu with Logic in front: "New Audio Track" (or the software
 //! instrument's, or the external MIDI's) makes one below the selected track, which is selected first with a click on
 //! its header; "Delete Track" takes the selected track away, after the click that selects it and a check that it is
-//! the one. Logic's history names them "Create Track" and "Delete Tracks"; an added track is taken back by value (its
-//! own deletion); a deleted track requires the producer's manual undo because native titles do not prove ownership.
+//! the one. Logic's history names them "Create Track" and "Delete Tracks". Logic's visible header and Mixer do not
+//! expose all of a track's contents: closed
+//! plug-in parameters/presets and automation data can change without any visible difference. A track Kumi added
+//! therefore cannot be safely removed automatically, and a deleted track also requires manual undo because native
+//! titles do not prove ownership.
 
 use std::time::Duration;
 
@@ -10,13 +13,17 @@ use serde_json::{json, Value};
 
 use super::nudge;
 use super::undo::Probe;
-use super::{changed, front, gone, quoted, ref_text, timeline, tracks, Applied, Ctx, Done, Epoch, Preview, Restore, Restored, Watch};
+use super::{changed, front, quoted, ref_text, timeline, tracks, Applied, Ctx, Done, Epoch, Preview, Restore, Restored, Watch};
 use crate::ax::{Node, Root};
 use crate::refs::{bad, failed};
 
 /// How long a header click gets before the selection is read back, and a menu item before the headers are.
 const SELECT_SETTLE: Duration = Duration::from_millis(300);
 const MENU_SETTLE: Duration = Duration::from_millis(500);
+
+pub const TRACK_ADD_RESTORE_REFUSAL: &str =
+    "Kumi can't safely remove a track it added because Logic Pro doesn't expose all of its contents. Use Logic Pro's own undo manually.";
+const MANUAL_UNDO_GUIDANCE: &str = "Use Logic Pro's own undo manually.";
 
 /// The kinds of track Logic's Track menu makes, and the menu item for each.
 const KINDS: [(&str, &str); 3] =
@@ -181,8 +188,10 @@ pub fn add_apply(ctx: &mut Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     Ok(Applied {
         applied: json!({"index": place, "name": name, "kind": plan.kind}),
         created: Some(json!({"ref": ref_text(ctx, "track", &[place]), "kind": "track"})),
-        material: None,
-        display: json!({"title": format!("Added {} track {}", plan.kind, quoted(&name))}),
+        material: Some(json!({"undo": {
+            "mode": "manual", "reason": TRACK_ADD_RESTORE_REFUSAL, "guidance": MANUAL_UNDO_GUIDANCE,
+        }})),
+        display: json!({"title": format!("Added {} track {}", plan.kind, quoted(&name)), "note": TRACK_ADD_RESTORE_REFUSAL}),
         step: Some("Create Track"),
         probe: Some(Probe::Headers { prior: before, applied: names }),
     })
@@ -211,28 +220,10 @@ fn delete_track(ctx: &mut Ctx, place: usize, name: &str) -> Done<Vec<tracks::Fou
     nudge::wrote(tracks::headers(ctx))
 }
 
-pub fn add_restore(ctx: &mut Ctx, restore: &Restore) -> Done<Restored> {
-    let created = restore.created.ok_or_else(|| bad("created: the track that was added"))?;
-    let place = super::track_place(ctx, created, "ref", Epoch::Any)?;
-    let all = nudge::read(tracks::headers(ctx))?;
-    let name = restore.applied["name"].as_str().unwrap_or_default().to_string();
-    let Some(found) = all.get(place - 1).filter(|f| f.header.name == name) else {
-        return Err(gone(format!("the track Kumi added ({}) isn't at place {place} any more", quoted(&name))));
-    };
-    let label = found.label();
-    if !restore.discard {
-        let regions = nudge::read(ctx.project.read_regions(ctx.ax))?;
-        let held = regions.iter().filter(|(track, _)| *track == place).count();
-        if held > 0 {
-            return Err(changed(format!("the track Kumi added ({}) holds {held} region(s) now", quoted(&label))));
-        }
-    }
-    let before = all.len();
-    let after = delete_track(ctx, place, &name)?;
-    if after.len() != before - 1 {
-        return Err(super::uncertain(format!("Logic Pro shows {} tracks after Kumi asked to delete {}", after.len(), quoted(&label))));
-    }
-    Ok(Restored::by_value(json!({"deleted": created["ref"]}), json!({"title": format!("{} taken away again", quoted(&label))})))
+pub fn add_restore(_ctx: &mut Ctx, _restore: &Restore) -> Done<Restored> {
+    // Matching visible values, a name, kind, or an empty visible region lane cannot prove hidden material unchanged.
+    // Never select the track, open a pane, or send Delete Track, including for discard: true and legacy journals.
+    Err(failed(TRACK_ADD_RESTORE_REFUSAL))
 }
 
 // ----- deleting -----
@@ -326,5 +317,38 @@ mod tests {
         assert!(add_plan(&mut ctx, &json!({"kind": "drummer"}), 2).is_err());
         assert!(add_plan(&mut ctx, &json!({}), 0).is_err());
         assert_eq!(add_fence(&["Vocal".into(), "Keys".into()]), json!({"tracks": 2, "names": ["Vocal", "Keys"]}));
+    }
+
+    #[test]
+    fn removing_an_added_track_is_manual_even_with_discard_or_a_legacy_journal() {
+        let hands = crate::helper::MockHands::new();
+        let mut helper = crate::helper::Launch::launch(&mut hands.clone()).unwrap();
+        let mut ax = crate::ax::Ax::new(helper.as_mut(), 7);
+        let mut project = crate::project::Project::new(crate::ax::strings::Strings::english());
+        let mut ctx = Ctx { project: &mut project, ax: &mut ax };
+        let target = json!({"ref": null, "kind": "track"});
+        let prior = json!({"tracks": 2});
+        let applied = json!({"index": 3, "name": "Pad", "kind": "instrument"});
+        let created = json!({"ref": "1:track:3", "kind": "track"});
+        // Neither a visible same-named track nor a caller's purported snapshot establishes that unobserved
+        // plug-in or automation material is unchanged. A legacy journal gets the same safe boundary.
+        let purported_snapshot = json!({"track": {"name": "Pad", "kind": "instrument", "regions": []},
+            "pluginParameters": {"cutoff": 0.3}, "automation": [{"position": 8, "value": 0.25}]});
+        for discard in [false, true] {
+            for material in [None, Some(&purported_snapshot)] {
+                let restore = Restore {
+                    target: &target,
+                    prior: &prior,
+                    applied: &applied,
+                    created: Some(&created),
+                    material,
+                    discard,
+                    desc: "Kumi: remove Pad",
+                    key: "track-add ".into(),
+                };
+                assert_eq!(add_restore(&mut ctx, &restore).err().unwrap(), failed(TRACK_ADD_RESTORE_REFUSAL));
+                assert!(hands.calls().is_empty(), "unsupported removal never reads, selects, or deletes the producer's track");
+            }
+        }
     }
 }
