@@ -192,6 +192,9 @@ export interface Analysis {
   dynamics?: { crestDb?: number }
   tempo?: { bpm?: number; confidence?: number } | null
   key?: { name?: string; confidence?: number } | null
+  /** Set when the audio is one sound (a sample, a one-shot): its pitch, envelope and movement. The runtime's own
+   *  summary of such a sound names no key, and neither does the card. */
+  sound?: object | null
 }
 
 /** `kumi_media::audio::Comparison`: current minus reference; paired values are `[current, reference]`. */

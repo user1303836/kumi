@@ -60,6 +60,13 @@ function WithT({ children }: { children: ReactNode }) {
   )
 }
 
+// The map and the Measurements tab open beside the chat rather than over it: a search or a measurement arrives mid-turn,
+// and Use… leaves its request in the chat's input, which a tab over the chat hid (research-1's first-hour run and D3).
+// The second of them to open stacks on the first, so the chat keeps its share of the window. `plugin-workspace:<id>` is
+// the pane Desktop opens for workspace `<id>`; were that ever another, Desktop places the tab by its own rule.
+const besideTheChat = (open: string | null) =>
+  open ? { pane: `plugin-workspace:${open}`, pos: 'center' as const } : { pane: 'workspace', pos: 'right' as const }
+
 const plugin: HermesPlugin = {
   id: PLUGIN_ID,
   name: 'Kumi',
@@ -71,6 +78,8 @@ const plugin: HermesPlugin = {
     const audition = new Audition(id => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 60_000 }))
     let closeMap: (() => void) | null = null
     let mapPane: (() => void) | null = null
+    let closeMeasurements: (() => void) | null = null
+    let measurementsPane: (() => void) | null = null
     const mapView = () => (
       <WithT>
         <MapWorkspace audition={audition} ctx={ctx} store={store} />
@@ -82,6 +91,7 @@ const plugin: HermesPlugin = {
         closeMap = host.openWorkspace(MAP_WORKSPACE, {
           title: wordsOf(ctx)('map.tab'),
           minWidth: '26rem',
+          dock: besideTheChat(closeMeasurements ? MEASUREMENTS_WORKSPACE : null),
           render: mapView,
           onClose: () => {
             closeMap = null
@@ -98,8 +108,6 @@ const plugin: HermesPlugin = {
         render: mapView
       })
     }
-    let closeMeasurements: (() => void) | null = null
-    let measurementsPane: (() => void) | null = null
     const openMeasurements = () => {
       const render = () => (
         <WithT>
@@ -111,6 +119,7 @@ const plugin: HermesPlugin = {
         closeMeasurements = host.openWorkspace(MEASUREMENTS_WORKSPACE, {
           title,
           minWidth: '24rem',
+          dock: besideTheChat(closeMap ? MAP_WORKSPACE : null),
           render,
           onClose: () => {
             closeMeasurements = null
@@ -140,7 +149,7 @@ const plugin: HermesPlugin = {
     ctx.setInterval(() => {
       if (document.visibilityState !== 'hidden') void store.refreshJobs()
     }, JOB_POLL_MS)
-    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours(payload => store.trackJob(payload.job_id)))
+    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours(payload => store.trackJob(payload.job_id, payload.state === 'running')))
     // CC-13: a generation's card, sent whatever Hermes's tool progress setting is. The Jobs row follows its job and
     // keeps the card for its reconciled ledger; it creates, places or inserts nothing. The event always names its
     // profile, so one naming none is for no one here (fails closed, like CC-9's). One over 256 KiB comes without a
@@ -202,8 +211,9 @@ const plugin: HermesPlugin = {
       const name = typeof payload.name === 'string' ? payload.name : ''
       if (!name.startsWith('kumi_')) return
       refresh()
-      // A scan (or any call that starts a job) answers with its job's id: follow it.
-      store.trackJob(jobOf(payload.result))
+      // A scan (or any call that starts a job) answers with its job's id: follow it, as news even if it has already
+      // ended. `kumi_job` only reads a job that exists, which may have ended long ago.
+      store.trackJob(jobOf(payload.result), name !== 'kumi_job')
       const id = callId(payload.tool_id)
       if (name === 'kumi_listen' && id) {
         // Its tool part shows, card and all: no tab.

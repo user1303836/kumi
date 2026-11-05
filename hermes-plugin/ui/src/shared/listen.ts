@@ -106,7 +106,8 @@ export function listenView(result: ListenResult, t: Translate = english): Listen
     row(t('listen.crest'), mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), v => `${num(v)} dB`, undefined, v => `${signed(v)} dB`),
     row(t('listen.tempo'), mine.tempo?.bpm, theirs(reference?.tempo?.bpm), v => `${num(v)} BPM`, undefined, v => `${signed(v)} BPM`)
   ].filter((value): value is MetricRow => value !== null)
-  const key = mine.key?.name
+  // A key is a passage's: one sound (a snare, a one-shot) has none worth naming, whatever the estimator returned.
+  const key = mine.sound ? undefined : mine.key?.name
   if (typeof key === 'string' && key) {
     const otherKey = reference?.key?.name
     rows.push({ label: t('listen.key'), mine: clean(key, 20), ...(compare ? { reference: typeof otherKey === 'string' && otherKey ? clean(otherKey, 20) : '—' } : {}), direction: 0 })

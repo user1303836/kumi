@@ -34,7 +34,7 @@ function atom(value) {
 }
 
 function harness({ submit = () => true, routes = ROUTES } = {}) {
-  const calls = { submit: [], insert: [], notify: [], workspaces: [], sessions: [], rest: [] }
+  const calls = { submit: [], insert: [], notify: [], workspaces: [], docks: [], sessions: [], rest: [] }
   globalThis.__kumiTestHost = {
     notify: input => calls.notify.push(input),
     navigate: () => {},
@@ -43,7 +43,11 @@ function harness({ submit = () => true, routes = ROUTES } = {}) {
       submit: (session, text) => (calls.submit.push([session, text]), submit(session, text)),
       insertText: async (session, text) => (calls.insert.push([session, text]), true)
     },
-    openWorkspace: (id, options) => (calls.workspaces.push([id, options.title]), () => {}),
+    openWorkspace: (id, options) => {
+      calls.workspaces.push([id, options.title])
+      calls.docks.push([id, options.dock])
+      return () => options.onClose?.()
+    },
     openSession: id => calls.sessions.push(id),
     state: { profile: atom('default'), connectionId: atom('local') }
   }
@@ -233,6 +237,22 @@ test('a kumi_sounds result opens the map on what it found; other tools only refr
   assert.equal(h.calls.workspaces.length, 0)
   complete({ payload: { name: 'kumi_sounds', result: JSON.stringify({ map_revision: 'r7', items: [{ sound_id: 's-r7-0091' }, { sound_id: 's-r7-0092' }] }) } })
   assert.deepEqual(h.calls.workspaces, [['kumi-sound-map', 'Sound map']])
+})
+
+test('a search opens the map beside the chat, not over it, and Measurements then stacks on the map', async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  const h = inFront(harness())
+  const timers = []
+  h.ctx.setTimeout = fn => (timers.push(fn), () => {})
+  plugin.register(h.ctx)
+  await settle()
+  h.events.get('tool.complete')({ payload: { name: 'kumi_sounds', result: JSON.stringify({ map_revision: 'r7', items: [{ sound_id: 's-r7-0091' }] }) } })
+  h.events.get('plugin.kumi.listen.done')({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-9', result: { metrics: { file: 'a.wav' } } } })
+  timers.at(-1)()
+  assert.deepEqual(h.calls.docks, [
+    ['kumi-sound-map', { pane: 'workspace', pos: 'right' }],
+    ['kumi-measurements', { pane: 'plugin-workspace:kumi-sound-map', pos: 'center' }]
+  ])
 })
 
 test('a call that starts a job, or a job.progress event, has the pane follow that job until it ends', async () => {
