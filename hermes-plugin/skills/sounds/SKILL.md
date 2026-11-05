@@ -56,6 +56,15 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
      Then report the pad, the sound and the HISTORY id.
 - **The producer approves the exact placement,** and HISTORY lets them undo it.
 - **When a producer picks a sound on the map,** Desktop puts a request in the chat ("Use sound s-… on the selected track"). Treat it like any other request: observe, then make an approved change.
+- **"Put “<name>” (sound <id> from map <rev>) on the Drum Rack pad C1 (note 36) on the selected track"** is Desktop's request from the map's "Use on pad…". Its sound and map revision are the source, and its note is the pad.
+  - **Live:** look (`kumi_observe` with `scope: focus`) for the selected track's Drum Rack, and the pad with that note. Then:
+    - an empty pad: `load_sample_to_pad`, with the rack's `deviceRef` and that `note`;
+    - a pad holding a Simpler: `replace_sample`, with that Simpler's `deviceRef`;
+    - anything else on the pad, or no Drum Rack on the track: say so and ask. Never clear a pad to make room.
+  - **Renoise** (its request reads "the drum pad for note 36"): Renoise's notes are MIDI's numbers, so note 36 is `C-3`.
+    - Where a sample of the selected instrument already plays on that key, `sample_load` into that sample (`ref`: the sample).
+    - Otherwise, `sample_load` it as a new sample of the instrument, then `keyzone_set` it to that one key (`noteRange` and `baseNote`).
+  - **REAPER:** Kumi can't put a sound on a drum pad there yet: REAPER's drum kit step is refused. Say so, and offer to place it as an item on a track (`item_import`).
 
 ## A sound another Hermes plugin made (ElevenLabs)
 - **Use the file that plugin already made.** ElevenLabs Music (`elevenlabs_music_compose`, `elevenlabs_music_compose_plan`, `elevenlabs_music_stems`, `elevenlabs_music_from_video`; a job still running is checked with `elevenlabs_music_job`, and a finished one returns its files) and Sound Effects (`elevenlabs_sound_effect`) return the finished file as a `MEDIA:` line. Their own skills cover making it, and their own approvals cover paying and uploading. Kumi never makes it again or calls ElevenLabs. It reads only the finished file, never that plugin's private files or credentials.
