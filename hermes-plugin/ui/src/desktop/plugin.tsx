@@ -95,7 +95,7 @@ const plugin: HermesPlugin = {
     for (const atom of [host.state.profile, host.state.connectionId]) {
       const stop = atom?.listen?.(() => {
         store.reset()
-        audition.stop()
+        audition.reset()
         refresh()
       })
       if (stop) ctx.onDispose(stop)

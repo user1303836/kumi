@@ -148,4 +148,8 @@ export interface ListenResult {
   interpretation?: { text?: string; model?: string }
   interpretation_error?: string
   error?: string
+  /** `refused`, `cancelled` or `unsure` for a track listen that didn't complete (CC-2); those carry no measurements. */
+  state?: string
+  /** How a track or the mix was captured (CC-2): the beat window, the measured seconds, and whether all was put back. */
+  capture?: { method?: string; from_beat?: number; beats?: number; seconds?: number; cleanup?: string }
 }

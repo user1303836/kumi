@@ -10,11 +10,15 @@ from __future__ import annotations
 
 import base64
 import importlib.util
+import logging
+import re
 import sys
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Query
+
+_log = logging.getLogger(__name__)
 
 _PLUGIN_DIR = Path(__file__).resolve().parent.parent
 
@@ -108,30 +112,43 @@ def sound(id: str = Query(..., min_length=1, max_length=128)) -> dict:  # noqa: 
     return {**found, "playable": snapshots.media(state, id, _library_folders()) is not None}
 
 
+# What `/audio` hands over: the audio players and the listen card's spectrogram, nothing a browser would render.
+_MEDIA_TYPE = re.compile(r"audio/[a-z0-9][a-z0-9.+-]{0,40}|image/png")
+
+
 @router.get("/audio")
 def audio(id: str = Query(..., min_length=1, max_length=128)) -> dict:  # noqa: A002 - the query parameter is `id`
-    """An artifact's or a current map sound's bytes, as a data URL. Only ids the runtime published are served, and
-    only from the state folder's artifacts or an approved sample folder, up to 50 MiB (CC-4)."""
+    """An artifact's or a current map sound's bytes, as a data URL. Only ids the runtime published are served, only
+    from the state folder's artifacts or an approved sample folder, up to 50 MiB (CC-4), and only as audio or PNG."""
     read = snapshots.read_media(snapshots.state_dir(), id, _library_folders())
     if read is None:
         raise HTTPException(status_code=404, detail="Kumi has no audio for that id here.")
     found, data = read
+    mime = found.get("mime")
+    if not isinstance(mime, str) or not _MEDIA_TYPE.fullmatch(mime):
+        raise HTTPException(status_code=415, detail="Kumi serves only audio and PNG images here.")
     encoded = base64.b64encode(data).decode("ascii")
-    return {"id": id, "mime": found["mime"], "bytes": len(data), "data_url": f"data:{found['mime']};base64,{encoded}"}
+    return {"id": id, "mime": mime, "bytes": len(data), "data_url": f"data:{mime};base64,{encoded}"}
 
 
 @router.get("/setup")
 def setup() -> dict:
     """Where setup stands (the runtime, the DAW component, the next step), read without network or writes by
-    setup.py's own `status()` (W5). A setup.py without one answers that the state is unknown."""
+    setup.py's own `status()` (W5). A setup.py without one, or one that fails, answers that the state is unknown; a
+    failure's own words go to the log, never to the page (they can hold paths)."""
     try:
         module = _load("setup", "setup.py") if (_PLUGIN_DIR / "setup.py").is_file() else None
         read_status = getattr(module, "status", None)
         if callable(read_status):
             daw = _setting("daw")
-            return read_status(daw=daw if isinstance(daw, str) else None)
-    except Exception as exc:  # health: allow BLE001 -- setup state is shown, never fatal to the UI
-        return {"state": "unknown", "message": f"Kumi couldn't read its setup state: {exc}"}
+            found = read_status(daw=daw if isinstance(daw, str) else None)
+            if isinstance(found, dict):
+                return found
+            _log.warning("kumi: setup.status() answered %s, not a dict", type(found).__name__)
+            return {"state": "unknown", "message": "Kumi couldn't read its setup state."}
+    except Exception:  # health: allow BLE001 -- setup state is shown, never fatal to the UI
+        _log.warning("kumi: setup.status() failed", exc_info=True)
+        return {"state": "unknown", "message": "Kumi couldn't read its setup state."}
     return {"state": "unknown", "message": "This version of Kumi's plugin can't tell how far setup got."}
 
 

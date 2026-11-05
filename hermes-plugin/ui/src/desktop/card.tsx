@@ -165,6 +165,11 @@ export function ListenCard({ media, audition }: { media: ToolMediaRendererProps;
         </span>
         <Chip title="Measured on this computer by Kumi, from the audio file itself">measured</Chip>
       </div>
+      {view.capture && (
+        <span style={S.faint} title="Kumi played this window and measured it; it isn't a change, so there's nothing to undo">
+          {view.capture}
+        </span>
+      )}
       {view.verdict && <span style={S.text}>{view.verdict}</span>}
       {view.mineId ? (
         <div style={{ ...S.row, gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>

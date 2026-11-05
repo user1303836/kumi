@@ -25,9 +25,15 @@ export interface ListenView {
   verdict?: string
   interpretation?: { label: string; text: string }
   interpretationError?: string
+  /** How a track or the mix was captured (CC-2): never a change, nothing to undo. */
+  capture?: string
 }
 
-/** A tool result, as the transcript hands it over: the object, or the JSON string the handler returned. */
+// A track listen that didn't complete (CC-2): no measurements, no file, nothing the card could draw.
+const NOT_MEASURED: Record<string, true> = { preview: true, refused: true, cancelled: true, unsure: true }
+
+/** A tool result, as the transcript hands it over: the object, or the JSON string the handler returned. Only a result
+ *  with measurements is the card's; anything else stays Desktop's to show. */
 export function parseListen(result: unknown): ListenResult | null {
   let value = result
   if (typeof value === 'string') {
@@ -38,7 +44,25 @@ export function parseListen(result: unknown): ListenResult | null {
     }
   }
   if (!value || typeof value !== 'object' || !('metrics' in value) || !value.metrics || typeof value.metrics !== 'object') return null
+  const state = 'state' in value ? value.state : undefined
+  if (typeof state === 'string' && NOT_MEASURED[state]) return null
   return value as ListenResult
+}
+
+const CAPTURED_BY: Record<string, string> = { ears: 'Kumi Ears', offline: 'an offline render' }
+
+/** `Beats 17–25 · 7.9 s, through Kumi Ears · put back as it was` for a track capture, or nothing. */
+export function captureWords(capture: ListenResult['capture']): string | undefined {
+  if (!capture || typeof capture !== 'object') return undefined
+  const parts: string[] = []
+  const from = capture.from_beat
+  const beats = capture.beats
+  if (finite(from) && finite(beats)) parts.push(`Beats ${num(from, 2)}–${num(from + beats, 2)}`)
+  if (finite(capture.seconds)) parts.push(`${num(capture.seconds, 1)} s measured`)
+  const by = typeof capture.method === 'string' ? CAPTURED_BY[capture.method] ?? clean(capture.method, 20) : ''
+  const said = [parts.join(' · '), by && `through ${by}`].filter(Boolean).join(', ')
+  if (!said) return undefined
+  return capture.cleanup === 'restored' ? `${said} · your project put back as it was` : said
 }
 
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value)
@@ -95,7 +119,8 @@ export function listenView(result: ListenResult): ListenView {
     bands: differenceBands.length ? differenceBands : levelBands,
     bandsAre: differenceBands.length ? 'difference' : 'level',
     headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter(line => typeof line === 'string').map(line => clean(line, 140)) : [],
-    verdict: typeof result.verdict_text === 'string' && result.verdict_text ? clean(result.verdict_text, 400) : undefined
+    verdict: typeof result.verdict_text === 'string' && result.verdict_text ? clean(result.verdict_text, 400) : undefined,
+    capture: captureWords(result.capture)
   }
   if (compare) {
     view.referenceTitle = fileName(reference, 'Reference')

@@ -106,6 +106,43 @@ class Routes(unittest.TestCase):
         with self.assertRaises(HTTPException):
             self.api.audio(id="s-r7-0091")
 
+    def test_audio_is_served_only_as_audio_or_png_whatever_the_runtime_says(self) -> None:
+        from fastapi import HTTPException
+
+        listing = self.state / "artifacts.json"
+        artifacts = json.loads(listing.read_text(encoding="utf-8"))
+        for entry in artifacts["artifacts"].values():
+            entry["mime"] = "text/html"
+        listing.write_text(json.dumps(artifacts), encoding="utf-8")
+        with self.assertRaises(HTTPException) as refused:
+            self.api.audio(id="a-7f32")
+        self.assertEqual(refused.exception.status_code, 415)
+
+    def test_an_unknown_sound_is_404(self) -> None:
+        from fastapi import HTTPException
+
+        with self.assertRaises(HTTPException) as unknown:
+            self.api.sound(id="s-r7-9999")
+        self.assertEqual(unknown.exception.status_code, 404)
+
+    def test_settings_come_from_the_plugins_entry_its_legacy_config_else_nothing(self) -> None:
+        import types
+
+        config = {"plugins": {"entries": {"kumi": {"settings": {"daw": "reaper", "library_folders": ["/a", 7, "/b"]}, "config": {"daw": "renoise", "other": 1}}}}}
+        saved = sys.modules.get("hermes_cli.config")
+        self.api._library_folders = self.saved[1]
+        try:
+            sys.modules["hermes_cli.config"] = types.SimpleNamespace(load_config_readonly=lambda: config)
+            self.assertEqual((self.api._setting("daw"), self.api._setting("other"), self.api._setting("nothing")), ("reaper", 1, None))
+            self.assertEqual(self.api._library_folders(), ["/a", "/b"])
+            config["plugins"] = {}
+            self.assertEqual(self.api._library_folders(), [])
+        finally:
+            if saved is None:
+                sys.modules.pop("hermes_cli.config", None)
+            else:
+                sys.modules["hermes_cli.config"] = saved
+
     def test_setup_answers_what_setup_pys_status_says_for_the_daw_setting_and_unknown_without_it(self) -> None:
         import types
 
@@ -119,15 +156,19 @@ class Routes(unittest.TestCase):
             return ready
 
         def broken(*, daw=None, **_):
-            raise OSError("the runtime's folder is unreadable")
+            raise OSError("[Errno 2] No such file or directory: '/var/folders/x/plugin-data/kumi/runtime/missing.json'")
 
         try:
             self.api._setting = lambda key: "reaper" if key == "daw" else None
             sys.modules[name] = types.SimpleNamespace(status=status)
             self.assertEqual((self.api.setup(), asked), (ready, ["reaper"]))
             sys.modules[name] = types.SimpleNamespace(status=broken)
-            self.assertEqual(self.api.setup()["state"], "unknown")
-            self.assertIn("unreadable", self.api.setup()["message"])
+            with self.assertLogs(self.api._log.name, "WARNING"):
+                failed = self.api.setup()
+            self.assertEqual(failed, {"state": "unknown", "message": "Kumi couldn't read its setup state."})
+            sys.modules[name] = types.SimpleNamespace(status=lambda **_: "ready")
+            with self.assertLogs(self.api._log.name, "WARNING"):
+                self.assertEqual(self.api.setup()["state"], "unknown")
             sys.modules[name] = types.SimpleNamespace()
             self.assertEqual(self.api.setup()["state"], "unknown")
         finally:

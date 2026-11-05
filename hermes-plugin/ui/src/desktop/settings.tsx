@@ -69,21 +69,25 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
             <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>Setup</span>
             <Line label="State">{STATE_WORDS[setup?.state ?? 'unknown'] ?? clean(setup?.state ?? '', 40)}</Line>
             {setup?.message && <Line label="Next">{clean(setup.message, 300)}</Line>}
-            <Line label="Kumi runtime">
-              {runtime?.installed ? `Kumi ${clean(runtime.version ?? '', 20)}` : 'Not installed'}
-              {setup?.pinned_version && <span style={S.faint}> · pinned {clean(setup.pinned_version, 20)}</span>}
-              {setup?.target && <span style={S.faint}> · {clean(setup.target, 40)}</span>}
-            </Line>
-            {!runtime?.installed && megabytes(setup?.download_bytes) && (
+            {runtime && (
+              <Line label="Kumi runtime">
+                {runtime.installed ? `Kumi ${clean(runtime.version ?? '', 20)}` : 'Not installed'}
+                {setup?.pinned_version && <span style={S.faint}> · pinned {clean(setup.pinned_version, 20)}</span>}
+                {setup?.target && <span style={S.faint}> · {clean(setup.target, 40)}</span>}
+              </Line>
+            )}
+            {runtime && !runtime.installed && megabytes(setup?.download_bytes) && (
               <Line label="Download">
                 {megabytes(setup?.download_bytes)}
                 {megabytes(setup?.unpacked_bytes) && <span style={S.faint}> ({megabytes(setup?.unpacked_bytes)} unpacked)</span>}
               </Line>
             )}
-            <Line label={`${dawName(daw)} part`}>
-              {clean(component?.name ?? 'DAW component', 40)}: {clean(component?.state ?? 'unknown', 20).replace('_', ' ')}
-              {component?.path && <div style={{ ...S.faint, marginTop: 2 }}>{clean(component.path, 200)}</div>}
-            </Line>
+            {component && (
+              <Line label={`${dawName(daw)} part`}>
+                {clean(component.name ?? 'DAW component', 40)}: {clean(component.state ?? 'unknown', 20).replace('_', ' ')}
+                {component.path && <div style={{ ...S.faint, marginTop: 2 }}>{clean(component.path, 200)}</div>}
+              </Line>
+            )}
             {setup?.existing_kumi?.path && (
               <Line label="Standalone Kumi">
                 {clean(setup.existing_kumi.path, 120)}

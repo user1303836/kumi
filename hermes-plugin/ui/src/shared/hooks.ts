@@ -14,17 +14,24 @@ export function useWant(store: KumiStore, part: Part): void {
   useEffect(() => store.want(part), [store, part])
 }
 
+/** How much audio the window keeps for replays, counted in data-URL characters (about bytes). */
+export const AUDITION_CACHE_CHARS = 48 * 1024 * 1024
+
 /**
  * Plays a sound or artifact Kumi published, in the window only: an audition is a read (the bytes come from the
- * backend's `/audio` route), never a change in the DAW. One sound at a time; recent ones are kept for replays.
+ * backend's `/audio` route), never a change in the DAW. One sound at a time; recent ones are kept for replays, up to
+ * `AUDITION_CACHE_CHARS`, and forgotten when the profile changes (ids repeat across profiles).
  */
 export class Audition {
   private audio: HTMLAudioElement | null = null
   private cache = new Map<string, string>()
+  private cached = 0
+  private loading = new Map<string, Promise<string>>()
+  private generation = 0
   private listeners = new Set<() => void>()
   playing: string | null = null
 
-  constructor(private readonly load: (id: string) => Promise<AudioReply>) {}
+  constructor(private readonly load: (id: string) => Promise<AudioReply>, private readonly limit = AUDITION_CACHE_CHARS) {}
 
   subscribe = (fn: () => void): (() => void) => {
     this.listeners.add(fn)
@@ -36,16 +43,49 @@ export class Audition {
     for (const fn of [...this.listeners]) fn()
   }
 
-  /** The data URL for `id`, from the cache or the backend. */
-  async url(id: string): Promise<string> {
+  /** The data URL for `id`: from the cache, the load already under way, or the backend. */
+  url(id: string): Promise<string> {
     const cached = this.cache.get(id)
-    if (cached) return cached
-    const reply = await this.load(id)
-    if (typeof reply?.data_url !== 'string' || !reply.data_url.startsWith('data:')) throw new Error('Kumi sent no audio for that sound.')
-    this.cache.set(id, reply.data_url)
-    // A dozen recent sounds at most: data URLs of whole files add up.
-    while (this.cache.size > 12) this.cache.delete(this.cache.keys().next().value as string)
-    return reply.data_url
+    if (cached) {
+      // Most recently used last, so the oldest goes first.
+      this.cache.delete(id)
+      this.cache.set(id, cached)
+      return Promise.resolve(cached)
+    }
+    const loading = this.loading.get(id)
+    if (loading) return loading
+    const generation = this.generation
+    const promise = this.load(id)
+      .then(reply => {
+        if (typeof reply?.data_url !== 'string' || !reply.data_url.startsWith('data:')) throw new Error('Kumi sent no audio for that sound.')
+        if (generation === this.generation) this.keep(id, reply.data_url)
+        return reply.data_url
+      })
+      .finally(() => {
+        if (this.loading.get(id) === promise) this.loading.delete(id)
+      })
+    this.loading.set(id, promise)
+    return promise
+  }
+
+  private keep(id: string, url: string): void {
+    if (url.length > this.limit) return
+    this.cache.set(id, url)
+    this.cached += url.length
+    for (const [oldest, kept] of this.cache) {
+      if (this.cached <= this.limit) break
+      this.cache.delete(oldest)
+      this.cached -= kept.length
+    }
+  }
+
+  /** Another profile or connection: stop, and forget every sound of the last one. */
+  reset(): void {
+    this.stop()
+    this.generation += 1
+    this.cache.clear()
+    this.cached = 0
+    this.loading.clear()
   }
 
   async play(id: string): Promise<void> {
@@ -75,8 +115,7 @@ export class Audition {
   }
 
   dispose(): void {
-    this.stop()
-    this.cache.clear()
+    this.reset()
     this.listeners.clear()
   }
 }

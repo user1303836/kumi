@@ -120,13 +120,19 @@
   function useWant(store, part) {
     useEffect(() => store.want(part), [store, part]);
   }
+  var AUDITION_CACHE_CHARS = 48 * 1024 * 1024;
   var Audition = class {
-    constructor(load) {
+    constructor(load, limit = AUDITION_CACHE_CHARS) {
       this.load = load;
+      this.limit = limit;
     }
     load;
+    limit;
     audio = null;
     cache = /* @__PURE__ */ new Map();
+    cached = 0;
+    loading = /* @__PURE__ */ new Map();
+    generation = 0;
     listeners = /* @__PURE__ */ new Set();
     playing = null;
     subscribe = (fn) => {
@@ -137,15 +143,44 @@
       this.playing = playing;
       for (const fn of [...this.listeners]) fn();
     }
-    /** The data URL for `id`, from the cache or the backend. */
-    async url(id) {
+    /** The data URL for `id`: from the cache, the load already under way, or the backend. */
+    url(id) {
       const cached = this.cache.get(id);
-      if (cached) return cached;
-      const reply = await this.load(id);
-      if (typeof reply?.data_url !== "string" || !reply.data_url.startsWith("data:")) throw new Error("Kumi sent no audio for that sound.");
-      this.cache.set(id, reply.data_url);
-      while (this.cache.size > 12) this.cache.delete(this.cache.keys().next().value);
-      return reply.data_url;
+      if (cached) {
+        this.cache.delete(id);
+        this.cache.set(id, cached);
+        return Promise.resolve(cached);
+      }
+      const loading = this.loading.get(id);
+      if (loading) return loading;
+      const generation = this.generation;
+      const promise = this.load(id).then((reply) => {
+        if (typeof reply?.data_url !== "string" || !reply.data_url.startsWith("data:")) throw new Error("Kumi sent no audio for that sound.");
+        if (generation === this.generation) this.keep(id, reply.data_url);
+        return reply.data_url;
+      }).finally(() => {
+        if (this.loading.get(id) === promise) this.loading.delete(id);
+      });
+      this.loading.set(id, promise);
+      return promise;
+    }
+    keep(id, url) {
+      if (url.length > this.limit) return;
+      this.cache.set(id, url);
+      this.cached += url.length;
+      for (const [oldest, kept] of this.cache) {
+        if (this.cached <= this.limit) break;
+        this.cache.delete(oldest);
+        this.cached -= kept.length;
+      }
+    }
+    /** Another profile or connection: stop, and forget every sound of the last one. */
+    reset() {
+      this.stop();
+      this.generation += 1;
+      this.cache.clear();
+      this.cached = 0;
+      this.loading.clear();
     }
     async play(id) {
       this.stop();
@@ -172,8 +207,7 @@
       if (this.playing !== null) this.changed(null);
     }
     dispose() {
-      this.stop();
-      this.cache.clear();
+      this.reset();
       this.listeners.clear();
     }
   };
@@ -438,6 +472,7 @@
     const mapSize = Math.max(1, Math.min(size.width, size.height) - 32);
     const hasPoints = model.points.length > 0;
     const searched = useMemo(() => searchSounds(model, query), [model, query]);
+    const indexOf = useMemo(() => new Map(model.points.map((point, index) => [point.id, index])), [model]);
     const foundIds = useMemo(
       () => found && (found.revision === null || found.revision === model.revision) ? new Set(found.ids) : null,
       [found, model.revision]
@@ -508,8 +543,8 @@
       }
       context.globalAlpha = 1;
       const ring = (id, color, extra, width) => {
-        const index = model.points.findIndex((point) => point.id === id);
-        if (index < 0) return;
+        const index = indexOf.get(id);
+        if (index === void 0) return;
         const [x, y] = toScreen(view, mapSize, model.points[index].x, model.points[index].y);
         context.strokeStyle = color;
         context.lineWidth = width;
@@ -520,7 +555,7 @@
       foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
       if (playing) ring(playing, colors.accent, 6, 2);
       if (selected) ring(selected, colors.strong, 4, 2);
-    }, [model, view, size, visible, foundIds, selected, playing, mapSize]);
+    }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];

@@ -53,6 +53,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
   const hasPoints = model.points.length > 0
 
   const searched = useMemo(() => searchSounds(model, query), [model, query])
+  const indexOf = useMemo(() => new Map(model.points.map((point, index) => [point.id, index])), [model])
   const foundIds = useMemo(
     () => (found && (found.revision === null || found.revision === model.revision) ? new Set(found.ids) : null),
     [found, model.revision]
@@ -134,8 +135,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
     }
     context.globalAlpha = 1
     const ring = (id: string, color: string, extra: number, width: number) => {
-      const index = model.points.findIndex(point => point.id === id)
-      if (index < 0) return
+      const index = indexOf.get(id)
+      if (index === undefined) return
       const [x, y] = toScreen(view, mapSize, model.points[index].x, model.points[index].y)
       context.strokeStyle = color
       context.lineWidth = width
@@ -146,7 +147,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
     foundIds?.forEach(id => ring(id, colors.accent, 3, 1.5))
     if (playing) ring(playing, colors.accent, 6, 2)
     if (selected) ring(selected, colors.strong, 4, 2)
-  }, [model, view, size, visible, foundIds, selected, playing, mapSize])
+  }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()

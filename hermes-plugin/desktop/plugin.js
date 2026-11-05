@@ -98,13 +98,19 @@ function useKumi(store) {
 function useWant(store, part) {
   useEffect(() => store.want(part), [store, part]);
 }
+var AUDITION_CACHE_CHARS = 48 * 1024 * 1024;
 var Audition = class {
-  constructor(load) {
+  constructor(load, limit = AUDITION_CACHE_CHARS) {
     this.load = load;
+    this.limit = limit;
   }
   load;
+  limit;
   audio = null;
   cache = /* @__PURE__ */ new Map();
+  cached = 0;
+  loading = /* @__PURE__ */ new Map();
+  generation = 0;
   listeners = /* @__PURE__ */ new Set();
   playing = null;
   subscribe = (fn) => {
@@ -115,15 +121,44 @@ var Audition = class {
     this.playing = playing;
     for (const fn of [...this.listeners]) fn();
   }
-  /** The data URL for `id`, from the cache or the backend. */
-  async url(id) {
+  /** The data URL for `id`: from the cache, the load already under way, or the backend. */
+  url(id) {
     const cached = this.cache.get(id);
-    if (cached) return cached;
-    const reply = await this.load(id);
-    if (typeof reply?.data_url !== "string" || !reply.data_url.startsWith("data:")) throw new Error("Kumi sent no audio for that sound.");
-    this.cache.set(id, reply.data_url);
-    while (this.cache.size > 12) this.cache.delete(this.cache.keys().next().value);
-    return reply.data_url;
+    if (cached) {
+      this.cache.delete(id);
+      this.cache.set(id, cached);
+      return Promise.resolve(cached);
+    }
+    const loading = this.loading.get(id);
+    if (loading) return loading;
+    const generation = this.generation;
+    const promise = this.load(id).then((reply) => {
+      if (typeof reply?.data_url !== "string" || !reply.data_url.startsWith("data:")) throw new Error("Kumi sent no audio for that sound.");
+      if (generation === this.generation) this.keep(id, reply.data_url);
+      return reply.data_url;
+    }).finally(() => {
+      if (this.loading.get(id) === promise) this.loading.delete(id);
+    });
+    this.loading.set(id, promise);
+    return promise;
+  }
+  keep(id, url) {
+    if (url.length > this.limit) return;
+    this.cache.set(id, url);
+    this.cached += url.length;
+    for (const [oldest, kept] of this.cache) {
+      if (this.cached <= this.limit) break;
+      this.cache.delete(oldest);
+      this.cached -= kept.length;
+    }
+  }
+  /** Another profile or connection: stop, and forget every sound of the last one. */
+  reset() {
+    this.stop();
+    this.generation += 1;
+    this.cache.clear();
+    this.cached = 0;
+    this.loading.clear();
   }
   async play(id) {
     this.stop();
@@ -150,8 +185,7 @@ var Audition = class {
     if (this.playing !== null) this.changed(null);
   }
   dispose() {
-    this.stop();
-    this.cache.clear();
+    this.reset();
     this.listeners.clear();
   }
 };
@@ -299,6 +333,8 @@ function foundSounds(result) {
 
 // src/desktop/actions.ts
 import { host } from "@hermes/plugin-sdk";
+var OPEN_WAIT_MS = 1e3;
+var OPEN_POLL_MS = 100;
 async function ask(ctx, text, options) {
   const composer = host.composer;
   const session = options.session ?? null;
@@ -310,16 +346,26 @@ async function ask(ctx, text, options) {
     });
     return { outcome: copied ? "copied" : "none" };
   }
+  if (!session) {
+    if (await composer.insertText(null, text)) return { outcome: "drafted" };
+    host.notify({ kind: "warning", message: "Open a chat first, then try again." });
+    return { outcome: "none" };
+  }
   const deliver = async () => options.send ? composer.submit(session, text) : composer.insertText(session, text);
   if (await deliver()) return { outcome: options.send ? "sent" : "drafted" };
-  if (session && typeof host.openSession === "function") {
-    host.openSession(session);
-    const opened = Promise.withResolvers();
-    ctx.setTimeout(opened.resolve, 600);
-    await opened.promise;
-    if (await deliver()) return { outcome: options.send ? "sent" : "drafted" };
+  if (typeof host.openSession === "function") {
+    try {
+      await host.openSession(session);
+      for (let waited = 0; waited <= OPEN_WAIT_MS; waited += OPEN_POLL_MS) {
+        if (await deliver()) return { outcome: options.send ? "sent" : "drafted" };
+        const tick = Promise.withResolvers();
+        ctx.setTimeout(tick.resolve, OPEN_POLL_MS);
+        await tick.promise;
+      }
+    } catch {
+    }
   }
-  if (session && await composer.insertText(null, text)) {
+  if (await composer.insertText(null, text)) {
     host.notify({
       kind: "warning",
       message: "Kumi's chat isn't open here, so the request is in your input, unsent. Send it from the chat Kumi is connected to."
@@ -356,6 +402,7 @@ var CANVAS = {
 import { useEffect as useEffect2, useState } from "react";
 
 // src/shared/listen.ts
+var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
 function parseListen(result) {
   let value = result;
   if (typeof value === "string") {
@@ -366,7 +413,22 @@ function parseListen(result) {
     }
   }
   if (!value || typeof value !== "object" || !("metrics" in value) || !value.metrics || typeof value.metrics !== "object") return null;
+  const state = "state" in value ? value.state : void 0;
+  if (typeof state === "string" && NOT_MEASURED[state]) return null;
   return value;
+}
+var CAPTURED_BY = { ears: "Kumi Ears", offline: "an offline render" };
+function captureWords(capture) {
+  if (!capture || typeof capture !== "object") return void 0;
+  const parts = [];
+  const from = capture.from_beat;
+  const beats = capture.beats;
+  if (finite(from) && finite(beats)) parts.push(`Beats ${num(from, 2)}–${num(from + beats, 2)}`);
+  if (finite(capture.seconds)) parts.push(`${num(capture.seconds, 1)} s measured`);
+  const by = typeof capture.method === "string" ? CAPTURED_BY[capture.method] ?? clean(capture.method, 20) : "";
+  const said = [parts.join(" · "), by && `through ${by}`].filter(Boolean).join(", ");
+  if (!said) return void 0;
+  return capture.cleanup === "restored" ? `${said} · your project put back as it was` : said;
 }
 var finite = (value) => typeof value === "number" && Number.isFinite(value);
 function fileName(analysis, fallback) {
@@ -418,7 +480,8 @@ function listenView(result) {
     bands: differenceBands.length ? differenceBands : levelBands,
     bandsAre: differenceBands.length ? "difference" : "level",
     headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [],
-    verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0
+    verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0,
+    capture: captureWords(result.capture)
   };
   if (compare) {
     view.referenceTitle = fileName(reference, "Reference");
@@ -620,6 +683,7 @@ function ListenCard({ media, audition }) {
           ] }),
           /* @__PURE__ */ jsx2(Chip, { title: "Measured on this computer by Kumi, from the audio file itself", children: "measured" })
         ] }),
+        view.capture && /* @__PURE__ */ jsx2("span", { style: S.faint, title: "Kumi played this window and measured it; it isn't a change, so there's nothing to undo", children: view.capture }),
         view.verdict && /* @__PURE__ */ jsx2("span", { style: S.text, children: view.verdict }),
         view.mineId ? /* @__PURE__ */ jsxs2("div", { style: { ...S.row, gap: 12, flexWrap: "wrap", alignItems: "flex-start" }, children: [
           /* @__PURE__ */ jsx2(Wave, { audition, id: view.mineId, label: view.title }),
@@ -987,6 +1051,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
   const mapSize = Math.max(1, Math.min(size.width, size.height) - 32);
   const hasPoints = model.points.length > 0;
   const searched = useMemo(() => searchSounds(model, query), [model, query]);
+  const indexOf = useMemo(() => new Map(model.points.map((point, index) => [point.id, index])), [model]);
   const foundIds = useMemo(
     () => found && (found.revision === null || found.revision === model.revision) ? new Set(found.ids) : null,
     [found, model.revision]
@@ -1057,8 +1122,8 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
     }
     context.globalAlpha = 1;
     const ring = (id, color, extra, width) => {
-      const index = model.points.findIndex((point) => point.id === id);
-      if (index < 0) return;
+      const index = indexOf.get(id);
+      if (index === void 0) return;
       const [x, y] = toScreen(view, mapSize, model.points[index].x, model.points[index].y);
       context.strokeStyle = color;
       context.lineWidth = width;
@@ -1069,7 +1134,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
     foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
     if (playing) ring(playing, colors.accent, 6, 2);
     if (selected) ring(selected, colors.strong, 4, 2);
-  }, [model, view, size, visible, foundIds, selected, playing, mapSize]);
+  }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize]);
   const at = (event) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -1291,8 +1356,8 @@ function SettingsPage({ ctx, store, onOpenMap }) {
         /* @__PURE__ */ jsx8("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Setup" }),
         /* @__PURE__ */ jsx8(Line, { label: "State", children: STATE_WORDS[setup?.state ?? "unknown"] ?? clean(setup?.state ?? "", 40) }),
         setup?.message && /* @__PURE__ */ jsx8(Line, { label: "Next", children: clean(setup.message, 300) }),
-        /* @__PURE__ */ jsxs8(Line, { label: "Kumi runtime", children: [
-          runtime?.installed ? `Kumi ${clean(runtime.version ?? "", 20)}` : "Not installed",
+        runtime && /* @__PURE__ */ jsxs8(Line, { label: "Kumi runtime", children: [
+          runtime.installed ? `Kumi ${clean(runtime.version ?? "", 20)}` : "Not installed",
           setup?.pinned_version && /* @__PURE__ */ jsxs8("span", { style: S.faint, children: [
             " · pinned ",
             clean(setup.pinned_version, 20)
@@ -1302,7 +1367,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             clean(setup.target, 40)
           ] })
         ] }),
-        !runtime?.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs8(Line, { label: "Download", children: [
+        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs8(Line, { label: "Download", children: [
           megabytes(setup?.download_bytes),
           megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs8("span", { style: S.faint, children: [
             " (",
@@ -1310,11 +1375,11 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             " unpacked)"
           ] })
         ] }),
-        /* @__PURE__ */ jsxs8(Line, { label: `${dawName(daw)} part`, children: [
-          clean(component?.name ?? "DAW component", 40),
+        component && /* @__PURE__ */ jsxs8(Line, { label: `${dawName(daw)} part`, children: [
+          clean(component.name ?? "DAW component", 40),
           ": ",
-          clean(component?.state ?? "unknown", 20).replace("_", " "),
-          component?.path && /* @__PURE__ */ jsx8("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
+          clean(component.state ?? "unknown", 20).replace("_", " "),
+          component.path && /* @__PURE__ */ jsx8("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
         setup?.existing_kumi?.path && /* @__PURE__ */ jsxs8(Line, { label: "Standalone Kumi", children: [
           clean(setup.existing_kumi.path, 120),
@@ -1422,7 +1487,7 @@ var plugin = {
     for (const atom of [host4.state.profile, host4.state.connectionId]) {
       const stop = atom?.listen?.(() => {
         store.reset();
-        audition.stop();
+        audition.reset();
         refresh();
       });
       if (stop) ctx.onDispose(stop);

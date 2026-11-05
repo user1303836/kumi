@@ -231,3 +231,29 @@ test('a backend that is not mounted reads as "off", never as an error, and a res
   assert.deepEqual(store.foundSounds('{"map_revision":"r7","items":[{"sound_id":"s-1"},{"name":"x"}]}'), { revision: 'r7', ids: ['s-1'] })
   assert.equal(store.foundSounds('nope'), null)
 })
+
+test('auditions share a load, keep recent sounds within a size, and forget them all on a profile switch', async () => {
+  const { Audition } = await load('src/shared/hooks.ts', { react: 'real' })
+  const loads = []
+  const audition = new Audition(async id => (loads.push(id), { data_url: `data:audio/wav;base64,${id.padEnd(40, 'A')}` }), 120)
+  const [first, again] = await Promise.all([audition.url('s-1'), audition.url('s-1')])
+  assert.equal(first, again)
+  assert.deepEqual(loads, ['s-1'])
+  await audition.url('s-2')
+  await audition.url('s-3')
+  await audition.url('s-1')
+  assert.deepEqual(loads, ['s-1', 's-2', 's-3', 's-1'], 'the oldest sound made room for the newest')
+  audition.reset()
+  await audition.url('s-3')
+  assert.equal(loads.at(-1), 's-3', 'nothing from the last profile is replayed')
+})
+
+test("a track listen that didn't complete is Desktop's to show; a completed one says what was captured", () => {
+  for (const state of ['refused', 'cancelled', 'unsure', 'preview']) {
+    assert.equal(listen.parseListen({ state, metrics: { loudness: { integratedLufs: -14 } } }), null, state)
+  }
+  const captured = listen.listenView({ ...compared, capture: { method: 'ears', from_beat: 16, beats: 8, seconds: 3.87, cleanup: 'restored' } })
+  assert.equal(captured.capture, 'Beats 16–24 · 3.9 s measured, through Kumi Ears · your project put back as it was')
+  assert.equal(listen.listenView({ ...compared, capture: { method: 'offline', seconds: 4 } }).capture, '4 s measured, through an offline render')
+  assert.equal(listen.listenView(compared).capture, undefined)
+})

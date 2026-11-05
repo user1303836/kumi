@@ -128,17 +128,27 @@ test("undo puts the newest undoable change's request, with its id, in Kumi's own
   assert.deepEqual(h.calls.submit, [[SESSION, 'Undo Kumi change h-p6f1c9e-g2-c14']])
 })
 
-test("when Kumi's chat can't take a request, it opens that chat, then leaves the words unsent in the input", async () => {
+test("when Kumi's chat can't take a request, it opens that chat, tries a while, then leaves the words unsent in the input", async () => {
   const { default: plugin } = await load('src/desktop/plugin.tsx')
-  const h = harness({ submit: () => false })
-  plugin.register(h.ctx)
-  await settle()
-  h.registered.find(contribution => contribution.data?.id === 'kumi.undo-last').data.run()
-  await new Promise(resolve => setTimeout(resolve, 800))
-  assert.deepEqual(h.calls.sessions, [SESSION])
-  assert.equal(h.calls.submit.length, 2)
-  assert.deepEqual(h.calls.insert, [[null, 'Undo Kumi change h-p6f1c9e-g2-c14']])
-  assert.equal(h.calls.notify.at(-1).kind, 'warning')
+  for (const openSession of [undefined, () => Promise.reject(new Error('no such chat here'))]) {
+    const h = harness({ submit: () => false })
+    if (openSession) globalThis.__kumiTestHost.openSession = id => (h.calls.sessions.push(id), openSession())
+    plugin.register(h.ctx)
+    await settle()
+    h.registered.find(contribution => contribution.data?.id === 'kumi.undo-last').data.run()
+    await new Promise(resolve => setTimeout(resolve, 1400))
+    assert.deepEqual(h.calls.sessions, [SESSION])
+    assert.ok(h.calls.submit.every(([session]) => session === SESSION), 'never sent from another chat')
+    assert.deepEqual(h.calls.insert, [[null, 'Undo Kumi change h-p6f1c9e-g2-c14']])
+    assert.equal(h.calls.notify.at(-1).kind, 'warning')
+  }
+})
+
+test('a request with no chat owning Kumi yet waits unsent in the input in front, for the producer to send', async () => {
+  const { ask } = await load('src/desktop/actions.ts')
+  const h = harness()
+  assert.deepEqual(await ask(h.ctx, 'Set up Kumi for Live', { send: true, session: null }), { outcome: 'drafted' })
+  assert.deepEqual([h.calls.submit, h.calls.insert], [[], [[null, 'Set up Kumi for Live']]])
 })
 
 test('nothing is undone when Kumi is not connected', async () => {
