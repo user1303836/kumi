@@ -4,7 +4,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 ---
 # Measuring audio with Kumi
 
-`kumi_listen` measures an audio file on this computer. Nothing is heard, by Kumi or by you: report measurements as measurements.
+`kumi_listen` measures an audio file on this computer, or a track or the mix of the open project over a beat window (that plays the window in the DAW while it's stopped, so the producer approves it first). Nothing is heard, by Kumi or by you: report measurements as measurements.
 
 ## What it measures
 - **Loudness:** integrated LUFS. Higher is louder, and streaming services normalise around −14 LUFS.
@@ -23,4 +23,5 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **Name what was measured, the numbers and what they suggest:** "The replacement measures 410 Hz lower in spectral centroid and 1.2 LU quieter, which fits a darker snare."
 - **Never say a file "sounds" a way** unless the producer said it.
 - **Measuring a file changes nothing in the project.** Changes go through `kumi_change` (skill `kumi:daw`).
+- **An `interpretation` is a model's reading of the measurements,** written from the numbers and a coarse band-energy image (its `inputs` say which), never from the audio. It appears only when the producer turned on "Interpret measurements with a model". Call it that ("the listening model reads these numbers as…"), keep the measurements first, and never present it as a listen. An `interpretation_error` means there's no reading this time; report the measurements alone.
 - **To share the measured file,** put the result's `MEDIA:` line in your reply, on a line of its own. In a messaging chat (Telegram, Discord…) only a `MEDIA:` line in your answer reaches the producer; one inside a tool result doesn't.

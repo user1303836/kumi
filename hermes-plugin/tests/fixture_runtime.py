@@ -385,9 +385,25 @@ def listen(fixture: Fixture, args: dict, host: dict) -> dict:
         return listen_track(fixture, args, host)
     if source.get("sound_id") not in {sound["sound_id"] for sound in SOUNDS}:
         return error("not_found", "Kumi can only measure a sound of the current map in the fixture.")
-    return {"metrics": {"lufsIntegrated": -14.2, "truePeakDb": -1.3, "centroidHz": 1840.0}, "artifact_id": "a-1",
+    return {"metrics": analysis(lufs=-14.2, peak=-1.3, centroid=1840.0, seconds=0.42), "artifact_id": "a-1",
             "verdict_text": "Measured: -14.2 LUFS, true peak -1.3 dBTP, centroid 1840 Hz.",
             "media_tag": "MEDIA:/fixture/Dusty Snare 04.wav"}
+
+
+def analysis(*, lufs: float, peak: float, centroid: float, seconds: float) -> dict:
+    """W3's measurements (`kumi_media::audio::Analysis`, camelCase), as kumi serve's listen returns them."""
+    return {"kumiAudio": 1, "format": "WAV", "sampleRate": 48000, "channels": 2, "seconds": seconds,
+            "analyzed": {"from": "0:00", "to": "0:00", "focus": "mix"},
+            "loudness": {"integratedLufs": lufs, "shortTermMaxLufs": lufs + 1.5, "rangeLu": 2.0, "truePeakDbtp": peak,
+                         "samplePeakDbfs": peak - 0.3, "clippedSamples": 0},
+            "balance": {"centroidHz": centroid, "tiltDbPerOctave": -1.2,
+                        "bands": [{"name": "bass", "hz": "60–120", "db": -9.0, "width": 0.1, "correlation": 0.8},
+                                  {"name": "presence", "hz": "2k–4k", "db": -14.0, "width": 0.2, "correlation": 0.7}]},
+            "stereo": {"correlation": 0.7, "width": 0.2, "lowEndMono": True},
+            "dynamics": {"crestDb": 9.0, "peakToLoudnessDb": 13.0, "onsetsPerSecond": 2.0},
+            "tempo": None, "key": None,
+            "spectrogram": {"rows": [{"band": "presence", "cells": "96·"}, {"band": "bass", "cells": "·39"}],
+                            "columns": "0:00 to 0:00, 3 steps", "scale": "9 = loudest, each step 3 dB quieter, · = silent"}}
 
 
 def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
@@ -416,7 +432,7 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
                 "deadline_seconds": fixture.options.listen_deadline}
     with open(fixture.state / "fixture-listens.jsonl", "a", encoding="utf-8") as log:
         log.write(json.dumps({"args": args, "host": host}) + "\n")
-    measured = {"metrics": {"lufsIntegrated": -11.8, "truePeakDb": -0.6, "centroidHz": 2210.0},
+    measured = {"metrics": analysis(lufs=-11.8, peak=-0.6, centroid=2210.0, seconds=round(seconds, 2)),
                 "verdict_text": "Measured: -11.8 LUFS, true peak -0.6 dBTP, centroid 2210 Hz."}
     outcome = fixture.options.listen_outcome
     if outcome == "refused":

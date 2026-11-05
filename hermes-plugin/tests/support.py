@@ -51,6 +51,7 @@ class Context:
         self.cli: dict[str, dict] = {}
         self.skills: dict[str, Path] = {}
         self.prompt: dict[str, str] = {}
+        self.aux_tasks: dict[str, dict] = {}
         self.settings = dict(settings or {})
         self.profile_name = profile_name
 
@@ -79,6 +80,10 @@ class Context:
         if len(content) > max_chars:
             raise ValueError(f"system prompt section {id} is over {max_chars} characters")
         self.prompt[id] = content
+
+    def register_auxiliary_task(self, key, *, display_name, description, defaults=None, inherit_from=None):
+        self.aux_tasks[key] = {"display_name": display_name, "description": description, "defaults": defaults,
+                               "inherit_from": inherit_from}
 
     def get_config(self, key: str, default: Any = None) -> Any:
         return self.settings.get(key, default)
