@@ -41,6 +41,18 @@ with setup._setup_lock(Path(sys.argv[2])):
 """
 
 
+def texts(value) -> list[str]:
+    """Every string in a report, however deep: a path is looked for in these, since JSON would escape a Windows path's
+    backslashes and no raw path would ever be found in it."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        return [text for item in value.values() for text in texts(item)]
+    if isinstance(value, (list, tuple)):
+        return [text for item in value for text in texts(item)]
+    return []
+
+
 def tar_xz(files: dict[str, bytes], links: dict[str, str] | None = None) -> bytes:
     out = io.BytesIO()
     with tarfile.open(fileobj=out, mode="w:xz") as archive:
@@ -600,10 +612,10 @@ class SetupTest(unittest.TestCase):
             if change:
                 change()
             report = self.status()
-            self.assertTrue(any(path in json.dumps(report) for path in local), "hermes kumi status shows them")
+            self.assertTrue(any(path in text for text in texts(report) for path in local), "hermes kumi status shows them")
             shown = setup.for_model(report)
             for path in local:
-                self.assertNotIn(path, json.dumps(shown), (state, path))
+                self.assertFalse(any(path in text for text in texts(shown)), (state, path))
             self.assertEqual((shown["state"], shown["compressed_audio"]["state"]), (report["state"], state))
             self.assertEqual(shown["runtime"]["version"], VERSION)
             self.assertEqual(shown["daw_component"]["parts"], [{"name": "Remote Script", "state": "same"},
