@@ -252,7 +252,22 @@ async fn quote(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         None,
         Some(if source.is_some() { "Preparing the approved Mirelo upload and estimate" } else { "Reading Mirelo's estimate" }),
     );
-    let prepared = client.prepare(task, &input, &call.signal).await.map_err(provider)?;
+    let uploads = mirelo::Uploads {
+        audio: source
+            .as_ref()
+            .map(|(_, stage)| {
+                Ok::<_, OpError>(mirelo::Upload {
+                    file: stage
+                        .opened()
+                        .try_clone()
+                        .map_err(|_| refused("invalid_source", "The approved copy could not be opened for upload."))?,
+                    extension: stage.path().extension().and_then(|extension| extension.to_str()).unwrap_or(""),
+                })
+            })
+            .transpose()?,
+        video: None,
+    };
+    let prepared = client.prepare(task, &input, uploads, &call.signal).await.map_err(provider)?;
     check(&call.signal)?;
     let public = json!({
         "state": "quoted", "quote_id": format!("q-{:032x}", rand::random::<u128>()), "kind": kind,

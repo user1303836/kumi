@@ -4,10 +4,13 @@ use kumi_types::errors::RuntimeError;
 use reqwest::{multipart, Method, RequestBuilder, Response};
 use serde_json::{json, Value};
 use std::{
+    borrow::Cow,
+    fmt,
+    io::{ErrorKind, SeekFrom},
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use url::Url;
 
 const MAX_FILE: u64 = 512 * 1024 * 1024;
@@ -22,10 +25,36 @@ pub(super) struct Failure {
     status: Option<reqwest::StatusCode>,
     retry_after: Option<Duration>,
     billing: Option<String>,
+    cause: &'static str,
+    io_kind: Option<ErrorKind>,
+    os_error: Option<i32>,
 }
 impl Failure {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into(), availability: false, status: None, retry_after: None, billing: None }
+    pub fn new(message: impl Into<Cow<'static, str>>) -> Self {
+        let message = message.into();
+        let cause = match &message {
+            Cow::Borrowed(message) => *message,
+            Cow::Owned(_) => "Request or provider response validation failed",
+        };
+        Self {
+            message: message.into_owned(),
+            availability: false,
+            status: None,
+            retry_after: None,
+            billing: None,
+            cause,
+            io_kind: None,
+            os_error: None,
+        }
+    }
+    fn io(operation: &'static str, error: std::io::Error) -> Self {
+        let mut failure = Self::new(operation);
+        failure.io_kind = Some(error.kind());
+        failure.os_error = error.raw_os_error();
+        failure
+    }
+    pub(super) fn diagnostic(&self) -> Diagnostic<'_> {
+        Diagnostic(self)
     }
     pub fn runtime(self) -> RuntimeError {
         RuntimeError::plain(self.message)
@@ -36,6 +65,20 @@ impl Failure {
         let id = job.get("id").or_else(|| job.get("job_id")).and_then(Value::as_str).unwrap_or("unknown (submission response lost)");
         self.message = format!("{}; job={id}, credits={}. Submission may have been billed or may still be running. Do not submit again automatically; no retry or fallback was attempted.", self.message, job.get("credits").unwrap_or(&Value::Null));
         self
+    }
+}
+/// Only code-owned text and numeric/enum codes; never a provider body, path or URL.
+pub(super) struct Diagnostic<'a>(&'a Failure);
+impl fmt::Display for Diagnostic<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "cause={}; http={:?}; io={:?}; os={:?}",
+            self.0.cause,
+            self.0.status.map(|status| status.as_u16()),
+            self.0.io_kind,
+            self.0.os_error
+        )
     }
 }
 pub(super) fn base_url(value: &str) -> Result<Url, String> {
@@ -226,28 +269,23 @@ impl Client {
         task: Task,
         input: &Value,
         model: Option<&str>,
+        uploads: super::mirelo::Uploads<'_>,
         signal: &Signal,
     ) -> Result<(Value, String, Value), Failure> {
         validate_input(task, input)?;
         if self.local && task != Task::AudioToMidi && model.is_none() && input.get("model").and_then(Value::as_str).is_none() {
             return Err(Failure::new("Configure an explicit release for this Mirelo-compatible SFX endpoint, or provide model"));
         }
-        // Reject invalid local files before any upload, quote, or generation request.
-        for (field, video) in [("audio", false), ("video", true)] {
-            if let Some(value) = input.get(field) {
-                let value = value.as_str().ok_or_else(|| Failure::new("Media must be an absolute file path or public URL"))?;
-                if value.starts_with("https://") || value.starts_with("http://") {
-                    public_source(&Url::parse(value).map_err(|_| Failure::new("Invalid media URL"))?)?;
-                } else {
-                    let file = media_file(value, video).await?;
-                    if task == Task::AudioToMidi
-                        && !matches!(file.mime, "audio/wav" | "audio/flac" | "audio/mpeg" | "audio/ogg" | "audio/aac")
-                    {
-                        return Err(Failure::new("Mirelo MIDI supports WAV, FLAC, MP3, OGG and AAC input only"));
-                    }
-                    if task == Task::AudioToMidi && file.bytes > 100 * 1024 * 1024 {
-                        return Err(Failure::new("Mirelo MIDI input exceeds 100 MiB"));
-                    }
+        // Validate once and retain each opened handle through header inspection and upload.
+        let audio = input_source(input.get("audio"), uploads.audio, false).await?;
+        let video = input_source(input.get("video"), uploads.video, true).await?;
+        if task == Task::AudioToMidi {
+            if let Some(Source::File(file)) = &audio {
+                if !matches!(file.mime, "audio/wav" | "audio/flac" | "audio/mpeg" | "audio/ogg" | "audio/aac") {
+                    return Err(Failure::new("Mirelo MIDI supports WAV, FLAC, MP3, OGG and AAC input only"));
+                }
+                if file.bytes > 100 * 1024 * 1024 {
+                    return Err(Failure::new("Mirelo MIDI input exceeds 100 MiB"));
                 }
             }
         }
@@ -261,7 +299,7 @@ impl Client {
                 return Ok((Value::Null, String::new(), quote));
             }
             affordable(&quote, true)?;
-            let audio = self.source(required_string(input, "audio")?, false, true, signal).await?;
+            let audio = self.source(audio.ok_or_else(|| Failure::new("Missing audio input"))?, true, signal).await?;
             let mut body = json!({"audio":audio});
             if let Some(instruments) = input.get("instruments") {
                 body["instruments"] = instruments.clone();
@@ -285,16 +323,9 @@ impl Client {
             if let Some(prompt) = input.get("prompt") {
                 content["prompt"] = prompt.clone();
             }
-            for (field, video) in [("audio", false), ("video", true)] {
-                if let Some(value) = input.get(field) {
-                    content[field] = self
-                        .source(
-                            value.as_str().ok_or_else(|| Failure::new("Media must be a file path or public URL"))?,
-                            video,
-                            false,
-                            signal,
-                        )
-                        .await?;
+            for (field, source) in [("audio", audio), ("video", video)] {
+                if let Some(source) = source {
+                    content[field] = self.source(source, false, signal).await?;
                 }
             }
             let mut body = json!({"model":release,"input":content,"output":{"format":"wav"}});
@@ -335,7 +366,7 @@ impl Client {
             let job = json!({"id":id,"job_id":id,"status":"queued","urls":{"self":path}});
             return self.poll(task, job, Value::Null, output, signal, true).await;
         }
-        let (body, path, quote) = self.prepare_request(task, input, model, signal).await?;
+        let (body, path, quote) = self.prepare_request(task, input, model, Default::default(), signal).await?;
         if input["quote"] == true {
             return Ok(self.quote(task, quote));
         }
@@ -446,29 +477,22 @@ impl Client {
             "attribution":if self.local {Value::Null} else {json!("Powered by Mirelo")},
             "cost_basis":if task == Task::AudioToMidi {"Estimate from supplied duration_ms; final credits use server-measured media duration"} else {"Preflight for this exact request"}})
     }
-    async fn source(&self, value: &str, video: bool, midi: bool, signal: &Signal) -> Result<Value, Failure> {
-        if value.starts_with("https://") || value.starts_with("http://") {
-            let url = Url::parse(value).map_err(|_| Failure::new("Invalid media URL"))?;
-            public_source(&url)?;
-            return Ok(if midi { json!({"type":"url","audio_url":value}) } else { json!({"type":"url","url":value}) });
-        }
-        let media = media_file(value, video).await?;
-        if midi && !matches!(media.mime, "audio/wav" | "audio/flac" | "audio/mpeg" | "audio/ogg" | "audio/aac") {
-            return Err(Failure::new("Mirelo MIDI supports WAV, FLAC, MP3, OGG and AAC input only"));
-        }
-        if midi && media.bytes > 100 * 1024 * 1024 {
-            return Err(Failure::new("Mirelo MIDI input exceeds 100 MiB"));
-        }
+    async fn source(&self, source: Source<'_>, midi: bool, signal: &Signal) -> Result<Value, Failure> {
+        let media = match source {
+            Source::Url(value) => {
+                return Ok(if midi { json!({"type":"url","audio_url":value}) } else { json!({"type":"url","url":value}) });
+            }
+            Source::File(media) => media,
+        };
         let ticket = self
             .json(Method::POST, if midi { "/v2/assets" } else { "/v3/assets" }, Some(&json!({"content_type":media.mime})), signal)
             .await?;
         let upload = self.external(required_string(&ticket, "upload_url")?)?;
-        let file = tokio::fs::File::open(&media.path).await.map_err(|_| Failure::new("Could not open media file"))?;
         let request = if midi {
             self.transfer(Method::PUT, upload)
                 .header(reqwest::header::CONTENT_TYPE, media.mime)
                 .header(reqwest::header::CONTENT_LENGTH, media.bytes)
-                .body(file)
+                .body(media.file)
         } else {
             let maximum = ticket["max_bytes"].as_u64().ok_or_else(|| Failure::new("Upload ticket omitted max_bytes"))?;
             if media.bytes > maximum {
@@ -479,7 +503,7 @@ impl Client {
             for (name, value) in fields {
                 form = form.text(name.clone(), value.as_str().ok_or_else(|| Failure::new("Invalid upload form field"))?.to_owned());
             }
-            let part = multipart::Part::stream_with_length(file, media.bytes)
+            let part = multipart::Part::stream_with_length(media.file, media.bytes)
                 .file_name(media.name)
                 .mime_str(media.mime)
                 .map_err(|_| Failure::new("Invalid media MIME type"))?;
@@ -833,10 +857,36 @@ async fn output_file(output: &Path, extension: &str) -> Result<(PathBuf, tokio::
     Ok((path, file))
 }
 pub(super) struct Media {
-    pub path: PathBuf,
+    pub file: tokio::fs::File,
     pub name: String,
     pub mime: &'static str,
     pub bytes: u64,
+}
+enum Source<'a> {
+    Url(&'a str),
+    File(Media),
+}
+async fn input_source<'a>(
+    value: Option<&'a Value>,
+    upload: Option<super::mirelo::Upload<'_>>,
+    video: bool,
+) -> Result<Option<Source<'a>>, Failure> {
+    let Some(value) = value else {
+        return if upload.is_some() { Err(Failure::new("An opened upload requires its audio or video input field")) } else { Ok(None) };
+    };
+    let value = value.as_str().ok_or_else(|| Failure::new("Media must be an absolute file path or public URL"))?;
+    let source = if let Some(upload) = upload {
+        // The caller authorized this handle. The input string is only its label, never a path to reopen.
+        let mut file = tokio::fs::File::from_std(upload.file);
+        file.seek(SeekFrom::Start(0)).await.map_err(|error| Failure::io("Could not rewind approved media", error))?;
+        Source::File(media_handle(file, upload.extension, video).await?)
+    } else if value.starts_with("https://") || value.starts_with("http://") {
+        public_source(&Url::parse(value).map_err(|_| Failure::new("Invalid media URL"))?)?;
+        Source::Url(value)
+    } else {
+        Source::File(media_file(value, video).await?)
+    };
+    Ok(Some(source))
 }
 pub(super) async fn media_file(value: &str, video: bool) -> Result<Media, Failure> {
     if kumi_common::path::network_or_device(value) || kumi_common::path::reserved_device(value) || value.chars().any(char::is_control) {
@@ -846,11 +896,16 @@ pub(super) async fn media_file(value: &str, video: bool) -> Result<Media, Failur
     if !path.is_absolute() {
         return Err(Failure::new("Media must be an absolute local file path or public HTTPS URL"));
     }
-    let metadata = tokio::fs::metadata(path).await.map_err(|_| Failure::new("Media file is missing or unreadable"))?;
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_FILE {
-        return Err(Failure::new("Media must be a nonempty regular file no larger than 512 MiB"));
-    }
-    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    // Reject pipes/devices before opening; inspect the handle again in case the named file changed.
+    let metadata = tokio::fs::metadata(path).await.map_err(|error| Failure::io("Media file is missing or unreadable", error))?;
+    media_size(&metadata)?;
+    let file = tokio::fs::File::open(path).await.map_err(|error| Failure::io("Could not open media file", error))?;
+    media_handle(file, path.extension().and_then(|value| value.to_str()).unwrap_or(""), video).await
+}
+async fn media_handle(mut file: tokio::fs::File, extension: &str, video: bool) -> Result<Media, Failure> {
+    let metadata = file.metadata().await.map_err(|error| Failure::io("Could not inspect media file", error))?;
+    let bytes = media_size(&metadata)?;
+    let extension = extension.to_ascii_lowercase();
     let mime = match (video, extension.as_str()) {
         (false, "wav" | "wave") => "audio/wav",
         (false, "flac") => "audio/flac",
@@ -863,9 +918,8 @@ pub(super) async fn media_file(value: &str, video: bool) -> Result<Media, Failur
         (true, "webm") => "video/webm",
         _ => return Err(Failure::new("Unsupported media file extension")),
     };
-    let mut file = tokio::fs::File::open(path).await.map_err(|_| Failure::new("Could not read media file"))?;
     let mut header = [0; 16];
-    let len = file.read(&mut header).await.map_err(|_| Failure::new("Could not read media header"))?;
+    let len = file.read(&mut header).await.map_err(|error| Failure::io("Could not read media header", error))?;
     let header = &header[..len];
     let recognized = match mime {
         "audio/wav" => header.starts_with(b"RIFF") && header.get(8..12) == Some(b"WAVE"),
@@ -878,7 +932,14 @@ pub(super) async fn media_file(value: &str, video: bool) -> Result<Media, Failur
     if !recognized {
         return Err(Failure::new("Media header does not match its file type"));
     }
-    Ok(Media { path: path.to_path_buf(), name: format!("input.{extension}"), mime, bytes: metadata.len() })
+    file.seek(SeekFrom::Start(0)).await.map_err(|error| Failure::io("Could not rewind media for upload", error))?;
+    Ok(Media { file, name: format!("input.{extension}"), mime, bytes })
+}
+fn media_size(metadata: &std::fs::Metadata) -> Result<u64, Failure> {
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_FILE {
+        return Err(Failure::new("Media must be a nonempty regular file no larger than 512 MiB"));
+    }
+    Ok(metadata.len())
 }
 fn public_source(url: &Url) -> Result<(), Failure> {
     secure_url(url).map_err(Failure::new)?;
@@ -1037,6 +1098,24 @@ async fn save_notes_bounded(output: &Path, notes: &Value, signal: &Signal, max_b
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preparation_diagnostics_keep_codes_but_never_provider_or_os_text() {
+        let sentinel = "key-sentinel /private/source.wav https://signed.example/?secret=key-sentinel";
+        let mut response = Failure::new(sentinel.to_owned());
+        response.status = Some(reqwest::StatusCode::BAD_REQUEST);
+        let io = Failure::io("Could not open media file", std::io::Error::new(ErrorKind::PermissionDenied, sentinel));
+        let os = Failure::io("Could not open media file", std::io::Error::from_raw_os_error(5));
+        for failure in [&response, &io, &os] {
+            let diagnostic = failure.diagnostic().to_string();
+            for private in ["key-sentinel", "/private/", "https://", "signed.example"] {
+                assert!(!diagnostic.contains(private), "{diagnostic}");
+            }
+        }
+        assert!(response.diagnostic().to_string().contains("400"));
+        assert!(io.diagnostic().to_string().contains("PermissionDenied"));
+        assert!(os.diagnostic().to_string().contains("os=Some(5)"));
+    }
 
     #[test]
     fn redirect_policy_checks_each_hop_without_reopening_loopback_exception() {

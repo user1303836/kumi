@@ -9,6 +9,7 @@ use reqwest::{Method, Request, RequestBuilder};
 use serde_json::Value;
 use std::{
     fmt,
+    fs::File,
     path::{Path, PathBuf},
 };
 
@@ -120,6 +121,17 @@ impl OutputKind {
         }
     }
 }
+/// An already authorized, stable source. Inspection and transfer consume this handle, not its label.
+/// A cloned handle shares its cursor; do not use that cursor concurrently with preparation.
+pub struct Upload<'a> {
+    pub file: File,
+    pub extension: &'a str,
+}
+#[derive(Default)]
+pub struct Uploads<'a> {
+    pub audio: Option<Upload<'a>>,
+    pub video: Option<Upload<'a>>,
+}
 
 /// Fixed-provider client. No credential-bearing state implements Debug.
 pub struct Client {
@@ -137,18 +149,17 @@ impl Client {
         }
         Ok(Self { wire: wire::Client::new(base, Some(key), false).map_err(|_| Error("Could not initialize Mirelo client"))? })
     }
-    pub async fn prepare(&self, task: Task, input: &Value, signal: &Signal) -> Result<Prepared, Error> {
+    pub async fn prepare(&self, task: Task, input: &Value, uploads: Uploads<'_>, signal: &Signal) -> Result<Prepared, Error> {
         if input.get("job_id").is_some() || input.get("quote").is_some() {
             return Err(Error("Phased generation does not accept job_id or quote inputs"));
         }
         if signal.is_cancelled() {
             return Err(Error("Mirelo preparation cancelled"));
         }
-        let (body, path, quote) = self
-            .wire
-            .prepare_request(task, input, None, signal)
-            .await
-            .map_err(|_| Error("Mirelo preparation failed; no generation submitted"))?;
+        let (body, path, quote) = self.wire.prepare_request(task, input, None, uploads, signal).await.map_err(|error| {
+            eprintln!("[warn] Mirelo preparation failed: {}", error.diagnostic());
+            Error("Mirelo preparation failed; no generation submitted")
+        })?;
         let credits = credits(&quote["credits"]).ok_or(Error("Mirelo preflight omitted a valid bounded credit estimate"))?;
         let (request, request_sha256, _) =
             self.wire.submission(task, body, path).map_err(|_| Error("Could not prepare Mirelo submission"))?;

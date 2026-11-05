@@ -940,7 +940,8 @@ async fn phased_mirelo_prepares_without_create_and_submits_exact_body_once() {
     let server = server(fixture).await;
     let client = Client::with_base(&server.url, "phased-secret").unwrap();
     let signal = Signal::new();
-    let prepared = client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), &signal).await.unwrap();
+    let prepared =
+        client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), Default::default(), &signal).await.unwrap();
     assert_eq!(prepared.credits(), 10);
     let digest = prepared.request_sha256().to_owned();
     {
@@ -992,7 +993,8 @@ async fn phased_mirelo_lost_or_refused_submission_is_unknown_and_never_replayed(
         }).await;
         let client = Client::with_base(&server.url, "key-sentinel").unwrap();
         let signal = Signal::new();
-        let prepared = client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), &signal).await.unwrap();
+        let prepared =
+            client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), Default::default(), &signal).await.unwrap();
         let error = client.submit(prepared, &signal).await.err().unwrap();
         assert!(!error.not_submitted(), "{status}");
         let diagnostic = format!("{error} {error:?}");
@@ -1009,7 +1011,8 @@ async fn phased_mirelo_predispatch_cancel_proves_no_submission() {
     let server = server(fixture).await;
     let client = Client::with_base(&server.url, "secret").unwrap();
     let signal = Signal::new();
-    let prepared = client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), &signal).await.unwrap();
+    let prepared =
+        client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), Default::default(), &signal).await.unwrap();
     signal.cancel();
     let error = client.submit(prepared, &signal).await.err().unwrap();
     assert!(error.not_submitted());
@@ -1110,13 +1113,13 @@ async fn phased_mirelo_rejects_quote_flags_and_invalid_estimates_without_create(
         )
         .await;
         let client = Client::with_base(&server.url, "secret").unwrap();
-        assert!(client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), &signal).await.is_err());
+        assert!(client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), Default::default(), &signal).await.is_err());
         assert_eq!(server.requests.lock().unwrap().len(), 2);
     }
     let server = server(fixture).await;
     let client = Client::with_base(&server.url, "secret").unwrap();
     for input in [json!({"job_id":"known"}), json!({"prompt":"rain","duration_ms":1000,"quote":false})] {
-        assert!(client.prepare(Task::TextToSfx, &input, &signal).await.is_err());
+        assert!(client.prepare(Task::TextToSfx, &input, Default::default(), &signal).await.is_err());
     }
     assert!(server.requests.lock().unwrap().is_empty());
 }
@@ -1146,7 +1149,8 @@ async fn phased_mirelo_receipt_amounts_status_and_errors_are_strict_and_private(
     })
     .await;
     let client = Client::with_base(&server.url, "key-sentinel").unwrap();
-    let error = client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), &signal).await.err().unwrap();
+    let error =
+        client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), Default::default(), &signal).await.err().unwrap();
     let get_error = client.get(Task::TextToSfx, "known", &signal).await.err().unwrap();
     for error in [error, get_error] {
         let diagnostic = format!("{error} {error:?}");
@@ -1178,7 +1182,8 @@ async fn phased_mirelo_midi_prepare_uploads_but_standalone_quote_stays_preflight
         .unwrap();
     assert_eq!(server.requests.lock().unwrap().len(), 1);
     let client = Client::with_base(&server.url, "secret").unwrap();
-    let prepared = client.prepare(Task::AudioToMidi, &json!({"audio":audio,"duration_ms":1000}), &signal).await.unwrap();
+    let prepared =
+        client.prepare(Task::AudioToMidi, &json!({"audio":audio,"duration_ms":1000}), Default::default(), &signal).await.unwrap();
     assert_eq!(prepared.credits(), 3);
     {
         let requests = server.requests.lock().unwrap();
@@ -1231,7 +1236,8 @@ async fn phased_mirelo_credit_boundaries_and_recovery_identity_are_exact() {
         })
         .await;
         let client = Client::with_base(&server.url, "secret").unwrap();
-        let prepared = client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), &signal).await.unwrap();
+        let prepared =
+            client.prepare(Task::TextToSfx, &json!({"prompt":"rain","duration_ms":1000}), Default::default(), &signal).await.unwrap();
         assert_eq!(prepared.credits(), amount);
         let job = client.submit(prepared, &signal).await.unwrap();
         assert_eq!(job.actual_credits(), Some(amount));
@@ -1240,4 +1246,66 @@ async fn phased_mirelo_credit_boundaries_and_recovery_identity_are_exact() {
     let client = Client::with_base(&server.url, "secret").unwrap();
     assert!(client.get(Task::TextToSfx, "known", &signal).await.is_err());
     assert_eq!(server.requests.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn phased_uploads_stream_the_approved_handle_from_zero_not_the_replaced_path() {
+    use kumi_ai::audio::mirelo::{Client, Upload, Uploads};
+    use std::io::Write;
+    const APPROVED: &[u8] = b"RIFF0000WAVEfmt approved audio bytes";
+    for task in [Task::AudioToMidi, Task::Extend] {
+        let server = server(|request, base| match request.path.as_str() {
+            "/v2/audio-to-midi/v1.0/preflight?duration_ms=1000" => answer(json!({"credits":3,"billing_mode":"unmetered"})),
+            "/v2/assets" => answer(json!({"asset_id":"asset1","upload_url":format!("{base}/put")})),
+            "/put" => Some(Reply { status: 200, mime: "text/plain", body: vec![], headers: vec![] }),
+            _ => fixture(request, base),
+        })
+        .await;
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("private unreleased source.wav");
+        let mut file = std::fs::OpenOptions::new().create_new(true).read(true).write(true).open(&path).unwrap();
+        file.write_all(APPROVED).unwrap(); // Keep the writable owner live, with its cursor at EOF.
+        let label = path.canonicalize().unwrap(); // Verbatim disk path on Windows.
+        std::fs::rename(&path, dir.path().join("approved.wav")).unwrap();
+        std::fs::write(&path, b"replaced path must never be inspected or uploaded").unwrap();
+        let input = if task == Task::AudioToMidi {
+            json!({"audio": label, "duration_ms":1000})
+        } else {
+            json!({"audio": label, "append_duration_ms":1000})
+        };
+        let uploads = Uploads { audio: Some(Upload { file: file.try_clone().unwrap(), extension: "WaV" }), video: None };
+        let client = Client::with_base(&server.url, "upload-key-sentinel").unwrap();
+        let _prepared = client.prepare(task, &input, uploads, &Signal::new()).await.unwrap();
+        let requests = server.requests.lock().unwrap();
+        assert!(requests.iter().all(|request| !request.path.ends_with("/jobs") && !request.path.ends_with("?wait=25")));
+        let uploaded = requests.iter().find(|request| matches!(request.path.as_str(), "/put" | "/upload")).unwrap();
+        assert!(!uploaded.headers.to_lowercase().contains("authorization:"));
+        if task == Task::AudioToMidi {
+            assert!(uploaded.headers.starts_with("PUT "));
+            assert_eq!(uploaded.body, APPROVED);
+        } else {
+            let body = String::from_utf8_lossy(&uploaded.body);
+            assert!(uploaded.headers.starts_with("POST "));
+            assert!(body.contains("filename=\"input.wav\""));
+            assert!(body.as_bytes().windows(APPROVED.len()).any(|bytes| bytes == APPROVED));
+            for private in ["private unreleased", "upload-key-sentinel", "replaced path", label.to_str().unwrap()] {
+                assert!(!body.contains(private));
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn phased_uploads_refuse_invalid_owned_bytes_without_falling_back_to_the_path() {
+    use kumi_ai::audio::mirelo::{Client, Upload, Uploads};
+    let server = server(fixture).await;
+    let dir = tempfile::tempdir().unwrap();
+    let valid = dir.path().join("valid.wav");
+    let invalid = dir.path().join("invalid.wav");
+    std::fs::write(&valid, b"RIFF0000WAVEfmt valid").unwrap();
+    std::fs::write(&invalid, b"not a WAV").unwrap();
+    let uploads = Uploads { audio: Some(Upload { file: std::fs::File::open(&invalid).unwrap(), extension: "wav" }), video: None };
+    let client = Client::with_base(&server.url, "upload-key-sentinel").unwrap();
+    assert!(client.prepare(Task::AudioToMidi, &json!({"audio":valid,"duration_ms":1000}), uploads, &Signal::new()).await.is_err());
+    assert!(server.requests.lock().unwrap().is_empty());
 }
