@@ -52,6 +52,9 @@ impl DawProvider for Ableton {
     fn plugin_steps(&self) -> &'static [kumi_daw::plugin::PluginStep] {
         crate::plugin_steps::PLUGIN_STEPS
     }
+    fn plugin_refused(&self) -> &'static [(&'static str, &'static str)] {
+        crate::plugin_steps::PLUGIN_REFUSED
+    }
     /// What Live's own change kinds say Kumi can't take back (`ChangeKind::permanent`), as the app's plan refuses it.
     fn plugin_refuses(&self, tool: &str, input: &serde_json::Value) -> Option<String> {
         let input = input.as_object()?;

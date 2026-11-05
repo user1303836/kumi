@@ -90,7 +90,7 @@ pub static PLUGIN_REFUSED: &[(&str, &str)] = &[
     ("delete_track", "It deletes a track with its clips and devices, and Kumi's undo can't bring it back."),
     ("delete_locator", "It deletes a locator, and Kumi's undo can't bring it back."),
     ("clear_range", "It clears clips from a stretch of the Arrangement and cuts those crossing it."),
-    ("group_tracks", "It has no Kumi HISTORY inverse."),
+    ("group_tracks", "Live's API can't group tracks without Kumi's native editing; select the tracks and press Cmd+G (Ctrl+G on Windows)."),
     ("play", "It plays and stops Live."),
     ("fire_scene", "It launches a scene."),
     ("launch_clip", "It launches a clip."),

@@ -148,6 +148,10 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
         let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
         let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
         let at = n + 1;
+        // A step the DAW keeps out of a plugin's plans says why, whether or not this DAW offers it now.
+        if let Some((_, why)) = provider.plugin_refused().iter().find(|(name, _)| *name == tool) {
+            return Err(refused("not_allowed", format!("Step {at}: Kumi for Hermes doesn't make {tool} here. {why}")));
+        }
         if !offered.iter().any(|name| name == tool) {
             return Err(refused("unknown_step", format!("Step {at}: {tool} isn't a change this DAW makes.")));
         }
