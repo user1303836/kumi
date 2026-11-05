@@ -136,11 +136,12 @@ def summary(controls: list[dict], limit: int) -> str:
 
 
 def next_step(built: dict) -> str:
-    """What the model does with a built device (22f): load it, then place it, each an ordinary approved change."""
-    step = (f"The device is in the User Library, not yet in the Set. To use it, call kumi_change with a load_device step "
-            f"{{\"itemId\": {json.dumps(built.get('item'), ensure_ascii=False)}, \"trackRef\": …}}, then move_device to "
-            "place it (\"before the Saturator\"): the producer approves that change on its own, and Kumi can undo it. "
-            "The file stays in the User Library after an undo.")
+    """What the model does with a built device (22f): observe, then load and place it in one ordinary approved change."""
+    step = ("The device is in the User Library, not yet in the Set. To use it, first kumi_observe for the track's ref "
+            "and the project key and epoch, then call kumi_change with a load_device step "
+            f"{{\"itemId\": {json.dumps(built.get('item'), ensure_ascii=False)}, \"trackRef\": …}} and a move_device "
+            "step to place it (\"before the Saturator\"), in that one change: the producer approves it on its own, "
+            "and Kumi can undo it. The file stays in the User Library after an undo.")
     if built.get("listed") is False:
         step += " Live's Browser hasn't listed it yet; the load waits for it."
     return step

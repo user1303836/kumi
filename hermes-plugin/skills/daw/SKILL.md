@@ -56,7 +56,7 @@ These are the steps for everyday changes. The project look lists each with its f
 | Set the tempo | `set_tempo` | `tempo_set` (`bpm`; `tempo_marker_set` where the project has tempo markers) | `song_bpm` (`bpm`) |
 | Rename | `rename` (`kind`, `ref`, `name`) | `track_rename`, `marker_rename` | `track_rename`, `instrument_rename`, `pattern_name` |
 | Add a track | `add_tracks_and_scenes` | `track_add` | `track_add` |
-| Load a device or plug-in | `load_device` | `fx_add` | `device_add` |
+| Load a device or plug-in | `load_device` (a device built with `kumi_device`: `itemId` is its build's `item`) | `fx_add` | `device_add` |
 | Set a device's parameter | `set_device_parameter` | `fx_param` (`fx_params` for several) | `device_param` (`device_params` for several) |
 | Quantize, humanize or transpose notes | `transform_midi`, `edit_notes` | `notes_quantize`, `notes_humanize` | `notes_transpose`, `notes_humanize` |
 | Mark a section | `set_locators` (`start`, `end`, `startName`, `endName`, in beats from the song's start) | `marker_add`, `region_add` | `slot_section` (in the pattern sequence) |
@@ -252,7 +252,7 @@ When the producer names a video tutorial ("make the bass from this video"):
 - **Typed steps and stock devices first;** a device only for processing no stock device does, built, then placed, in two approvals.
 - **Build it with `kumi_device`:** `{spec: {name, about, controls, code}}`. The code is GenExpr for one `gen~` (`in1`/`in2` to `out1`/`out2`), each control a `Param` of the same name. At most 16 controls, 400 lines and 32 KB; no `while` or `do`, a `for` only with literal bounds (at most 64, nested 2 deep), literal `Delay` and `Data` sizes, no `Buffer`. Kumi adds Mix and Output, and holds what the device adds under −0.3 dBFS.
 - **`about` is what the producer reads in the approval,** beside the controls, the code and the file it writes. A refusal lists findings: fix the spec and ask again, never the same spec.
-- **Then place it:** a `kumi_change` with `load_device` (`itemId`: the build's `item`, `trackRef`), then `move_device`. Kumi can undo that change; the file stays in the User Library.
+- **Then place it:** observe first (`kumi_observe`: the track's ref, the project key and epoch), then one `kumi_change` with `load_device` (`itemId`: the build's `item`, `trackRef`) and `move_device`. Kumi can undo that change; the file stays in the User Library.
 
 ## What Kumi doesn't do here
 - **Projects:** it doesn't open, save or close Sets and projects, or record.
