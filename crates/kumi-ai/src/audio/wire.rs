@@ -221,16 +221,13 @@ impl Client {
         }
         result
     }
-    async fn run(&self, task: Task, input: &Value, model: Option<&str>, output: &Path, signal: &Signal) -> Result<Value, Failure> {
-        if let Some(id) = input.get("job_id") {
-            if input.as_object().is_none_or(|object| object.len() != 1) {
-                return Err(Failure::new("job_id recovery cannot be mixed with generation inputs"));
-            }
-            let id = id.as_str().filter(|id| valid_job_id(id)).ok_or_else(|| Failure::new("Invalid audio job_id"))?;
-            let path = job_path(task, id);
-            let job = json!({"id":id,"job_id":id,"status":"queued","urls":{"self":path}});
-            return self.poll(task, job, Value::Null, output, signal, true).await;
-        }
+    pub(super) async fn prepare_request(
+        &self,
+        task: Task,
+        input: &Value,
+        model: Option<&str>,
+        signal: &Signal,
+    ) -> Result<(Value, String, Value), Failure> {
         validate_input(task, input)?;
         if self.local && task != Task::AudioToMidi && model.is_none() && input.get("model").and_then(Value::as_str).is_none() {
             return Err(Failure::new("Configure an explicit release for this Mirelo-compatible SFX endpoint, or provide model"));
@@ -261,7 +258,7 @@ impl Client {
             }
             let quote = self.json(Method::GET, &format!("/v2/audio-to-midi/v1.0/preflight?duration_ms={duration}"), None, signal).await?;
             if input["quote"] == true {
-                return Ok(self.quote(task, quote));
+                return Ok((Value::Null, String::new(), quote));
             }
             affordable(&quote, true)?;
             let audio = self.source(required_string(input, "audio")?, false, true, signal).await?;
@@ -321,27 +318,31 @@ impl Client {
             let path = format!("/v3/{}/{family}", task.as_str());
             let quote = self.json(Method::POST, &format!("{path}/preflight"), Some(&body), signal).await?;
             if input["quote"] == true {
-                return Ok(self.quote(task, quote));
+                return Ok((Value::Null, String::new(), quote));
             }
             affordable(&quote, false)?;
             (body, path, quote)
         };
+        Ok((body, path, quote))
+    }
+    async fn run(&self, task: Task, input: &Value, model: Option<&str>, output: &Path, signal: &Signal) -> Result<Value, Failure> {
+        if let Some(id) = input.get("job_id") {
+            if input.as_object().is_none_or(|object| object.len() != 1) {
+                return Err(Failure::new("job_id recovery cannot be mixed with generation inputs"));
+            }
+            let id = id.as_str().filter(|id| valid_job_id(id)).ok_or_else(|| Failure::new("Invalid audio job_id"))?;
+            let path = job_path(task, id);
+            let job = json!({"id":id,"job_id":id,"status":"queued","urls":{"self":path}});
+            return self.poll(task, job, Value::Null, output, signal, true).await;
+        }
+        let (body, path, quote) = self.prepare_request(task, input, model, signal).await?;
+        if input["quote"] == true {
+            return Ok(self.quote(task, quote));
+        }
         if signal.is_cancelled() {
             return Err(Failure::new("Operation cancelled before submission"));
         }
-        use sha2::{Digest, Sha256};
-        let midi = task == Task::AudioToMidi;
-        let idempotency_key = (!midi).then(|| uuid::Uuid::new_v4().to_string());
-        let encoded = serde_json::to_vec(&body).map_err(|_| Failure::new("Could not encode audio request"))?;
-        let body_hash = hex::encode(Sha256::digest(&encoded));
-        let mut request = self
-            .api(Method::POST, &if midi { path } else { format!("{path}?wait=25") })?
-            .timeout(Duration::from_secs(120))
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(encoded);
-        if let Some(key) = &idempotency_key {
-            request = request.header("Idempotency-Key", key);
-        }
+        let (request, body_hash, idempotency_key) = self.submission(task, body, path)?;
         let lost = |error: Failure| {
             let mut error = error.submitted(&Value::Null);
             error.message.push_str(&format!(
@@ -363,15 +364,27 @@ impl Client {
         let job = decode(response, signal).await.map_err(lost)?;
         self.poll(task, job, quote, output, signal, false).await
     }
-    async fn poll(
-        &self,
-        task: Task,
-        mut job: Value,
-        quote: Value,
-        output: &Path,
-        signal: &Signal,
-        mut immediate: bool,
-    ) -> Result<Value, Failure> {
+    pub(super) fn submission(&self, task: Task, body: Value, path: String) -> Result<(RequestBuilder, String, Option<String>), Failure> {
+        use sha2::{Digest, Sha256};
+        let midi = task == Task::AudioToMidi;
+        let idempotency_key = (!midi).then(|| uuid::Uuid::new_v4().to_string());
+        let encoded = serde_json::to_vec(&body).map_err(|_| Failure::new("Could not encode audio request"))?;
+        let body_hash = hex::encode(Sha256::digest(&encoded));
+        let mut request = self
+            .api(Method::POST, &if midi { path } else { format!("{path}?wait=25") })?
+            .timeout(Duration::from_secs(120))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(encoded);
+        if let Some(key) = &idempotency_key {
+            request = request.header("Idempotency-Key", key);
+        }
+        Ok((request, body_hash, idempotency_key))
+    }
+    async fn poll(&self, task: Task, job: Value, quote: Value, output: &Path, signal: &Signal, immediate: bool) -> Result<Value, Failure> {
+        let job = self.wait_job(task, job, signal, immediate).await?;
+        self.finish(task, job, quote, output, signal, MAX_FILE, false).await
+    }
+    pub(super) async fn wait_job(&self, task: Task, mut job: Value, signal: &Signal, mut immediate: bool) -> Result<Value, Failure> {
         let deadline = tokio::time::Instant::now() + JOB_WAIT;
         let mut delay = Duration::from_secs(2);
         loop {
@@ -426,7 +439,7 @@ impl Client {
                 }
             }
         }
-        self.finish(task, job, quote, output, signal).await
+        Ok(job)
     }
     fn quote(&self, task: Task, quote: Value) -> Value {
         json!({"provider":if self.local {"local"} else {"mirelo"},"task":task,"quote":quote,"submitted":false,
@@ -476,12 +489,21 @@ impl Client {
         let id = required_string(&ticket, if midi { "asset_id" } else { "id" })?;
         Ok(if midi { json!({"type":"asset","asset_id":id}) } else { json!({"type":"asset","id":id}) })
     }
-    async fn finish(&self, task: Task, job: Value, quote: Value, output: &Path, signal: &Signal) -> Result<Value, Failure> {
+    pub(super) async fn finish(
+        &self,
+        task: Task,
+        job: Value,
+        quote: Value,
+        output: &Path,
+        signal: &Signal,
+        max_bytes: u64,
+        native: bool,
+    ) -> Result<Value, Failure> {
         if output_count(&job) > MAX_OUTPUTS {
             return Err(Failure::new("Audio job exceeds Kumi's limit of 32 downloadable files; no files downloaded. Recover this job after arranging a smaller result; do not recreate it.").submitted(&job));
         }
         let mut files = Vec::new();
-        let mut remaining_bytes = MAX_FILE;
+        let mut remaining_bytes = max_bytes.min(MAX_FILE);
         let mut failures = Vec::new();
         let mut result = json!({"provider":if self.local {"local"} else {"mirelo"},"task":task,
             "job_id":job.get("id").or_else(|| job.get("job_id")),"status":job["status"],"credits":job["credits"],
@@ -493,6 +515,13 @@ impl Client {
             result["notes"] = job.pointer("/result/notes").cloned().unwrap_or(Value::Null);
             if result["notes"].is_array() {
                 normalize_notes(&mut result["notes"]).map_err(|error| error.submitted(&job))?;
+                if native {
+                    for note in result["notes"].as_array_mut().unwrap() {
+                        note.as_object_mut()
+                            .unwrap()
+                            .retain(|field, _| matches!(field.as_str(), "pitch" | "velocity" | "start" | "end" | "instrument"));
+                    }
+                }
             }
             result["timing"] = job.pointer("/result/timing").cloned().unwrap_or(Value::Null);
             for (field, extension) in [("midi_url", "mid"), ("musicxml_url", "musicxml")] {
@@ -528,6 +557,10 @@ impl Client {
                         for kind in ["audio", "video"] {
                             if let Some(file) = variant["files"].get(kind) {
                                 found = true;
+                                if native && kind == "video" {
+                                    failures.push("Native generation does not support video output".into());
+                                    continue;
+                                }
                                 let extension = if kind == "video" {
                                     "mp4"
                                 } else {
@@ -553,13 +586,13 @@ impl Client {
             }
         }
         if task == Task::AudioToMidi && result["notes"].is_array() {
-            match save_notes(output, &result["notes"], signal).await {
+            match save_notes_bounded(output, &result["notes"], signal, if native { remaining_bytes } else { u64::MAX }).await {
                 Ok(path) => result["notes_path"] = json!(path),
                 Err(error) => failures.push(error.message),
             }
         }
         result["files"] = json!(files);
-        if files.is_empty()
+        if (files.is_empty() && !(native && result["notes_path"].is_string()))
             || !matches!(job["status"].as_str(), Some("succeeded"))
             || !failures.is_empty()
             || (task == Task::AudioToMidi && !result["notes"].is_array())
@@ -698,10 +731,10 @@ async fn poll_wait(delay: Duration, deadline: tokio::time::Instant, signal: &Sig
         _ = tokio::time::sleep(delay) => Ok(())
     }
 }
-fn valid_job_id(id: &str) -> bool {
+pub(super) fn valid_job_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
-fn job_path(task: Task, id: &str) -> String {
+pub(super) fn job_path(task: Task, id: &str) -> String {
     if task == Task::AudioToMidi {
         format!("/v2/audio-to-midi/v1.0/jobs/{id}")
     } else {
@@ -767,7 +800,7 @@ pub(super) async fn bounded(mut response: Response, limit: u64, signal: &Signal)
     }
     Ok(bytes)
 }
-async fn decode(response: Response, signal: &Signal) -> Result<Value, Failure> {
+pub(super) async fn decode(response: Response, signal: &Signal) -> Result<Value, Failure> {
     serde_json::from_slice(&bounded(response, MAX_JSON, signal).await?).map_err(|_| Failure::new("Audio server returned invalid JSON"))
 }
 pub(super) async fn save(output: &Path, extension: &str, bytes: &[u8], signal: &Signal) -> Result<PathBuf, Failure> {
@@ -980,6 +1013,9 @@ fn affordable(quote: &Value, midi: bool) -> Result<(), Failure> {
 }
 
 pub(super) async fn save_notes(output: &Path, notes: &Value, signal: &Signal) -> Result<PathBuf, Failure> {
+    save_notes_bounded(output, notes, signal, u64::MAX).await
+}
+async fn save_notes_bounded(output: &Path, notes: &Value, signal: &Signal, max_bytes: u64) -> Result<PathBuf, Failure> {
     let notes = notes.as_array().ok_or_else(|| Failure::new("Audio-to-MIDI result omitted its authoritative notes"))?;
     for note in notes {
         let valid = note["pitch"].as_f64().is_some_and(|pitch| pitch.is_finite() && (0.0..=127.0).contains(&pitch) && pitch.fract() == 0.0)
@@ -992,6 +1028,9 @@ pub(super) async fn save_notes(output: &Path, notes: &Value, signal: &Signal) ->
         }
     }
     let bytes = serde_json::to_vec(notes).map_err(|_| Failure::new("Could not encode transcription notes"))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(Failure::new("Audio job exceeds its remaining output budget"));
+    }
     save(output, "json", &bytes, signal).await
 }
 

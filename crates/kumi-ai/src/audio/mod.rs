@@ -1,4 +1,5 @@
 //! Native audio generation/transcription, independent of conversational model providers.
+pub mod mirelo;
 mod muscriptor;
 mod wire;
 
