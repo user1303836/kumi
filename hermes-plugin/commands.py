@@ -40,10 +40,13 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
         lines.append(_said(status.get("message"), 300) or f"Kumi isn't connected to {daw}: ask Hermes to connect.")
         return "\n".join([*lines, *warning])
     project = status.get("project") or {}
-    owner = _said((status.get("owner") or {}).get("session_id") or "", 80)
+    # The chat using Kumi is the one that started its runtime in this process: the runtime's own status names a holder
+    # only while a change runs, and never its chat (fresh-user run 1, F13).
+    live = host.runtimes.get(host.data_dir())
+    owner = live.owner_session if live is not None else None
     using = ("This chat is using Kumi." if owner and owner == kwargs.get("session_id")
-             else "Another chat is using Kumi: use that chat, or end it." if owner else "No chat is using Kumi yet.")
-    lines.append(f"Connected to {daw}: {_said(project.get('name', 'a project'), 80)}. {using}")
+             else "Another chat is using Kumi: use that chat, or end it." if owner else "")
+    lines.append(f"Connected to {daw}: {_said(project.get('name', 'a project'), 80)}. {using}".rstrip())
     return "\n".join([*lines, *warning])
 
 

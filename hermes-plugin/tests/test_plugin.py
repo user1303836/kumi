@@ -78,7 +78,8 @@ class Tools(unittest.TestCase):
 
     def test_connect_starts_this_chats_runtime_and_status_then_reads_it(self):
         connected = support.call(self.host, "kumi_connect", {}, session_id="s1", task_id="t1", user_task="connect")
-        self.assertEqual((connected["connected"], connected["owner"]["session_id"]), (True, "s1"))
+        self.assertEqual(connected["connected"], True)
+        self.assertEqual(self.host.runtimes.get(self.data).owner_session, "s1", "the chat that started it")
         self.assertEqual(connected["project"], {"name": "Night Drive", "key": "live:night-drive", "epoch": "1"})
         status = support.call(self.host, "kumi_status", {}, session_id="s2")
         self.assertEqual((status["connected"], status["runtime"]["protocol"]), (True, "kumi-serve/1"))

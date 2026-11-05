@@ -779,7 +779,16 @@ def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str]
              "daw_component": f"Kumi: install Kumi's part in {DAWS[daw]}",
              "ffmpeg": "Kumi: let Kumi's runtime run the ffmpeg already on this computer",
              "use_daw": f"Kumi: make {DAWS[daw]} Kumi's DAW in this profile"}[plan["step"]]
-    return [title, *plan["effects"], *(f"Writes: {path}" for path in plan["paths"]), *using]
+    named = "\n".join(plan["effects"])
+    writes = [f"Writes: {path}" for path in plan["paths"] if not _names(named, path)]
+    return [title, *plan["effects"], *writes, *using]
+
+
+def _names(text: str, path: str) -> bool:
+    """Whether `text` shows `path` whole (not as the start of a longer path), so the approval needn't say it again
+    (fresh-user run 1, F10: REAPER's step named each path twice). A full stop ends it when a space or the line's end
+    follows (`…/kumi.dylib.`), never inside a name (`…/kumi.dylib.bak`)."""
+    return re.search(re.escape(path) + r"(?=$|[\s,;:)\]'\"]|\.(?:$|\s))", text, re.MULTILINE) is not None
 
 
 def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -> dict:

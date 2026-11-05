@@ -25,12 +25,12 @@ config_schema:
     choices: [ableton, reaper, renoise]
     default: ableton
     label: DAW
-    description: "The DAW Kumi connects to: ableton is Ableton Live."
+    description: "The DAW Kumi connects to: Ableton Live (ableton), REAPER (reaper) or Renoise (renoise)."
   library_folders:
     type: list
     default: []
     label: Sample folders
-    description: "Folders Kumi may read to build your sound map. Nothing else is scanned."
+    description: "Folders Kumi may read to build your sound map, as a list of full paths, such as [\"/Users/me/Samples\"]. Nothing else is scanned. In a chat, ask Hermes to add one: it asks you first."
   listen_interpretation:
     type: bool
     default: false
