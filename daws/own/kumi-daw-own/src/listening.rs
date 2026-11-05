@@ -2596,7 +2596,7 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         Ok(RestrictedPreflight {
             preview: HearPreview {
                 label, seconds, method: HearMethod::Offline, deadline_seconds: render_deadline_seconds(seconds),
-                disclosure: if self.renderer.daw == Daw::Reaper { "REAPER may show the project as modified after a listen." } else { "" },
+                disclosure: if renderer.profile().id == Some(DawId::Reaper) { "REAPER may show the project as modified after a listen." } else { "" },
             },
             window, source, epoch, state: read.get_mut("render_state").expect("validated preflight state").take(), focus,
         })
@@ -2694,6 +2694,12 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             _ => return Err(HearFailure::Unsure { reason: "The render start could not be resolved; its effects and restoration are unknown. Observe again.".into() }.into()),
         };
         let (done, cancelled) = self.restricted_wait(&started, before.preview.seconds, &original).await?;
+        // REAPER reports `stale` only from its pre-execution guards, before touching DAW
+        // state. Comparing its old focus now would mistake the producer's new tempo for
+        // restoration residue. Renoise can also report stale after a render has started.
+        if self.renderer.profile().id == Some(DawId::Reaper) && done["state"] == "failed" && done["code"] == "stale" {
+            return Err(hear_refused("stale", "The queued render's window or project changed before it started; preview again."));
+        }
         let restoration = self.restricted_restore(&before).await;
         if restoration.is_err() || cancelled || original.is_cancelled() || done["state"] == "cancelled" {
             self.restricted_discard(&done, &scratch, quarantine_root);
@@ -3464,10 +3470,10 @@ mod restricted_staging {
                 unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR); }
             }
             return Err(unsafe_file(if restored {
-                "The staging file changed during cleanup; its replacement was put back and nothing was deleted.".into()
+                "The staging file changed during cleanup; its replacement was put back and nothing was deleted."
             } else {
                 eprintln!("kumi listen: a substituted staging file was preserved at {}", kept_at.display());
-                "The staging file changed during cleanup; its replacement remains in this profile's permanent quarantine.".into()
+                "The staging file changed during cleanup; its replacement remains in this profile's permanent quarantine."
             }));
         }
         if unsafe { libc::unlinkat(claimed.as_raw_fd(), slot.as_ptr(), 0) } != 0 {

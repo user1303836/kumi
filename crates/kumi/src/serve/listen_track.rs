@@ -5,6 +5,7 @@ use super::ctx::{epoch_of, epoch_schema, Call, Ctx, Effect, JsonObject, OpError,
 use super::listen;
 use kumi_common::abort::{self, Signal};
 use kumi_types::contracts::{HearApproval, HearMethod, HearPreview, HearRequest};
+use kumi_types::daw::DawId;
 use kumi_types::errors::{HearFailure, RuntimeError};
 use serde_json::{json, Value};
 use std::{path::Path, time::Duration};
@@ -160,31 +161,27 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         None => None,
     };
     ctx.link().expect(key, epoch)?;
-    // The plain shutdown bound applies to preparation. Only the native phase extends it.
-    let _settling = if preview_only { None } else {
-        Some(ctx.settling(approved.expect("actual capture requires approval").0.deadline_seconds)?)
-    };
-    let preview = match connection.integration.preview_hear(&request, call.signal.clone()).await {
-        Ok(preview) => preview,
-        Err(error) => return hearing_error(ctx, error, false),
-    };
-    if !preview.seconds.is_finite() || preview.seconds <= 0. || preview.seconds > 60.
-        || !(1..=360).contains(&preview.deadline_seconds)
-    { return Err(OpError::Refused { code:"unsupported", reason:"The DAW did not provide a bounded capture plan.".into(), owner:None }); }
     if preview_only {
+        let preview = match connection.integration.preview_hear(&request, call.signal.clone()).await {
+            Ok(preview) => preview,
+            Err(error) => return hearing_error(ctx, error, false),
+        };
+        if !preview.seconds.is_finite() || preview.seconds <= 0. || preview.seconds > 60.
+            || !(1..=360).contains(&preview.deadline_seconds)
+        { return Err(OpError::Refused { code:"unsupported", reason:"The DAW did not provide a bounded capture plan.".into(), owner:None }); }
         return Ok(json!({"state":"preview","project":{"key":project.key,"epoch":project.epoch.to_string()},
             "text":preview_text(&request, &preview),"estimated_seconds":preview.seconds,
             "method":preview.method,"deadline_seconds":preview.deadline_seconds,
             "prepare_seconds":if call.args.contains_key("compare_to") {120} else {0}}));
     }
     let native = approved.expect("actual capture requires approval").0;
-    if !native.covers(preview.seconds, preview.deadline_seconds) {
-        return Ok(outcome("refused", "stale", "The current window exceeds its approved duration or deadline; preview again before listening.", true));
-    }
-    ctx.link().expect(key, epoch)?;
+    // Each adapter runs the same pure preflight again inside `hear`, checking this approval
+    // before changing anything. Do not spend the native allowance on a duplicate preflight.
+    let _settling = ctx.settling(native.deadline_seconds)?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(u64::from(native.deadline_seconds));
     let scratch = ctx.scratch("listen")?;
     request.scratch_dir = Some(scratch.path().to_path_buf());
-    if preview.method == HearMethod::Offline {
+    if ctx.daw() != DawId::Ableton {
         let mut directory = std::fs::DirBuilder::new();
         #[cfg(unix)]
         {
@@ -198,10 +195,11 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         }
     }
     call.progress.report(0., Some(3.), Some("Capturing the approved window; temporary DAW state will be restored."));
-    let takes = match connection.integration.hear(&request, call.signal.clone()).await {
-        Ok(Ok(takes)) => takes,
-        Ok(Err(_)) => return Ok(outcome("unsure", "capture_failed", "The DAW returned no verified restoration outcome. Observe again before another action.", false)),
-        Err(error) => return hearing_error(ctx, error, true),
+    let takes = match tokio::time::timeout_at(deadline, connection.integration.hear(&request, call.signal.clone())).await {
+        Ok(Ok(Ok(takes))) => takes,
+        Ok(Ok(Err(_))) => return Ok(outcome("unsure", "capture_failed", "The DAW returned no verified restoration outcome. Observe again before another action.", false)),
+        Ok(Err(error)) => return hearing_error(ctx, error, true),
+        Err(_) => return Ok(outcome("unsure", "capture_timeout", "The approved native deadline expired before restoration was verified. Observe again before another action.", false)),
     };
     if call.signal.is_cancelled() { return hearing_error(ctx, RuntimeError::Aborted, true); }
     let [take] = takes.as_slice() else {
@@ -213,13 +211,19 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     call.progress.report(1., Some(3.), Some("DAW restoration verified; measuring the private capture."));
     // Everything after `hear` is local. A failure here must preserve its known restoration,
     // produce no successful metrics or MEDIA line, and drop both unpublished copies.
+    let stop = Signal::new();
+    let signal = abort::any([call.signal.clone(), stop.clone()]);
     let measured = async {
-        let staged = ctx.artifacts().stage_scratch(ctx, &scratch, Path::new(&take.file), &call.signal).await?;
-        listen::measure(ctx, staged, Path::new("track-capture.wav"), &call.signal).await
-    }.await;
-    let measured = match measured {
-        Ok(measured) => measured,
-        Err(error) => return Ok(outcome(if call.signal.is_cancelled() {"cancelled"} else {"refused"}, error.code(), error.reason(), true)),
+        let staged = ctx.artifacts().stage_scratch(ctx, &scratch, Path::new(&take.file), &signal).await?;
+        listen::measure(ctx, staged, Path::new("track-capture.wav"), &signal).await
+    };
+    let measured = match tokio::time::timeout_at(deadline, measured).await {
+        Ok(Ok(measured)) => measured,
+        Ok(Err(error)) => return Ok(outcome(if call.signal.is_cancelled() {"cancelled"} else {"refused"}, error.code(), error.reason(), true)),
+        Err(_) => {
+            stop.cancel();
+            return Ok(outcome("refused", "measure_timeout", "The native deadline expired during local measurement; DAW state is restored and no audio was published.", true));
+        }
     };
     let seconds = measured.metrics.seconds;
     call.progress.report(2., Some(3.), Some("Measurements complete; retaining the approved capture."));
@@ -228,7 +232,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         Err(error) => return Ok(outcome(if call.signal.is_cancelled() {"cancelled"} else {"refused"}, error.code(), error.reason(), true)),
     };
     result["state"] = json!("done");
-    result["capture"] = json!({"method":preview.method,"from_beat":request.from_beat,"beats":request.beats,
+    result["capture"] = json!({"method":if take.live {HearMethod::Ears} else {HearMethod::Offline},"from_beat":request.from_beat,"beats":request.beats,
         "seconds":seconds,"cleanup":"restored"});
     if take.marked_modified { result["capture"]["marked_modified"] = json!(true); }
     if let Some(note) = &take.note {

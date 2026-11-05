@@ -362,6 +362,32 @@ impl RenoiseScript {
         Value::Array(self.state.lock().unwrap().lines.get(&(pattern, track)).cloned().unwrap_or_default())
     }
 
+    /// Native `read {ref}` for any track in the vector song, not only a test's custom chain.
+    /// The caller has already checked and normalized its epoch.
+    fn track_read(state: &State, asked: &Value) -> Option<Result<Value, (String, String)>> {
+        let reference = asked.get("ref")?.as_str()?;
+        let (_, at) = place(reference, "track")?;
+        if at.len() != 1 { return None; }
+        let number = at[0];
+        let page = state.cases.iter().find(|case| {
+            case.method == "read" && case.params["kind"] == "track"
+                && case.params["limit"] == MAX_LIMIT && case.params.get("cursor").is_none()
+        })?.response.as_ref().ok()?;
+        let Some(mut row) = page["items"].as_array()?.iter().find(|row| row["ref"] == reference).cloned() else {
+            return Some(Err(("bad-params".into(), "nothing is at that track ref".into())));
+        };
+        if let Some(name) = state.names.get(&number) { row["name"] = json!(name); }
+        if let Some(db) = state.volume.get(&number) {
+            row["volumeDb"] = json!(db);
+            row["preVolumeDb"] = json!(db);
+        }
+        if let Some(muted) = state.mute.get(&number) { row["mute"] = json!(if *muted { "muted" } else { "active" }); }
+        if let Some(added) = state.devices.get(&number) {
+            row["deviceCount"] = json!(row["deviceCount"].as_u64().unwrap_or(0) + added);
+        }
+        Some(Ok(json!({"items": [row], "epoch": EPOCH, "layout": 0})))
+    }
+
     /// What the lines a test wrote answer: a pattern track's `line` read, and a pattern read by its ref (from the
     /// vectors' patterns). Asked and answered in the vectors' epoch.
     fn lines_read(state: &State, asked: &Value) -> Option<Result<Value, (String, String)>> {
@@ -1222,7 +1248,7 @@ impl RenoiseScript {
             _ => asked,
         };
         if method == "read" {
-            if let Some(answer) = Self::lines_read(&state, &asked) {
+            if let Some(answer) = Self::track_read(&state, &asked).or_else(|| Self::lines_read(&state, &asked)) {
                 return Some(answer.map(|page| retag(&page, VECTORS_EPOCH, epoch, None)));
             }
         }
