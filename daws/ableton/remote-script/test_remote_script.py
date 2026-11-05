@@ -637,21 +637,25 @@ class RemoteScriptTests(unittest.TestCase):
             def __init__(self, *args, **kwargs): self.served = 0
             def update_display(self): self.served += 1
 
-        with patch.object(package, "_files_check", return_value=lambda: time.sleep(0.3)), patch.object(package, "_CHECK_ON_ITS_OWN_SECONDS", 0.05), \
+        release, waits, at = threading.Event(), [], [100.0]
+        clock = types.SimpleNamespace(perf_counter=lambda: at[0], monotonic=time.monotonic)
+        with patch.object(package, "time", clock), patch.object(package, "_files_check", return_value=lambda: release.wait(5)), \
                 patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
             surface = package.AbletonMcpBridge(FakeInstance())
             surface._keep_willington = lambda: None
-            surface.update_display()
-            self.assertIsNone(surface._bridge, "within the bound: not waited for")
-            time.sleep(0.06)
-            longest, deadline = 0.0, time.perf_counter() + 3
-            while surface._bridge is None and time.perf_counter() < deadline:
-                began = time.perf_counter()
+            checked = surface._checked
+            checked.wait = lambda seconds: (waits.append(seconds), False)[1]
+            try:
                 surface.update_display()
-                longest = max(longest, time.perf_counter() - began)
-                time.sleep(0.02)
+                self.assertEqual(waits, [], "within the bound: not waited for")
+                for tick in (100.5, 100.55, 100.7):
+                    at[0] = tick; surface.update_display()
+                self.assertIsNone(surface._bridge, "the check is still running")
+                self.assertEqual(waits, [0.01, 0.01], "only bounded waits, at most every 100 ms")
+            finally:
+                release.set(); self.wait_for_the_check(checked)
+            surface.update_display()
         self.assertEqual(surface._bridge.served, 1, "started, and served, at the first tick after the check")
-        self.assertLess(longest, 0.08, f"no tick held long: {longest:.3f} s")
 
     def test_the_bound_and_the_100_ms_between_moments_are_timed_by_perf_counter(self):
         """Before 3.13, monotonic() on Windows moves in 15.6 ms steps: display ticks about 100 ms apart would read 93.75
@@ -8084,23 +8088,33 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
 
     def test_requests_sent_right_after_their_answers_are_served_in_the_same_tick(self):
         client, channel = self.connect(); answered = []
-        def ask():
-            buffer = bytearray()
-            for sequence in (1, 2, 3):
-                client.sendall(self.frame(channel, sequence))
+        real_selector, test = remote_module.selectors.DefaultSelector, self
+        class NextStep:
+            """Send each next step once the tick's selector is waiting for it. The real sockets and
+            selector still carry the requests; no worker has to run within the production linger."""
+            def __init__(self): self.inner = real_selector(); self.buffer = bytearray()
+            def __enter__(self): self.inner.__enter__(); return self
+            def __exit__(self, *args): return self.inner.__exit__(*args)
+            def register(self, *args): return self.inner.register(*args)
+            def select(self, timeout):
+                test.assertEqual(timeout, remote_module.PUMP_LINGER_SECONDS)
+                buffer = self.buffer
                 while b"\n" not in buffer:
                     chunk = client.recv(1 << 20)
-                    if not chunk: return
+                    test.assertTrue(chunk, "the tick answered before waiting for the next step")
                     buffer.extend(chunk)
                 index = buffer.find(b"\n"); answered.append(json.loads(bytes(buffer[:index]))); del buffer[:index + 1]
-        asker = threading.Thread(target=ask); asker.start()
-        deadline = time.time() + 2
-        while not answered and time.time() < deadline: self.bridge.update_display(); time.sleep(0.001)
-        ticks_after_first = 0
-        while len(answered) < 3 and time.time() < deadline: self.bridge.update_display(); ticks_after_first += 1
-        asker.join(timeout=2)
+                if len(answered) == 3: return []
+                client.sendall(test.frame(channel, len(answered) + 1))
+                return self.inner.select(5)
+        client.sendall(self.frame(channel, 1))
+        self.assertTrue(select_module.select([self.bridge._connections[0].socket], [], [], 5)[0])
+        # This test checks the next-step path within one tick. Budget expiry has its own tests: a
+        # descheduled runner mustn't spend the production tick's budget before it reaches this path.
+        with patch.object(remote_module.time, "perf_counter", return_value=1000.0), \
+                patch.object(remote_module.selectors, "DefaultSelector", NextStep):
+            self.bridge.update_display()
         self.assertEqual([item["id"] for item in answered], ["status-1", "status-2", "status-3"])
-        self.assertEqual(ticks_after_first, 0, "the two later steps were served in the tick that answered the first")
 
     def test_a_read_the_tick_takes_late_ends_with_the_tick(self):
         # A paged read served while the tick waited for the next request mustn't stretch the tick past its budget.
