@@ -333,6 +333,16 @@ pub struct Status {
     pub secret: bool,
 }
 
+/// What an install would do ([`Lifecycle::plan`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Planned {
+    /// The copy in place is this one already, and so is every other copy of Kumi's: nothing changes.
+    pub in_place: bool,
+    /// Each file or folder it writes in the DAW's folders, whole: the target, its reference, and each other copy of
+    /// Kumi's it brings along with that copy's reference.
+    pub writes: Vec<PathBuf>,
+}
+
 /// One DAW's bridge lifecycle, over Kumi's folder for it.
 pub struct Lifecycle {
     pub paths: BridgePaths,
@@ -684,6 +694,47 @@ impl Lifecycle {
         self.write_receipt(&receipt)?;
         self.prune(&receipt);
         Ok(receipt)
+    }
+
+    /// What [`install`](Self::install) of `source` would do, read from files alone: nothing is made, locked, recovered
+    /// or written. Kumi's own folder of the bridge (`<kumi home>/bridges/<daw>`) is written besides.
+    pub fn plan(&self, source: &Path) -> Result<Planned, LifecycleError> {
+        let before = self.receipt()?.filter(|receipt| receipt.status == "installed");
+        let sha = tree_sha256(source)?;
+        let here = self.target.path();
+        let ours = before.as_ref().map(|before| self.ours(before)).unwrap_or_default();
+        let others = self.others(before.as_ref());
+        let found = |other: &Target| tree_sha256(&other.path()).ok();
+        let behind = |other: &Target| found(other).is_some_and(|found| found != sha && ours.contains(&found));
+        let in_place =
+            before.as_ref().is_some_and(|before| before.target == here.to_string_lossy() && before.sha256.as_deref() == Some(sha.as_str()))
+                && tree_sha256(&here).ok().as_deref() == Some(sha.as_str());
+        if in_place && !others.iter().any(behind) {
+            return Ok(Planned { in_place: true, writes: vec![] });
+        }
+        let mut writes = vec![];
+        let mut add = |path: PathBuf| {
+            if !writes.iter().any(|written: &PathBuf| path.starts_with(written)) {
+                writes.push(path);
+            }
+        };
+        if !in_place {
+            add(here.clone());
+        }
+        add(self.target.reference.clone());
+        // As `follow_copies` does: each other copy that's this one already gets its reference; one that's an earlier
+        // copy of Kumi's is replaced; any other is left as it is.
+        for other in &others {
+            match found(other) {
+                Some(found) if found == sha => add(other.reference.clone()),
+                Some(_) if behind(other) => {
+                    add(other.path());
+                    add(other.reference.clone());
+                }
+                _ => {}
+            }
+        }
+        Ok(Planned { in_place: false, writes })
     }
 
     /// Installs `source` (the bridge's file or folder) as `version`, or upgrades to it when installed already: the

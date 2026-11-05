@@ -11,6 +11,7 @@ use super::say;
 use kumi_agent::core::context::{HostPolicy, IntegrationContext};
 use kumi_agent::core::contracts::{CatchUp, ConnectionState, Integration, Observation, Reference};
 use kumi_agent::core::view::{DawFocus, Transport};
+use kumi_daw::component::same_folder;
 use kumi_daw::provider::DawSession;
 use kumi_types::contracts::{KernelTool, ToolRole};
 use serde_json::{json, Value};
@@ -509,13 +510,8 @@ pub fn transport_value(transport: &Transport) -> Value {
     })
 }
 
-/// Whether `a` and `b` are the same folder on disk (links resolved); false when either isn't there.
-fn same_folder(a: &Path, b: &Path) -> bool {
-    matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
-}
-
 /// Whether `path` is inside `folder` on disk (links resolved); false when either isn't there.
-fn inside(path: &Path, folder: &Path) -> bool {
+pub(super) fn inside(path: &Path, folder: &Path) -> bool {
     matches!((std::fs::canonicalize(path), std::fs::canonicalize(folder)), (Ok(path), Ok(folder)) if path.starts_with(&folder))
 }
 

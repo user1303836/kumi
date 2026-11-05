@@ -16,6 +16,10 @@ pub struct AbletonFactory(pub Rc<dyn Fn(AbletonOptions) -> Rc<dyn Integration>>)
 #[derive(Clone)]
 pub struct LiveRunning(pub AsyncBool);
 
+/// Where the runtime's bundle keeps Live's bridge (`prepared.json` and its tarball), in place of `<kumi's folder>/bridge`.
+#[derive(Clone)]
+pub struct PreparedBridge(pub String);
+
 /// The Lives installed here.
 #[derive(Clone)]
 pub struct Lives(pub Rc<dyn Fn() -> Vec<InstalledLive>>);

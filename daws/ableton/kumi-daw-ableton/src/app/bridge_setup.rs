@@ -177,7 +177,7 @@ pub fn unpack_prepared_bridge(bridge_dir: &str) -> Result<(), String> {
 }
 /// tar run in `bridge_dir`, given the tarball's plain name and `into`, a folder name in it: tar.exe reads its arguments
 /// in Windows' code page, which can't spell every folder name.
-fn unpack_into(bridge_dir: &str, artifact: &str, into: &str) -> Result<(), String> {
+pub(crate) fn unpack_into(bridge_dir: &str, artifact: &str, into: &str) -> Result<(), String> {
     let ran = std::process::Command::new(system::system_program_default(SystemProgram::Tar))
         .args(["-xzf", artifact, "-C", into])
         .current_dir(bridge_dir)
@@ -247,7 +247,18 @@ fn prepared_bridge(dir: &str) -> Option<Prepared> {
     (Path::new(&join(dir, artifact)).exists() && Path::new(&join(&root, &executable_name("ableton-mcp-server"))).exists())
         .then(|| Prepared { artifact: artifact.into(), sha256: sha256.into(), root })
 }
-fn digest(file: &str) -> std::io::Result<String> {
+/// The bridge tarball a bundle's `<bridge>/prepared.json` names, and its SHA-256, read without unpacking anything: its
+/// plain file name, when that file is there.
+pub(crate) fn prepared_artifact(dir: &str) -> Option<(String, String)> {
+    let manifest: Value = serde_json::from_slice(&fs::read(join(dir, "prepared.json")).ok()?).ok()?;
+    let artifact = manifest.get("artifact")?.as_str()?;
+    let sha256 = manifest.get("sha256")?.as_str()?;
+    if Path::new(artifact).file_name()?.to_str()? != artifact || !Path::new(&join(dir, artifact)).is_file() {
+        return None;
+    }
+    Some((artifact.into(), sha256.into()))
+}
+pub(crate) fn digest(file: &str) -> std::io::Result<String> {
     Ok(hex::encode(Sha256::digest(fs::read(file)?)))
 }
 fn last(ran: &Ran, most: usize) -> String {
@@ -477,9 +488,9 @@ pub fn remote_script_unchanged(package: &str, scripts: &str) -> bool {
     same(&Path::new(package).join("remote-script/AbletonMcpBridge"), &Path::new(scripts).join("AbletonMcpBridge"), true)
 }
 /// A bridge folder made for an install that hasn't finished: removed when the install stops early.
-struct Unfinished(Option<String>);
+pub(crate) struct Unfinished(pub(crate) Option<String>);
 impl Unfinished {
-    fn keep(mut self) {
+    pub(crate) fn keep(mut self) {
         self.0 = None;
     }
 }

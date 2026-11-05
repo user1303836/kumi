@@ -4,6 +4,7 @@
 pub mod answers;
 pub mod bridge_files;
 pub mod bridge_setup;
+pub mod component;
 pub mod doctor;
 pub mod folders;
 pub mod install;

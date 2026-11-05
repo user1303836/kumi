@@ -18,6 +18,7 @@ use kumi_agent::core::{
 use kumi_common::abort;
 use kumi_daw::{
     check::{Check, Probe},
+    component::{ApplyError, ComponentPlan},
     io::{Answers, DawIo},
     provider::{
         BridgeCommand, BridgeRollbackStep, BridgeState, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle, ToggleWords,
@@ -291,6 +292,17 @@ impl DawProvider for Ableton {
     }
     fn without_daw(&self, on_connection: Rc<dyn Fn(ConnectionState)>) -> Rc<dyn Integration> {
         crate::create_inference_only_integration(on_connection)
+    }
+    fn component_plan(&self, io: &DawIo, home: &std::path::Path) -> Result<ComponentPlan, String> {
+        super::component::plan(io, home)
+    }
+    fn component_apply<'a>(
+        &'a self,
+        io: &'a DawIo,
+        home: &'a std::path::Path,
+        plan: &'a ComponentPlan,
+    ) -> LocalBoxFuture<'a, Result<(), ApplyError>> {
+        super::component::apply(io, home, plan).boxed_local()
     }
 }
 

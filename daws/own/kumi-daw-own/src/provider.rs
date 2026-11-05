@@ -23,6 +23,7 @@ use kumi_agent::core::{
 use kumi_common::abort::{self, Signal};
 use kumi_daw::{
     check::{Check, Probe, Probes},
+    component::{same_folder, After, ApplyError, ComponentPlan, Part, PartState},
     io::{step, Answers, DawIo},
     provider::{
         BridgeCommand, BridgeRollbackStep, BridgeState, DawProvider, DawSession, EnableStep, Installed, RemovedBridge, Toggle, ToggleWords,
@@ -768,6 +769,122 @@ impl DawProvider for Own {
     fn without_daw(&self, on_connection: Rc<dyn Fn(ConnectionState)>) -> Rc<dyn Integration> {
         kumi_agent::integrations::none::create_no_daw_integration(*self.profile, self.instructions, on_connection)
     }
+    fn component_plan(&self, io: &DawIo, home: &Path) -> Result<ComponentPlan, String> {
+        self.look(&io.env, home).map(|look| look.plan)
+    }
+    fn component_apply<'a>(&'a self, io: &'a DawIo, home: &'a Path, plan: &'a ComponentPlan) -> LocalBoxFuture<'a, Result<(), ApplyError>> {
+        async move {
+            let look = self.look(&io.env, home).map_err(ApplyError::Failed)?;
+            if look.plan != *plan {
+                return Err(ApplyError::Changed(format!("What's in {} changed since setup looked: plan the step again.", self.name())));
+            }
+            if plan.paths.is_empty() {
+                return Ok(());
+            }
+            self.put(look.life, &look.source, false)
+                .map(|_| ())
+                .map_err(|why| ApplyError::Failed(format!("{} couldn't go in {}: {why}.", self.bridge, self.name())))
+        }
+        .boxed_local()
+    }
+}
+
+/// What a plan of Kumi's part in a DAW read: the plan, and what carrying it out puts where.
+struct Look {
+    plan: ComponentPlan,
+    source: PathBuf,
+    life: Lifecycle,
+}
+
+impl Own {
+    /// Kumi's part in the DAW for the Kumi home `home` (C8's `setup_daw`): this Kumi's bridge at the target detection
+    /// finds, with each other copy of Kumi's the lifecycle brings along. The copy there is this home's when its receipt
+    /// put it there (as connect takes it), or its reference names this home; any other stays as it is.
+    fn look(&self, env: &Env, home: &Path) -> Result<Look, String> {
+        let source = self.bundled_source().ok_or_else(|| format!("this Kumi doesn't carry {} for {}", self.bridge, self.name()))?;
+        let target = self.target(env)?;
+        if let Some(why) = (self.unloadable)(self, env, &source) {
+            return Err(why);
+        }
+        let component = match self.id {
+            DawId::Reaper => "REAPER extension",
+            DawId::Renoise => "Renoise tool",
+            _ => "DAW component",
+        };
+        let bundled = self.version_of(&source);
+        let path = target.path();
+        let reference = target.reference.clone();
+        let life = Lifecycle::new(home, target).with_elsewhere((self.elsewhere)(env));
+        let receipt = life.receipt().map_err(|why| why.to_string())?.filter(|receipt| receipt.status == "installed");
+        let there = std::fs::symlink_metadata(&path).is_ok();
+        let placed_here = receipt.as_ref().is_some_and(|receipt| Path::new(&receipt.target) == path);
+        let owner = if there && !placed_here { reference_owner(&reference, self.daw) } else { None };
+        let theirs = there && !placed_here && !owner.as_deref().is_some_and(|owner| same_folder(Path::new(owner), home));
+        let planned = life.plan(&source).map_err(|why| why.to_string())?;
+        let installed = receipt.as_ref().filter(|_| placed_here).and_then(|receipt| receipt.version.clone());
+        let state = match (&installed, &bundled) {
+            _ if theirs => PartState::OtherOwner,
+            _ if !there => PartState::Missing,
+            _ if planned.in_place => PartState::Same,
+            (Some(installed), Some(bundled)) if kumi_daw::provider::newer(installed, bundled) => PartState::Newer,
+            _ => PartState::Older,
+        };
+        let (name, shown) = (self.name(), path.display().to_string());
+        let ours = home.join(self.bridge_folder);
+        let version = bundled.as_deref().unwrap_or("this Kumi's");
+        let (mut paths, mut effects) = (vec![], vec![]);
+        match state {
+            PartState::Missing | PartState::Older => {
+                effects.push(match (state, &installed) {
+                    (PartState::Older, Some(installed)) => format!(
+                        "Update {} in {name} ({shown}) from {installed} to {version}; the one it replaces is kept in {} to go back to",
+                        self.bridge,
+                        ours.display()
+                    ),
+                    (PartState::Older, None) => format!("Put {} {version} in {name} again: {shown}", self.bridge),
+                    _ => format!("Put {} {version} in {name}: {shown}", self.bridge),
+                });
+                for written in planned.writes.iter().filter(|written| **written != path) {
+                    effects.push(if *written == reference {
+                        format!("Write where it finds Kumi's runtime (never the secret itself): {}", written.display())
+                    } else {
+                        format!("Bring Kumi's copy there up to date too: {}", written.display())
+                    });
+                }
+                effects.push(format!("Keep its secret, its receipt and the versions it can go back to in {}", ours.display()));
+                paths.extend(planned.writes.iter().map(|written| written.display().to_string()));
+                paths.push(ours.display().to_string());
+            }
+            PartState::Newer => effects.push(format!(
+                "{} in {name} ({shown}) is {}, newer than this Kumi's {version}: it stays as it is. Update Kumi for Hermes to match it",
+                self.bridge,
+                installed.as_deref().unwrap_or("newer")
+            )),
+            PartState::OtherOwner => effects.push(match &owner {
+                Some(owner) => format!("{} in {name} ({shown}) belongs to the Kumi at {owner}: it stays as it is", self.bridge),
+                None => format!("The copy in {name} at {shown} doesn't say which Kumi it belongs to: it stays as it is"),
+            }),
+            PartState::Same => {}
+        }
+        let version = match state {
+            PartState::Newer | PartState::OtherOwner => installed.clone(),
+            _ => bundled.clone(),
+        };
+        let after = if paths.is_empty() { After::None } else { After::RestartDaw };
+        let parts = vec![Part { name: component, path: shown, state }];
+        let owner = owner.filter(|_| state == PartState::OtherOwner);
+        let plan = ComponentPlan { component, version, state, owner, paths, effects, after, parts, keep_identity: false };
+        Ok(Look { plan, source, life })
+    }
+}
+
+/// The Kumi home whose secret a bridge's reference names (`<home>/bridges/<daw>/bridge.secret`): the lifecycle writes it
+/// beside the bridge for the home that put it in. None when it can't be read, or names no home's secret.
+fn reference_owner(reference: &Path, daw: Daw) -> Option<String> {
+    let reference = files::Reference::read(reference).ok()?;
+    let secret = Path::new(&reference.secret_file);
+    let home = secret.parent()?.parent()?.parent()?;
+    (BridgePaths::new(home, daw).secret() == secret).then(|| home.display().to_string())
 }
 
 /// A rollback's step for a DAW whose bridge is Kumi's own: once Kumi is back, the bridge goes to the copy that Kumi
