@@ -37,6 +37,9 @@ pub struct Project {
     pub epoch: u64,
     /// When it was seen (ms).
     pub seen_at: i64,
+    /// The DAW's own epoch the look read it at (an own bridge's snapshot epoch, a Live look's): with the project, so a
+    /// caller that checks it ([`Link::expect`]) has the epoch of that same look, with no second read between.
+    pub native_epoch: Option<String>,
 }
 
 /// What the integration reports between looks, kept for `observe` and `focus.json`.
@@ -115,7 +118,7 @@ pub struct Link {
     /// The DAW's own epoch the last look read, taken with that look: an own bridge's page of another epoch (a tab
     /// switched since) isn't the looked project's. Never read again after the look, so a switch between the two can't
     /// pair the looked project's key with another's epoch.
-    page_epoch: RefCell<Option<String>>,
+    native_epoch: RefCell<Option<String>>,
 }
 
 impl Link {
@@ -131,7 +134,7 @@ impl Link {
             tools: RefCell::new(Vec::new()),
             ref_names: RefCell::new(HashMap::new()),
             unsure: RefCell::new(None),
-            page_epoch: RefCell::new(None),
+            native_epoch: RefCell::new(None),
         }
     }
 
@@ -204,24 +207,26 @@ impl Link {
         }
         self.returns_seen.set(returns);
         let name = observation.identity.as_ref().map_or_else(|| observation.label.clone(), |identity| identity.name.clone());
-        let project = Project { key, name, epoch: self.epoch.get(), seen_at: kumi_common::time::now_ms() };
+        let native_epoch = observation.native_epoch.clone();
+        let project =
+            Project { key, name, epoch: self.epoch.get(), seen_at: kumi_common::time::now_ms(), native_epoch: native_epoch.clone() };
         *self.project.borrow_mut() = Some(project.clone());
         *self.tools.borrow_mut() = observation.tools.clone();
-        *self.page_epoch.borrow_mut() = observation.native_epoch.clone();
+        *self.native_epoch.borrow_mut() = native_epoch;
         project
     }
 
     /// The DAW's own epoch the last look read, taken with that look (an own bridge's from its snapshot): None when the
     /// DAW gave none or no look read the project. A capture names it, so another project's state is never taken for the
-    /// looked one.
+    /// looked one. Where the project is checked too, take it from [`Link::expect`]'s [`Project`], the same look's.
     pub fn observed_native_epoch(&self) -> Option<String> {
-        self.page_epoch.borrow().clone()
+        self.native_epoch.borrow().clone()
     }
 
     /// Whether an own bridge's page with this epoch is of the state of the project the last look saw: both known, and
     /// the same.
     pub fn page_is_looked(&self, epoch: Option<&str>) -> bool {
-        matches!((self.page_epoch.borrow().as_deref(), epoch), (Some(looked), Some(now)) if looked == now)
+        matches!((self.native_epoch.borrow().as_deref(), epoch), (Some(looked), Some(now)) if looked == now)
     }
 
     /// Moves the epoch on (a write's outcome is unsure): refs from earlier looks no longer hold.
