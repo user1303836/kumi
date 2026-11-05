@@ -40,6 +40,11 @@ const REF_KINDS: [&str; 26] = [
 /// What an item's or a take's row says of a MIDI source (`source`): REAPER's extension writes it, Kumi's REAPER side reads it.
 pub const MIDI_SOURCE: &str = "mid";
 
+/// What a bridge that keeps a project's id in the project only while a connection asks it to (CC-8: the hello's
+/// `keepIdentity`) carries in its own files, for setup to read before any DAW has run it: REAPER's extension in its
+/// library, Renoise's tool in `payload/status.lua`. Setup goes by this mark alone, never by a version.
+pub const KEEPS_IDENTITY_ONLY_WHEN_ASKED: &str = "kumi-daw/1 keeps a project's id only while a connection asks";
+
 /// Whether text is shaped like a ref: `<prefix>:<kind>:<rest>`, one word with no spaces.
 pub fn looks_like_ref(text: &str) -> bool {
     if text.chars().any(char::is_whitespace) {

@@ -811,6 +811,59 @@ case!(setup_daw_puts_reapers_extension_in_exactly_as_planned_and_never_into_an_a
     assert_eq!(adopted.tree(), before, "nothing is written, not even the lease's file");
 });
 
+/// `bytes` with CC-8's mark in them, as a bridge that keeps a project's id only when asked carries it.
+fn marked(bytes: &[u8]) -> Vec<u8> {
+    [bytes, daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED.as_bytes()].concat()
+}
+
+case!(setup_daw_says_a_part_keeps_an_id_only_when_asked_from_the_files_of_the_copy_in_once_it_has_run, async {
+    let lab = Lab::new(DawId::Reaper, false);
+    let env = || env_for(lab.root.path(), &lab.home, &lab.path("Renoise"));
+    // Nothing in REAPER yet: the part once in is the extension a runtime brings, so its library decides.
+    carried(lab.root.path(), "marked", None, &marked(b"the extension"));
+    let bringing = runtime(lab.root.path(), "plugin/state-2", &lab.home, DawId::Reaper, env(), carrying(&lab, "marked"));
+    let plan = setup_on(&bringing, true).await.unwrap();
+    assert_eq!((plan["state"].as_str(), &plan["keep_identity"]), (Some("missing"), &json!(true)), "{plan}");
+    // One without the mark, at the same version, says nothing; and the approval of one isn't the other's.
+    let unmarked = lab.setup(true).await.unwrap();
+    assert_eq!((&unmarked["keep_identity"], &unmarked["version"]), (&json!(false), &plan["version"]), "{unmarked}");
+    let before = lab.tree();
+    assert_eq!(refused(lab.install(&plan["digest"]).await).0, "changed");
+    within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
+    // A copy that stays is the part: another home's extension speaks for itself, whatever the runtime brings.
+    let user_plugins = lab.path("REAPER/UserPlugins");
+    let name = daw_bridge::install::reaper_extension_name(daw_bridge::detect::Os::current());
+    let target = daw_bridge::lifecycle::Target {
+        daw: daw_bridge::Daw::Reaper,
+        dir: user_plugins.clone(),
+        name: name.to_string(),
+        folder: false,
+        reference: user_plugins.join("kumi-bridge-reference.json"),
+    };
+    let other = daw_bridge::lifecycle::Lifecycle::new(&lab.path("standalone/.kumi"), target);
+    for (theirs, says) in [("runtime", false), ("marked", true)] {
+        other.install(&lab.path(theirs).join("daws/reaper").join(name), "1.0.0").unwrap();
+        for ctx in [&bringing, &lab.ctx] {
+            let plan = setup_on(ctx, true).await.unwrap();
+            assert_eq!((plan["state"].as_str(), &plan["keep_identity"]), (Some("other_owner"), &json!(says)), "{theirs}: {plan}");
+        }
+    }
+});
+
+case!(setup_daw_reads_renoises_mark_in_its_tools_status_file, async {
+    let lab = Lab::new(DawId::Renoise, false);
+    let env = || env_for(lab.root.path(), &lab.home, &lab.path("Renoise"));
+    let mark = daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED;
+    for (name, says) in [("marked", true), ("unmarked", false)] {
+        let status = carried(lab.root.path(), name, None, b"the extension").join("daws/renoise/com.kumi.Bridge.xrnx/payload/status.lua");
+        let text = std::fs::read_to_string(&status).unwrap().replace(mark, "");
+        std::fs::write(&status, if says { format!("{text}\n-- {mark}\n") } else { text }).unwrap();
+        let bringing = runtime(lab.root.path(), &format!("plugin/state-{name}"), &lab.home, DawId::Renoise, env(), carrying(&lab, name));
+        let plan = setup_on(&bringing, true).await.unwrap();
+        assert_eq!((plan["state"].as_str(), &plan["keep_identity"]), (Some("missing"), &json!(says)), "{name}: {plan}");
+    }
+});
+
 case!(setup_daw_takes_reapers_and_renoises_parts_only_from_the_runtimes_release_bundle, async {
     for daw in [DawId::Reaper, DawId::Renoise] {
         let lab = Lab::new(daw, false);

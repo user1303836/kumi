@@ -82,6 +82,9 @@ pub struct Own {
     pub built: fn(&Path) -> Option<PathBuf>,
     /// The file that says the version of the bridge at a path.
     pub version_file: fn(&Path) -> PathBuf,
+    /// The bridge's own file at a path that carries [`daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED`] when the
+    /// bridge keeps a project's id only while a connection asks it to (CC-8): the copy's own, never one beside it.
+    pub identity_file: fn(&Path) -> PathBuf,
     /// Where the bridge goes in the DAW, or why it can't go yet as detection says it; None when the DAW isn't
     /// installed.
     pub placed: fn(&Own, &Env) -> Result<Target, Option<TargetError>>,
@@ -317,6 +320,15 @@ impl Own {
         let text = std::fs::read_to_string((self.version_file)(source)).ok()?;
         let quoted = text.split('"').nth(1).unwrap_or(text.trim());
         detect::Version::parse(quoted).map(|_| quoted.to_string())
+    }
+
+    /// Whether the bridge at `copy` says in its own files that it keeps a project's id in the project only while a
+    /// connection asks it to ([`daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED`]). One whose file can't be read,
+    /// or isn't inside it, says nothing.
+    fn keeps_identity_only_when_asked(&self, copy: &Path) -> bool {
+        let mark = daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED.as_bytes();
+        let file = (self.identity_file)(copy);
+        file.starts_with(copy) && std::fs::read(&file).is_ok_and(|bytes| bytes.windows(mark.len()).any(|window| window == mark))
     }
 
     /// Puts the bridge this Kumi brings in the DAW, where detection finds it, or what stopped it, in words.
@@ -989,7 +1001,14 @@ impl Own {
         let after = if paths.is_empty() { After::None } else { After::RestartDaw };
         let parts = vec![Part { name: component, path: shown, state }];
         let owner = owner.filter(|_| state == PartState::OtherOwner);
-        let plan = ComponentPlan { component, version, state, owner, paths, effects, after, parts, keep_identity: false };
+        // CC-8: whether the part, as it stands once the plan has run, keeps a project's id only while a connection asks,
+        // as its own files say: the copy this Kumi brings where the plan puts it in, else the copy there (one that stays,
+        // whatever this Kumi brings). Never by a version.
+        let keep_identity = match state {
+            PartState::Missing | PartState::Older if planned.writes.contains(&path) => self.keeps_identity_only_when_asked(&source),
+            _ => there && self.keeps_identity_only_when_asked(&path),
+        };
+        let plan = ComponentPlan { component, version, state, owner, paths, effects, after, parts, keep_identity };
         Ok(Look { plan, source, life, replaced: planned.replaced })
     }
 }
