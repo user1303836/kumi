@@ -256,12 +256,12 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it(
     put(
         &worker,
         format!(
-            "#!/bin/sh\nmkdir \"$TMPDIR/kumi-audio-1\" && : > \"$TMPDIR/kumi-audio-1/converted.wav\"\nprintf '%s' \"$TMPDIR\" > '{0}/temp'\nsleep 30 &\nprintf '%s' $! > '{0}/child'\nwait\n",
+            "#!/bin/sh\nmkdir \"$TMPDIR/kumi-audio-1\" && : > \"$TMPDIR/kumi-audio-1/converted.wav\"\nprintf '%s' \"$TMPDIR\" > '{0}/temp'\nsleep 30 &\nprintf '%s' $! > '{0}/child.next'\nmv '{0}/child.next' '{0}/child'\nwait\n",
             root.path().display()
         ),
     );
     std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
-    let pool = MeasurePool::with_worker(1, WorkerProgram::new(worker, "library-measure"), Duration::from_millis(1000));
+    let pool = MeasurePool::with_worker(1, WorkerProgram::new(worker, "library-measure"), Duration::from_secs(90));
     let job = MeasureJob {
         id: 0,
         path: "/x.mp3".into(),
@@ -272,10 +272,21 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it(
         seconds: None,
         decode: Default::default(),
     };
-    assert_eq!(pool.run(0, job).await.unwrap().error.as_deref(), Some("it took too long to read"));
+    // The timeout path is checked above. Here cleanup must run after the worker has actually made its temporary
+    // copy and started its child; a timeout during shell startup would prove neither.
+    let child_marker = root.path().join("child");
+    let child: libc::pid_t = {
+        let running = pool.run(0, job);
+        tokio::pin!(running);
+        tokio::select! {
+            result = &mut running => panic!("the hanging worker answered before it was stopped: {result:?}"),
+            child = fixture::wait_for_worker_marker(&child_marker) => child.parse().unwrap(),
+        }
+    }; // Dropping the in-flight read releases the pool's slot, as a learner cancelling its measurement does.
     let temp = std::fs::read_to_string(root.path().join("temp")).unwrap();
+    assert!(std::path::Path::new(&temp).join("kumi-audio-1/converted.wav").is_file(), "the worker made its copy");
+    pool.close().await;
     assert!(!std::path::Path::new(&temp).exists(), "{temp} is still there");
-    let child: libc::pid_t = std::fs::read_to_string(root.path().join("child")).unwrap().parse().unwrap();
     // Gone once whoever took it in has reaped it.
     let mut ended = false;
     for _ in 0..50 {
@@ -286,7 +297,6 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it(
         std::thread::sleep(Duration::from_millis(100));
     }
     assert!(ended, "the worker's child is still running");
-    pool.close().await;
 }
 #[cfg(unix)]
 #[test]
