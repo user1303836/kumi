@@ -25,7 +25,13 @@ rules keep its changes exact, approved and reversible.
 - **One `kumi_change` per intent.**
   - Give it a short `title` the producer will recognise, and typed steps (up to 20).
   - Each step is one of the DAW's change steps. `kumi_read` with `action: schema, tool: <step>` gives its input.
-  - Placing a sound on a track is an `import_audio` step.
+  - A step's later steps can use its result: name it with `as`, and refer to it as `@name` (a new track, then a file on it).
+- **A file goes in through the DAW's own file step:**
+  - Live: `replace_sample` (field `sample`: a Simpler's audio, by `deviceRef`) or `import_audio` (field `sample`: an empty Session slot, or a take lane);
+  - REAPER: `item_import` (field `path`: a media item on a track, at a position);
+  - Renoise: `sample_load` (field `path`: a new sample of an instrument, or in place of a sample's audio).
+
+  The file field holds a source, never a path: a map sound `{"sound_id", "map_revision"}` from `kumi_sounds`, a file Kumi made `{"artifact_id"}`, or a file in an approved folder `{"file", "provenance": {"host_tool", "tool_call_id"}}`. A path there is refused. The other fields are the step's own: `kumi_read` with `action: schema` gives them.
 - **The producer approves each change** with Kumi's description of it, naming the targets and current values. Never split a change to get around an approval, and never ask the producer to switch approvals off.
 - **Report the result as Kumi gives it:**
   - `applied`: done.

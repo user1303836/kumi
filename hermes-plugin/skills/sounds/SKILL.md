@@ -26,9 +26,10 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 - **To let the producer hear a sound in a messaging chat** (Telegram, Discord…), put the `MEDIA:` line `kumi_listen` returned for it in your reply, on a line of its own. A `MEDIA:` line inside a tool result isn't delivered there.
 
 ## Placing a sound
-- **Placing is a change:** `kumi_change` with an `import_audio` step.
-  - Its `source` is the sound (`{"sound_id", "map_revision"}`) or an earlier Kumi artifact (`{"artifact_id"}`).
-  - Its target is a `track_ref` from your latest observe, or a `new_track`.
-  - To swap the sample in an existing sampler (Live's Simpler on a drum pad), use that DAW's replace step: `kumi_read` with `action: schema` says which steps exist.
+- **Placing is a change:** `kumi_change` with the DAW's own file step (skill `kumi:daw`), with the sound as its source in the file field: `{"sound_id", "map_revision"}`, never the sound's path.
+  - Live: `replace_sample` swaps a Simpler's audio (a drum pad's, by its `deviceRef` from your latest observe); `import_audio` fills an empty Session slot or a take lane.
+  - REAPER: `item_import` puts it on a track at a position. Renoise: `sample_load` loads it into an instrument.
+  - For a new track, add it in an earlier step of the same plan, named with `as`, and refer to it as `@name`.
+  - Example (Live, a drum pad): `{"tool": "replace_sample", "input": {"deviceRef": "<the Simpler's ref>", "sample": {"sound_id": "s-…", "map_revision": "r…"}}}`.
 - **The producer approves the exact placement,** and HISTORY lets them undo it.
 - **When a producer picks a sound on the map,** Desktop puts a request in the chat ("Use sound s-… on the selected track"). Treat it like any other request: observe, then make an approved change.

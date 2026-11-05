@@ -83,7 +83,9 @@ KUMI_CHANGE = _tool(
     "Change the open project with a bounded, typed plan of up to 20 steps, each one of the DAW's own change steps "
     "(look one up with kumi_read action schema), as one entry in Kumi's HISTORY. The producer approves the exact change "
     "before it runs. Pass the project key and epoch from your latest kumi_observe or kumi_read: a changed project is "
-    "refused, not guessed. Placing a sound, a generated file or a library sample on a track is an import_audio step. "
+    "refused, not guessed. A file goes in through the DAW's own file step (Live replace_sample or import_audio, REAPER "
+    "item_import, Renoise sample_load), whose file field holds a source: {sound_id, map_revision}, {artifact_id} or "
+    "{file, provenance}, never a path. "
     "Returns applied, partial, unsure or refused, with HISTORY ids; never retry an unsure change, check kumi_history.",
     {"title": {"type": "string", "maxLength": 120,
                "description": "What the change does, in a few words the producer will see."},
@@ -149,7 +151,7 @@ KUMI_SOUNDS = _tool(
     "kumi_sounds",
     "Search the producer's sound map (samples in the folders they approved) by words, or find sounds near one sound. "
     "Returns sound ids for the map's current revision; pass them to kumi_listen, or place one with a kumi_change "
-    "import_audio step. Reads only.",
+    "file step, its file field {sound_id, map_revision}. Reads only.",
     {"query": {"type": "string"}, "near": {"type": "string", "description": "A sound id to find similar sounds to."},
      "kind": {"type": "string", "description": "A kind of sound, e.g. kick, snare, pad, loop."},
      "limit": {"type": "integer", "minimum": 1, "maximum": 100}},

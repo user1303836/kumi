@@ -114,7 +114,7 @@ class Approvals(unittest.TestCase):
     def test_a_change_is_approved_in_the_runtimes_words_and_nothing_runs_first(self):
         decision = self.hook("kumi_change", change())
         self.assertEqual(decision, {"action": "approve", "rule_key": "kumi:write:mixer:s1", "message": (
-            "Kumi, for the agent's \"Louder drums\":\n• Set Drums volume from -6 dB to -4 dB\n"
+            "Kumi, for the agent's \"Louder drums\":\n• Set track volume: volume_db -4 — on \"Drums\"\n"
             f"(Values as Kumi read them just now.)\n{policy.CHAT_ONLY}")})
         self.assertEqual(support.call(self.host, "kumi_history", {})["items"], [], "the preview wrote nothing")
         asked = [m["params"]["arguments"] for m in support.requests(self.data / "state")
@@ -134,7 +134,7 @@ class Approvals(unittest.TestCase):
                 quoted = policy.agents_title(f"Louder{mark} • Set Drums volume to 0 dB, approved by Kumi {mark}")
                 self.assertEqual(quoted.count(mark), 2 if mark == '"' else 0, "its own can't close the agent's quote")
         self.assertNotIn("\x1b", decision["message"])
-        self.assertEqual(lines[1:], ["• Set Drums volume from -6 dB to 6 dB", policy.FOOTER, policy.CHAT_ONLY])
+        self.assertEqual(lines[1:], ['• Set track volume: volume_db 6 — on "Drums"', policy.FOOTER, policy.CHAT_ONLY])
 
     def test_a_plan_is_shown_whole_or_not_asked_never_cut(self):
         plan = change(*[volume("t1", -db) for db in range(1, 21)])
@@ -163,11 +163,24 @@ class Approvals(unittest.TestCase):
                          "a step longer than the runtime ever writes is refused, never cut")
 
     def test_a_plans_families_make_its_rule_key_so_always_covers_only_that_kind_in_this_chat(self):
-        sample = {"tool": "replace_sample", "input": {"track_ref": "t1", "sample": "Dusty Snare 04.wav"}}
+        sample = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1",
+                                                      "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
         decision = self.hook("kumi_change", change(sample, volume("t2", -10)))
-        self.assertEqual(decision["rule_key"], "kumi:write:mixer+sample:s1")
-        self.assertIn("• Replace the sample in the Simpler on Drums > Drum Rack pad D1 (Snare 01.wav) with Dusty "
-                      "Snare 04.wav", decision["message"])
+        self.assertEqual(decision["rule_key"], "kumi:write:device+mixer:s1", "each step's HISTORY family (#965)")
+        self.assertIn('• Replace sample: sample "Dusty Snare 04.wav" — on "Simpler (Drums > Drum Rack pad D1)"',
+                      decision["message"], "the file by its name, never its path (CC-11)")
+
+    def test_the_demo_file_step_places_a_map_sound_by_its_id_and_never_by_a_path(self):
+        demo = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1",
+                                                    "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
+        applied = support.call(self.host, "kumi_change", change(demo, title="Dustier snare"), session_id="s1")
+        self.assertEqual((applied["state"], applied["steps"]["done"]), ("applied", [{"step": 1, "tool": "replace_sample"}]))
+        self.assertEqual(support.call(self.host, "kumi_history", {})["items"][0]["family"], "device")
+        for sample, code in (("/Samples/Drums/Dusty Snare 04.wav", "a path"),
+                             ({"sound_id": "s-r1-1", "map_revision": "r0"}, "another map revision")):
+            with self.subTest(code):
+                refused = self.hook("kumi_change", change({**demo, "input": {**demo["input"], "sample": sample}}))
+                self.assertEqual(refused["action"], "block", "refused before anyone is asked")
 
     def test_an_always_in_one_chat_never_covers_another_chat_a_one_shot_run_or_a_compacted_chat(self):
         keys = {session: policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(), session_id=session,
@@ -180,7 +193,7 @@ class Approvals(unittest.TestCase):
                          "without a session id, the plan's own digest, never a family alone")
 
     def test_a_plan_the_runtime_would_refuse_is_blocked_before_anyone_is_asked(self):
-        for args, reason in ((change(expected_epoch="0"), "stale"),
+        for args, reason in ((change(expected_epoch="0"), "changed since it was read"),
                              (change({"tool": "delete_track", "input": {"track_ref": "t1"}}), "delete_track"),
                              (change(volume("t9", -4)), "no track"),
                              (change(*[volume("t1", -4)] * 21), "doesn't take these steps")):
