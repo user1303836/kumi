@@ -39,7 +39,8 @@ class Host:
     def __init__(self, ctx: Any, runtimes: runtime.Runtimes, *, data_dir: Callable[[], Path] | None = None,
                  pinned: Callable[[], str | None] = setup.pinned_version,
                  hook_timeout: Callable[[], float | None] | None = None, plugin_dir: Path | None = None,
-                 hermes_config: Callable[[], dict] | None = None, session_key: Callable[[], str] | None = None):
+                 hermes_config: Callable[[], dict] | None = None, session_key: Callable[[], str] | None = None,
+                 media_roots: Callable[[], list[str]] | None = None):
         self._ctx = ctx
         self.runtimes = runtimes
         self.calls = calls.CallIds()
@@ -49,6 +50,7 @@ class Host:
         self.plugin_dir = plugin_dir  # where setup reads kumi_release.json (None: this plugin's own folder)
         self._hermes_config = hermes_config
         self._session_key = session_key
+        self._media_roots = media_roots
         self._stops: dict[str, float] = {}  # a session's key → when the producer last stopped its turn
         self._stops_lock = threading.Lock()
 
@@ -155,6 +157,20 @@ class Host:
         if isinstance(configured, int) and not isinstance(configured, bool):
             retries = max(0, min(configured, 6))
         return total / (1 + retries)
+
+    def media_roots(self) -> list[str]:
+        """Folders of finished media the runtime may import or measure from (`--media-root`): this profile's
+        `<HERMES_HOME>/cache/generated/audio`, where other plugins' results land (ElevenLabs Music and Sound Effects).
+        Passed as is, even before it exists: the runtime keeps an absolute root and checks a file against it when it
+        resolves the file (CC-11). Kumi never makes the folder; it writes only in its plugin data."""
+        if self._media_roots is not None:
+            return self._media_roots()
+        try:
+            from hermes_constants import get_hermes_home  # Hermes's
+            return [str(Path(get_hermes_home()) / "cache" / "generated" / "audio")]
+        except Exception:
+            log.exception("Kumi couldn't find Hermes's generated audio folder")
+            return []
 
     def set_library_folders(self, folders: list[str]) -> None:
         self._ctx.set_config("library_folders", folders)
@@ -401,7 +417,8 @@ def setup_daw_caller(host: Host, daw: str, kwargs: dict) -> Callable[[dict], dic
                 f"Kumi's runtime in this profile works in {schemas.DAW_NAMES[live.daw]}; set Kumi up for "
                 f"{schemas.DAW_NAMES[daw]} once the chat that started it ends."))
         live = live or host.runtimes.start(data_dir, install, daw, kwargs.get("session_id"),
-                                           library_roots=host.library_folders(), profile=host.profile())
+                                           library_roots=host.library_folders(), media_roots=host.media_roots(),
+                                           profile=host.profile())
         timeout = READ_TIMEOUT if args.get("dry_run") else SETUP_TIMEOUT
         return live.call("setup_daw", args, host.identity(kwargs), timeout=timeout)
 
@@ -478,7 +495,8 @@ def kumi_connect(host: Host, args: dict, **kwargs: Any) -> dict:
             f"Kumi's runtime in this profile works in {schemas.DAW_NAMES[live.daw]}; it works in "
             f"{schemas.DAW_NAMES[daw]} once the chat that started it ends.")}}
     live = live or host.runtimes.start(data_dir, install, daw, kwargs.get("session_id"),
-                                       library_roots=host.library_folders(), profile=host.profile())
+                                       library_roots=host.library_folders(), media_roots=host.media_roots(),
+                                       profile=host.profile())
     return live.call("connect", {"daw": daw}, host.identity(kwargs), timeout=CONNECT_TIMEOUT)
 
 
