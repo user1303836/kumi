@@ -18,6 +18,12 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **Louder seems better.** Compare tone at matched loudness: say how far apart the files are in LUFS before you say which is brighter or fuller.
 - **Stereo, only when measured.** When a result has stereo correlation and width, report them as measured. When it has none (a mono file or a mono sum), say nothing about width or placement.
 - **Short one-shots give few frames.** Say when a measurement rests on very little audio.
+- **Several candidates against one reference:** the first `kumi_listen` with `compare_to` returns `compare.artifact_id`, Kumi's kept copy of the reference. Pass `{"artifact_id": …}` as `compare_to` for the next candidates: every candidate is measured against the same reference audio, even if the original moves or the map changes.
+- **Which files Kumi can measure:** a file inside one of the producer's approved sample folders or this profile's media, a map sound, or a file Kumi made. A mixdown exported anywhere else is refused: ask the producer to export it into an approved folder, or to add its folder (`kumi_library` `add_folder`).
+- **How far from a loudness target** (−14 LUFS for streaming, or the producer's figure): measure the file, then report its integrated LUFS against the target, and its true peak against −1 dBTP.
+  - Kumi measures; it doesn't master. Say what's off, by how much.
+  - Where a level change is the fix, offer one, as an approved `kumi_change`.
+  - Measuring the same file again can't show that change: it measures as before. To check it, the producer exports or bounces again into an approved folder, and you measure the new file. Otherwise say Kumi can't check the result itself.
 
 ## Reporting
 - **Name what was measured, the numbers and what they suggest:** "The replacement measures 410 Hz lower in spectral centroid and 1.2 LU quieter, which fits a darker snare."

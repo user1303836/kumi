@@ -24,6 +24,14 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 - **`kumi_listen`** with `source: {"sound_id", "map_revision"}` measures a sound (skill `kumi:listening`), and with `compare_to` compares two.
 - **In Hermes Desktop the producer can click sounds on the map** to hear them locally. That plays nothing in the DAW.
 - **To let the producer hear a sound in a messaging chat** (Telegram, Discord…), put the `MEDIA:` line `kumi_listen` returned for it in your reply, on a line of its own. A `MEDIA:` line inside a tool result isn't delivered there.
+- **"Find me a darker snare", end to end:**
+  1. `kumi_sounds` with `{"query": "", "kind": "snare"}`, or `{"query": "", "near": "<the current snare's sound id>"}` when it's a map sound. `query` is always given, even empty.
+  2. Measure the two or three likeliest with `kumi_listen`.
+     - Set `compare_to` to the current snare when Kumi can name it: `{"sound_id", "map_revision"}` together, or a file Kumi kept (`{"artifact_id"}`). Otherwise measure the candidates against the first of them.
+     - After the first answer, use its `compare.artifact_id` as `compare_to`.
+  3. Report each candidate's spectral centroid (lower is darker) and loudness difference, at matched loudness (skill `kumi:listening`).
+  4. Place the one the producer picks with one `kumi_change` file step, as below.
+  5. The placed sample measures as it did before. To check it in the mix, the producer exports or bounces into an approved folder, and you measure that file.
 
 ## Placing a sound
 - **Placing is a change:** `kumi_change` with the DAW's own file step (skill `kumi:daw`), with the sound as its source in the file field: `{"sound_id", "map_revision"}`, never the sound's path.

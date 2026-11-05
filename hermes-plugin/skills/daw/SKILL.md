@@ -45,6 +45,26 @@ rules keep its changes exact, approved and reversible.
   - `refused`: nothing changed; say why.
 - **Use the producer's units:** dB for levels, bars and beats for positions, BPM for tempo, note names for pitch.
 
+## Common steps
+These are the steps for everyday changes. `kumi_read` with `action: schema` gives each step's fields, so read the schema only for a step you haven't used in this chat.
+
+| To | Live | REAPER | Renoise |
+|---|---|---|---|
+| Set a level (dB), pan, mute or solo | `set_mixer` (`trackRef`, `volumeDb`, `pan` −1…1 or `panDisplay` "25L", `mute`, `solo`) | `track_volume` (`ref`, `volumeDb` up to +24), `track_pan`, `track_mute`, `track_solo` | `track_volume` (`ref`, `volumeDb` up to +3), `track_pan`, `track_mute`, `track_solo` |
+| Set a send level | `set_mixer` (`sends` or `sendsDb`, for return tracks A, B… in order) | a new send: `send_add` (with `volumeDb`); an existing one: `send_volume` (`ref`: the send) | a send track (`track_add` with `type: "send"`), then a `#Send` device (`device_add`); an existing send: `device_param` with `valueString` "-6 dB" |
+| Set the tempo | `set_tempo` | `tempo_set` (`bpm`; `tempo_marker_set` where the project has tempo markers) | `song_bpm` (`bpm`) |
+| Rename | `rename` (`kind`, `ref`, `name`) | `track_rename`, `marker_rename` | `track_rename`, `instrument_rename`, `pattern_name` |
+| Add a track | `add_tracks_and_scenes` | `track_add` | `track_add` |
+| Load a device or plug-in | `load_device` | `fx_add` | `device_add` |
+| Set a device's parameter | `set_device_parameter` | `fx_param` (`fx_params` for several) | `device_param` (`device_params` for several) |
+| Quantize, humanize or transpose notes | `transform_midi`, `edit_notes` | `notes_quantize`, `notes_humanize` | `notes_transpose`, `notes_humanize` |
+| Mark a section | `set_locators` (`start`, `end`, `startName`, `endName`, in beats from the song's start) | `marker_add`, `region_add` | `slot_section` (in the pattern sequence) |
+
+- **Plan the whole intent in one change:** "make the drums quieter and pan the hats left" is one `kumi_change` with two steps, and one approval.
+- **Give values in the producer's units:** `volumeDb: -4`, not a fader position.
+  - Every DAW's parameter step also takes a value as the device shows it: "800 Hz", "-6 dB" (Renoise's as `valueString`).
+  - A Renoise `#Send` device's own `amount` is 0–1, not dB, so set it by `valueString`.
+
 ## Undo
 - **Undo with `kumi_undo` and a HISTORY id** from `kumi_history` or a `kumi_change` result. The producer approves it too.
 - **Never "undo" by making a reverse change from your memory** of what the project was.
