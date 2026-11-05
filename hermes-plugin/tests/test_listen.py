@@ -4,6 +4,7 @@ carries no measurements and no MEDIA: line."""
 from __future__ import annotations
 
 import json
+import struct
 import unittest
 from unittest import mock
 
@@ -112,6 +113,16 @@ class TrackListen(unittest.TestCase):
         [run] = played(self.data)
         self.assertEqual(run["args"]["_listen"], approved, "the bounds the producer approved, never the model's")
         self.assertEqual(["_listen" in args for args in asked(self.data)], [False, True], "a preview carries none")
+
+    def test_the_windows_seconds_reach_the_runtime_exactly_as_its_preview_gave_them(self):
+        # The runtime renders only if the window's seconds are at most the approved ones, compared exactly (#1035):
+        # nothing between the preview and `_listen` may round or format them.
+        seconds = 2.0000000000000004  # the float just above 2.0, which any rounding would turn into 2.0
+        host, _, data = support.host(self, None, "--listen-estimated", repr(seconds))
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        self.assertEqual(support.call(host, "kumi_listen", track(), session_id="s1")["capture"]["cleanup"], "restored")
+        [run] = played(data)
+        self.assertEqual(struct.pack("<d", run["args"]["_listen"]["estimated_seconds"]), struct.pack("<d", seconds))
 
     def test_a_window_or_source_kumi_doesnt_take_is_blocked_without_asking_the_runtime(self):
         for args in (track(beats=0), track(beats=257), track(beats=float("nan")), track(from_beat=-1),
