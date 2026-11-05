@@ -37,7 +37,7 @@ test('the other requests name the DAW, and words from the backend stay on one pl
   assert.equal(format.clean('x'.repeat(100), 10), `${'x'.repeat(9)}…`)
   // Controls and line separators become spaces; bidi controls, zero-width and tag characters, which could make a
   // name read as other words, are dropped.
-  assert.equal(format.clean('Demo\u202eranS\u200b \u0007Snare\u2028kit\u0085\u{e0041}\ufeff'), 'DemoranS Snare kit')
+  assert.equal(format.clean('Demo\u202eranS\u200b \u0007Snare\u2028kit\u0085\u{e0041}\ufeff\u061c'), 'DemoranS Snare kit')
 })
 
 test('numbers carry a true minus and the chip says what is connected, stale or missing', () => {
