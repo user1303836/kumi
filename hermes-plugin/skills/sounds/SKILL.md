@@ -84,7 +84,7 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 - **Observe first,** then find the destination with `kumi_read`, so you have the current project key, epoch and destination ref. Ask `kumi_read` with `action: schema` for the DAW's file step; never invent a placement it doesn't have.
 - **Place it with one `kumi_change` file step,** with the DAW's own destination fields:
   - Live `replace_sample`: `deviceRef` names the existing Simpler, and `sample` holds the source.
-  - Live `import_audio`: `sample` holds the source; `trackRef` and `sceneIndex` name an empty Session slot, or `takeLaneRef` and `position` a take lane.
+  - Live `import_audio`: `sample` holds the source; `trackRef` and `sceneIndex` name an empty Session slot.
   - REAPER `item_import`: `path` holds the source; `ref` and `positionBeats` say where.
   - Renoise `sample_load`: `path` holds the source; `ref` names the instrument or sample, as its schema says.
 

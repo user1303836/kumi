@@ -32,7 +32,7 @@ rules keep its changes exact, approved and reversible.
   - Each step is one of the DAW's change steps, listed in the project look with its fields. `kumi_read` with `action: schema, tool: <step>` gives a step's whole input, when its line in the look leaves out what you need.
   - A step's later steps can use its result: name it with `as`, and refer to it as `@name` (a new track, then a file on it).
 - **A file goes in through the DAW's own file step:**
-  - Live: `replace_sample` (field `sample`: a Simpler's audio, by `deviceRef`) or `import_audio` (field `sample`: an empty Session slot, or a take lane);
+  - Live: `replace_sample` (field `sample`: a Simpler's audio, by `deviceRef`) or `import_audio` (field `sample`: an empty Session slot);
   - REAPER: `item_import` (field `path`: a media item on a track, at a position);
   - Renoise: `sample_load` (field `path`: a new sample of an instrument, or in place of a sample's audio).
 
