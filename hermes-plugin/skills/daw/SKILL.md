@@ -130,7 +130,7 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
     - `volume` and `panning` are hex strings or column commands. `delay` is 0–255 or hex, where 128 is half a line.
   - **An effect cell** is `{col 1–8, number, amount}`.
   - **`merge`:** without it, a named cell is written whole, and fields you leave out are blanked. `merge: true` changes only what you give.
-  - **Limits:** about 3,000 note cells a step for `notes_write`, and about 2,000 for `phrase_write`, which writes a phrase's lines with the same cells.
+  - **Limits:** about 3,000 note cells a step for `notes_write`, and about 2,100 for `phrase_write`, which writes a phrase's lines with the same cells.
   - **Undo:** Kumi's undo of a pattern write is refused once anything in that pattern has changed since, another Kumi change included. So write a pattern in one step where you can.
   - `notes_transpose` and `notes_humanize` change notes in place.
 - **"Write me a drum beat", on a new track, in Live:**
