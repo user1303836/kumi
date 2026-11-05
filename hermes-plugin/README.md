@@ -53,9 +53,9 @@ switched off.
 
 Kumi needs two things on the machine that runs Hermes, and asks before each:
 
-1. **Its runtime:** Kumi's official release for your platform, 25–32 MB, from
+1. **Its runtime:** Kumi's official release for your platform, 26–33 MB, from
    `github.com/user1303836/kumi/releases/download/v<version>/`. Kumi checks it against the SHA-256 this plugin pins,
-   unpacks it (77–113 MB) into this profile's plugin data, and refuses anything that doesn't match.
+   unpacks it (82–120 MB) into this profile's plugin data, and refuses anything that doesn't match.
 2. **Its part in your DAW:** Live's Remote Script, REAPER's extension or Renoise's tool, installed only at the location
    shown to you. If another Kumi installation already put it there, setup offers to use that installation instead of
    replacing it.
