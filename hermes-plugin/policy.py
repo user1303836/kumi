@@ -697,8 +697,9 @@ def _script_message(code: str, facts: dict, surface: str, *, chat_line: bool) ->
         if facts["why"]:
             lines.append(scripts.asked_because(one_line(facts["why"], 60)))
         count = f"{facts['lines']} line{'s' if facts['lines'] != 1 else ''}"
-        lines.append(f"{count} · {facts['bytes']:,} bytes · SHA-256 {facts['digest'][:16]}…" if facts_form == "long"
-                     else f"{count} · SHA-256 {facts['digest'][:8]}…")
+        stop = f"stopped after {scripts.DEADLINE_SECONDS} s"
+        lines.append(f"{count} · {facts['bytes']:,} bytes · SHA-256 {facts['digest'][:16]}… · {stop}"
+                     if facts_form == "long" else f"{count} · SHA-256 {facts['digest'][:8]}… · {stop}")
         shown = code_lines[:head]
         lines += [f"  {scripts.code_line(_visible(line), width)}" for line in shown]
         if head and len(code_lines) > len(shown):

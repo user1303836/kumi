@@ -46,6 +46,8 @@ DAW_LANGUAGE = {"ableton": "python", "reaper": "lua", "renoise": "lua"}
 
 # 19e, word for word: the approval, Desktop's pane (through `script.pending`) and the docs all say it this way.
 WARNING = "Runs with the DAW's access to your computer. Kumi can't undo it; the DAW's own undo may."
+# CC-19 r9: the runtime stops a script that runs longer than this, so it can't hang the DAW; the approval names it.
+DEADLINE_SECONDS = 10
 
 # Hermes's tools whose results bring nothing from outside this computer (r2): its local file tools, its to-do list,
 # the producer's own answers (`clarify`) and the skills installed here (Kumi's included). Every other tool taints, its

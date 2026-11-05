@@ -52,6 +52,7 @@ class Scripts(unittest.TestCase):
         self.assertEqual((clean["action"], clean["rule_key"]), ("approve", "kumi:script:s1"))
         self.assertIn(scripts.WARNING, clean["message"])
         self.assertIn('Hermes says: "Read the tempo"', clean["message"])
+        self.assertIn("stopped after 10 s", clean["message"], "r9: the deadline is named before anyone approves")
         self.finished("web_extract", {"urls": ["https://example.com/tutorial"]})
         tainted = self.hook(script())
         digest = scripts.sha256(CODE)
