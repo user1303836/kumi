@@ -1231,6 +1231,9 @@
     }
     return best;
   }
+  function mapLabel(name) {
+    return clean(name, 28);
+  }
   function searchSounds(model, query) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return null;
@@ -1367,8 +1370,8 @@
         context.textBaseline = "middle";
         const placed = [];
         for (const [x, y, name] of labelled) {
-          if (!name) continue;
-          const text = name.length > 28 ? `${name.slice(0, 27)}…` : name;
+          const text = mapLabel(name);
+          if (!text) continue;
           const box = [x + radius + 4, y - 7, context.measureText(text).width, 14];
           if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue;
           placed.push(box);

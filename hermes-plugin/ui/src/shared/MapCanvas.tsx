@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num, seconds } from './format.ts'
-import { buildModel, fitView, frame, type MapViewport, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
+import { buildModel, fitView, frame, mapLabel, type MapViewport, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
 import { Chip, S, useT } from './ui.tsx'
@@ -159,8 +159,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
       context.textBaseline = 'middle'
       const placed: [number, number, number, number][] = []
       for (const [x, y, name] of labelled) {
-        if (!name) continue
-        const text = name.length > 28 ? `${name.slice(0, 27)}…` : name
+        const text = mapLabel(name)
+        if (!text) continue
         const box: [number, number, number, number] = [x + radius + 4, y - 7, context.measureText(text).width, 14]
         if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue
         placed.push(box)

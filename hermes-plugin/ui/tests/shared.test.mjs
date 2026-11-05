@@ -125,6 +125,14 @@ const sample = {
   sounds: { 's-1': { name: 'Dusty Snare 04', class: 'snare', folder: 'Drums/Snares' }, 's-2': { name: 'Tape Snare 01', class: 'snare' }, 's-3': { name: 'Warm Pad', class: 'pad' } }
 }
 
+test("a map label is the sound's name with nothing that reorders it, cut to 28 characters", () => {
+  // fillText applies bidi: an RLO in a sample's name would draw "Snare" + "exe.wav" reversed (rgzm, #1021).
+  assert.equal(map.mapLabel('Snare\u202eexe.wav'), 'Snareexe.wav')
+  assert.equal(map.mapLabel('Snare\u2066Kick\u2069 01'), 'SnareKick 01')
+  assert.equal(map.mapLabel('A very long sample name that keeps going on'), 'A very long sample name tha…')
+  assert.equal(map.mapLabel(undefined), '')
+})
+
 test('the map keeps valid points, colours each group, and picks the nearest point under the pointer', () => {
   const model = map.buildModel(sample)
   assert.equal(model.points.length, 3)
