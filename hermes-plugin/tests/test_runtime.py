@@ -124,6 +124,21 @@ class Runtimes(unittest.TestCase):
                                                          f"{sorted(runtime.OPERATIONS - served)}: pin a release that "
                                                          "does (scripts/hermes_pin.py)")
 
+    def test_every_generation_kind_and_ledger_key_the_plugin_uses_is_one_the_pinned_runtime_has(self):
+        """CC-15's 15a: kumi_release.json records the pinned runtime's `generate` kinds and the ledger policy keys it
+        reads (generate's inputSchema and its _meta in tools/list). kumi_generate offers generate.KINDS, and the ledger
+        is configured with one switch for each of generate.SETTINGS: a kind the runtime lacks is refused, and a key its
+        ledger can't read stops paid generation for every producer."""
+        generate = support.module("generate")
+        pin = json.loads((Path(runtime.__file__).parent / "kumi_release.json").read_text(encoding="utf-8"))
+        kinds, keys = set(pin["generate_kinds"]), set(pin["ledger_policy_keys"])
+        self.assertLessEqual(set(generate.KINDS), kinds, f"kumi serve {pin['kumi']} doesn't generate "
+                                                         f"{sorted(set(generate.KINDS) - kinds)}: pin a release that "
+                                                         "does (scripts/hermes_pin.py)")
+        self.assertLessEqual(set(generate.SETTINGS), keys, f"kumi serve {pin['kumi']}'s ledger doesn't read "
+                                                           f"{sorted(set(generate.SETTINGS) - keys)}: pin a release "
+                                                           "whose does (scripts/hermes_pin.py)")
+
     def test_an_operation_the_plugin_doesnt_declare_is_never_sent(self):
         """So the pin test above covers every call: one the plugin would add without declaring it fails here first."""
         live = self.start()
