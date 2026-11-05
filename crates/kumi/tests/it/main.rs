@@ -61,6 +61,7 @@ mod pin_startup;
 mod plain_farewell;
 mod print;
 mod report;
+mod serve;
 mod session;
 mod session_thread;
 mod spinner;

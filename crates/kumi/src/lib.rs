@@ -17,6 +17,7 @@ pub mod models;
 pub mod print;
 pub mod process;
 pub mod report;
+pub mod serve;
 pub mod spinner;
 pub mod terminal;
 pub mod text;
