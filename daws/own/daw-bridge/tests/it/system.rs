@@ -382,8 +382,8 @@ mod windows_acl_shapes {
             write_raw(&path, &[allow(flags, FULL, Whose::Me)]);
             shapes.push((name, path, expected, expected.map(|code| code == 0)));
         }
-        // Folders. DIRECTORY_CHECKS asks only for the owner and the protection, so it passes folders whose rules aren't
-        // Kumi's shape, which the fast path leaves to it.
+        // Folders. DIRECTORY_CHECKS validates the same access rule as FILE_CHECKS. The native fast path takes only
+        // Kumi's exact inheritance flags; other shapes still go to the PowerShell check.
         let native_folder = made_folder("natively");
         make_kumis_folder_shape(&native_folder).unwrap();
         shapes.push(("a folder made natively", native_folder, Some(0), Some(true)));
@@ -405,11 +405,19 @@ mod windows_acl_shapes {
                 "a folder with a second rule, for everyone",
                 Some(vec![allow(INHERITABLE, FULL, Whose::Me), allow(INHERITABLE, READ, Whose::Sid(EVERYONE))]),
                 true,
-                Some(0),
+                Some(4),
                 Some(false),
             ),
-            ("a folder's one rule, read and write", Some(vec![allow(INHERITABLE, READ | WRITE, Whose::Me)]), true, Some(0), Some(false)),
-            ("a folder's one rule, for everyone", Some(vec![allow(INHERITABLE, FULL, Whose::Sid(EVERYONE))]), true, Some(0), Some(false)),
+            ("a folder's one rule, read and write", Some(vec![allow(INHERITABLE, READ | WRITE, Whose::Me)]), true, Some(8), Some(false)),
+            ("a folder's one rule, for everyone", Some(vec![allow(INHERITABLE, FULL, Whose::Sid(EVERYONE))]), true, Some(5), Some(false)),
+            (
+                "a folder's one rule, denying access",
+                Some(vec![Ace { allow: false, flags: INHERITABLE, mask: FULL, whose: Whose::Me }]),
+                true,
+                Some(7),
+                Some(false),
+            ),
+            ("a folder with an empty DACL", Some(vec![]), true, Some(4), Some(false)),
             ("a folder's one rule, generic rights", Some(vec![allow(INHERITABLE, GENERIC_ALL, Whose::Me)]), true, None, None),
             ("a folder not protected", Some(vec![allow(INHERITABLE, FULL, Whose::Me)]), false, Some(3), Some(false)),
             ("a folder with a null DACL", None, true, None, Some(false)),
@@ -419,6 +427,10 @@ mod windows_acl_shapes {
             write(&path, aces.as_deref(), protected);
             shapes.push((name, path, code, fast));
         }
+        // A folder's inherited rule written whole, so Windows keeps its flag even though the DACL is protected.
+        let inherited_folder = made_folder("inherited-whole");
+        write_raw(&inherited_folder, &[allow(INHERITABLE | INHERITED, FULL, Whose::Me)]);
+        shapes.push(("a folder's one rule marked inherited, written whole", inherited_folder, Some(6), Some(false)));
         // Owned by Administrators, where this account may hand them over: CI's elevated runners can.
         let handed = made("handed-over.json");
         write(&handed, Some(&[allow(0, FULL, Whose::Me)]), true);

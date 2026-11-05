@@ -204,7 +204,8 @@ fn is_shaped(path: &Path, flags: u8) -> bool {
 /// Kumi's shape, as `FILE_CHECKS` reads a file: owned by `account`; the DACL protected (AreAccessRulesProtected); one ACE
 /// (Access.Count), for `account`, an allow ACE, with full control exactly, and its flags `flags` exactly (none for a
 /// file, so not inherited; handed down for a folder): what SECURE_FILE and SECURE_DIRECTORY write, and nothing more.
-/// (`DIRECTORY_CHECKS` asks only for the owner and the protection, which this shape has.)
+/// FILE_CHECKS and DIRECTORY_CHECKS validate the same owner, protection and access rule; this native shape also
+/// requires its full-control mask and inheritance flags to be exactly what Kumi writes.
 ///
 /// # Safety
 /// `owner`, `dacl` and `descriptor` come from one GetNamedSecurityInfoW that succeeded, and are still allocated.
