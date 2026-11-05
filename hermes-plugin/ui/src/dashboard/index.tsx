@@ -122,7 +122,9 @@ function Dashboard() {
           <Section title={t('pane.history')}>
             <HistoryView
               action={item => (canUndo(state.status, item) ? <CopyButton label={t('dashboard.copyUndo')} text={undoRequest(item)} /> : null)}
+              daw={state.status?.daw}
               history={state.history}
+              live={Boolean(state.status?.connected) && state.status?.stale !== true}
               now={now}
             />
           </Section>

@@ -33,9 +33,20 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
   )
 }
 
+// Decimal megabytes, as setup's own messages and the docs give them (setup.py `_mb`): 27.6 MB, not 26.
 function megabytes(bytes: unknown): string | null {
-  return typeof bytes === 'number' && bytes > 0 ? `${(bytes / 1_048_576).toFixed(0)} MB` : null
+  return typeof bytes === 'number' && bytes > 0 ? `${(bytes / 1_000_000).toFixed(1)} MB` : null
 }
+
+// The release targets Kumi ships, which the catalogs name as a producer would (`settings.platforms.*`).
+const PLATFORMS = new Set([
+  'aarch64-apple-darwin',
+  'x86_64-apple-darwin',
+  'aarch64-pc-windows-msvc',
+  'x86_64-pc-windows-msvc',
+  'aarch64-unknown-linux-gnu',
+  'x86_64-unknown-linux-gnu'
+])
 
 export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; store: KumiStore; onOpenMap: () => void }) {
   const t = useT()
@@ -70,8 +81,13 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
             {runtime && (
               <Line label={t('settings.runtime')}>
                 {runtime.installed ? t('settings.installed', clean(runtime.version ?? '', 20)) : t('settings.notInstalled')}
-                {setup?.pinned_version && <span style={S.faint}> · {t('settings.pinned', clean(setup.pinned_version, 20))}</span>}
-                {setup?.target && <span style={S.faint}> · {clean(setup.target, 40)}</span>}
+                {/* The pin shows only where the runtime isn't it yet: that's when it's a step. */}
+                {setup?.pinned_version && setup.pinned_version !== runtime.version && (
+                  <span style={S.faint}> · {t('settings.needs', clean(setup.pinned_version, 20))}</span>
+                )}
+                {setup?.target && (
+                  <span style={S.faint}> · {PLATFORMS.has(setup.target) ? t(`settings.platforms.${setup.target}`) : clean(setup.target, 40)}</span>
+                )}
               </Line>
             )}
             {runtime && !runtime.installed && megabytes(setup?.download_bytes) && (
@@ -82,15 +98,15 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
             )}
             {component && (
               <Line label={t('settings.part', dawName(daw, t))}>
-                {t(
-                  'settings.componentLine',
-                  clean(component.name ?? t('settings.dawComponent'), 40),
-                  partWorks
+                {(() => {
+                  const word = partWorks
                     ? t('settings.partInUse')
                     : COMPONENT_STATES.has(componentState)
                       ? t(`settings.componentStates.${componentState}`)
                       : clean(componentState, 20).replace('_', ' ')
-                )}
+                  // The line's label already names Kumi's part: its own name shows only when setup knows a specific one.
+                  return component.name ? t('settings.componentLine', clean(component.name, 40), word) : word
+                })()}
                 {component.path && <div style={{ ...S.faint, marginTop: 2 }}>{clean(component.path, 200)}</div>}
               </Line>
             )}
@@ -114,7 +130,12 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
                 return <Chip tone={words.tone === 'muted' ? undefined : words.tone}>{words.text}</Chip>
               })()}
             </Line>
-            {state.status?.owner?.session_id && <Line label={t('settings.chat')}>{clean(state.status.owner.session_id, 80)}</Line>}
+            {/* Which chat Kumi answers in, as the producer sees chats: this one, or another (its id means nothing to them). */}
+            {state.status?.owner?.session_id && (
+              <Line label={t('settings.chat')}>
+                {host.state.focusedStoredSessionId?.get() === state.status.owner.session_id ? t('settings.chatHere') : t('settings.chatElsewhere')}
+              </Line>
+            )}
           </div>
           <div style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
             {step && (
