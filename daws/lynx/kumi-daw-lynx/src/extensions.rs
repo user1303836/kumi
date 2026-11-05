@@ -12,6 +12,14 @@ pub const OPS: &[(&str, &str, &str, bool)] = &[
     ("lynx_playlist_edit", "playlist.edit", "Edit the current LYNX arrangement as one atomic native undo step, with playback stopped. Read lynx_playlist_inspect first. Submit 1–128 add, update, duplicate or remove edits; all validate before any change. add chooses an existing pattern/audio-channel/automation source; update and duplicate preserve omitted clip properties, and duplicate creates a fresh clipId. Locked tracks are refused. Times are ticks at PPQ 960. This places existing sources without changing channel/mixer routing or creating patterns. Arrangement switching and arbitrary file imports are not supported.", true),
 ];
 
+/// Only these feature flags affect the tool catalog; ignore unrelated future capability metadata.
+pub fn capability_signature(capabilities: &Value) -> u8 {
+    ["pluginParameters", "effects", "playlist"]
+        .iter()
+        .enumerate()
+        .fold(0, |bits, (index, group)| bits | if capabilities.get(*group).and_then(Value::as_bool) == Some(true) { 1 << index } else { 0 })
+}
+
 /// A control build advertises extension groups only after its native dispatch supports them.
 pub fn enabled(op: &str, capabilities: &Value) -> bool {
     let group = match op {

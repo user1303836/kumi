@@ -24,6 +24,7 @@ pub fn tools(
     client: Client,
     project: String,
     revision: u64,
+    control_epoch: Option<String>,
     capabilities: &Value,
     context: IntegrationContext,
     serial: Rc<Cell<u64>>,
@@ -37,6 +38,7 @@ pub fn tools(
                 client: client.clone(),
                 project: project.clone(),
                 known_revision: known_revision.clone(),
+                control_epoch: control_epoch.clone(),
                 context: context.clone(),
                 serial: serial.clone(),
                 name,
@@ -157,6 +159,7 @@ struct LynxTool {
     client: Client,
     project: String,
     known_revision: Rc<Cell<u64>>,
+    control_epoch: Option<String>,
     context: IntegrationContext,
     serial: Rc<Cell<u64>>,
     name: &'static str,
@@ -196,6 +199,9 @@ impl KernelTool for LynxTool {
         }
         if self.writes {
             input.insert("expectedProjectId".into(), self.project.clone().into());
+            if let Some(epoch) = &self.control_epoch {
+                input.insert("expectedEpoch".into(), epoch.clone().into());
+            }
             // A full-pattern replacement is tied to the exact notes read by the model.
             // Other writes use the last revision this catalog showed or changed itself.
             if self.op != "pattern.replace_notes" {
@@ -217,6 +223,14 @@ impl KernelTool for LynxTool {
             }
             return Ok(ToolResult::error(
                 "LYNX project changed or its response identity is missing; inspect the session again before editing",
+            ));
+        }
+        if result.get("controlEpoch").and_then(Value::as_str) != self.control_epoch.as_deref() {
+            if let Some(again) = &self.context.on_look_again {
+                again();
+            }
+            return Ok(ToolResult::error(
+                "LYNX control process changed or its epoch is missing; refresh the session before editing. A sent change may have run",
             ));
         }
         let Some(revision) = result.get("revision").and_then(Value::as_u64) else {
