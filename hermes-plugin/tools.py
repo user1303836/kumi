@@ -93,12 +93,16 @@ class Host:
             raise runtime.Unavailable("not_connected", "Kumi isn't connected to the DAW: call kumi_connect first.")
         return live
 
+    def profile(self) -> str:
+        """The Hermes profile this call runs in (its plugin data is that profile's)."""
+        return str(getattr(self._ctx, "profile_name", "") or "")
+
     def identity(self, kwargs: dict) -> dict:
         """Hermes's identity for one call, which the runtime records and dedups on (C2 `_host`, CC-5). Hermes gives a
         tool handler its session and task; the model's tool-call id comes from the approval hook's record of this
         call, and is null without one (never made up)."""
         call = kwargs.get("kumi_call")
-        return {"profile_id": str(getattr(self._ctx, "profile_name", "") or ""),
+        return {"profile_id": self.profile(),
                 "session_id": kwargs.get("session_id") or None,
                 "task_id": kwargs.get("task_id") or None,
                 "tool_call_id": call.tool_call_id if isinstance(call, calls.Entry) else None,
@@ -113,6 +117,41 @@ def broadcast(event: str, payload: dict) -> None:
     """Tell this process's Desktop clients a snapshot changed (C5: `plugin.kumi.<event>`)."""
     from hermes_cli.plugin_events import broadcast_plugin_event  # Hermes's, documented
     broadcast_plugin_event(PLUGIN, event, payload)
+
+
+SOUNDS_FOUND = 200
+LISTEN_EVENT_BYTES = 256 * 1024
+
+
+def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any, tool_call_id: Any) -> None:
+    """CC-9: after Hermes has a `kumi_sounds` or `kumi_listen` result, tell Desktop, so the sound map and the listen
+    card work with tool progress off. Only a call Hermes reports `ok` with a result the model got (already without
+    paths, CC-4, and without a failed listen's measurements, R5): `sounds.found` with up to 200 sound ids, and
+    `listen.done` with the result itself when it's at most 256 KiB. A failed broadcast never fails the call."""
+    if status != "ok" or tool not in ("kumi_sounds", "kumi_listen") or not isinstance(result, str):
+        return
+    try:
+        data = json.loads(result)
+    except ValueError:
+        return
+    if not isinstance(data, dict) or "error" in data:
+        return
+    base = {"profile": host.profile(), "session_id": session_id, "tool_call_id": tool_call_id}
+    if tool == "kumi_sounds":
+        ids = [item["sound_id"] for item in data.get("items") or []
+               if isinstance(item, dict) and isinstance(item.get("sound_id"), str)][:SOUNDS_FOUND]
+        if not ids:
+            return
+        event, payload = "sounds.found", {**base, "map_revision": data.get("map_revision"), "sound_ids": ids}
+    else:
+        if not isinstance(data.get("metrics"), dict) or data.get("state") in ("refused", "cancelled", "unsure"):
+            return
+        fits = len(result.encode("utf-8")) <= LISTEN_EVENT_BYTES
+        event, payload = "listen.done", {**base, **({"result": data} if fits else {})}
+    try:
+        broadcast(event, payload)
+    except Exception:
+        log.exception("Kumi couldn't tell Desktop about %s", tool)
 
 
 def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
