@@ -216,7 +216,13 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
         (Some(key.as_str()), Some(epoch)),
         "the same project, the same epoch"
     );
-    assert!(!seen["text"].as_str().unwrap().is_empty());
+    // The whole turn's look: the steps a change may use, each with its input's fields, and the readers, before the
+    // tracks, which come last (what a small room cuts).
+    let look: Value = serde_json::from_str(seen["text"].as_str().unwrap()).unwrap();
+    let volume = look["steps"].as_array().unwrap().iter().filter_map(Value::as_str).find(|line| line.starts_with("track_volume: "));
+    assert!(volume.is_some_and(|line| line.contains("(ref")), "{}", look["steps"]);
+    assert!(look["readers"].as_array().unwrap().contains(&json!("reaper_read")), "{}", look["readers"]);
+    assert_eq!(look.as_object().unwrap().keys().last().map(String::as_str), Some("tracks"), "{look}");
     let refs = seen["refs"].as_array().unwrap();
     assert!(refs.iter().filter(|candidate| candidate["kind"] == "track").count() >= 3, "{refs:?}");
     assert!(refs.iter().all(|candidate| candidate["reference"]["kind"] == "daw"), "only the project's things: {refs:?}");
@@ -271,6 +277,13 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
     let Err(OpError::NotConnected { .. }) = lab.ctx.link().expect(other["project_key"].as_str().unwrap(), epoch + 1) else {
         panic!("a plan while REAPER is away")
     };
+    // A look that can't read the project makes no project of REAPER's words for why: it's refused in them, and the last
+    // project read stays the one a plan names.
+    let Err(OpError::Failed { reason }) = lab.call("observe", json!({"scope": "project"})).await else {
+        panic!("a look while REAPER is away")
+    };
+    assert!(reason.contains("REAPER") && !reason.contains("Inference-only"), "{reason}");
+    assert_eq!(lab.ctx.link().project().map(|project| project.key), other["project_key"].as_str().map(str::to_owned));
     // Nothing but reads reached REAPER: connecting and looking write nothing into the project.
     let reads = ["digest", "focus", "focus_body", "read", "snapshot", "status"];
     let sent = lab.methods_sent();
@@ -1426,20 +1439,22 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
 });
 
 case!(serve_refuses_a_path_in_renoises_file_field_before_anything_runs, async {
-    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(|secret| SimulatorConfig::renoise(secret, "/lab/Renoise")))).await;
+    let script = daw_mcp_server::renoise::simulator::RenoiseScript::new();
+    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| script.config(secret, "/lab/Renoise")))).await;
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (connected, refused) = wire.call("connect", json!({}), None).await;
     assert!(!refused, "{connected}");
     let (seen, _) = wire.call("observe", json!({"scope": "project"}), None).await;
     let key = seen["project_key"].clone();
     let epoch = seen["epoch"].as_u64().unwrap_or_else(|| panic!("{seen}"));
-    let sent = lab.methods_sent();
+    let sent = lab.methods_sent().len();
     for (n, path) in ["/Users/me/Samples/kick.wav", "C:\\Samples\\kick.wav", "library:Drums/kick.wav"].into_iter().enumerate() {
         let steps = json!([{"tool": "sample_load", "input": {"ref": "i1", "path": path}}]);
         let (refused, _) = wire.call("change", plan(&key, epoch, steps), Some(&format!("tc-path-{n}"))).await;
         assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")), "{path}: {refused}");
     }
-    assert_eq!(lab.methods_sent(), sent, "nothing reached Renoise");
+    let after = lab.methods_sent();
+    assert!(!after[sent..].iter().any(|method| method.starts_with("change_")), "nothing written into Renoise: {after:?}");
     wire.end().await;
 });
 
