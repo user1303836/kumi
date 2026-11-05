@@ -184,6 +184,7 @@ When the producer names a video tutorial ("make the bass from this video"):
   - at most 400 lines and 32 KB;
   - no hidden or direction-changing characters;
   - nothing that runs processes or reaches the network (`os.execute`, `io.popen`, `subprocess`, `os.system`, `socket`, `urllib`, `ctypes`), which Kumi refuses before anyone is asked.
+  - quick: Kumi stops a script after 10 seconds in Live and REAPER, and 0.8 seconds in Renoise (the approval says which), and it then comes back `failed`. Never wait or poll inside one.
 - **`purpose` is one line the producer reads in the approval,** with the warning and the code. Say plainly what the script changes.
 - **When it asks:** in a chat that has read nothing from outside, the producer can allow scripts for the chat. Once the chat has read outside content (a web page, a transcript, another tool's result), every script is asked, and none runs while Hermes's approvals are off. A delegated subagent never runs one, and a messaging chat only when the producer allowed it in Kumi's settings. When a script is refused for any of these, say why, and offer typed steps instead.
 - **After it runs:**
