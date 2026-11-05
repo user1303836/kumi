@@ -1321,24 +1321,31 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn the_daw_starts_apart_from_kumis_terminal() {
-        use std::os::unix::fs::PermissionsExt;
+        use std::io::Read;
+        use std::os::unix::{ffi::OsStrExt, fs::PermissionsExt};
         let dir = tempfile::tempdir().unwrap();
         let script = dir.path().join("daw");
         let said = dir.path().join("daw.said");
+        let ready = dir.path().join("daw.ready");
+        let name = std::ffi::CString::new(ready.as_os_str().as_bytes()).unwrap();
+        // SAFETY: `name` is a live C string, pointing only inside this fixture's temporary directory.
+        assert_eq!(unsafe { libc::mkfifo(name.as_ptr(), 0o600) }, 0);
+        let mut ready = std::fs::OpenOptions::new().read(true).write(true).open(ready).unwrap();
         let set = dir.path().join("A producer's 音 & mix.rpp");
         std::fs::write(&set, "saved project").unwrap();
         std::fs::write(
             &script,
             "#!/bin/sh\nif [ -c /dev/fd/1 ] && [ ! -t 1 ]; then out=null; else out=terminal; fi\n\
-             printf '%s\\n%s\\n%s\\n%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" \"$out\" \"$#\" \"$1\" > \"$0.said.part\" && mv \"$0.said.part\" \"$0.said\"\n",
+             printf '%s\\n%s\\n%s\\n%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" \"$out\" \"$#\" \"$1\" > \"$0.said.part\" && mv \"$0.said.part\" \"$0.said\" && printf R 3<> \"$0.ready\" >&3\n",
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
         assert!(start_apart(app_command(Os::Linux, &script, Some(&set)).unwrap()));
-        let deadline = std::time::Instant::now() + Duration::from_secs(10);
-        while !said.exists() && std::time::Instant::now() < deadline {
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        // The byte follows the atomic marker write. Opening the FIFO read/write on both sides avoids an open race,
+        // and the child's one-byte write never waits for the parent if it disappeared; start_apart reaps the child.
+        let mut state = [0];
+        ready.read_exact(&mut state).unwrap();
+        assert_eq!(&state, b"R");
         let text = std::fs::read_to_string(&said).unwrap();
         let mut lines = text.lines();
         // SAFETY: getpgrp has no preconditions.
