@@ -1173,11 +1173,13 @@ case!(a_first_run_whose_daw_is_chosen_here_goes_on_with_its_setup, async {
 case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
     // Review K1: once setup has put REAPER's extension in (its receipt is written), connecting hands the session the
     // bridge's reference and reconnects it, as Live's setup does, so the session connects without a restart.
+    // Review K13: setup captures the saved project before the DAW closes, so it can open that project again.
     use kumi_daw::{provider::DawProvider, setup::SetupSession};
     /// The session as setup reaches it: it counts setup's reconnects.
     #[derive(Default)]
     struct Reached {
         reconnects: std::cell::Cell<u32>,
+        set: RefCell<Option<String>>,
     }
     #[async_trait::async_trait(?Send)]
     impl SetupSession for Reached {
@@ -1186,7 +1188,7 @@ case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
             Ok(())
         }
         fn open_set(&self) -> Option<String> {
-            None
+            self.set.borrow().clone()
         }
     }
     let home = tempfile::tempdir().unwrap();
@@ -1197,10 +1199,16 @@ case!(an_own_daws_setup_hands_the_session_its_bridge_and_reconnects_it, async {
         ("KUMI_REAPER_RESOURCE_DIR".into(), home.path().join("REAPER").display().to_string()),
     ]);
     let bridge: Rc<RefCell<Option<String>>> = Rc::default();
-    let reached = Rc::new(Reached::default());
+    let saved = home.path().join("A producer's 音 & mix.rpp");
+    std::fs::write(&saved, "saved project").unwrap();
+    let saved = saved.to_string_lossy().into_owned();
+    let reached = Rc::new(Reached { set: RefCell::new(Some(saved.clone())), ..Default::default() });
     let as_session: Rc<dyn SetupSession> = reached.clone();
     let session: Rc<RefCell<Option<std::rc::Weak<dyn SetupSession>>>> = Rc::new(RefCell::new(Some(Rc::downgrade(&as_session))));
     let setup = kumi_daw_reaper::PROVIDER.setup(&env, bridge.clone(), false, session.clone());
+    assert_eq!(setup.open_set(), Some(saved), "setup remembers the actual saved project for its restart");
+    *reached.set.borrow_mut() = None;
+    assert_eq!(setup.open_set(), None, "an unsaved project has no file to reopen");
     // The extension in place: its receipt says where its reference is.
     let paths = daw_bridge::paths::BridgePaths::new(&kumi_home, daw_bridge::Daw::Reaper);
     std::fs::create_dir_all(paths.receipt().parent().unwrap()).unwrap();

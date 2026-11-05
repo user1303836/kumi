@@ -1146,15 +1146,34 @@ pub(crate) async fn closed(daw: Daw, env: &Env, stop: &Signal) -> bool {
     }
 }
 
-/// Opens the DAW's app apart from Kumi: on macOS through `open`, whose answer says whether it opened; elsewhere as a
-/// process of its own ([`start_apart`]).
-fn open_app(app: &Path) -> bool {
-    if cfg!(target_os = "macos") {
-        let mut open = std::process::Command::new("open");
-        open.arg("-a").arg(app).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
-        return open.status().is_ok_and(|status| status.success());
+/// Opens the supplied saved project, never an unsaved project's title or a path guessed from it. Each path is one
+/// argument: spaces, quotes and non-ASCII names go to the app unchanged.
+fn app_command(os: Os, app: &Path, set: Option<&Path>) -> Option<std::process::Command> {
+    if set.is_some_and(|set| !set.is_absolute() || !set.is_file()) {
+        return None;
     }
-    start_apart(std::process::Command::new(app))
+    let mut command = if os == Os::Mac {
+        let mut open = std::process::Command::new("open");
+        open.arg("-a").arg(app);
+        open
+    } else {
+        std::process::Command::new(app)
+    };
+    if let Some(set) = set {
+        command.arg(set);
+    }
+    Some(command)
+}
+
+/// Opens the DAW's app apart from Kumi: on macOS through `open`, whose answer says whether it opened; elsewhere as a
+/// process of its own ([`start_apart`]). With a project it can't open, setup can fall back to starting the app alone.
+fn open_app(app: &Path, set: Option<&Path>) -> bool {
+    let Some(mut command) = app_command(Os::current(), app, set) else { return false };
+    if cfg!(target_os = "macos") {
+        command.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+        return command.status().is_ok_and(|status| status.success());
+    }
+    start_apart(command)
 }
 
 /// Starts `command` with no terminal and in a process group of its own, so the DAW's output never prints over Kumi's,
@@ -1212,10 +1231,13 @@ impl DawSetup for OwnSetup {
     fn reopens(&self) -> Reopens {
         self.seen.borrow().as_ref().map_or(Reopens::Unknown, |target| (self.own.reopens)(target))
     }
-    async fn start(&self, app: Option<String>, _set: Option<String>) -> bool {
+    async fn start(&self, app: Option<String>, set: Option<String>) -> bool {
         // An app setup didn't find ("") is looked for again.
         let Some(app) = app.filter(|app| !app.is_empty()).map(PathBuf::from).or_else(|| self.app()) else { return false };
-        tokio::task::spawn_blocking(move || open_app(&app)).await.unwrap_or(false)
+        tokio::task::spawn_blocking(move || open_app(&app, set.as_deref().map(Path::new))).await.unwrap_or(false)
+    }
+    fn open_set(&self) -> Option<String> {
+        self.session.borrow().as_ref().and_then(Weak::upgrade).and_then(|session| session.open_set())
     }
     /// The bridge is in and the DAW is opening: the session takes the bridge and reconnects (as Live's setup does); one
     /// still starting is asked again shortly.
@@ -1263,7 +1285,35 @@ mod tests {
     #[test]
     fn an_app_that_wont_open_says_so() {
         let dir = tempfile::tempdir().unwrap();
-        assert!(!open_app(&dir.path().join("Nowhere").join(if cfg!(target_os = "macos") { "REAPER.app" } else { "reaper" })));
+        assert!(!open_app(&dir.path().join("Nowhere").join(if cfg!(target_os = "macos") { "REAPER.app" } else { "reaper" }), None));
+    }
+
+    /// Review K13: a saved project is passed to the same app as one argument, on every platform; an unsaved title or a
+    /// missing file is not reported as reopened, so setup can open the app alone and offer its recent projects.
+    #[test]
+    fn the_saved_project_is_passed_to_the_app_whole() {
+        let dir = tempfile::tempdir().unwrap();
+        for (name, extension) in [("REAPER", "rpp"), ("Renoise", "xrns")] {
+            let app = dir.path().join(format!("Applications with spaces/{name}.app"));
+            let set = dir.path().join(format!("A producer's 音 & mix.{extension}"));
+            std::fs::write(&set, "saved project").unwrap();
+            for os in [Os::Mac, Os::Windows, Os::Linux] {
+                let mut expected = Vec::<std::ffi::OsString>::new();
+                if os == Os::Mac {
+                    expected.extend(["-a".into(), app.as_os_str().into()]);
+                }
+                let alone = app_command(os, &app, None).unwrap();
+                assert_eq!(alone.get_program(), if os == Os::Mac { std::ffi::OsStr::new("open") } else { app.as_os_str() });
+                assert_eq!(alone.get_args().collect::<Vec<_>>(), expected);
+                expected.push(set.as_os_str().into());
+                let reopen = app_command(os, &app, Some(&set)).unwrap();
+                assert_eq!(reopen.get_program(), alone.get_program());
+                assert_eq!(reopen.get_args().collect::<Vec<_>>(), expected);
+                for invalid in [Path::new(""), Path::new("Untitled"), dir.path(), &dir.path().join("missing.rpp")] {
+                    assert!(app_command(os, &app, Some(invalid)).is_none(), "{os:?}: {invalid:?}");
+                }
+            }
+        }
     }
 
     /// Review K21: the DAW starts with no terminal (its output can't print over Kumi's) and in a process group of its
@@ -1274,17 +1324,17 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
         let script = dir.path().join("daw");
-        let said = dir.path().join("said");
+        let said = dir.path().join("daw.said");
+        let set = dir.path().join("A producer's 音 & mix.rpp");
+        std::fs::write(&set, "saved project").unwrap();
         std::fs::write(
             &script,
             "#!/bin/sh\nif [ -c /dev/fd/1 ] && [ ! -t 1 ]; then out=null; else out=terminal; fi\n\
-             printf '%s\\n%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" \"$out\" > \"$1.part\" && mv \"$1.part\" \"$1\"\n",
+             printf '%s\\n%s\\n%s\\n%s\\n' \"$(ps -o pgid= -p $$ | tr -d ' ')\" \"$out\" \"$#\" \"$1\" > \"$0.said.part\" && mv \"$0.said.part\" \"$0.said\"\n",
         )
         .unwrap();
         std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let mut command = std::process::Command::new(&script);
-        command.arg(&said);
-        assert!(start_apart(command));
+        assert!(start_apart(app_command(Os::Linux, &script, Some(&set)).unwrap()));
         let deadline = std::time::Instant::now() + Duration::from_secs(10);
         while !said.exists() && std::time::Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
@@ -1295,5 +1345,7 @@ mod tests {
         let ours = unsafe { libc::getpgrp() };
         assert_ne!(lines.next().and_then(|pgid| pgid.parse::<i32>().ok()), Some(ours), "{text}");
         assert_eq!(lines.next(), Some("null"), "{text}");
+        assert_eq!(lines.next(), Some("1"), "{text}");
+        assert_eq!(lines.next(), set.to_str(), "{text}");
     }
 }
