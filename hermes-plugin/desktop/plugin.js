@@ -205,15 +205,24 @@ var en = {
   },
   generate: {
     generated: "generated",
-    generatedTitle: (provider) => `Made by ${provider || "a generator"} from your words. It isn't in your project until you place it.`,
+    generatedTitle: "Made by Mirelo from your words. It isn't in your project until you place it.",
+    soundTitle: "Generated sound",
+    notesTitle: "Notes from audio",
     credits: (n, shown) => n === 1 ? `${shown} credit` : `${shown} credits`,
-    cost: (credits, estimate) => `${credits} (est. ${estimate})`,
-    estimateOnly: (shown) => `about ${shown} credits`,
+    creditsTitle: "Mirelo API credits, not money. An estimate or a reservation is not a price.",
+    cost: (credits2, estimate) => `${credits2} (est. ${estimate})`,
+    reserved: (credits2) => `${credits2} reserved`,
+    unknownCharge: (credits2) => `charge not known yet · ${credits2} reserved`,
     left: (left, cap) => `${left} of ${cap} credits left under your cap`,
     capTitle: "Kumi's own budget for paid generation, which approvals count against. It isn't the provider's bill.",
+    frozen: "New paid generations are paused: a charge came in above its estimate",
+    notes: (n, shown) => n === 1 ? `${shown} note` : `${shown} notes`,
+    outputs: { midi: "MIDI file", notes: "Notes", musicxml: "MusicXML" },
+    states: { running: "generating", failed: "failed", cancelled: "cancelled", interrupted: "interrupted" },
     place: "Place…",
     placeTitle: "Put a request to place this file in your project in the chat, to finish and send",
-    midi: "MIDI file"
+    planNotes: "Plan notes…",
+    planNotesTitle: "Put a request in the chat to plan where these notes go, from your project's own timing, to finish and send"
   },
   palette: {
     map: "Kumi: open the sound map",
@@ -439,15 +448,24 @@ var ja = {
   },
   generate: {
     generated: "生成",
-    generatedTitle: (provider) => `${provider || "生成ツール"} があなたの言葉から作りました。配置するまでプロジェクトには入りません。`,
+    generatedTitle: "Mirelo があなたの言葉から作りました。配置するまでプロジェクトには入りません。",
+    soundTitle: "生成したサウンド",
+    notesTitle: "オーディオから取り出したノート",
     credits: (_n, shown) => `${shown} クレジット`,
-    cost: (credits, estimate) => `${credits}（見積 ${estimate}）`,
-    estimateOnly: (shown) => `約 ${shown} クレジット`,
+    creditsTitle: "Mirelo API のクレジットで、お金ではありません。見積や確保額は価格ではありません。",
+    cost: (credits2, estimate) => `${credits2}（見積 ${estimate}）`,
+    reserved: (credits2) => `${credits2} を確保`,
+    unknownCharge: (credits2) => `請求額はまだ不明 · ${credits2} を確保`,
     left: (left, cap) => `上限 ${cap} クレジット中 残り ${left}`,
     capTitle: "有料生成のための Kumi 自身の予算で、承認ごとに差し引かれます。提供元の請求額ではありません。",
+    frozen: "見積を超える請求があったため、新しい有料生成は止めています",
+    notes: (_n, shown) => `${shown} ノート`,
+    outputs: { midi: "MIDI ファイル", notes: "ノート", musicxml: "MusicXML" },
+    states: { running: "生成中", failed: "失敗", cancelled: "取り消し", interrupted: "中断" },
     place: "配置…",
     placeTitle: "このファイルをプロジェクトに配置する依頼をチャットに入れます。仕上げて送信してください",
-    midi: "MIDI ファイル"
+    planNotes: "ノートの配置を計画…",
+    planNotesTitle: "プロジェクト自身のタイミングから、これらのノートをどこに置くか計画する依頼をチャットに入れます。仕上げて送信してください"
   },
   palette: {
     map: "Kumi: サンプルマップを開く",
@@ -673,15 +691,24 @@ var zh = {
   },
   generate: {
     generated: "生成",
-    generatedTitle: (provider) => `由 ${provider || "生成工具"} 根据你的描述生成。放入项目之前，它不会出现在你的项目中。`,
+    generatedTitle: "由 Mirelo 根据你的描述生成。放入项目之前，它不会出现在你的项目中。",
+    soundTitle: "生成的声音",
+    notesTitle: "从音频提取的音符",
     credits: (_n, shown) => `${shown} 积分`,
-    cost: (credits, estimate) => `${credits}（预估 ${estimate}）`,
-    estimateOnly: (shown) => `约 ${shown} 积分`,
+    creditsTitle: "Mirelo API 积分，不是钱。预估或预留不是价格。",
+    cost: (credits2, estimate) => `${credits2}（预估 ${estimate}）`,
+    reserved: (credits2) => `已预留 ${credits2}`,
+    unknownCharge: (credits2) => `费用尚不清楚 · 已预留 ${credits2}`,
     left: (left, cap) => `上限 ${cap} 积分，剩余 ${left}`,
     capTitle: "Kumi 自己的付费生成预算，批准时从中扣除。这不是服务商的账单。",
+    frozen: "有一笔费用超出了预估，新的付费生成已暂停",
+    notes: (_n, shown) => `${shown} 个音符`,
+    outputs: { midi: "MIDI 文件", notes: "音符", musicxml: "MusicXML" },
+    states: { running: "生成中", failed: "失败", cancelled: "已取消", interrupted: "已中断" },
     place: "放入…",
     placeTitle: "把放入这个文件的请求放进对话，补充完整后发送",
-    midi: "MIDI 文件"
+    planNotes: "规划音符…",
+    planNotesTitle: "把根据项目自身的节拍规划这些音符放在哪里的请求放进对话，补充完整后发送"
   },
   palette: {
     map: "Kumi：打开采样地图",
@@ -821,17 +848,11 @@ function jobWords(job, t = english) {
   const total = typeof progress.total === "number" && Number.isFinite(progress.total) && progress.total > 0 ? progress.total : null;
   const message = typeof progress.message === "string" ? clean(progress.message, 60) : "";
   if (job.state === "running" || job.state === void 0) {
-    const count3 = done === null ? "" : total === null ? num(done, 0) : t("job.of", num(done, 0), num(total, 0));
-    return { title: running, detail: [message, count3].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
+    const count2 = done === null ? "" : total === null ? num(done, 0) : t("job.of", num(done, 0), num(total, 0));
+    return { title: running, detail: [message, count2].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
   }
   if (job.state === "done") {
     const result = job.result && typeof job.result === "object" ? job.result : {};
-    if (kind === "generate") {
-      const file = typeof result.file === "string" ? clean(result.file.split(/[\\/]/).pop() ?? "", 60) : "";
-      const credits = result.credits && typeof result.credits === "object" ? count(result.credits.actual) : null;
-      const detail2 = [file, credits === null ? "" : t("generate.credits", credits, num(credits, 0))];
-      return { title: t("job.done", noun), detail: detail2.filter(Boolean).join(" · "), fraction: 1, tone: "good" };
-    }
     const sounds = count(result.sounds);
     const failed = count(result.failed);
     const detail = [sounds === null ? "" : t("job.sounds", sounds, num(sounds, 0)), failed ? t("job.unreadable", num(failed, 0)) : ""];
@@ -857,6 +878,12 @@ function placeRequest(artifactId, name) {
   if (!id) return null;
   const said = clean(name ?? "", 80);
   return said ? `Place “${said}” (artifact ${id}) in my project` : `Place artifact ${id} in my project`;
+}
+function planNotesRequest(artifactId, count2) {
+  const id = plainId(artifactId);
+  if (!id) return null;
+  const notes = typeof count2 === "number" && Number.isInteger(count2) && count2 >= 0 ? `the ${count2} notes` : "the notes";
+  return `Plan putting ${notes} from artifact ${id} (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me the plan before changing anything`;
 }
 function soundRequest(soundId, name, revision) {
   const id = plainId(soundId);
@@ -1578,7 +1605,7 @@ function ListenResultCard({ result, audition, fallback }) {
 }
 
 // src/shared/generate.ts
-var count2 = (value) => typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+var STATES = /* @__PURE__ */ new Set(["running", "done", "failed", "cancelled", "interrupted"]);
 function objectOf(value) {
   let found = value;
   if (typeof found === "string") {
@@ -1590,40 +1617,79 @@ function objectOf(value) {
   }
   return found && typeof found === "object" && !Array.isArray(found) ? found : null;
 }
-function parseGenerated(value) {
+var credits = (value) => typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+var positive = (value) => typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
+function ledgerOf(value) {
+  const ledger = objectOf(value);
+  if (!ledger) return null;
+  const [cap, spent, reserved, left] = [ledger.cap, ledger.spent, ledger.reserved, ledger.left].map(credits);
+  if (cap === null || spent === null || reserved === null || left === null) return null;
+  return { cap, spent, reserved, left, frozen: ledger.frozen === true };
+}
+function parseGeneration(value) {
   const outer = objectOf(value);
-  if (!outer) return null;
-  let done = outer;
-  if ("job_id" in outer) {
-    const result = objectOf(outer.result);
-    if (outer.kind !== "generate" || outer.state !== "done" || !result) return null;
-    done = result;
-  }
-  const credits = objectOf(done.credits) ?? {};
-  const ledger = objectOf(done.ledger) ?? {};
-  const artifactId = plainId(done.artifact_id);
-  const file = typeof done.file === "string" ? clean(done.file.split(/[\\/]/).pop() ?? "", 80) : "";
-  if (!file || !artifactId && typeof done.prompt !== "string") return null;
+  if (!outer || plainId(outer.job_id) === null) return null;
+  const envelope = outer.kind === "generate";
+  const result = envelope ? objectOf(outer.result) ?? {} : outer;
+  const state = typeof outer.state === "string" && STATES.has(outer.state) ? outer.state : null;
+  if (!state || !envelope && (state !== "running" || plainId(outer.quote_id) === null)) return null;
+  const spent = objectOf(result.credits);
+  const estimate = objectOf(result.estimate);
+  const error = objectOf(outer.error);
+  const progress = objectOf(outer.progress);
+  const notes = result.note_count;
   return {
-    artifactId,
-    file,
-    kind: typeof done.kind === "string" ? clean(done.kind, 24) : "",
-    prompt: typeof done.prompt === "string" ? clean(done.prompt, 300) : "",
-    seconds: count2(done.seconds),
-    provider: typeof done.provider === "string" ? clean(done.provider, 24) : "",
-    actual: count2(credits.actual),
-    estimate: count2(credits.estimate),
-    cap: count2(ledger.cap),
-    left: count2(ledger.left)
+    state,
+    kind: typeof result.kind === "string" ? clean(result.kind, 24) : "",
+    prompt: typeof result.prompt === "string" ? clean(result.prompt, 200) : "",
+    artifactId: plainId(result.artifact_id),
+    file: typeof result.file === "string" ? clean(result.file.split(/[\\/]/).pop() ?? "", 80) : "",
+    outputType: typeof result.output_type === "string" ? clean(result.output_type, 16) : null,
+    seconds: positive(result.seconds),
+    noteCount: typeof notes === "number" && Number.isInteger(notes) && notes >= 0 ? notes : null,
+    estimate: credits(spent?.estimate ?? estimate?.credits),
+    reserved: credits(spent?.reserved ?? estimate?.max_credits),
+    actual: credits(spent?.actual),
+    // A raw job snapshot has no ledger: then none is shown, rather than an older one.
+    ledger: ledgerOf(result.ledger ?? outer.ledger),
+    error: error ? { code: typeof error.code === "string" ? clean(error.code, 40) : "", reason: typeof error.reason === "string" ? clean(error.reason, 200) : "" } : null,
+    message: typeof progress?.message === "string" ? clean(progress.message, 60) : ""
   };
 }
 function costWords(made, t = english) {
-  if (made.actual === null) return made.estimate === null ? "" : t("generate.estimateOnly", num(made.estimate, 0));
-  const spent = t("generate.credits", made.actual, num(made.actual, 0));
-  return made.estimate === null || made.estimate === made.actual ? spent : t("generate.cost", spent, num(made.estimate, 0));
+  const amount = (n) => t("generate.credits", n, num(n, 0));
+  if (made.actual !== null) {
+    return made.estimate === null || made.estimate === made.actual ? amount(made.actual) : t("generate.cost", amount(made.actual), num(made.estimate, 0));
+  }
+  const held = made.reserved ?? made.estimate;
+  if (held === null) return "";
+  return made.state === "running" ? t("generate.reserved", amount(held)) : t("generate.unknownCharge", amount(held));
 }
 function capWords(made, t = english) {
-  return made.cap === null || made.left === null ? "" : t("generate.left", num(made.left, 0), num(made.cap, 0));
+  return made.ledger ? t("generate.left", num(made.ledger.left, 0), num(made.ledger.cap, 0)) : "";
+}
+function isNotes(made) {
+  return made.outputType !== null ? made.outputType !== "audio" : made.kind === "audio_to_midi";
+}
+function generationTitle(made, t = english) {
+  return made.prompt || (isNotes(made) ? t("generate.notesTitle") : t("generate.soundTitle"));
+}
+function generationJobWords(job, t = english) {
+  const words = jobWords(job, t);
+  const made = parseGeneration({ ...job, kind: "generate" });
+  if (!made) return words;
+  const reason = made.state === "failed" || made.state === "interrupted" ? made.error?.reason ?? "" : "";
+  const detail = [made.state === "running" ? made.message : made.file, reason, costWords(made, t), made.ledger?.frozen ? t("generate.frozen") : ""];
+  return { ...words, detail: detail.filter(Boolean).join(" · "), tone: made.ledger?.frozen && words.tone === "good" ? "warn" : words.tone };
+}
+function generationRequest(made, t = english) {
+  if (made.state !== "done" || !made.artifactId) return null;
+  if (isNotes(made)) {
+    const request2 = planNotesRequest(made.artifactId, made.noteCount);
+    return request2 ? { label: t("generate.planNotes"), title: t("generate.planNotesTitle"), request: request2 } : null;
+  }
+  const request = placeRequest(made.artifactId, made.prompt);
+  return request ? { label: t("generate.place"), title: t("generate.placeTitle"), request } : null;
 }
 
 // src/desktop/pane.tsx
@@ -1710,12 +1776,14 @@ function HistoryView({ history, now, action }) {
 // src/desktop/jobs.tsx
 import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
 var TONE2 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
-function JobsView({ jobs }) {
+function JobsView({ jobs, onRequest }) {
   const t = useT();
   const shown = Object.entries(jobs);
   if (!shown.length) return null;
   return /* @__PURE__ */ jsx4("ul", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }, children: shown.map(([id, job]) => {
-    const words = jobWords(job, t);
+    const generation = job.kind === "generate" ? parseGeneration(job) : null;
+    const words = generation ? generationJobWords(job, t) : jobWords(job, t);
+    const offer = generation && onRequest ? generationRequest(generation, t) : null;
     return /* @__PURE__ */ jsxs4("li", { style: { display: "flex", flexDirection: "column", gap: 3 }, children: [
       /* @__PURE__ */ jsxs4("span", { style: { ...S.row, gap: 6 }, children: [
         /* @__PURE__ */ jsx4("span", { style: { ...S.text, color: job.ended_at === null ? T.text : TONE2[words.tone] }, children: words.title }),
@@ -1740,7 +1808,8 @@ function JobsView({ jobs }) {
             }
           )
         }
-      )
+      ),
+      offer && /* @__PURE__ */ jsx4("span", { children: /* @__PURE__ */ jsx4(TextButton, { onClick: () => onRequest?.(offer.request), title: offer.title, children: offer.label }) })
     ] }, id);
   }) });
 }
@@ -1813,7 +1882,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
       step && /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, step.request, { send: true, session: connected ? session : null }), strong: true, children: step.label }) })
     ] }),
     /* @__PURE__ */ jsx5(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx5(FocusView, { focus: state.focus, now }) }),
-    Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx5(Section, { title: t("pane.jobs"), children: /* @__PURE__ */ jsx5(JobsView, { jobs: state.jobs }) }),
+    Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx5(Section, { title: t("pane.jobs"), children: /* @__PURE__ */ jsx5(JobsView, { jobs: state.jobs, onRequest: (request) => void ask(ctx, request, { send: false, session }) }) }),
     /* @__PURE__ */ jsx5(
       Section,
       {
@@ -1841,14 +1910,17 @@ function KumiPane({ ctx, store, onOpenMap }) {
 
 // src/desktop/generate.tsx
 import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+var OUTPUTS = /* @__PURE__ */ new Set(["midi", "notes", "musicxml"]);
+var ENDED = /* @__PURE__ */ new Set(["failed", "cancelled", "interrupted"]);
 function GenerateCard({ media, audition, ctx, store }) {
   const t = useT();
-  const made = parseGenerated(media.result);
+  const made = parseGeneration(media.result);
   if (!made) return media.fallback;
-  const request = made.artifactId ? placeRequest(made.artifactId, made.file) : null;
+  const title = generationTitle(made, t);
+  const notes = isNotes(made);
   const cost = costWords(made, t);
   const left = capWords(made, t);
-  const audio = media.file?.kind === "audio";
+  const offer = generationRequest(made, t);
   return /* @__PURE__ */ jsxs6(
     "div",
     {
@@ -1856,31 +1928,33 @@ function GenerateCard({ media, audition, ctx, store }) {
       style: { display: "flex", flexDirection: "column", gap: 8, maxWidth: 560, padding: "10px 12px", borderRadius: 6, border: `1px solid ${T.border}`, background: T.card, color: T.text },
       children: [
         /* @__PURE__ */ jsxs6("div", { style: { ...S.row, justifyContent: "space-between", alignItems: "flex-start", gap: 8 }, children: [
-          /* @__PURE__ */ jsxs6("span", { style: { ...S.text, fontWeight: 600, minWidth: 0 }, children: [
-            /* @__PURE__ */ jsx6("span", { style: { color: T.accent }, children: audio ? "♪" : "▤" }),
+          /* @__PURE__ */ jsxs6("span", { style: { ...S.text, fontWeight: 600, minWidth: 0, whiteSpace: "normal" }, children: [
+            /* @__PURE__ */ jsx6("span", { style: { color: T.accent }, children: notes ? "♫" : "♪" }),
             " ",
-            made.file
+            made.prompt ? `“${title}”` : title
           ] }),
-          /* @__PURE__ */ jsxs6("span", { style: { ...S.row, gap: 4 }, children: [
-            made.kind === "audio_to_midi" && /* @__PURE__ */ jsx6(Chip, { children: t("generate.midi") }),
+          /* @__PURE__ */ jsxs6("span", { style: { ...S.row, gap: 4, flexShrink: 0 }, children: [
+            made.outputType && OUTPUTS.has(made.outputType) && /* @__PURE__ */ jsx6(Chip, { children: t(`generate.outputs.${made.outputType}`) }),
+            made.noteCount !== null && /* @__PURE__ */ jsx6(Chip, { children: t("generate.notes", made.noteCount, String(made.noteCount)) }),
             made.seconds !== null && /* @__PURE__ */ jsx6(Chip, { children: seconds(made.seconds) }),
-            /* @__PURE__ */ jsx6(Chip, { title: t("generate.generatedTitle", made.provider), tone: "accent", children: t("generate.generated") })
+            ENDED.has(made.state) ? /* @__PURE__ */ jsx6(Chip, { tone: "bad", children: t(`generate.states.${made.state}`) }) : /* @__PURE__ */ jsx6(Chip, { title: t("generate.generatedTitle"), tone: "accent", children: t("generate.generated") })
           ] })
         ] }),
-        made.prompt && /* @__PURE__ */ jsxs6("span", { style: { ...S.muted, whiteSpace: "normal" }, children: [
-          "“",
-          made.prompt,
-          "”"
-        ] }),
-        audio && made.artifactId ? (
+        made.file && /* @__PURE__ */ jsx6("span", { style: { ...S.faint, ...S.ellipsis }, children: made.file }),
+        !notes && made.artifactId && media.file?.kind === "audio" ? (
           // In a row, as in the listen card: the waveform's flex basis is a width there, not a height.
-          /* @__PURE__ */ jsx6("div", { style: { display: "flex" }, children: /* @__PURE__ */ jsx6(Wave, { audition, caption: "", id: made.artifactId, label: made.file }) })
-        ) : media.fallback,
+          /* @__PURE__ */ jsx6("div", { style: { display: "flex" }, children: /* @__PURE__ */ jsx6(Wave, { audition, caption: "", id: made.artifactId, label: title }) })
+        ) : (
+          // Notes, MIDI and MusicXML: Desktop's own file chip, to open or save it.
+          media.fallback
+        ),
+        ENDED.has(made.state) && made.error?.reason && /* @__PURE__ */ jsx6("span", { style: { ...S.muted, whiteSpace: "normal" }, children: made.error.reason }),
         (cost || left) && /* @__PURE__ */ jsxs6("span", { style: { ...S.row, gap: 6, flexWrap: "wrap" }, children: [
-          cost && /* @__PURE__ */ jsx6(Chip, { children: cost }),
+          cost && /* @__PURE__ */ jsx6(Chip, { title: t("generate.creditsTitle"), children: cost }),
           left && /* @__PURE__ */ jsx6("span", { style: S.faint, title: t("generate.capTitle"), children: left })
         ] }),
-        request && /* @__PURE__ */ jsx6("span", { children: /* @__PURE__ */ jsx6(TextButton, { onClick: () => void ask(ctx, request, { send: false, session: ownerSession(store.get()) }), strong: true, title: t("generate.placeTitle"), children: t("generate.place") }) })
+        made.ledger?.frozen && /* @__PURE__ */ jsx6("span", { style: { ...S.text, color: T.warn, whiteSpace: "normal" }, children: t("generate.frozen") }),
+        offer && /* @__PURE__ */ jsx6("span", { children: /* @__PURE__ */ jsx6(TextButton, { onClick: () => void ask(ctx, offer.request, { send: false, session: ownerSession(store.get()) }), strong: true, title: offer.title, children: offer.label }) })
       ]
     }
   );
@@ -2248,7 +2322,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
   const chosen = selected ? model.sounds[selected] : void 0;
   const hovered = hover ? model.points[hover.index] : void 0;
   const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
-  const shown = model.points.reduce((count3, _, index) => count3 + (visible(index) ? 1 : 0), 0);
+  const shown = model.points.reduce((count2, _, index) => count2 + (visible(index) ? 1 : 0), 0);
   return /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
     /* @__PURE__ */ jsxs9("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
       /* @__PURE__ */ jsx9(
@@ -2450,7 +2524,7 @@ import { host as host5 } from "@hermes/plugin-sdk";
 import { useState as useState5 } from "react";
 import { Fragment as Fragment4, jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
-var STATES = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
+var STATES2 = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
 var COMPONENT_STATES = /* @__PURE__ */ new Set(["not_installed", "installed", "outdated", "unknown"]);
 function Line({ label, children }) {
   return /* @__PURE__ */ jsxs12("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
@@ -2481,7 +2555,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
     state.available === false ? /* @__PURE__ */ jsx12("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs12(Fragment4, { children: [
       /* @__PURE__ */ jsxs12("div", { children: [
         /* @__PURE__ */ jsx12("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.setup") }),
-        /* @__PURE__ */ jsx12(Line, { label: t("settings.state"), children: STATES.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
+        /* @__PURE__ */ jsx12(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
         setup?.message && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
         runtime && /* @__PURE__ */ jsxs12(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
@@ -2639,6 +2713,7 @@ var plugin = {
       if (document.visibilityState !== "hidden") void store.refreshJobs();
     }, JOB_POLL_MS);
     ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours((payload) => store.trackJob(payload.job_id)));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.generate.updated`, ours((payload) => store.trackJob(jobOf(payload.card))));
     ctx.onEvent(
       `plugin.${PLUGIN_ID}.settings.changed`,
       ours(() => {
@@ -2743,7 +2818,7 @@ var plugin = {
         id: "generate-card",
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
-          tools: ["kumi_generate", "kumi_job"],
+          tools: ["kumi_job"],
           render: (props) => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(GenerateCard, { audition, ctx, media: props, store }) })
         }
       });

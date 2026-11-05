@@ -1,21 +1,26 @@
-// Kumi's background jobs in the pane: a library scan while it runs, with how far it got, then for a minute how it
-// ended. A job is something Kumi was asked to do in the chat; this only shows it, and changes nothing.
+// Kumi's background jobs in the pane: a library scan or a generation while it runs, with how far it got, then for a
+// minute how it ended. A job is something Kumi was asked to do in the chat; this only shows it. A finished generation
+// offers its one request (Place… or Plan notes…), left unsent in the chat, as its transcript card does (CC-13): with
+// tool progress off, this row is where it shows.
 import { T } from '@kumi/theme'
 
 import { jobWords } from '../shared/format.ts'
+import { generationJobWords, generationRequest, parseGeneration } from '../shared/generate.ts'
 import type { TrackedJob } from '../shared/store.ts'
-import { S, useT } from '../shared/ui.tsx'
+import { S, TextButton, useT } from '../shared/ui.tsx'
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
 
-export function JobsView({ jobs }: { jobs: Record<string, TrackedJob> }) {
+export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>; onRequest?: (request: string) => void }) {
   const t = useT()
   const shown = Object.entries(jobs)
   if (!shown.length) return null
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
       {shown.map(([id, job]) => {
-        const words = jobWords(job, t)
+        const generation = job.kind === 'generate' ? parseGeneration(job) : null
+        const words = generation ? generationJobWords(job, t) : jobWords(job, t)
+        const offer = generation && onRequest ? generationRequest(generation, t) : null
         return (
           <li key={id} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <span style={{ ...S.row, gap: 6 }}>
@@ -37,6 +42,13 @@ export function JobsView({ jobs }: { jobs: Record<string, TrackedJob> }) {
                     opacity: words.fraction === null ? 0.5 : 1
                   }}
                 />
+              </span>
+            )}
+            {offer && (
+              <span>
+                <TextButton onClick={() => onRequest?.(offer.request)} title={offer.title}>
+                  {offer.label}
+                </TextButton>
               </span>
             )}
           </li>

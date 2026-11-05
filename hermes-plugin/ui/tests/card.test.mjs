@@ -302,16 +302,21 @@ test("a track listen's capture note shows as plain text under the capture line, 
   assert.equal(card('  '), card(undefined), 'an empty note adds nothing')
 })
 
-test('the generate card shows the file, its words, the waveform, the cost and the cap, and Place… drafts a request', async () => {
+test('the generate card shows what was asked, the file, the waveform, the cost and the cap, and Place… for audio only', async () => {
   const { GenerateCard } = await load('src/desktop/generate.tsx', { react: 'real' })
-  const media = (result, kind = 'audio') => ({ file: { kind, name: 'Riser 01.wav' }, result, fallback: createElement('i', null, 'player') })
+  const fixtures = await import('./generation.fixtures.mjs')
+  const media = (result, kind = 'audio') => ({ file: { kind }, result, fallback: createElement('i', null, 'player') })
   const audition = new Audition(async () => ({ data_url: 'data:audio/wav;base64,' }))
-  const store = { get: () => ({ status: null }) }
-  const result = { job_id: 'j-gen-1', kind: 'generate', state: 'done', result: { artifact_id: 'a-12', file: 'Riser 01.wav', kind: 'sfx', prompt: 'a rising white-noise sweep', seconds: 4, provider: 'mirelo', credits: { estimate: 15, actual: 12 }, ledger: { cap: 100, left: 48 } } }
-  const html = renderToStaticMarkup(createElement(GenerateCard, { media: media(result), audition, ctx: {}, store }))
-  for (const text of ['Riser 01.wav', '“a rising white-noise sweep”', 'aria-label="Waveform of Riser 01.wav"', '12 credits (est. 15)', '48 of 100 credits left under your cap', 'Place…', 'generated']) {
-    assert.ok(html.includes(text), `${text} in ${html}`)
+  const card = (result, kind) => renderToStaticMarkup(createElement(GenerateCard, { media: media(result, kind), audition, ctx: {}, store: { get: () => ({ status: null }) } }))
+  const audio = card(fixtures.DONE)
+  for (const text of ['“a short metallic impact”', 'a-primary.wav', 'aria-label="Waveform of a short metallic impact"', '12 credits (est. 15)', '68 of 100 credits left under your cap', 'Place…']) {
+    assert.ok(audio.includes(text), `${text} in ${audio}`)
   }
-  // Anything else keeps Desktop's own player.
-  assert.equal(renderToStaticMarkup(createElement(GenerateCard, { media: media({ job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }), audition, ctx: {}, store })), '<i>player</i>')
+  // Notes from audio: Desktop's own file chip, the note count and Plan notes…; no waveform and no Place step.
+  const notes = card(fixtures.MIDI_DONE, 'file')
+  for (const text of ['<i>player</i>', 'MIDI file', '128 notes', 'Plan notes…']) assert.ok(notes.includes(text), `${text} in ${notes}`)
+  assert.ok(!notes.includes('Place…') && !notes.includes('Waveform'))
+  assert.ok(card(fixtures.FROZEN).includes('New paid generations are paused'))
+  // A scan's answer keeps Desktop's own player, unchanged.
+  assert.equal(card({ job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }), '<i>player</i>')
 })

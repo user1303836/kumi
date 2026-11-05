@@ -447,33 +447,42 @@ test('every catalog key the UI names has words in English, Japanese and Chinese,
 })
 
 const generate = await load('src/shared/generate.ts')
+const fixtures = await import('./generation.fixtures.mjs')
 
-test('a finished generation reads as its file, its words, its cost against the estimate and what is left under the cap', () => {
-  const job = {
-    job_id: 'j-gen-1',
-    kind: 'generate',
-    state: 'done',
-    result: {
-      artifact_id: 'a-12',
-      file: '/Users/producer/.hermes/cache/generated/audio/Riser 01.wav',
-      kind: 'sfx',
-      prompt: 'a rising white-noise sweep',
-      seconds: 4,
-      provider: 'mirelo',
-      credits: { estimate: 15, actual: 12 },
-      ledger: { cap: 100, spent: 52, reserved: 0, left: 48 }
-    }
+test('a generation reads as CC-13 says: what is reserved while it runs, the charge against the estimate once known, and the cap from the result in hand', () => {
+  const made = value => generate.parseGeneration(value)
+  assert.equal(generate.costWords(made(fixtures.CREATE)), '15 credits reserved')
+  assert.equal(generate.capWords(made(fixtures.CREATE)), '65 of 100 credits left under your cap')
+  assert.deepEqual(generate.generationJobWords(fixtures.RUNNING), { title: 'Generating', detail: 'Mirelo is generating · 15 credits reserved', fraction: null, tone: 'muted' })
+  const done = made(JSON.stringify(fixtures.DONE))
+  assert.deepEqual([done.file, generate.costWords(done), generate.capWords(done)], ['a-primary.wav', '12 credits (est. 15)', '68 of 100 credits left under your cap'])
+  assert.equal(generate.costWords(done, i18n.translator('ja')), '12 クレジット（見積 15）')
+  // A raw job snapshot has no ledger: no budget is shown, rather than an older one.
+  assert.equal(generate.capWords(made(fixtures.RAW_DONE)), '')
+  // Audio's one request is CC-11's Place, naming the artifact, in English (C5).
+  assert.equal(generate.generationRequest(done, i18n.translator('ja')).request, 'Place “a short metallic impact” (artifact a-primary) in my project')
+})
+
+test('an unknown charge is never a number, a frozen ledger warns, and notes never get an audio Place step', () => {
+  const failed = generate.generationJobWords(fixtures.FAILED_UNKNOWN)
+  assert.deepEqual(failed, { title: 'Generation failed', detail: 'Mirelo didn’t answer after the request was sent · charge not known yet · 15 credits reserved', fraction: null, tone: 'bad' })
+  const frozen = generate.generationJobWords(fixtures.FROZEN)
+  assert.equal(frozen.tone, 'warn')
+  assert.ok(frozen.detail.endsWith('18 credits (est. 15) · New paid generations are paused: a charge came in above its estimate'), frozen.detail)
+  // A charge that isn't a whole, non-negative number of credits is unknown, never rounded or shown.
+  const fractional = { ...fixtures.DONE, result: { ...fixtures.DONE.result, credits: { estimate: 15, reserved: 15, actual: 12.5 } } }
+  assert.equal(generate.costWords(generate.parseGeneration(fractional)), 'charge not known yet · 15 credits reserved')
+  const notes = generate.parseGeneration(fixtures.MIDI_DONE)
+  assert.equal(generate.isNotes(notes), true)
+  assert.deepEqual(generate.generationRequest(notes), {
+    label: 'Plan notes…',
+    title: "Put a request in the chat to plan where these notes go, from your project's own timing, to finish and send",
+    request: "Plan putting the 128 notes from artifact a-midi (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me the plan before changing anything"
+  })
+})
+
+test('a quote, a scan and a refusal before any job are not generations', () => {
+  for (const value of [fixtures.QUOTE, { job_id: 'j-scan-1', kind: 'scan', state: 'running' }, { job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }, { error: { code: 'cap_exceeded', reason: 'Over your cap' }, ledger: {} }]) {
+    assert.equal(generate.parseGeneration(value), null, JSON.stringify(value))
   }
-  const made = generate.parseGenerated(JSON.stringify(job))
-  assert.equal(made.file, 'Riser 01.wav', 'a name, never the path')
-  assert.equal(generate.costWords(made), '12 credits (est. 15)')
-  assert.equal(generate.capWords(made), '48 of 100 credits left under your cap')
-  assert.equal(generate.costWords(made, i18n.translator('ja')), '12 クレジット（見積 15）')
-  assert.deepEqual(format.jobWords(job), { title: 'Generation done', detail: 'Riser 01.wav · 12 credits', fraction: 1, tone: 'good' })
-  // The request to place it names the artifact (CC-11's {artifact_id} source) and stays English.
-  assert.equal(format.placeRequest('a-12', made.file), 'Place “Riser 01.wav” (artifact a-12) in my project')
-  // Not a generation: a scan's answer, a quote, a failure.
-  assert.equal(generate.parseGenerated({ job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 640 } }), null)
-  assert.equal(generate.parseGenerated({ state: 'quoted', quote_id: 'q-1', estimate: { credits: 12, max_credits: 15 } }), null)
-  assert.equal(generate.parseGenerated({ job_id: 'j-gen-2', kind: 'generate', state: 'failed', error: { reason: 'over the cap' } }), null)
 })

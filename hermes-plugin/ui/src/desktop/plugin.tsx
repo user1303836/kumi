@@ -135,6 +135,9 @@ const plugin: HermesPlugin = {
       if (document.visibilityState !== 'hidden') void store.refreshJobs()
     }, JOB_POLL_MS)
     ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours(payload => store.trackJob(payload.job_id)))
+    // CC-13: a generation's card, sent whatever Hermes's tool progress setting is. The Jobs row follows its job; it
+    // creates, places or inserts nothing.
+    ctx.onEvent(`plugin.${PLUGIN_ID}.generate.updated`, ours(payload => store.trackJob(jobOf(payload.card))))
     ctx.onEvent(
       `plugin.${PLUGIN_ID}.settings.changed`,
       ours(() => {
@@ -257,13 +260,14 @@ const plugin: HermesPlugin = {
           )
         }
       })
-      // A sound Kumi had made: `kumi_job`'s answer once the generation is done (or `kumi_generate`'s, if it answers
-      // with the file). Any other result of theirs keeps Desktop's own player or chip.
+      // What Kumi had made through Mirelo: `kumi_job`'s answer for a generation, once Desktop ties its `MEDIA:` line to
+      // the call (CC-13). `kumi_generate` never answers with a file. Any other result keeps Desktop's player or chip; a
+      // scan's answer has no `MEDIA:` line at all.
       contributions.push({
         id: 'generate-card',
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
-          tools: ['kumi_generate', 'kumi_job'],
+          tools: ['kumi_job'],
           render: (props: ToolMediaRendererProps) => (
             <WithT>
               <GenerateCard audition={audition} ctx={ctx} media={props} store={store} />

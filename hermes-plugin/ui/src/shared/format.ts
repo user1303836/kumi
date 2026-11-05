@@ -142,13 +142,6 @@ export function jobWords(job: Job, t: Translate = english): { title: string; det
   }
   if (job.state === 'done') {
     const result = job.result && typeof job.result === 'object' ? (job.result as Record<string, unknown>) : {}
-    if (kind === 'generate') {
-      // A generation's result: the file it made, and the credits it used (C7).
-      const file = typeof result.file === 'string' ? clean(result.file.split(/[\\/]/).pop() ?? '', 60) : ''
-      const credits = result.credits && typeof result.credits === 'object' ? count((result.credits as Record<string, unknown>).actual) : null
-      const detail = [file, credits === null ? '' : t('generate.credits', credits, num(credits, 0))]
-      return { title: t('job.done', noun), detail: detail.filter(Boolean).join(' · '), fraction: 1, tone: 'good' }
-    }
     // A scan's result (W3): `sounds` indexed, `failed` files it couldn't read, as counts.
     const sounds = count(result.sounds)
     const failed = count(result.failed)
@@ -193,13 +186,22 @@ export function quotable(name: unknown, max = 80): string {
   return clean(typeof name === 'string' ? name.replace(QUOTE_MARKS, ' ') : name, max).replace(QUOTE_MARKS, ' ').replace(/\s+/g, ' ').trim()
 }
 
-/** Left unsent in the input, like `soundRequest`: a generated file, by its artifact id, so the model can hand CC-11's
- *  `{artifact_id}` source to the DAW's file step. The producer says where before sending. */
+/** Left unsent in the input, like `soundRequest`: generated audio, by its artifact id, so the model can hand CC-11's
+ *  `{artifact_id}` source to the DAW's file step. The producer says where before sending. Audio only (CC-13). */
 export function placeRequest(artifactId: string, name?: string): string | null {
   const id = plainId(artifactId)
   if (!id) return null
   const said = clean(name ?? '', 80)
   return said ? `Place “${said}” (artifact ${id}) in my project` : `Place artifact ${id} in my project`
+}
+
+/** Left unsent: generated notes never go through an audio file step (CC-13). The request asks for a plan from the
+ *  project's own timing, shown before any separately approved notes or clip change; nothing is inferred or inserted. */
+export function planNotesRequest(artifactId: string, count?: number | null): string | null {
+  const id = plainId(artifactId)
+  if (!id) return null
+  const notes = typeof count === 'number' && Number.isInteger(count) && count >= 0 ? `the ${count} notes` : 'the notes'
+  return `Plan putting ${notes} from artifact ${id} (timing in seconds) in my project: read the project's tempo and where they'd go first, and show me the plan before changing anything`
 }
 
 /** Left unsent in the input, so the producer reads the sound's name before sending; null for an id the runtime

@@ -1,26 +1,42 @@
-// What the generate card shows for a sound Kumi had made (Mirelo, through `kumi_generate`; RESEARCH C1, C7): the file,
-// the words it was made from, what it cost against the estimate, and how much of the producer's cap is left. The
-// result's shape is the one agreed with W3 (agent-m) until its contract change names it; anything else isn't ours.
-import { clean, num, plainId } from './format.ts'
+// A sound or notes Kumi had made through Mirelo (`kumi_generate`, then `kumi_job`), in CC-13's shapes: what was asked,
+// the file it made, what it cost against what was reserved, and the producer's own cap. Credits are Mirelo API credits,
+// never money; `null` is unknown, never zero. Nothing here spends, places or retries anything.
+import { clean, jobWords, num, placeRequest, plainId, planNotesRequest } from './format.ts'
 import { english, type Translate } from './i18n.ts'
+import type { Job } from './types.ts'
 
-/** A `kumi_job` (or `kumi_generate`) result for a finished generation, as far as the card reads it. */
-export interface Generated {
-  artifactId: string | null
-  file: string
-  kind: string
-  prompt: string
-  seconds: number | null
-  provider: string
-  /** Credits the job used, and the approved estimate it was held to (C7). */
-  actual: number | null
-  estimate: number | null
-  /** The producer's cap and what's left under it (the plugin's own budget, not the provider's bill). */
-  cap: number | null
-  left: number | null
+/** The plugin's own budget after reconciliation (C7). Shown only from the result in hand, never kept from an older one. */
+export interface Ledger {
+  cap: number
+  spent: number
+  reserved: number
+  left: number
+  frozen: boolean
 }
 
-const count = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null)
+export interface Generation {
+  /** The job's state: `running`, `done`, `failed`, `cancelled` or `interrupted`. */
+  state: string
+  /** `sfx` or `audio_to_midi`. */
+  kind: string
+  /** What was asked for (a sound effect's words); empty for notes from audio. */
+  prompt: string
+  /** The primary output: its artifact, its basename and its type (`audio`, `midi`, `notes`, `musicxml`). */
+  artifactId: string | null
+  file: string
+  outputType: string | null
+  seconds: number | null
+  noteCount: number | null
+  estimate: number | null
+  reserved: number | null
+  actual: number | null
+  ledger: Ledger | null
+  error: { code: string; reason: string } | null
+  /** What the job is on now, in its own words (a real phase, never a path). */
+  message: string
+}
+
+const STATES = new Set(['running', 'done', 'failed', 'cancelled', 'interrupted'])
 
 function objectOf(value: unknown): Record<string, unknown> | null {
   let found = value
@@ -34,46 +50,100 @@ function objectOf(value: unknown): Record<string, unknown> | null {
   return found && typeof found === 'object' && !Array.isArray(found) ? (found as Record<string, unknown>) : null
 }
 
-/** A finished generation from a tool's result: a `kumi_job` answer `{kind: 'generate', state: 'done', result}`, or
- *  the result itself. Null for anything else (a scan, a quote, a failure): the card isn't drawn for those. */
-export function parseGenerated(value: unknown): Generated | null {
+/** A whole number of credits, or null: unknown, fractional or negative amounts are never shown as a number. */
+const credits = (value: unknown): number | null => (typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null)
+const positive = (value: unknown): number | null => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : null)
+
+function ledgerOf(value: unknown): Ledger | null {
+  const ledger = objectOf(value)
+  if (!ledger) return null
+  const [cap, spent, reserved, left] = [ledger.cap, ledger.spent, ledger.reserved, ledger.left].map(credits)
+  if (cap === null || spent === null || reserved === null || left === null) return null
+  return { cap, spent, reserved, left, frozen: ledger.frozen === true }
+}
+
+/** A generation from a tool's result or a `generate.updated` card: `kumi_job`'s envelope for a `generate` job, or
+ *  `kumi_generate`'s create answer. Null for anything else: a quote (no job yet), a scan, a refusal before a job. */
+export function parseGeneration(value: unknown): Generation | null {
   const outer = objectOf(value)
-  if (!outer) return null
-  // A job's answer carries its own kind ('generate', 'scan') and, once done, the result; a bare result has neither.
-  let done = outer
-  if ('job_id' in outer) {
-    const result = objectOf(outer.result)
-    if (outer.kind !== 'generate' || outer.state !== 'done' || !result) return null
-    done = result
-  }
-  const credits = objectOf(done.credits) ?? {}
-  const ledger = objectOf(done.ledger) ?? {}
-  const artifactId = plainId(done.artifact_id)
-  const file = typeof done.file === 'string' ? clean(done.file.split(/[\\/]/).pop() ?? '', 80) : ''
-  // A generation names what it made and from what: without either, this is some other tool's result.
-  if (!file || (!artifactId && typeof done.prompt !== 'string')) return null
+  if (!outer || plainId(outer.job_id) === null) return null
+  // `kumi_job`'s envelope carries the job's own kind; `kumi_generate`'s create answer is the generation itself, running,
+  // with the quote it consumed. A scan's envelope is neither.
+  const envelope = outer.kind === 'generate'
+  const result = envelope ? objectOf(outer.result) ?? {} : outer
+  const state = typeof outer.state === 'string' && STATES.has(outer.state) ? outer.state : null
+  if (!state || (!envelope && (state !== 'running' || plainId(outer.quote_id) === null))) return null
+  const spent = objectOf(result.credits)
+  const estimate = objectOf(result.estimate)
+  const error = objectOf(outer.error)
+  const progress = objectOf(outer.progress)
+  const notes = result.note_count
   return {
-    artifactId,
-    file,
-    kind: typeof done.kind === 'string' ? clean(done.kind, 24) : '',
-    prompt: typeof done.prompt === 'string' ? clean(done.prompt, 300) : '',
-    seconds: count(done.seconds),
-    provider: typeof done.provider === 'string' ? clean(done.provider, 24) : '',
-    actual: count(credits.actual),
-    estimate: count(credits.estimate),
-    cap: count(ledger.cap),
-    left: count(ledger.left)
+    state,
+    kind: typeof result.kind === 'string' ? clean(result.kind, 24) : '',
+    prompt: typeof result.prompt === 'string' ? clean(result.prompt, 200) : '',
+    artifactId: plainId(result.artifact_id),
+    file: typeof result.file === 'string' ? clean(result.file.split(/[\\/]/).pop() ?? '', 80) : '',
+    outputType: typeof result.output_type === 'string' ? clean(result.output_type, 16) : null,
+    seconds: positive(result.seconds),
+    noteCount: typeof notes === 'number' && Number.isInteger(notes) && notes >= 0 ? notes : null,
+    estimate: credits(spent?.estimate ?? estimate?.credits),
+    reserved: credits(spent?.reserved ?? estimate?.max_credits),
+    actual: credits(spent?.actual),
+    // A raw job snapshot has no ledger: then none is shown, rather than an older one.
+    ledger: ledgerOf(result.ledger ?? outer.ledger),
+    error: error ? { code: typeof error.code === 'string' ? clean(error.code, 40) : '', reason: typeof error.reason === 'string' ? clean(error.reason, 200) : '' } : null,
+    message: typeof progress?.message === 'string' ? clean(progress.message, 60) : ''
   }
 }
 
-/** The cost in words: `12 credits (est. 15)`, or nothing when the result doesn't say. */
-export function costWords(made: Generated, t: Translate = english): string {
-  if (made.actual === null) return made.estimate === null ? '' : t('generate.estimateOnly', num(made.estimate, 0))
-  const spent = t('generate.credits', made.actual, num(made.actual, 0))
-  return made.estimate === null || made.estimate === made.actual ? spent : t('generate.cost', spent, num(made.estimate, 0))
+/** What it cost: `12 credits (est. 15)` once the charge is known; while it runs, what's reserved; after it ended
+ *  without a known charge, that the charge isn't known, with what stays reserved. Never a guessed or zero charge. */
+export function costWords(made: Generation, t: Translate = english): string {
+  const amount = (n: number) => t('generate.credits', n, num(n, 0))
+  if (made.actual !== null) {
+    return made.estimate === null || made.estimate === made.actual ? amount(made.actual) : t('generate.cost', amount(made.actual), num(made.estimate, 0))
+  }
+  const held = made.reserved ?? made.estimate
+  if (held === null) return ''
+  return made.state === 'running' ? t('generate.reserved', amount(held)) : t('generate.unknownCharge', amount(held))
 }
 
-/** What's left under the producer's cap: `48 of 100 credits left under your cap`, or nothing. */
-export function capWords(made: Generated, t: Translate = english): string {
-  return made.cap === null || made.left === null ? '' : t('generate.left', num(made.left, 0), num(made.cap, 0))
+/** What's left under the producer's cap, from this result's ledger only. */
+export function capWords(made: Generation, t: Translate = english): string {
+  return made.ledger ? t('generate.left', num(made.ledger.left, 0), num(made.ledger.cap, 0)) : ''
+}
+
+/** Whether a generation made notes rather than audio: then it has no waveform and no Place step (CC-13). */
+export function isNotes(made: Generation): boolean {
+  return made.outputType !== null ? made.outputType !== 'audio' : made.kind === 'audio_to_midi'
+}
+
+/** What the card and the Jobs row call it: the words it was made from, else what it is. */
+export function generationTitle(made: Generation, t: Translate = english): string {
+  return made.prompt || (isNotes(made) ? t('generate.notesTitle') : t('generate.soundTitle'))
+}
+
+/** A generation job as a Jobs row: the shared title and progress, with its file, its cost and, when the ledger is
+ *  frozen or the job failed, a warning. */
+export function generationJobWords(job: Job, t: Translate = english): ReturnType<typeof jobWords> {
+  const words = jobWords(job, t)
+  const made = parseGeneration({ ...job, kind: 'generate' })
+  if (!made) return words
+  const reason = made.state === 'failed' || made.state === 'interrupted' ? made.error?.reason ?? '' : ''
+  const detail = [made.state === 'running' ? made.message : made.file, reason, costWords(made, t), made.ledger?.frozen ? t('generate.frozen') : '']
+  return { ...words, detail: detail.filter(Boolean).join(' · '), tone: made.ledger?.frozen && words.tone === 'good' ? 'warn' : words.tone }
+}
+
+/** The one thing a finished generation offers, as a request left unsent in the chat: audio goes through CC-11's file
+ *  step (Place…); notes get a plan from the project's own timing first, never an audio step (CC-13). The request
+ *  stays English (C5): it names the producer's own words, never a translated title. */
+export function generationRequest(made: Generation, t: Translate = english): { label: string; title: string; request: string } | null {
+  if (made.state !== 'done' || !made.artifactId) return null
+  if (isNotes(made)) {
+    const request = planNotesRequest(made.artifactId, made.noteCount)
+    return request ? { label: t('generate.planNotes'), title: t('generate.planNotesTitle'), request } : null
+  }
+  const request = placeRequest(made.artifactId, made.prompt)
+  return request ? { label: t('generate.place'), title: t('generate.placeTitle'), request } : null
 }
