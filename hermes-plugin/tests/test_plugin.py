@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+from types import SimpleNamespace
 import unittest
 from unittest import mock
 
@@ -144,6 +145,9 @@ class Tools(unittest.TestCase):
 class Command(unittest.TestCase):
     def test_kumi_says_where_kumi_stands(self):
         commands = support.module("commands")
+        asks = SimpleNamespace(is_current_session_yolo_enabled=lambda: False)  # Hermes's check: this chat isn't /yolo
+        self.enterContext(mock.patch.dict("sys.modules", {"tools": SimpleNamespace(approval=asks),
+                                                          "tools.approval": asks}))
         host, _, data = support.host(self, installed=False)
         self.assertEqual(commands.kumi(host, "", session_id="s1"),
                          "Kumi isn't ready: Kumi needs its runtime: 26.0 MB from github.com/user1303836/kumi. Ask the "

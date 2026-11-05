@@ -191,16 +191,21 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
 
 NO_APPROVALS = ("Hermes's approvals are off here (--yolo, /yolo or approvals.mode: off), so Kumi's changes, track "
                 "listens, folder reads and setup steps run without asking the producer.")
+UNKNOWN_APPROVALS = ("Kumi can't tell whether /yolo is on in this chat (Hermes runs Kumi in its plugin isolation, or "
+                     "doesn't say). If it is, Kumi's changes, track listens, folder reads and setup steps run without "
+                     "asking the producer.")
+# Set in the environment of Hermes's plugin host (`plugins.isolation: host`), whose process holds no chat's /yolo.
+PLUGIN_HOST_ENV = "HERMES_PLUGIN_HOST_PROCESS"
 
 
-def approvals_bypassed(host: Host, *, chat: bool = True) -> bool:
-    """Whether Hermes runs a call it would ask about without asking:
+def approvals_bypassed(host: Host, *, chat: bool = True) -> bool | None:
+    """Whether Hermes runs a call it would ask about without asking, or None when Kumi can't tell:
     - `approvals.mode: off` in Hermes's settings (YAML's bare `off` reads as false);
     - `HERMES_YOLO_MODE` set for this process (what `--yolo` sets);
     - for a chat (`chat`), that chat's `/yolo`. Hermes has no documented way to read it, so this is a stated coupling
-      with Hermes v0.22.7's `tools.approval.is_current_session_yolo_enabled`; if that moves, only a chat's `/yolo`
-      goes unreported.
-    A terminal (`chat=False`) can't see any chat's `/yolo`."""
+      with Hermes v0.22.7's `tools.approval.is_current_session_yolo_enabled` (catalog rule 9 warns of it). In Hermes's
+      plugin host, which holds no chat's /yolo, or when that check is gone or fails, it's None: never a false "asks".
+    A terminal (`chat=False`) can't see any chat's `/yolo`, and says so itself."""
     approvals = host.hermes_config().get("approvals")
     mode = approvals.get("mode") if isinstance(approvals, dict) else None
     if mode is False or (isinstance(mode, str) and mode.strip().lower() == "off"):
@@ -209,11 +214,13 @@ def approvals_bypassed(host: Host, *, chat: bool = True) -> bool:
         return True
     if not chat:
         return False
+    if os.environ.get(PLUGIN_HOST_ENV) == "1":
+        return None
     try:
         from tools.approval import is_current_session_yolo_enabled  # Hermes's; see above
         return bool(is_current_session_yolo_enabled())
     except Exception:
-        return False
+        return None
 
 
 def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -222,8 +229,9 @@ def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
     report: dict[str, Any] = {"setup": setup.status(daw=daw, data_dir=data_dir, plugin_dir=host.plugin_dir),
                               "runtime": None, "connected": False, "daw": daw, "project": None, "owner": None,
                               "capabilities": []}
-    if approvals_bypassed(host):
-        report["approvals"] = NO_APPROVALS  # say it to the producer before changing anything
+    bypassed = approvals_bypassed(host)
+    if bypassed is not False:  # say it to the producer before changing anything
+        report["approvals"] = NO_APPROVALS if bypassed else UNKNOWN_APPROVALS
     try:
         host.install(data_dir)
     except runtime.Unavailable as failure:

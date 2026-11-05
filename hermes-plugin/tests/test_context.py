@@ -227,6 +227,22 @@ class Approvals(unittest.TestCase):
             host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "manual"}})
             self.assertNotIn("approvals", support.call(host, "kumi_status", {}), "Hermes asks: nothing to say")
 
+    def test_where_kumi_cant_see_a_chats_yolo_it_says_so_and_never_that_hermes_asks(self):
+        tools = support.module("tools")
+        gone = SimpleNamespace()  # a Hermes whose tools.approval no longer has the check
+        cases = (("in Hermes's plugin host", mock.patch.dict("os.environ", {tools.PLUGIN_HOST_ENV: "1"}),
+                  self.chat_yolo(False)),
+                 ("the check gone", mock.patch.dict("os.environ", {}),
+                  mock.patch.dict("sys.modules", {"tools": SimpleNamespace(approval=gone), "tools.approval": gone})))
+        for name, environ, approval in cases:
+            with self.subTest(name), environ, approval:
+                host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "manual"}})
+                self.assertEqual(support.call(host, "kumi_status", {})["approvals"], tools.UNKNOWN_APPROVALS)
+                self.assertTrue(commands.kumi(host, "").endswith(tools.UNKNOWN_APPROVALS))
+        with mock.patch.dict("os.environ", {tools.PLUGIN_HOST_ENV: "1"}):
+            host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "off"}})
+            self.assertEqual(support.call(host, "kumi_status", {})["approvals"], tools.NO_APPROVALS, "off is off")
+
     def test_hermes_kumi_status_says_whether_hermes_asks(self):
         host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "off"}})
         self.assertIn("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without asking.",
