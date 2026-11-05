@@ -638,8 +638,9 @@ class RemoteScriptTests(unittest.TestCase):
             def update_display(self): self.served += 1
 
         release, waits, at = threading.Event(), [], [100.0]
+        self.addCleanup(release.set)
         clock = types.SimpleNamespace(perf_counter=lambda: at[0], monotonic=time.monotonic)
-        with patch.object(package, "time", clock), patch.object(package, "_files_check", return_value=lambda: release.wait(5)), \
+        with patch.object(package, "time", clock), patch.object(package, "_files_check", return_value=release.wait), \
                 patch.object(package, "_read_config", return_value={}), patch.object(package, "_Bridge", Bridge):
             surface = package.AbletonMcpBridge(FakeInstance())
             surface._keep_willington = lambda: None
@@ -8097,6 +8098,7 @@ class LingeringTickTests(_BridgeSocketFixture, unittest.TestCase):
             def __exit__(self, *args): return self.inner.__exit__(*args)
             def register(self, *args): return self.inner.register(*args)
             def select(self, timeout):
+                test.assertGreater(timeout, 0, "the tick offers the next step a wait")
                 test.assertEqual(timeout, remote_module.PUMP_LINGER_SECONDS)
                 buffer = self.buffer
                 while b"\n" not in buffer:
