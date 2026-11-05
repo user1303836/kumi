@@ -294,6 +294,7 @@ fn harness(run: Option<Run>, config: impl FnOnce(&mut SessionOptions)) -> Harnes
         tracks: None,
         saved_at: None,
         identity: None,
+        native_epoch: None,
     }));
     let events = Rc::new(RefCell::new(vec![]));
     let out = events.clone();

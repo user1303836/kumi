@@ -107,6 +107,7 @@ async fn reapers_observation_is_its_project_in_short_refs_at_its_place() {
             assert_eq!(seen.label, "REAPER — Night Drive");
             assert_eq!(seen.project.as_ref().map(|p| p.id.as_str()), Some(format!("reaper-{PROJECT_ID}").as_str()));
             assert_eq!(seen.set.as_deref(), Some("4242:0x7f01"));
+            assert_eq!(seen.native_epoch.as_deref(), Some("1"), "the epoch of the snapshot the look read");
             assert_eq!(seen.tracks.as_deref(), Some(&["Drums".to_string(), "Bass".to_string()][..]));
             let context: Value = serde_json::from_str(&seen.context).unwrap();
             assert_eq!(context["daw"], "REAPER");
@@ -210,6 +211,7 @@ async fn an_unsaved_project_is_the_dawss_unsaved_place_and_a_daw_not_there_is_sa
             assert!(away.label.contains("No REAPER access"), "{}", away.label);
             assert!(away.label.contains("no REAPER with Kumi's bridge is running"), "{}", away.label);
             assert!(away.tools.is_empty());
+            assert_eq!(away.native_epoch, None, "a look that read nothing pins no epoch");
             assert_eq!(states.borrow().last(), Some(&ConnectionState::Disconnected));
         })
         .await;

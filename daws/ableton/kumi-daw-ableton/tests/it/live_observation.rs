@@ -451,6 +451,10 @@ async fn a_reference_reaches_the_look_and_one_live_renumbered_is_found_again_or_
 
             // Read at this epoch: where it is.
             let seen = observer.observe(endpoint.as_ref(), Signal::new(), Some(references(vec![track.clone()]))).await.unwrap();
+            // The look carries the epoch it read, as a capture names it.
+            let read_at = connection.epoch.get().map(|epoch| epoch.to_string());
+            assert!(read_at.is_some());
+            assert_eq!(seen.native_epoch, read_at, "the epoch this look read");
             let now = told(seen);
             assert_eq!(now[0]["said"], format!("@{}", first.name));
             assert!(now[0].get("gone").is_none() && now[0]["ref"].as_str().is_some(), "{now}");

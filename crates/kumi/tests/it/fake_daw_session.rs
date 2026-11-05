@@ -255,6 +255,7 @@ impl Integration for FakeIntegration {
             tracks: Some(vec!["Kick".into(), "Bass".into()]),
             saved_at: None,
             identity: None,
+            native_epoch: None,
         })
     }
     async fn close(&self) -> Result<(), RuntimeError> {

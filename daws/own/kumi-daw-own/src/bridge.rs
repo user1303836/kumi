@@ -1657,6 +1657,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                 saved_at: None,
                 open_identity: identity,
             }),
+            // The epoch of this snapshot, the one the look read: never read again after it, so a switch since isn't
+            // taken for the looked state.
+            native_epoch: snapshot.get("epoch").and_then(Value::as_str).map(str::to_owned),
         }
     }
 }
