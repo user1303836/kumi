@@ -386,8 +386,10 @@ def announce(host: Host, tool: str, result: Any, *, status: Any, session_id: Any
 
 
 # What runs without asking first when Hermes's approvals are off: every call Kumi asks about (policy.py). One list,
-# said the same everywhere (research-1's copy review, P3).
-UNASKED = "Kumi's changes, undos, track listens, sample-folder adds and scans, and setup steps"
+# said the same everywhere (research-1's copy review, P3). Paid generations and their uploads are among them: only a
+# turn with nobody in it refuses them (policy._paid, policy._upload), and the credit cap bounds what they spend (#1079).
+UNASKED = ("Kumi's changes, undos, track listens, sample-folder adds and scans, setup steps, and paid Mirelo generations "
+           "and the files they send to Mirelo (up to the credit cap)")
 NO_APPROVALS = (f"Hermes's approvals are off here (--yolo, /yolo or approvals.mode: off), so {UNASKED} run without "
                 "asking first.")
 UNKNOWN_APPROVALS = ("Kumi can't tell whether /yolo is on in this chat (Hermes runs Kumi in its plugin isolation, or "
