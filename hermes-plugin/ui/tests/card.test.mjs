@@ -263,3 +263,19 @@ test('what the agent found, or a search, is also listed by name above the map, f
   assert.ok(!draw({ revision: 'r6', ids }).includes('Sounds Kumi found'))
   assert.ok(!draw(null).includes('Sounds Kumi found'))
 })
+
+test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why an undo didn't happen", async () => {
+  const { HistoryView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
+  // #965's rows: `track` a plain name, `note` the runtime's words, an earlier runtime's rows with no undo.
+  const history = {
+    items: [
+      { id: 'h-g2-u1', label: '', title: 'Raise the Drums fader', family: 'unsure', state: 'unsure', undo_available: false, note: 'Live stopped answering mid-change.', runtime_generation: 'g2' },
+      { id: 'h-g2-c3', label: 'c3', title: 'Bass muted', family: 'mixer', state: 'kept', undo_available: false, track: 'Bass', note: 'Bass was changed by hand since, so Kumi kept it.', runtime_generation: 'g2' },
+      { id: 'h-g1-c9', label: 'c9', title: 'Tempo 120 → 124', family: 'tempo', state: 'applied', undo_available: false, runtime_generation: 'g1' }
+    ]
+  }
+  const html = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, action: () => null }))
+  for (const text of ['Live stopped answering mid-change.', 'Ask Kumi to look again before another change.', 'Bass was changed by hand since, so Kumi kept it.', 'Bass · mixer · c3', 'Tempo 120 → 124']) {
+    assert.ok(html.includes(text), `${text} in ${html}`)
+  }
+})

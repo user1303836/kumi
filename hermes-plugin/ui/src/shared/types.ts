@@ -102,9 +102,13 @@ export interface HistoryItem {
   undo_available?: boolean
   track?: Named
   project_key?: string
+  /** The runtime that made it: an earlier runtime's rows come back as the record, with `undo_available` false. */
+  runtime_generation?: string
   /** Why a row is partial or unsure, and whether Kumi put back what it changed meanwhile (CC-2). */
   reason?: string
   cleanup?: string
+  /** What `kumi serve` (#965) writes in plain words: why an undo didn't happen, or what's unsure. */
+  note?: string
 }
 
 export interface History extends Liveness {

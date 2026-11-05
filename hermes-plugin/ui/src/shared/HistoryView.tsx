@@ -97,12 +97,15 @@ export function HistoryView({ history, now, action }: { history: History | null;
                   {[track && clean(track, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now)].filter(Boolean).join(' · ')}
                 </span>
               </span>
-              {(item.state === 'unsure' || item.state === 'partial') && (
+              {item.state === 'unsure' || item.state === 'partial' ? (
                 <span style={{ ...S.muted, color: T.warn, whiteSpace: 'normal' }}>
-                  {[clean(item.reason ?? 'Kumi couldn’t confirm what happened.', 200), cleanupWords(item.cleanup), 'Ask Kumi to look again before another change.']
+                  {[clean(item.reason ?? item.note ?? 'Kumi couldn’t confirm what happened.', 200), cleanupWords(item.cleanup), 'Ask Kumi to look again before another change.']
                     .filter(Boolean)
                     .join(' ')}
                 </span>
+              ) : (
+                // The runtime's own words for any other row: why an undo didn't happen, say.
+                item.note && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{clean(item.note, 200)}</span>
               )}
             </span>
             {action?.(item)}
