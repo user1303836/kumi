@@ -25,7 +25,7 @@ TARGETS = {
     "status": "whether Kumi is connected, and to which project",
 }
 HISTORY_ROWS = 10
-STATES = {"applied", "undone", "kept", "unsure", "expired", "heard"}  # a HISTORY row's states (serve/history.rs)
+STATES = {"applied", "failed", "undone", "kept", "unsure", "expired", "heard"}  # a HISTORY row's (serve/history.rs)
 RESTARTED = "can't be undone: Kumi restarted since"  # kumi-adv's D2, with Desktop's and the runtime's words
 
 

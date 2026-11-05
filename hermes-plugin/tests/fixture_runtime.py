@@ -529,6 +529,7 @@ def script(fixture: Fixture, args: dict, host: dict) -> dict:
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
                             "runtime_generation": fixture.generation, "title": f"Script: {args.get('purpose')}",
                             "family": "script", "at": now(), "state": "applied", "undo_available": False,
+                            "note": SCRIPT_UNDO.format(daw=DAW_NAMES[fixture.daw]),
                             "track": None, "script": {"sha256": digest, "language": args["language"]},
                             "tool_call_id": host.get("tool_call_id"), "call_outcome": "applied"})
     fixture.publish("history", "focus")
