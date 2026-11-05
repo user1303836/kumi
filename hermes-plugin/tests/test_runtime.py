@@ -3,7 +3,9 @@ runtime, calls and their errors, a runtime that stops, doesn't answer, floods it
 exit, events, one runtime per profile, and who stops it (its chat, idleness)."""
 from __future__ import annotations
 
+import contextvars
 import json
+import logging
 import os
 from pathlib import Path
 import stat
@@ -187,6 +189,35 @@ class Runtimes(unittest.TestCase):
         self.assertEqual(len(answers), 1, "the slow call outlived the idle time and was answered")
         self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "then, idle, it stopped")
         self.assertTrue(eventually(lambda: not live.client.running), "and its process ended")
+
+    def test_an_idle_runtime_is_stopped_in_the_context_of_the_profile_that_started_it(self):
+        profile = contextvars.ContextVar("profile")
+        heard: list[tuple[object, object]] = []
+
+        class Heard(logging.Handler):
+            def emit(self, record):
+                subject = record.args[0] if isinstance(record.args, tuple) and record.args else None
+                heard.append((subject, profile.get(None)))
+
+        handler, level = Heard(logging.INFO), runtime.log.level
+        runtime.log.addHandler(handler)
+        runtime.log.setLevel(logging.INFO)
+        self.addCleanup(runtime.log.setLevel, level)
+        self.addCleanup(runtime.log.removeHandler, handler)
+        runtimes = self.make(idle_after=0.3)
+        other = Path(self.enterContext(tempfile.TemporaryDirectory()))
+
+        def start(name: str, data: Path) -> None:
+            profile.set(name)
+            support.install(data)
+            runtimes.start(data, runtime.installed(data, support.VERSION), "ableton", None, profile=name)
+
+        contextvars.copy_context().run(start, "first", self.data)  # this start begins the one idle watch
+        contextvars.copy_context().run(start, "second", other)
+        self.assertTrue(eventually(lambda: runtimes.get(self.data) is None and runtimes.get(other) is None))
+        about_second = [name for subject, name in heard if subject == other]
+        self.assertTrue(about_second, "its idle stop was logged")
+        self.assertEqual(set(about_second), {"second"}, "never in the first profile's context")
 
     def test_a_chats_end_mid_call_returns_at_once_and_the_runtime_settles_holding_the_profile(self):
         live = self.start("--slow", "history=3")  # a call that takes a while to settle, as a cancelled render does

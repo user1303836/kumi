@@ -12,13 +12,17 @@ helpers are imported where they're used.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
+import posixpath
 import re
 import stat
 import time
 from pathlib import Path
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 SCHEMA = 1
 # A heartbeat older than this makes the state stale: shown as last known, never acted on (C3).
@@ -270,16 +274,19 @@ def _inside(path: str, roots: list[Path]) -> bool:
 # (`C:x`, `\x`), which depends on the process's own drive and folder, and one Windows would read as something else: a
 # reserved device name (`NUL`, `COM1.wav`), a name ending in a dot or space (Windows drops them, so `a.wav.` is
 # `a.wav`), or an alternate data stream (`a.wav:hidden`). Network folders therefore can't be auditioned on Windows.
+# Elsewhere, the automounter's network roots (`/net`, macOS's `/Network`) are refused the same way: looking one up mounts
+# another machine's share.
 _VERBATIM_DRIVE = re.compile(r"^[\\/]{2}\?[\\/](?=[A-Za-z]:[\\/])")
 _DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
 _RESERVED = re.compile(r"^(?:CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]|CONIN\$|CONOUT\$) *(?:\..*)?$", re.IGNORECASE)
+_NETWORK_ROOT = re.compile(r"^/(?:net|Network)(?:/|$)", re.IGNORECASE)
 
 
-def _local(path: str, windows: bool = os.name == "nt") -> str | None:
-    """`path` as a file path on this machine, in the form the containment check compares; None for one never served.
-    Elsewhere than Windows it is returned as it is."""
+def local(path: str, windows: bool = os.name == "nt") -> str | None:
+    """`path` as a file path on this machine, in the form the containment check compares; None for one never served
+    or read, decided without touching the filesystem. Elsewhere than Windows it is returned as it is."""
     if not windows:
-        return path
+        return None if _NETWORK_ROOT.match(posixpath.normpath(path).replace("//", "/", 1)) else path
     plain = _VERBATIM_DRIVE.sub("", path, count=1)
     if not _DRIVE_ABSOLUTE.match(plain) or ":" in plain[2:]:
         return None
@@ -291,10 +298,89 @@ def _local(path: str, windows: bool = os.name == "nt") -> str | None:
     return plain
 
 
-def _resolved(path: str, windows: bool = os.name == "nt") -> str | None:
-    """`path` (already through `_local`) with its links resolved, checked again: a link inside an approved folder, or a
+def resolved(path: str, windows: bool = os.name == "nt") -> str | None:
+    """`path` (already through `local`) with its links resolved, checked again: a link inside an approved folder, or a
     folder that is one, can lead to a network share, and a long path can come back in the verbatim form."""
-    return _local(os.path.realpath(path), windows)
+    return local(os.path.realpath(path), windows)
+
+
+def hermes_home() -> str | None:
+    """This profile's Hermes home (`hermes_constants.get_hermes_home`), or None where Hermes isn't importable."""
+    try:
+        from hermes_constants import get_hermes_home  # Hermes's
+
+        return str(get_hermes_home())
+    except Exception:
+        return None
+
+
+def library_folder(folder: Any, *, hermes_home: str | None = None) -> tuple[str | None, str | None]:
+    """A sample folder the producer may approve, as Kumi will keep and read it: an absolute path (`~` expanded; on
+    Windows with its drive), normalized. A network or device path is refused before anything touches the filesystem
+    (`local`: even a lookup can reach another machine). Its real place, links followed and matched by identity, is
+    never a disk's or volume's root, the home folder or one holding it, nor Hermes's own folder, inside or holding it
+    (`hermes_home`). Returns (folder, None), or (None, why not)."""
+    if not isinstance(folder, str) or not folder.strip():
+        return None, "name the folder, as a full path."
+    if any(ord(char) < 32 or ord(char) == 127 for char in folder):
+        return None, "the folder's name has control characters."
+    expanded = os.path.expanduser(folder)
+    if not Path(expanded).is_absolute():
+        return None, f"{folder!r} isn't a full path."
+    normal = os.path.normpath(expanded)
+    if local(normal) is None:
+        return None, f"{normal} is a network or device path; name a folder on this computer."
+    real = resolved(normal)
+    if real is None:
+        return None, f"{normal} leads to a network or device path; name a folder on this computer."
+    if os.path.dirname(real) == real or os.path.ismount(real):
+        return None, f"{normal} is a whole disk or volume; name a sample folder."
+    if _holds(real, os.path.expanduser("~")):
+        return None, "that's the home folder, or a folder holding it; name a sample folder."
+    if hermes_home and (_holds(real, hermes_home) or _within(real, hermes_home)):
+        return None, "that's Hermes's own folder; name a sample folder."
+    return normal, None
+
+
+def library_folders(folders: Any, *, hermes_home: str | None = None) -> list[str]:
+    """The `library_folders` setting as the guard keeps it: each folder normalized, once. One the guard refuses
+    (relative, a disk, the home folder, Hermes's own, a network path), however it got into the setting, is left out
+    with a warning: `kumi serve` would refuse to start with it, and no media route reads it."""
+    kept: list[str] = []
+    for folder in folders if isinstance(folders, list) else []:
+        normal, refusal = library_folder(folder, hermes_home=hermes_home)
+        if normal is None:
+            log.warning("Kumi left a sample folder setting out: %s", refusal)
+        elif normal not in kept:
+            kept.append(normal)
+    return kept
+
+
+def _holds(folder: str, target: str) -> bool:
+    """Whether `folder` is `target` or holds it, under any name: the path that reaches `target` from one of its own
+    folders (itself included) reaches it from `folder` too. So a link to home or above counts, and so does macOS's
+    /System/Volumes/Data, which isn't / (nor a mount point) but holds home as Users/<name> (rgzm)."""
+    place = Path(os.path.realpath(target))
+    for parent in (place, *place.parents):
+        try:
+            if os.path.samefile(os.path.join(folder, os.path.relpath(place, parent)), place):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def _within(folder: str, root: str) -> bool:
+    """Whether `folder` is inside `root`, by identity: one of its folders is `root` under any spelling, so a
+    case-insensitive disk's other spelling of it counts (rgzm)."""
+    for parent in Path(folder).parents:
+        try:
+            if os.path.samefile(parent, root):
+                return True
+        except OSError:
+            continue
+    return False
+
 
 
 # The keys every snapshot carries around its own data.
@@ -316,22 +402,18 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
     an artifact (artifacts.json) whose real path is inside `<state>/artifacts` or an approved sample folder, and a
     sound of the current map revision whose real path is inside an approved sample folder. Nothing else in the plugin
     data (Kumi's home, the runtime, setup) is ever served. The file must be a regular one, at most 50 MiB."""
-    approved = [Path(real) for real in (_resolved(local) for local in (_local(os.path.expanduser(f)) for f in library_folders or [] if isinstance(f, str) and f) if local) if real]
+    approved = _approved(library_folders)
     entry: dict | None = _artifacts(state).get(media_id)
     if entry is not None:
-        roots = [Path(real) for real in [_resolved(str(state / "artifacts"))] if real] + approved
+        roots = _artifact_roots(state) + approved
     else:
         found = sound(state, media_id)
         if found is None:
             return None
         entry = {"path": found.get("path"), "kind": "audio", "mime": found.get("mime")}
         roots = approved
-    path = entry.get("path")
-    local = _local(path) if isinstance(path, str) and path else None
-    real = _resolved(local) if local is not None else None
+    real = _real_file(entry.get("path"), roots)
     if real is None:
-        return None
-    if not _inside(real, roots) or not os.path.isfile(real):
         return None
     size = os.path.getsize(real)
     if size > MEDIA_MAX_BYTES:
@@ -341,6 +423,30 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
     if not isinstance(mime, str) or not _MEDIA_TYPE.fullmatch(mime):
         return None
     return {"id": media_id, "path": real, "kind": entry.get("kind") or "audio", "mime": mime, "bytes": size}
+
+
+def artifact_file(state: Path, artifact_id: str) -> str | None:
+    """The real path of a file the runtime kept as an artifact (artifacts.json) in `<state>/artifacts`, a regular
+    file, or None. A listen's `MEDIA:` line may name only this: no size or type limit, as it names the file and
+    doesn't serve it."""
+    entry = _artifacts(state).get(artifact_id)
+    return _real_file(entry.get("path"), _artifact_roots(state)) if entry is not None else None
+
+
+def _artifact_roots(state: Path) -> list[Path]:
+    return [Path(real) for real in [resolved(str(state / "artifacts"))] if real]
+
+
+def _approved(library_folders: list[str] | None) -> list[Path]:
+    found = (local(os.path.expanduser(f)) for f in library_folders or [] if isinstance(f, str) and f)
+    return [Path(real) for real in (resolved(path) for path in found if path) if real]
+
+
+def _real_file(path: Any, roots: list[Path]) -> str | None:
+    """`path`'s real place when it's a regular file inside one of `roots`, checked as `media()` checks a file."""
+    found = local(path) if isinstance(path, str) and path else None
+    real = resolved(found) if found is not None else None
+    return real if real is not None and _inside(real, roots) and os.path.isfile(real) else None
 
 
 def read_media(state: Path, media_id: str, library_folders: list[str] | None = None) -> tuple[dict, bytes] | None:

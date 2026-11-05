@@ -52,6 +52,7 @@ class Fixture:
         self.options = options
         self.state = Path(options.state_dir)
         self.state.mkdir(parents=True, exist_ok=True)
+        self.artifacts: dict[str, dict] = {}  # artifacts.json's table, as W3's runtime keeps a measured file
         self.seq = 0
         self.connected = False
         self.daw = options.daw
@@ -381,7 +382,27 @@ def listen(fixture: Fixture, args: dict, host: dict) -> dict:
         return error("not_found", "Kumi can only measure a sound of the current map in the fixture.")
     return {"metrics": analysis(lufs=-14.2, peak=-1.3, centroid=1840.0, seconds=0.42), "artifact_id": "a-1",
             "verdict_text": "Measured: -14.2 LUFS, true peak -1.3 dBTP, centroid 1840 Hz.",
-            "media_tag": "MEDIA:/fixture/Dusty Snare 04.wav"}
+            "media_tag": kept(fixture, "a-1")}
+
+
+# A short silent WAV (44-byte header, 4 samples), standing in for a measured file.
+WAV = (b"RIFF" + (44 - 8 + 8).to_bytes(4, "little") + b"WAVEfmt " + (16).to_bytes(4, "little")
+       + (1).to_bytes(2, "little") + (1).to_bytes(2, "little") + (48000).to_bytes(4, "little")
+       + (96000).to_bytes(4, "little") + (2).to_bytes(2, "little") + (16).to_bytes(2, "little")
+       + b"data" + (8).to_bytes(4, "little") + bytes(8))
+
+
+def kept(fixture: Fixture, artifact_id: str) -> str:
+    """A measured file kept as W3's runtime keeps one: `<state>/artifacts/<id>.wav`, listed in artifacts.json. Its
+    `MEDIA:` line."""
+    path = fixture.state / "artifacts" / f"{artifact_id}.wav"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(WAV)
+    fixture.artifacts[artifact_id] = {"path": str(path), "kind": "audio", "mime": "audio/wav", "tool": "listen",
+                                      "at": now()}
+    fixture.record("artifacts.json", {"schema": 1, "seq": fixture.next_seq(), "at": now(), "owner": fixture.owner,
+                                      "artifacts": dict(fixture.artifacts)})
+    return f"MEDIA:{path}"
 
 
 def analysis(*, lufs: float, peak: float, centroid: float, seconds: float) -> dict:
@@ -440,9 +461,9 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
         unsure = {"state": "unsure", "code": "restore_failed", "cleanup": "unsure",
                   "reason": "Kumi couldn't confirm Live's routing was put back."}
         if outcome == "unsure-with-media":
-            unsure.update(measured, artifact_id="a-partial", media_tag="MEDIA:/fixture/artifacts/a-partial.wav")
+            unsure.update(measured, artifact_id="a-partial", media_tag=kept(fixture, "a-partial"))
         return unsure
-    return {**measured, "artifact_id": "a-track-1", "media_tag": "MEDIA:/fixture/artifacts/a-track-1.wav",
+    return {**measured, "artifact_id": "a-track-1", "media_tag": kept(fixture, "a-track-1"),
             "capture": {"method": "ears", "from_beat": start, "beats": beats, "seconds": round(seconds, 2),
                         "cleanup": "restored"}}
 

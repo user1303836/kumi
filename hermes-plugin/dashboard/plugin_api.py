@@ -61,10 +61,9 @@ def _setting(key: str) -> object:
 
 
 def _library_folders() -> list[str]:
-    """The sample folders the user approved (the plugin's `library_folders` setting): the only places besides the
-    plugin's own data that a media route may read."""
-    folders = _setting("library_folders")
-    return [folder for folder in folders if isinstance(folder, str)] if isinstance(folders, list) else []
+    """The sample folders the user approved (the plugin's `library_folders` setting), as the guard keeps them
+    (`snapshots.library_folders`): the only places besides the plugin's own data that a media route may read."""
+    return snapshots.library_folders(_setting("library_folders"), hermes_home=snapshots.hermes_home())
 
 
 def _liveness(state: Path) -> dict:
