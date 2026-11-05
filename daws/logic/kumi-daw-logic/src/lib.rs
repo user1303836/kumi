@@ -260,6 +260,7 @@ fn lanes_timeline(body: &Value) -> TimelineStrip {
             track_ref: lane.get("trackRef").and_then(Value::as_str).map(str::to_owned),
             color: lane.get("color").and_then(Value::as_str).filter(|c| c.starts_with('#')).map(str::to_owned),
             depth: number(lane, "depth").unwrap_or(0.).max(0.) as u32,
+            fixed_lanes: None,
             items: list(lane, "regions")
                 .filter_map(|region| {
                     let (start, end) = (number(region, "startBeats")?, number(region, "endBeats")?);
@@ -269,6 +270,8 @@ fn lanes_timeline(body: &Value) -> TimelineStrip {
                         name: text(region, "name"),
                         muted: flag(region, "muted"),
                         selected: flag(region, "selected"),
+                        lane: None,
+                        silent: false,
                     })
                 })
                 .collect(),
@@ -281,7 +284,7 @@ fn lanes_timeline(body: &Value) -> TimelineStrip {
     let mut locators: Vec<Locator> = list(body, "markers")
         .filter_map(|marker| {
             let position = number(marker, "positionBeats").or_else(|| beats_of(marker.get("position")?, beats_per_bar(body)))?;
-            Some(Locator { name: text(marker, "name"), position })
+            Some(Locator { name: text(marker, "name"), position, end: None })
         })
         .collect();
     locators.sort_by(|a, b| a.position.total_cmp(&b.position));
@@ -300,6 +303,8 @@ fn lanes_timeline(body: &Value) -> TimelineStrip {
         time_selection: None,
         track_count: number(body, "trackCount").map(|n| n.max(0.) as usize),
         lanes_from: number(body, "from").map(|n| n.max(0.) as usize),
+        // The read window is a query bound, not Logic's visible viewport.
+        window: None,
     }
 }
 
