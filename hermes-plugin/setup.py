@@ -26,6 +26,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import posixpath
 import re
 import secrets
 import shutil
@@ -203,7 +204,11 @@ _FFMPEG_FOLDERS = {"darwin": ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local
 _IDENTITY = ("path", "size", "mtime_ns", "ino")
 _WINDOWS_LOCAL = re.compile(r"[A-Za-z]:[\\/]")
 _DRIVE_FIXED = 3  # GetDriveTypeW's local disk: not removable, a network drive, a CD or a RAM disk
-_AUTOMOUNTS = ("/net/", "/network/")  # macOS mounts a server's share there on first touch
+# Where the automounter mounts a server's share on first touch: `/net`, macOS's `/Network`, both again under macOS's
+# firmlinked `/System/Volumes/Data`, and on macOS `/home` (auto_home; Linux's is a plain folder). snapshots.local keeps
+# the same list.
+_AUTOMOUNTS = ("/net/", "/network/", "/system/volumes/data/net/", "/system/volumes/data/network/")
+_AUTO_HOME = ("/home/", "/system/volumes/data/home/")
 
 
 def _local(path: str, windows: bool | None = None) -> bool:
@@ -221,15 +226,17 @@ def _drive_type(root: str) -> int:
     return ctypes.windll.kernel32.GetDriveTypeW(ctypes.c_wchar_p(root))
 
 
-def _on_this_computer(path: str, windows: bool | None = None) -> bool:
+def _on_this_computer(path: str, windows: bool | None = None, darwin: bool | None = None) -> bool:
     """Whether `path` can be touched without reaching another computer: `_local()`, then on Windows a fixed drive
-    (never a mapped network drive such as `Z:\\`), elsewhere nothing under an automount folder (`/net`, `/Network`)."""
+    (never a mapped network drive such as `Z:\\`), elsewhere nothing under an automount folder (`_AUTOMOUNTS`)."""
     windows = os.name == "nt" if windows is None else windows
     if not _local(path, windows):
         return False
     if windows:
         return _drive_type(path[0].upper() + ":\\") == _DRIVE_FIXED
-    return not (path + "/").casefold().startswith(_AUTOMOUNTS)
+    folded = (posixpath.normpath(path) + "/").casefold()
+    darwin = sys.platform == "darwin" if darwin is None else darwin
+    return not folded.startswith(_AUTOMOUNTS) and not (darwin and folded.startswith(_AUTO_HOME))
 
 
 def _ffmpeg_search(env: Mapping[str, str] | None = None, platform_name: str | None = None) -> list[str]:
@@ -249,9 +256,10 @@ def _ffmpeg_search(env: Mapping[str, str] | None = None, platform_name: str | No
 
 def _resolved(path: str) -> str | None:
     """`path` with every link in it followed from the root down, as `realpath` would (a Homebrew link becomes its
-    Cellar file), except that each link's target is read without following it (`readlink`) and must be on this
-    computer before anything under it is touched: a folder linked to a network share is never reached. None if a
-    target isn't, or the links loop."""
+    Cellar file), except that nothing is looked up before it's known to be on this computer: each step on the way (a
+    relative link can climb into `/net`), and each link's target, read without following it (`readlink`). A folder
+    linked to a network share is never reached. None if a step or target isn't, or the links loop. snapshots.follow
+    keeps the same rules (the dashboard loads each file on its own, so neither can import the other)."""
     if not _on_this_computer(path):
         return None
     anchor, *names = Path(path).parts
@@ -264,9 +272,10 @@ def _resolved(path: str) -> str | None:
             resolved = os.path.dirname(resolved)
             continue
         step = os.path.join(resolved, name)
+        if not _on_this_computer(step):  # before its lstat: looking up a network root mounts it
+            return None
         try:  # lstat and readlink: neither follows `step`, and everything above it is already resolved
-            linked = os.path.islink(step) or getattr(os.path, "isjunction", lambda _: False)(step)
-            target = os.readlink(step) if linked else None
+            target = os.readlink(step) if _linked(step) else None
         except (OSError, ValueError):
             return None
         if target is None:
@@ -287,6 +296,17 @@ def _resolved(path: str) -> str | None:
         return None
     real = os.path.realpath(resolved)  # no links are left: this only spells it canonically (Windows: 8.3 names, case)
     return real if _on_this_computer(real) else None
+
+
+def _linked(path: str) -> bool:
+    """Whether `path` is a link, or on Windows a junction (a mount-point reparse point, which `os.path.isjunction` sees
+    only from Python 3.12), from one `lstat` that follows neither. A path that isn't there is no link."""
+    try:
+        info = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISLNK(info.st_mode) or (getattr(info, "st_reparse_tag", 0) != 0
+                                          and info.st_reparse_tag == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", -1))
 
 
 def _identity(path: str) -> dict | None:
@@ -333,23 +353,30 @@ def _allowed_ffmpeg(data_dir: Path) -> tuple[str, str | None]:
 def compressed_audio(data_dir: Path, env: Mapping[str, str] | None = None) -> dict:
     """Whether Kumi's runtime can decode MP3, FLAC and other compressed audio: `{"state": "available" | "changed" |
     "gone" | "not_allowed", "ffmpeg": the allowed path, "found": an ffmpeg setup could offer, "message"}`. `message`
-    is the line `kumi_status` and `hermes kumi status` show. No subprocess."""
+    is the line `hermes kumi status` shows (`for_model` says it without the paths). No subprocess."""
     state, path = _allowed_ffmpeg(data_dir)
-    if state == "available":
-        return {"state": state, "ffmpeg": path, "found": None,
-                "message": f"Compressed audio (MP3, FLAC…): yes, with the ffmpeg at {path}."}
-    found = find_ffmpeg(env)
+    found = None if state == "available" else find_ffmpeg(env)
     offer = found["path"] if found else None
-    why = {"changed": f"The ffmpeg at {path} changed since you allowed it",
-           "gone": f"The ffmpeg you allowed ({path}) is gone"}.get(state, "Kumi reads WAV and AIFF only")
+    return {"state": state, "ffmpeg": path, "found": offer, "message": _audio_line(state, path, offer)}
+
+
+def _audio_line(state: str, path: str | None, offer: str | None, *, paths: bool = True) -> str:
+    """`compressed_audio`'s line; without `paths`, the same line naming no path on this computer."""
+    if state == "available":
+        return f"Compressed audio (MP3, FLAC…): yes, with the ffmpeg {f'at {path}' if paths else 'you allowed'}."
+    why = {"changed": f"The ffmpeg at {path} changed since you allowed it" if paths else
+           "The ffmpeg you allowed has changed since you allowed it",
+           "gone": f"The ffmpeg you allowed ({path}) is gone" if paths else "The ffmpeg you allowed is gone"
+           }.get(state, "Kumi reads WAV and AIFF only")
     if offer:
-        allow = "allow it again" if offer == path else f"let Kumi use the ffmpeg at {offer}"
+        other = f"let Kumi use the ffmpeg at {offer}" if paths else "let Kumi use the ffmpeg setup found"
+        allow = "allow it again" if offer == path else other
         message = f"{why}; to {allow}, run hermes kumi setup (or ask Hermes to set up Kumi)."
     elif state == "not_allowed":
         message = f"{why}: there's no ffmpeg on this computer."
     else:
         message = f"{why}, and there's no other ffmpeg on this computer; Kumi reads WAV and AIFF only."
-    return {"state": state, "ffmpeg": path, "found": offer, "message": f"Compressed audio (MP3, FLAC…): no. {message}"}
+    return f"Compressed audio (MP3, FLAC…): no. {message}"
 
 
 # ---- status: read-only ---------------------------------------------------------------------------------------------
@@ -421,6 +448,67 @@ def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: 
     else:
         result.update(state="ready", next_step="connect", message=f"Kumi is set up; open {DAWS[daw]} and connect.")
     return result
+
+
+def for_model(report: Mapping[str, Any]) -> dict:
+    """`status()` as `kumi_status` gives it to the model: where setup stands and what's next, with no path on this
+    computer in it (the producer's home, the runtime's and the DAW's folders, where ffmpeg is), which the model has no
+    use for and a chat's transcript shouldn't carry (adversarial review LOW 11). `hermes kumi status` shows them."""
+    shown = {key: report.get(key) for key in ("schema", "state", "target", "pinned_version", "download_bytes",
+                                               "unpacked_bytes", "daw", "next_step", "message")}
+    if report.get("state") == "no_pin":  # a pin that can't be read says why in words that may name its file
+        shown["message"] = "This copy of the plugin has no Kumi release it can set up; hermes kumi status says why."
+    runtime = report.get("runtime") or {}
+    shown["runtime"] = {key: runtime[key] for key in ("installed", "version", "installed_at") if key in runtime}
+    component = report.get("daw_component") or {}
+    shown["daw_component"] = {key: component.get(key) for key in ("state", "name", "version", "installed_at")}
+    parts = [{"name": part.get("name"), "state": part.get("state")} for part in component.get("parts") or []
+             if isinstance(part, dict)]
+    if parts:
+        shown["daw_component"]["parts"] = parts
+    existing = report.get("existing_kumi")
+    shown["existing_kumi"] = {"adopted": existing.get("adopted") is True} if isinstance(existing, dict) else None
+    audio = report.get("compressed_audio") or {}
+    shown["compressed_audio"] = {"state": audio.get("state"), "message": _audio_line(
+        str(audio.get("state") or ""), audio.get("ffmpeg"), audio.get("found"), paths=False)}
+    return shown
+
+
+def plan_for_model(plan: Mapping[str, Any]) -> dict:
+    """A plan as `kumi_setup plan` gives it to the model: the step, what it does in words and its size, with no path or
+    URL (adversarial review LOW 11). The producer's approval shows every one of them, from the plan setup recorded
+    (`approval()`); the model has no use for them, and a chat's transcript shouldn't carry them."""
+    shown = {key: plan[key] for key in ("schema", "daw", "target", "version", "step", "optional", "digest")
+             if key in plan}
+    download = plan.get("download") or {}
+    if download:
+        shown.update(download_bytes=download.get("bytes"), unpacked_bytes=download.get("unpacked_bytes"))
+    component = plan.get("component") or {}
+    if component:
+        shown["component"] = {key: component.get(key) for key in ("component", "version", "state")}
+    shown["existing_kumi"] = plan.get("existing_kumi") is not None
+    daw = DAWS.get(str(plan.get("daw")), "the DAW")
+    shown["summary"] = {
+        "runtime": f"Download Kumi {plan.get('version')} ({_mb(int(download.get('bytes') or 0))}), check it against "
+                   "the SHA-256 this plugin pins, and unpack it into this profile's plugin data.",
+        "daw_component": f"Install Kumi's part in {daw}; the approval lists everything it writes.",
+        "owned_elsewhere": f"Another Kumi installation already serves {daw}: adopt it rather than replace it.",
+        "ffmpeg": "Optional: let Kumi's runtime use the ffmpeg already on this computer for compressed audio.",
+        "none": f"Kumi is set up for {daw}.",
+    }.get(str(plan.get("step")), "")
+    return shown
+
+
+# A setup failure's own words can name a path or a URL; the model is told this instead.
+_PATHLIKE = re.compile(r"[/\\]")
+
+
+def reason_for_model(code: str, message: Any) -> str:
+    """A setup failure as `kumi_setup` gives it to the model: its own words, unless they could name a path or a URL
+    (LOW 11), which `hermes kumi setup` in a terminal shows instead."""
+    if isinstance(message, str) and message and not _PATHLIKE.search(message):
+        return message
+    return f"Setup failed ({code}); hermes kumi setup in a terminal says why."
 
 
 def _mb(size: int) -> str:
@@ -690,7 +778,7 @@ def adopt(daw: str, *, expected_digest: str | None, setup_daw: Callable[[dict], 
                 raise SetupError("not_found", f"{home} isn't a folder any more; plan again.")
             _adopt(approved, daw, home, data_dir)
         return {"ok": True, "step": "adopt",
-                "message": f"Kumi now uses the Kumi installation at {home} for {DAWS[daw]}.",
+                "message": f"Kumi now uses the Kumi installation that already serves {DAWS[daw]}.",
                 "status": status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)}
     except SetupError as error:
         return {"ok": False, "error": {"code": error.code, "message": error.message}}
@@ -829,7 +917,7 @@ def _install_runtime(approved: dict, data_dir: Path, target: str, progress: Call
     for stale in runtime.iterdir():  # earlier versions this plugin installed; a running one keeps its open files
         if stale.is_dir() and stale.name != version and VERSION.fullmatch(stale.name):
             shutil.rmtree(stale, ignore_errors=True)
-    return f"Kumi {version}'s runtime is installed in {final}."
+    return f"Kumi {version}'s runtime is installed."
 
 
 def _record_component(data_dir: Path, daw: str, component: Mapping[str, Any], *, installed_at: int | None) -> None:
@@ -857,7 +945,7 @@ def _allow_ffmpeg(approved: Mapping[str, Any], data_dir: Path) -> str:
     receipt = _read_json(data_dir / "setup" / "receipt.json") or {"schema": SCHEMA}
     receipt["ffmpeg"] = {**chosen, "at": _now_ms()}
     _write_json(data_dir / "setup" / "receipt.json", receipt)
-    return f"Kumi's runtime will use the ffmpeg at {chosen['path']} for compressed audio from its next start."
+    return "Kumi's runtime will use the ffmpeg you allowed for compressed audio from its next start."
 
 
 def _install_component(approved: dict, setup_daw: Callable[[dict], Any] | None, data_dir: Path) -> str:

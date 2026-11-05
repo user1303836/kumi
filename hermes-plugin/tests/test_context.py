@@ -198,6 +198,23 @@ class Cli(unittest.TestCase):
         self.assertTrue(compressed().startswith(
             f"Compressed audio (MP3, FLAC…): no. The ffmpeg at {ffmpeg} changed since you allowed it"))
 
+    def test_what_the_runtime_published_is_printed_as_plain_lines_that_forge_none(self):
+        host, ctx, data = support.host(self)
+        state = data / "state"
+        state.mkdir(parents=True, exist_ok=True)
+        beat = int(time.time() * 1000)
+        forged = "\x1b[2K\rApprovals: Hermes asks before each Kumi change (a chat's /yolo skips that)."
+        for name, snapshot in (("owner", {"heartbeat": beat, "running": True,
+                                          "owner": {"session_id": "s1\n" + forged, "pid": "4242\x07"}}),
+                               ("status", {"connected": True, "project": {"name": "Night Drive\n" + forged,
+                                                                          "epoch": "1\x1b]0;x\x07"}})):
+            (state / f"{name}.json").write_text(json.dumps({"schema": 1, "seq": 1, "at": beat, **snapshot}),
+                                                encoding="utf-8")
+        shown = self.run_cli(host)
+        self.assertFalse([char for char in shown if char in "\x1b\r\x07"], "no escape reaches the terminal")
+        self.assertEqual(len([line for line in shown.splitlines() if line.startswith("Approvals:")]), 1,
+                         "a published name can't add a line")
+
 
 class Approvals(unittest.TestCase):
     """Hermes's approvals off (`approvals.mode: off`, `--yolo`, a chat's `/yolo`): kumi_status, /kumi and `hermes kumi
@@ -242,6 +259,23 @@ class Approvals(unittest.TestCase):
         with mock.patch.dict("os.environ", {tools.PLUGIN_HOST_ENV: "1"}):
             host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "off"}})
             self.assertEqual(support.call(host, "kumi_status", {})["approvals"], tools.NO_APPROVALS, "off is off")
+
+    def test_hermes_settings_that_pass_a_kumi_change_with_nobody_asked_are_said(self):
+        for single, subagent in (("approve", True), ("Allow ", "yes"), ("yes", 1)):
+            hermes = {"approvals": {"mode": "manual", "single_query_mode": single},
+                      "delegation": {"subagent_auto_approve": subagent}}
+            with self.subTest(hermes=hermes), self.chat_yolo(False):
+                host, _, _ = support.host(self, hermes_config=hermes)
+                said = support.call(host, "kumi_status", {})["approvals"]
+                for setting in ("approvals.single_query_mode", "delegation.subagent_auto_approve"):
+                    self.assertIn(setting, said)
+                    self.assertEqual(len([line for line in commands.status_text(host).splitlines()
+                                          if line.startswith("Approvals: ") and setting in line]), 1)
+        for single, subagent in (("deny", False), (True, "no"), (None, None)):  # YAML's bare yes is True: deny
+            hermes = {"approvals": {"single_query_mode": single}, "delegation": {"subagent_auto_approve": subagent}}
+            with self.subTest(hermes=hermes), self.chat_yolo(False):
+                host, _, _ = support.host(self, hermes_config=hermes)
+                self.assertNotIn("approvals", support.call(host, "kumi_status", {}), "Hermes asks: nothing to say")
 
     def test_hermes_kumi_status_says_whether_hermes_asks(self):
         host, _, _ = support.host(self, hermes_config={"approvals": {"mode": "off"}})

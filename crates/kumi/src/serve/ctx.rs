@@ -100,6 +100,65 @@ pub struct Host {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// What the host gives the call privately, after its approval: never written or said anywhere.
+    #[serde(skip)]
+    pub private: Private,
+}
+
+/// The arguments the host adds to a call after its approval, for the call alone (CC-13's `_mirelo`: a service's key,
+/// the producer's acknowledgment and the credits reserved), each an object, and only with `_host`.
+///
+/// W2's plugin handler is their only writer: it adds `_mirelo` after its approval, and strips every `_`-prefixed key
+/// the model wrote before then, so one that reaches the runtime is the host's.
+pub const PRIVATE_ARGS: [&str; 1] = ["_mirelo"];
+
+/// The fields of [`PRIVATE_ARGS`] that are secrets, as (argument, field): a job's checkpoint never holds one
+/// ([`JobHandle::checkpoint`]). The rest (the acknowledgment, the reservation) may be kept: CC-13 checkpoints the
+/// reservation.
+pub const SECRET_FIELDS: [(&str, &str); 1] = [("_mirelo", "api_key")];
+
+/// The most bytes one of [`PRIVATE_ARGS`] takes, as JSON.
+pub const PRIVATE_MOST: usize = 4096;
+
+/// What the host passes a call privately ([`PRIVATE_ARGS`], by name), taken out of its arguments before anything
+/// reads them: so never in what the call asked (its digest and deduplication), its in-flight record, HISTORY, a
+/// snapshot, a log or an error. Its `Debug` shows only how many there are.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Private(Map<String, Value>);
+
+impl From<Map<String, Value>> for Private {
+    fn from(arguments: Map<String, Value>) -> Private {
+        Private(arguments)
+    }
+}
+
+impl Private {
+    /// The private argument `name` (`"_mirelo"`), if the host gave it.
+    pub fn get(&self, name: &str) -> Option<&Value> {
+        self.0.get(name)
+    }
+
+    /// The secrets in it ([`SECRET_FIELDS`]), each non-empty.
+    pub fn secrets(&self) -> Vec<String> {
+        SECRET_FIELDS
+            .iter()
+            .filter_map(|(name, field)| self.0.get(*name)?.get(*field)?.as_str())
+            .filter(|secret| !secret.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+}
+
+tokio::task_local! {
+    /// The private arguments of the call whose operation is running (the adapter sets it around each run): a job the
+    /// call starts keeps their secrets, so its checkpoints are refused any that hold one.
+    pub static CALL_PRIVATE: Private;
+}
+
+impl std::fmt::Debug for Private {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Private({} argument(s))", self.0.len())
+    }
 }
 
 impl Host {
@@ -309,6 +368,31 @@ pub struct Ctx {
     link: Link,
     lease: super::lease::Lease,
     history: super::history::History,
+    /// The calls' own settle bounds (a track listen's render and restoration), each while its guard lives, and the
+    /// last guard's number.
+    settles: Rc<RefCell<Vec<(u64, std::time::Duration)>>>,
+    settle_ids: Cell<u64>,
+    /// When a stop that waits on a call's own bound gives up (ms), while it waits.
+    settling_until: Cell<Option<i64>>,
+}
+
+/// The most a stop waits for a call's own settle bound, in seconds: CC-2's largest approved deadline. #989's host waits
+/// 390 s for a stopping runtime, which this, the DAW's close and the exit fit in.
+pub const SETTLE_MOST_SECONDS: u16 = 360;
+pub const SETTLE_MOST: std::time::Duration = std::time::Duration::from_secs(SETTLE_MOST_SECONDS as u64);
+
+/// A call's own bound for settling when the runtime stops (a track listen's render, then the DAW put back): while it
+/// lives, a stop waits up to the largest live bound for the calls to finish, not just the runtime's own few seconds.
+/// The bound counts from the stop's start, so it bounds the whole stop.
+pub struct Settling {
+    settles: Rc<RefCell<Vec<(u64, std::time::Duration)>>>,
+    id: u64,
+}
+
+impl Drop for Settling {
+    fn drop(&mut self) {
+        self.settles.borrow_mut().retain(|(id, _)| *id != self.id);
+    }
 }
 
 impl Ctx {
@@ -339,6 +423,9 @@ impl Ctx {
             shutdown: Signal::new(),
             offered: Cell::new(super::registry::OPERATIONS),
             scratches: Cell::new(0),
+            settles: Rc::new(RefCell::new(Vec::new())),
+            settle_ids: Cell::new(0),
+            settling_until: Cell::new(None),
             started,
             answers,
             link: Link::new(started.max(0) as u64),
@@ -444,13 +531,15 @@ impl Ctx {
     /// Starts `work` as a background job of `kind` (`scan`, say): its id at once, for the call to answer with. `work`
     /// gets the runtime and the job's handle (its signal fires when the runtime stops; its progress goes to
     /// `jobs/<id>.json`); what it returns is the job's result. Refused `busy` while [`super::jobs::RUNNING`] jobs run.
+    /// The job keeps the secrets of the call it's started in ([`CALL_PRIVATE`]), so its checkpoints never hold them.
     pub fn start_job<W, F>(&self, kind: &'static str, work: W) -> Result<String, OpError>
     where
         W: FnOnce(Rc<Ctx>, JobHandle) -> F + 'static,
         F: Future<Output = Result<Value, OpError>> + 'static,
     {
         let ctx = self.me.upgrade().ok_or_else(|| OpError::Failed { reason: "the runtime is stopping".into() })?;
-        self.jobs.start(ctx, kind, work)
+        let secrets = CALL_PRIVATE.try_with(Private::secrets).unwrap_or_default();
+        self.jobs.start(ctx, kind, secrets, work)
     }
 
     /// A scratch folder for one call of `op`: `<state>/scratch/<op>/<id>/`, the id the runtime's own (never anything
@@ -465,6 +554,38 @@ impl Ctx {
         let path = self.paths.state_dir.join("scratch").join(op).join(format!("{}-{n}", kumi_common::time::now_ms()));
         make_private_dir(&path).map_err(|error| OpError::Failed { reason: format!("no scratch folder: {error}") })?;
         Ok(Scratch { path })
+    }
+
+    /// A guard holding a stop to `deadline_seconds` from the stop's start while it lives: take it just before the work
+    /// whose cleanup must finish (a render and the DAW put back), and drop it once that's done.
+    ///
+    /// - The bound is the call's approved deadline (CC-2's `deadline_seconds`, 1 to [`SETTLE_MOST_SECONDS`]), never
+    ///   a number the model gave: anything else is refused.
+    /// - The cleanup it covers must run on a signal the stop doesn't cancel. A stop cancels `ctx.shutdown()` first, and
+    ///   every call's `signal` has it in it, so a restoration awaited on `call.signal` would be cut off as it began.
+    pub fn settling(&self, deadline_seconds: u16) -> Result<Settling, OpError> {
+        if !(1..=SETTLE_MOST_SECONDS).contains(&deadline_seconds) {
+            let reason = format!("A call's settle bound is 1 to {SETTLE_MOST_SECONDS} seconds, not {deadline_seconds}.");
+            return Err(OpError::Failed { reason });
+        }
+        let id = self.settle_ids.get() + 1;
+        self.settle_ids.set(id);
+        self.settles.borrow_mut().push((id, std::time::Duration::from_secs(deadline_seconds.into())));
+        Ok(Settling { settles: self.settles.clone(), id })
+    }
+
+    /// The largest bound a live guard holds a stop to, if any.
+    pub fn settle_bound(&self) -> Option<std::time::Duration> {
+        self.settles.borrow().iter().map(|(_, bound)| *bound).max()
+    }
+
+    /// When a stop waiting on a call's bound gives up (ms), while it waits: `status` says it.
+    pub fn settling_until(&self) -> Option<i64> {
+        self.settling_until.get()
+    }
+
+    pub(super) fn set_settling_until(&self, until: Option<i64>) {
+        self.settling_until.set(until);
     }
 
     /// When the runtime started (ms since the epoch).

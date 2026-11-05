@@ -215,7 +215,7 @@ pub async fn publish_stopped(ctx: &Ctx) {
 /// stands for it (`free` until the runtime takes the lease).
 pub fn publish_owner(ctx: &Ctx, running: bool) {
     let owner = ctx.snapshots().owner();
-    let body = json!({
+    let mut body = json!({
         "profile": owner.profile_id,
         "session_id": owner.session_id,
         "pid": std::process::id(),
@@ -224,6 +224,11 @@ pub fn publish_owner(ctx: &Ctx, running: bool) {
         "running": running,
         "lease": if ctx.lease().held() { "held" } else { "free" },
     });
+    // A stop that waits on a call's own cleanup (a track listen's render and restoration): until when, so the host
+    // tells a slow stop from a hung one.
+    if let Some(until) = ctx.settling_until() {
+        body["settling_until_ms"] = json!(until);
+    }
     if let Err(error) = ctx.snapshots().write("owner", &body) {
         super::say(&format!("kumi serve: owner.json not written: {error}"));
     }

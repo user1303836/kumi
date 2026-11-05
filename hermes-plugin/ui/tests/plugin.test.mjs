@@ -86,7 +86,7 @@ test('it registers the pane, the chip, its palette commands, the listen card, th
   assert.deepEqual(byArea.panes.map(pane => [pane.id, pane.title, pane.data.placement]), [['pane', 'Kumi', 'right']])
   assert.equal(byArea['statusBar.right'].length, 1)
   assert.deepEqual(byArea.palette.map(entry => entry.data.id), ['kumi.map', 'kumi.undo-last', 'kumi.settings'])
-  assert.deepEqual(byArea['transcript.toolMedia'].map(card => card.data.tools), [['kumi_listen']])
+  assert.deepEqual(byArea['transcript.toolMedia'].map(card => card.data.tools), [['kumi_listen'], ['kumi_job']])
   assert.deepEqual(byArea['composer.underside'].map(hint => hint.id), ['focus-hint'])
   assert.deepEqual(h.settings.map(page => page.id), ['kumi'])
 })
@@ -212,6 +212,24 @@ test('a call that starts a job, or a job.progress event, has the pane follow tha
   h.events.get('plugin.kumi.job.progress')({ payload: { job_id: '../owner' } })
   await settle()
   assert.deepEqual(h.calls.rest.filter(path => path.startsWith('/job')).sort(), ['/job?id=j-scan-1', '/job?id=j-scan-2'], "another profile's job is never read")
+})
+
+test('a generate.updated event has the pane follow its generation, never one naming another profile or none, and sends nothing', async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  const h = harness({ routes: { ...ROUTES, '/job?id=native-job-id': { job_id: 'native-job-id', kind: 'generate', state: 'running', progress: { done: 0 } } } })
+  plugin.register(h.ctx)
+  await settle()
+  const event = h.events.get('plugin.kumi.generate.updated')
+  const card = { state: 'running', job_id: 'native-job-id', quote_id: 'q-opaque-id', kind: 'sfx', estimate: { credits: 15, max_credits: 15 } }
+  event({ payload: { profile: 'work', session_id: SESSION, tool_call_id: 'call-8', tool: 'kumi_generate', card: { ...card, job_id: 'work-job' } } })
+  // CC-13's event always names its profile: one naming none is for no one here.
+  event({ payload: { session_id: SESSION, tool_call_id: 'call-7', tool: 'kumi_generate', card: { ...card, job_id: 'unnamed-job' } } })
+  // Over 256 KiB it comes without its card: nothing to follow.
+  event({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-10', tool: 'kumi_job' } })
+  event({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-9', tool: 'kumi_generate', card } })
+  await settle()
+  assert.deepEqual(h.calls.rest.filter(path => path.startsWith('/job')), ['/job?id=native-job-id'])
+  assert.equal(h.calls.submit.length + h.calls.insert.length, 0, 'an event never places or sends anything')
 })
 
 test('the built Desktop file uses only the SDK and React, and none of the doors rule 8 closes', () => {

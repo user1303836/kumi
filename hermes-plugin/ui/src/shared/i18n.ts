@@ -90,6 +90,8 @@ const en = {
   },
   job: {
     scanning: 'Scanning',
+    generating: 'Generating',
+    generation: 'Generation',
     scan: 'Scan',
     job: 'Job',
     running: (kind: string) => `${kind} running`,
@@ -210,6 +212,28 @@ const en = {
       unknown: 'unknown'
     }
   },
+  generate: {
+    generated: 'generated',
+    generatedTitle: "Made by Mirelo from your words. It isn't in your project until you place it.",
+    soundTitle: 'Generated sound',
+    notesTitle: 'Notes from audio',
+    credits: (n: number, shown: string) => (n === 1 ? `${shown} credit` : `${shown} credits`),
+    creditsTitle: 'Mirelo API credits, not money. An estimate or a reservation is not a price.',
+    cost: (credits: string, estimate: string) => `${credits} (est. ${estimate})`,
+    reserved: (credits: string) => `${credits} reserved`,
+    unknownCharge: (credits: string) => `charge not known yet · ${credits} reserved`,
+    notSubmitted: 'never sent to Mirelo · nothing charged',
+    left: (left: string, cap: string) => `${left} of ${cap} credits left under your cap`,
+    capTitle: "Kumi's own budget for paid generation, which approvals count against. It isn't the provider's bill.",
+    frozen: 'New paid generations are paused: a charge came in above its estimate',
+    notes: (n: number, shown: string) => (n === 1 ? `${shown} note` : `${shown} notes`),
+    outputs: { midi: 'MIDI file', notes: 'Notes', musicxml: 'MusicXML' },
+    states: { running: 'generating', failed: 'failed', cancelled: 'cancelled', interrupted: 'interrupted' },
+    place: 'Place…',
+    placeTitle: 'Put a request to place this file in your project in the chat, to finish and send',
+    planNotes: 'Plan notes…',
+    planNotesTitle: "Put a request in the chat to plan where these notes go, from your project's own timing, to finish and send"
+  },
   palette: {
     map: 'Kumi: open the sound map',
     undo: 'Kumi: undo the last change',
@@ -314,6 +338,8 @@ const ja: Shape<typeof en> = {
   },
   job: {
     scanning: 'スキャン中',
+    generating: '生成中',
+    generation: '生成',
     scan: 'スキャン',
     job: 'ジョブ',
     running: kind => `${kind} 実行中`,
@@ -434,6 +460,28 @@ const ja: Shape<typeof en> = {
       unknown: '不明'
     }
   },
+  generate: {
+    generated: '生成',
+    generatedTitle: 'Mirelo があなたの言葉から作りました。配置するまでプロジェクトには入りません。',
+    soundTitle: '生成したサウンド',
+    notesTitle: 'オーディオから取り出したノート',
+    credits: (_n, shown) => `${shown} クレジット`,
+    creditsTitle: 'Mirelo API のクレジットで、お金ではありません。見積や確保額は価格ではありません。',
+    cost: (credits, estimate) => `${credits}（見積 ${estimate}）`,
+    reserved: credits => `${credits} を確保`,
+    unknownCharge: credits => `請求額はまだ不明 · ${credits} を確保`,
+    notSubmitted: 'Mirelo には送信されませんでした · 請求なし',
+    left: (left, cap) => `上限 ${cap} クレジット中 残り ${left}`,
+    capTitle: '有料生成のための Kumi 自身の予算で、承認ごとに差し引かれます。提供元の請求額ではありません。',
+    frozen: '見積を超える請求があったため、新しい有料生成は止めています',
+    notes: (_n, shown) => `${shown} ノート`,
+    outputs: { midi: 'MIDI ファイル', notes: 'ノート', musicxml: 'MusicXML' },
+    states: { running: '生成中', failed: '失敗', cancelled: 'キャンセル済み', interrupted: '中断' },
+    place: '配置…',
+    placeTitle: 'このファイルをプロジェクトに配置する依頼をチャットに入れます。仕上げて送信してください',
+    planNotes: 'ノートの配置を計画…',
+    planNotesTitle: 'プロジェクト自身のタイミングから、これらのノートをどこに置くか計画する依頼をチャットに入れます。仕上げて送信してください'
+  },
   palette: {
     map: 'Kumi: サンプルマップを開く',
     undo: 'Kumi: 最後の変更を取り消す',
@@ -537,6 +585,8 @@ const zh: Shape<typeof en> = {
   },
   job: {
     scanning: '正在扫描',
+    generating: '正在生成',
+    generation: '生成',
     scan: '扫描',
     job: '任务',
     running: kind => `${kind} 运行中`,
@@ -654,6 +704,28 @@ const zh: Shape<typeof en> = {
       outdated: '版本过旧',
       unknown: '未知'
     }
+  },
+  generate: {
+    generated: '生成',
+    generatedTitle: '由 Mirelo 根据你的描述生成。放入项目之前，它不会出现在你的项目中。',
+    soundTitle: '生成的声音',
+    notesTitle: '从音频提取的音符',
+    credits: (_n, shown) => `${shown} 积分`,
+    creditsTitle: 'Mirelo API 积分，不是钱。预估或预留不是价格。',
+    cost: (credits, estimate) => `${credits}（预估 ${estimate}）`,
+    reserved: credits => `已预留 ${credits}`,
+    unknownCharge: credits => `费用尚不清楚 · 已预留 ${credits}`,
+    notSubmitted: '未发送给 Mirelo · 未收费',
+    left: (left, cap) => `上限 ${cap} 积分，剩余 ${left}`,
+    capTitle: 'Kumi 自己的付费生成预算，批准时从中扣除。这不是服务商的账单。',
+    frozen: '有一笔费用超出了预估，新的付费生成已暂停',
+    notes: (_n, shown) => `${shown} 个音符`,
+    outputs: { midi: 'MIDI 文件', notes: '音符', musicxml: 'MusicXML' },
+    states: { running: '生成中', failed: '失败', cancelled: '已取消', interrupted: '已中断' },
+    place: '放入…',
+    placeTitle: '把放入这个文件的请求放进对话，补充完整后发送',
+    planNotes: '规划音符…',
+    planNotesTitle: '把根据项目自身的节拍规划这些音符放在哪里的请求放进对话，补充完整后发送'
   },
   palette: {
     map: 'Kumi：打开采样地图',

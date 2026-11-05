@@ -532,6 +532,9 @@ class Runtime:
     in_flight: int = 0
     closing: bool = False
     retired: bool = False
+    # The starter's context variables (Hermes keeps the active profile there): the idle watch, one thread for every
+    # profile, stops this runtime in them, so what it logs lands in this profile's logs (research-1's review, item 12).
+    context: contextvars.Context = field(default_factory=contextvars.copy_context)
     gone: threading.Event = field(default_factory=threading.Event)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -541,14 +544,17 @@ class Runtime:
 
     def call(self, tool: str, args: dict, host: dict, *, timeout: float) -> dict:
         """Call one of the runtime's tools (C2: C1's names without `kumi_`), with Hermes's call identity in `_host`.
-        Its answer's structured content, or Refused with the runtime's error."""
+        Its answer's structured content, or Refused with the runtime's error. A key starting with `_` is the host's to
+        give (`_host`, and CC-13's `_mirelo`, which the runtime takes as the host's say-so): one in `args`, written by
+        the model, is dropped, never passed on (rgzm, #1007)."""
+        arguments = {key: value for key, value in args.items() if not (isinstance(key, str) and key.startswith("_"))}
         with self._lock:
             if self.closing:
                 raise Unavailable("not_running", "Kumi's runtime was stopping; kumi_connect starts it again. Nothing "
                                                  "was sent.")
             self.in_flight += 1
         try:
-            result = self.client.request("tools/call", {"name": tool, "arguments": {**args, "_host": host}},
+            result = self.client.request("tools/call", {"name": tool, "arguments": {**arguments, "_host": host}},
                                          timeout=timeout)
         finally:
             with self._lock:
@@ -736,9 +742,12 @@ class Runtimes:
                 runtimes = list(self._running.values())
             for runtime in runtimes:
                 if runtime.close_if_idle(self._idle_after, time.monotonic()):
-                    log.info("Kumi's runtime for %s was idle for %g s: stopping it", runtime.data_dir, self._idle_after)
-                    runtime.client.close(timeout=self._stop_wait)
-                    self._retire(runtime)
+                    runtime.context.copy().run(self._stop_idle, runtime)
+
+    def _stop_idle(self, runtime: Runtime) -> None:
+        log.info("Kumi's runtime for %s was idle for %g s: stopping it", runtime.data_dir, self._idle_after)
+        runtime.client.close(timeout=self._stop_wait)
+        self._retire(runtime)
 
     def _handshake(self, runtime: Runtime) -> dict:
         client, expected = runtime.client, runtime.install.version

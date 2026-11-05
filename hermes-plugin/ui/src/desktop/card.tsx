@@ -30,7 +30,10 @@ async function peaksOf(dataUrl: string, buckets = 96): Promise<number[]> {
   return peaks.map(peak => peak / top)
 }
 
-function Wave({ audition, id, label }: { audition: Audition; id: string; label: string }) {
+/** A file's waveform with a play button, drawn from its audio (`audition`): the listen and generate cards' shared part.
+ *  `label` names it for screen readers; `caption` is the text shown beside the button (the label, unless a card already
+ *  shows the name). */
+export function Wave({ audition, id, label, caption = label }: { audition: Audition; id: string; label: string; caption?: string }) {
   const t = useT()
   const [peaks, setPeaks] = useState<null | number[]>(null)
   const [failed, setFailed] = useState(false)
@@ -49,7 +52,7 @@ function Wave({ audition, id, label }: { audition: Audition; id: string; label: 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 160px', minWidth: 140 }}>
       <div style={{ ...S.row, justifyContent: 'space-between' }}>
-        <span style={{ ...S.faint, ...S.ellipsis }}>{label}</span>
+        <span style={{ ...S.faint, ...S.ellipsis }}>{caption}</span>
         <TextButton onClick={() => (playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)))}>{playing ? '■' : '▶'}</TextButton>
       </div>
       <svg aria-label={t('listen.waveform', label)} height={36} preserveAspectRatio="none" role="img" viewBox="0 0 96 36" width="100%">

@@ -20,16 +20,21 @@ from __future__ import annotations
 
 import logging
 import re
+import textwrap
 from typing import Any
 import unicodedata
 
-from . import runtime, setup, tools
+from . import calls, runtime, setup, snapshots, tools
 
 log = logging.getLogger(__name__)
 
 PREVIEW_TIMEOUT = 10.0
-STEP_LINES = 18
 LINE = 120
+# The longest line of a change's preview the runtime writes (W1: values first, each name quoted and capped at 40, one
+# line of at most 200). A longer one is never cut: the approval is blocked (research-1's review, item 2).
+STEP_LINE = 200
+TOO_LONG = ("Kumi didn't run this: its approval is longer than this window shows whole, and Kumi asks only with every "
+            "line in view. Split it into smaller changes, or approve it in Hermes Desktop.")
 # A track listen's one line: which track or the mix, the exact beats, and what's put back after. The runtime writes it
 # and bounds the names in it, so it's cut only far past what a preview says.
 PLAYBACK_LINE = 600
@@ -42,6 +47,12 @@ UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
+# Where Hermes shows less than an approval's whole text (v0.22.7): the terminal's approval panel, at most 10 rows of
+# 64 columns (`hermes_cli/cli_tui_mixin.py:205`), and chat apps that cut the reason at a length (`_EA_REASON_BUDGET`).
+# Desktop shows it whole. Kumi asks only where every line is shown (rgzm, #954 LOW 17; research-1's review, item 3).
+PANEL_ROWS, PANEL_COLUMNS = 10, 64
+REASON_BUDGETS = {"telegram": 500, "slack": 500, "discord": 300}
+_TELEGRAM_ESCAPED = set(r"_*[]()~`>#+-=|{}.!\\")
 
 
 def pre_tool_call(host: Any, tool_name: str = "", args: Any = None, **kwargs: Any) -> dict | None:
@@ -89,7 +100,28 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     decision, extra = _decide(host, tool, args, kwargs)
     if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
+    if decision is not None and decision["action"] == "approve" and not decision["rule_key"].startswith("kumi:setup:"):
+        decision = chat_scoped(decision, args, kwargs)
+        if not shows_whole(decision["message"], host.session_surface()):
+            return block(TOO_LONG), {}
     return decision, extra
+
+
+# kumi-adv's decision: "this session" and "always" cover a kind of Kumi change within one chat, the convenience quick
+# tweaks need, never a new chat, a scheduled job or a webhook, which Hermes then asks about or refuses. So the rule key
+# ends with the chat's session id (Hermes's, as C1's identity has it); without one, with the plan's own digest, never a
+# family alone. A one-shot run that resumes a chat (`hermes chat -q --resume`) is that chat, and its approvals apply
+# there. Setup's key is its plan's digest already (and a paid call's will be its quote's). Hermes keeps an "always" in
+# its config's command allowlist; Kumi never edits that.
+CHAT_ONLY = ("Kumi's approvals apply to one chat, including a one-shot run that resumes it (hermes chat -q --resume); a "
+             "scheduled job, a new one-shot run or another chat always asks or is refused.")
+
+
+def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
+    rule_key = decision["rule_key"]
+    session = kwargs.get("session_id")
+    scope = session.strip() if isinstance(session, str) and session.strip() else f"plan-{calls.digest(args)}"
+    return {**decision, "rule_key": f"{rule_key}:{scope}", "message": f"{decision['message']}\n{CHAT_ONLY}"}
 
 
 def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
@@ -131,12 +163,13 @@ def one_line(text: Any, limit: int = LINE) -> str:
 
 
 def approve(lines: list[str], rule_key: str, footer: str | None = None) -> dict:
-    """`lines[0]` is the title; the rest are effects, of which at most 18 are shown, then the footer."""
-    title, effects = one_line(lines[0]), [one_line(line) for line in lines[1:]]
-    shown = effects[:STEP_LINES]
-    if len(effects) > STEP_LINES:
-        shown.append(f"… and {len(effects) - STEP_LINES} more steps")
-    message = [title, *shown, *([footer] if footer else [])]
+    """`lines[0]` is the agent's title, one line of at most 120 characters (its own words); the rest are Kumi's
+    effects, every one shown whole, then the footer. An effect longer than a preview line ever is blocks the approval
+    rather than being cut, so nothing the change does is hidden."""
+    title, effects = one_line(lines[0]), [one_line(line, limit=STEP_LINE + 1) for line in lines[1:]]
+    if any(len(effect) > STEP_LINE for effect in effects):
+        return block("Kumi didn't run this: one of its steps can't be described in a line Kumi shows whole.")
+    message = [title, *effects, *([footer] if footer else [])]
     return {"action": "approve", "message": "\n".join(message), "rule_key": rule_key}
 
 
@@ -233,7 +266,7 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
     except runtime.Unavailable as failure:
         return block(f"Kumi didn't read any folder: {_reason(failure)}")
     if action == "add_folder":
-        folder, refusal = tools.library_folder(args.get("folder"))
+        folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
         if refusal is not None:
             return block(f"Kumi didn't add the folder: {refusal}")
         return approve([f"Kumi: read the folder {folder} and everything in it, to build your sound map. It never "
@@ -264,5 +297,30 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
     if asked is None:
         return block("Kumi did not set anything up: run kumi_setup plan first."), {}
     lines = [asked["title"], *(f"• {line}" for line in asked["effects"])]
-    decision = {"action": "approve", "message": "\n".join(lines), "rule_key": f"kumi:setup:{asked['digest']}"}
+    message = "\n".join(lines)
+    surface = host.session_surface()
+    if not shows_whole(message, surface):
+        where = "Hermes Desktop or `hermes kumi setup` in a terminal" if surface not in ("cli", "tui") else \
+            "`hermes kumi setup` in a terminal"
+        return block(f"Kumi did not set anything up: this setup step is longer than this window shows, and Kumi asks only "
+                     f"with every line of it in view. Use {where}: it shows the whole plan before it asks."), {}
+    decision = {"action": "approve", "message": message, "rule_key": f"kumi:setup:{asked['digest']}"}
     return decision, {"digest": asked["digest"]}
+
+
+def shows_whole(message: str, surface: str) -> bool:
+    """Whether Hermes shows `message`, an approval's reason, whole on `surface` (`Host.session_surface()`): Desktop
+    and any client without a known limit do; the terminal's panel wraps each line on its own (long words broken) into
+    at most 10 rows of 64 columns; Telegram, Slack and Discord cut it at a length (Telegram's after escaping). An
+    "unknown" surface (Hermes couldn't say) shows nothing whole."""
+    if surface == "unknown":
+        return False
+    if surface in ("cli", "tui"):
+        rows = sum(len(textwrap.wrap(line, PANEL_COLUMNS, replace_whitespace=False, drop_whitespace=False) or [""])
+                   for line in message.splitlines())
+        return rows <= PANEL_ROWS
+    budget = REASON_BUDGETS.get(surface)
+    if budget is None:
+        return True
+    length = sum(2 if char in _TELEGRAM_ESCAPED else 1 for char in message) if surface == "telegram" else len(message)
+    return length <= budget

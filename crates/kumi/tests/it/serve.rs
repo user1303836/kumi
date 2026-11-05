@@ -102,8 +102,13 @@ struct Running {
 }
 
 impl Running {
-    fn start(mut command: Command) -> Running {
-        let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).spawn().unwrap();
+    fn start(command: Command) -> Running {
+        Running::start_with(command, Stdio::null())
+    }
+
+    /// The same, its stderr (the host's log) going to `stderr`.
+    fn start_with(mut command: Command, stderr: Stdio) -> Running {
+        let mut child = command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(stderr).spawn().unwrap();
         let to = child.stdin.take();
         let stdout = child.stdout.take().unwrap();
         let (lines, from) = std::sync::mpsc::channel();
@@ -216,6 +221,76 @@ fn serve_refuses_a_daw_it_doesnt_offer_and_says_how_to_start_it() {
     assert!(said.contains("ableton, reaper or renoise") && said.contains("usage: kumi serve"), "{said}");
     assert!(output.stdout.is_empty());
     assert!(!folders.state.exists(), "nothing made for a runtime that didn't start");
+}
+
+/// Every file under `folder`, as text.
+fn texts(folder: &Path) -> Vec<(PathBuf, String)> {
+    let mut found = vec![];
+    let mut folders = vec![folder.to_path_buf()];
+    while let Some(folder) = folders.pop() {
+        for entry in std::fs::read_dir(&folder).unwrap().filter_map(Result::ok) {
+            let path = entry.path();
+            if path.is_dir() {
+                folders.push(path);
+            } else if let Ok(bytes) = std::fs::read(&path) {
+                found.push((path, String::from_utf8_lossy(&bytes).into_owned()));
+            }
+        }
+    }
+    found
+}
+
+#[test]
+fn serve_keeps_the_hosts_private_key_out_of_its_log_its_folders_and_its_answers() {
+    const SENTINEL: &str = "sk-sentinel-9d41b7";
+    let folders = Folders::new();
+    let log = folders._dir.path().join("serve.log");
+    let mut serve = Running::start_with(folders.command("reaper"), Stdio::from(std::fs::File::create(&log).unwrap()));
+    serve.initialize();
+    let mirelo = json!({"api_key": SENTINEL, "acknowledged": true, "enabled": true, "reservation_id": "r-1"});
+    let host = |id: &str| json!({"profile_id": "default", "session_id": "s1", "tool_call_id": id});
+    let mut change =
+        json!({"title": "Add a track", "steps": [{"tool": "add_track", "input": {}}], "expected_project_key": "p-1", "expected_epoch": 1});
+    change["_host"] = host("tc-3");
+    change["_mirelo"] = mirelo.clone();
+    let calls = [
+        ("status", json!({"_host": host("tc-1"), "_mirelo": mirelo.clone()})),
+        ("read", json!({"action": "data", "tool": "no_such_reader", "query": {}, "_host": host("tc-2"), "_mirelo": mirelo.clone()})),
+        ("change", change),
+        ("status", json!({"_mirelo": mirelo})),
+        ("status", json!({"_host": host("tc-5"), "_mirelo": {"api_key": SENTINEL.repeat(300)}})),
+    ];
+    let mut said = vec![];
+    for (n, (name, arguments)) in calls.into_iter().enumerate() {
+        let id = n as u64 + 2;
+        serve.send(json!({"jsonrpc": "2.0", "id": id, "method": "tools/call", "params": {"name": name, "arguments": arguments}}));
+        said.push(serve.answer(id));
+    }
+    // What each came to: an error's code, or a change's own refusal (C1's `{state: "refused", code}`).
+    let codes: Vec<Value> = said
+        .iter()
+        .map(|answer| {
+            let content = &answer["result"]["structuredContent"];
+            content["error"]["code"].as_str().or(content["code"].as_str()).map_or(Value::Null, |code| json!(code))
+        })
+        .collect();
+    assert_eq!(said[0]["result"]["isError"], false, "status runs: {}", said[0]);
+    assert!(said[1]["result"]["isError"] == true && codes[1].is_string(), "a read with bad arguments: {}", said[1]);
+    assert_eq!(said[2]["result"]["structuredContent"]["state"], "refused", "a change with no DAW: {}", said[2]);
+    assert_eq!(codes[2], "not_connected", "a change with no DAW: {}", said[2]);
+    assert_eq!((codes[3].clone(), codes[4].clone()), (json!("invalid"), json!("invalid")), "without _host, and oversized");
+    assert_eq!(serve.end(), 0, "the end of input ends it");
+
+    for answer in &said {
+        assert!(!answer.to_string().contains(SENTINEL), "said: {answer}");
+    }
+    let logged = std::fs::read_to_string(&log).unwrap();
+    assert!(!logged.contains(SENTINEL), "its log keeps the key");
+    let kept = texts(&folders.state);
+    assert!(kept.len() >= 2, "the state folder was looked through ({} files)", kept.len());
+    for (path, text) in kept.iter().chain(&texts(&folders.transport)) {
+        assert!(!text.contains(SENTINEL), "{} keeps the key", path.display());
+    }
 }
 
 #[cfg(unix)]

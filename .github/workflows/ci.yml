@@ -584,7 +584,7 @@ jobs:
   hermes-plugin-platforms:
     # The Hermes plugin's tests on macOS and on Windows, where its one-runtime-per-profile lock is msvcrt's and its
     # runtime starts without a console (Linux's run in Hermes plugin).
-    name: Hermes plugin / ${{ matrix.os }}
+    name: Hermes plugin / ${{ matrix.os }}${{ matrix.python != '3.11' && format(' / Python {0}', matrix.python) || '' }}
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
@@ -592,6 +592,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [macos-15, windows-2025]
+        python: ["3.11"]
+        include:
+          # Windows's path handling (`os.path.realpath`, `ntpath`) changes between Pythons, and the media route's
+          # containment rests on it: its tests also run on the newest (#1000).
+          - os: windows-2025
+            python: "3.14"
     defaults:
       run:
         shell: bash
@@ -606,11 +612,13 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0 (Node 24)
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
       - name: The plugin's tests
         env:
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python -m unittest discover -s hermes-plugin/tests -p 'test_*.py'
+        # Verbose: each test's name and outcome in the log, skipped ones included (a Windows-only test that skipped
+        # would otherwise pass unseen).
+        run: python -m unittest discover -v -s hermes-plugin/tests -p 'test_*.py'
 
   main-failed:
     # macOS and Windows first test a change once it's on main, and a release waits for main's CI on all three systems: a

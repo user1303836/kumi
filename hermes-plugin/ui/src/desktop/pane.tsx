@@ -108,7 +108,7 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
       </Section>
       {Object.keys(state.jobs).length > 0 && (
         <Section title={t('pane.jobs')}>
-          <JobsView jobs={state.jobs} />
+          <JobsView jobs={state.jobs} onRequest={request => void ask(ctx, request, { send: false, session })} />
         </Section>
       )}
       <Section

@@ -12,13 +12,18 @@ helpers are imported where they're used.
 from __future__ import annotations
 
 import json
+import logging
 import math
 import os
+import posixpath
 import re
 import stat
+import sys
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+log = logging.getLogger(__name__)
 
 SCHEMA = 1
 # A heartbeat older than this makes the state stale: shown as last known, never acted on (C3).
@@ -263,6 +268,181 @@ def _inside(path: str, roots: list[Path]) -> bool:
     return False
 
 
+# Windows path forms (W5 review L-S6). Kumi's native snapshots name files in the verbatim drive form (`\\?\C:\…`), and
+# a sample folder the producer approved is usually a plain drive path (`C:\…`): both are compared in the plain form.
+# A network or device path (`\\server\share`, `\\?\UNC\…`, `\\.\…`, `\\?\GLOBALROOT\…`) is refused before anything
+# touches the filesystem, since even resolving one can reach another machine. So is a path that isn't drive-absolute
+# (`C:x`, `\x`), which depends on the process's own drive and folder, and one Windows would read as something else: a
+# reserved device name (`NUL`, `COM1.wav`), a name ending in a dot or space (Windows drops them, so `a.wav.` is
+# `a.wav`), or an alternate data stream (`a.wav:hidden`). Network folders therefore can't be auditioned on Windows.
+# Elsewhere, the automounter's network roots (`/net`, macOS's `/Network`, and both again under macOS's firmlinked
+# `/System/Volumes/Data`) are refused the same way: looking one up mounts another machine's share. So is macOS's `/home`,
+# a link to `/System/Volumes/Data/home`, which its automounter serves (auto_home); Linux's `/home` is a plain folder.
+_VERBATIM_DRIVE = re.compile(r"^[\\/]{2}\?[\\/](?=[A-Za-z]:[\\/])")
+_DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
+_RESERVED = re.compile(r"^(?:CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]|CONIN\$|CONOUT\$) *(?:\..*)?$", re.IGNORECASE)
+_NETWORK_ROOT = re.compile(r"^/(?:System/Volumes/Data/)?(?:net|Network)(?:/|$)", re.IGNORECASE)
+_AUTO_HOME = re.compile(r"^/(?:System/Volumes/Data/)?home(?:/|$)", re.IGNORECASE)
+# How many links one path may pass through before it's taken as a loop.
+_HOPS = 32
+
+
+def local(path: str, windows: bool = os.name == "nt", darwin: bool = sys.platform == "darwin") -> str | None:
+    """`path` as a file path on this machine, in the form the containment check compares; None for one never served
+    or read, decided without touching the filesystem. Elsewhere than Windows it is returned as it is."""
+    if not windows:
+        plain = posixpath.normpath(path).replace("//", "/", 1)
+        return None if _NETWORK_ROOT.match(plain) or (darwin and _AUTO_HOME.match(plain)) else path
+    plain = _VERBATIM_DRIVE.sub("", path, count=1)
+    if not _DRIVE_ABSOLUTE.match(plain) or ":" in plain[2:]:
+        return None
+    for part in re.split(r"[\\/]+", plain[3:]):
+        if part in ("", ".", ".."):
+            continue
+        if part[-1] in ". " or _RESERVED.match(part.rstrip(". ")):
+            return None
+    return plain
+
+
+def resolved(path: str, windows: bool = os.name == "nt") -> str | None:
+    """`path` (already through `local`) with its links followed (`follow`), each link's target checked by `local`
+    before anything under it is touched: a link inside an approved folder, or a folder that is one, can lead to a
+    network share, which a lookup alone would reach (rgzm). A long path can come back in the verbatim form."""
+    return follow(path, lambda each: local(each, windows))
+
+
+def follow(path: str, allowed: Callable[[str], str | None]) -> str | None:
+    """`path` with every link in it followed from the root down, as `realpath` would, except that nothing is looked up
+    before it passes `allowed`: each step on the way (a relative link can climb into `/net`), and each link's target,
+    read without following it (`readlink`). `allowed` answers the path to go on with (its plain form), or None to
+    refuse it. None too if the links loop."""
+    start = allowed(path)
+    if start is None:
+        return None
+    anchor, *names = Path(start).parts
+    current, hops = anchor, 0
+    while names:
+        name = names.pop(0)
+        if name in ("", "."):
+            continue
+        if name == "..":
+            current = os.path.dirname(current)
+            continue
+        step = os.path.join(current, name)
+        if allowed(step) is None:  # before its lstat: looking up a network root mounts it
+            return None
+        try:  # lstat and readlink: neither follows `step`, and everything above it is already followed
+            target = os.readlink(step) if _linked(step) else None
+        except (OSError, ValueError):
+            return None
+        if target is None:
+            current = step
+            continue
+        hops += 1
+        if hops > _HOPS or (Path(target).anchor and not Path(target).is_absolute()):  # a loop, or `\x`/`C:x`
+            return None
+        if Path(target).is_absolute():
+            plain = allowed(target)
+            if plain is None:
+                return None
+            current, names = Path(plain).anchor, [*Path(plain).parts[1:], *names]
+        else:
+            names = [*Path(target).parts, *names]
+    if allowed(current) is None:
+        return None
+    return allowed(os.path.realpath(current))  # no links are left: realpath only spells it canonically
+
+
+def _linked(path: str) -> bool:
+    """Whether `path` is a link, or on Windows a junction (a mount-point reparse point, which `os.path.isjunction` sees
+    only from Python 3.12), from one `lstat` that follows neither. A path that isn't there is no link."""
+    try:
+        info = os.lstat(path)
+    except (OSError, ValueError):
+        return False
+    return stat.S_ISLNK(info.st_mode) or (getattr(info, "st_reparse_tag", 0) != 0
+                                          and info.st_reparse_tag == getattr(stat, "IO_REPARSE_TAG_MOUNT_POINT", -1))
+
+
+def hermes_home() -> str | None:
+    """This profile's Hermes home (`hermes_constants.get_hermes_home`), or None where Hermes isn't importable."""
+    try:
+        from hermes_constants import get_hermes_home  # Hermes's
+
+        return str(get_hermes_home())
+    except Exception:
+        return None
+
+
+def library_folder(folder: Any, *, hermes_home: str | None = None) -> tuple[str | None, str | None]:
+    """A sample folder the producer may approve, as Kumi will keep and read it: an absolute path (`~` expanded; on
+    Windows with its drive), normalized. A network or device path is refused before anything touches the filesystem
+    (`local`: even a lookup can reach another machine). Its real place, links followed and matched by identity, is
+    never a disk's or volume's root, the home folder or one holding it, nor Hermes's own folder, inside or holding it
+    (`hermes_home`). Returns (folder, None), or (None, why not)."""
+    if not isinstance(folder, str) or not folder.strip():
+        return None, "name the folder, as a full path."
+    if any(ord(char) < 32 or ord(char) == 127 for char in folder):
+        return None, "the folder's name has control characters."
+    expanded = os.path.expanduser(folder)
+    if not Path(expanded).is_absolute():
+        return None, f"{folder!r} isn't a full path."
+    normal = os.path.normpath(expanded)
+    if local(normal) is None:
+        return None, f"{normal} is a network or device path; name a folder on this computer."
+    real = resolved(normal)
+    if real is None:
+        return None, f"{normal} leads to a network or device path; name a folder on this computer."
+    if os.path.dirname(real) == real or os.path.ismount(real):
+        return None, f"{normal} is a whole disk or volume; name a sample folder."
+    if _holds(real, os.path.expanduser("~")):
+        return None, "that's the home folder, or a folder holding it; name a sample folder."
+    if hermes_home and (_holds(real, hermes_home) or _within(real, hermes_home)):
+        return None, "that's Hermes's own folder; name a sample folder."
+    return normal, None
+
+
+def library_folders(folders: Any, *, hermes_home: str | None = None) -> list[str]:
+    """The `library_folders` setting as the guard keeps it: each folder normalized, once. One the guard refuses
+    (relative, a disk, the home folder, Hermes's own, a network path), however it got into the setting, is left out
+    with a warning: `kumi serve` would refuse to start with it, and no media route reads it."""
+    kept: list[str] = []
+    for folder in folders if isinstance(folders, list) else []:
+        normal, refusal = library_folder(folder, hermes_home=hermes_home)
+        if normal is None:
+            log.warning("Kumi left a sample folder setting out: %s", refusal)
+        elif normal not in kept:
+            kept.append(normal)
+    return kept
+
+
+def _holds(folder: str, target: str) -> bool:
+    """Whether `folder` is `target` or holds it, under any name: the path that reaches `target` from one of its own
+    folders (itself included) reaches it from `folder` too. So a link to home or above counts, and so does macOS's
+    /System/Volumes/Data, which isn't / (nor a mount point) but holds home as Users/<name> (rgzm)."""
+    place = Path(os.path.realpath(target))
+    for parent in (place, *place.parents):
+        try:
+            if os.path.samefile(os.path.join(folder, os.path.relpath(place, parent)), place):
+                return True
+        except (OSError, ValueError):
+            continue
+    return False
+
+
+def _within(folder: str, root: str) -> bool:
+    """Whether `folder` is inside `root`, by identity: one of its folders is `root` under any spelling, so a
+    case-insensitive disk's other spelling of it counts (rgzm)."""
+    for parent in Path(folder).parents:
+        try:
+            if os.path.samefile(parent, root):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+
 # The keys every snapshot carries around its own data.
 _ENVELOPE = {"schema", "seq", "at", "owner"}
 
@@ -282,21 +462,18 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
     an artifact (artifacts.json) whose real path is inside `<state>/artifacts` or an approved sample folder, and a
     sound of the current map revision whose real path is inside an approved sample folder. Nothing else in the plugin
     data (Kumi's home, the runtime, setup) is ever served. The file must be a regular one, at most 50 MiB."""
-    approved = [Path(os.path.realpath(os.path.expanduser(f))) for f in library_folders or [] if isinstance(f, str) and f]
+    approved = _approved(library_folders)
     entry: dict | None = _artifacts(state).get(media_id)
     if entry is not None:
-        roots = [Path(os.path.realpath(state / "artifacts")), *approved]
+        roots = _artifact_roots(state) + approved
     else:
         found = sound(state, media_id)
         if found is None:
             return None
         entry = {"path": found.get("path"), "kind": "audio", "mime": found.get("mime")}
         roots = approved
-    path = entry.get("path")
-    if not isinstance(path, str) or not path:
-        return None
-    real = os.path.realpath(path)
-    if not _inside(real, roots) or not os.path.isfile(real):
+    real = _real_file(entry.get("path"), roots)
+    if real is None:
         return None
     size = os.path.getsize(real)
     if size > MEDIA_MAX_BYTES:
@@ -308,19 +485,46 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
     return {"id": media_id, "path": real, "kind": entry.get("kind") or "audio", "mime": mime, "bytes": size}
 
 
+def artifact_file(state: Path, artifact_id: str) -> str | None:
+    """The real path of a file the runtime kept as an artifact (artifacts.json) in `<state>/artifacts`, a regular
+    file, or None. A listen's `MEDIA:` line may name only this: no size or type limit, as it names the file and
+    doesn't serve it."""
+    entry = _artifacts(state).get(artifact_id)
+    return _real_file(entry.get("path"), _artifact_roots(state)) if entry is not None else None
+
+
+def _artifact_roots(state: Path) -> list[Path]:
+    return [Path(real) for real in [resolved(str(state / "artifacts"))] if real]
+
+
+def _approved(library_folders: list[str] | None) -> list[Path]:
+    found = (local(os.path.expanduser(f)) for f in library_folders or [] if isinstance(f, str) and f)
+    return [Path(real) for real in (resolved(path) for path in found if path) if real]
+
+
+def _real_file(path: Any, roots: list[Path]) -> str | None:
+    """`path`'s real place when it's a regular file inside one of `roots`, checked as `media()` checks a file."""
+    found = local(path) if isinstance(path, str) and path else None
+    real = resolved(found) if found is not None else None
+    return real if real is not None and _inside(real, roots) and os.path.isfile(real) else None
+
+
 def read_media(state: Path, media_id: str, library_folders: list[str] | None = None) -> tuple[dict, bytes] | None:
-    """`media()`'s file and its bytes. The resolved path is opened without following a link (a file swapped for one
-    after the check is refused) and checked again on the open file: regular, within the size cap."""
+    """`media()`'s file and its bytes. The resolved path must still be a regular file, not a link, and the file opened
+    must be that same file (device and inode, which Windows reports too): a file swapped for a link or for another
+    file after the check is refused, on systems without `O_NOFOLLOW` as well (#1000). Within the size cap."""
     found = media(state, media_id, library_folders)
     if found is None:
         return None
     try:
+        checked = os.lstat(found["path"])
         handle = os.open(found["path"], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
     except OSError:
         return None
     with os.fdopen(handle, "rb") as file:
         info = os.fstat(file.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_size > MEDIA_MAX_BYTES:
+        same = (info.st_dev, info.st_ino) == (checked.st_dev, checked.st_ino)
+        if not stat.S_ISREG(checked.st_mode) or not stat.S_ISREG(info.st_mode) or not same or info.st_size > MEDIA_MAX_BYTES:
             return None
         data = file.read(MEDIA_MAX_BYTES + 1)
     if len(data) > MEDIA_MAX_BYTES:
