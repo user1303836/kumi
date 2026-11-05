@@ -172,6 +172,17 @@ export function undoRequest(item: Pick<HistoryItem, 'id'>): string {
   return `Undo Kumi change ${plainId(item.id) ?? ''}`.trim()
 }
 
+// Double quote marks, and the marks that pass for them, which a name could use to close the quotes a drafted request
+// puts around it and go on in the producer's voice (W5's LOW 15): straight, curly, low-9, reversed, primes,
+// fullwidth, angle and CJK quotes. A name keeps its apostrophes: they can't close “…”.
+const QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟]/g
+
+/** A name as a drafted request quotes it: `clean()`, then with no quote mark of its own, so everything from the DAW
+ *  or a sample pack stays inside the request's quotes. */
+export function quotable(name: unknown, max = 80): string {
+  return clean(typeof name === 'string' ? name.replace(QUOTE_MARKS, ' ') : name, max).replace(QUOTE_MARKS, ' ').replace(/\s+/g, ' ').trim()
+}
+
 /** Left unsent in the input, so the producer reads the sound's name before sending; null for an id the runtime
  *  doesn't write. The name leads, as the producer would say it; the ids follow in parentheses, with the map revision
  *  the sound is from, so the model can hand CC-11's `{sound_id, map_revision}` source to a file step without searching
@@ -180,7 +191,7 @@ export function soundRequest(soundId: string, name?: string, revision?: string |
   const id = plainId(soundId)
   if (!id) return null
   const from = revision ? plainId(revision) : null
-  const said = clean(name ?? '', 80)
+  const said = quotable(name)
   const which = `sound ${id}${from ? ` from map ${from}` : ''}`
   return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`
 }
