@@ -117,7 +117,7 @@ fn wanted(input: &Value) -> Done<(bool, f64, f64)> {
 }
 
 /// Require a fresh unambiguous saved main project, rather than trusting the last polling cycle's cached identity.
-fn project(ctx: &mut Ctx) -> Done<Value> {
+pub(super) fn project(ctx: &mut Ctx) -> Done<Value> {
     if ctx.project.root != Root::Main {
         return Err(unsupported("The cycle needs the project's main window"));
     }

@@ -534,6 +534,7 @@ pub fn apply(ctx: &mut Ctx, input: &Value, fence: &Value, mode: Mode) -> Done<Ap
         let label = label(&shown.region);
         Ok(Applied {
             applied: json!({"added": added.iter().map(Spec::json).collect::<Vec<_>>(), "removed": removed.iter().map(Spec::json).collect::<Vec<_>>(), "notes": after.len()}),
+            target: None,
             created: None,
             material: None,
             display: json!({"title": title(mode.verb(), count, &label), "notes": after.len(), "written": shown_notes(&added)}),

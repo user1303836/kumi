@@ -10,6 +10,7 @@ mod fx;
 mod marks;
 mod notes;
 mod nudge;
+mod region_values;
 mod structure;
 mod timeline;
 mod tracks;
@@ -61,8 +62,11 @@ pub struct Preview {
 }
 
 /// What an apply did, and what the undo watch keeps of it.
+#[derive(Default)]
 pub struct Applied {
     pub applied: Value,
+    /// A property edit such as a region rename moves the epoch: the host journal adopts its confirmed new ref.
+    pub target: Option<Value>,
     pub created: Option<Value>,
     pub material: Option<Value>,
     pub display: Value,
@@ -118,6 +122,8 @@ pub enum Kind {
     Notes(notes::Mode),
     FxBypass,
     LoopRange,
+    RegionRename,
+    RegionLoop,
 }
 
 /// The kinds Logic's bridge can't make yet, and why, so the refusal says so.
@@ -146,6 +152,8 @@ impl std::fmt::Debug for Kind {
             Kind::Notes(mode) => write!(f, "Notes({mode:?})"),
             Kind::FxBypass => f.write_str("FxBypass"),
             Kind::LoopRange => f.write_str("LoopRange"),
+            Kind::RegionRename => f.write_str("RegionRename"),
+            Kind::RegionLoop => f.write_str("RegionLoop"),
         }
     }
 }
@@ -167,12 +175,14 @@ pub fn kind(name: &str) -> Option<Kind> {
         "notes-delete" => Some(Kind::Notes(notes::Mode::Delete)),
         "fx-bypass" => Some(Kind::FxBypass),
         "loop-range" => Some(Kind::LoopRange),
+        "region-rename" => Some(Kind::RegionRename),
+        "region-loop" => Some(Kind::RegionLoop),
         _ => None,
     }
 }
 
 /// Every kind the bridge makes, by its wire name.
-pub const KINDS: [&str; 17] = [
+pub const KINDS: [&str; 19] = [
     "track-volume",
     "track-pan",
     "track-mute",
@@ -190,6 +200,8 @@ pub const KINDS: [&str; 17] = [
     "notes-delete",
     "fx-bypass",
     "loop-range",
+    "region-rename",
+    "region-loop",
 ];
 
 impl Kind {
@@ -206,6 +218,8 @@ impl Kind {
             Kind::Notes(mode) => notes::preview(ctx, input, mode),
             Kind::FxBypass => fx::bypass_preview(ctx, input),
             Kind::LoopRange => cycle::preview(ctx, input),
+            Kind::RegionRename => region_values::preview(ctx, input, region_values::Mode::Rename),
+            Kind::RegionLoop => region_values::preview(ctx, input, region_values::Mode::Loop),
         }
     }
 
@@ -222,6 +236,8 @@ impl Kind {
             Kind::Notes(mode) => notes::apply(ctx, input, fence, mode),
             Kind::FxBypass => fx::bypass_apply(ctx, input, fence),
             Kind::LoopRange => cycle::apply(ctx, input, fence),
+            Kind::RegionRename => region_values::apply(ctx, input, fence, region_values::Mode::Rename),
+            Kind::RegionLoop => region_values::apply(ctx, input, fence, region_values::Mode::Loop),
         }
     }
 
@@ -238,6 +254,8 @@ impl Kind {
             Kind::Notes(_) => notes::restore(ctx, restore),
             Kind::FxBypass => fx::bypass_restore(ctx, restore),
             Kind::LoopRange => cycle::restore(ctx, restore),
+            Kind::RegionRename => region_values::restore(ctx, restore, region_values::Mode::Rename),
+            Kind::RegionLoop => region_values::restore(ctx, restore, region_values::Mode::Loop),
         }
     }
 }
@@ -409,6 +427,9 @@ impl Changes {
         let mut answer = Map::new();
         answer.insert("epoch".into(), ctx.project.epoch.to_string().into());
         answer.insert("applied".into(), applied.applied);
+        if let Some(target) = applied.target {
+            answer.insert("target".into(), target);
+        }
         if let Some(created) = applied.created {
             answer.insert("created".into(), created);
         }

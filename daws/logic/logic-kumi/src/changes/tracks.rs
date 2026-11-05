@@ -359,6 +359,7 @@ pub fn prop_apply(ctx: &mut Ctx, prop: &'static Prop, input: &Value, fence: &Val
     let title = (prop.title)(&found.label(), &now, &after);
     Ok(Applied {
         applied: after.clone(),
+        target: None,
         created: None,
         material: None,
         display: json!({"title": title, "before": now, "after": after}),
@@ -467,6 +468,7 @@ pub fn rename_apply(ctx: &mut Ctx, input: &Value, fence: &Value) -> Done<Applied
     let after = name_state(&shown);
     Ok(Applied {
         applied: after.clone(),
+        target: None,
         created: None,
         material: None,
         display: json!({"title": rename_title(&found.header.name, &shown), "before": now, "after": after}),

@@ -187,6 +187,7 @@ pub fn add_apply(ctx: &mut Ctx, input: &Value, fence: &Value) -> Done<Applied> {
     let names: Vec<String> = nudge::wrote(tracks::headers(ctx))?.iter().map(|f| f.header.name.clone()).collect();
     Ok(Applied {
         applied: json!({"index": place, "name": name, "kind": plan.kind}),
+        target: None,
         created: Some(json!({"ref": ref_text(ctx, "track", &[place]), "kind": "track"})),
         material: Some(json!({"undo": {
             "mode": "manual", "reason": TRACK_ADD_RESTORE_REFUSAL, "guidance": MANUAL_UNDO_GUIDANCE,
@@ -268,6 +269,7 @@ pub fn delete_apply(ctx: &mut Ctx, input: &Value, fence: &Value, desc: &str) -> 
     let header = &found.header;
     Ok(Applied {
         applied: json!({"deleted": true}),
+        target: None,
         created: None,
         material: Some(json!({
             "name": header.name, "kind": kind, "index": found.place, "regions": regions,

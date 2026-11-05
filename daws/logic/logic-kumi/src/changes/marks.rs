@@ -454,6 +454,7 @@ pub fn add_apply(ctx: &mut Ctx, input: &Value, fence: &Value) -> Done<Applied> {
         }
         Ok(Applied {
             applied: state(&marker),
+            target: None,
             created: Some(target(ctx, place)),
             material: Some(material),
             display,
@@ -554,6 +555,7 @@ pub fn move_apply(ctx: &mut Ctx, input: &Value, fence: &Value) -> Done<Applied> 
         }
         Ok(Applied {
             applied: json!({"position": after.position.to_json()}),
+            target: None,
             created: None,
             material: Some(material),
             display,
@@ -658,6 +660,7 @@ pub fn delete_apply(ctx: &mut Ctx, input: &Value, fence: &Value) -> Done<Applied
         }
         Ok(Applied {
             applied: json!({"deleted": true}),
+            target: None,
             created: None,
             material: Some(material),
             display: json!({"title": format!("Deleted {name}")}),

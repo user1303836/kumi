@@ -234,6 +234,7 @@ pub fn bypass_apply(ctx: &mut Ctx, input: &Value, fence: &Value) -> Done<Applied
     }
     Ok(Applied {
         applied: state(after),
+        target: None,
         created: None,
         material: None,
         display: json!({"title": title(&plugin, &name, after), "before": state(before), "after": state(after)}),

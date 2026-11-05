@@ -1,0 +1,15 @@
+{
+  "commit": "6f8f6e9bbc3666159ce68be1ce7466aa30e82670",
+  "files": [
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-region-rename/scene.json.gz",
+      "path": "change-region-rename/scene.json.gz",
+      "sha256": "82f167b31bc9a6a6d034f160257f183288c685d5e82c01b998158345966651bb"
+    },
+    {
+      "source": "crates/logic-kumi/tests/fixtures/change-region-loop/scene.json.gz",
+      "path": "change-region-loop/scene.json.gz",
+      "sha256": "a01ea212fc3f1364b7c8af6d6a4a11d8bb2a07a9c78e36b3bb15457f9c46e315"
+    }
+  ]
+}

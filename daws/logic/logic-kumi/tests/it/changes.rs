@@ -355,6 +355,45 @@ fn the_original_cycle_scene_is_preserved_and_its_incomplete_setup_refuses_withou
 }
 
 #[test]
+fn original_region_value_scenes_keep_their_bytes_and_refuse_at_an_explicit_incomplete_setup_prefix() {
+    let source: Value = serde_json::from_str(include_str!("../fixtures/region-values-sources.json")).unwrap();
+    assert_eq!(source["commit"], "6f8f6e9bbc3666159ce68be1ce7466aa30e82670");
+    let files = source["files"].as_array().unwrap();
+    assert_eq!(files.len(), 2);
+    for file in files {
+        let bytes = std::fs::read(fixtures().join(file["path"].as_str().unwrap())).unwrap();
+        assert_eq!(daw_bridge::auth::sha256_hex(&bytes), file["sha256"]);
+        let scene = load(file["path"].as_str().unwrap().split('/').next().unwrap());
+        let records = scene.logic["steps"].as_array().unwrap();
+        assert_eq!(records.len(), 5);
+        assert_eq!(records[0]["step"]["method"], "change_preview");
+        assert_eq!(records[0]["answer"]["ok"], true, "original answers remain unchanged historical evidence");
+        // Raw recorded replies are sufficient for this read-only refusal prefix. We don't fabricate missing
+        // Mixer/Inspector/action facts, replay mutation requests, or count the unconsumed suffix as coverage.
+        let hands = logic_kumi::helper::MockHands::new();
+        hands.reply("windows", Ok(scene.calls.iter().find(|c| c.op == "windows").unwrap().reply.clone()));
+        hands.reply(
+            "tree",
+            Ok(scene.calls.iter().find(|c| c.op == "tree" && c.params["path"] == "5" && c.params["depth"] == 3).unwrap().reply.clone()),
+        );
+        let mut helper = hands.clone().launch().unwrap();
+        let saved = &scene.logic["project"];
+        let mut state = Project::new(Strings::english());
+        state.set_identity(saved["id"].as_str(), saved["path"].as_str(), saved["name"].as_str().unwrap());
+        state.layout.control_bar = Some("5".into());
+        state.layout.headers = Some("7.1.0.0.0".into());
+        let error =
+            serve::answer_change(&mut state, &mut Changes::default(), helper.as_mut(), 1, "change_preview", &records[0]["step"]["params"])
+                .unwrap_err();
+        assert_eq!(error.0, "failed");
+        assert!(error.1.contains("Inspector and Mixer must already be visible"), "{}", error.1);
+        assert_eq!(hands.calls().iter().map(|(op, _)| op.as_str()).collect::<Vec<_>>(), ["windows", "tree"]);
+        assert_eq!(records[1..].len(), 4, "four dependent recorded requests remain explicitly unconsumed");
+        assert_eq!(records[1]["step"]["method"], "change_apply");
+    }
+}
+
+#[test]
 fn a_tracks_volume_pan_mute_solo_and_arm_go_through_its_header_and_come_back_by_value() {
     for (name, field, wanted, prior, step) in [
         ("change-track-volume", "volumeDb", json!(-6.0), json!(0.0), "Vocal volume −6 dB"),
