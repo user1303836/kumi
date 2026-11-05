@@ -68,26 +68,36 @@ description: What Kumi's audio measurements mean and how to report them honestly
   - the reference file (in an approved folder, a map sound, or a file Kumi made);
   - one window of the mix, its loudest part, 60 s at most;
   - the target: the reference's loudness and true peak, its tonal balance, its stereo width.
-- **The extents differ.** `kumi_listen` measures a reference file's first 12 minutes, and the mix only over its window. So prefer a reference already cut to the matching section. Otherwise say what each measurement covers, and never take the window's loudness range for the whole song's.
-- **Where `kumi_listen` can't capture the mix in this DAW,** use a bounce of the mix in an approved folder instead, and say each round needs a new bounce. A bounce is never a retry after a capture that was refused, cancelled or unsure.
-- **The baseline:** capture the mix over that window with `compare_to` the reference. Report the gaps:
+- **The extents differ.** `kumi_listen` measures a reference file's first 12 minutes, and the mix only over what was captured or bounced. So prefer a reference already cut to the matching section. Otherwise say what each measurement covers, and never take the window's loudness range for the whole song's.
+- **Measuring the mix:** by capture where `kumi_listen` offers the mix in this DAW. Otherwise, and that's every DAW until its description says so, by bounce:
+  - the producer bounces the same range, after each approved round, into an approved folder (`kumi_library` `add_folder` if needed);
+  - Kumi can't tell a file from before a round from one after it, so the producer confirms which round each file is;
+  - measure it as `{"file": …}`, with `compare_to` the reference's kept copy;
+  - window, epoch and length checks are for captures; they don't apply to a file.
+  - A bounce is never a retry after a capture that was refused, cancelled or unsure.
+- **The baseline:** measure the mix (captured over the window, or the first bounce) with `compare_to` the reference. Report the gaps:
   - integrated LUFS;
   - true peak;
   - the spectral balance (band levels and centroid);
   - the stereo width and correlation;
-  - the dynamics (loudness range, over what was measured).
+  - the dynamics: the crest factor, and the loudness range over what was measured.
 - **A round is one plan on the master track, approved once.**
-  - **The processors the producer chose come first:** iZotope Ozone when it's installed and wanted, set by its parameter names in its own units.
+  - **The master:** Live's main track as `kumi_observe` gives it; REAPER's `r:track:master`; Renoise's master track, as read.
+  - **The processors the producer chose come first:** iZotope Ozone when the producer asks for it or it's already on the master as read, set by the parameter names Kumi reads on it, in its own units.
   - **Otherwise, native devices:**
-    - EQ toward the reference's balance: Live `EQ Eight`, REAPER `ReaEQ`, Renoise `EQ 10`;
-    - gentle glue compression: Live `Glue Compressor`, REAPER `ReaComp`, Renoise `Bus Compressor`;
-    - a limiter with its gain toward the reference's LUFS: Live `Limiter`, REAPER `ReaLimit`, Renoise `Maximizer`.
+    - EQ toward the reference's balance: Live `EQ Eight` (`audio_effects/EQ Eight`), REAPER `ReaEQ (Cockos)`, Renoise `EQ 10`;
+    - gentle glue compression: Live `Glue Compressor` (`audio_effects/Glue Compressor`; where the Browser has none, `Compressor`), REAPER `ReaComp (Cockos)`, Renoise `Bus Compressor`;
+    - a limiter: Live `Limiter` (`audio_effects/Limiter`), REAPER `ReaLimit (Cockos)`, Renoise `Maximizer`.
+  - **Each limiter's gain and ceiling:**
+    - Live `Limiter`: raise `Gain` toward the reference's LUFS, with `Ceiling` under the true-peak target.
+    - REAPER `ReaLimit`: lower `Threshold` for gain, with `Ceiling` a few tenths of a dB under the target.
+    - Renoise `Maximizer`: raise `Boost` for gain, with `Ceiling` under the target. Renoise's master fader tops out at +3 dB.
   - **In one plan, name each device as you load it, then set it:** load the EQ (`as: "eq"`), set `@eq`, then the compressor, then the limiter. Later rounds read the devices again and change only their settings.
   - **REAPER:** the master track's own FX chain, enabled, never its monitoring FX (monitoring FX aren't rendered).
-- **−1 dBTP is a measured target, not a knob value.** Set the limiter's ceiling with a margin under it, then let the next capture show the true peak. Never report a ceiling setting as the result.
-- **After each round, capture the same window again,** with `compare_to` the reference's kept copy (`compare.artifact_id`), and report what moved.
+- **−1 dBTP is a measured target, not a knob value.** Set the limiter's ceiling with a margin under it, then let the next measurement show the true peak. Never report a ceiling setting as the result.
+- **After each round, measure the mix again the same way** (the same window, or the producer's next bounce), with `compare_to` the reference's kept copy (`compare.artifact_id`), and report what moved.
   - **A round that made nothing better ends the rounds:** stop there, without another try.
-  - **To take back a worse round,** `kumi_undo` each of its HISTORY ids, newest first, each approved. Stop at the first that isn't undone.
+  - **To take back a worse round,** `kumi_undo` the HISTORY ids its plan returned (one for each kind of change in it), newest first, each approved. Stop at the first that isn't undone.
   - **Stop when the gaps are within what the producer agreed,** or after the third round. Any more rounds are the producer's new decision.
 - **The rounds section's stops apply here too,** and so does a plan that came back `partial`, `refused` or `unsure`.
 - **Say what this is:** the numbers match the reference's, measured, not heard. A limiter can't fix a mix: say so when the gaps are in the mix itself, such as a harsh band or a narrow image.
