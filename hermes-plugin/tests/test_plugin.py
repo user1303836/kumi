@@ -188,6 +188,32 @@ class Tools(unittest.TestCase):
                 and not m["params"]["arguments"].get("preview")]
         self.assertEqual(len(sent), 1)
 
+    def test_the_producers_stop_cancels_its_own_turns_change_in_flight_and_it_is_unsure(self):
+        host, _, data = support.host(self, None, "--slow", "change=1", session_key="agent:main:tui:s1")
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        stopped = host.on_loop_stopped  # what Hermes's agent_loop_stopped hook calls
+        stopped(session_key="agent:main:tui:s1", platform="tui", reason="user_stop")
+        applied = support.call(host, "kumi_change", LOUDER, session_id="s1")
+        self.assertEqual(applied["state"], "applied", "a Stop before the call isn't this call's")
+
+        def sent() -> list:
+            return [m["id"] for m in support.requests(data / "state") if m.get("method") == "tools/call"
+                    and m["params"]["name"] == "change" and not m["params"]["arguments"].get("preview")]
+
+        before, answers = len(sent()), []
+        caller = threading.Thread(target=lambda: answers.append(support.call(host, "kumi_change", LOUDER,
+                                                                             session_id="s1")))
+        caller.start()
+        self.assertTrue(support.eventually(lambda: len(sent()) > before), "the change was sent")
+        stopped(session_key="agent:main:tui:another-chat", platform="tui", reason="user_stop")
+        stopped(session_key="agent:main:tui:s1", platform="tui", reason="user_stop")
+        caller.join(10)
+        self.assertEqual((answers[0]["state"], answers[0]["code"]), ("unsure", "interrupted"), answers)
+        self.assertIn("Don't send it again", answers[0]["hint"])
+        self.assertTrue(support.eventually(lambda: [m["params"]["requestId"] for m in support.requests(data / "state")
+                                                    if m.get("method") == "notifications/cancelled"]
+                                           == sent()[before:]), "the runtime is told to stop that call, and only it")
+
     def test_an_approved_folder_is_kept_for_the_next_runtime(self):
         support.call(self.host, "kumi_connect", {}, session_id="s1")
         added = support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS + os.sep})

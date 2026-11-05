@@ -55,6 +55,9 @@ TRACK_MARGIN = 30.0
 # its stdin ends is the largest call's own (at most a track listen's 360 s; agent-s), then it closes the DAW (5 s at
 # most) and exits. A reaper waits, never the stop, which returns at once within Hermes's 10 s.
 SETTLE_WAIT = TRACK_DEADLINE_MAX + TRACK_MARGIN
+# How often a call waiting on the runtime asks whether the producer stopped the turn (Hermes's Stop): a stop cancels
+# what's in flight within this, rather than leaving its remaining steps to apply (research-1's review, item 7).
+INTERRUPT_SLICE = 0.25
 BUSY = ("Kumi's runtime is still stopping: it finishes what it was doing first (putting the project back after a "
         "listen, say). Try again in a moment.")
 
@@ -312,6 +315,20 @@ class _Pending:
     gone: str | None = None
 
 
+def _answered(done: threading.Event, timeout: float, interrupted: Callable[[], bool] | None) -> str | None:
+    """Wait for `done` up to `timeout`, asking `interrupted()` between slices: None once it's set, else why the wait
+    ended ("timeout" or "interrupted")."""
+    if interrupted is None:
+        return None if done.wait(timeout) else "timeout"
+    deadline = time.monotonic() + timeout
+    while not done.wait(max(0.0, min(INTERRUPT_SLICE, deadline - time.monotonic()))):
+        if interrupted():
+            return "interrupted"
+        if time.monotonic() >= deadline:
+            return "timeout"
+    return None
+
+
 class Client:
     """MCP over a child's stdin and stdout (the stdio transport: one JSON-RPC message a line). Requests are answered by
     id; notifications go to `on_notification` on the reader thread. A writer thread sends, so a runtime that stops
@@ -352,9 +369,11 @@ class Client:
     def running(self) -> bool:
         return self._gone is None
 
-    def request(self, method: str, params: dict | None = None, *, timeout: float) -> Any:
-        """Send a request and wait for its answer. Past `timeout`, the request is cancelled (notifications/cancelled)
-        and Unavailable("timeout") raised: whatever it did is unknown, and it's never sent again."""
+    def request(self, method: str, params: dict | None = None, *, timeout: float,
+                interrupted: Callable[[], bool] | None = None) -> Any:
+        """Send a request and wait for its answer. Past `timeout`, or once `interrupted()` says the producer stopped
+        the turn (asked every `INTERRUPT_SLICE` seconds), the request is cancelled (notifications/cancelled) and
+        Unavailable("timeout") or ("interrupted") raised: whatever it did is unknown, and it's never sent again."""
         pending = _Pending()
         with self._lock:
             if self._gone is not None:
@@ -365,10 +384,16 @@ class Client:
             self._pending[ident] = pending
             self._outbox.put(_line({"jsonrpc": "2.0", "id": ident, "method": method, "params": params or {}}))
         try:
-            if not pending.done.wait(timeout):
+            ended = _answered(pending.done, timeout, interrupted)
+            if ended is not None:
                 with self._lock:
                     self._abandoned.add(ident)
-                self.notify("notifications/cancelled", {"requestId": ident, "reason": "Hermes stopped waiting"})
+                stopped = ended == "interrupted"
+                self.notify("notifications/cancelled", {"requestId": ident, "reason": "The producer stopped the turn"
+                                                        if stopped else "Hermes stopped waiting"})
+                if stopped:
+                    raise Unavailable("interrupted", f"The producer stopped Kumi's {method}; it was cancelled, and "
+                                                     "what it did is unknown.")
                 raise Unavailable("timeout", f"Kumi didn't answer {method} within {timeout:g} s; it was cancelled, and "
                                              "what it did is unknown.")
         finally:
@@ -542,11 +567,13 @@ class Runtime:
     def state_dir(self) -> Path:
         return self.data_dir / "state"
 
-    def call(self, tool: str, args: dict, host: dict, *, timeout: float) -> dict:
+    def call(self, tool: str, args: dict, host: dict, *, timeout: float,
+             interrupted: Callable[[], bool] | None = None) -> dict:
         """Call one of the runtime's tools (C2: C1's names without `kumi_`), with Hermes's call identity in `_host`.
         Its answer's structured content, or Refused with the runtime's error. A key starting with `_` is the host's to
         give (`_host`, and CC-13's `_mirelo`, which the runtime takes as the host's say-so): one in `args`, written by
-        the model, is dropped, never passed on (rgzm, #1007)."""
+        the model, is dropped, never passed on (rgzm, #1007). With `interrupted`, the producer's Stop cancels the call
+        while it waits (Client.request)."""
         arguments = {key: value for key, value in args.items() if not (isinstance(key, str) and key.startswith("_"))}
         with self._lock:
             if self.closing:
@@ -555,7 +582,7 @@ class Runtime:
             self.in_flight += 1
         try:
             result = self.client.request("tools/call", {"name": tool, "arguments": {**arguments, "_host": host}},
-                                         timeout=timeout)
+                                         timeout=timeout, interrupted=interrupted)
         finally:
             with self._lock:
                 self.in_flight -= 1
