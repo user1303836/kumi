@@ -59,6 +59,7 @@ class Fixture:
         self.owner: dict | None = None
         self.running = True
         self.since = now()
+        self.seen_at: int | None = None  # the last look (connect or observe), as focus.json's project.seen_at
         self.slow = dict(item.split("=", 1) for item in options.slow)
         self.writing = threading.Lock()
         self.counting = threading.Lock()
@@ -169,13 +170,14 @@ class Fixture:
                 "owner": self.owner, "capabilities": ["observe", "read", "change", "undo", "history"]}
 
     def focus(self) -> dict:
-        """focus.json as kumi serve writes it (#953): `focus` a DawFocus (camelCase), `transport` a Transport, and
-        `catch_up` CatchUp entries ({set, last_seen_at, lines, more})."""
+        """focus.json as kumi serve writes it (CC-7): `project` with `seen_at`, `focus` a DawFocus, `transport` without
+        a clock, and `catch_up` CatchUp entries ({set, lastSeenAt, lines, more, afterReconnect?}), camelCase."""
         drums = self.set["tracks"][0]
-        return {"project": self.project(),
+        project = self.project()
+        return {"project": {**project, "seen_at": self.seen_at} if project else None,
                 "focus": {"track": {"name": drums["name"]}, "trackRef": drums["ref"], "device": "Drum Rack",
                           "view": "Arrangement"},
-                "transport": {"playing": False, "tempo": self.set["tempo"], "at": 0.0}, "catch_up": []}
+                "transport": {"playing": False, "tempo": self.set["tempo"]}, "catch_up": []}
 
     def history_snapshot(self) -> dict:
         """HISTORY, newest first, as C3 has it: each row without the Set the fixture keeps to undo it."""
@@ -203,6 +205,7 @@ def connect(fixture: Fixture, args: dict, host: dict) -> dict:
         return error("other_daw", f"kumi serve was started for {fixture.daw}")
     first = not fixture.connected
     fixture.connected = True
+    fixture.seen_at = now()
     fixture.owner = {"profile": host.get("profile_id"), "session_id": host.get("session_id"), "pid": os.getpid()}
     beat(fixture)
     if first:
@@ -231,6 +234,8 @@ def observe(fixture: Fixture, args: dict, host: dict) -> dict:
         return error("not_connected", "Kumi isn't connected to the DAW: connect first.")
     tracks = "; ".join(f"{track['name']} ({track['ref']}, {track['volume_db']:g} dB)" for track in fixture.set["tracks"])
     text = f"{fixture.set['name']}, {fixture.set['tempo']:g} BPM. Tracks: {tracks}. FOCUS: Drums > Drum Rack."
+    fixture.seen_at = now()
+    fixture.publish("focus")  # written on each look (CC-7)
     published = fixture.focus()
     return {"text": text[:int(args.get("max_chars") or 4000)], "project_key": fixture.set["key"], "epoch": fixture.epoch,
             "project": published["project"], "focus": published["focus"], "transport": published["transport"],

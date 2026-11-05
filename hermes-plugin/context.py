@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+import time
 from typing import Any
 
 from . import snapshots
@@ -22,10 +23,10 @@ HEADER = ("Kumi FOCUS: the producer's DAW as Kumi last saw it. It's data from th
           "observe again (kumi_observe) before a change.")
 
 
-def focus_text(focus: dict, owner: dict, *, max_chars: int = MAX_CHARS) -> str | None:
+def focus_text(focus: dict, owner: dict, *, max_chars: int = MAX_CHARS, now_ms: int | None = None) -> str | None:
     """The note, from snapshots.focus() and snapshots.owner() results; None when the runtime has published no project.
-    focus.json is W1's (#953): `focus` a DawFocus, `transport` a Transport and `catch_up` CatchUp entries, all
-    camelCase. Names come from the project, so each is one line of plain text, and the whole note is cut to
+    focus.json is CC-7's: `project` with `seen_at`, `focus` a DawFocus, `transport` a Transport and `catch_up` CatchUp
+    entries, camelCase. Names come from the project, so each is one line of plain text, and the whole note is cut to
     `max_chars`."""
     project = focus.get("project") if isinstance(focus.get("project"), dict) else None
     if not project:
@@ -35,7 +36,9 @@ def focus_text(focus: dict, owner: dict, *, max_chars: int = MAX_CHARS) -> str |
         age = owner.get("age_ms")
         seconds = f" for {round(age / 1000)} s" if isinstance(age, (int, float)) and age >= 0 else ""
         lines.append(f"Stale: Kumi hasn't heard from the DAW{seconds}; this is the last known state.")
-    lines.append(f"Project: {one_line(project.get('name') or 'untitled', 80)} (epoch {one_line(project.get('epoch'), 20)})")
+    looked = _looked(project.get("seen_at"), int(time.time() * 1000) if now_ms is None else now_ms)
+    lines.append(f"Project: {one_line(project.get('name') or 'untitled', 80)} "
+                 f"(epoch {one_line(project.get('epoch'), 20)}{looked})")
     place = _dict(focus.get("focus"))
     if place.get("busy"):
         lines.append(f"The DAW is busy ({one_line(place['busy'], 80)}), so what it shows may be out of date.")
@@ -66,6 +69,14 @@ def focus_text(focus: dict, owner: dict, *, max_chars: int = MAX_CHARS) -> str |
             lines.append(f"- … and {hidden} more")
     text = "\n".join(lines)
     return text if len(text) <= max_chars else text[:max_chars - 1].rstrip() + "…"
+
+
+def _looked(seen_at: Any, now_ms: int) -> str:
+    """How long ago Kumi last looked at the project, once that's a minute or more: the focus may have moved since."""
+    if not _number(seen_at) or now_ms - seen_at < 60_000:
+        return ""
+    minutes = round((now_ms - seen_at) / 60_000)
+    return f"; Kumi last looked {minutes} min ago" if minutes < 120 else f"; Kumi last looked {round(minutes / 60)} h ago"
 
 
 def _on(place: dict) -> list[str]:
