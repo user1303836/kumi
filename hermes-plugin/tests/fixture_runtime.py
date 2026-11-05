@@ -64,6 +64,7 @@ class Fixture:
         self.scans: dict[str, str] = {}  # job id -> running, cancelling, cancelled or done (CC-14)
         self.quoted: dict[str, dict] = {}  # Mirelo quotes this runtime made (CC-13)
         self.generations: dict[str, dict] = {}  # generation jobs it created
+        self.ledger_busy_said = False  # --generate-create ledger_busy_once: whether its one busy answer was given
         self.previews: dict[tuple, str] = {}  # an upload preview's file identity, by the host call it was for (A1)
         self.seq = 0
         self.connected = False
@@ -674,6 +675,11 @@ def generate(fixture: Fixture, args: dict, host: dict) -> dict:
             return error("not_approved", "a create needs the host's reservation")
         if fixture.options.generate_create == "not_submitted":
             return error("not_submitted", "Mirelo refused it before anything was sent")
+        busy = fixture.options.generate_create == "ledger_busy" or (
+            fixture.options.generate_create == "ledger_busy_once" and not fixture.ledger_busy_said)
+        if busy:  # its ledger lock timed out before anything was posted; the same call may come again
+            fixture.ledger_busy_said = True
+            return error("ledger_unavailable", "Kumi's credit ledger is busy.")
         job_id = f"g-{os.getpid()}-{len(fixture.generations) + 1}"
         fixture.generations[job_id] = {"quote": quote, "reserved": sealed.get("reserved_credits")}
         fixture.record(f"jobs/{job_id}.json", {"schema": 1, "seq": fixture.next_seq(), "at": now(), "job_id": job_id,
@@ -745,7 +751,8 @@ def main() -> None:
                         choices=["missing", "same", "older", "newer", "other_owner"])
     parser.add_argument("--component-owner")
     parser.add_argument("--generate-estimate", type=int, default=15, help="a quote's estimate, in credits")
-    parser.add_argument("--generate-create", default="running", choices=["running", "not_submitted"])
+    parser.add_argument("--generate-create", default="running",
+                        choices=["running", "not_submitted", "ledger_busy_once", "ledger_busy"])
     parser.add_argument("--generate-actual", type=int, default=12, help="a finished job's charge (-1: unknown)")
     parser.add_argument("--generate-expires-ms", type=int, default=300_000,
                         help="how long a quote lasts from now, in milliseconds (negative: already expired)")

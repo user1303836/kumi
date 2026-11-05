@@ -220,6 +220,25 @@ class Generation(unittest.TestCase):
                          "the key for its GET, with the switches as they are now")
         self.assertEqual(len(self.sent(data, "create")), 1)
 
+    def test_a_create_a_busy_ledger_refused_goes_again_as_the_same_call_with_the_same_reservation(self):
+        def created(host) -> dict:
+            quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+            return support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
+
+        with mock.patch.object(generate, "LEDGER_RETRY_PAUSE", 0):
+            host, _, data = self.host(None, "--generate-create", "ledger_busy_once")
+            running = created(host)
+            self.assertEqual(running["state"], "running", running)
+            first, again = self.sent(data, "create")
+            self.assertEqual((first["_host"], first["_mirelo"]), (again["_host"], again["_mirelo"]),
+                             "the same host call and reservation, never a new one")
+            self.assertEqual(host.ledger().snapshot()["reserved"], 15, "reserved once")
+            host, _, data = self.host(None, "--generate-create", "ledger_busy")
+            busy = created(host)
+        self.assertEqual((busy["error"]["code"], busy["ledger"]["reserved"]), ("ledger_unavailable", 15), busy)
+        self.assertIn("don't create it again", busy["hint"])
+        self.assertEqual(len(self.sent(data, "create")), generate.LEDGER_RETRIES + 1, "then it stops")
+
     def test_a_create_kumi_can_not_send_holds_no_credits(self):
         host, _, data = self.host()
         quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
@@ -306,7 +325,11 @@ class Generation(unittest.TestCase):
         self.assertEqual(commands.cli_credits(host, *release, stdin=Tty("n\n"), stdout=Tty()), 1)
         self.assertEqual(host.ledger().snapshot()["reserved"], 15)
         self.assertEqual(commands.cli_credits(host, *release, stdin=Tty("y\n"), stdout=Tty()), 0)
-        self.assertEqual((host.ledger().snapshot()["reserved"], host.ledger().reservations()), (0, []))
+        self.assertEqual(host.ledger().snapshot()["reserved"], 0, "released: nothing held")
+        out = io.StringIO()
+        commands.cli_credits(host, None, stdout=out)
+        self.assertIn("Released by you, so nothing is held", out.getvalue())
+        self.assertIn(f"{held['reservation_id']}: sound effect, was 15 credits", out.getvalue())
 
         host, _, _ = self.host(None, "--generate-actual", "20")  # a charge above its estimate (15) pauses new ones
         self.generation(host)
@@ -316,6 +339,33 @@ class Generation(unittest.TestCase):
         self.assertEqual(commands.cli_credits(host, "unfreeze", stdin=Tty("y\n"), stdout=Tty()), 0)
         self.assertFalse(host.ledger().snapshot()["frozen"])
         self.assertFalse([name for name, _, _, _ in tools.TOOLS if "credit" in name], "no tool reaches them")
+
+    def test_a_charge_mirelo_reports_after_the_producer_released_its_reservation_still_counts(self):
+        host, _, data = self.host(None, "--slow", "generate=2")
+        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        with mock.patch.object(generate, "TIMEOUT", 0.3):  # the answer is lost; the runtime goes on and makes the job
+            unsure = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
+        self.assertEqual(unsure["state"], "unsure")
+        [held] = host.ledger().reservations()
+        self.assertEqual(commands.cli_credits(host, "release", held["reservation_id"], stdin=Tty("y\n"), stdout=Tty()),
+                         0, "the producer checked too early, and released it")
+        self.assertEqual({key: host.ledger().snapshot()[key] for key in ("spent", "reserved")},
+                         {"spent": 0, "reserved": 0})
+        jobs = data / "state" / "jobs"
+        self.assertTrue(support.eventually(lambda: any(jobs.glob("g-*.json"))), "but the job was made")
+        [listed] = jobs.glob("g-*.json")
+        job_id = json.loads(listed.read_text(encoding="utf-8"))["job_id"]
+        plain = host.live().call("job", {"job_id": job_id}, host.identity({"session_id": "s1"}), timeout=10)
+        other = {**plain, "result": {**plain["result"], "credits": {**plain["result"]["credits"], "reserved": 99}}}
+        self.assertIsNone(generate.adopt(host, job_id, other), "a receipt that isn't that job's is refused")
+        self.assertEqual(host.ledger().find_job(job_id), None, "and nothing was bound")
+        done = support.call(host, "kumi_job", {"job_id": job_id}, session_id="s1")
+        totals = done["result"]["ledger"]
+        self.assertEqual({key: totals[key] for key in ("spent", "reserved", "frozen")},
+                         {"spent": 12, "reserved": 0, "frozen": True},
+                         "found by its quote and bound with its own record: the charge counts, and, held nowhere, "
+                         "pauses new generations (amendment C)")
+        self.assertEqual(len(self.sent(data, "create")), 1, "nothing was created again")
 
     def test_a_card_goes_only_for_a_call_hermes_ran_and_none_over_its_size(self):
         sent: list = []

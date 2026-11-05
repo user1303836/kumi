@@ -29,6 +29,11 @@ LEDGER_FILE = "ledger.json"
 # How long each ledger call waits for the ledger's lock before it's ledger_unavailable (amendment B-c): the approval
 # hook makes at most four such calls, within Hermes's hook timeout (policy._generate).
 LEDGER_WAIT = 2.0
+# A create the runtime refuses as ledger_unavailable (its ledger's lock timed out before it posted anything; it keeps
+# the create prepared and doesn't keep that answer) goes again as the same call: the same _host and reservation,
+# never a new reservation or host call (rgzm, #1048). Once more (two tries in all, like _bind's), this far apart.
+LEDGER_RETRIES = 1
+LEDGER_RETRY_PAUSE = 0.5
 # The card event (13a): the public result, MIDI `notes` left out; one over this goes without its card.
 CARD_BYTES = 256 * 1024
 _SOURCE_KEYS = ({"artifact_id"}, {"sound_id", "map_revision"}, {"file", "provenance"})
@@ -185,20 +190,31 @@ def create(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
         return _ledger_error(failure, ledger)
     reservation_id = reservation["reservation_id"]
     sealed = private(key, reservation_id=reservation_id, reserved_credits=reservation["reserved_credits"])
-    try:
-        result = live.call("generate", {"action": "create", "quote_id": quote_id}, identity, timeout=TIMEOUT,
-                           private=sealed)
-    except runtime.NotSent as failure:  # refused before a byte reached the runtime: nothing reached Mirelo either
-        return _freed(ledger, reservation_id, failure.reason, error(failure.code, failure.reason))
-    except runtime.Refused as refused:
-        if refused.code == "not_submitted":  # the runtime's proof nothing was posted (13-R8)
-            return _freed(ledger, reservation_id, refused.reason, refused.as_json())
-        return {**refused.as_json(), "ledger": _snapshot(ledger)}
-    except runtime.Unavailable as failure:  # posted or not is unknown: the reservation stays, and nothing is resent
-        return {"state": "unsure", "code": failure.code, "quote_id": quote_id, "reason": failure.reason,
-                "hint": ("Whether Mirelo got it is unknown, so its credits stay reserved. Don't create it again: "
-                         "kumi_job shows the job if there is one, and the producer can check Mirelo."),
-                "ledger": _snapshot(ledger)}
+    for attempt in range(LEDGER_RETRIES + 1):
+        again = attempt < LEDGER_RETRIES
+        try:
+            result = live.call("generate", {"action": "create", "quote_id": quote_id}, identity, timeout=TIMEOUT,
+                               private=sealed)
+        except runtime.NotSent as failure:  # refused before a byte reached the runtime: nothing reached Mirelo either
+            return _freed(ledger, reservation_id, failure.reason, error(failure.code, failure.reason))
+        except runtime.Refused as refused:
+            if refused.code == "ledger_unavailable" and again:
+                time.sleep(LEDGER_RETRY_PAUSE)
+                continue
+            if refused.code == "not_submitted":  # the runtime's proof nothing was posted (13-R8)
+                return _freed(ledger, reservation_id, refused.reason, refused.as_json())
+            answer = refused.as_json()
+            if refused.code == "ledger_unavailable":
+                answer["hint"] = (f"Kumi's credit ledger stayed busy, so the runtime didn't send it. Its credits stay "
+                                  f"reserved ({reservation_id}) until the producer releases them in a terminal (hermes "
+                                  "kumi credits); don't create it again.")
+            return {**answer, "ledger": _snapshot(ledger)}
+        except runtime.Unavailable as failure:  # posted or not is unknown: the reservation stays, and nothing is resent
+            return {"state": "unsure", "code": failure.code, "quote_id": quote_id, "reason": failure.reason,
+                    "hint": ("Whether Mirelo got it is unknown, so its credits stay reserved. Don't create it again: "
+                             "kumi_job shows the job if there is one, and the producer can check Mirelo."),
+                    "ledger": _snapshot(ledger)}
+        break
     if isinstance(result.get("error"), dict):
         if result["error"].get("code") == "not_submitted":
             return _freed(ledger, reservation_id, str(result["error"].get("reason") or "not submitted"), result)
@@ -253,8 +269,10 @@ def find(host: Any, job_id: Any) -> tuple[Any, dict] | None:
 def adopt(host: Any, job_id: Any, plain: Any) -> tuple[Any, dict] | None:
     """A generation job the ledger never bound, because the create's answer was lost (`unsure`) while the runtime went
     on and made it: the runtime's own job record (`plain`, kumi_job's plain read) names its quote, and the one unsettled
-    reservation of that quote is bound to it, so it's followed and settled like any other (W3's calls, agent-m's C7
-    check). Nothing is created or sent again. None for any other job, or when the quote doesn't name exactly one."""
+    reservation for that quote, held or released by the producer, is bound to it, with that record as the receipt the
+    ledger checks (CONTRACT-CHANGES B-b, C), so kumi_job settles it as any other job; a charge on a released one still
+    counts, and pauses new generations. Nothing is created or sent again. None for any other job, when the quote
+    doesn't name exactly one, or when the ledger refuses the receipt."""
     if not isinstance(plain, dict) or plain.get("kind") != "generate" or plain.get("job_id") != job_id \
             or snapshots.file_id(job_id) is None or not (Path(host.data_dir()) / LEDGER_FILE).is_file():
         return None
@@ -266,7 +284,7 @@ def adopt(host: Any, job_id: Any, plain: Any) -> tuple[Any, dict] | None:
                 if isinstance(row, dict) and row.get("quote_id") == quote_id and row.get("job_id") in (None, job_id)]
         if not isinstance(quote_id, str) or len(held) != 1:
             return None
-        ledger.bind(held[0]["reservation_id"], job_id)
+        ledger.bind(held[0]["reservation_id"], job_id, receipt=plain)
         found = ledger.find_job(job_id)
     except Exception:
         log.warning("Kumi couldn't bind a generation job it found to its credit reservation")

@@ -153,15 +153,23 @@ KIND_WORDS = {"sfx": "sound effect", "audio_to_midi": "audio to MIDI"}
 
 
 def reservation_lines(held: Any) -> list[str]:
-    """The ledger's unsettled reservations, one line each, with the id `release` takes (W3's `reservations()`)."""
+    """The ledger's unsettled reservations, one line each, with the id `release` takes (W3's `reservations()`): those
+    still held, then those the producer released by hand, which hold nothing now (CC-13 B-b amendment: a charge Mirelo
+    reports for one later is still counted)."""
     rows = [row for row in held if isinstance(row, dict)] if isinstance(held, list) else []
-    lines = ["Reserved, not settled yet:"] if rows else []
-    for row in rows:
-        job = row.get("job_id")
-        lines.append(f"• {_said(row.get('reservation_id'), 80)}: {KIND_WORDS.get(row.get('kind'), 'a generation')}, "
-                     f"{_said(row.get('reserved_credits'), 20)} credits, "
-                     f"{f'job {_said(job, 80)}' if isinstance(job, str) and job else 'no job'}, "
-                     f"submitted: {_said(row.get('submission') or 'unknown', 40)}")
+    lines = []
+    for released, heading in ((False, "Reserved, not settled yet:"),
+                              (True, "Released by you, so nothing is held; a charge Mirelo reports later still "
+                                     "counts:")):
+        group = [row for row in rows if (row.get("settlement") == "manual_release") is released]
+        if group:
+            lines.append(heading)
+        for row in group:
+            job = row.get("job_id")
+            amount = f"was {_said(row.get('reserved_credits'), 20)}" if released else _said(row.get("reserved_credits"), 20)
+            lines.append(f"• {_said(row.get('reservation_id'), 80)}: {KIND_WORDS.get(row.get('kind'), 'a generation')}, "
+                         f"{amount} credits, {f'job {_said(job, 80)}' if isinstance(job, str) and job else 'no job'}, "
+                         f"submitted: {_said(row.get('submission') or 'unknown', 40)}")
     return lines
 
 
