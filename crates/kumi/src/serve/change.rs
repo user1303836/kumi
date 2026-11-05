@@ -1252,9 +1252,9 @@ mod tests {
     }
 
     #[test]
-    fn a_racks_new_chain_is_the_one_live_step_left_to_lives_own_undo() {
+    fn the_live_steps_left_to_lives_own_undo_are_a_racks_new_chain_and_a_device_move() {
         let live = crate::daw::provider(kumi_types::daw::DawId::Ableton).unwrap();
-        let offered: Vec<String> = ["edit_rack", "import_audio"].map(String::from).to_vec();
+        let offered: Vec<String> = ["edit_rack", "import_audio", "load_device", "move_device", "move_device_to"].map(String::from).to_vec();
         let step = |tool, input| allowed_step(live, &offered, 1, tool, &input);
         let chain = step("edit_rack", json!({"rackRef": "1:device:0:0", "action": "add-chain"}));
         assert!(chain.is_ok_and(|(allowed, daw_undo)| allowed.tool == "edit_rack" && daw_undo), "through, as one Live's Undo takes back");
@@ -1265,5 +1265,16 @@ mod tests {
         // A step Live keeps no undo for and that isn't marked stays refused: a sound into a take lane.
         let lane = json!({"sample": {"sound_id": "s-r1-1", "map_revision": "r1"}, "takeLaneRef": "1:take_lane:0:0", "position": 4});
         assert_eq!(step("import_audio", lane).unwrap_err()["code"], "not_allowed");
+        // A device's move is through, as one only Live's Undo takes back (#1139); so a load and the move that places it
+        // are two changes: the load Kumi undoes, the move Live's Undo takes back.
+        let load = json!({"tool": "load_device", "input": {"trackRef": "1:track:0", "itemId": "audio_effects/Utility"}, "as": "util"});
+        let place = json!({"tool": "move_device", "input": {"deviceRef": "@util", "index": 0}});
+        let flags: Vec<bool> =
+            [&load, &place].iter().map(|plan| step(plan["tool"].as_str().unwrap(), plan["input"].clone()).unwrap().1).collect();
+        assert_eq!(flags, [false, true]);
+        assert!(step("move_device_to", json!({"deviceRef": "1:device:0:1", "targetTrackRef": "1:track:2", "index": 0})).unwrap().1);
+        let checked = Checked { families: vec!["device"; 2], files: Vec::new(), daw_undo: flags, because: Vec::new(), app: "Live" };
+        let refused = checked.alone(&[load, place]).unwrap_err();
+        assert!(refused["reason"].as_str().is_some_and(|reason| reason.starts_with("Step 2 (move_device)")), "{refused}");
     }
 }
