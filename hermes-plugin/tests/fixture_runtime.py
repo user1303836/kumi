@@ -42,7 +42,12 @@ RESTARTED = ("Kumi restarted since this change, so it can't undo it safely: undo
 RESOURCES = ("kumi://status", "kumi://focus", "kumi://history", "kumi://map")  # C2's, as #1047's kumi serve offers
 # The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`), with
 # the HISTORY family each one is in Live's change table (#965: a preview's `family`, so an approval's rule key).
-STEPS = {"set_track_volume": "mixer", "replace_sample": "device"}
+STEPS = {"set_track_volume": "mixer", "replace_sample": "device", "load_device": "device"}
+# What Kumi's undo of a Live device load says until #1101's fix: Live's own undo, when it's next, or by hand (rgzm).
+DAW_UNDO = {"next": "Cmd+Z in Live takes back Kumi's whole change while it's Live's latest step: if nothing changed in "
+                    "Live since, press it there once, right away.",
+            "buried": "Live's undo would take back what came after first. Remove the device by hand instead (select "
+                      "it in Live and press Delete), or undo the later changes first."}
 SET = {
     "name": "Night Drive", "key": "live:night-drive", "tempo": 124.0,
     "tracks": [
@@ -226,9 +231,11 @@ class Fixture:
                 "transport": {"playing": False, "tempo": self.set["tempo"]}, "catch_up": []}
 
     def history_snapshot(self) -> dict:
-        """HISTORY, newest first, as C3 has it: each row without the Set the fixture keeps to undo it, and this
-        runtime's generation (#1047), which an earlier runtime's rows don't have."""
-        return {"generation": self.generation, "items": [{key: value for key, value in row.items() if key != "before"}
+        """HISTORY, newest first, as C3 has it: each row without what the fixture keeps to undo it (the Set before,
+        and whether it loaded a device), and this runtime's generation (#1047), which an earlier runtime's rows don't
+        have."""
+        return {"generation": self.generation, "items": [{key: value for key, value in row.items()
+                                                          if key not in ("before", "loads_device")}
                                                          for row in reversed(self.history)][:200]}
 
     def track(self, ref: str) -> dict | None:
@@ -330,6 +337,9 @@ def plan_refusal(fixture: Fixture, args: dict) -> tuple[str, str] | None:
                 return "invalid", f"no track {target.get('track_ref')!r} in the project"
             if not isinstance(target.get("volume_db"), (int, float)):
                 return "invalid", "set_track_volume needs volume_db, a number"
+        elif step["tool"] == "load_device":
+            if fixture.track(target.get("trackRef", "")) is None or not isinstance(target.get("itemId"), str):
+                return "invalid", "load_device needs trackRef, a track, and itemId"
         elif step["tool"] == "replace_sample":
             if fixture.simpler(target.get("deviceRef", "")) is None:
                 return "invalid", f"no Simpler {target.get('deviceRef')!r} in the project"
@@ -378,6 +388,9 @@ def describe(fixture: Fixture, step: dict) -> dict:
     if step["tool"] == "set_track_volume":
         name = fixture.track(target["track_ref"])["name"]
         text = f"Set track volume: volume_db {float(target['volume_db']):g} — on {quoted(name)}"
+    elif step["tool"] == "load_device":
+        device, track = target["itemId"].rsplit("/", 1)[-1], fixture.track(target["trackRef"])["name"]
+        text = f"Load device: {quoted(device)} — on {quoted(track)}"
     else:
         track, pad = fixture.simpler(target["deviceRef"])
         name = f"{pad['device']} ({track['name']} > {track['devices'][0]['name']} pad {pad['pad']})"
@@ -406,16 +419,22 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
         target = step["input"]
         if step["tool"] == "set_track_volume":
             fixture.track(target["track_ref"])["volume_db"] = float(target["volume_db"])
+        elif step["tool"] == "load_device":
+            fixture.track(target["trackRef"])["devices"].append(
+                {"ref": f"{target['trackRef']}/d{len(fixture.track(target['trackRef'])['devices']) + 1}",
+                 "name": target["itemId"].rsplit("/", 1)[-1]})
         else:
             fixture.simpler(target["deviceRef"])[1]["sample"] = source_name(target["sample"])
     first = steps[0]["input"]
-    track = fixture.track(first["track_ref"]) if "track_ref" in first else fixture.simpler(first["deviceRef"])[0]
+    track = (fixture.track(first.get("track_ref") or first["trackRef"]) if "deviceRef" not in first
+             else fixture.simpler(first["deviceRef"])[0])
     ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
     # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note) and CC-5's
     # (tool_call_id, digest, call_outcome), which the plugin never passes on.
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
                             "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
                             "family": STEPS[steps[0]["tool"]], "at": now(), "state": "applied",
+                            "loads_device": any(step["tool"] == "load_device" for step in steps),
                             "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
                             "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
                             "call_outcome": "applied", "before": before})
@@ -437,6 +456,10 @@ def undo(fixture: Fixture, args: dict, host: dict) -> dict:
         if row is None:
             return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
         preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": not why_not}
+        if not why_not and row.get("loads_device"):  # #1101: only Live's own undo, or the producer's hand, takes it back
+            daw_undo = "next" if row is fixture.history[-1] else "buried"  # derived when read, never kept in the row
+            return {**preview, "undo_available": False, "reason": "kept", "note": DAW_UNDO[daw_undo],
+                    "daw_undo": daw_undo}
         return {**preview, "reason": why_not[0]} if why_not else preview
     if row is None:
         return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}

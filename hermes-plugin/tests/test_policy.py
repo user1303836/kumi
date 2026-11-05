@@ -247,6 +247,22 @@ class Approvals(unittest.TestCase):
         self.assertEqual((decision["action"], decision["message"]),
                          ("block", "Kumi didn't undo anything: It can't be undone any more."), "words, never a code")
 
+    def test_a_device_loads_undo_says_how_live_takes_it_back_while_kumi_cant(self):
+        loaded = support.call(self.host, "kumi_change", change(
+            {"tool": "load_device", "input": {"trackRef": "t2", "itemId": "audio_effects/Saturator"}},
+            title="Warmer bass"), session_id="s1")
+        undo = {"history_id": loaded["history_ids"][0]}
+        next_words = ("Cmd+Z in Live takes back Kumi's whole change while it's Live's latest step: if nothing changed "
+                      "in Live since, press it there once, right away.")
+        self.assertEqual(self.hook("kumi_undo", undo),
+                         {"action": "block", "message": f"Kumi didn't undo anything: {next_words}"},
+                         "#1101: Live's own undo, while the load is its latest step; never the kept code's words")
+        support.call(self.host, "kumi_change", change(expected_epoch=str(loaded["epoch"])), session_id="s1")
+        decision = self.hook("kumi_undo", undo)
+        self.assertEqual(decision["action"], "block")
+        self.assertIn("Live's undo would take back what came after first", decision["message"])
+        self.assertNotIn("press it there once", decision["message"], "never Cmd+Z over the producer's later work")
+
     def test_a_change_from_before_kumi_restarted_says_why_it_cant_be_undone_and_what_to_do(self):
         applied = support.call(self.host, "kumi_change", change(), session_id="s1")
         undo = {"history_id": applied["history_ids"][0]}

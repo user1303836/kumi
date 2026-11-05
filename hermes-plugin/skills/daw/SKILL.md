@@ -154,7 +154,11 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
 ## Undo
 - **Undo with `kumi_undo` and a HISTORY id** from `kumi_history` or a `kumi_change` result. The producer approves it too.
 - **Never "undo" by making a reverse change from your memory** of what the project was.
-- **`kept`** means the producer changed that thing since, so Kumi left it. **`expired`** means it can't be undone any more.
+- **`kept`** means the producer changed that thing since, so Kumi left it, unless it comes with `daw_undo` (below). **`expired`** means it can't be undone any more.
+- **A Live change that loaded a device, for now** (#1101): Kumi refuses to undo it, and nothing is undone. Kumi's words say what the producer can do instead, and its answer's `daw_undo` says which case. Relay the words.
+  - **Nothing happened in Live since** (`daw_undo: "next"`): Cmd+Z in Live takes back Kumi's whole change while it's Live's latest step, so the producer presses it once, right away.
+  - **Something happened in Live since** (`daw_undo: "buried"`: the producer's edit, or a later change): Cmd+Z would take back that later work first, so never suggest it. The producer removes the device by hand (select it in Live and press Delete), or undoes the later changes first.
+  - Never send the undo again, and never take the device out yourself another way.
 - **Kumi restarted since the change** (`kumi_undo` says so, and `@kumi:history` marks it): Kumi's undo for it went with the runtime that made it. Tell the producer just that, and that they can undo it in the DAW if it's still the latest step there, or ask you to set it back. Setting it back is a new change: observe first, take what HISTORY says the change was, and the producer approves it like any other.
 - **When Kumi's runtime doesn't run in this Hermes process, and always in a scheduled job,** `kumi_history` answers with HISTORY as Kumi last published it (`from: last_published`, `as_of`, and a note on why). Nothing in it can be undone from there, and the project may have changed since: say when it's from, and never act on it without connecting and observing first.
 

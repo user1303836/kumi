@@ -361,11 +361,20 @@ def _undo(host: Any, args: dict, kwargs: dict) -> dict:
     except (runtime.Unavailable, runtime.Refused) as failure:
         return block(f"Kumi didn't undo anything: {_reason(failure)}")
     if answer.get("state") != "preview" or not answer.get("undo_available"):
-        reason = answer.get("reason") if isinstance(answer.get("reason"), str) else ""
-        words = (UNDO_REFUSED[reason].format(daw=setup.DAWS.get(host.daw(), "the DAW")) if reason in UNDO_REFUSED
-                 else reason or "that change can no longer be undone.")
-        return block(f"Kumi didn't undo anything: {words}")
+        return block(f"Kumi didn't undo anything: {undo_refused(host, answer)}")
     return approve([f"Kumi: {answer.get('text') or 'undo a Kumi change'}"], "kumi:write:undo")
+
+
+def undo_refused(host: Any, answer: dict) -> str:
+    """Why an undo's preview says Kumi can't undo it, in words. A change only the DAW's own undo can take back (#1101:
+    a Live device load) has `daw_undo`, `next` when nothing happened in the DAW since and `buried` when something did,
+    and says how in the runtime's `note`, so its code (`kept`) never stands for it."""
+    note = answer.get("note")
+    if answer.get("daw_undo") in ("next", "buried") and isinstance(note, str) and note.strip():
+        return one_line(note, 400)
+    reason = answer.get("reason") if isinstance(answer.get("reason"), str) else ""
+    return (UNDO_REFUSED[reason].format(daw=setup.DAWS.get(host.daw(), "the DAW")) if reason in UNDO_REFUSED
+            else reason or "that change can no longer be undone.")
 
 
 def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
