@@ -4,7 +4,10 @@ kumi_testkit::fixture_paths!();
 use async_trait::async_trait;
 use futures::FutureExt;
 use kumi_agent::{
-    core::contracts::*,
+    core::{
+        contracts::*,
+        goal_rig::{knob_key, moved},
+    },
     mcp::{
         client::{McpEndpoint, StderrStatus},
         types::{CallToolResult, Implementation, ListToolsResult},
@@ -39,6 +42,8 @@ struct Fixture {
     calls: Cell<usize>,
     /// A goal generation checks availability before setting and before rendering. The old recording's Set is static.
     availability_reads: Cell<usize>,
+    /// Original knob reads between the two new checks, counted from the trial's actual moved values.
+    knob_reads: Cell<usize>,
     original: RefCell<Signal>,
     cancelled: Cell<bool>,
     tag: RefCell<String>,
@@ -99,18 +104,20 @@ impl McpEndpoint for Fixture {
         let actual = json!({"name":name,"args":args});
         let mut expected = self.case["calls"][index].clone();
         // (#789) Two availability reads are new: unchanged and cached trials used to keep missing candidates too.
-        // Reuse only this exact track projection, at most twice a generation, from the latest recorded reply. The
-        // real disappearing-track cases exercise both render paths in `live_goal`; the immutable oracle is unchanged.
+        // Reuse only these two reads of this exact projection. Count the original knob reads between them explicitly:
+        // a cached generation's second check can equal the next generation's first recorded read, so equality alone
+        // can't say which dispatch this is. Real disappearing tracks exercise both render paths in `live_goal`.
         if self.availability_reads.get() > 0
             && name == "live_discover"
-            && actual["args"]["kind"] == "track"
-            && actual["args"]["fields"] == json!(["ref", "name", "color"])
-            && actual != expected
+            && actual["args"] == json!({"kind":"track","fields":["ref","name","color"],"budget":10000000,"limit":100000})
         {
-            if let Some(read) = (0..index).rev().find(|at| self.case["calls"][*at] == actual) {
+            if self.availability_reads.get() == 2 || self.knob_reads.get() == 0 {
+                let read = if actual == expected { Some(index) } else { (0..index).rev().find(|at| self.case["calls"][*at] == actual) }
+                    .expect("the availability check has an exact recorded track projection to reuse");
                 self.availability_reads.set(self.availability_reads.get() - 1);
                 return self.answer(read);
             }
+            self.knob_reads.set(self.knob_reads.get() - 1);
         }
         // Goals now read the immutable product name and enabled state before reusing a limiter, and each device's identity, to
         // find it again however the chain moves (#399).
@@ -291,6 +298,7 @@ struct Bench {
     connection: Rc<LiveConnection>,
     observer: Rc<Observer>,
     rendering: Rc<Rendering>,
+    current: RefCell<std::collections::HashMap<String, indexmap::IndexMap<String, f64>>>,
 }
 impl Bench {
     async fn new(case: &Value, generation: &str, folder: &Path) -> Self {
@@ -299,6 +307,7 @@ impl Bench {
             case: case.clone(),
             calls: Cell::new(0),
             availability_reads: Cell::new(0),
+            knob_reads: Cell::new(0),
             original: RefCell::new(Signal::new()),
             cancelled: Cell::new(false),
             tag: RefCell::new("tag".into()),
@@ -397,7 +406,39 @@ impl Bench {
                 async move { files.clip_file(&file, signal).await }.boxed_local()
             }),
         );
-        Self { endpoint, ears, connection, observer, rendering }
+        Self { endpoint, ears, connection, observer, rendering, current: RefCell::default() }
+    }
+    /// Tracks only accepted knob values so the replay can distinguish the original reads from the two added checks.
+    async fn generation(
+        &self,
+        rig: &Rc<dyn GoalRig>,
+        trials: &[GenerationTrial],
+        signal: Signal,
+        options: GenerationOptions,
+    ) -> Result<Generation, RuntimeError> {
+        {
+            let mut current = self.current.borrow_mut();
+            for slot in rig.slots() {
+                let values = current.entry(slot.name).or_default();
+                for knob in slot.knobs {
+                    values.entry(knob_key(&knob)).or_insert(knob.value);
+                }
+            }
+            self.endpoint.knob_reads.set(trials.iter().filter(|trial| !moved(trial, current.get(&trial.slot)).is_empty()).count());
+        }
+        let result = rig.generation(trials, signal, Some(options)).await?;
+        assert_eq!(self.endpoint.availability_reads.get(), 0, "exactly two availability reads were adapted");
+        assert_eq!(self.endpoint.knob_reads.get(), 0, "every original knob read consumed its recorded dispatch");
+        for trial in trials {
+            let mut current = self.current.borrow_mut();
+            let values = current.entry(trial.slot.clone()).or_default();
+            for (knob, value) in trial.knobs.iter().zip(&trial.values) {
+                if value.is_finite() && !result.frozen.get(&trial.slot).is_some_and(|keys| keys.contains(&knob_key(knob))) {
+                    values.insert(knob_key(knob), *value);
+                }
+            }
+        }
+        Ok(result)
     }
     /// One of a case's operations; what it comes to.
     async fn run(&self, goal: &mut Option<Rc<dyn GoalRig>>, op: &Value, signal: Signal) -> Result<Value, RuntimeError> {
@@ -410,7 +451,7 @@ impl Bench {
     "hear"=>match rendering.hear_in_set(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(value)=>json!(value),Err(message)=>json!(message)},
     "restore"=>json!(rendering.restore_after_crash(op["identity"].as_str().unwrap(),op["path"].as_str(),signal).await?),
     "open"=>match rendering.open_goal(&serde_json::from_value(op["request"].clone()).unwrap(),signal).await?{Ok(value)=>{let result=json!({"slots":value.slots().into_iter().map(as_ported).collect::<Vec<_>>(),"screens":value.screens()});*goal=Some(value);result},Err(message)=>json!(message)},
-    "generation"=>{let trials=op["trials"].as_array().unwrap().iter().map(|trial|GenerationTrial{slot:trial["slot"].as_str().unwrap().into(),knobs:serde_json::from_value(trial["knobs"].clone()).unwrap(),values:serde_json::from_value(trial["values"].clone()).unwrap(),fresh:trial["fresh"].as_bool()}).collect::<Vec<_>>();let v=goal.as_ref().unwrap().generation(&trials,signal,Some(GenerationOptions{screen:op["options"]["screen"].as_bool()})).await?;json!({"scores":v.scores,"gaps":v.gaps,"silent":v.silent,"frozen":v.frozen,"structural":v.structural,"screened":v.screened,"cached":v.cached})},
+    "generation"=>{let trials=op["trials"].as_array().unwrap().iter().map(|trial|GenerationTrial{slot:trial["slot"].as_str().unwrap().into(),knobs:serde_json::from_value(trial["knobs"].clone()).unwrap(),values:serde_json::from_value(trial["values"].clone()).unwrap(),fresh:trial["fresh"].as_bool()}).collect::<Vec<_>>();let v=self.generation(goal.as_ref().unwrap(),&trials,signal,GenerationOptions{screen:op["options"]["screen"].as_bool()}).await?;json!({"scores":v.scores,"gaps":v.gaps,"silent":v.silent,"frozen":v.frozen,"structural":v.structural,"screened":v.screened,"cached":v.cached})},
     "add"=>match goal.as_ref().unwrap().add(&serde_json::from_value(op["candidate"].clone()).unwrap(),signal).await?{Ok(value)=>json!(as_ported(value)),Err(error)=>json!(error)},
     "settle"=>json!(goal.as_ref().unwrap().settle(op["slot"].as_str().unwrap(),&serde_json::from_value::<Vec<_>>(op["knobs"].clone()).unwrap(),&serde_json::from_value::<Vec<_>>(op["values"].clone()).unwrap(),signal).await?),
     "keep"=>json!(goal.as_ref().unwrap().keep_best(op["slot"].as_str().unwrap(),&serde_json::from_value::<Vec<_>>(op["knobs"].clone()).unwrap(),&serde_json::from_value::<Vec<_>>(op["values"].clone()).unwrap(),signal).await?),
@@ -713,6 +754,7 @@ async fn cancelled_kernel_audition_removes_scratch_tracks_and_clears_its_journal
                 case: case.clone(),
                 calls: Cell::new(0),
                 availability_reads: Cell::new(0),
+                knob_reads: Cell::new(0),
                 original: RefCell::new(controller.clone()),
                 cancelled: Cell::new(false),
                 tag: RefCell::new("tag".into()),
