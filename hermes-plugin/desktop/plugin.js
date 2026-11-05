@@ -4,10 +4,693 @@
 import * as sdk from "@hermes/plugin-sdk";
 import { host as host6, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from "@hermes/plugin-sdk";
 
+// src/shared/i18n.ts
+var en = {
+  common: {
+    yourDaw: "your DAW"
+  },
+  chip: {
+    kumi: "Kumi",
+    stopped: "Kumi stopped",
+    notAnswering: "not answering",
+    notConnected: (daw) => `Kumi · ${daw} not connected`,
+    label: (text) => `Kumi: ${text}`,
+    openMap: "Open the sound map",
+    settings: "Kumi settings"
+  },
+  step: {
+    setup: (daw) => `Set up Kumi for ${daw}`,
+    connect: (daw) => `Connect to ${daw}`
+  },
+  time: {
+    now: "now",
+    minutes: (n) => `${n} min ago`,
+    hours: (n) => `${n} h ago`,
+    days: (n) => `${n} d ago`
+  },
+  pane: {
+    title: "Kumi",
+    agentOff: "Kumi's agent half is off in this profile.",
+    agentOffHow: "Turn on the kumi plugin's Agent switch in Capabilities → Plugins, then restart the gateway. This pane shows your DAW's FOCUS and Kumi's HISTORY once it's on.",
+    reading: "Reading Kumi's state…",
+    backendError: (error) => `Kumi's backend didn't answer: ${error}`,
+    unsure: (op, reason) => `Kumi isn't sure your project is as it was after ${op}${reason ? `: ${reason}` : ""}.`,
+    unsureOp: "its last action",
+    needsLook: "It needs a fresh look before another change.",
+    lookAgain: "Ask Kumi to look again",
+    focus: "Focus",
+    jobs: "Jobs",
+    history: "History",
+    undoable: (n) => `· ${n} can be undone`,
+    undo: "Undo",
+    undoTitle: "Ask Kumi to undo this change",
+    openMap: "Open the sound map",
+    undoNeedsConnection: "Undo needs a connected Kumi."
+  },
+  hint: {
+    sees: "Kumi sees",
+    lastSaw: "Kumi last saw",
+    title: "What Kumi sees selected in your DAW: words like “this track” in this chat mean it.",
+    titleUnsure: "What Kumi last saw selected in your DAW. It isn't sure your project is as it was: ask it to look again."
+  },
+  focus: {
+    nothing: "Nothing in focus yet. Kumi shows what you select in your DAW once it's connected.",
+    nothingSelected: "Nothing selected",
+    project: "The open project",
+    playing: "▶ playing",
+    stopped: "■ stopped",
+    busy: "The DAW answers late while this lasts, so what's shown may be behind",
+    kumiStopped: "Kumi stopped",
+    notAnswering: "not answering",
+    since: "Since Kumi last looked",
+    more: (n) => `and ${n} more`,
+    lastHeard: (ago2) => `Last heard ${ago2}.`
+  },
+  history: {
+    empty: "No changes yet. Each change Kumi makes in your DAW shows here, with its undo.",
+    applied: "applied",
+    undone: "undone",
+    kept: "kept",
+    partial: "partly applied",
+    unsure: "unsure",
+    refused: "refused",
+    failed: "failed",
+    recorded: "recorded",
+    unconfirmed: "Kumi couldn’t confirm what happened.",
+    lookFirst: "Ask Kumi to look again before another change.",
+    restored: "Kumi put back what it changed meanwhile.",
+    restoreUnsure: "Kumi isn’t sure it put everything back."
+  },
+  job: {
+    scanning: "Scanning",
+    scan: "Scan",
+    job: "Job",
+    running: (kind) => `${kind} running`,
+    of: (done, total) => `${done} of ${total}`,
+    done: (noun) => `${noun} done`,
+    sounds: (n, shown) => n === 1 ? `${shown} sound` : `${shown} sounds`,
+    unreadable: (shown) => `${shown} couldn't be read`,
+    failed: (noun) => `${noun} failed`,
+    stopped: (noun) => `${noun} stopped`,
+    interrupted: (noun) => `${noun} interrupted`,
+    interruptedWhy: "Kumi stopped before it finished.",
+    underWay: (title) => `${title}: under way`,
+    percent: (title, percent) => `${title}: ${percent}%`
+  },
+  map: {
+    tab: "Sound map",
+    canvas: "Sound map",
+    agentOff: "Kumi's agent half is off in this profile, so there's no map to show.",
+    reading: "Reading the sound map…",
+    empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there.",
+    search: "Search sounds",
+    searchHint: "Search the map: name, class or folder",
+    count: (n) => `${n} sounds`,
+    countOf: (shown, total) => `${shown} of ${total} sounds`,
+    revision: (revision) => `map ${revision}`,
+    show: (group) => `Show ${group}`,
+    hide: (group) => `Hide ${group}`,
+    matches: "Sounds that match",
+    found: "Sounds Kumi found",
+    more: (n) => `and ${n} more on the map`,
+    play: "▶ Play",
+    stop: "■ Stop",
+    playTitle: "Play it here (nothing changes in your DAW)",
+    use: "Use…",
+    useTitle: "Put a request to use this sound in the chat, to finish and send",
+    playFailed: (error) => `Kumi couldn't play that sound: ${error}`
+  },
+  measurements: {
+    tab: "Measurements",
+    nothing: "Nothing measured yet. When Kumi measures audio in your chat, its numbers show here as well.",
+    tooMuch: "Kumi measured it, but there's too much to show here: the numbers are in its reply in the chat.",
+    inReply: "Kumi measured it: the numbers are in its reply in the chat.",
+    measured: (ago2) => `Measured ${ago2}`
+  },
+  listen: {
+    measured: "measured",
+    measuredTitle: "Measured on this computer by Kumi, from the audio file itself",
+    captureTitle: "Kumi played this window and measured it; it isn't a change, so there's nothing to undo",
+    waveform: (label) => `Waveform of ${label}`,
+    audioGone: "The audio isn't available any more.",
+    this: "This",
+    reference: "Reference",
+    difference: "Difference",
+    bandsDifference: "Band balance, this minus reference (level-matched)",
+    bandsLevel: "Band levels",
+    measuredAudio: "Measured audio",
+    loudness: "Loudness",
+    truePeak: "True peak",
+    brightness: "Brightness (centroid)",
+    range: "Loudness range",
+    crest: "Crest",
+    tempo: "Tempo",
+    key: "Key",
+    interpretation: "Interpretation",
+    noInterpretation: (why) => `No model interpretation: ${why}`,
+    more: "More",
+    less: "Less",
+    beats: (from, to) => `Beats ${from}–${to}`,
+    secondsMeasured: (seconds2) => `${seconds2} s measured`,
+    through: (by) => `through ${by}`,
+    ears: "Kumi Ears",
+    offline: "an offline render",
+    restored: "your project put back as it was",
+    versus: (reference) => ` vs ${reference}`
+  },
+  settings: {
+    intro: (daw) => `Kumi reads and changes your ${daw || "DAW"} project through typed changes you approve, keeps HISTORY with undo, measures audio on this computer, and maps the sample folders you allow.`,
+    agentOff: "Kumi's agent half is off in this profile. Turn on the kumi plugin's Agent switch in Capabilities → Plugins and restart the gateway; its settings form appears under Agent settings.",
+    setup: "Setup",
+    state: "State",
+    next: "Next",
+    runtime: "Kumi runtime",
+    installed: (version) => `Kumi ${version}`,
+    notInstalled: "Not installed",
+    pinned: (version) => `pinned ${version}`,
+    download: "Download",
+    unpacked: (size) => `(${size} unpacked)`,
+    part: (daw) => `${daw} part`,
+    dawComponent: "DAW component",
+    standalone: "Standalone Kumi",
+    adopted: "adopted",
+    leftAsIs: "left as it is",
+    audioFormats: "Audio formats",
+    connection: "Connection",
+    now: "Now",
+    chat: "Kumi's chat",
+    openMap: "Open the sound map",
+    agentSettings: "Agent settings",
+    thisWindow: "This window",
+    openOnFind: "Open the sound map when Kumi finds sounds",
+    states: {
+      ready: "Ready",
+      needs_runtime: "Not set up yet",
+      outdated_runtime: "Needs the pinned version",
+      damaged_runtime: "Needs reinstalling",
+      needs_daw_component: "Needs its DAW part",
+      no_pin: "No pinned release in this plugin",
+      unsupported_platform: "Not available on this system",
+      unknown: "Unknown"
+    },
+    componentStates: {
+      not_installed: "not installed",
+      installed: "installed",
+      outdated: "outdated",
+      unknown: "unknown"
+    }
+  },
+  palette: {
+    map: "Kumi: open the sound map",
+    undo: "Kumi: undo the last change",
+    settings: "Kumi: settings"
+  },
+  notify: {
+    nothingToUndo: "Kumi has no change it can undo right now.",
+    undoUnsure: "Kumi isn't sure of its last change: ask it to look at your project again first.",
+    copied: "Copied the request: paste it into the chat to send it.",
+    askInChat: (text) => `Ask in the chat: ${text}`,
+    openChat: "Open a chat first, then try again.",
+    notOpenHere: "Kumi's chat isn't open here, so the request is in your input, unsent. Send it from the chat Kumi is connected to."
+  },
+  dashboard: {
+    agentOff: "Kumi's agent plugin is off in this profile.",
+    agentOffHow: "Turn it on (Hermes's plugins settings, or `hermes plugins enable kumi`) and restart the dashboard to see Kumi here.",
+    copyTitle: (text) => `Copy “${text}” to paste into a chat`,
+    copied: "Copied",
+    copyRequest: "Copy request",
+    copyUndo: "Copy undo",
+    mapEmpty: "No sound map yet: add a sample folder in Kumi's settings and ask Kumi to scan it.",
+    askLook: "Ask Kumi in your chat to look again before another change."
+  }
+};
+var ja = {
+  common: {
+    yourDaw: "DAW"
+  },
+  chip: {
+    kumi: "Kumi",
+    stopped: "Kumi は停止中",
+    notAnswering: "応答なし",
+    notConnected: (daw) => `Kumi · ${daw} 未接続`,
+    label: (text) => `Kumi: ${text}`,
+    openMap: "サンプルマップを開く",
+    settings: "Kumi の設定"
+  },
+  step: {
+    setup: (daw) => `${daw} 用に Kumi をセットアップ`,
+    connect: (daw) => `${daw} に接続`
+  },
+  time: {
+    now: "たった今",
+    minutes: (n) => `${n} 分前`,
+    hours: (n) => `${n} 時間前`,
+    days: (n) => `${n} 日前`
+  },
+  pane: {
+    title: "Kumi",
+    agentOff: "このプロファイルでは Kumi のエージェント側がオフです。",
+    agentOffHow: "「スキルとツール → プラグイン」で kumi プラグインの Agent スイッチをオンにし、ゲートウェイを再起動してください。オンになると、このペインに DAW の FOCUS と Kumi の HISTORY が表示されます。",
+    reading: "Kumi の状態を読み込み中…",
+    backendError: (error) => `Kumi のバックエンドが応答しませんでした: ${error}`,
+    unsure: (op, reason) => `${op}のあと、プロジェクトが元のままか Kumi は確信できません${reason ? `（${reason}）` : ""}。`,
+    unsureOp: "直前の操作",
+    needsLook: "次の変更の前に、もう一度確認が必要です。",
+    lookAgain: "Kumi にもう一度確認してもらう",
+    focus: "Focus",
+    jobs: "ジョブ",
+    history: "History",
+    undoable: (n) => `· ${n} 件取り消せます`,
+    undo: "取り消す",
+    undoTitle: "この変更の取り消しを Kumi に頼む",
+    openMap: "サンプルマップを開く",
+    undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
+  },
+  hint: {
+    sees: "Kumi が見ているもの:",
+    lastSaw: "Kumi が最後に見たもの:",
+    title: "Kumi が DAW で選択中と見ているもの。このチャットで「このトラック」などと言うと、これを指します。",
+    titleUnsure: "Kumi が最後に DAW で選択中と見たもの。プロジェクトが元のままか確信できないので、もう一度確認するよう頼んでください。"
+  },
+  focus: {
+    nothing: "まだ何もフォーカスされていません。接続すると、DAW で選択したものを Kumi が表示します。",
+    nothingSelected: "何も選択されていません",
+    project: "開いているプロジェクト",
+    playing: "▶ 再生中",
+    stopped: "■ 停止中",
+    busy: "この間は DAW の応答が遅れるため、表示が実際より遅れることがあります",
+    kumiStopped: "Kumi は停止中",
+    notAnswering: "応答なし",
+    since: "Kumi が前回見てから",
+    more: (n) => `ほか ${n} 件`,
+    lastHeard: (ago2) => `最終応答: ${ago2}。`
+  },
+  history: {
+    empty: "まだ変更はありません。Kumi が DAW に加えた変更は、取り消しとともにここに表示されます。",
+    applied: "適用済み",
+    undone: "取り消し済み",
+    kept: "維持",
+    partial: "一部のみ適用",
+    unsure: "不確か",
+    refused: "拒否",
+    failed: "失敗",
+    recorded: "記録",
+    unconfirmed: "何が起きたか Kumi は確認できませんでした。",
+    lookFirst: "次の変更の前に、Kumi にもう一度確認してもらってください。",
+    restored: "その間に変えたものは Kumi が元に戻しました。",
+    restoreUnsure: "すべて元に戻せたか Kumi は確信できません。"
+  },
+  job: {
+    scanning: "スキャン中",
+    scan: "スキャン",
+    job: "ジョブ",
+    running: (kind) => `${kind} 実行中`,
+    of: (done, total) => `${done} / ${total}`,
+    done: (noun) => `${noun}完了`,
+    sounds: (_n, shown) => `${shown} 個のサウンド`,
+    unreadable: (shown) => `${shown} 個は読み込めませんでした`,
+    failed: (noun) => `${noun}失敗`,
+    stopped: (noun) => `${noun}停止`,
+    interrupted: (noun) => `${noun}中断`,
+    interruptedWhy: "完了する前に Kumi が停止しました。",
+    underWay: (title) => `${title}: 進行中`,
+    percent: (title, percent) => `${title}: ${percent}%`
+  },
+  map: {
+    tab: "サンプルマップ",
+    canvas: "サンプルマップ",
+    agentOff: "このプロファイルでは Kumi のエージェント側がオフのため、表示できるマップがありません。",
+    reading: "サンプルマップを読み込み中…",
+    empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Kumi にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
+    search: "サウンドを検索",
+    searchHint: "マップを検索: 名前・種類・フォルダ",
+    count: (n) => `${n} 個のサウンド`,
+    countOf: (shown, total) => `${total} 個中 ${shown} 個のサウンド`,
+    revision: (revision) => `マップ ${revision}`,
+    show: (group) => `${group} を表示`,
+    hide: (group) => `${group} を隠す`,
+    matches: "一致するサウンド",
+    found: "Kumi が見つけたサウンド",
+    more: (n) => `ほか ${n} 個はマップ上に`,
+    play: "▶ 再生",
+    stop: "■ 停止",
+    playTitle: "ここで再生（DAW は何も変わりません）",
+    use: "使う…",
+    useTitle: "このサウンドを使う依頼をチャットに入れます。仕上げて送信してください",
+    playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`
+  },
+  measurements: {
+    tab: "測定結果",
+    nothing: "まだ測定はありません。Kumi がチャットでオーディオを測定すると、その数値がここにも表示されます。",
+    tooMuch: "Kumi は測定しましたが、ここに表示するには多すぎます。数値はチャットの返答にあります。",
+    inReply: "Kumi は測定しました。数値はチャットの返答にあります。",
+    measured: (ago2) => `測定: ${ago2}`
+  },
+  listen: {
+    measured: "測定値",
+    measuredTitle: "Kumi がこのコンピュータ上で、オーディオファイルそのものから測定しました",
+    captureTitle: "Kumi はこの区間を再生して測定しました。変更ではないので、取り消すものはありません",
+    waveform: (label) => `${label} の波形`,
+    audioGone: "このオーディオはもう利用できません。",
+    this: "これ",
+    reference: "リファレンス",
+    difference: "差",
+    bandsDifference: "帯域バランス（これ − リファレンス、レベル合わせ済み）",
+    bandsLevel: "帯域レベル",
+    measuredAudio: "測定したオーディオ",
+    loudness: "ラウドネス",
+    truePeak: "トゥルーピーク",
+    brightness: "明るさ（セントロイド）",
+    range: "ラウドネスレンジ",
+    crest: "クレスト",
+    tempo: "テンポ",
+    key: "キー",
+    interpretation: "解釈",
+    noInterpretation: (why) => `モデルによる解釈なし: ${why}`,
+    more: "もっと見る",
+    less: "閉じる",
+    beats: (from, to) => `${from}–${to} 拍`,
+    secondsMeasured: (seconds2) => `${seconds2} 秒を測定`,
+    through: (by) => /[A-Za-z]$/.test(by) ? `${by} 経由` : `${by}経由`,
+    ears: "Kumi Ears",
+    offline: "オフラインレンダリング",
+    restored: "プロジェクトは元に戻しました",
+    versus: (reference) => `（${reference} と比較）`
+  },
+  settings: {
+    intro: (daw) => `Kumi は、あなたが承認した型付きの変更で ${daw || "DAW"} のプロジェクトを読み書きし、HISTORY と取り消しを保ち、このコンピュータ上でオーディオを測定し、許可したサンプルフォルダをマップにします。`,
+    agentOff: "このプロファイルでは Kumi のエージェント側がオフです。「スキルとツール → プラグイン」で kumi プラグインの Agent スイッチをオンにし、ゲートウェイを再起動してください。設定フォームは「エージェント設定」に表示されます。",
+    setup: "セットアップ",
+    state: "状態",
+    next: "次にすること",
+    runtime: "Kumi ランタイム",
+    installed: (version) => `Kumi ${version}`,
+    notInstalled: "未インストール",
+    pinned: (version) => `固定版 ${version}`,
+    download: "ダウンロード",
+    unpacked: (size) => `（展開後 ${size}）`,
+    part: (daw) => `${daw} 側の部品`,
+    dawComponent: "DAW の部品",
+    standalone: "単体の Kumi",
+    adopted: "引き継ぎ済み",
+    leftAsIs: "そのまま",
+    audioFormats: "オーディオ形式",
+    connection: "接続",
+    now: "現在",
+    chat: "Kumi のチャット",
+    openMap: "サンプルマップを開く",
+    agentSettings: "エージェント設定",
+    thisWindow: "このウィンドウ",
+    openOnFind: "Kumi がサウンドを見つけたらサンプルマップを開く",
+    states: {
+      ready: "準備完了",
+      needs_runtime: "まだセットアップされていません",
+      outdated_runtime: "固定版への更新が必要です",
+      damaged_runtime: "再インストールが必要です",
+      needs_daw_component: "DAW 側の部品が必要です",
+      no_pin: "このプラグインには固定版がありません",
+      unsupported_platform: "このシステムでは利用できません",
+      unknown: "不明"
+    },
+    componentStates: {
+      not_installed: "未インストール",
+      installed: "インストール済み",
+      outdated: "古い版",
+      unknown: "不明"
+    }
+  },
+  palette: {
+    map: "Kumi: サンプルマップを開く",
+    undo: "Kumi: 最後の変更を取り消す",
+    settings: "Kumi: 設定"
+  },
+  notify: {
+    nothingToUndo: "今すぐ取り消せる変更はありません。",
+    undoUnsure: "Kumi は直前の変更に確信がありません。まずプロジェクトをもう一度確認するよう頼んでください。",
+    copied: "依頼をコピーしました。チャットに貼り付けて送信してください。",
+    askInChat: (text) => `チャットで頼んでください: ${text}`,
+    openChat: "先にチャットを開いてから、もう一度試してください。",
+    notOpenHere: "Kumi のチャットがここで開いていないため、依頼は未送信のまま入力欄にあります。Kumi が接続しているチャットから送信してください。"
+  },
+  dashboard: {
+    agentOff: "このプロファイルでは Kumi のエージェントプラグインがオフです。",
+    agentOffHow: "オンにして（Hermes のプラグイン設定、または `hermes plugins enable kumi`）、ダッシュボードを再起動すると、ここに Kumi が表示されます。",
+    copyTitle: (text) => `「${text}」をコピーしてチャットに貼り付け`,
+    copied: "コピーしました",
+    copyRequest: "依頼をコピー",
+    copyUndo: "取り消しをコピー",
+    mapEmpty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Kumi にスキャンを頼んでください。",
+    askLook: "次の変更の前に、チャットで Kumi にもう一度確認するよう頼んでください。"
+  }
+};
+var zh = {
+  common: {
+    yourDaw: "DAW"
+  },
+  chip: {
+    kumi: "Kumi",
+    stopped: "Kumi 已停止",
+    notAnswering: "无响应",
+    notConnected: (daw) => `Kumi · ${daw} 未连接`,
+    label: (text) => `Kumi：${text}`,
+    openMap: "打开采样地图",
+    settings: "Kumi 设置"
+  },
+  step: {
+    setup: (daw) => `为 ${daw} 设置 Kumi`,
+    connect: (daw) => `连接到 ${daw}`
+  },
+  time: {
+    now: "刚刚",
+    minutes: (n) => `${n} 分钟前`,
+    hours: (n) => `${n} 小时前`,
+    days: (n) => `${n} 天前`
+  },
+  pane: {
+    title: "Kumi",
+    agentOff: "此配置中 Kumi 的 Agent 部分已关闭。",
+    agentOffHow: "请在“技能与工具 → 插件”中打开 kumi 插件的 Agent 开关，然后重启网关。打开后，此面板会显示 DAW 的 FOCUS 和 Kumi 的 HISTORY。",
+    reading: "正在读取 Kumi 的状态…",
+    backendError: (error) => `Kumi 的后端没有响应：${error}`,
+    unsure: (op, reason) => `在${op}之后，Kumi 不确定你的项目是否保持原样${reason ? `：${reason}` : ""}。`,
+    unsureOp: "上一个操作",
+    needsLook: "下一次改动之前，需要重新查看一次。",
+    lookAgain: "让 Kumi 重新查看",
+    focus: "Focus",
+    jobs: "任务",
+    history: "History",
+    undoable: (n) => `· ${n} 项可撤销`,
+    undo: "撤销",
+    undoTitle: "让 Kumi 撤销这次改动",
+    openMap: "打开采样地图",
+    undoNeedsConnection: "撤销需要 Kumi 已连接。"
+  },
+  hint: {
+    sees: "Kumi 看到：",
+    lastSaw: "Kumi 上次看到：",
+    title: "Kumi 在你的 DAW 中看到的选中内容：在这个对话里说“这条音轨”等，指的就是它。",
+    titleUnsure: "Kumi 上次在你的 DAW 中看到的选中内容。它不确定项目是否保持原样：请让它重新查看。"
+  },
+  focus: {
+    nothing: "还没有焦点。连接后，Kumi 会显示你在 DAW 中选中的内容。",
+    nothingSelected: "未选中任何内容",
+    project: "当前打开的项目",
+    playing: "▶ 播放中",
+    stopped: "■ 已停止",
+    busy: "在此期间 DAW 响应较慢，显示的内容可能滞后",
+    kumiStopped: "Kumi 已停止",
+    notAnswering: "无响应",
+    since: "自 Kumi 上次查看以来",
+    more: (n) => `还有 ${n} 项`,
+    lastHeard: (ago2) => `最后响应：${ago2}。`
+  },
+  history: {
+    empty: "还没有改动。Kumi 在你的 DAW 中做的每次改动都会显示在这里，并可撤销。",
+    applied: "已应用",
+    undone: "已撤销",
+    kept: "已保留",
+    partial: "部分应用",
+    unsure: "不确定",
+    refused: "已拒绝",
+    failed: "失败",
+    recorded: "已记录",
+    unconfirmed: "Kumi 无法确认发生了什么。",
+    lookFirst: "下一次改动之前，请让 Kumi 重新查看。",
+    restored: "Kumi 已还原期间做出的改动。",
+    restoreUnsure: "Kumi 不确定是否已全部还原。"
+  },
+  job: {
+    scanning: "正在扫描",
+    scan: "扫描",
+    job: "任务",
+    running: (kind) => `${kind} 运行中`,
+    of: (done, total) => `${done} / ${total}`,
+    done: (noun) => `${noun}完成`,
+    sounds: (_n, shown) => `${shown} 个声音`,
+    unreadable: (shown) => `${shown} 个无法读取`,
+    failed: (noun) => `${noun}失败`,
+    stopped: (noun) => `${noun}已停止`,
+    interrupted: (noun) => `${noun}中断`,
+    interruptedWhy: "Kumi 在完成前停止了。",
+    underWay: (title) => `${title}：进行中`,
+    percent: (title, percent) => `${title}：${percent}%`
+  },
+  map: {
+    tab: "采样地图",
+    canvas: "采样地图",
+    agentOff: "此配置中 Kumi 的 Agent 部分已关闭，没有可显示的地图。",
+    reading: "正在读取采样地图…",
+    empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Kumi 扫描；地图会根据找到的声音生成。",
+    search: "搜索声音",
+    searchHint: "搜索地图：名称、类别或文件夹",
+    count: (n) => `${n} 个声音`,
+    countOf: (shown, total) => `${total} 个声音中的 ${shown} 个`,
+    revision: (revision) => `地图 ${revision}`,
+    show: (group) => `显示 ${group}`,
+    hide: (group) => `隐藏 ${group}`,
+    matches: "匹配的声音",
+    found: "Kumi 找到的声音",
+    more: (n) => `地图上还有 ${n} 个`,
+    play: "▶ 播放",
+    stop: "■ 停止",
+    playTitle: "在这里播放（DAW 不会有任何改动）",
+    use: "使用…",
+    useTitle: "把使用这个声音的请求放进对话，补充完整后发送",
+    playFailed: (error) => `Kumi 无法播放这个声音：${error}`
+  },
+  measurements: {
+    tab: "测量结果",
+    nothing: "还没有测量。Kumi 在对话中测量音频时，数值也会显示在这里。",
+    tooMuch: "Kumi 已完成测量，但内容太多无法在此显示：数值在它在对话中的回复里。",
+    inReply: "Kumi 已完成测量：数值在它在对话中的回复里。",
+    measured: (ago2) => `测量于 ${ago2}`
+  },
+  listen: {
+    measured: "实测",
+    measuredTitle: "由 Kumi 在这台电脑上根据音频文件本身测量",
+    captureTitle: "Kumi 播放并测量了这个片段；这不是改动，所以没有需要撤销的内容",
+    waveform: (label) => `${label} 的波形`,
+    audioGone: "这段音频已不可用。",
+    this: "当前",
+    reference: "参考",
+    difference: "差值",
+    bandsDifference: "频段平衡（当前减参考，已对齐电平）",
+    bandsLevel: "频段电平",
+    measuredAudio: "已测量的音频",
+    loudness: "响度",
+    truePeak: "真峰值",
+    brightness: "明亮度（质心）",
+    range: "响度范围",
+    crest: "峰值因数",
+    tempo: "速度",
+    key: "调性",
+    interpretation: "解读",
+    noInterpretation: (why) => `没有模型解读：${why}`,
+    more: "展开",
+    less: "收起",
+    beats: (from, to) => `第 ${from}–${to} 拍`,
+    secondsMeasured: (seconds2) => `测量了 ${seconds2} 秒`,
+    through: (by) => /^[A-Za-z]/.test(by) ? `通过 ${by}` : `通过${by}`,
+    ears: "Kumi Ears",
+    offline: "离线渲染",
+    restored: "项目已还原",
+    versus: (reference) => `（对比 ${reference}）`
+  },
+  settings: {
+    intro: (daw) => `Kumi 通过你批准的类型化改动读取和修改你的 ${daw || "DAW"} 项目，保留可撤销的 HISTORY，在这台电脑上测量音频，并为你允许的采样文件夹生成地图。`,
+    agentOff: "此配置中 Kumi 的 Agent 部分已关闭。请在“技能与工具 → 插件”中打开 kumi 插件的 Agent 开关并重启网关；它的设置表单会出现在“智能体设置”中。",
+    setup: "设置",
+    state: "状态",
+    next: "下一步",
+    runtime: "Kumi 运行时",
+    installed: (version) => `Kumi ${version}`,
+    notInstalled: "未安装",
+    pinned: (version) => `固定版本 ${version}`,
+    download: "下载",
+    unpacked: (size) => `（解压后 ${size}）`,
+    part: (daw) => `${daw} 组件`,
+    dawComponent: "DAW 组件",
+    standalone: "独立的 Kumi",
+    adopted: "已接管",
+    leftAsIs: "保持不变",
+    audioFormats: "音频格式",
+    connection: "连接",
+    now: "当前",
+    chat: "Kumi 的对话",
+    openMap: "打开采样地图",
+    agentSettings: "智能体设置",
+    thisWindow: "此窗口",
+    openOnFind: "Kumi 找到声音时打开采样地图",
+    states: {
+      ready: "就绪",
+      needs_runtime: "尚未设置",
+      outdated_runtime: "需要固定版本",
+      damaged_runtime: "需要重新安装",
+      needs_daw_component: "需要 DAW 组件",
+      no_pin: "此插件没有固定版本",
+      unsupported_platform: "此系统上不可用",
+      unknown: "未知"
+    },
+    componentStates: {
+      not_installed: "未安装",
+      installed: "已安装",
+      outdated: "版本过旧",
+      unknown: "未知"
+    }
+  },
+  palette: {
+    map: "Kumi：打开采样地图",
+    undo: "Kumi：撤销最近一次改动",
+    settings: "Kumi：设置"
+  },
+  notify: {
+    nothingToUndo: "Kumi 现在没有可以撤销的改动。",
+    undoUnsure: "Kumi 不确定它的上一次改动：请先让它重新查看你的项目。",
+    copied: "已复制请求：粘贴到对话中发送。",
+    askInChat: (text) => `请在对话中提出：${text}`,
+    openChat: "请先打开一个对话，然后重试。",
+    notOpenHere: "Kumi 的对话没有在这里打开，所以请求还在你的输入框中，尚未发送。请在 Kumi 连接的对话中发送。"
+  },
+  dashboard: {
+    agentOff: "此配置中 Kumi 的 Agent 插件已关闭。",
+    agentOffHow: "打开它（Hermes 的插件设置，或 `hermes plugins enable kumi`）并重启仪表板，即可在这里看到 Kumi。",
+    copyTitle: (text) => `复制“${text}”以粘贴到对话中`,
+    copied: "已复制",
+    copyRequest: "复制请求",
+    copyUndo: "复制撤销",
+    mapEmpty: "还没有采样地图：请在 Kumi 设置中添加采样文件夹，并让 Kumi 扫描。",
+    askLook: "下一次改动之前，请在对话中让 Kumi 重新查看。"
+  }
+};
+var MESSAGES = { en, ja, zh };
+function localeOf(raw) {
+  const id = typeof raw === "string" ? raw.toLowerCase() : "";
+  if (id.startsWith("ja")) return "ja";
+  if (id.startsWith("zh")) return "zh";
+  return "en";
+}
+function lookup(messages, key) {
+  let value = messages;
+  for (const part of key.split(".")) value = value && typeof value === "object" ? value[part] : void 0;
+  return value;
+}
+function translator(locale) {
+  const own = MESSAGES[localeOf(locale)];
+  return (key, ...args) => {
+    const message = lookup(own, key) ?? lookup(en, key);
+    if (typeof message === "function") return String(message(...args));
+    return typeof message === "string" ? message : key;
+  };
+}
+var english = translator("en");
+
 // src/shared/format.ts
 var DAWS = { ableton: "Live", live: "Live", reaper: "REAPER", renoise: "Renoise", soundcraft: "SoundCraft" };
-function dawName(daw) {
-  return typeof daw === "string" && DAWS[daw.toLowerCase()] || "your DAW";
+function knownDaw(daw) {
+  return typeof daw === "string" && DAWS[daw.toLowerCase()] || null;
+}
+function dawName(daw, t = english) {
+  return knownDaw(daw) ?? t("common.yourDaw");
 }
 function nameOf(value) {
   if (typeof value === "string") return value.trim() || void 0;
@@ -62,45 +745,47 @@ function hz(value) {
 function bpm(tempo) {
   return typeof tempo === "number" && tempo > 0 ? `${num(tempo, 1)} BPM` : void 0;
 }
-function ago(at, now = Date.now()) {
+function ago(at, now = Date.now(), t = english) {
   if (typeof at !== "number") return "";
   const seconds2 = Math.max(0, (now - at) / 1e3);
-  if (seconds2 < 45) return "now";
-  if (seconds2 < 3600) return `${Math.round(seconds2 / 60)} min ago`;
-  if (seconds2 < 86400) return `${Math.round(seconds2 / 3600)} h ago`;
-  return `${Math.round(seconds2 / 86400)} d ago`;
+  if (seconds2 < 45) return t("time.now");
+  if (seconds2 < 3600) return t("time.minutes", Math.round(seconds2 / 60));
+  if (seconds2 < 86400) return t("time.hours", Math.round(seconds2 / 3600));
+  return t("time.days", Math.round(seconds2 / 86400));
 }
 function seconds(value) {
   if (typeof value !== "number" || !(value >= 0)) return "";
   return value < 10 ? `${num(value, 2)} s` : value < 60 ? `${num(value, 1)} s` : `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
 }
-var JOB_KINDS = { scan: { running: "Scanning", noun: "Scan" } };
+var JOB_KINDS = { scan: { running: "job.scanning", noun: "job.scan" } };
 function count(value) {
   if (Array.isArray(value)) return value.length;
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
-function jobWords(job) {
+function jobWords(job, t = english) {
   const kind = typeof job.kind === "string" && job.kind ? job.kind : "";
-  const named = JOB_KINDS[kind] ?? { running: `${clean(kind || "Job", 24)} running`, noun: clean(kind || "Job", 24) };
+  const known = JOB_KINDS[kind];
+  const noun = known ? t(known.noun) : clean(kind, 24) || t("job.job");
+  const running = known ? t(known.running) : t("job.running", noun);
   const progress = job.progress ?? {};
   const done = typeof progress.done === "number" && Number.isFinite(progress.done) ? progress.done : null;
   const total = typeof progress.total === "number" && Number.isFinite(progress.total) && progress.total > 0 ? progress.total : null;
   const message = typeof progress.message === "string" ? clean(progress.message, 60) : "";
   if (job.state === "running" || job.state === void 0) {
-    const count2 = done === null ? "" : total === null ? num(done, 0) : `${num(done, 0)} of ${num(total, 0)}`;
-    return { title: named.running, detail: [message, count2].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
+    const count2 = done === null ? "" : total === null ? num(done, 0) : t("job.of", num(done, 0), num(total, 0));
+    return { title: running, detail: [message, count2].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
   }
   if (job.state === "done") {
     const result = job.result && typeof job.result === "object" ? job.result : {};
     const sounds = count(result.sounds);
     const failed = count(result.failed);
-    const detail = [sounds === null ? "" : `${num(sounds, 0)} sound${sounds === 1 ? "" : "s"}`, failed ? `${num(failed, 0)} couldn't be read` : ""];
-    return { title: `${named.noun} done`, detail: detail.filter(Boolean).join(" · "), fraction: 1, tone: failed ? "warn" : "good" };
+    const detail = [sounds === null ? "" : t("job.sounds", sounds, num(sounds, 0)), failed ? t("job.unreadable", num(failed, 0)) : ""];
+    return { title: t("job.done", noun), detail: detail.filter(Boolean).join(" · "), fraction: 1, tone: failed ? "warn" : "good" };
   }
-  if (job.state === "failed") return { title: `${named.noun} failed`, detail: clean(job.error?.reason ?? "", 120), fraction: null, tone: "bad" };
-  if (job.state === "cancelled") return { title: `${named.noun} stopped`, detail: "", fraction: null, tone: "muted" };
-  if (job.state === "interrupted") return { title: `${named.noun} interrupted`, detail: "Kumi stopped before it finished.", fraction: null, tone: "warn" };
-  return { title: named.noun, detail: clean(job.state ?? "", 24), fraction: null, tone: "muted" };
+  if (job.state === "failed") return { title: t("job.failed", noun), detail: clean(job.error?.reason ?? "", 120), fraction: null, tone: "bad" };
+  if (job.state === "cancelled") return { title: t("job.stopped", noun), detail: "", fraction: null, tone: "muted" };
+  if (job.state === "interrupted") return { title: t("job.interrupted", noun), detail: t("job.interruptedWhy"), fraction: null, tone: "warn" };
+  return { title: noun, detail: clean(job.state ?? "", 24), fraction: null, tone: "muted" };
 }
 var ID = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$/;
 function plainId(value) {
@@ -127,22 +812,22 @@ function connectRequest(daw) {
   return `Connect Kumi to ${dawName(daw)}`;
 }
 var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
-function cleanupWords(cleanup) {
-  if (cleanup === "restored") return "Kumi put back what it changed meanwhile.";
-  if (cleanup === "unsure") return "Kumi isn’t sure it put everything back.";
+function cleanupWords(cleanup, t = english) {
+  if (cleanup === "restored") return t("history.restored");
+  if (cleanup === "unsure") return t("history.restoreUnsure");
   return "";
 }
-function chipWords(status, tempo) {
-  if (!status) return { tone: "muted", text: "Kumi" };
-  const daw = dawName(status.daw);
+function chipWords(status, tempo, t = english) {
+  if (!status) return { tone: "muted", text: t("chip.kumi") };
+  const daw = dawName(status.daw, t);
   const project = clean(status.project?.name ?? "", 40);
   if (status.connected) {
     const parts = [daw, project, bpm(tempo)].filter(Boolean);
     return { tone: "good", text: parts.join(" · ") };
   }
-  if (status.stale && status.running === false) return { tone: "muted", text: project ? `${daw} · ${project} · Kumi stopped` : `${daw} · Kumi stopped` };
-  if (status.stale && status.owner) return { tone: "warn", text: project ? `${daw} · ${project} · not answering` : `${daw} · not answering` };
-  return { tone: "muted", text: `Kumi · ${daw} not connected` };
+  if (status.stale && status.running === false) return { tone: "muted", text: [daw, project, t("chip.stopped")].filter(Boolean).join(" · ") };
+  if (status.stale && status.owner) return { tone: "warn", text: [daw, project, t("chip.notAnswering")].filter(Boolean).join(" · ") };
+  return { tone: "muted", text: t("chip.notConnected", daw) };
 }
 
 // src/shared/hooks.ts
@@ -271,18 +956,19 @@ function parseListen(result) {
   if (typeof state === "string" && NOT_MEASURED[state]) return null;
   return value;
 }
-var CAPTURED_BY = { ears: "Kumi Ears", offline: "an offline render" };
-function captureWords(capture) {
+var CAPTURED_BY = { ears: "listen.ears", offline: "listen.offline" };
+function captureWords(capture, t = english) {
   if (!capture || typeof capture !== "object") return void 0;
   const parts = [];
   const from = capture.from_beat;
   const beats = capture.beats;
-  if (finite(from) && finite(beats)) parts.push(`Beats ${num(from, 2)}–${num(from + beats, 2)}`);
-  if (finite(capture.seconds)) parts.push(`${num(capture.seconds, 1)} s measured`);
-  const by = typeof capture.method === "string" ? CAPTURED_BY[capture.method] ?? clean(capture.method, 20) : "";
-  const said = [parts.join(" · "), by && `through ${by}`].filter(Boolean).join(", ");
+  if (finite(from) && finite(beats)) parts.push(t("listen.beats", num(from, 2), num(from + beats, 2)));
+  if (finite(capture.seconds)) parts.push(t("listen.secondsMeasured", num(capture.seconds, 1)));
+  const method = typeof capture.method === "string" ? capture.method : "";
+  const by = method ? CAPTURED_BY[method] ? t(CAPTURED_BY[method]) : clean(method, 20) : "";
+  const said = [parts.join(" · "), by && t("listen.through", by)].filter(Boolean).join(", ");
   if (!said) return void 0;
-  return capture.cleanup === "restored" ? `${said} · your project put back as it was` : said;
+  return capture.cleanup === "restored" ? `${said} · ${t("listen.restored")}` : said;
 }
 var finite = (value) => typeof value === "number" && Number.isFinite(value);
 function fileName(analysis, fallback) {
@@ -302,24 +988,24 @@ function row(label, mine, reference, show, delta, deltaShow) {
   }
   return out;
 }
-function listenView(result) {
+function listenView(result, t = english) {
   const mine = result.metrics ?? {};
   const compare = result.compare;
   const reference = compare?.metrics;
   const differences = compare?.differences;
   const theirs = (value) => compare ? value ?? null : void 0;
   const rows = [
-    row("Loudness", mine.loudness?.integratedLufs, theirs(reference?.loudness?.integratedLufs), (v) => `${num(v)} LUFS`, differences?.loudness?.differenceLu, (v) => `${signed(v)} LU`),
-    row("True peak", mine.loudness?.truePeakDbtp, theirs(reference?.loudness?.truePeakDbtp), (v) => `${num(v)} dBTP`, void 0, (v) => `${signed(v)} dB`),
-    row("Brightness (centroid)", mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
-    row("Loudness range", mine.loudness?.rangeLu, theirs(reference?.loudness?.rangeLu), (v) => `${num(v)} LU`, void 0, (v) => `${signed(v)} LU`),
-    row("Crest", mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
-    row("Tempo", mine.tempo?.bpm, theirs(reference?.tempo?.bpm), (v) => `${num(v)} BPM`, void 0, (v) => `${signed(v)} BPM`)
+    row(t("listen.loudness"), mine.loudness?.integratedLufs, theirs(reference?.loudness?.integratedLufs), (v) => `${num(v)} LUFS`, differences?.loudness?.differenceLu, (v) => `${signed(v)} LU`),
+    row(t("listen.truePeak"), mine.loudness?.truePeakDbtp, theirs(reference?.loudness?.truePeakDbtp), (v) => `${num(v)} dBTP`, void 0, (v) => `${signed(v)} dB`),
+    row(t("listen.brightness"), mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
+    row(t("listen.range"), mine.loudness?.rangeLu, theirs(reference?.loudness?.rangeLu), (v) => `${num(v)} LU`, void 0, (v) => `${signed(v)} LU`),
+    row(t("listen.crest"), mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
+    row(t("listen.tempo"), mine.tempo?.bpm, theirs(reference?.tempo?.bpm), (v) => `${num(v)} BPM`, void 0, (v) => `${signed(v)} BPM`)
   ].filter((value) => value !== null);
   const key = mine.key?.name;
   if (typeof key === "string" && key) {
     const otherKey = reference?.key?.name;
-    rows.push({ label: "Key", mine: clean(key, 20), ...compare ? { reference: typeof otherKey === "string" && otherKey ? clean(otherKey, 20) : "—" } : {}, direction: 0 });
+    rows.push({ label: t("listen.key"), mine: clean(key, 20), ...compare ? { reference: typeof otherKey === "string" && otherKey ? clean(otherKey, 20) : "—" } : {}, direction: 0 });
   }
   const differenceBands = (Array.isArray(differences?.balance) ? differences.balance : []).flatMap(
     (band) => band && finite(band.difference) ? [{ name: clean(band.band ?? band.hz ?? "", 16), value: band.difference }] : []
@@ -328,23 +1014,23 @@ function listenView(result) {
     (band) => band && finite(band.db) ? [{ name: clean(band.name ?? band.hz ?? "", 16), value: band.db }] : []
   );
   const view = {
-    title: fileName(mine, "Measured audio"),
+    title: fileName(mine, t("listen.measuredAudio")),
     mineId: typeof result.artifact_id === "string" ? result.artifact_id : void 0,
     rows,
     bands: differenceBands.length ? differenceBands : levelBands,
     bandsAre: differenceBands.length ? "difference" : "level",
     headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [],
     verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0,
-    capture: captureWords(result.capture)
+    capture: captureWords(result.capture, t)
   };
   if (compare) {
-    view.referenceTitle = fileName(reference, "Reference");
+    view.referenceTitle = fileName(reference, t("listen.reference"));
     view.referenceId = typeof compare.artifact_id === "string" ? compare.artifact_id : void 0;
   }
   const interpretation = result.interpretation;
   if (interpretation && typeof interpretation.text === "string" && interpretation.text.trim()) {
     const model = typeof interpretation.model === "string" && interpretation.model ? ` · ${clean(interpretation.model, 40)}` : "";
-    view.interpretation = { label: `Interpretation${model}`, text: interpretation.text.trim().slice(0, 4e3) };
+    view.interpretation = { label: `${t("listen.interpretation")}${model}`, text: interpretation.text.trim().slice(0, 4e3) };
   } else if (typeof result.interpretation_error === "string" && result.interpretation_error) {
     view.interpretationError = clean(result.interpretation_error, 200);
   }
@@ -548,51 +1234,6 @@ function foundSounds(result) {
   return { revision, ids };
 }
 
-// src/desktop/actions.ts
-import { host } from "@hermes/plugin-sdk";
-var OPEN_WAIT_MS = 1e3;
-var OPEN_POLL_MS = 100;
-async function ask(ctx, text, options) {
-  const composer = host.composer;
-  const session = options.session ?? null;
-  if (!composer) {
-    const copied = await ctx.os?.writeClipboard?.(text) ?? false;
-    host.notify({
-      kind: copied ? "info" : "warning",
-      message: copied ? "Copied the request: paste it into the chat to send it." : `Ask in the chat: ${text}`
-    });
-    return { outcome: copied ? "copied" : "none" };
-  }
-  if (!session) {
-    if (await composer.insertText(null, text)) return { outcome: "drafted" };
-    host.notify({ kind: "warning", message: "Open a chat first, then try again." });
-    return { outcome: "none" };
-  }
-  const deliver = async () => options.send ? composer.submit(session, text) : composer.insertText(session, text);
-  if (await deliver()) return { outcome: options.send ? "sent" : "drafted" };
-  if (typeof host.openSession === "function") {
-    try {
-      await host.openSession(session);
-      for (let waited = 0; waited <= OPEN_WAIT_MS; waited += OPEN_POLL_MS) {
-        if (await deliver()) return { outcome: options.send ? "sent" : "drafted" };
-        const tick = Promise.withResolvers();
-        ctx.setTimeout(tick.resolve, OPEN_POLL_MS);
-        await tick.promise;
-      }
-    } catch {
-    }
-  }
-  if (await composer.insertText(null, text)) {
-    host.notify({
-      kind: "warning",
-      message: "Kumi's chat isn't open here, so the request is in your input, unsent. Send it from the chat Kumi is connected to."
-    });
-    return { outcome: "drafted" };
-  }
-  host.notify({ kind: "warning", message: "Open a chat first, then try again." });
-  return { outcome: "none" };
-}
-
 // src/desktop/theme.ts
 var T = {
   text: "var(--ui-text-primary)",
@@ -615,11 +1256,13 @@ var CANVAS = {
   strong: "--ui-text-primary"
 };
 
-// src/desktop/card.tsx
-import { useEffect as useEffect2, useState } from "react";
-
 // src/shared/ui.tsx
+import { createContext, useContext } from "react";
 import { jsx, jsxs } from "react/jsx-runtime";
+var I18n = createContext(english);
+function useT() {
+  return useContext(I18n);
+}
 var S = {
   section: { display: "flex", flexDirection: "column", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${T.border}` },
   heading: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: T.muted },
@@ -678,7 +1321,54 @@ function Section({ title, right, children }) {
   ] });
 }
 
+// src/desktop/actions.ts
+import { host } from "@hermes/plugin-sdk";
+function wordsOf(ctx) {
+  return ctx.i18n?.t ?? english;
+}
+var OPEN_WAIT_MS = 1e3;
+var OPEN_POLL_MS = 100;
+async function ask(ctx, text, options) {
+  const t = wordsOf(ctx);
+  const composer = host.composer;
+  const session = options.session ?? null;
+  if (!composer) {
+    const copied = await ctx.os?.writeClipboard?.(text) ?? false;
+    host.notify({
+      kind: copied ? "info" : "warning",
+      message: copied ? t("notify.copied") : t("notify.askInChat", text)
+    });
+    return { outcome: copied ? "copied" : "none" };
+  }
+  if (!session) {
+    if (await composer.insertText(null, text)) return { outcome: "drafted" };
+    host.notify({ kind: "warning", message: t("notify.openChat") });
+    return { outcome: "none" };
+  }
+  const deliver = async () => options.send ? composer.submit(session, text) : composer.insertText(session, text);
+  if (await deliver()) return { outcome: options.send ? "sent" : "drafted" };
+  if (typeof host.openSession === "function") {
+    try {
+      await host.openSession(session);
+      for (let waited = 0; waited <= OPEN_WAIT_MS; waited += OPEN_POLL_MS) {
+        if (await deliver()) return { outcome: options.send ? "sent" : "drafted" };
+        const tick = Promise.withResolvers();
+        ctx.setTimeout(tick.resolve, OPEN_POLL_MS);
+        await tick.promise;
+      }
+    } catch {
+    }
+  }
+  if (await composer.insertText(null, text)) {
+    host.notify({ kind: "warning", message: t("notify.notOpenHere") });
+    return { outcome: "drafted" };
+  }
+  host.notify({ kind: "warning", message: t("notify.openChat") });
+  return { outcome: "none" };
+}
+
 // src/desktop/card.tsx
+import { useEffect as useEffect2, useState } from "react";
 import { jsx as jsx2, jsxs as jsxs2 } from "react/jsx-runtime";
 async function peaksOf(dataUrl, buckets = 96) {
   const comma = dataUrl.indexOf(",");
@@ -698,6 +1388,7 @@ async function peaksOf(dataUrl, buckets = 96) {
   return peaks.map((peak) => peak / top);
 }
 function Wave({ audition, id, label }) {
+  const t = useT();
   const [peaks, setPeaks] = useState(null);
   const [failed, setFailed] = useState(false);
   const playing = usePlaying(audition) === id;
@@ -713,22 +1404,23 @@ function Wave({ audition, id, label }) {
       /* @__PURE__ */ jsx2("span", { style: { ...S.faint, ...S.ellipsis }, children: label }),
       /* @__PURE__ */ jsx2(TextButton, { onClick: () => playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)), children: playing ? "■" : "▶" })
     ] }),
-    /* @__PURE__ */ jsxs2("svg", { "aria-label": `Waveform of ${label}`, height: 36, preserveAspectRatio: "none", role: "img", viewBox: "0 0 96 36", width: "100%", children: [
+    /* @__PURE__ */ jsxs2("svg", { "aria-label": t("listen.waveform", label), height: 36, preserveAspectRatio: "none", role: "img", viewBox: "0 0 96 36", width: "100%", children: [
       (peaks ?? []).map((peak, index) => /* @__PURE__ */ jsx2("rect", { fill: playing ? T.accent : T.secondary, height: Math.max(1, peak * 34), opacity: 0.85, width: 0.7, x: index + 0.15, y: 18 - Math.max(0.5, peak * 17) }, index)),
       !peaks && /* @__PURE__ */ jsx2("line", { stroke: T.border, x1: 0, x2: 96, y1: 18, y2: 18 })
     ] }),
-    failed && /* @__PURE__ */ jsx2("span", { style: S.faint, children: "The audio isn't available any more." })
+    failed && /* @__PURE__ */ jsx2("span", { style: S.faint, children: t("listen.audioGone") })
   ] });
 }
 function Rows({ view }) {
+  const t = useT();
   const compared = view.referenceTitle !== void 0;
   const cell = { padding: "2px 6px", textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
   return /* @__PURE__ */ jsxs2("table", { style: { borderCollapse: "collapse", fontSize: 12, color: T.text, width: "100%" }, children: [
     compared && /* @__PURE__ */ jsx2("thead", { children: /* @__PURE__ */ jsxs2("tr", { style: { color: T.muted, fontSize: 11 }, children: [
       /* @__PURE__ */ jsx2("th", { style: { ...cell, textAlign: "left", fontWeight: 400 } }),
-      /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: "This" }),
-      /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: "Reference" }),
-      /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: "Difference" })
+      /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.this") }),
+      /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.reference") }),
+      /* @__PURE__ */ jsx2("th", { style: { ...cell, fontWeight: 400 }, children: t("listen.difference") })
     ] }) }),
     /* @__PURE__ */ jsx2("tbody", { children: view.rows.map((row2) => /* @__PURE__ */ jsxs2("tr", { style: { borderTop: `1px solid ${T.border}` }, children: [
       /* @__PURE__ */ jsx2("td", { style: { ...cell, textAlign: "left", color: T.muted }, children: row2.label }),
@@ -739,10 +1431,11 @@ function Rows({ view }) {
   ] });
 }
 function Bands({ view }) {
+  const t = useT();
   if (!view.bands.length) return null;
   const top = Math.max(...view.bands.map((band) => Math.abs(band.value)), view.bandsAre === "difference" ? 3 : 1);
   return /* @__PURE__ */ jsxs2("div", { style: { display: "flex", flexDirection: "column", gap: 3 }, children: [
-    /* @__PURE__ */ jsx2("span", { style: S.faint, children: view.bandsAre === "difference" ? "Band balance, this minus reference (level-matched)" : "Band levels" }),
+    /* @__PURE__ */ jsx2("span", { style: S.faint, children: view.bandsAre === "difference" ? t("listen.bandsDifference") : t("listen.bandsLevel") }),
     /* @__PURE__ */ jsx2("div", { style: { display: "flex", alignItems: "stretch", gap: 3, height: 54 }, children: view.bands.map((band) => {
       const share = Math.min(1, Math.abs(band.value) / top);
       const label = view.bandsAre === "difference" ? `${band.name}: ${signed(band.value)} dB` : `${band.name}: ${num(band.value)} dB`;
@@ -769,18 +1462,16 @@ function Bands({ view }) {
   ] });
 }
 function Interpretation({ view }) {
+  const t = useT();
   const [open, setOpen] = useState(false);
-  if (view.interpretationError) return /* @__PURE__ */ jsxs2("span", { style: S.faint, children: [
-    "No model interpretation: ",
-    view.interpretationError
-  ] });
+  if (view.interpretationError) return /* @__PURE__ */ jsx2("span", { style: S.faint, children: t("listen.noInterpretation", view.interpretationError) });
   if (!view.interpretation) return null;
   const text = view.interpretation.text;
   const long = text.length > 320;
   return /* @__PURE__ */ jsxs2("div", { style: { display: "flex", flexDirection: "column", gap: 3, borderLeft: `2px solid ${T.border}`, paddingLeft: 8 }, children: [
     /* @__PURE__ */ jsx2("span", { style: S.faint, children: view.interpretation.label }),
     /* @__PURE__ */ jsx2("span", { style: { ...S.muted, whiteSpace: "pre-wrap" }, children: long && !open ? `${text.slice(0, 320)}…` : text }),
-    long && /* @__PURE__ */ jsx2("span", { children: /* @__PURE__ */ jsx2(TextButton, { onClick: () => setOpen(!open), children: open ? "Less" : "More" }) })
+    long && /* @__PURE__ */ jsx2("span", { children: /* @__PURE__ */ jsx2(TextButton, { onClick: () => setOpen(!open), children: open ? t("listen.less") : t("listen.more") }) })
   ] });
 }
 function ListenCard({ media, audition }) {
@@ -788,9 +1479,10 @@ function ListenCard({ media, audition }) {
   return /* @__PURE__ */ jsx2(ListenResultCard, { audition, fallback: media.fallback, result: media.result });
 }
 function ListenResultCard({ result, audition, fallback }) {
+  const t = useT();
   const parsed = parseListen(result);
   if (!parsed) return fallback;
-  const view = listenView(parsed);
+  const view = listenView(parsed, t);
   return /* @__PURE__ */ jsxs2(
     "div",
     {
@@ -802,18 +1494,15 @@ function ListenResultCard({ result, audition, fallback }) {
             /* @__PURE__ */ jsx2("span", { style: { color: T.accent }, children: "♪" }),
             " ",
             view.title,
-            view.referenceTitle && /* @__PURE__ */ jsxs2("span", { style: { color: T.muted, fontWeight: 400 }, children: [
-              " vs ",
-              view.referenceTitle
-            ] })
+            view.referenceTitle && /* @__PURE__ */ jsx2("span", { style: { color: T.muted, fontWeight: 400 }, children: t("listen.versus", view.referenceTitle) })
           ] }),
-          /* @__PURE__ */ jsx2(Chip, { title: "Measured on this computer by Kumi, from the audio file itself", children: "measured" })
+          /* @__PURE__ */ jsx2(Chip, { title: t("listen.measuredTitle"), children: t("listen.measured") })
         ] }),
-        view.capture && /* @__PURE__ */ jsx2("span", { style: S.faint, title: "Kumi played this window and measured it; it isn't a change, so there's nothing to undo", children: view.capture }),
+        view.capture && /* @__PURE__ */ jsx2("span", { style: S.faint, title: t("listen.captureTitle"), children: view.capture }),
         view.verdict && /* @__PURE__ */ jsx2("span", { style: S.text, children: view.verdict }),
         view.mineId ? /* @__PURE__ */ jsxs2("div", { style: { ...S.row, gap: 12, flexWrap: "wrap", alignItems: "flex-start" }, children: [
           /* @__PURE__ */ jsx2(Wave, { audition, id: view.mineId, label: view.title }),
-          view.referenceId && /* @__PURE__ */ jsx2(Wave, { audition, id: view.referenceId, label: view.referenceTitle ?? "Reference" })
+          view.referenceId && /* @__PURE__ */ jsx2(Wave, { audition, id: view.referenceId, label: view.referenceTitle ?? t("listen.reference") })
         ] }) : fallback,
         /* @__PURE__ */ jsx2(Rows, { view }),
         /* @__PURE__ */ jsx2(Bands, { view }),
@@ -834,22 +1523,25 @@ import { useEffect as useEffect3, useState as useState2 } from "react";
 // src/shared/HistoryView.tsx
 import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
 var STATE = {
-  applied: { mark: "✓", tone: "good", word: "applied" },
-  undone: { mark: "↺", tone: "muted", word: "undone" },
-  kept: { mark: "✓", tone: "good", word: "kept" },
-  partial: { mark: "◐", tone: "warn", word: "partly applied" },
-  unsure: { mark: "?", tone: "warn", word: "unsure" },
-  refused: { mark: "✕", tone: "muted", word: "refused" },
-  failed: { mark: "✕", tone: "bad", word: "failed" }
+  applied: { mark: "✓", tone: "good", word: "history.applied" },
+  undone: { mark: "↺", tone: "muted", word: "history.undone" },
+  kept: { mark: "✓", tone: "good", word: "history.kept" },
+  partial: { mark: "◐", tone: "warn", word: "history.partial" },
+  unsure: { mark: "?", tone: "warn", word: "history.unsure" },
+  refused: { mark: "✕", tone: "muted", word: "history.refused" },
+  failed: { mark: "✕", tone: "bad", word: "history.failed" }
 };
-function stateOf(item) {
-  return STATE[item.state ?? ""] ?? { mark: "·", tone: "muted", word: clean(item.state ?? "recorded", 20) };
+function stateOf(item, t = english) {
+  const known = STATE[item.state ?? ""];
+  if (known) return { ...known, word: t(known.word) };
+  return { mark: "·", tone: "muted", word: item.state ? clean(item.state, 20) : t("history.recorded") };
 }
 var TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
 function FocusView({ focus, now }) {
+  const t = useT();
   const catchUp = catchUpLines(focus);
   if (!focus || !focus.focus && !focus.project && !catchUp.lines.length) {
-    return /* @__PURE__ */ jsx3("span", { style: S.muted, children: "Nothing in focus yet. Kumi shows what you select in your DAW once it's connected." });
+    return /* @__PURE__ */ jsx3("span", { style: S.muted, children: t("focus.nothing") });
   }
   const transport = focus.transport;
   const path = focusPath(focus);
@@ -859,33 +1551,34 @@ function FocusView({ focus, now }) {
   return /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 6, opacity: focus.stale ? 0.6 : 1 }, children: [
     /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 7 }, children: [
       /* @__PURE__ */ jsx3(Dot, { color: colorOf(focus.focus?.track) ?? T.faint, size: 9 }),
-      /* @__PURE__ */ jsx3("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: path.length ? path.join(" › ") : "Nothing selected" })
+      /* @__PURE__ */ jsx3("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: path.length ? path.join(" › ") : t("focus.nothingSelected") })
     ] }),
     parameter && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, ...S.ellipsis }, children: parameter }),
     /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 4, flexWrap: "wrap" }, children: [
-      focus.project?.name && /* @__PURE__ */ jsx3(Chip, { title: "The open project", children: clean(focus.project.name, 40) }),
+      focus.project?.name && /* @__PURE__ */ jsx3(Chip, { title: t("focus.project"), children: clean(focus.project.name, 40) }),
       focusPlace(focus).map((place, index) => /* @__PURE__ */ jsx3(Chip, { children: place }, index)),
-      typeof transport?.playing === "boolean" && /* @__PURE__ */ jsx3(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
+      typeof transport?.playing === "boolean" && /* @__PURE__ */ jsx3(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? t("focus.playing") : t("focus.stopped") }),
       bpm(transport?.tempo) && /* @__PURE__ */ jsx3(Chip, { children: bpm(transport?.tempo) }),
       meter && /* @__PURE__ */ jsx3(Chip, { children: clean(meter, 12) }),
-      busy && /* @__PURE__ */ jsx3(Chip, { tone: "warn", title: "The DAW answers late while this lasts, so what's shown may be behind", children: clean(busy, 40) }),
-      focus.stale && (focus.running === false ? /* @__PURE__ */ jsx3(Chip, { children: "Kumi stopped" }) : /* @__PURE__ */ jsx3(Chip, { tone: "warn", children: "not answering" }))
+      busy && /* @__PURE__ */ jsx3(Chip, { tone: "warn", title: t("focus.busy"), children: clean(busy, 40) }),
+      focus.stale && (focus.running === false ? /* @__PURE__ */ jsx3(Chip, { children: t("focus.kumiStopped") }) : /* @__PURE__ */ jsx3(Chip, { tone: "warn", children: t("focus.notAnswering") }))
     ] }),
     catchUp.lines.length > 0 && /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
-      /* @__PURE__ */ jsx3("span", { style: S.faint, children: "Since Kumi last looked" }),
+      /* @__PURE__ */ jsx3("span", { style: S.faint, children: t("focus.since") }),
       catchUp.lines.map((line, index) => /* @__PURE__ */ jsx3("span", { style: { ...S.muted, ...S.ellipsis }, children: line }, index)),
-      catchUp.more > 0 && /* @__PURE__ */ jsx3("span", { style: S.faint, children: `and ${catchUp.more} more` })
+      catchUp.more > 0 && /* @__PURE__ */ jsx3("span", { style: S.faint, children: t("focus.more", catchUp.more) })
     ] }),
-    focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx3("span", { style: S.faint, children: `Last heard ${ago(focus.heard_at, now)}.` })
+    focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx3("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
   ] });
 }
 function HistoryView({ history, now, action }) {
+  const t = useT();
   const items = history?.items ?? [];
   if (!items.length) {
-    return /* @__PURE__ */ jsx3("span", { style: S.muted, children: "No changes yet. Each change Kumi makes in your DAW shows here, with its undo." });
+    return /* @__PURE__ */ jsx3("span", { style: S.muted, children: t("history.empty") });
   }
   return /* @__PURE__ */ jsx3("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }, children: items.map((item) => {
-    const state = stateOf(item);
+    const state = stateOf(item, t);
     const track = nameOf(item.track);
     return /* @__PURE__ */ jsxs3("li", { style: { ...S.row, gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
       /* @__PURE__ */ jsx3("span", { "aria-label": state.word, title: state.word, style: { width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
@@ -893,9 +1586,9 @@ function HistoryView({ history, now, action }) {
         /* @__PURE__ */ jsx3("span", { style: { ...S.text, ...S.ellipsis, textDecoration: item.state === "undone" ? "line-through" : void 0 }, title: clean(item.title ?? "", 300), children: clean(item.title ?? item.label ?? item.id, 120) }),
         /* @__PURE__ */ jsxs3("span", { style: { ...S.row, gap: 5 }, children: [
           track && /* @__PURE__ */ jsx3(Dot, { color: colorOf(item.track) ?? T.faint, size: 6 }),
-          /* @__PURE__ */ jsx3("span", { style: { ...S.faint, ...S.ellipsis }, children: [track && clean(track, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now)].filter(Boolean).join(" · ") })
+          /* @__PURE__ */ jsx3("span", { style: { ...S.faint, ...S.ellipsis }, children: [track && clean(track, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
         ] }),
-        item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? "Kumi couldn’t confirm what happened.", 200), cleanupWords(item.cleanup), "Ask Kumi to look again before another change."].filter(Boolean).join(" ") }) : (
+        item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : (
           // The runtime's own words for any other row: why an undo didn't happen, say.
           item.note && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) })
         )
@@ -909,10 +1602,11 @@ function HistoryView({ history, now, action }) {
 import { jsx as jsx4, jsxs as jsxs4 } from "react/jsx-runtime";
 var TONE2 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
 function JobsView({ jobs }) {
+  const t = useT();
   const shown = Object.entries(jobs);
   if (!shown.length) return null;
   return /* @__PURE__ */ jsx4("ul", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 6 }, children: shown.map(([id, job]) => {
-    const words = jobWords(job);
+    const words = jobWords(job, t);
     return /* @__PURE__ */ jsxs4("li", { style: { display: "flex", flexDirection: "column", gap: 3 }, children: [
       /* @__PURE__ */ jsxs4("span", { style: { ...S.row, gap: 6 }, children: [
         /* @__PURE__ */ jsx4("span", { style: { ...S.text, color: job.ended_at === null ? T.text : TONE2[words.tone] }, children: words.title }),
@@ -921,7 +1615,7 @@ function JobsView({ jobs }) {
       job.ended_at === null && /* @__PURE__ */ jsx4(
         "span",
         {
-          "aria-label": words.fraction === null ? `${words.title}: under way` : `${words.title}: ${Math.round(words.fraction * 100)}%`,
+          "aria-label": words.fraction === null ? t("job.underWay", words.title) : t("job.percent", words.title, Math.round(words.fraction * 100)),
           role: "progressbar",
           style: { display: "block", height: 3, borderRadius: 2, background: T.border, overflow: "hidden" },
           children: /* @__PURE__ */ jsx4(
@@ -957,30 +1651,31 @@ function ownerSession(state) {
   return typeof session === "string" && session ? session : null;
 }
 var NEEDS_SETUP = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true, needs_daw_component: true };
-function nextStep(state) {
+function nextStep(state, t = english) {
   const setup = state.setup;
   const daw = state.status?.daw ?? setup?.daw;
   if (setup && (NEEDS_SETUP[setup.state ?? ""] || setup.next_step === "install_runtime" || setup.next_step === "install_daw_component")) {
-    return { label: `Set up Kumi for ${dawName(daw)}`, request: setupRequest(daw) };
+    return { label: t("step.setup", dawName(daw, t)), request: setupRequest(daw) };
   }
-  if (setup?.state === "ready" && !state.status?.connected) return { label: `Connect to ${dawName(daw)}`, request: connectRequest(daw) };
+  if (setup?.state === "ready" && !state.status?.connected) return { label: t("step.connect", dawName(daw, t)), request: connectRequest(daw) };
   return null;
 }
 var TONE3 = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
 function KumiPane({ ctx, store, onOpenMap }) {
+  const t = useT();
   const state = useKumi(store);
   const now = useNow();
   if (state.available === false) {
     return /* @__PURE__ */ jsxs5("div", { style: { padding: 14, display: "flex", flexDirection: "column", gap: 8 }, children: [
-      /* @__PURE__ */ jsx5("span", { style: S.text, children: "Kumi's agent half is off in this profile." }),
-      /* @__PURE__ */ jsx5("span", { style: S.muted, children: "Turn on the kumi plugin's Agent switch in Capabilities → Plugins, then restart the gateway. This pane shows your DAW's FOCUS and Kumi's HISTORY once it's on." })
+      /* @__PURE__ */ jsx5("span", { style: S.text, children: t("pane.agentOff") }),
+      /* @__PURE__ */ jsx5("span", { style: S.muted, children: t("pane.agentOffHow") })
     ] });
   }
   if (state.available === null) {
-    return /* @__PURE__ */ jsx5("div", { style: { ...S.muted, padding: 14 }, children: "Reading Kumi's state…" });
+    return /* @__PURE__ */ jsx5("div", { style: { ...S.muted, padding: 14 }, children: t("pane.reading") });
   }
-  const words = chipWords(state.status, state.focus?.transport?.tempo);
-  const step = nextStep(state);
+  const words = chipWords(state.status, state.focus?.transport?.tempo, t);
+  const step = nextStep(state, t);
   const session = ownerSession(state);
   const connected = Boolean(state.status?.connected);
   const setupState = state.setup?.state;
@@ -997,45 +1692,40 @@ function KumiPane({ ctx, store, onOpenMap }) {
         ] })
       ] }),
       setupMessage && /* @__PURE__ */ jsx5("span", { style: S.muted, children: setupMessage }),
-      state.error && /* @__PURE__ */ jsxs5("span", { style: { ...S.muted, color: T.warn }, children: [
-        "Kumi's backend didn't answer: ",
-        state.error
-      ] }),
+      state.error && /* @__PURE__ */ jsx5("span", { style: { ...S.muted, color: T.warn }, children: t("pane.backendError", state.error) }),
       state.status?.unsure && /* @__PURE__ */ jsxs5("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
-        /* @__PURE__ */ jsxs5("span", { style: { ...S.muted, color: T.warn }, children: [
-          "Kumi isn't sure your project is as it was after ",
-          clean(state.status.unsure.op ?? "its last action", 40),
-          state.status.unsure.reason ? `: ${clean(state.status.unsure.reason, 160)}` : "",
-          ". ",
-          cleanupWords(state.status.unsure.cleanup),
-          " It needs a fresh look before another change."
-        ] }),
-        /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: "Ask Kumi to look again" }) })
+        /* @__PURE__ */ jsx5("span", { style: { ...S.muted, color: T.warn }, children: [
+          t("pane.unsure", clean(state.status.unsure.op ?? t("pane.unsureOp"), 40), state.status.unsure.reason ? clean(state.status.unsure.reason, 160) : ""),
+          cleanupWords(state.status.unsure.cleanup, t),
+          t("pane.needsLook")
+        ].filter(Boolean).join(" ") }),
+        /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: t("pane.lookAgain") }) })
       ] }),
       step && /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, step.request, { send: true, session: connected ? session : null }), strong: true, children: step.label }) })
     ] }),
-    /* @__PURE__ */ jsx5(Section, { title: "Focus", children: /* @__PURE__ */ jsx5(FocusView, { focus: state.focus, now }) }),
-    Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx5(Section, { title: "Jobs", children: /* @__PURE__ */ jsx5(JobsView, { jobs: state.jobs }) }),
+    /* @__PURE__ */ jsx5(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx5(FocusView, { focus: state.focus, now }) }),
+    Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx5(Section, { title: t("pane.jobs"), children: /* @__PURE__ */ jsx5(JobsView, { jobs: state.jobs }) }),
     /* @__PURE__ */ jsx5(
       Section,
       {
         title: /* @__PURE__ */ jsxs5(Fragment, { children: [
-          "History ",
-          /* @__PURE__ */ jsx5("span", { style: { textTransform: "none", letterSpacing: 0 }, children: undoable ? `· ${undoable} can be undone` : "" })
+          t("pane.history"),
+          " ",
+          /* @__PURE__ */ jsx5("span", { style: { textTransform: "none", letterSpacing: 0 }, children: undoable ? t("pane.undoable", undoable) : "" })
         ] }),
         children: /* @__PURE__ */ jsx5(
           HistoryView,
           {
             history: state.history,
             now,
-            action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, undoRequest(item), { send: true, session }), title: "Ask Kumi to undo this change", children: "Undo" }) : null
+            action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, undoRequest(item), { send: true, session }), title: t("pane.undoTitle"), children: t("pane.undo") }) : null
           }
         )
       }
     ),
     /* @__PURE__ */ jsxs5("div", { style: { ...S.row, padding: "10px 12px", gap: 8 }, children: [
-      /* @__PURE__ */ jsx5(TextButton, { onClick: onOpenMap, children: "Open the sound map" }),
-      !connected && state.status?.owner && /* @__PURE__ */ jsx5("span", { style: S.faint, children: "Undo needs a connected Kumi." })
+      /* @__PURE__ */ jsx5(TextButton, { onClick: onOpenMap, children: t("pane.openMap") }),
+      !connected && state.status?.owner && /* @__PURE__ */ jsx5("span", { style: S.faint, children: t("pane.undoNeedsConnection") })
     ] })
   ] });
 }
@@ -1054,6 +1744,7 @@ function useFocusedChat() {
   return useSyncExternalStore2(subscribe, read, read);
 }
 function FocusHint({ store }) {
+  const t = useT();
   useWant(store, "focus");
   const state = useKumi(store);
   const chat = useFocusedChat();
@@ -1068,10 +1759,10 @@ function FocusHint({ store }) {
     {
       "data-unsure": unsure || void 0,
       style: { ...S.row, gap: 6, padding: "2px 10px", maxWidth: "100%", opacity: unsure ? 0.5 : 1 },
-      title: unsure ? "What Kumi last saw selected in your DAW. It isn't sure your project is as it was: ask it to look again." : "What Kumi sees selected in your DAW: words like “this track” in this chat mean it.",
+      title: unsure ? t("hint.titleUnsure") : t("hint.title"),
       children: [
         /* @__PURE__ */ jsx6(Dot, { color: unsure ? T.faint : colorOf(state.focus?.focus?.track) ?? T.faint, size: 7 }),
-        /* @__PURE__ */ jsx6("span", { style: { ...S.faint, ...S.ellipsis }, children: `${unsure ? "Kumi last saw" : "Kumi sees"} ${path.join(" › ")}${tempo ? ` · ${tempo}` : ""}` })
+        /* @__PURE__ */ jsx6("span", { style: { ...S.faint, ...S.ellipsis }, children: `${unsure ? t("hint.lastSaw") : t("hint.sees")} ${path.join(" › ")}${tempo ? ` · ${tempo}` : ""}` })
       ]
     }
   );
@@ -1086,16 +1777,17 @@ function StatusChip({
   onOpenMap,
   onOpenSettings
 }) {
+  const t = useT();
   const state = useKumi(store);
   if (state.available !== true) return null;
-  const words = chipWords(state.status, state.focus?.transport?.tempo);
-  const step = nextStep(state);
+  const words = chipWords(state.status, state.focus?.transport?.tempo, t);
+  const step = nextStep(state, t);
   const connected = Boolean(state.status?.connected);
   return /* @__PURE__ */ jsxs7(DropdownMenu, { children: [
     /* @__PURE__ */ jsx7(DropdownMenuTrigger, { asChild: true, children: /* @__PURE__ */ jsxs7(
       "button",
       {
-        "aria-label": `Kumi: ${words.text}`,
+        "aria-label": t("chip.label", words.text),
         title: "Kumi",
         type: "button",
         style: {
@@ -1120,10 +1812,10 @@ function StatusChip({
       }
     ) }),
     /* @__PURE__ */ jsxs7(DropdownMenuContent, { align: "end", side: "top", children: [
-      /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: onOpenMap, children: "Open the sound map" }),
+      /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: onOpenMap, children: t("chip.openMap") }),
       step && /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: () => void ask(ctx, step.request, { send: true, session: connected ? ownerSession(state) : null }), children: step.label }),
       /* @__PURE__ */ jsx7(DropdownMenuSeparator, {}),
-      /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: onOpenSettings, children: "Kumi settings" })
+      /* @__PURE__ */ jsx7(DropdownMenuItem, { onSelect: onOpenSettings, children: t("chip.settings") })
     ] })
   ] });
 }
@@ -1287,6 +1979,7 @@ function resolve(canvas) {
   };
 }
 function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
+  const t = useT();
   const model = useMemo(() => buildModel(map), [map]);
   const canvasRef = useRef(null);
   const boxRef = useRef(null);
@@ -1403,16 +2096,16 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
       /* @__PURE__ */ jsx8(
         "input",
         {
-          "aria-label": "Search sounds",
+          "aria-label": t("map.search"),
           onChange: (event) => setQuery(event.target.value),
-          placeholder: "Search the map: name, class or folder",
+          placeholder: t("map.searchHint"),
           style: { flex: "1 1 180px", minWidth: 140, font: "inherit", fontSize: 12, padding: "3px 8px", borderRadius: 3, border: `1px solid ${T.border}`, background: "transparent", color: T.text },
           value: query
         }
       ),
       /* @__PURE__ */ jsxs8("span", { style: S.faint, children: [
-        shown === model.points.length ? `${model.points.length} sounds` : `${shown} of ${model.points.length} sounds`,
-        model.revision ? ` · map ${model.revision}` : ""
+        shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)),
+        model.revision ? ` · ${t("map.revision", model.revision)}` : ""
       ] })
     ] }),
     /* @__PURE__ */ jsx8("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
@@ -1426,7 +2119,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
             else next.add(group.key);
             return next;
           }),
-          title: off ? `Show ${group.name}` : `Hide ${group.name}`,
+          title: off ? t("map.show", group.name) : t("map.hide", group.name),
           type: "button",
           style: { ...S.row, gap: 4, font: "inherit", fontSize: 11, padding: "1px 6px", borderRadius: 10, border: `1px solid ${T.border}`, background: "transparent", color: off ? T.faint : T.secondary, cursor: "pointer", opacity: off ? 0.6 : 1 },
           children: [
@@ -1439,7 +2132,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
         group.key
       );
     }) }),
-    matches.length > 0 && /* @__PURE__ */ jsxs8("div", { "aria-label": searched ? "Sounds that match" : "Sounds Kumi found", role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
+    matches.length > 0 && /* @__PURE__ */ jsxs8("div", { "aria-label": searched ? t("map.matches") : t("map.found"), role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
       matches.slice(0, MATCHES_LISTED).map((id) => {
         const sound = model.sounds[id];
         return /* @__PURE__ */ jsxs8(
@@ -1457,18 +2150,14 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           id
         );
       }),
-      matches.length > MATCHES_LISTED && /* @__PURE__ */ jsxs8("span", { style: { ...S.faint, padding: "0 6px" }, children: [
-        "and ",
-        matches.length - MATCHES_LISTED,
-        " more on the map"
-      ] })
+      matches.length > MATCHES_LISTED && /* @__PURE__ */ jsx8("span", { style: { ...S.faint, padding: "0 6px" }, children: t("map.more", matches.length - MATCHES_LISTED) })
     ] }),
     /* @__PURE__ */ jsxs8("div", { ref: boxRef, style: { position: "relative", flex: 1, minHeight: 160, overflow: "hidden" }, children: [
       /* @__PURE__ */ jsx8(
         "canvas",
         {
           ref: canvasRef,
-          "aria-label": "Sound map",
+          "aria-label": t("map.canvas"),
           onPointerDown: (event) => {
             if (!view) return;
             event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -1545,29 +2234,30 @@ function errorText(error) {
   return text || "no answer";
 }
 function MapWorkspace({ ctx, store, audition }) {
+  const t = useT();
   useWant(store, "map");
   const state = useKumi(store);
   const playing = usePlaying(audition);
   const [selected, setSelected] = useState4(null);
   const play = (id) => {
-    audition.play(id).catch((error) => host4.notify({ kind: "warning", message: `Kumi couldn't play that sound: ${errorText(error)}` }));
+    audition.play(id).catch((error) => host4.notify({ kind: "warning", message: t("map.playFailed", errorText(error)) }));
   };
   const map = state.map;
-  const empty = state.available === false ? "Kumi's agent half is off in this profile, so there's no map to show." : map === null ? "Reading the sound map…" : "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there.";
+  const empty = state.available === false ? t("map.agentOff") : map === null ? t("map.reading") : t("map.empty");
   return /* @__PURE__ */ jsx9(
     MapCanvas,
     {
       actions: (id, sound) => {
         const request = soundRequest(id, sound.name, map?.revision);
         return /* @__PURE__ */ jsxs9(Fragment2, { children: [
-          /* @__PURE__ */ jsx9(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: "Play it here (nothing changes in your DAW)", children: playing === id ? "■ Stop" : "▶ Play" }),
+          /* @__PURE__ */ jsx9(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: t("map.playTitle"), children: playing === id ? t("map.stop") : t("map.play") }),
           request && /* @__PURE__ */ jsx9(
             TextButton,
             {
               onClick: () => void ask(ctx, request, { send: false, session: ownerSession(state) }),
               strong: true,
-              title: "Put a request to use this sound in the chat, to finish and send",
-              children: "Use…"
+              title: t("map.useTitle"),
+              children: t("map.use")
             }
           )
         ] });
@@ -1588,11 +2278,12 @@ function MapWorkspace({ ctx, store, audition }) {
 // src/desktop/measurements.tsx
 import { Fragment as Fragment3, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
 function MeasurementsWorkspace({ store, audition }) {
+  const t = useT();
   const { measured } = useKumi(store);
   const note = (text) => /* @__PURE__ */ jsx10("span", { style: S.muted, children: text });
-  return /* @__PURE__ */ jsx10("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note("Nothing measured yet. When Kumi measures audio in your chat, its numbers show here as well.") : measured.result === null ? note("Kumi measured it, but there's too much to show here: the numbers are in its reply in the chat.") : /* @__PURE__ */ jsxs10(Fragment3, { children: [
-    /* @__PURE__ */ jsx10("span", { style: S.faint, children: `Measured ${ago(measured.at)}` }),
-    /* @__PURE__ */ jsx10(ListenResultCard, { audition, fallback: note("Kumi measured it: the numbers are in its reply in the chat."), result: measured.result })
+  return /* @__PURE__ */ jsx10("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs10(Fragment3, { children: [
+    /* @__PURE__ */ jsx10("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
+    /* @__PURE__ */ jsx10(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result })
   ] }) });
 }
 
@@ -1601,16 +2292,8 @@ import { host as host5 } from "@hermes/plugin-sdk";
 import { useState as useState5 } from "react";
 import { Fragment as Fragment4, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
-var STATE_WORDS = {
-  ready: "Ready",
-  needs_runtime: "Not set up yet",
-  outdated_runtime: "Needs the pinned version",
-  damaged_runtime: "Needs reinstalling",
-  needs_daw_component: "Needs its DAW part",
-  no_pin: "No pinned release in this plugin",
-  unsupported_platform: "Not available on this system",
-  unknown: "Unknown"
-};
+var STATES = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
+var COMPONENT_STATES = /* @__PURE__ */ new Set(["not_installed", "installed", "outdated", "unknown"]);
 function Line({ label, children }) {
   return /* @__PURE__ */ jsxs11("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
     /* @__PURE__ */ jsx11("span", { style: S.muted, children: label }),
@@ -1621,66 +2304,68 @@ function megabytes(bytes) {
   return typeof bytes === "number" && bytes > 0 ? `${(bytes / 1048576).toFixed(0)} MB` : null;
 }
 function SettingsPage({ ctx, store, onOpenMap }) {
+  const t = useT();
   useWant(store, "setup");
   const state = useKumi(store);
   const [openOnFind, setOpenOnFind] = useState5(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
   const setup = state.setup;
-  const step = nextStep(state);
+  const step = nextStep(state, t);
   const daw = state.status?.daw ?? setup?.daw;
   const runtime = setup?.runtime;
   const component = setup?.daw_component;
+  const setupState = setup?.state ?? "unknown";
+  const componentState = component?.state ?? "unknown";
   return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
     /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
       /* @__PURE__ */ jsx11("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
-      /* @__PURE__ */ jsxs11("span", { style: S.muted, children: [
-        "Kumi reads and changes your ",
-        dawName(daw),
-        " project through typed changes you approve, keeps HISTORY with undo, measures audio on this computer, and maps the sample folders you allow."
-      ] })
+      /* @__PURE__ */ jsx11("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
     ] }),
-    state.available === false ? /* @__PURE__ */ jsx11("span", { style: S.text, children: "Kumi's agent half is off in this profile. Turn on the kumi plugin's Agent switch in Capabilities → Plugins and restart the gateway; its settings form appears under Agent settings." }) : /* @__PURE__ */ jsxs11(Fragment4, { children: [
+    state.available === false ? /* @__PURE__ */ jsx11("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs11(Fragment4, { children: [
       /* @__PURE__ */ jsxs11("div", { children: [
-        /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Setup" }),
-        /* @__PURE__ */ jsx11(Line, { label: "State", children: STATE_WORDS[setup?.state ?? "unknown"] ?? clean(setup?.state ?? "", 40) }),
-        setup?.message && /* @__PURE__ */ jsx11(Line, { label: "Next", children: clean(setup.message, 300) }),
-        runtime && /* @__PURE__ */ jsxs11(Line, { label: "Kumi runtime", children: [
-          runtime.installed ? `Kumi ${clean(runtime.version ?? "", 20)}` : "Not installed",
+        /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.setup") }),
+        /* @__PURE__ */ jsx11(Line, { label: t("settings.state"), children: STATES.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
+        setup?.message && /* @__PURE__ */ jsx11(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
+        runtime && /* @__PURE__ */ jsxs11(Line, { label: t("settings.runtime"), children: [
+          runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
           setup?.pinned_version && /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
-            " · pinned ",
-            clean(setup.pinned_version, 20)
+            " · ",
+            t("settings.pinned", clean(setup.pinned_version, 20))
           ] }),
           setup?.target && /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
             " · ",
             clean(setup.target, 40)
           ] })
         ] }),
-        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs11(Line, { label: "Download", children: [
+        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs11(Line, { label: t("settings.download"), children: [
           megabytes(setup?.download_bytes),
           megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
-            " (",
-            megabytes(setup?.unpacked_bytes),
-            " unpacked)"
+            " ",
+            t("settings.unpacked", megabytes(setup?.unpacked_bytes))
           ] })
         ] }),
-        component && /* @__PURE__ */ jsxs11(Line, { label: `${dawName(daw)} part`, children: [
-          clean(component.name ?? "DAW component", 40),
-          ": ",
-          clean(component.state ?? "unknown", 20).replace("_", " "),
+        component && /* @__PURE__ */ jsxs11(Line, { label: t("settings.part", dawName(daw, t)), children: [
+          clean(component.name ?? t("settings.dawComponent"), 40),
+          ":",
+          " ",
+          COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " "),
           component.path && /* @__PURE__ */ jsx11("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
-        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs11(Line, { label: "Standalone Kumi", children: [
+        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs11(Line, { label: t("settings.standalone"), children: [
           clean(setup.existing_kumi.path, 120),
-          /* @__PURE__ */ jsx11("span", { style: S.faint, children: setup.existing_kumi.adopted ? " · adopted" : " · left as it is" })
+          /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
+            " · ",
+            setup.existing_kumi.adopted ? t("settings.adopted") : t("settings.leftAsIs")
+          ] })
         ] }),
-        setup?.compressed_audio?.message && /* @__PURE__ */ jsx11(Line, { label: "Audio formats", children: /* @__PURE__ */ jsx11("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
+        setup?.compressed_audio?.message && /* @__PURE__ */ jsx11(Line, { label: t("settings.audioFormats"), children: /* @__PURE__ */ jsx11("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
       ] }),
       /* @__PURE__ */ jsxs11("div", { children: [
-        /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Connection" }),
-        /* @__PURE__ */ jsx11(Line, { label: "Now", children: (() => {
-          const words = chipWords(state.status, state.focus?.transport?.tempo);
+        /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.connection") }),
+        /* @__PURE__ */ jsx11(Line, { label: t("settings.now"), children: (() => {
+          const words = chipWords(state.status, state.focus?.transport?.tempo, t);
           return /* @__PURE__ */ jsx11(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
         })() }),
-        state.status?.owner?.session_id && /* @__PURE__ */ jsx11(Line, { label: "Kumi's chat", children: clean(state.status.owner.session_id, 80) })
+        state.status?.owner?.session_id && /* @__PURE__ */ jsx11(Line, { label: t("settings.chat"), children: clean(state.status.owner.session_id, 80) })
       ] }),
       /* @__PURE__ */ jsxs11("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
         step && /* @__PURE__ */ jsx11(
@@ -1691,12 +2376,12 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             children: step.label
           }
         ),
-        /* @__PURE__ */ jsx11(TextButton, { onClick: onOpenMap, children: "Open the sound map" }),
-        /* @__PURE__ */ jsx11(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: "Agent settings" })
+        /* @__PURE__ */ jsx11(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
+        /* @__PURE__ */ jsx11(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: t("settings.agentSettings") })
       ] })
     ] }),
     /* @__PURE__ */ jsxs11("div", { children: [
-      /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "This window" }),
+      /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.thisWindow") }),
       /* @__PURE__ */ jsxs11("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
         /* @__PURE__ */ jsx11(
           "input",
@@ -1709,7 +2394,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             type: "checkbox"
           }
         ),
-        /* @__PURE__ */ jsx11("span", { style: S.text, children: "Open the sound map when Kumi finds sounds" })
+        /* @__PURE__ */ jsx11("span", { style: S.text, children: t("settings.openOnFind") })
       ] })
     ] })
   ] });
@@ -1723,21 +2408,28 @@ var MEASUREMENTS_WORKSPACE = "kumi-measurements";
 var LISTEN_FALLBACK_MS = 2e3;
 var POLL_MS = 5e3;
 var JOB_POLL_MS = 2e3;
+var usePluginWords = typeof sdk.usePluginI18n === "function" ? sdk.usePluginI18n : null;
+function WithT({ children }) {
+  const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english;
+  return /* @__PURE__ */ jsx12(I18n.Provider, { value: t, children });
+}
 var plugin = {
   id: PLUGIN_ID,
   name: "Kumi",
   description: "Your DAW beside the chat: FOCUS, HISTORY with undo, a sound map of your sample folders, and Kumi's audio measurements.",
   register(ctx) {
+    ctx.i18n?.register(MESSAGES);
     const store = new KumiStore((path) => ctx.rest(path, { timeoutMs: 15e3 }));
     const audition = new Audition((id) => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 6e4 }));
     let closeMap = null;
     let mapPane = null;
+    const mapView = () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(MapWorkspace, { audition, ctx, store }) });
     const openMap = () => {
       if (typeof host6.openWorkspace === "function") {
         closeMap = host6.openWorkspace(MAP_WORKSPACE, {
-          title: "Sound map",
+          title: wordsOf(ctx)("map.tab"),
           minWidth: "26rem",
-          render: () => /* @__PURE__ */ jsx12(MapWorkspace, { audition, ctx, store }),
+          render: mapView,
           onClose: () => {
             closeMap = null;
           }
@@ -1747,18 +2439,19 @@ var plugin = {
       mapPane ??= ctx.register({
         id: "map-pane",
         area: PANES_AREA,
-        title: "Sound map",
+        title: wordsOf(ctx)("map.tab"),
         data: { placement: "main" },
-        render: () => /* @__PURE__ */ jsx12(MapWorkspace, { audition, ctx, store })
+        render: mapView
       });
     };
     let closeMeasurements = null;
     let measurementsPane = null;
     const openMeasurements = () => {
-      const render = () => /* @__PURE__ */ jsx12(MeasurementsWorkspace, { audition, store });
+      const render = () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(MeasurementsWorkspace, { audition, store }) });
+      const title = wordsOf(ctx)("measurements.tab");
       if (typeof host6.openWorkspace === "function") {
         closeMeasurements = host6.openWorkspace(MEASUREMENTS_WORKSPACE, {
-          title: "Measurements",
+          title,
           minWidth: "24rem",
           render,
           onClose: () => {
@@ -1767,7 +2460,7 @@ var plugin = {
         });
         return;
       }
-      measurementsPane ??= ctx.register({ id: "measurements-pane", area: PANES_AREA, title: "Measurements", data: { placement: "main" }, render });
+      measurementsPane ??= ctx.register({ id: "measurements-pane", area: PANES_AREA, title, data: { placement: "main" }, render });
     };
     const openSettings = () => host6.navigate(typeof sdk.pluginSettingsHref === "function" ? sdk.pluginSettingsHref(PLUGIN_ID) : "/settings?tab=plugins");
     const refresh = () => void store.refreshStatus();
@@ -1869,35 +2562,52 @@ var plugin = {
         area: PANES_AREA,
         title: "Kumi",
         data: { placement: "right", width: "320px" },
-        render: () => /* @__PURE__ */ jsx12(KumiPane, { ctx, onOpenMap: openMap, store })
+        render: () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(KumiPane, { ctx, onOpenMap: openMap, store }) })
       },
       {
         id: "status",
         area: STATUSBAR_AREAS.right,
         order: 60,
-        render: () => /* @__PURE__ */ jsx12(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store })
-      },
+        render: () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store }) })
+      }
+    ];
+    if (typeof sdk.TOOL_MEDIA_RENDERER_AREA === "string") {
+      contributions.push({
+        id: "listen-card",
+        area: sdk.TOOL_MEDIA_RENDERER_AREA,
+        data: {
+          tools: ["kumi_listen"],
+          render: (props) => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(ListenCard, { audition, media: props }) })
+        }
+      });
+    }
+    if (typeof sdk.COMPOSER_AREAS?.underside === "string") {
+      contributions.push({
+        id: "focus-hint",
+        area: sdk.COMPOSER_AREAS.underside,
+        render: () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(FocusHint, { store }) })
+      });
+    }
+    ctx.registerMany(contributions);
+    const palette = (t) => [
       {
         id: "open-map",
         area: PALETTE_AREA,
-        data: { id: "kumi.map", label: "Kumi: open the sound map", keywords: ["kumi", "sound", "samples", "map", "library"], run: openMap }
+        data: { id: "kumi.map", label: t("palette.map"), keywords: ["kumi", "sound", "samples", "map", "library"], run: openMap }
       },
       {
         id: "undo-last",
         area: PALETTE_AREA,
         data: {
           id: "kumi.undo-last",
-          label: "Kumi: undo the last change",
+          label: t("palette.undo"),
           keywords: ["kumi", "undo", "history", "revert"],
           run: () => {
             const state = store.get();
             const last = state.history?.items.find((item) => item.state !== "undone");
             if (!last || !canUndo(state.status, last)) {
               const unsure = Boolean(state.status?.unsure) || last?.state === "unsure" || last?.state === "partial";
-              host6.notify({
-                kind: "info",
-                message: unsure ? "Kumi isn't sure of its last change: ask it to look at your project again first." : "Kumi has no change it can undo right now."
-              });
+              host6.notify({ kind: "info", message: wordsOf(ctx)(unsure ? "notify.undoUnsure" : "notify.nothingToUndo") });
               return;
             }
             void ask(ctx, undoRequest(last), { send: true, session: ownerSession(state) });
@@ -1907,28 +2617,19 @@ var plugin = {
       {
         id: "settings",
         area: PALETTE_AREA,
-        data: { id: "kumi.settings", label: "Kumi: settings", keywords: ["kumi", "setup", "settings", "daw"], run: openSettings }
+        data: { id: "kumi.settings", label: t("palette.settings"), keywords: ["kumi", "setup", "settings", "daw"], run: openSettings }
       }
     ];
-    if (typeof sdk.TOOL_MEDIA_RENDERER_AREA === "string") {
-      contributions.push({
-        id: "listen-card",
-        area: sdk.TOOL_MEDIA_RENDERER_AREA,
-        data: {
-          tools: ["kumi_listen"],
-          render: (props) => /* @__PURE__ */ jsx12(ListenCard, { audition, media: props })
-        }
-      });
-    }
-    if (typeof sdk.COMPOSER_AREAS?.underside === "string") {
-      contributions.push({ id: "focus-hint", area: sdk.COMPOSER_AREAS.underside, render: () => /* @__PURE__ */ jsx12(FocusHint, { store }) });
-    }
-    ctx.registerMany(contributions);
+    let unregisterPalette = ctx.registerMany(palette(wordsOf(ctx)));
+    ctx.i18n?.onLocaleChange(() => {
+      unregisterPalette();
+      unregisterPalette = ctx.registerMany(palette(wordsOf(ctx)));
+    });
     ctx.registerSettingsPage?.({
       id: "kumi",
       title: "Kumi",
       icon: "pulse",
-      render: () => /* @__PURE__ */ jsx12(SettingsPage, { ctx, onOpenMap: openMap, store })
+      render: () => /* @__PURE__ */ jsx12(WithT, { children: /* @__PURE__ */ jsx12(SettingsPage, { ctx, onOpenMap: openMap, store }) })
     });
   }
 };

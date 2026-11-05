@@ -3,6 +3,13 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { host } from '@hermes/plugin-sdk'
 
+import { english, type Translate } from '../shared/i18n.ts'
+
+/** Words for this plugin in Desktop's language, read when they're needed; English on a Desktop without plugin i18n. */
+export function wordsOf(ctx: PluginContext): Translate {
+  return ctx.i18n?.t ?? english
+}
+
 export interface Asked {
   /** Where the request went: `sent` to Kumi's chat, `drafted` into an input, `copied` to the clipboard, or nowhere. */
   outcome: 'copied' | 'drafted' | 'none' | 'sent'
@@ -22,19 +29,20 @@ const OPEN_POLL_MS = 100
  * producer chooses the chat.
  */
 export async function ask(ctx: PluginContext, text: string, options: { session?: null | string; send: boolean }): Promise<Asked> {
+  const t = wordsOf(ctx)
   const composer = host.composer
   const session = options.session ?? null
   if (!composer) {
     const copied = (await ctx.os?.writeClipboard?.(text)) ?? false
     host.notify({
       kind: copied ? 'info' : 'warning',
-      message: copied ? 'Copied the request: paste it into the chat to send it.' : `Ask in the chat: ${text}`
+      message: copied ? t('notify.copied') : t('notify.askInChat', text)
     })
     return { outcome: copied ? 'copied' : 'none' }
   }
   if (!session) {
     if (await composer.insertText(null, text)) return { outcome: 'drafted' }
-    host.notify({ kind: 'warning', message: 'Open a chat first, then try again.' })
+    host.notify({ kind: 'warning', message: t('notify.openChat') })
     return { outcome: 'none' }
   }
   const deliver = async (): Promise<boolean> => (options.send ? composer.submit(session, text) : composer.insertText(session, text))
@@ -53,12 +61,9 @@ export async function ask(ctx: PluginContext, text: string, options: { session?:
     }
   }
   if (await composer.insertText(null, text)) {
-    host.notify({
-      kind: 'warning',
-      message: "Kumi's chat isn't open here, so the request is in your input, unsent. Send it from the chat Kumi is connected to."
-    })
+    host.notify({ kind: 'warning', message: t('notify.notOpenHere') })
     return { outcome: 'drafted' }
   }
-  host.notify({ kind: 'warning', message: 'Open a chat first, then try again.' })
+  host.notify({ kind: 'warning', message: t('notify.openChat') })
   return { outcome: 'none' }
 }

@@ -57,6 +57,14 @@ declare module '@hermes/plugin-sdk' {
     writeClipboard?: (text: string) => Promise<boolean>
   }
 
+  /** Desktop's plugin i18n (`ctx.i18n`): bundles per locale, resolved in the app's language with English, then the key,
+   *  as fallbacks. Older Desktops have none. */
+  export interface PluginI18n {
+    register: (bundles: Record<string, unknown>) => () => void
+    t: (key: string, ...args: unknown[]) => string
+    onLocaleChange: (listener: () => void) => () => void
+  }
+
   export interface PluginContext {
     readonly source: string
     register: (contribution: PluginContribution) => () => void
@@ -70,6 +78,7 @@ declare module '@hermes/plugin-sdk' {
     rest: <T>(path: string, options?: PluginRestOptions) => Promise<T>
     storage: PluginStorage
     os?: PluginOs
+    i18n?: PluginI18n
   }
 
   export interface HermesPlugin {
@@ -138,6 +147,8 @@ declare module '@hermes/plugin-sdk' {
   export const COMPOSER_AREAS: { top?: string; bottom?: string; underside?: string } | undefined
   export function useValue<T>(atom: ReadableAtom<T>): T
   export function pluginSettingsHref(pluginId: string, subpage?: string): string
+  /** A React translator for this plugin's bundles, re-rendering on a language switch. Older Desktops have none. */
+  export const usePluginI18n: ((pluginId: string) => (key: string, ...args: unknown[]) => string) | undefined
 
   type Variant = 'default' | 'destructive' | 'ghost' | 'link' | 'outline' | 'secondary' | 'text'
   type Size = 'default' | 'icon-sm' | 'icon-xs' | 'inline' | 'lg' | 'micro' | 'sm' | 'xs'

@@ -338,3 +338,25 @@ test('a profile switch drops the measurement waiting on the old one, and a resul
   timers.filter(timer => timer.ms === 2000 && !timer.cancelled).at(-1).fn()
   assert.deepEqual(h.calls.workspaces.filter(([id]) => id === 'kumi-measurements'), [['kumi-measurements', 'Measurements']], 'a result too large to carry still opens the tab')
 })
+
+test("with Desktop's plugin i18n it registers Kumi's words, and labels the palette in the app's language, again on a switch", async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx', { sdk: sdkStub({ i18n: true }) })
+  const h = harness()
+  let words = { 'palette.map': 'Kumi: サンプルマップを開く', 'palette.undo': 'Kumi: 最後の変更を取り消す' }
+  let bundles = null
+  const switches = []
+  const active = new Set()
+  h.ctx.registerMany = contributions => {
+    for (const contribution of contributions) active.add(contribution)
+    return () => contributions.forEach(contribution => active.delete(contribution))
+  }
+  h.ctx.i18n = { register: given => ((bundles = given), () => {}), t: key => words[key] ?? key, onLocaleChange: fn => (switches.push(fn), () => {}) }
+  plugin.register(h.ctx)
+  assert.deepEqual(Object.keys(bundles).sort(), ['en', 'ja', 'zh'])
+  const palette = () => [...active].filter(contribution => contribution.area === 'palette').map(entry => entry.data.label)
+  assert.deepEqual(palette().slice(0, 2), ['Kumi: サンプルマップを開く', 'Kumi: 最後の変更を取り消す'])
+  words = { 'palette.map': 'Kumi：打开采样地图' }
+  for (const fn of switches) fn()
+  assert.equal(palette().length, 3, 'the old labels are gone, not doubled')
+  assert.equal(palette()[0], 'Kumi：打开采样地图')
+})

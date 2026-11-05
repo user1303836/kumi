@@ -8,7 +8,7 @@ import { soundRequest } from '../shared/format.ts'
 import { type Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
 import type { KumiStore } from '../shared/store.ts'
-import { TextButton } from '../shared/ui.tsx'
+import { TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { ownerSession } from './pane.tsx'
 
@@ -28,36 +28,32 @@ export function errorText(error: unknown): string {
 }
 
 export function MapWorkspace({ ctx, store, audition }: { ctx: PluginContext; store: KumiStore; audition: Audition }) {
+  const t = useT()
   useWant(store, 'map')
   const state = useKumi(store)
   const playing = usePlaying(audition)
   const [selected, setSelected] = useState<null | string>(null)
   const play = (id: string) => {
-    audition.play(id).catch(error => host.notify({ kind: 'warning', message: `Kumi couldn't play that sound: ${errorText(error)}` }))
+    audition.play(id).catch(error => host.notify({ kind: 'warning', message: t('map.playFailed', errorText(error)) }))
   }
   const map = state.map
-  const empty =
-    state.available === false
-      ? "Kumi's agent half is off in this profile, so there's no map to show."
-      : map === null
-        ? 'Reading the sound map…'
-        : "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there."
+  const empty = state.available === false ? t('map.agentOff') : map === null ? t('map.reading') : t('map.empty')
   return (
     <MapCanvas
       actions={(id, sound) => {
         const request = soundRequest(id, sound.name, map?.revision)
         return (
           <>
-            <TextButton onClick={() => (playing === id ? audition.stop() : play(id))} title="Play it here (nothing changes in your DAW)">
-              {playing === id ? '■ Stop' : '▶ Play'}
+            <TextButton onClick={() => (playing === id ? audition.stop() : play(id))} title={t('map.playTitle')}>
+              {playing === id ? t('map.stop') : t('map.play')}
             </TextButton>
             {request && (
               <TextButton
                 onClick={() => void ask(ctx, request, { send: false, session: ownerSession(state) })}
                 strong
-                title="Put a request to use this sound in the chat, to finish and send"
+                title={t('map.useTitle')}
               >
-                Use…
+                {t('map.use')}
               </TextButton>
             )}
           </>

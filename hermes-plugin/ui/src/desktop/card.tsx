@@ -9,7 +9,7 @@ import { useEffect, useState } from 'react'
 import { num, signed } from '../shared/format.ts'
 import { type Audition, usePlaying } from '../shared/hooks.ts'
 import { listenView, parseListen, type ListenView } from '../shared/listen.ts'
-import { Chip, S, TextButton } from '../shared/ui.tsx'
+import { Chip, S, TextButton, useT } from '../shared/ui.tsx'
 
 /** A data URL's bytes, decoded to peak levels for a waveform. */
 async function peaksOf(dataUrl: string, buckets = 96): Promise<number[]> {
@@ -31,6 +31,7 @@ async function peaksOf(dataUrl: string, buckets = 96): Promise<number[]> {
 }
 
 function Wave({ audition, id, label }: { audition: Audition; id: string; label: string }) {
+  const t = useT()
   const [peaks, setPeaks] = useState<null | number[]>(null)
   const [failed, setFailed] = useState(false)
   const playing = usePlaying(audition) === id
@@ -51,18 +52,19 @@ function Wave({ audition, id, label }: { audition: Audition; id: string; label: 
         <span style={{ ...S.faint, ...S.ellipsis }}>{label}</span>
         <TextButton onClick={() => (playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)))}>{playing ? '■' : '▶'}</TextButton>
       </div>
-      <svg aria-label={`Waveform of ${label}`} height={36} preserveAspectRatio="none" role="img" viewBox="0 0 96 36" width="100%">
+      <svg aria-label={t('listen.waveform', label)} height={36} preserveAspectRatio="none" role="img" viewBox="0 0 96 36" width="100%">
         {(peaks ?? []).map((peak, index) => (
           <rect fill={playing ? T.accent : T.secondary} height={Math.max(1, peak * 34)} key={index} opacity={0.85} width={0.7} x={index + 0.15} y={18 - Math.max(0.5, peak * 17)} />
         ))}
         {!peaks && <line stroke={T.border} x1={0} x2={96} y1={18} y2={18} />}
       </svg>
-      {failed && <span style={S.faint}>The audio isn't available any more.</span>}
+      {failed && <span style={S.faint}>{t('listen.audioGone')}</span>}
     </div>
   )
 }
 
 function Rows({ view }: { view: ListenView }) {
+  const t = useT()
   const compared = view.referenceTitle !== undefined
   const cell = { padding: '2px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' } as const
   return (
@@ -71,9 +73,9 @@ function Rows({ view }: { view: ListenView }) {
         <thead>
           <tr style={{ color: T.muted, fontSize: 11 }}>
             <th style={{ ...cell, textAlign: 'left', fontWeight: 400 }} />
-            <th style={{ ...cell, fontWeight: 400 }}>This</th>
-            <th style={{ ...cell, fontWeight: 400 }}>Reference</th>
-            <th style={{ ...cell, fontWeight: 400 }}>Difference</th>
+            <th style={{ ...cell, fontWeight: 400 }}>{t('listen.this')}</th>
+            <th style={{ ...cell, fontWeight: 400 }}>{t('listen.reference')}</th>
+            <th style={{ ...cell, fontWeight: 400 }}>{t('listen.difference')}</th>
           </tr>
         </thead>
       )}
@@ -92,11 +94,12 @@ function Rows({ view }: { view: ListenView }) {
 }
 
 function Bands({ view }: { view: ListenView }) {
+  const t = useT()
   if (!view.bands.length) return null
   const top = Math.max(...view.bands.map(band => Math.abs(band.value)), view.bandsAre === 'difference' ? 3 : 1)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <span style={S.faint}>{view.bandsAre === 'difference' ? 'Band balance, this minus reference (level-matched)' : 'Band levels'}</span>
+      <span style={S.faint}>{view.bandsAre === 'difference' ? t('listen.bandsDifference') : t('listen.bandsLevel')}</span>
       <div style={{ display: 'flex', alignItems: 'stretch', gap: 3, height: 54 }}>
         {view.bands.map(band => {
           const share = Math.min(1, Math.abs(band.value) / top)
@@ -130,8 +133,9 @@ function Bands({ view }: { view: ListenView }) {
 }
 
 function Interpretation({ view }: { view: ListenView }) {
+  const t = useT()
   const [open, setOpen] = useState(false)
-  if (view.interpretationError) return <span style={S.faint}>No model interpretation: {view.interpretationError}</span>
+  if (view.interpretationError) return <span style={S.faint}>{t('listen.noInterpretation', view.interpretationError)}</span>
   if (!view.interpretation) return null
   const text = view.interpretation.text
   const long = text.length > 320
@@ -141,7 +145,7 @@ function Interpretation({ view }: { view: ListenView }) {
       <span style={{ ...S.muted, whiteSpace: 'pre-wrap' }}>{long && !open ? `${text.slice(0, 320)}…` : text}</span>
       {long && (
         <span>
-          <TextButton onClick={() => setOpen(!open)}>{open ? 'Less' : 'More'}</TextButton>
+          <TextButton onClick={() => setOpen(!open)}>{open ? t('listen.less') : t('listen.more')}</TextButton>
         </span>
       )}
     </div>
@@ -157,9 +161,10 @@ export function ListenCard({ media, audition }: { media: ToolMediaRendererProps;
 /** The card for a `kumi_listen` result, wherever it's drawn: in the transcript's tool part, or in the Measurements tab
  *  when the transcript shows no tool parts (CC-9). `fallback` stands in for what it can't draw. */
 export function ListenResultCard({ result, audition, fallback }: { result: unknown; audition: Audition; fallback: ReactNode }): ReactNode {
+  const t = useT()
   const parsed = parseListen(result)
   if (!parsed) return fallback
-  const view = listenView(parsed)
+  const view = listenView(parsed, t)
   return (
     <div
       data-kumi-card="listen"
@@ -168,12 +173,12 @@ export function ListenResultCard({ result, audition, fallback }: { result: unkno
       <div style={{ ...S.row, justifyContent: 'space-between', alignItems: 'flex-start', gap: 8 }}>
         <span style={{ ...S.text, fontWeight: 600, minWidth: 0 }}>
           <span style={{ color: T.accent }}>♪</span> {view.title}
-          {view.referenceTitle && <span style={{ color: T.muted, fontWeight: 400 }}> vs {view.referenceTitle}</span>}
+          {view.referenceTitle && <span style={{ color: T.muted, fontWeight: 400 }}>{t('listen.versus', view.referenceTitle)}</span>}
         </span>
-        <Chip title="Measured on this computer by Kumi, from the audio file itself">measured</Chip>
+        <Chip title={t('listen.measuredTitle')}>{t('listen.measured')}</Chip>
       </div>
       {view.capture && (
-        <span style={S.faint} title="Kumi played this window and measured it; it isn't a change, so there's nothing to undo">
+        <span style={S.faint} title={t('listen.captureTitle')}>
           {view.capture}
         </span>
       )}
@@ -181,7 +186,7 @@ export function ListenResultCard({ result, audition, fallback }: { result: unkno
       {view.mineId ? (
         <div style={{ ...S.row, gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
           <Wave audition={audition} id={view.mineId} label={view.title} />
-          {view.referenceId && <Wave audition={audition} id={view.referenceId} label={view.referenceTitle ?? 'Reference'} />}
+          {view.referenceId && <Wave audition={audition} id={view.referenceId} label={view.referenceTitle ?? t('listen.reference')} />}
         </div>
       ) : (
         fallback

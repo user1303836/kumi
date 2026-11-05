@@ -6,11 +6,11 @@ import { CANVAS, T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
-import { clean, seconds } from './format.ts'
+import { clean, num, seconds } from './format.ts'
 import { buildModel, fitView, frame, type MapViewport, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
-import { Chip, S } from './ui.tsx'
+import { Chip, S, useT } from './ui.tsx'
 
 export interface MapCanvasProps {
   map: SoundMap | null
@@ -43,6 +43,7 @@ function resolve(canvas: HTMLCanvasElement): Record<keyof typeof CANVAS, string>
 }
 
 export function MapCanvas({ map, found, playing, selected, onPick, actions, empty }: MapCanvasProps) {
+  const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
   const boxRef = useRef<HTMLDivElement | null>(null)
@@ -177,15 +178,15 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 240, color: T.text }}>
       <div style={{ ...S.row, flexWrap: 'wrap', padding: '8px 10px', gap: 6, borderBottom: `1px solid ${T.border}` }}>
         <input
-          aria-label="Search sounds"
+          aria-label={t('map.search')}
           onChange={event => setQuery(event.target.value)}
-          placeholder="Search the map: name, class or folder"
+          placeholder={t('map.searchHint')}
           style={{ flex: '1 1 180px', minWidth: 140, font: 'inherit', fontSize: 12, padding: '3px 8px', borderRadius: 3, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
           value={query}
         />
         <span style={S.faint}>
-          {shown === model.points.length ? `${model.points.length} sounds` : `${shown} of ${model.points.length} sounds`}
-          {model.revision ? ` · map ${model.revision}` : ''}
+          {shown === model.points.length ? t('map.count', num(model.points.length, 0)) : t('map.countOf', num(shown, 0), num(model.points.length, 0))}
+          {model.revision ? ` · ${t('map.revision', model.revision)}` : ''}
         </span>
       </div>
       <div style={{ ...S.row, flexWrap: 'wrap', gap: 4, padding: '6px 10px' }}>
@@ -202,7 +203,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
                   return next
                 })
               }
-              title={off ? `Show ${group.name}` : `Hide ${group.name}`}
+              title={off ? t('map.show', group.name) : t('map.hide', group.name)}
               type="button"
               style={{ ...S.row, gap: 4, font: 'inherit', fontSize: 11, padding: '1px 6px', borderRadius: 10, border: `1px solid ${T.border}`, background: 'transparent', color: off ? T.faint : T.secondary, cursor: 'pointer', opacity: off ? 0.6 : 1 }}
             >
@@ -213,7 +214,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
         })}
       </div>
       {matches.length > 0 && (
-        <div aria-label={searched ? 'Sounds that match' : 'Sounds Kumi found'} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 10px 6px' }}>
+        <div aria-label={searched ? t('map.matches') : t('map.found')} role="group" style={{ display: 'flex', flexDirection: 'column', gap: 1, padding: '0 10px 6px' }}>
           {matches.slice(0, MATCHES_LISTED).map(id => {
             const sound = model.sounds[id]
             return (
@@ -229,13 +230,13 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
               </button>
             )
           })}
-          {matches.length > MATCHES_LISTED && <span style={{ ...S.faint, padding: '0 6px' }}>and {matches.length - MATCHES_LISTED} more on the map</span>}
+          {matches.length > MATCHES_LISTED && <span style={{ ...S.faint, padding: '0 6px' }}>{t('map.more', matches.length - MATCHES_LISTED)}</span>}
         </div>
       )}
       <div ref={boxRef} style={{ position: 'relative', flex: 1, minHeight: 160, overflow: 'hidden' }}>
         <canvas
           ref={canvasRef}
-          aria-label="Sound map"
+          aria-label={t('map.canvas')}
           onPointerDown={event => {
             if (!view) return
             event.currentTarget.setPointerCapture?.(event.pointerId)

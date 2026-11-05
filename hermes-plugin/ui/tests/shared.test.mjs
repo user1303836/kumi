@@ -397,3 +397,37 @@ test('a job shows only once its profile answers for it, never as news when first
   assert.equal(kumi.get().jobs['j-1'].state, 'interrupted')
   assert.equal(typeof kumi.get().jobs['j-1'].ended_at, 'number')
 })
+
+const i18n = await load('src/shared/i18n.ts')
+
+test('the chip, a job and the time read in Japanese and Chinese; requests to the model stay English', () => {
+  const ja = i18n.translator('ja')
+  const zh = i18n.translator('zh-CN')
+  assert.equal(format.chipWords({ daw: 'ableton', project: { name: 'Night Drive' }, stale: true, running: false }, undefined, ja).text, 'Live · Night Drive · Kumi は停止中')
+  assert.equal(format.chipWords({ daw: 'reaper', connected: false }, undefined, zh).text, 'Kumi · REAPER 未连接')
+  assert.equal(format.jobWords({ kind: 'scan', state: 'done', result: { sounds: 637, failed: 3 } }, ja).detail, '637 個のサウンド · 3 個は読み込めませんでした')
+  assert.equal(format.ago(0, 5 * 60_000, zh), '5 分钟前')
+  assert.equal(format.undoRequest({ id: 'h-1' }), 'Undo Kumi change h-1')
+  // A language Kumi doesn't have reads English, never a raw key.
+  assert.equal(i18n.translator('fr-FR')('pane.undo'), 'Undo')
+})
+
+test('every catalog key the UI names has words in English, Japanese and Chinese, so no raw key ever shows', async () => {
+  const { readdirSync, readFileSync } = await import('node:fs')
+  const { join } = await import('node:path')
+  const walk = dir => readdirSync(dir, { withFileTypes: true }).flatMap(entry => (entry.isDirectory() ? walk(join(dir, entry.name)) : [join(dir, entry.name)]))
+  const sources = walk(new URL('../src', import.meta.url).pathname).filter(file => /\.(ts|tsx)$/.test(file) && !file.endsWith('i18n.ts'))
+  const keys = new Set()
+  // Keys are written in single quotes (`t('pane.undo')`, and the state maps); backticks in comments name events.
+  const pattern = /'((?:common|chip|step|time|pane|hint|focus|history|job|map|measurements|listen|settings|palette|notify|dashboard)\.[A-Za-z_]+(?:\.[A-Za-z_]+)*)'/g
+  for (const file of sources) for (const match of readFileSync(file, 'utf8').matchAll(pattern)) keys.add(match[1])
+  // The keys built from a state's name.
+  for (const state of ['ready', 'needs_runtime', 'outdated_runtime', 'damaged_runtime', 'needs_daw_component', 'no_pin', 'unsupported_platform', 'unknown']) keys.add(`settings.states.${state}`)
+  for (const state of ['not_installed', 'installed', 'outdated', 'unknown']) keys.add(`settings.componentStates.${state}`)
+  assert.ok(keys.size > 100, `${keys.size} keys found`)
+  const has = (messages, key) => key.split('.').reduce((value, part) => (value && typeof value === 'object' ? value[part] : undefined), messages) !== undefined
+  for (const locale of ['en', 'ja', 'zh']) {
+    const missing = [...keys].filter(key => !has(i18n.MESSAGES[locale], key))
+    assert.deepEqual(missing, [], `${locale} lacks these keys`)
+  }
+})

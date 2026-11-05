@@ -1,11 +1,18 @@
-// Words and numbers the UI shows, and the requests it puts in the chat. Pure functions, tested in ui/tests.
+// Words and numbers the UI shows, and the requests it puts in the chat. Pure functions, tested in ui/tests. The UI's
+// words come through a `Translate` (English by default); the requests stay English, as contract C5 has them.
+import { english, type Translate } from './i18n.ts'
 import type { Focus, HistoryItem, Job, Named, Status } from './types.ts'
 
 const DAWS: Record<string, string> = { ableton: 'Live', live: 'Live', reaper: 'REAPER', renoise: 'Renoise', soundcraft: 'SoundCraft' }
 
-/** The DAW's name as producers say it: `ableton` is Live. */
-export function dawName(daw: unknown): string {
-  return (typeof daw === 'string' && DAWS[daw.toLowerCase()]) || 'your DAW'
+/** The DAW's name as producers say it (`ableton` is Live), or null for one Kumi doesn't name. */
+export function knownDaw(daw: unknown): string | null {
+  return (typeof daw === 'string' && DAWS[daw.toLowerCase()]) || null
+}
+
+/** The DAW's name, or "your DAW" in `t`'s words. */
+export function dawName(daw: unknown, t: Translate = english): string {
+  return knownDaw(daw) ?? t('common.yourDaw')
 }
 
 /** A name from FOCUS or HISTORY, which may be a string or an object with a `name`. */
@@ -86,13 +93,13 @@ export function bpm(tempo: unknown): string | undefined {
 }
 
 /** How long ago `at` (ms since 1970) was: `now`, `4 min ago`, `2 h ago`, `3 d ago`. */
-export function ago(at: unknown, now = Date.now()): string {
+export function ago(at: unknown, now = Date.now(), t: Translate = english): string {
   if (typeof at !== 'number') return ''
   const seconds = Math.max(0, (now - at) / 1000)
-  if (seconds < 45) return 'now'
-  if (seconds < 3600) return `${Math.round(seconds / 60)} min ago`
-  if (seconds < 86_400) return `${Math.round(seconds / 3600)} h ago`
-  return `${Math.round(seconds / 86_400)} d ago`
+  if (seconds < 45) return t('time.now')
+  if (seconds < 3600) return t('time.minutes', Math.round(seconds / 60))
+  if (seconds < 86_400) return t('time.hours', Math.round(seconds / 3600))
+  return t('time.days', Math.round(seconds / 86_400))
 }
 
 export function seconds(value: unknown): string {
@@ -100,8 +107,8 @@ export function seconds(value: unknown): string {
   return value < 10 ? `${num(value, 2)} s` : value < 60 ? `${num(value, 1)} s` : `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, '0')}`
 }
 
-// A job's kind as a producer says it: running, and once it ended.
-const JOB_KINDS: Record<string, { running: string; noun: string }> = { scan: { running: 'Scanning', noun: 'Scan' } }
+// A job's kind as a producer says it, running and once it ended (catalog keys).
+const JOB_KINDS: Record<string, { running: string; noun: string }> = { scan: { running: 'job.scanning', noun: 'job.scan' } }
 
 /** A count a job's result gives as a number or as a list of what it counted; null when it gives neither. */
 function count(value: unknown): number | null {
@@ -111,29 +118,31 @@ function count(value: unknown): number | null {
 
 /** A background job in words: `Scanning` · `Drums · 412 of 1,200`, how much of it is done (0–1, when it's known),
  *  and a tone for its state. */
-export function jobWords(job: Job): { title: string; detail: string; fraction: number | null; tone: 'bad' | 'good' | 'muted' | 'warn' } {
+export function jobWords(job: Job, t: Translate = english): { title: string; detail: string; fraction: number | null; tone: 'bad' | 'good' | 'muted' | 'warn' } {
   const kind = typeof job.kind === 'string' && job.kind ? job.kind : ''
-  const named = JOB_KINDS[kind] ?? { running: `${clean(kind || 'Job', 24)} running`, noun: clean(kind || 'Job', 24) }
+  const known = JOB_KINDS[kind]
+  const noun = known ? t(known.noun) : clean(kind, 24) || t('job.job')
+  const running = known ? t(known.running) : t('job.running', noun)
   const progress = job.progress ?? {}
   const done = typeof progress.done === 'number' && Number.isFinite(progress.done) ? progress.done : null
   const total = typeof progress.total === 'number' && Number.isFinite(progress.total) && progress.total > 0 ? progress.total : null
   const message = typeof progress.message === 'string' ? clean(progress.message, 60) : ''
   if (job.state === 'running' || job.state === undefined) {
-    const count = done === null ? '' : total === null ? num(done, 0) : `${num(done, 0)} of ${num(total, 0)}`
-    return { title: named.running, detail: [message, count].filter(Boolean).join(' · '), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: 'muted' }
+    const count = done === null ? '' : total === null ? num(done, 0) : t('job.of', num(done, 0), num(total, 0))
+    return { title: running, detail: [message, count].filter(Boolean).join(' · '), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: 'muted' }
   }
   if (job.state === 'done') {
     const result = job.result && typeof job.result === 'object' ? (job.result as Record<string, unknown>) : {}
     // A scan's result (W3): `sounds` indexed, `failed` files it couldn't read, as counts.
     const sounds = count(result.sounds)
     const failed = count(result.failed)
-    const detail = [sounds === null ? '' : `${num(sounds, 0)} sound${sounds === 1 ? '' : 's'}`, failed ? `${num(failed, 0)} couldn't be read` : '']
-    return { title: `${named.noun} done`, detail: detail.filter(Boolean).join(' · '), fraction: 1, tone: failed ? 'warn' : 'good' }
+    const detail = [sounds === null ? '' : t('job.sounds', sounds, num(sounds, 0)), failed ? t('job.unreadable', num(failed, 0)) : '']
+    return { title: t('job.done', noun), detail: detail.filter(Boolean).join(' · '), fraction: 1, tone: failed ? 'warn' : 'good' }
   }
-  if (job.state === 'failed') return { title: `${named.noun} failed`, detail: clean(job.error?.reason ?? '', 120), fraction: null, tone: 'bad' }
-  if (job.state === 'cancelled') return { title: `${named.noun} stopped`, detail: '', fraction: null, tone: 'muted' }
-  if (job.state === 'interrupted') return { title: `${named.noun} interrupted`, detail: 'Kumi stopped before it finished.', fraction: null, tone: 'warn' }
-  return { title: named.noun, detail: clean(job.state ?? '', 24), fraction: null, tone: 'muted' }
+  if (job.state === 'failed') return { title: t('job.failed', noun), detail: clean(job.error?.reason ?? '', 120), fraction: null, tone: 'bad' }
+  if (job.state === 'cancelled') return { title: t('job.stopped', noun), detail: '', fraction: null, tone: 'muted' }
+  if (job.state === 'interrupted') return { title: t('job.interrupted', noun), detail: t('job.interruptedWhy'), fraction: null, tone: 'warn' }
+  return { title: noun, detail: clean(job.state ?? '', 24), fraction: null, tone: 'muted' }
 }
 
 // The requests the UI puts in the chat (contract C5). Every change goes model → tool → approval like any other
@@ -182,23 +191,23 @@ export function connectRequest(daw: unknown): string {
 export const LOOK_AGAIN_REQUEST = 'Kumi, look at my project again before changing anything else'
 
 /** What an unsure or partial outcome's `cleanup` says Kumi did about it (CC-2), as a sentence or nothing. */
-export function cleanupWords(cleanup: unknown): string {
-  if (cleanup === 'restored') return 'Kumi put back what it changed meanwhile.'
-  if (cleanup === 'unsure') return 'Kumi isn’t sure it put everything back.'
+export function cleanupWords(cleanup: unknown, t: Translate = english): string {
+  if (cleanup === 'restored') return t('history.restored')
+  if (cleanup === 'unsure') return t('history.restoreUnsure')
   return ''
 }
 
 /** The status chip's words: `Live · Night Drive · 124 BPM`, or what's missing. */
-export function chipWords(status: Status | null, tempo?: unknown): { tone: 'bad' | 'good' | 'muted' | 'warn'; text: string } {
-  if (!status) return { tone: 'muted', text: 'Kumi' }
-  const daw = dawName(status.daw)
+export function chipWords(status: Status | null, tempo?: unknown, t: Translate = english): { tone: 'bad' | 'good' | 'muted' | 'warn'; text: string } {
+  if (!status) return { tone: 'muted', text: t('chip.kumi') }
+  const daw = dawName(status.daw, t)
   const project = clean(status.project?.name ?? '', 40)
   if (status.connected) {
     const parts = [daw, project, bpm(tempo)].filter(Boolean)
     return { tone: 'good', text: parts.join(' · ') }
   }
   // Its last word was that it stopped (its chat ended, or it sat idle): nothing's wrong, it just isn't running.
-  if (status.stale && status.running === false) return { tone: 'muted', text: project ? `${daw} · ${project} · Kumi stopped` : `${daw} · Kumi stopped` }
-  if (status.stale && status.owner) return { tone: 'warn', text: project ? `${daw} · ${project} · not answering` : `${daw} · not answering` }
-  return { tone: 'muted', text: `Kumi · ${daw} not connected` }
+  if (status.stale && status.running === false) return { tone: 'muted', text: [daw, project, t('chip.stopped')].filter(Boolean).join(' · ') }
+  if (status.stale && status.owner) return { tone: 'warn', text: [daw, project, t('chip.notAnswering')].filter(Boolean).join(' · ') }
+  return { tone: 'muted', text: t('chip.notConnected', daw) }
 }
