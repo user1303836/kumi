@@ -24,7 +24,7 @@ import textwrap
 from typing import Any
 import unicodedata
 
-from . import calls, runtime, setup, tools
+from . import calls, runtime, setup, snapshots, tools
 
 log = logging.getLogger(__name__)
 
@@ -266,7 +266,7 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
     except runtime.Unavailable as failure:
         return block(f"Kumi didn't read any folder: {_reason(failure)}")
     if action == "add_folder":
-        folder, refusal = tools.library_folder(args.get("folder"))
+        folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
         if refusal is not None:
             return block(f"Kumi didn't add the folder: {refusal}")
         return approve([f"Kumi: read the folder {folder} and everything in it, to build your sound map. It never "

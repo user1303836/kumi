@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+from pathlib import Path
 import re
+import tempfile
 import threading
 import time
 from types import SimpleNamespace
@@ -207,6 +209,28 @@ class Tools(unittest.TestCase):
         self.assertFalse([item for item in found["items"] if "path" in item], found)
         measured = support.call(self.host, "kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"}})
         self.assertTrue(measured["media_tag"].startswith("MEDIA:"))
+
+    def test_a_listens_media_line_is_passed_on_only_when_it_names_its_kept_file(self):
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+        measured = support.call(self.host, "kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"}})
+        kept = os.path.realpath(self.data / "state" / "artifacts" / f"{measured['artifact_id']}.wav")
+        self.assertEqual(measured["media_tag"], f"MEDIA:{kept}", "the kept file, by its real path")
+        roundabout = self.data / "state" / "artifacts" / ".." / "artifacts" / f"{measured['artifact_id']}.wav"
+        self.assertEqual(tools.kept_media(self.host, {**measured, "media_tag": f"MEDIA:{roundabout}"}), measured)
+        with mock.patch.object(support.module("snapshots"), "MEDIA_MAX_BYTES", 1):
+            self.assertEqual(tools.kept_media(self.host, measured), measured, "a long render's too, past the cap")
+        for forged in ("MEDIA:" + str(self.data / "kumi-home" / "bridge.secret"), "MEDIA:/etc/hosts", "not a tag"):
+            with self.subTest(forged=forged):
+                passed = tools.kept_media(self.host, {**measured, "media_tag": forged})
+                self.assertNotIn("media_tag", passed)
+                self.assertEqual(passed["metrics"], measured["metrics"], "the measurements stay")
+
+    def test_a_folder_setting_with_a_tilde_is_expanded_and_one_the_guard_refuses_left_out(self):
+        home = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        (home / "Samples").mkdir()
+        with mock.patch.dict(os.environ, {"HOME": str(home), "USERPROFILE": str(home)}):
+            self.ctx.settings["library_folders"] = ["~/Samples", "Samples", os.path.abspath(os.sep), "~", "~/Samples"]
+            self.assertEqual(self.host.library_folders(), [str(home / "Samples")], "kumi serve starts with these")
 
     def test_every_tool_answers_json_whatever_it_gets(self):
         for name, _, _, _ in tools.TOOLS:

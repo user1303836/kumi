@@ -11,7 +11,7 @@ import argparse
 from pathlib import Path
 from typing import Any, TextIO
 
-from . import runtime, schemas, setup, snapshots, tools
+from . import policy, runtime, schemas, setup, snapshots, tools
 
 DESCRIPTION = "Kumi's state: setup, its runtime, the DAW connection and the open project"
 CLI_HELP = "Kumi in this Hermes profile: where it stands, and setting it up"
@@ -21,8 +21,8 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
     try:
         status = tools.kumi_status(host, {}, **kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return f"Kumi: its runtime didn't answer ({failure.reason})"
-    daw = schemas.DAW_NAMES.get(status.get("daw"), status.get("daw"))
+        return f"Kumi: its runtime didn't answer ({_said(failure.reason)})"
+    daw = _said(schemas.DAW_NAMES.get(status.get("daw"), status.get("daw")), 40)
     state = status.get("setup") or {}
     warning = [status["approvals"]] if status.get("approvals") else []
     if state.get("state") != "ready":
@@ -31,13 +31,13 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
                           *warning])
     lines = [f"Kumi {(state.get('runtime') or {}).get('version')} is set up ({state.get('target')}); DAW: {daw}."]
     if not status.get("connected"):
-        lines.append(status.get("message") or f"Kumi isn't connected to {daw}: ask the agent to connect.")
+        lines.append(_said(status.get("message"), 300) or f"Kumi isn't connected to {daw}: ask the agent to connect.")
         return "\n".join([*lines, *warning])
     project = status.get("project") or {}
-    owner = (status.get("owner") or {}).get("session_id")
+    owner = _said((status.get("owner") or {}).get("session_id") or "", 80)
     held = "this chat" if owner and owner == kwargs.get("session_id") else f"chat {owner}" if owner else "no chat yet"
-    lines.append(f"Connected to {daw}: {project.get('name', 'a project')} (epoch {project.get('epoch')}). "
-                 f"Changes are held by {held}.")
+    lines.append(f"Connected to {daw}: {_said(project.get('name', 'a project'), 80)} "
+                 f"(epoch {_said(project.get('epoch'), 40)}). Changes are held by {held}.")
     return "\n".join([*lines, *warning])
 
 
@@ -61,20 +61,28 @@ def status_text(host: tools.Host) -> str:
     elif owner.get("stale"):
         lines.append(f"Runtime: not running (last heard {max(0, round(owner['age_ms'] / 1000))} s ago).")
     else:
-        pid = f" (pid {holder['pid']})" if holder.get("pid") else ""
-        chat = f", for chat {holder['session_id']}" if holder.get("session_id") else ""
+        pid = f" (pid {_said(holder['pid'], 20)})" if holder.get("pid") else ""
+        chat = f", for chat {_said(holder['session_id'], 80)}" if holder.get("session_id") else ""
         lines.append(f"Runtime: running{pid}{chat}.")
         if now.get("connected") and project:
-            lines.append(f"Connected to {daw}: {project.get('name', 'a project')} (epoch {project.get('epoch')}).")
+            lines.append(f"Connected to {daw}: {_said(project.get('name', 'a project'), 80)} "
+                         f"(epoch {_said(project.get('epoch'), 40)}).")
         else:
             lines.append(f"Not connected to {daw}.")
     folders = host.library_folders()
-    lines.append("Sample folders: " + (", ".join(folders) if folders else "none yet."))
+    lines.append("Sample folders: " + (", ".join(_said(folder, 300) for folder in folders) if folders else "none yet."))
     lines.append(setup.compressed_audio(data)["message"])
     lines.append("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without asking."
                  if tools.approvals_bypassed(host, chat=False)
                  else "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that).")
+    lines.extend(f"Approvals: {gap}" for gap in tools.approval_gaps(host))
     return "\n".join(lines)
+
+
+def _said(text: Any, limit: int = policy.LINE) -> str:
+    """What a runtime, a snapshot or a setting says, printed as one plain line: no control characters, escapes or
+    line breaks that could forge or hide a line here (research-1's review, item 10)."""
+    return policy.one_line(text, limit) if text is not None else ""
 
 
 def register_cli(ctx: Any, host: tools.Host) -> None:

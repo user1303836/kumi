@@ -226,7 +226,7 @@ class Media(StateTest):
 
     def test_windows_paths_compare_in_the_plain_drive_form_and_network_or_device_paths_are_refused(self) -> None:
         # Kumi's native snapshots use the verbatim drive form; a producer's folder is usually plain (W5 review L-S6).
-        local = snapshots._local
+        local = snapshots.local
         self.assertEqual(local(r"\\?\C:\Samples\Snare.wav", windows=True), r"C:\Samples\Snare.wav")
         self.assertEqual(local("//?/d:/Samples/Snare.wav", windows=True), "d:/Samples/Snare.wav")
         self.assertEqual(local(r"C:\Samples\Snare.wav", windows=True), r"C:\Samples\Snare.wav")
@@ -239,6 +239,9 @@ class Media(StateTest):
             self.assertIsNone(local(refused, windows=True), refused)
         self.assertEqual(local(r"C:\Samples\Console Snare.wav", windows=True), r"C:\Samples\Console Snare.wav")
         self.assertEqual(local("/Users/me/Samples/Snare.wav", windows=False), "/Users/me/Samples/Snare.wav")
+        for network in ("/net/server/Samples", "/Network/Servers/x", "//net/server", "/NET/server", "/tmp/../net/s"):
+            self.assertIsNone(local(network, windows=False), network)  # the automounter's: a lookup mounts a share
+        self.assertEqual(local("/Users/me/net/Snare.wav", windows=False), "/Users/me/net/Snare.wav")
 
     def test_a_resolved_path_is_checked_again_so_a_link_to_a_share_is_refused_and_a_long_path_compares_plainly(self) -> None:
         # realpath's answer goes through the same check: a link inside an approved folder, or a folder that is one, can
@@ -246,9 +249,9 @@ class Media(StateTest):
         real_realpath = snapshots.os.path.realpath
         try:
             snapshots.os.path.realpath = lambda path, *args, **kwargs: r"\\server\share\Snare.wav"
-            self.assertIsNone(snapshots._resolved(r"C:\Samples\link.wav", windows=True))
+            self.assertIsNone(snapshots.resolved(r"C:\Samples\link.wav", windows=True))
             snapshots.os.path.realpath = lambda path, *args, **kwargs: "\\\\?\\C:\\" + "Long\\" * 60 + "Snare.wav"
-            self.assertEqual(snapshots._resolved(r"C:\Samples\link.wav", windows=True), "C:\\" + "Long\\" * 60 + "Snare.wav")
+            self.assertEqual(snapshots.resolved(r"C:\Samples\link.wav", windows=True), "C:\\" + "Long\\" * 60 + "Snare.wav")
         finally:
             snapshots.os.path.realpath = real_realpath
 

@@ -532,6 +532,9 @@ class Runtime:
     in_flight: int = 0
     closing: bool = False
     retired: bool = False
+    # The starter's context variables (Hermes keeps the active profile there): the idle watch, one thread for every
+    # profile, stops this runtime in them, so what it logs lands in this profile's logs (research-1's review, item 12).
+    context: contextvars.Context = field(default_factory=contextvars.copy_context)
     gone: threading.Event = field(default_factory=threading.Event)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -736,9 +739,12 @@ class Runtimes:
                 runtimes = list(self._running.values())
             for runtime in runtimes:
                 if runtime.close_if_idle(self._idle_after, time.monotonic()):
-                    log.info("Kumi's runtime for %s was idle for %g s: stopping it", runtime.data_dir, self._idle_after)
-                    runtime.client.close(timeout=self._stop_wait)
-                    self._retire(runtime)
+                    runtime.context.copy().run(self._stop_idle, runtime)
+
+    def _stop_idle(self, runtime: Runtime) -> None:
+        log.info("Kumi's runtime for %s was idle for %g s: stopping it", runtime.data_dir, self._idle_after)
+        runtime.client.close(timeout=self._stop_wait)
+        self._retire(runtime)
 
     def _handshake(self, runtime: Runtime) -> dict:
         client, expected = runtime.client, runtime.install.version

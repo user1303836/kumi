@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import contextvars
 import os
+from pathlib import Path
+import tempfile
 import unittest
 from unittest import mock
 
@@ -206,6 +208,43 @@ class Approvals(unittest.TestCase):
                 self.assertEqual(self.hook("kumi_library", {"action": "add_folder", "folder": folder})["action"],
                                  "block")
         self.assertEqual(self.hook("kumi_library", {"action": "erase"})["action"], "block")
+
+    def test_a_folder_is_judged_by_where_it_really_is(self):
+        snapshots = support.module("snapshots")
+        place = Path(os.path.realpath(self.enterContext(tempfile.TemporaryDirectory())))
+        for name, target in (("disk", Path(os.path.abspath(os.sep))), ("home", Path.home())):
+            link = place / name
+            try:
+                link.symlink_to(target, target_is_directory=True)
+            except OSError:
+                self.skipTest("this system can't make links here")
+            with self.subTest(name):
+                self.assertIsNone(snapshots.library_folder(str(link))[0], "another name for a disk or the home folder")
+        hermes = place / "hermes"
+        (hermes / "cache" / "generated").mkdir(parents=True)
+        spelled = [place / "HERMES" / "cache"] if (place / "HERMES").exists() else []  # a case-insensitive disk
+        for folder in (hermes, hermes / "cache" / "generated", place, *spelled):
+            with self.subTest(folder=str(folder)):
+                self.assertIsNone(snapshots.library_folder(str(folder), hermes_home=str(hermes))[0], "Hermes's own")
+        self.assertEqual(snapshots.library_folder(str(place / "Samples"), hermes_home=str(hermes))[0],
+                         str(place / "Samples"), "a folder beside Hermes's own is fine")
+        data = Path("/System/Volumes/Data")
+        if data.is_dir():  # macOS: neither / nor a mount point, yet it holds home at Users/<name>, and home itself
+            for folder in (data, data / Path.home().relative_to(Path.home().anchor)):
+                with self.subTest(folder=str(folder)):
+                    self.assertIsNone(snapshots.library_folder(str(folder))[0])
+
+    def test_a_network_folder_is_refused_before_anything_looks_it_up(self):
+        snapshots = support.module("snapshots")
+        network = ([r"\\server\share\Samples", r"\\?\UNC\server\share\Samples", "//server/share/Samples"]
+                   if os.name == "nt" else ["/net/server/Samples", "/Network/Servers/s/Samples", "/NET/server"])
+        touched = mock.Mock(side_effect=AssertionError("Kumi looked the folder up"))
+        with mock.patch.object(os.path, "realpath", touched), mock.patch.object(os.path, "ismount", touched), \
+                mock.patch.object(os.path, "samefile", touched), mock.patch.object(os, "stat", touched):
+            for folder in network:
+                with self.subTest(folder=folder):
+                    self.assertIsNone(snapshots.library_folder(folder)[0])
+        touched.assert_not_called()
 
     def test_a_scan_names_the_folders_the_runtime_reads_and_needs_one(self):
         self.assertIn("no approved sample folders", self.hook("kumi_library", {"action": "scan"})["message"])

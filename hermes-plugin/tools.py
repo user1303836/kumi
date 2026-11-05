@@ -97,8 +97,11 @@ class Host:
         return self._ctx.get_config("inject_focus", True) is not False
 
     def library_folders(self) -> list[str]:
-        folders = self._ctx.get_config("library_folders", [])
-        return [folder for folder in folders if isinstance(folder, str) and folder] if isinstance(folders, list) else []
+        """The sample folders in the plugin's settings, as the guard keeps them (`snapshots.library_folders`)."""
+        return snapshots.library_folders(self._ctx.get_config("library_folders", []), hermes_home=self.hermes_home())
+
+    def hermes_home(self) -> str | None:
+        return snapshots.hermes_home()
 
     def listen_interpretation(self) -> bool:
         return self._ctx.get_config("listen_interpretation", False) is True
@@ -263,6 +266,23 @@ UNKNOWN_APPROVALS = ("Kumi can't tell whether /yolo is on in this chat (Hermes r
 PLUGIN_HOST_ENV = "HERMES_PLUGIN_HOST_PROCESS"
 
 
+def approval_gaps(host: Host) -> list[str]:
+    """Hermes settings under which Kumi's approvals pass with nobody asked (research-1's review, item 8), each read as
+    Hermes v0.22.7 reads it (`tools.approval_context._binary_approval_mode`, `utils.is_truthy_value`). Kumi itself
+    refuses what needs one in scheduled jobs, webhooks and API calls (#983); `hermes -z`, which Hermes treats as
+    --yolo, has no public sign Kumi can read (the README says so)."""
+    config = host.hermes_config()
+    approvals = config.get("approvals") if isinstance(config.get("approvals"), dict) else {}
+    delegation = config.get("delegation") if isinstance(config.get("delegation"), dict) else {}
+    gaps = []
+    if str(approvals.get("single_query_mode", "deny")).lower().strip() in {"approve", "off", "allow", "yes"}:
+        gaps.append("approvals.single_query_mode lets a one-shot hermes -q run Kumi's changes without asking.")
+    auto = delegation.get("subagent_auto_approve", False)
+    if auto.strip().lower() in {"1", "true", "yes", "on"} if isinstance(auto, str) else bool(auto):
+        gaps.append("delegation.subagent_auto_approve lets a subagent's Kumi changes run without asking.")
+    return gaps
+
+
 def approvals_bypassed(host: Host, *, chat: bool = True) -> bool | None:
     """Whether Hermes runs a call it would ask about without asking, or None when Kumi can't tell:
     - `approvals.mode: off` in Hermes's settings (YAML's bare `off` reads as false);
@@ -295,8 +315,9 @@ def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
                               "runtime": None, "connected": False, "daw": daw, "project": None, "owner": None,
                               "capabilities": []}
     bypassed = approvals_bypassed(host)
-    if bypassed is not False:  # say it to the producer before changing anything
-        report["approvals"] = NO_APPROVALS if bypassed else UNKNOWN_APPROVALS
+    said = ([] if bypassed is False else [NO_APPROVALS if bypassed else UNKNOWN_APPROVALS]) + approval_gaps(host)
+    if said:  # say it to the producer before changing anything
+        report["approvals"] = " ".join(said)
     try:
         host.install(data_dir)
     except runtime.Unavailable as failure:
@@ -580,7 +601,7 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
         return {"error": {"code": "invalid", "reason": refusal}}
     if not is_track_listen(args):
         result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
-        return interpreted(host, result)
+        return interpreted(host, kept_media(host, result))
     # A track listen plays the project: sent once, and an answer that never came is unsure, never resent (CC-2).
     call = kwargs.get("kumi_call")
     deadline = track_deadline(call.extra.get("deadline")) if isinstance(call, calls.Entry) else None
@@ -600,7 +621,24 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
         if result["state"] == "unsure":
             result.setdefault("hint", UNSURE_HINT)
         return result
-    return interpreted(host, result)
+    return interpreted(host, kept_media(host, result))
+
+
+def kept_media(host: Host, result: dict) -> dict:
+    """A result's `media_tag` (`MEDIA:<path>`) passes only when it names the very file its artifact is kept as in the
+    profile's artifacts (`snapshots.artifact_file`), and then names that file by its real path. Hermes delivers a
+    MEDIA: path through links, with only a denylist, so a crafted one could hand a chat a file from elsewhere
+    (research-1's review, item 16; rgzm). The measurements stay either way."""
+    tag = result.get("media_tag")
+    if tag is None:
+        return result
+    artifact = result.get("artifact_id")
+    kept = snapshots.artifact_file(Path(host.data_dir()) / "state", artifact) if isinstance(artifact, str) else None
+    named = snapshots.local(tag[len("MEDIA:"):]) if isinstance(tag, str) and tag.startswith("MEDIA:") else None
+    if kept is not None and named is not None and snapshots.resolved(named) == kept:
+        return {**result, "media_tag": f"MEDIA:{kept}"}
+    log.warning("Kumi left out a listen's MEDIA: line that doesn't name its kept file")
+    return {key: value for key, value in result.items() if key != "media_tag"}
 
 
 def interpreted(host: Host, result: dict) -> dict:
@@ -632,23 +670,6 @@ def kumi_sounds(host: Host, args: dict, **kwargs: Any) -> dict:
     return result
 
 
-def library_folder(folder: Any) -> tuple[str | None, str | None]:
-    """A sample folder the producer may approve, as Kumi will keep and read it: an absolute path (on Windows with its
-    drive), normalized, never a disk's root or the home folder itself. Returns (folder, None), or (None, why not)."""
-    if not isinstance(folder, str) or not folder.strip():
-        return None, "name the folder, as a full path."
-    if any(ord(char) < 32 or ord(char) == 127 for char in folder):
-        return None, "the folder's name has control characters."
-    if not Path(folder).is_absolute():
-        return None, f"{folder!r} isn't a full path."
-    normal = os.path.normpath(folder)
-    if os.path.dirname(normal) == normal:
-        return None, f"{normal} is a whole disk; name a sample folder."
-    if normal == os.path.normpath(os.path.expanduser("~")):
-        return None, "that's the whole home folder; name a sample folder."
-    return normal, None
-
-
 def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
     """The library tool; a folder the producer approved adding is also kept in the plugin's library_folders setting, so
     the next runtime starts with it (`--library-root`)."""
@@ -656,7 +677,7 @@ def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
     if action not in ("status", "add_folder", "scan"):
         return {"error": {"code": "invalid", "reason": "action is status, add_folder or scan."}}
     if action == "add_folder":
-        folder, refusal = library_folder(args.get("folder"))
+        folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
         if refusal is not None:
             return {"error": {"code": "invalid", "reason": refusal}}
         args = {**args, "folder": folder}
