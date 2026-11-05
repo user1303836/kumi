@@ -610,7 +610,7 @@ async fn worker(entries: Vec<SoundEntry>, sources: Vec<Source>) -> Result<mpsc::
                         });
                     }
                     Ok(index.search_indexed(&request.query).hits.into_iter().map(|hit| Match {
-                        path: hit.entry.path,
+                        path: hit.entry.file.path,
                         why: public_reasons(hit.why),
                         closeness: hit.closeness.filter(|v| v.is_finite()).map(|v| v.clamp(0.0, 100.0) as u8),
                     }).collect())
