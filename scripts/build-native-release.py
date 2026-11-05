@@ -26,7 +26,7 @@ BRIDGE_BINARIES = ("ableton-mcp-server", "ableton-mcp-analysis-worker")
 # The other DAWs' bridges, by the DAW's id (scripts/daws.toml, which release.py and build-migration-release.py read
 # through here). A library or a Renoise tool is in daws/<id> in the bundle, where Kumi installs it from
 # (daws/own/kumi-daw-own/src/provider.rs): a library with its version, its crate's, in a file beside it, or the tool's
-# folder. A program is one more of the bundle's binaries.
+# folder. A program normally ships among the bundle's binaries; an owned program carries its own payload folder.
 DAWS = "daws"
 DAW_BRIDGES = {daw["id"]: daw for daw in tomllib.loads((ROOT / "scripts/daws.toml").read_text(encoding="utf-8"))["daw"]}
 # The bridges with versions of their own, which the manifests name by the DAW's id: every one but a program, which
@@ -37,7 +37,7 @@ VERSIONED_BRIDGES = {daw_id: daw for daw_id, daw in DAW_BRIDGES.items() if "prog
 # The library learner and the sound measurer are doors of kumi's own (`kumi __library-learner`, `kumi __library-measure`),
 # not programs of their own.
 BINARIES = ("kumi", *BRIDGE_BINARIES, "daw-mcp-server",
-            *(daw["program"]["binary"] for daw in DAW_BRIDGES.values() if "program" in daw), "kumi-harness")
+            *(daw["program"]["binary"] for daw in DAW_BRIDGES.values() if "program" in daw and "folder" not in daw["program"]), "kumi-harness")
 # What a bundle carries beside kumi. The bridge's own binaries, Remote Script and Live extension are in its package under
 # bridge/, the lifecycle's artifact unpacked, and Kumi runs the bridge from there: shipping them beside kumi too made the
 # download a fifth bigger.
@@ -643,6 +643,29 @@ def stage_daws(root: Path, bundle: Path, target: str, extensions: dict[str, Path
                 copy(source / name, folder / source.name / name)
     return versions
 
+def stage_programs(root: Path, bundle: Path, binaries: Path, target: str) -> None:
+    """Owned programs and their source-bound helpers, only on the systems that can use them. They take Kumi's
+    version but stage beside one another in daws/<id>/<folder>, where the provider installs them from."""
+    for daw_id, daw in DAW_BRIDGES.items():
+        program = daw.get("program", {})
+        if "folder" not in program or system_of(target) not in program.get("systems", [system_of(target)]):
+            continue
+        folder = bundle / DAWS / daw_id / program["folder"]
+        binary = program["binary"] + (".exe" if "windows" in target else "")
+        copy(binaries / binary, folder / binary)
+        (folder / binary).chmod(0o755)
+        (folder / program["version_file"]).write_text(crate_version(root, program["crate"]) + "\n", encoding="ascii")
+        if helper := daw.get("helper"):
+            name = helper["prefix"] + digest(root / helper["source"])[:12]
+            built = root / helper["folder"]
+            files = inventory(built) if built.exists() else {}
+            if any(candidate != name for candidate in files):
+                raise ValueError(f"{daw['name']} helper payload must match the current source: {name}")
+            if name not in files:
+                raise ValueError(f"{daw['name']} release requires {built / name}; run python3 {helper['build']} first")
+            copy(built / name, folder / name)
+            (folder / name).chmod(0o755)
+
 def cargo_library(daw: dict, rust_target: str) -> str:
     name = crate_names(daw)[1]
     return {"macos": f"lib{name}.dylib", "windows": f"{name}.dll", "linux": f"lib{name}.so"}[system_of(rust_target)]
@@ -714,6 +737,7 @@ def build_release(root: Path, binaries: Path, out: Path, target: str, source: di
             (bundle / f"{name}{extension}").chmod(0o755)
         stage_hands(root, bundle, target)
         daws = stage_daws(root, bundle, target, extensions)
+        stage_programs(root, bundle, binaries, target)
         version = tomllib.loads((root / "crates/kumi/Cargo.toml").read_text())["package"]["version"]
         # `bridge` is Live's bridge, as every earlier Kumi reads it; each other DAW's bridge is a key of its own, its id.
         metadata = {"name": "kumi", "version": version, "bridge": manifest["package"]["version"], **daws, "runtime": "rust-native", "target": target}

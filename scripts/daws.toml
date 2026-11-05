@@ -19,6 +19,9 @@
 #   own binary. It ships at the bundle's root beside kumi and daw-mcp-server, not in daws/<id>, and
 #   takes Kumi's version (release.py's CRATES): no version, flags, changelog heading or manifest key of its own, and no
 #   `loads`, since the DAW loads nothing of it.
+#   Optional `folder` stages an owned program under daws/<id>/<folder>, with its `version_file`, instead of at the
+#   bundle's root. `systems` limits that payload (not the workspace's portable build). An owned program's `helper`
+#   names its source-bound helper: the build folder must hold exactly the file named by prefix + source SHA-256[:12].
 
 [[daw]]
 id = "reaper"
@@ -67,3 +70,13 @@ words = { ja = "SoundCraft プログラム", zh-CN = "SoundCraft 程序" }
 integration = "daws/soundcraft/kumi-daw-soundcraft"
 # SoundCraft never loads it: it runs beside SoundCraft and reaches it over SoundCraft's control channel.
 program = { crate = "daws/soundcraft/soundcraft-kumi", binary = "soundcraft-kumi" }
+
+[[daw]]
+id = "logic"
+name = "Logic Pro"
+bridge = "program"
+words = { ja = "Logic Pro プログラム", zh-CN = "Logic Pro 程序" }
+integration = "daws/logic/kumi-daw-logic"
+# Logic loads nothing. Kumi installs this payload into its own bridge folder, preserving the producer's Logic app.
+program = { crate = "daws/logic/logic-kumi", binary = "logic-kumi", folder = "logic-kumi", version_file = "version", systems = ["macos"] }
+helper = { source = "daws/logic/logic-kumi/helper/KumiLogicHands.swift", folder = "target/logic-hands", prefix = "kumi-logic-hands-", build = "scripts/build-logic-hands.py" }

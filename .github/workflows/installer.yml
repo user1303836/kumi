@@ -33,6 +33,8 @@ on:
       - "daws/reaper/kumi-daw-reaper/src/provider.rs"
       - "daws/renoise/kumi-daw-renoise/src/provider.rs"
       - "daws/soundcraft/kumi-daw-soundcraft/src/provider.rs"
+      - "daws/logic/kumi-daw-logic/src/provider.rs"
+      - "daws/logic/kumi-daw-logic/src/provider/**"
       - "crates/kumi-types/src/system.rs"
       - "crates/kumi-ai/src/http.rs"
       - "crates/kumi-library/src/sources.rs"
@@ -54,6 +56,9 @@ on:
       - "daws/own/daw-mcp-server/src/bin/**"
       - "daws/soundcraft/soundcraft-kumi/Cargo.toml"
       - "daws/soundcraft/soundcraft-kumi/src/main.rs"
+      - "daws/logic/logic-kumi/Cargo.toml"
+      - "daws/logic/logic-kumi/src/main.rs"
+      - "daws/logic/logic-kumi/helper/KumiLogicHands.swift"
       - "daws/reaper/reaper-kumi/build.rs"
       - "daws/reaper/reaper-kumi/Cargo.toml"
       - "daws/reaper/reaper-kumi/shim/**"
@@ -66,6 +71,7 @@ on:
       - "scripts/build-migration-release.py"
       - "scripts/daws.toml"
       - "scripts/build-hands.py"
+      - "scripts/build-logic-hands.py"
       - "scripts/release.py"
       - "scripts/check-installers.sh"
       - "scripts/vendor-willington.py"
@@ -95,6 +101,8 @@ on:
       - "daws/reaper/kumi-daw-reaper/src/provider.rs"
       - "daws/renoise/kumi-daw-renoise/src/provider.rs"
       - "daws/soundcraft/kumi-daw-soundcraft/src/provider.rs"
+      - "daws/logic/kumi-daw-logic/src/provider.rs"
+      - "daws/logic/kumi-daw-logic/src/provider/**"
       - "crates/kumi-types/src/system.rs"
       - "crates/kumi-ai/src/http.rs"
       - "crates/kumi-library/src/sources.rs"
@@ -116,6 +124,9 @@ on:
       - "daws/own/daw-mcp-server/src/bin/**"
       - "daws/soundcraft/soundcraft-kumi/Cargo.toml"
       - "daws/soundcraft/soundcraft-kumi/src/main.rs"
+      - "daws/logic/logic-kumi/Cargo.toml"
+      - "daws/logic/logic-kumi/src/main.rs"
+      - "daws/logic/logic-kumi/helper/KumiLogicHands.swift"
       - "daws/reaper/reaper-kumi/build.rs"
       - "daws/reaper/reaper-kumi/Cargo.toml"
       - "daws/reaper/reaper-kumi/shim/**"
@@ -128,6 +139,7 @@ on:
       - "scripts/build-migration-release.py"
       - "scripts/daws.toml"
       - "scripts/build-hands.py"
+      - "scripts/build-logic-hands.py"
       - "scripts/release.py"
       - "scripts/check-installers.sh"
       - "scripts/vendor-willington.py"
@@ -255,11 +267,13 @@ jobs:
         with:
           key: ${{ env.PROFILE }}-${{ matrix.target }}
           save-if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule' }}
-      # Only the Mac bundles carry the helper Kumi uses Live's menus with; each Mac job builds it (universal, under
-      # a minute) instead of waiting for a job of its own.
-      - name: Build Kumi's Mac helper
+      # Only the Mac bundles carry the helpers for Live's menus and Logic's Accessibility; each existing Mac job
+      # builds their universal files instead of waiting for jobs of their own.
+      - name: Build Kumi's Mac helpers
         if: runner.os == 'macOS'
-        run: python3 scripts/build-hands.py
+        run: |
+          python3 scripts/build-hands.py
+          python3 scripts/build-logic-hands.py
       - name: Build and bind the release artifacts
         shell: bash
         run: python3 scripts/build-native-release.py --target '${{ matrix.target }}' --profile "$PROFILE" --out release
@@ -269,7 +283,7 @@ jobs:
         run: |
           want=arm64
           if [[ '${{ matrix.target }}' == x86_64-* ]]; then want=x86_64; fi
-          for name in kumi ableton-mcp-server ableton-mcp-analysis-worker daw-mcp-server soundcraft-kumi kumi-harness; do
+          for name in kumi ableton-mcp-server ableton-mcp-analysis-worker daw-mcp-server soundcraft-kumi logic-kumi kumi-harness; do
             archs="$(lipo -archs "target/${{ matrix.target }}/$PROFILE/$name")"
             echo "$name: $archs"
             test "$archs" = "$want"
@@ -283,6 +297,11 @@ jobs:
           codesign --verify --strict --verbose "$extension"
           test "$(otool -D "$extension" | tail -n 1)" = "@rpath/reaper_kumi.dylib"
           if dyld_info -segments "$extension" | grep -i mis-aligned; then exit 1; fi
+          for helper in target/logic-hands/kumi-logic-hands-*; do
+            archs="$(lipo -archs "$helper" | tr ' ' '\n' | sort | xargs)"
+            test "$archs" = "arm64 x86_64"
+            codesign --verify --strict --verbose "$helper"
+          done
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: native-${{ matrix.target }}
@@ -411,6 +430,18 @@ jobs:
           daws > daws.txt
           "$KUMI_HOME/app/daw-mcp-server" --version
           "$KUMI_HOME/app/soundcraft-kumi" --version
+          # The Logic reader is carried only on Mac, ready for the provider to install into Kumi's owned folder.
+          # --version exits without attaching to Logic or asking for Accessibility.
+          if [ "$(uname -s)" = Darwin ]; then
+            logic="$KUMI_HOME/app/daws/logic/logic-kumi"
+            test -x "$logic/logic-kumi"
+            "$logic/logic-kumi" --version
+            test "$(cat "$logic/version")" = "$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
+            for helper in "$logic"/kumi-logic-hands-*; do test -x "$helper"; codesign --verify --strict "$helper"; done
+            test ! -e "$KUMI_HOME/app/logic-kumi"
+          else
+            test ! -e "$KUMI_HOME/app/daws/logic"
+          fi
           kumi --daw reaper doctor || true
           kumi update | tee update.txt; grep -q "up to date" update.txt
           test "$(daws)" = "$(cat daws.txt)"   # up to date: both bridges as they were, the one to roll back to kept

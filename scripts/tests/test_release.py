@@ -361,12 +361,15 @@ class DawPrograms(unittest.TestCase):
     SOUNDCRAFT = "daws/soundcraft/soundcraft-kumi"
 
     def test_a_program_is_one_of_kumis_crates_and_no_daw_bridge(self):
-        self.assertEqual(release.CRATES["soundcraft-kumi"], self.SOUNDCRAFT)
-        self.assertNotIn("soundcraft", release.DAWS)
-        self.assertNotIn("soundcraft", release.NAMES)
-        self.assertNotIn("soundcraft", release.DAW_SHIPS)
-        self.assertTrue(f"{self.SOUNDCRAFT}/src/server.rs".startswith(release.KUMI))
-        self.assertTrue("daws/soundcraft/kumi-daw-soundcraft/src/lib.rs".startswith(release.KUMI))
+        for daw in ("soundcraft", "logic"):
+            with self.subTest(daw=daw):
+                folder = f"daws/{daw}/{daw}-kumi"
+                self.assertEqual(release.CRATES[f"{daw}-kumi"], folder)
+                self.assertNotIn(daw, release.DAWS)
+                self.assertNotIn(daw, release.NAMES)
+                self.assertNotIn(daw, release.DAW_SHIPS)
+                self.assertTrue(f"{folder}/src/server.rs".startswith(release.KUMI))
+                self.assertTrue(f"daws/{daw}/kumi-daw-{daw}/src/lib.rs".startswith(release.KUMI))
 
     def test_a_programs_changes_and_lines_are_kumis(self):
         paths = [f"{self.SOUNDCRAFT}/src/server.rs"]
@@ -386,7 +389,7 @@ class DawPrograms(unittest.TestCase):
         self.assertEqual(plan.moved(), ["reaper"])
 
     def test_a_program_has_no_flags(self):
-        for flag in ("--soundcraft", "--no-soundcraft"):
+        for flag in ("--soundcraft", "--no-soundcraft", "--logic", "--no-logic"):
             with self.subTest(flag=flag), patch.object(sys, "argv", ["release.py", flag]), patch("sys.stderr"):
                 with self.assertRaises(SystemExit):
                     release.main()
