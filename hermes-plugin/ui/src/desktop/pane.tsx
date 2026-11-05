@@ -119,7 +119,9 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
         }
       >
         <HistoryView
+          daw={state.status?.daw}
           history={state.history}
+          live={Boolean(state.status?.connected) && state.status?.stale !== true}
           now={now}
           action={item =>
             canUndo(state.status, item) ? (

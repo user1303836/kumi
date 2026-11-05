@@ -30,20 +30,20 @@ var en = {
   },
   pane: {
     title: "Kumi",
-    agentOff: "Kumi's agent half is off in this profile.",
+    agentOff: "Kumi's Agent switch is off in this profile.",
     agentOffHow: "Turn on the kumi plugin's Agent switch in Capabilities → Plugins, then restart the gateway. This pane shows your DAW's FOCUS and Kumi's HISTORY once it's on.",
     reading: "Reading Kumi's state…",
-    backendError: (error) => `Kumi's backend didn't answer: ${error}`,
+    backendError: (error) => `Hermes didn't answer Kumi's pane: ${error}`,
     unsure: (op, reason) => `Kumi isn't sure your project is as it was after ${op}${reason ? `: ${reason}` : ""}.`,
     unsureOp: "its last action",
     needsLook: "It needs a fresh look before another change.",
-    lookAgain: "Ask Kumi to look again",
-    focus: "Focus",
+    lookAgain: "Ask Hermes to look again",
+    focus: "FOCUS",
     jobs: "Jobs",
-    history: "History",
+    history: "HISTORY",
     undoable: (n) => `· ${n} can be undone`,
     undo: "Undo",
-    undoTitle: "Ask Kumi to undo this change",
+    undoTitle: "Ask Hermes to undo this change",
     undoLabel: (change) => `Undo ${change}`,
     openMap: "Open the sound map",
     undoNeedsConnection: "Undo needs a connected Kumi."
@@ -71,16 +71,18 @@ var en = {
     empty: "No changes yet. Each change Kumi makes in your DAW shows here, with its undo.",
     applied: "applied",
     undone: "undone",
-    kept: "kept",
+    kept: "kept (you changed it since)",
+    expired: "can't be undone: Kumi restarted since",
     partial: "partly applied",
     unsure: "unsure",
     refused: "refused",
     failed: "failed",
     recorded: "recorded",
     unconfirmed: "Kumi couldn’t confirm what happened.",
-    lookFirst: "Ask Kumi to look again before another change.",
+    lookFirst: "Ask Hermes to look again before another change.",
     restored: "Kumi put back what it changed meanwhile.",
-    restoreUnsure: "Kumi isn’t sure it put everything back."
+    restoreUnsure: "Kumi isn’t sure it put everything back.",
+    restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`
   },
   job: {
     scanning: "Scanning",
@@ -105,11 +107,11 @@ var en = {
     canvas: "Sound map",
     roledescription: "sound map",
     keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
-    agentOff: "Kumi's agent half is off in this profile, so there's no map to show.",
+    agentOff: "Kumi's Agent switch is off in this profile, so there's no map to show.",
     reading: "Reading the sound map…",
-    empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there.",
+    empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Hermes to scan it; the map is made from what it finds there.",
     search: "Search sounds",
-    searchHint: "Search the map: name, class or folder",
+    searchHint: "Search the map: name, kind or folder",
     count: (n) => `${n} sounds`,
     countOf: (shown, total) => `${shown} of ${total} sounds`,
     revision: (revision) => `map ${revision}`,
@@ -167,18 +169,17 @@ var en = {
   },
   settings: {
     intro: (daw) => `Kumi reads and changes your ${daw || "DAW"} project through typed changes you approve, keeps HISTORY with undo, measures audio on this computer, and maps the sample folders you allow.`,
-    agentOff: "Kumi's agent half is off in this profile. Turn on the kumi plugin's Agent switch in Capabilities → Plugins and restart the gateway; its settings form appears under Agent settings.",
+    agentOff: "Kumi's Agent switch is off in this profile. Turn on the kumi plugin's Agent switch in Capabilities → Plugins and restart the gateway; its settings form appears under Agent settings.",
     setup: "Setup",
     state: "State",
     next: "Next",
     runtime: "Kumi runtime",
     installed: (version) => `Kumi ${version}`,
     notInstalled: "Not installed",
-    pinned: (version) => `pinned ${version}`,
+    needs: (version) => `needs ${version}`,
     download: "Download",
     unpacked: (size) => `(${size} unpacked)`,
-    part: (daw) => `${daw} part`,
-    dawComponent: "DAW component",
+    part: (daw) => `Kumi's part in ${daw}`,
     componentLine: (name, state) => `${name}: ${state}`,
     standalone: "Standalone Kumi",
     adopted: "adopted",
@@ -187,6 +188,8 @@ var en = {
     connection: "Connection",
     now: "Now",
     chat: "Kumi's chat",
+    chatHere: "this chat",
+    chatElsewhere: "another chat",
     openMap: "Open the sound map",
     agentSettings: "Agent settings",
     thisWindow: "This window",
@@ -195,12 +198,20 @@ var en = {
     states: {
       ready: "Ready",
       needs_runtime: "Not set up yet",
-      outdated_runtime: "Needs the pinned version",
+      outdated_runtime: "Needs an update: run setup",
       damaged_runtime: "Needs reinstalling",
-      needs_daw_component: "Needs its DAW part",
-      no_pin: "No pinned release in this plugin",
+      needs_daw_component: "Needs Kumi's part in your DAW",
+      no_pin: "This copy of the plugin can't set Kumi up",
       unsupported_platform: "Not available on this system",
       unknown: "Unknown"
+    },
+    platforms: {
+      "aarch64-apple-darwin": "macOS (Apple silicon)",
+      "x86_64-apple-darwin": "macOS (Intel)",
+      "aarch64-pc-windows-msvc": "Windows (ARM64)",
+      "x86_64-pc-windows-msvc": "Windows (x64)",
+      "aarch64-unknown-linux-gnu": "Linux (ARM64)",
+      "x86_64-unknown-linux-gnu": "Linux (x86-64)"
     },
     componentStates: {
       not_installed: "not installed",
@@ -242,21 +253,21 @@ var en = {
   },
   notify: {
     nothingToUndo: "Kumi has no change it can undo right now.",
-    undoUnsure: "Kumi isn't sure of its last change: ask it to look at your project again first.",
+    undoUnsure: "Kumi isn't sure of its last change: ask Hermes to have it look at your project again first.",
     copied: "Copied the request: paste it into the chat to send it.",
     askInChat: (text) => `Ask in the chat: ${text}`,
     openChat: "Open a chat first, then try again.",
     notOpenHere: "Kumi's chat isn't open here, so the request is in your input, unsent. Send it from the chat Kumi is connected to."
   },
   dashboard: {
-    agentOff: "Kumi's agent plugin is off in this profile.",
-    agentOffHow: "Turn it on (Hermes's plugins settings, or `hermes plugins enable kumi`) and restart the dashboard to see Kumi here.",
+    agentOff: "Kumi's Agent switch is off in this profile.",
+    agentOffHow: "Turn it on (the Plugins page, or `hermes plugins enable kumi`) and restart the dashboard to see Kumi here.",
     copyTitle: (text) => `Copy “${text}” to paste into a chat`,
     copied: "Copied",
     copyRequest: "Copy request",
     copyUndo: "Copy undo",
-    mapEmpty: "No sound map yet: add a sample folder in Kumi's settings and ask Kumi to scan it.",
-    askLook: "Ask Kumi in your chat to look again before another change."
+    mapEmpty: "No sound map yet: add a sample folder in Kumi's settings and ask Hermes to scan it.",
+    askLook: "Ask Hermes in your chat to look again before another change."
   }
 };
 var ja = {
@@ -284,20 +295,20 @@ var ja = {
   },
   pane: {
     title: "Kumi",
-    agentOff: "このプロファイルでは Kumi のエージェント側がオフです。",
+    agentOff: "このプロファイルでは Kumi の Agent スイッチがオフです。",
     agentOffHow: "「スキルとツール → プラグイン」で kumi プラグインの Agent スイッチをオンにし、ゲートウェイを再起動してください。オンになると、このペインに DAW の FOCUS と Kumi の HISTORY が表示されます。",
     reading: "Kumi の状態を読み込み中…",
-    backendError: (error) => `Kumi のバックエンドが応答しませんでした: ${error}`,
+    backendError: (error) => `Kumi のペインに Hermes が応答しませんでした: ${error}`,
     unsure: (op, reason) => `${op}のあと、プロジェクトが元のままか Kumi は確信できません${reason ? `（${reason}）` : ""}。`,
     unsureOp: "直前の操作",
     needsLook: "次の変更の前に、もう一度確認が必要です。",
-    lookAgain: "Kumi にもう一度確認してもらう",
-    focus: "Focus",
+    lookAgain: "Hermes にもう一度確認してもらう",
+    focus: "FOCUS",
     jobs: "ジョブ",
-    history: "History",
+    history: "HISTORY",
     undoable: (n) => `· ${n} 件取り消せます`,
     undo: "取り消す",
-    undoTitle: "この変更の取り消しを Kumi に頼む",
+    undoTitle: "この変更の取り消しを Hermes に頼む",
     undoLabel: (change) => `${change} を取り消す`,
     openMap: "サンプルマップを開く",
     undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
@@ -325,15 +336,17 @@ var ja = {
     empty: "まだ変更はありません。Kumi が DAW に加えた変更は、取り消しとともにここに表示されます。",
     applied: "適用済み",
     undone: "取り消し済み",
-    kept: "維持",
+    kept: "維持（その後あなたが変更しました）",
+    expired: "取り消せません: Kumi が再起動しました",
     partial: "一部のみ適用",
     unsure: "不確か",
     refused: "拒否",
     failed: "失敗",
     recorded: "記録",
     unconfirmed: "何が起きたか Kumi は確認できませんでした。",
-    lookFirst: "次の変更の前に、Kumi にもう一度確認してもらってください。",
+    lookFirst: "次の変更の前に、Hermes にもう一度確認してもらってください。",
     restored: "その間に変えたものは Kumi が元に戻しました。",
+    restartedSince: (daw) => `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
     restoreUnsure: "すべて元に戻せたか Kumi は確信できません。"
   },
   job: {
@@ -359,9 +372,9 @@ var ja = {
     canvas: "サンプルマップ",
     roledescription: "サンプルマップ",
     keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
-    agentOff: "このプロファイルでは Kumi のエージェント側がオフのため、表示できるマップがありません。",
+    agentOff: "このプロファイルでは Kumi の Agent スイッチがオフのため、表示できるマップがありません。",
     reading: "サンプルマップを読み込み中…",
-    empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Kumi にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
+    empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
     search: "サウンドを検索",
     searchHint: "マップを検索: 名前・種類・フォルダ",
     count: (n) => `${n} 個のサウンド`,
@@ -421,18 +434,17 @@ var ja = {
   },
   settings: {
     intro: (daw) => `Kumi は、あなたが承認した型付きの変更で ${daw || "DAW"} のプロジェクトを読み書きし、HISTORY と取り消しを保ち、このコンピュータ上でオーディオを測定し、許可したサンプルフォルダをマップにします。`,
-    agentOff: "このプロファイルでは Kumi のエージェント側がオフです。「スキルとツール → プラグイン」で kumi プラグインの Agent スイッチをオンにし、ゲートウェイを再起動してください。設定フォームは「エージェント設定」に表示されます。",
+    agentOff: "このプロファイルでは Kumi の Agent スイッチがオフです。「スキルとツール → プラグイン」で kumi プラグインの Agent スイッチをオンにし、ゲートウェイを再起動してください。設定フォームは「エージェント設定」に表示されます。",
     setup: "セットアップ",
     state: "状態",
     next: "次にすること",
     runtime: "Kumi ランタイム",
     installed: (version) => `Kumi ${version}`,
     notInstalled: "未インストール",
-    pinned: (version) => `固定版 ${version}`,
+    needs: (version) => `${version} が必要`,
     download: "ダウンロード",
     unpacked: (size) => `（展開後 ${size}）`,
-    part: (daw) => `${daw} 側の部品`,
-    dawComponent: "DAW の部品",
+    part: (daw) => `${daw} 用の Kumi の部品`,
     componentLine: (name, state) => `${name}：${state}`,
     standalone: "単体の Kumi",
     adopted: "引き継ぎ済み",
@@ -441,6 +453,8 @@ var ja = {
     connection: "接続",
     now: "現在",
     chat: "Kumi のチャット",
+    chatHere: "このチャット",
+    chatElsewhere: "別のチャット",
     openMap: "サンプルマップを開く",
     agentSettings: "エージェント設定",
     thisWindow: "このウィンドウ",
@@ -449,12 +463,20 @@ var ja = {
     states: {
       ready: "準備完了",
       needs_runtime: "まだセットアップされていません",
-      outdated_runtime: "固定版への更新が必要です",
+      outdated_runtime: "更新が必要です: セットアップを実行してください",
       damaged_runtime: "再インストールが必要です",
-      needs_daw_component: "DAW 側の部品が必要です",
-      no_pin: "このプラグインには固定版がありません",
+      needs_daw_component: "DAW 用の Kumi の部品が必要です",
+      no_pin: "このプラグインのコピーでは Kumi をセットアップできません",
       unsupported_platform: "このシステムでは利用できません",
       unknown: "不明"
+    },
+    platforms: {
+      "aarch64-apple-darwin": "macOS（Apple シリコン）",
+      "x86_64-apple-darwin": "macOS（Intel）",
+      "aarch64-pc-windows-msvc": "Windows（ARM64）",
+      "x86_64-pc-windows-msvc": "Windows（x64）",
+      "aarch64-unknown-linux-gnu": "Linux（ARM64）",
+      "x86_64-unknown-linux-gnu": "Linux（x86-64）"
     },
     componentStates: {
       not_installed: "未インストール",
@@ -496,21 +518,21 @@ var ja = {
   },
   notify: {
     nothingToUndo: "今すぐ取り消せる変更はありません。",
-    undoUnsure: "Kumi は直前の変更に確信がありません。まずプロジェクトをもう一度確認するよう頼んでください。",
+    undoUnsure: "Kumi は直前の変更に確信がありません。まずプロジェクトをもう一度確認するよう Hermes に頼んでください。",
     copied: "依頼をコピーしました。チャットに貼り付けて送信してください。",
     askInChat: (text) => `チャットで頼んでください: ${text}`,
     openChat: "先にチャットを開いてから、もう一度試してください。",
     notOpenHere: "Kumi のチャットがここで開いていないため、依頼は未送信のまま入力欄にあります。Kumi が接続しているチャットから送信してください。"
   },
   dashboard: {
-    agentOff: "このプロファイルでは Kumi のエージェントプラグインがオフです。",
-    agentOffHow: "オンにして（Hermes のプラグイン設定、または `hermes plugins enable kumi`）、ダッシュボードを再起動すると、ここに Kumi が表示されます。",
+    agentOff: "このプロファイルでは Kumi の Agent スイッチがオフです。",
+    agentOffHow: "オンにして（プラグインのページ、または `hermes plugins enable kumi`）、ダッシュボードを再起動すると、ここに Kumi が表示されます。",
     copyTitle: (text) => `「${text}」をコピーしてチャットに貼り付け`,
     copied: "コピーしました",
     copyRequest: "依頼をコピー",
     copyUndo: "取り消しをコピー",
-    mapEmpty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Kumi にスキャンを頼んでください。",
-    askLook: "次の変更の前に、チャットで Kumi にもう一度確認するよう頼んでください。"
+    mapEmpty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Hermes にスキャンを頼んでください。",
+    askLook: "次の変更の前に、チャットで Hermes にもう一度確認するよう頼んでください。"
   }
 };
 var zh = {
@@ -538,20 +560,20 @@ var zh = {
   },
   pane: {
     title: "Kumi",
-    agentOff: "此配置中 Kumi 的 Agent 部分已关闭。",
+    agentOff: "此配置中 Kumi 的 Agent 开关已关闭。",
     agentOffHow: "请在“技能与工具 → 插件”中打开 kumi 插件的 Agent 开关，然后重启网关。打开后，此面板会显示 DAW 的 FOCUS 和 Kumi 的 HISTORY。",
     reading: "正在读取 Kumi 的状态…",
-    backendError: (error) => `Kumi 的后端没有响应：${error}`,
+    backendError: (error) => `Hermes 没有响应 Kumi 的面板：${error}`,
     unsure: (op, reason) => `在${op}之后，Kumi 不确定你的项目是否保持原样${reason ? `：${reason}` : ""}。`,
     unsureOp: "上一个操作",
     needsLook: "下一次改动之前，需要重新查看一次。",
-    lookAgain: "让 Kumi 重新查看",
-    focus: "Focus",
+    lookAgain: "让 Hermes 重新查看",
+    focus: "FOCUS",
     jobs: "任务",
-    history: "History",
+    history: "HISTORY",
     undoable: (n) => `· ${n} 项可撤销`,
     undo: "撤销",
-    undoTitle: "让 Kumi 撤销这次改动",
+    undoTitle: "让 Hermes 撤销这次改动",
     undoLabel: (change) => `撤销 ${change}`,
     openMap: "打开采样地图",
     undoNeedsConnection: "撤销需要 Kumi 已连接。"
@@ -579,15 +601,17 @@ var zh = {
     empty: "还没有改动。Kumi 在你的 DAW 中做的每次改动都会显示在这里，并可撤销。",
     applied: "已应用",
     undone: "已撤销",
-    kept: "已保留",
+    kept: "已保留（之后你改过它）",
+    expired: "无法撤销：Kumi 已重启",
     partial: "部分应用",
     unsure: "不确定",
     refused: "已拒绝",
     failed: "失败",
     recorded: "已记录",
     unconfirmed: "Kumi 无法确认发生了什么。",
-    lookFirst: "下一次改动之前，请让 Kumi 重新查看。",
+    lookFirst: "下一次改动之前，请让 Hermes 重新查看。",
     restored: "Kumi 已还原期间做出的改动。",
+    restartedSince: (daw) => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
     restoreUnsure: "Kumi 不确定是否已全部还原。"
   },
   job: {
@@ -613,11 +637,11 @@ var zh = {
     canvas: "采样地图",
     roledescription: "采样地图",
     keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
-    agentOff: "此配置中 Kumi 的 Agent 部分已关闭，没有可显示的地图。",
+    agentOff: "此配置中 Kumi 的 Agent 开关已关闭，没有可显示的地图。",
     reading: "正在读取采样地图…",
-    empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Kumi 扫描；地图会根据找到的声音生成。",
+    empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描；地图会根据找到的声音生成。",
     search: "搜索声音",
-    searchHint: "搜索地图：名称、类别或文件夹",
+    searchHint: "搜索地图：名称、种类或文件夹",
     count: (n) => `${n} 个声音`,
     countOf: (shown, total) => `${total} 个声音中的 ${shown} 个`,
     revision: (revision) => `地图 ${revision}`,
@@ -675,18 +699,17 @@ var zh = {
   },
   settings: {
     intro: (daw) => `Kumi 通过你批准的类型化改动读取和修改你的 ${daw || "DAW"} 项目，保留可撤销的 HISTORY，在这台电脑上测量音频，并为你允许的采样文件夹生成地图。`,
-    agentOff: "此配置中 Kumi 的 Agent 部分已关闭。请在“技能与工具 → 插件”中打开 kumi 插件的 Agent 开关并重启网关；它的设置表单会出现在“智能体设置”中。",
+    agentOff: "此配置中 Kumi 的 Agent 开关已关闭。请在“技能与工具 → 插件”中打开 kumi 插件的 Agent 开关并重启网关；它的设置表单会出现在“智能体设置”中。",
     setup: "设置",
     state: "状态",
     next: "下一步",
     runtime: "Kumi 运行时",
     installed: (version) => `Kumi ${version}`,
     notInstalled: "未安装",
-    pinned: (version) => `固定版本 ${version}`,
+    needs: (version) => `需要 ${version}`,
     download: "下载",
     unpacked: (size) => `（解压后 ${size}）`,
-    part: (daw) => `${daw} 组件`,
-    dawComponent: "DAW 组件",
+    part: (daw) => `Kumi 的 ${daw} 组件`,
     componentLine: (name, state) => `${name}：${state}`,
     standalone: "独立的 Kumi",
     adopted: "已接管",
@@ -695,6 +718,8 @@ var zh = {
     connection: "连接",
     now: "当前",
     chat: "Kumi 的对话",
+    chatHere: "此对话",
+    chatElsewhere: "另一个对话",
     openMap: "打开采样地图",
     agentSettings: "智能体设置",
     thisWindow: "此窗口",
@@ -703,12 +728,20 @@ var zh = {
     states: {
       ready: "就绪",
       needs_runtime: "尚未设置",
-      outdated_runtime: "需要固定版本",
+      outdated_runtime: "需要更新：请运行设置",
       damaged_runtime: "需要重新安装",
-      needs_daw_component: "需要 DAW 组件",
-      no_pin: "此插件没有固定版本",
+      needs_daw_component: "需要 Kumi 的 DAW 组件",
+      no_pin: "这份插件无法设置 Kumi",
       unsupported_platform: "此系统上不可用",
       unknown: "未知"
+    },
+    platforms: {
+      "aarch64-apple-darwin": "macOS（Apple 芯片）",
+      "x86_64-apple-darwin": "macOS（Intel）",
+      "aarch64-pc-windows-msvc": "Windows（ARM64）",
+      "x86_64-pc-windows-msvc": "Windows（x64）",
+      "aarch64-unknown-linux-gnu": "Linux（ARM64）",
+      "x86_64-unknown-linux-gnu": "Linux（x86-64）"
     },
     componentStates: {
       not_installed: "未安装",
@@ -750,21 +783,21 @@ var zh = {
   },
   notify: {
     nothingToUndo: "Kumi 现在没有可以撤销的改动。",
-    undoUnsure: "Kumi 不确定它的上一次改动：请先让它重新查看你的项目。",
+    undoUnsure: "Kumi 不确定它的上一次改动：请先让 Hermes 让它重新查看你的项目。",
     copied: "已复制请求：粘贴到对话中发送。",
     askInChat: (text) => `请在对话中提出：${text}`,
     openChat: "请先打开一个对话，然后重试。",
     notOpenHere: "Kumi 的对话没有在这里打开，所以请求还在你的输入框中，尚未发送。请在 Kumi 连接的对话中发送。"
   },
   dashboard: {
-    agentOff: "此配置中 Kumi 的 Agent 插件已关闭。",
-    agentOffHow: "打开它（Hermes 的插件设置，或 `hermes plugins enable kumi`）并重启仪表板，即可在这里看到 Kumi。",
+    agentOff: "此配置中 Kumi 的 Agent 开关已关闭。",
+    agentOffHow: "打开它（插件页面，或 `hermes plugins enable kumi`）并重启仪表板，即可在这里看到 Kumi。",
     copyTitle: (text) => `复制“${text}”以粘贴到对话中`,
     copied: "已复制",
     copyRequest: "复制请求",
     copyUndo: "复制撤销",
-    mapEmpty: "还没有采样地图：请在 Kumi 设置中添加采样文件夹，并让 Kumi 扫描。",
-    askLook: "下一次改动之前，请在对话中让 Kumi 重新查看。"
+    mapEmpty: "还没有采样地图：请在 Kumi 设置中添加采样文件夹，并让 Hermes 扫描。",
+    askLook: "下一次改动之前，请在对话中让 Hermes 重新查看。"
   }
 };
 var MESSAGES = { en, ja, zh };
@@ -1808,14 +1841,19 @@ import { jsx as jsx3, jsxs as jsxs3 } from "react/jsx-runtime";
 var STATE = {
   applied: { mark: "✓", tone: "good", word: "history.applied" },
   undone: { mark: "↺", tone: "muted", word: "history.undone" },
-  kept: { mark: "✓", tone: "good", word: "history.kept" },
+  kept: { mark: "✓", tone: "muted", word: "history.kept" },
+  expired: { mark: "·", tone: "muted", word: "history.expired" },
   partial: { mark: "◐", tone: "warn", word: "history.partial" },
   unsure: { mark: "?", tone: "warn", word: "history.unsure" },
   refused: { mark: "✕", tone: "muted", word: "history.refused" },
   failed: { mark: "✕", tone: "bad", word: "history.failed" }
 };
-function stateOf(item, t = english) {
-  const known = STATE[item.state ?? ""];
+function restartedSince(item, live) {
+  if (item.note) return false;
+  return item.state === "expired" || live && item.state === "applied" && item.undo_available === false;
+}
+function stateOf(item, t = english, live = false) {
+  const known = STATE[restartedSince(item, live) ? "expired" : item.state ?? ""];
   if (known) return { ...known, word: t(known.word) };
   return { mark: "·", tone: "muted", word: item.state ? clean(item.state, 20) : t("history.recorded") };
 }
@@ -1854,14 +1892,20 @@ function FocusView({ focus, now }) {
     focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx3("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
   ] });
 }
-function HistoryView({ history, now, action }) {
+function HistoryView({
+  history,
+  now,
+  action,
+  live = false,
+  daw
+}) {
   const t = useT();
   const items = history?.items ?? [];
   if (!items.length) {
     return /* @__PURE__ */ jsx3("span", { style: S.muted, children: t("history.empty") });
   }
   return /* @__PURE__ */ jsx3("ol", { style: { listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 2 }, children: items.map((item) => {
-    const state = stateOf(item, t);
+    const state = stateOf(item, t, live);
     const track = nameOf(item.track);
     return /* @__PURE__ */ jsxs3("li", { style: { ...S.row, gap: 7, padding: "4px 0", borderTop: `1px solid ${T.border}`, opacity: item.state === "undone" ? 0.7 : 1 }, children: [
       /* @__PURE__ */ jsx3("span", { "aria-label": state.word, title: state.word, style: { width: 14, textAlign: "center", color: TONE[state.tone], flex: "none" }, children: state.mark }),
@@ -1872,8 +1916,8 @@ function HistoryView({ history, now, action }) {
           /* @__PURE__ */ jsx3("span", { style: { ...S.faint, ...S.ellipsis }, children: [track && clean(track, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
         ] }),
         item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : (
-          // The runtime's own words for any other row: why an undo didn't happen, say.
-          item.note && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) })
+          // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
+          item.note ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) }) : restartedSince(item, live) && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
         )
       ] }),
       action?.(item)
@@ -2006,7 +2050,9 @@ function KumiPane({ ctx, store, onOpenMap }) {
         children: /* @__PURE__ */ jsx5(
           HistoryView,
           {
+            daw: state.status?.daw,
             history: state.history,
+            live: Boolean(state.status?.connected) && state.status?.stale !== true,
             now,
             action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(
               TextButton,
@@ -2796,8 +2842,16 @@ function Line({ label, children }) {
   ] });
 }
 function megabytes(bytes) {
-  return typeof bytes === "number" && bytes > 0 ? `${(bytes / 1048576).toFixed(0)} MB` : null;
+  return typeof bytes === "number" && bytes > 0 ? `${(bytes / 1e6).toFixed(1)} MB` : null;
 }
+var PLATFORMS = /* @__PURE__ */ new Set([
+  "aarch64-apple-darwin",
+  "x86_64-apple-darwin",
+  "aarch64-pc-windows-msvc",
+  "x86_64-pc-windows-msvc",
+  "aarch64-unknown-linux-gnu",
+  "x86_64-unknown-linux-gnu"
+]);
 function SettingsPage({ ctx, store, onOpenMap }) {
   const t = useT();
   useWant(store, "setup");
@@ -2824,13 +2878,13 @@ function SettingsPage({ ctx, store, onOpenMap }) {
         setup?.message && !partWorks && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
         runtime && /* @__PURE__ */ jsxs12(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
-          setup?.pinned_version && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
+          setup?.pinned_version && setup.pinned_version !== runtime.version && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
             " · ",
-            t("settings.pinned", clean(setup.pinned_version, 20))
+            t("settings.needs", clean(setup.pinned_version, 20))
           ] }),
           setup?.target && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
             " · ",
-            clean(setup.target, 40)
+            PLATFORMS.has(setup.target) ? t(`settings.platforms.${setup.target}`) : clean(setup.target, 40)
           ] })
         ] }),
         runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs12(Line, { label: t("settings.download"), children: [
@@ -2841,11 +2895,10 @@ function SettingsPage({ ctx, store, onOpenMap }) {
           ] })
         ] }),
         component && /* @__PURE__ */ jsxs12(Line, { label: t("settings.part", dawName(daw, t)), children: [
-          t(
-            "settings.componentLine",
-            clean(component.name ?? t("settings.dawComponent"), 40),
-            partWorks ? t("settings.partInUse") : COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ")
-          ),
+          (() => {
+            const word = partWorks ? t("settings.partInUse") : COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ");
+            return component.name ? t("settings.componentLine", clean(component.name, 40), word) : word;
+          })(),
           component.path && /* @__PURE__ */ jsx12("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
         setup?.existing_kumi?.path && /* @__PURE__ */ jsxs12(Line, { label: t("settings.standalone"), children: [
@@ -2863,7 +2916,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
           const words = chipWords(state.status, state.focus?.transport?.tempo, t);
           return /* @__PURE__ */ jsx12(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
         })() }),
-        state.status?.owner?.session_id && /* @__PURE__ */ jsx12(Line, { label: t("settings.chat"), children: clean(state.status.owner.session_id, 80) })
+        state.status?.owner?.session_id && /* @__PURE__ */ jsx12(Line, { label: t("settings.chat"), children: host5.state.focusedStoredSessionId?.get() === state.status.owner.session_id ? t("settings.chatHere") : t("settings.chatElsewhere") })
       ] }),
       /* @__PURE__ */ jsxs12("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
         step2 && /* @__PURE__ */ jsx12(
