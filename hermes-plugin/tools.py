@@ -64,8 +64,9 @@ class Host:
         self._changes_lock = threading.Lock()
 
     def remember_change(self, kwargs: dict, answer: Any) -> None:
-        """Keep a chat's kumi_change answer that changed the project (applied or partial) as its newest change."""
-        if not isinstance(answer, dict) or answer.get("state") not in ("applied", "partial"):
+        """Keep a chat's write that made HISTORY rows (a change applied or partial, a script that ran or failed, a
+        make of takes) as its newest change, so "undo that" means it, never one before it."""
+        if not isinstance(answer, dict) or answer.get("state") not in ("applied", "partial", "ran", "failed"):
             return
         session, ids = kwargs.get("session_id"), answer.get("history_ids")
         if (isinstance(session, str) and session and isinstance(ids, list) and ids
@@ -630,20 +631,21 @@ def _write(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
     item 7); that's unsure too."""
     live = host.live()
     try:
-        return live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT, interrupted=host.stop_watch())
+        answer = live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT, interrupted=host.stop_watch())
     except runtime.Unavailable as failure:
         if failure.code not in UNSURE_CODES:
             raise
         return {"state": "unsure", "code": failure.code, "reason": failure.reason, "hint": UNSURE_HINT}
+    if tool != "undo":  # every other write that made rows is the chat's newest change (CC-3 A2)
+        host.remember_change(kwargs, answer)
+    return answer
 
 
 def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     change = {key: value for key, value in args.items() if key != "preview"}  # previews are the approval hook's (CC-3)
     if "expected_epoch" in change:
         change["expected_epoch"] = str(change["expected_epoch"])
-    answer = _write(host, "change", change, kwargs)
-    host.remember_change(kwargs, answer)
-    return answer
+    return _write(host, "change", change, kwargs)
 
 
 # kumi_undo with no id, where this chat made no change Kumi remembers (CC-3 amendment A2), and how many of a chat's
