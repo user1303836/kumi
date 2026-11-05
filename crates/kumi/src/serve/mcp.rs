@@ -311,7 +311,7 @@ impl Server {
         // A call that only reads is run again; any other is run once per host call.
         let seen = match (effect, &prepared.host.tool_call_id) {
             (Effect::Read, _) | (_, None) => None,
-            (_, Some(host_call)) => match self.seen(host_call, &asked) {
+            (_, Some(_)) => match self.seen(&prepared.host, &asked) {
                 Ok(seen) => Some(seen),
                 Err(refused) => return self.send_result(id, tool_result(Err(refused))),
             },
@@ -360,7 +360,7 @@ impl Server {
             Err(refused) => return tool_result(Err(refused)),
         };
         super::core::publish_owner(&self.ctx, true);
-        let identity = CallIdentity { tool_call_id: host.tool_call_id.as_deref(), digest: asked };
+        let identity = CallIdentity::of(host, asked);
         let answer = match super::inflight::begin(&self.ctx, operation.name, title, identity) {
             Err(error) => tool_result(Err(error)),
             Ok(record) => {
@@ -448,25 +448,32 @@ impl Server {
     /// The host call `host_call` asking `digest`: (it, true) when it's new and this call runs it; (it, false) when
     /// it's running or has run, and this call takes its answer. Refused when it asked something else. One the
     /// in-memory table doesn't know (an earlier runtime's, or one long forgotten) is looked for in HISTORY (C5-3).
-    fn seen(&self, host_call: &str, digest: &str) -> Result<(Rc<SeenCall>, bool), OpError> {
+    fn seen(&self, host: &Host, digest: &str) -> Result<(Rc<SeenCall>, bool), OpError> {
         let duplicate = |reason: String| OpError::Refused { code: "duplicate", reason, owner: None };
-        if let Some(earlier) = self.seen.borrow().calls.get(host_call) {
+        // A host's call ids are unique within a chat: the same id in another session or profile is another call.
+        let host_call = format!(
+            "{}\u{1f}{}\u{1f}{}",
+            host.profile_id.as_deref().unwrap_or_default(),
+            host.session_id.as_deref().unwrap_or_default(),
+            host.tool_call_id.as_deref().unwrap_or_default()
+        );
+        if let Some(earlier) = self.seen.borrow().calls.get(&host_call) {
             if earlier.digest != digest {
                 return Err(duplicate("This host call already ran with other arguments: a call is run once, as first asked.".into()));
             }
             return Ok((earlier.clone(), false));
         }
         let new = Rc::new(SeenCall { digest: digest.to_string(), answer: RefCell::new(None), answered: Notify::new() });
-        match self.ctx.history().ran(host_call, digest) {
+        match self.ctx.history().ran(CallIdentity::of(host, digest)) {
             Some(Err(reason)) => Err(duplicate(reason)),
             Some(Ok(outcome)) => {
                 *new.answer.borrow_mut() = Some(tool_result(Ok(outcome)));
-                self.seen.borrow_mut().calls.insert(host_call.to_string(), new.clone());
+                self.seen.borrow_mut().calls.insert(host_call, new.clone());
                 self.remember(&new);
                 Ok((new, false))
             }
             None => {
-                self.seen.borrow_mut().calls.insert(host_call.to_string(), new.clone());
+                self.seen.borrow_mut().calls.insert(host_call, new.clone());
                 Ok((new, true))
             }
         }
@@ -1247,7 +1254,8 @@ mod tests {
             let session = Session::start().initialized().await;
             // A place the runtime dispatched and never saw settle (killed, say): its record stays.
             let asked = json!({"word": "snare"});
-            let identity = CallIdentity { tool_call_id: Some("tc-7"), digest: &digest("place", asked.as_object().unwrap()) };
+            let asked_digest = digest("place", asked.as_object().unwrap());
+            let identity = CallIdentity { profile_id: None, session_id: None, tool_call_id: Some("tc-7"), digest: &asked_digest };
             drop(crate::serve::inflight::begin(&session.ctx, "place", Some("Place the snare"), identity).unwrap());
             let state = session.stopped().await;
             let mut session = Session::at(state).initialized().await;

@@ -34,7 +34,12 @@ pub struct Row {
     /// Why an undo didn't happen, or what's unsure, in plain words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub note: Option<String>,
-    /// The host call that made it (CC-5) and what it asked, digested: a retry after a restart is known by them.
+    /// The host call that made it (CC-5: its profile, session and id) and what it asked, digested: a retry after a
+    /// restart is known by them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tool_call_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -57,12 +62,27 @@ pub struct History {
     audits: std::cell::Cell<u64>,
 }
 
-/// The host call a row came from (CC-5): its `tool_call_id` and the digest of what it asked (the operation's name and
+/// The host call a row came from (CC-5): its profile, session and `tool_call_id` (a host's call ids are only unique
+/// within a session: `call_0` comes again in another chat), and the digest of what it asked (the operation's name and
 /// its arguments, `_host` left out), so a retry after a restart is known by them.
 #[derive(Debug, Clone, Copy)]
 pub struct CallIdentity<'a> {
+    pub profile_id: Option<&'a str>,
+    pub session_id: Option<&'a str>,
     pub tool_call_id: Option<&'a str>,
     pub digest: &'a str,
+}
+
+impl<'a> CallIdentity<'a> {
+    /// The call `host` names, asking what `digest` digests.
+    pub fn of(host: &'a super::ctx::Host, digest: &'a str) -> CallIdentity<'a> {
+        CallIdentity {
+            profile_id: host.profile_id.as_deref(),
+            session_id: host.session_id.as_deref(),
+            tool_call_id: host.tool_call_id.as_deref(),
+            digest,
+        }
+    }
 }
 
 impl History {
@@ -117,6 +137,8 @@ impl History {
             undo_available: record.state == ChangeState::Applied,
             track: record.track.as_ref().map(|track| track.name.clone()),
             note: record.note.clone(),
+            profile_id: None,
+            session_id: None,
             tool_call_id: None,
             digest: None,
             call_outcome: None,
@@ -128,15 +150,17 @@ impl History {
                 Some(row) => {
                     // Its state since: the project, the call, what the call came to and when it was made stay as first
                     // recorded.
-                    let (project_key, tool_call_id, digest, call_outcome, sources, at) = (
+                    let (project_key, profile_id, session_id, tool_call_id, digest, call_outcome, sources, at) = (
                         row.project_key.clone(),
+                        row.profile_id.clone(),
+                        row.session_id.clone(),
                         row.tool_call_id.clone(),
                         row.digest.clone(),
                         row.call_outcome.clone(),
                         row.sources.clone(),
                         row.at,
                     );
-                    *row = Row { project_key, tool_call_id, digest, call_outcome, sources, at, ..fresh };
+                    *row = Row { project_key, profile_id, session_id, tool_call_id, digest, call_outcome, sources, at, ..fresh };
                     row.clone()
                 }
                 None => {
@@ -169,6 +193,8 @@ impl History {
                 .filter(|row| made.contains(&row.id))
                 .map(|row| {
                     if row.digest.is_none() {
+                        row.profile_id = identity.profile_id.map(str::to_string);
+                        row.session_id = identity.session_id.map(str::to_string);
                         row.tool_call_id = identity.tool_call_id.map(str::to_string);
                         row.digest = Some(identity.digest.to_string());
                     }
@@ -240,6 +266,8 @@ impl History {
             undo_available: false,
             track: None,
             note: Some(reason.to_string()),
+            profile_id: identity.profile_id.map(str::to_string),
+            session_id: identity.session_id.map(str::to_string),
             tool_call_id: identity.tool_call_id.map(str::to_string),
             digest: Some(identity.digest.to_string()),
             call_outcome: None,
@@ -254,16 +282,24 @@ impl History {
         row
     }
 
-    /// What came of the host call `tool_call_id` when its rows are here (CC-5's C5-3: a retry the in-memory table no
+    /// What came of the host call `call` names (its profile, session and id) when its rows are here (CC-5's C5-3: a retry the in-memory table no
     /// longer knows, after a restart say): the outcome again, from its rows, when it asked the same (`digest`); refused
     /// `duplicate` when it asked something else. None when no row came from it.
-    pub fn ran(&self, tool_call_id: &str, digest: &str) -> Option<Result<Value, String>> {
+    pub fn ran(&self, call: CallIdentity) -> Option<Result<Value, String>> {
+        let tool_call_id = call.tool_call_id?;
         let rows = self.rows.borrow();
-        let mut made: Vec<&Row> = rows.iter().filter(|row| row.tool_call_id.as_deref() == Some(tool_call_id)).collect();
+        let mut made: Vec<&Row> = rows
+            .iter()
+            .filter(|row| {
+                row.tool_call_id.as_deref() == Some(tool_call_id)
+                    && row.profile_id.as_deref() == call.profile_id
+                    && row.session_id.as_deref() == call.session_id
+            })
+            .collect();
         if made.is_empty() {
             return None;
         }
-        if made.iter().any(|row| row.digest.as_deref() != Some(digest)) {
+        if made.iter().any(|row| row.digest.as_deref() != Some(call.digest)) {
             return Some(Err("This host call already ran with other arguments: a call is run once, as first asked.".into()));
         }
         made.reverse();
@@ -317,7 +353,7 @@ mod tests {
     }
 
     fn call(tool_call_id: &'static str, digest: &'static str) -> CallIdentity<'static> {
-        CallIdentity { tool_call_id: Some(tool_call_id), digest }
+        CallIdentity { profile_id: Some("work"), session_id: Some("chat-1"), tool_call_id: Some(tool_call_id), digest }
     }
 
     #[test]
@@ -381,7 +417,7 @@ mod tests {
         first.audit("Raise the bass", "p-1", "REAPER stopped answering", call("tc-2", "d2"), &snapshots);
         snapshots.flush();
         let later = History::new(dir.path(), "g2".into());
-        let again = later.ran("tc-1", "d1").unwrap().unwrap();
+        let again = later.ran(call("tc-1", "d1")).unwrap().unwrap();
         assert_eq!(
             (again["state"].clone(), again["history_ids"].clone()),
             (json!("partial"), json!(["h-g1-c1", "h-g1-c2"])),
@@ -389,8 +425,10 @@ mod tests {
         );
         assert_eq!(again["rows"][1]["state"], "undone", "each row as it is now");
         assert_eq!((again["replayed"].clone(), again["undo_available"].clone()), (json!(true), json!(false)));
-        assert_eq!(later.ran("tc-2", "d2").unwrap().unwrap()["state"], "unsure");
-        assert!(later.ran("tc-1", "another").unwrap().is_err(), "the same call asking something else");
-        assert!(later.ran("tc-9", "d1").is_none(), "a call no row came from runs");
+        assert_eq!(later.ran(call("tc-2", "d2")).unwrap().unwrap()["state"], "unsure");
+        assert!(later.ran(call("tc-1", "another")).unwrap().is_err(), "the same call asking something else");
+        assert!(later.ran(call("tc-9", "d1")).is_none(), "a call no row came from runs");
+        let elsewhere = CallIdentity { session_id: Some("chat-2"), ..call("tc-1", "d1") };
+        assert!(later.ran(elsewhere).is_none(), "another chat's call_0 is another call");
     }
 }

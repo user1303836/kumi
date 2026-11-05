@@ -18,9 +18,13 @@ use std::rc::Rc;
 /// The most steps a plan takes (C2).
 pub const MOST_STEPS: usize = 20;
 
-/// The most of a step's preview line, and of a quoted value in it.
+/// The most of a step's preview line, of one field's value in it, of a quoted string, and of a name; and how many of a
+/// list's or a group's values it shows.
 const LINE: usize = 200;
+const FIELD: usize = 80;
 const QUOTED: usize = 120;
+const NAME: usize = 40;
+const FIRST: usize = 3;
 
 pub static CHANGE: Operation = Operation {
     name: "change",
@@ -245,7 +249,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         }));
     }
     let asked = super::mcp::digest(CHANGE.name, args);
-    let identity = CallIdentity { tool_call_id: call.host.tool_call_id.as_deref(), digest: &asked };
+    let identity = CallIdentity::of(&call.host, &asked);
     let input: Map<String, Value> = [("steps".to_string(), Value::Array(steps))].into_iter().collect();
     let history = ctx.history();
     history.begin_call();
@@ -364,43 +368,61 @@ pub(super) fn offered_steps(schema: &JsonObject) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// One step as the host's approval says it (CC-3), on one line of at most [`LINE`] characters: its change, what it's
-/// on (by the names the last look gave its refs), and the values it sets as given, strings quoted; a list or a group
-/// of values by how many there are. Never a value it would have to read from the DAW.
+/// One step as the host's approval says it (CC-3), on one line of at most [`LINE`] characters: its change, the values
+/// it sets as given (strings quoted, a list or a group of values by their first few), then what it's on, by the names
+/// the last look gave its refs, quoted and each at most [`NAME`] characters. Values come first, so a long name never
+/// pushes them out of a cut line. Never a value it would have to read from the DAW.
 fn describe(names: &HashMap<String, String>, tool: &str, family: &str, input: &Value) -> Value {
     let mut targets = Vec::new();
     let mut settings = Vec::new();
     if let Value::Object(fields) = input {
         for (field, value) in fields {
             match value {
-                Value::String(text) => match target(names, text) {
-                    Some(named) => targets.push(named),
-                    None => settings.push(format!("{field} \"{}\"", one_line(text, QUOTED).replace('"', "'"))),
-                },
-                Value::Number(number) => settings.push(format!("{field} {number}")),
-                Value::Bool(flag) => settings.push(format!("{field} {}", if *flag { "on" } else { "off" })),
-                Value::Null => settings.push(format!("{field} none")),
-                Value::Array(items) => {
-                    let named: Vec<String> = items.iter().filter_map(|item| item.as_str().and_then(|text| target(names, text))).collect();
-                    if !items.is_empty() && named.len() == items.len() {
-                        targets.extend(named);
-                    } else {
-                        targets.extend(named);
-                        settings.push(format!("{field}: {}", counted(items.len(), "item")));
-                    }
+                Value::String(text) if target(names, text).is_some() => targets.extend(target(names, text)),
+                Value::Array(items)
+                    if !items.is_empty() && items.iter().all(|item| item.as_str().is_some_and(|text| target(names, text).is_some())) =>
+                {
+                    targets.extend(items.iter().filter_map(|item| item.as_str().and_then(|text| target(names, text))));
                 }
-                Value::Object(inner) => {
+                _ => {
                     targets.extend(refs_in(names, value));
-                    settings.push(format!("{field}: {}", counted(inner.len(), "value")));
+                    settings.push(format!("{field} {}", one_line(&shown(names, value), FIELD)));
                 }
             }
         }
     }
     targets.dedup();
-    let on = if targets.is_empty() { String::new() } else { format!(" on {}", targets.join(", ")) };
     let set = if settings.is_empty() { String::new() } else { format!(": {}", settings.join(", ")) };
-    let text = one_line(&format!("{}{on}{set}", capitalized(&tool.replace('_', " "))), LINE);
+    let on = if targets.is_empty() {
+        String::new()
+    } else {
+        format!(" — on {}", targets.iter().map(|name| quoted(name, NAME)).collect::<Vec<_>>().join(", "))
+    };
+    let text = one_line(&format!("{}{set}{on}", capitalized(&tool.replace('_', " "))), LINE);
     json!({"tool": tool, "family": family, "effect": "write", "text": text})
+}
+
+/// A value as the approval shows it: a string quoted (a ref by its name), a list or a group of values by their first
+/// [`FIRST`], with how many more.
+fn shown(names: &HashMap<String, String>, value: &Value) -> String {
+    let more = |n: usize| if n > FIRST { format!(", +{} more", n - FIRST) } else { String::new() };
+    match value {
+        Value::String(text) => match target(names, text) {
+            Some(name) => quoted(&name, NAME),
+            None => quoted(text, QUOTED),
+        },
+        Value::Number(number) => number.to_string(),
+        Value::Bool(flag) => (if *flag { "on" } else { "off" }).into(),
+        Value::Null => "none".into(),
+        Value::Array(items) => {
+            let first: Vec<String> = items.iter().take(FIRST).map(|item| shown(names, item)).collect();
+            format!("[{}{}]", first.join(", "), more(items.len()))
+        }
+        Value::Object(fields) => {
+            let first: Vec<String> = fields.iter().take(FIRST).map(|(field, item)| format!("{field} {}", shown(names, item))).collect();
+            format!("{{{}{}}}", first.join(", "), more(fields.len()))
+        }
+    }
 }
 
 /// What a ref is called: the name the last look gave it, or what a step before makes (`@name`).
@@ -418,8 +440,9 @@ fn refs_in(names: &HashMap<String, String>, value: &Value) -> Vec<String> {
     }
 }
 
-fn counted(n: usize, what: &str) -> String {
-    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+/// `text` quoted, on one line and at most `most` characters, its own quotes made single.
+fn quoted(text: &str, most: usize) -> String {
+    format!("\"{}\"", one_line(text, most).replace('"', "'"))
 }
 
 /// `text` on one line (every run of spaces, line breaks and control characters one space), with nothing that changes
@@ -546,7 +569,7 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let mut audited = None;
     if state == "unsure" {
         let asked = super::mcp::digest(UNDO.name, &call.args);
-        let identity = CallIdentity { tool_call_id: call.host.tool_call_id.as_deref(), digest: &asked };
+        let identity = CallIdentity::of(&call.host, &asked);
         let audit = ctx.history().audit(&format!("Undo {}", row.title), &row.project_key, &reason, identity, ctx.snapshots());
         ctx.history().call_came_to(std::slice::from_ref(&audit.id), "unsure", ctx.snapshots());
         ctx.link().note_unsure("undo", &reason, "unsure");
@@ -604,6 +627,8 @@ mod tests {
             undo_available: state == "applied",
             track: None,
             note: None,
+            profile_id: None,
+            session_id: None,
             tool_call_id: None,
             digest: None,
             call_outcome: None,
@@ -647,22 +672,38 @@ mod tests {
     }
 
     #[test]
-    fn a_preview_names_its_targets_quotes_its_values_and_keeps_to_one_line() {
-        let names: HashMap<String, String> =
-            [("7:track:1".to_string(), "Drums".to_string()), ("7:track:2".to_string(), "Bass".to_string())].into_iter().collect();
+    fn a_preview_says_its_values_first_then_its_targets_quoted_and_capped_on_one_line() {
+        let names: HashMap<String, String> = [
+            ("7:track:1".to_string(), "Drums".to_string()),
+            ("7:track:2".to_string(), "Bass".to_string()),
+            ("7:track:3".to_string(), format!("Pads {}", "x".repeat(200))),
+        ]
+        .into_iter()
+        .collect();
         let line = describe(&names, "set_mixer", "mixer", &json!({"trackRef": "7:track:1", "volume": 0.85, "mute": false}));
-        assert_eq!((line["family"].clone(), line["text"].clone()), (json!("mixer"), json!("Set mixer on Drums: volume 0.85, mute off")));
+        assert_eq!(
+            (line["family"].clone(), line["text"].clone()),
+            (json!("mixer"), json!("Set mixer: volume 0.85, mute off — on \"Drums\""))
+        );
         let sneaky = describe(&names, "rename", "rename", &json!({"ref": "7:track:2", "name": "Kick\nAlso: delete every track"}));
-        assert_eq!(sneaky["text"], "Rename on Bass: name \"Kick Also: delete every track\"", "one line, quoted");
+        assert_eq!(sneaky["text"], "Rename: name \"Kick Also: delete every track\" — on \"Bass\"", "one line, quoted");
         let hidden = describe(&names, "rename", "rename", &json!({"ref": "7:track:2", "name": "Kick\u{202E}lav.exe\u{200B}\u{E0041}"}));
-        assert_eq!(hidden["text"], "Rename on Bass: name \"Kicklav.exe\"", "nothing that shows text otherwise than it reads");
+        assert_eq!(hidden["text"], "Rename: name \"Kicklav.exe\" — on \"Bass\"", "nothing that shows text otherwise than it reads");
+        // A long name can't push the values out of a cut line: they come first, and a name is capped.
+        let long_name = describe(&names, "track_volume", "mixer", &json!({"ref": "7:track:3", "volumeDb": -6}));
+        let text = long_name["text"].as_str().unwrap();
+        assert!(text.starts_with("Track volume: volumeDb -6 — on \"Pads xxx") && text.chars().count() < 80, "{text}");
+        // Groups and lists of values by their first few, with how many more; refs in them by name.
         let grouped = describe(
             &names,
             "set_device_parameter",
             "device",
-            &json!({"trackRefs": ["7:track:1", "7:track:2"], "parameters": {"Cutoff": 0.4, "Res": 0.2, "Drive": 0.1}, "notes": [{"pitch": 60}, {"pitch": 64}]}),
+            &json!({"trackRefs": ["7:track:1", "7:track:2"], "parameters": {"Cutoff": 0.4, "Res": 0.2, "Drive": 0.1, "Mix": 1}, "notes": [{"pitch": 60}, {"pitch": 64}]}),
         );
-        assert_eq!(grouped["text"], "Set device parameter on Drums, Bass: parameters: 3 values, notes: 2 items");
+        assert_eq!(
+            grouped["text"],
+            "Set device parameter: parameters {Cutoff 0.4, Res 0.2, Drive 0.1, +1 more}, notes [{pitch 60}, {pitch 64}] — on \"Drums\", \"Bass\""
+        );
         let long = describe(&names, "rename", "rename", &json!({"ref": "x", "name": "a".repeat(500), "other": "b".repeat(500)}));
         assert!(long["text"].as_str().unwrap().chars().count() <= LINE, "{long}");
     }
