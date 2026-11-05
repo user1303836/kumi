@@ -544,9 +544,12 @@ impl McpEndpoint for BrowserFixture {
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
         Ok(serde_json::from_value(json!({"tools":(["live_status","live_browser_load_preview","live_browser_load_apply","live_browser_inspect"].iter().map(|name|json!({"name":name,"inputSchema":{"type":"object"}})).collect::<Vec<_>>())})).unwrap())
     }
-    async fn call(&self, name: &str, _: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
+    async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
         if name != "live_status" {
             self.calls.borrow_mut().push(name.into());
+        }
+        if matches!(name, "live_browser_inspect" | "live_browser_load_preview") {
+            assert_eq!(args["itemId"], "user_library/Kumi/Audio Effects/Tape Wobble");
         }
         let inspected = self.calls.borrow().iter().filter(|call| *call == "live_browser_inspect").count();
         let (body, error) = match name {
@@ -579,11 +582,13 @@ impl McpEndpoint for BrowserFixture {
     }
 }
 #[tokio::test(flavor = "current_thread")]
-async fn a_device_a_background_job_wrote_loads_once_lives_browser_lists_it() {
+async fn a_device_written_or_copied_loads_once_lives_browser_lists_it() {
     tokio::task::LocalSet::new()
         .run_until(async {
             let endpoint = Rc::new(BrowserFixture { calls: RefCell::default(), listed_after: 2 });
             let mut options = AbletonOptions::new(Rc::new(|_, _| {}));
+            let library = tempfile::tempdir().unwrap();
+            options.user_library = Some(library.path().to_string_lossy().into_owned());
             options.connect = Some(Rc::new({
                 let endpoint = endpoint.clone();
                 move |_| {
@@ -634,6 +639,40 @@ async fn a_device_a_background_job_wrote_loads_once_lives_browser_lists_it() {
                 .unwrap();
             assert!(!again.is_error, "{}", again.text);
             assert_eq!(*endpoint.calls.borrow(), ["live_browser_load_preview", "live_browser_load_apply"]);
+            // A device from before 1.12.1 is copied into its kind's folder first. The normal load sees the copy's item
+            // and waits for the Browser to list it, so an effect can load after an instrument with the usual undo.
+            std::fs::create_dir(library.path().join("Kumi")).unwrap();
+            let bytes = kumi_daw_ableton::devices::amxd::encode_amxd(
+                kumi_daw_ableton::devices::amxd::DeviceType::AudioEffect,
+                &json!({"patcher":{"boxes":[],"lines":[]}}),
+            );
+            let old = library.path().join("Kumi/Tape Wobble.amxd");
+            std::fs::write(&old, &bytes).unwrap();
+            endpoint.calls.borrow_mut().clear();
+            let copied = integration
+                .mutations
+                .make_changes(
+                    json!({"steps":[{"tool":"load_device","input":{"trackRef":"7:track:0","itemId":"user_library/Kumi/Tape Wobble"}}]})
+                        .as_object()
+                        .unwrap()
+                        .clone(),
+                    Signal::new(),
+                )
+                .await
+                .unwrap();
+            assert!(!copied.is_error, "{}", copied.text);
+            assert_eq!(std::fs::read(&old).unwrap(), bytes, "the original stays for saved Sets");
+            assert_eq!(std::fs::read(library.path().join("Kumi/Audio Effects/Tape Wobble.amxd")).unwrap(), bytes);
+            assert_eq!(
+                *endpoint.calls.borrow(),
+                [
+                    "live_browser_inspect",
+                    "live_browser_inspect",
+                    "live_browser_inspect",
+                    "live_browser_load_preview",
+                    "live_browser_load_apply"
+                ]
+            );
         })
         .await;
 }

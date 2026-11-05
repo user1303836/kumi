@@ -8,6 +8,7 @@ pub mod gen;
 pub mod harness;
 pub mod harness_child;
 pub mod kit;
+pub(crate) mod legacy;
 pub mod look;
 pub mod mapping;
 pub mod midi;

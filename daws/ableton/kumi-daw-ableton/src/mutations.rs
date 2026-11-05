@@ -104,8 +104,25 @@ impl Mutations {
             self.parameters.history.connection.version().as_deref().unwrap_or("older")
         )
     }
-    pub async fn change(&self, kind: &ChangeKind, named: JsonObject, original: Signal, settled: bool) -> ChangeOutcome {
+    pub async fn change(&self, kind: &ChangeKind, mut named: JsonObject, original: Signal, settled: bool) -> ChangeOutcome {
         if kind.tool == "load_device" {
+            if let Some(item) = named.get("itemId").and_then(Value::as_str).filter(|item| item.starts_with("user_library/Kumi/")) {
+                if !original.is_cancelled() {
+                    let item = item.to_owned();
+                    let library = self.options.user_library.clone().unwrap_or_else(|| super::samples::user_library(None, None));
+                    let prepared =
+                        tokio::task::spawn_blocking(move || crate::devices::legacy::prepare(std::path::Path::new(&library), &item)).await;
+                    match prepared {
+                        Ok(Ok(Some(item))) => {
+                            self.made.borrow_mut().written_unlisted(&item);
+                            named.insert("itemId".into(), json!(item));
+                        }
+                        Ok(Ok(None)) => {}
+                        Ok(Err(why)) => return ChangeOutcome::error(why),
+                        Err(_) => return ChangeOutcome::error("Kumi couldn't prepare a copy of that old device: try loading it again."),
+                    }
+                }
+            }
             self.browser_lists(&named, &original).await;
         }
         // A change acting on a track's devices reads them again first, so what Kumi holds of them is current where it
