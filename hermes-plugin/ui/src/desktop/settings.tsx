@@ -7,25 +7,18 @@ import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 import { useState } from 'react'
 
-import { chipWords, clean, dawName } from '../shared/format.ts'
+import { chipWords, clean, dawName, knownDaw } from '../shared/format.ts'
 import { useKumi, useWant } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
-import { Chip, S, TextButton } from '../shared/ui.tsx'
+import { Chip, S, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { nextStep, ownerSession } from './pane.tsx'
 
 export const OPEN_MAP_ON_FIND = 'openMapOnFind'
 
-const STATE_WORDS: Record<string, string> = {
-  ready: 'Ready',
-  needs_runtime: 'Not set up yet',
-  outdated_runtime: 'Needs the pinned version',
-  damaged_runtime: 'Needs reinstalling',
-  needs_daw_component: 'Needs its DAW part',
-  no_pin: 'No pinned release in this plugin',
-  unsupported_platform: 'Not available on this system',
-  unknown: 'Unknown'
-}
+// Setup states and DAW-part states the catalogs word (`settings.states.*`, `settings.componentStates.*`).
+const STATES = new Set(['ready', 'needs_runtime', 'outdated_runtime', 'damaged_runtime', 'needs_daw_component', 'no_pin', 'unsupported_platform', 'unknown'])
+const COMPONENT_STATES = new Set(['not_installed', 'installed', 'outdated', 'unknown'])
 
 function Line({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -41,74 +34,72 @@ function megabytes(bytes: unknown): string | null {
 }
 
 export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; store: KumiStore; onOpenMap: () => void }) {
+  const t = useT()
   useWant(store, 'setup')
   const state = useKumi(store)
   const [openOnFind, setOpenOnFind] = useState(() => ctx.storage.get(OPEN_MAP_ON_FIND, true))
   const setup = state.setup
-  const step = nextStep(state)
+  const step = nextStep(state, t)
   const daw = state.status?.daw ?? setup?.daw
   const runtime = setup?.runtime
   const component = setup?.daw_component
+  const setupState = setup?.state ?? 'unknown'
+  const componentState = component?.state ?? 'unknown'
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 640, color: T.text }}>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{ fontSize: 15, fontWeight: 600 }}>Kumi</span>
-        <span style={S.muted}>
-          Kumi reads and changes your {dawName(daw)} project through typed changes you approve, keeps HISTORY with undo, measures audio on this computer, and maps
-          the sample folders you allow.
-        </span>
+        <span style={S.muted}>{t('settings.intro', knownDaw(daw) ?? '')}</span>
       </div>
       {state.available === false ? (
-        <span style={S.text}>
-          Kumi's agent half is off in this profile. Turn on the kumi plugin's Agent switch in Capabilities → Plugins and restart the gateway; its settings form
-          appears under Agent settings.
-        </span>
+        <span style={S.text}>{t('settings.agentOff')}</span>
       ) : (
         <>
           <div>
-            <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>Setup</span>
-            <Line label="State">{STATE_WORDS[setup?.state ?? 'unknown'] ?? clean(setup?.state ?? '', 40)}</Line>
-            {setup?.message && <Line label="Next">{clean(setup.message, 300)}</Line>}
+            <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>{t('settings.setup')}</span>
+            <Line label={t('settings.state')}>{STATES.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40)}</Line>
+            {setup?.message && <Line label={t('settings.next')}>{clean(setup.message, 300)}</Line>}
             {runtime && (
-              <Line label="Kumi runtime">
-                {runtime.installed ? `Kumi ${clean(runtime.version ?? '', 20)}` : 'Not installed'}
-                {setup?.pinned_version && <span style={S.faint}> · pinned {clean(setup.pinned_version, 20)}</span>}
+              <Line label={t('settings.runtime')}>
+                {runtime.installed ? t('settings.installed', clean(runtime.version ?? '', 20)) : t('settings.notInstalled')}
+                {setup?.pinned_version && <span style={S.faint}> · {t('settings.pinned', clean(setup.pinned_version, 20))}</span>}
                 {setup?.target && <span style={S.faint}> · {clean(setup.target, 40)}</span>}
               </Line>
             )}
             {runtime && !runtime.installed && megabytes(setup?.download_bytes) && (
-              <Line label="Download">
+              <Line label={t('settings.download')}>
                 {megabytes(setup?.download_bytes)}
-                {megabytes(setup?.unpacked_bytes) && <span style={S.faint}> ({megabytes(setup?.unpacked_bytes)} unpacked)</span>}
+                {megabytes(setup?.unpacked_bytes) && <span style={S.faint}> {t('settings.unpacked', megabytes(setup?.unpacked_bytes))}</span>}
               </Line>
             )}
             {component && (
-              <Line label={`${dawName(daw)} part`}>
-                {clean(component.name ?? 'DAW component', 40)}: {clean(component.state ?? 'unknown', 20).replace('_', ' ')}
+              <Line label={t('settings.part', dawName(daw, t))}>
+                {clean(component.name ?? t('settings.dawComponent'), 40)}:{' '}
+                {COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace('_', ' ')}
                 {component.path && <div style={{ ...S.faint, marginTop: 2 }}>{clean(component.path, 200)}</div>}
               </Line>
             )}
             {setup?.existing_kumi?.path && (
-              <Line label="Standalone Kumi">
+              <Line label={t('settings.standalone')}>
                 {clean(setup.existing_kumi.path, 120)}
-                <span style={S.faint}>{setup.existing_kumi.adopted ? ' · adopted' : ' · left as it is'}</span>
+                <span style={S.faint}> · {setup.existing_kumi.adopted ? t('settings.adopted') : t('settings.leftAsIs')}</span>
               </Line>
             )}
             {setup?.compressed_audio?.message && (
-              <Line label="Audio formats">
+              <Line label={t('settings.audioFormats')}>
                 <span style={setup.compressed_audio.state === 'available' ? undefined : S.muted}>{clean(setup.compressed_audio.message, 400)}</span>
               </Line>
             )}
           </div>
           <div>
-            <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>Connection</span>
-            <Line label="Now">
+            <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>{t('settings.connection')}</span>
+            <Line label={t('settings.now')}>
               {(() => {
-                const words = chipWords(state.status, state.focus?.transport?.tempo)
+                const words = chipWords(state.status, state.focus?.transport?.tempo, t)
                 return <Chip tone={words.tone === 'muted' ? undefined : words.tone}>{words.text}</Chip>
               })()}
             </Line>
-            {state.status?.owner?.session_id && <Line label="Kumi's chat">{clean(state.status.owner.session_id, 80)}</Line>}
+            {state.status?.owner?.session_id && <Line label={t('settings.chat')}>{clean(state.status.owner.session_id, 80)}</Line>}
           </div>
           <div style={{ ...S.row, gap: 8, flexWrap: 'wrap' }}>
             {step && (
@@ -119,13 +110,13 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
                 {step.label}
               </TextButton>
             )}
-            <TextButton onClick={onOpenMap}>Open the sound map</TextButton>
-            <TextButton onClick={() => host.navigate('/settings?tab=plugins&agent=kumi')}>Agent settings</TextButton>
+            <TextButton onClick={onOpenMap}>{t('settings.openMap')}</TextButton>
+            <TextButton onClick={() => host.navigate('/settings?tab=plugins&agent=kumi')}>{t('settings.agentSettings')}</TextButton>
           </div>
         </>
       )}
       <div>
-        <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>This window</span>
+        <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>{t('settings.thisWindow')}</span>
         <label style={{ ...S.row, gap: 8, padding: '5px 0', borderTop: `1px solid ${T.border}`, cursor: 'pointer' }}>
           <input
             checked={openOnFind}
@@ -135,7 +126,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
             }}
             type="checkbox"
           />
-          <span style={S.text}>Open the sound map when Kumi finds sounds</span>
+          <span style={S.text}>{t('settings.openOnFind')}</span>
         </label>
       </div>
     </div>

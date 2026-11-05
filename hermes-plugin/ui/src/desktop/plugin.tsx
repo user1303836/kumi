@@ -16,12 +16,15 @@ import type { HermesPlugin, PaletteContribution, PluginContribution, ToolMediaRe
 // A namespace import too: on a Desktop without an export (the tool-media seam), a named import would stop the module.
 import * as sdk from '@hermes/plugin-sdk'
 import { host, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from '@hermes/plugin-sdk'
+import type { ReactNode } from 'react'
 
 import { canUndo, undoRequest } from '../shared/format.ts'
 import { Audition } from '../shared/hooks.ts'
+import { english, MESSAGES, type Translate } from '../shared/i18n.ts'
 import { parseListen } from '../shared/listen.ts'
 import { foundSounds, jobOf, KumiStore } from '../shared/store.ts'
-import { ask } from './actions.ts'
+import { I18n } from '../shared/ui.tsx'
+import { ask, wordsOf } from './actions.ts'
 import { ListenCard } from './card.tsx'
 import { FocusHint } from './composer.tsx'
 import { StatusChip } from './chip.tsx'
@@ -30,7 +33,6 @@ import { MapWorkspace } from './map.tsx'
 import { MeasurementsWorkspace } from './measurements.tsx'
 import { KumiPane, ownerSession } from './pane.tsx'
 import { OPEN_MAP_ON_FIND, SettingsPage } from './settings.tsx'
-
 export const PLUGIN_ID = 'kumi'
 export const MAP_WORKSPACE = 'kumi-sound-map'
 export const MEASUREMENTS_WORKSPACE = 'kumi-measurements'
@@ -42,22 +44,38 @@ export const POLL_MS = 5000
 /** How often a running job is read while the window is in view (none is read when nothing runs). */
 export const JOB_POLL_MS = 2000
 
+// Desktop's translator for this plugin's catalogs, reactive to a language switch; English on a Desktop without it.
+const usePluginWords: ((pluginId: string) => Translate) | null = typeof sdk.usePluginI18n === 'function' ? sdk.usePluginI18n : null
+
+/** Every Desktop root draws inside this: its components' `useT()` gets Desktop's words for the app's language. */
+function WithT({ children }: { children: ReactNode }) {
+  const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english
+  return <I18n.Provider value={t}>{children}</I18n.Provider>
+}
+
 const plugin: HermesPlugin = {
   id: PLUGIN_ID,
   name: 'Kumi',
   description: "Your DAW beside the chat: FOCUS, HISTORY with undo, a sound map of your sample folders, and Kumi's audio measurements.",
   register(ctx) {
+    // English, Japanese and Simplified Chinese; Desktop drops them when the plugin unloads.
+    ctx.i18n?.register(MESSAGES)
     const store = new KumiStore(path => ctx.rest(path, { timeoutMs: 15_000 }))
     const audition = new Audition(id => ctx.rest(`/audio?id=${encodeURIComponent(id)}`, { timeoutMs: 60_000 }))
     let closeMap: (() => void) | null = null
     let mapPane: (() => void) | null = null
+    const mapView = () => (
+      <WithT>
+        <MapWorkspace audition={audition} ctx={ctx} store={store} />
+      </WithT>
+    )
 
     const openMap = () => {
       if (typeof host.openWorkspace === 'function') {
         closeMap = host.openWorkspace(MAP_WORKSPACE, {
-          title: 'Sound map',
+          title: wordsOf(ctx)('map.tab'),
           minWidth: '26rem',
-          render: () => <MapWorkspace audition={audition} ctx={ctx} store={store} />,
+          render: mapView,
           onClose: () => {
             closeMap = null
           }
@@ -68,18 +86,23 @@ const plugin: HermesPlugin = {
       mapPane ??= ctx.register({
         id: 'map-pane',
         area: PANES_AREA,
-        title: 'Sound map',
+        title: wordsOf(ctx)('map.tab'),
         data: { placement: 'main' },
-        render: () => <MapWorkspace audition={audition} ctx={ctx} store={store} />
+        render: mapView
       })
     }
     let closeMeasurements: (() => void) | null = null
     let measurementsPane: (() => void) | null = null
     const openMeasurements = () => {
-      const render = () => <MeasurementsWorkspace audition={audition} store={store} />
+      const render = () => (
+        <WithT>
+          <MeasurementsWorkspace audition={audition} store={store} />
+        </WithT>
+      )
+      const title = wordsOf(ctx)('measurements.tab')
       if (typeof host.openWorkspace === 'function') {
         closeMeasurements = host.openWorkspace(MEASUREMENTS_WORKSPACE, {
-          title: 'Measurements',
+          title,
           minWidth: '24rem',
           render,
           onClose: () => {
@@ -88,7 +111,7 @@ const plugin: HermesPlugin = {
         })
         return
       }
-      measurementsPane ??= ctx.register({ id: 'measurements-pane', area: PANES_AREA, title: 'Measurements', data: { placement: 'main' }, render })
+      measurementsPane ??= ctx.register({ id: 'measurements-pane', area: PANES_AREA, title, data: { placement: 'main' }, render })
     }
     const openSettings = () => host.navigate(typeof sdk.pluginSettingsHref === 'function' ? sdk.pluginSettingsHref(PLUGIN_ID) : '/settings?tab=plugins')
 
@@ -203,25 +226,63 @@ const plugin: HermesPlugin = {
         area: PANES_AREA,
         title: 'Kumi',
         data: { placement: 'right', width: '320px' },
-        render: () => <KumiPane ctx={ctx} onOpenMap={openMap} store={store} />
+        render: () => (
+          <WithT>
+            <KumiPane ctx={ctx} onOpenMap={openMap} store={store} />
+          </WithT>
+        )
       },
       {
         id: 'status',
         area: STATUSBAR_AREAS.right,
         order: 60,
-        render: () => <StatusChip ctx={ctx} onOpenMap={openMap} onOpenSettings={openSettings} store={store} />
-      },
+        render: () => (
+          <WithT>
+            <StatusChip ctx={ctx} onOpenMap={openMap} onOpenSettings={openSettings} store={store} />
+          </WithT>
+        )
+      }
+    ]
+    if (typeof sdk.TOOL_MEDIA_RENDERER_AREA === 'string') {
+      contributions.push({
+        id: 'listen-card',
+        area: sdk.TOOL_MEDIA_RENDERER_AREA,
+        data: {
+          tools: ['kumi_listen'],
+          render: (props: ToolMediaRendererProps) => (
+            <WithT>
+              <ListenCard audition={audition} media={props} />
+            </WithT>
+          )
+        }
+      })
+    }
+    if (typeof sdk.COMPOSER_AREAS?.underside === 'string') {
+      contributions.push({
+        id: 'focus-hint',
+        area: sdk.COMPOSER_AREAS.underside,
+        render: () => (
+          <WithT>
+            <FocusHint store={store} />
+          </WithT>
+        )
+      })
+    }
+    ctx.registerMany(contributions)
+
+    // The palette's labels are plain strings: registered in the app's language, and again when it changes.
+    const palette = (t: Translate): PluginContribution[] => [
       {
         id: 'open-map',
         area: PALETTE_AREA,
-        data: { id: 'kumi.map', label: 'Kumi: open the sound map', keywords: ['kumi', 'sound', 'samples', 'map', 'library'], run: openMap } satisfies PaletteContribution
+        data: { id: 'kumi.map', label: t('palette.map'), keywords: ['kumi', 'sound', 'samples', 'map', 'library'], run: openMap } satisfies PaletteContribution
       },
       {
         id: 'undo-last',
         area: PALETTE_AREA,
         data: {
           id: 'kumi.undo-last',
-          label: 'Kumi: undo the last change',
+          label: t('palette.undo'),
           keywords: ['kumi', 'undo', 'history', 'revert'],
           run: () => {
             const state = store.get()
@@ -229,10 +290,7 @@ const plugin: HermesPlugin = {
             const last = state.history?.items.find(item => item.state !== 'undone')
             if (!last || !canUndo(state.status, last)) {
               const unsure = Boolean(state.status?.unsure) || last?.state === 'unsure' || last?.state === 'partial'
-              host.notify({
-                kind: 'info',
-                message: unsure ? "Kumi isn't sure of its last change: ask it to look at your project again first." : 'Kumi has no change it can undo right now.'
-              })
+              host.notify({ kind: 'info', message: wordsOf(ctx)(unsure ? 'notify.undoUnsure' : 'notify.nothingToUndo') })
               return
             }
             void ask(ctx, undoRequest(last), { send: true, session: ownerSession(state) })
@@ -242,28 +300,23 @@ const plugin: HermesPlugin = {
       {
         id: 'settings',
         area: PALETTE_AREA,
-        data: { id: 'kumi.settings', label: 'Kumi: settings', keywords: ['kumi', 'setup', 'settings', 'daw'], run: openSettings } satisfies PaletteContribution
+        data: { id: 'kumi.settings', label: t('palette.settings'), keywords: ['kumi', 'setup', 'settings', 'daw'], run: openSettings } satisfies PaletteContribution
       }
     ]
-    if (typeof sdk.TOOL_MEDIA_RENDERER_AREA === 'string') {
-      contributions.push({
-        id: 'listen-card',
-        area: sdk.TOOL_MEDIA_RENDERER_AREA,
-        data: {
-          tools: ['kumi_listen'],
-          render: (props: ToolMediaRendererProps) => <ListenCard audition={audition} media={props} />
-        }
-      })
-    }
-    if (typeof sdk.COMPOSER_AREAS?.underside === 'string') {
-      contributions.push({ id: 'focus-hint', area: sdk.COMPOSER_AREAS.underside, render: () => <FocusHint store={store} /> })
-    }
-    ctx.registerMany(contributions)
+    let unregisterPalette = ctx.registerMany(palette(wordsOf(ctx)))
+    ctx.i18n?.onLocaleChange(() => {
+      unregisterPalette()
+      unregisterPalette = ctx.registerMany(palette(wordsOf(ctx)))
+    })
     ctx.registerSettingsPage?.({
       id: 'kumi',
       title: 'Kumi',
       icon: 'pulse',
-      render: () => <SettingsPage ctx={ctx} onOpenMap={openMap} store={store} />
+      render: () => (
+        <WithT>
+          <SettingsPage ctx={ctx} onOpenMap={openMap} store={store} />
+        </WithT>
+      )
     })
   }
 }

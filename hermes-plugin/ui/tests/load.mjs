@@ -11,8 +11,9 @@ export const plugin = fileURLToPath(new URL('../..', import.meta.url))
 
 let loads = 0
 
-/** A stub `@hermes/plugin-sdk`. Every newer export is optional: `{ toolMedia: false, composer: false }` makes an older Desktop. */
-export function sdkStub({ toolMedia = true, settingsHref = true, composer = true } = {}) {
+/** A stub `@hermes/plugin-sdk`. Every newer export is optional: `{ toolMedia: false, composer: false }` makes an older Desktop;
+ *  `{ i18n: true }` a Desktop with plugin i18n, whose translator answers in `globalThis.__kumiTestWords` (a key → words map). */
+export function sdkStub({ toolMedia = true, settingsHref = true, composer = true, i18n = false } = {}) {
   return `
     // Read at use, not at import: each test installs its own host after loading the bundle.
     export const host = new Proxy({}, { get: (_target, key) => globalThis.__kumiTestHost?.[key] })
@@ -22,6 +23,7 @@ export function sdkStub({ toolMedia = true, settingsHref = true, composer = true
     ${toolMedia ? "export const TOOL_MEDIA_RENDERER_AREA = 'transcript.toolMedia'" : ''}
     ${composer ? "export const COMPOSER_AREAS = { top: 'composer.top', bottom: 'composer.bottom', underside: 'composer.underside' }" : ''}
     ${settingsHref ? "export const pluginSettingsHref = (id, page) => '/settings?tab=plugins&plugin=' + id + (page ? '&ppage=' + page : '')" : ''}
+    ${i18n ? 'export const usePluginI18n = () => key => globalThis.__kumiTestWords?.[key] ?? key' : ''}
     export const useValue = atom => atom.get()
     const Pass = props => props.children ?? null
     export const Button = Pass, Codicon = () => null, StatusDot = () => null
@@ -33,6 +35,8 @@ const reactStub = `
   export const useEffect = () => {}, useMemo = f => f(), useCallback = f => f, useRef = v => ({ current: v })
   export const useState = v => [typeof v === 'function' ? v() : v, () => {}]
   export const useSyncExternalStore = (subscribe, get) => get()
+  export const createContext = value => ({ value, Provider: props => props.children ?? null })
+  export const useContext = context => context.value
   export const Fragment = 'Fragment'
   export const jsx = (type, props) => ({ type, props }), jsxs = jsx
   export default { Fragment }

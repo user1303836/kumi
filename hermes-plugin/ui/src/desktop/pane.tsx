@@ -6,8 +6,9 @@ import { useEffect, useState } from 'react'
 import { canUndo, chipWords, clean, cleanupWords, connectRequest, dawName, LOOK_AGAIN_REQUEST, setupRequest, undoRequest } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { useKumi } from '../shared/hooks.ts'
+import { english, type Translate } from '../shared/i18n.ts'
 import type { KumiState, KumiStore } from '../shared/store.ts'
-import { Dot, S, Section, TextButton } from '../shared/ui.tsx'
+import { Dot, S, Section, TextButton, useT } from '../shared/ui.tsx'
 import { T } from '@kumi/theme'
 import { ask } from './actions.ts'
 import { JobsView } from './jobs.tsx'
@@ -31,38 +32,37 @@ export function ownerSession(state: KumiState): null | string {
 // `choose_control_surface` is the producer's step in the DAW, which setup's message explains.
 const NEEDS_SETUP: Record<string, true> = { needs_runtime: true, outdated_runtime: true, damaged_runtime: true, needs_daw_component: true }
 
-/** Setup's next step, when there is one, as the button that asks for it. */
-export function nextStep(state: KumiState): { label: string; request: string } | null {
+/** Setup's next step, when there is one, as the button that asks for it (its label in `t`'s words; the request stays
+ *  English, C5). */
+export function nextStep(state: KumiState, t: Translate = english): { label: string; request: string } | null {
   const setup = state.setup
   const daw = state.status?.daw ?? setup?.daw
   if (setup && (NEEDS_SETUP[setup.state ?? ''] || setup.next_step === 'install_runtime' || setup.next_step === 'install_daw_component')) {
-    return { label: `Set up Kumi for ${dawName(daw)}`, request: setupRequest(daw) }
+    return { label: t('step.setup', dawName(daw, t)), request: setupRequest(daw) }
   }
-  if (setup?.state === 'ready' && !state.status?.connected) return { label: `Connect to ${dawName(daw)}`, request: connectRequest(daw) }
+  if (setup?.state === 'ready' && !state.status?.connected) return { label: t('step.connect', dawName(daw, t)), request: connectRequest(daw) }
   return null
 }
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
 
 export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store: KumiStore; onOpenMap: () => void }) {
+  const t = useT()
   const state = useKumi(store)
   const now = useNow()
   if (state.available === false) {
     return (
       <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={S.text}>Kumi's agent half is off in this profile.</span>
-        <span style={S.muted}>
-          Turn on the kumi plugin's Agent switch in Capabilities → Plugins, then restart the gateway. This pane shows your DAW's FOCUS and Kumi's HISTORY once
-          it's on.
-        </span>
+        <span style={S.text}>{t('pane.agentOff')}</span>
+        <span style={S.muted}>{t('pane.agentOffHow')}</span>
       </div>
     )
   }
   if (state.available === null) {
-    return <div style={{ ...S.muted, padding: 14 }}>Reading Kumi's state…</div>
+    return <div style={{ ...S.muted, padding: 14 }}>{t('pane.reading')}</div>
   }
-  const words = chipWords(state.status, state.focus?.transport?.tempo)
-  const step = nextStep(state)
+  const words = chipWords(state.status, state.focus?.transport?.tempo, t)
+  const step = nextStep(state, t)
   const session = ownerSession(state)
   const connected = Boolean(state.status?.connected)
   // Setup's word only when there's something to do; an unknown state is the settings page's to explain.
@@ -78,16 +78,20 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
         </div>
         {setupMessage && <span style={S.muted}>{setupMessage}</span>}
-        {state.error && <span style={{ ...S.muted, color: T.warn }}>Kumi's backend didn't answer: {state.error}</span>}
+        {state.error && <span style={{ ...S.muted, color: T.warn }}>{t('pane.backendError', state.error)}</span>}
         {state.status?.unsure && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ ...S.muted, color: T.warn }}>
-              Kumi isn't sure your project is as it was after {clean(state.status.unsure.op ?? 'its last action', 40)}
-              {state.status.unsure.reason ? `: ${clean(state.status.unsure.reason, 160)}` : ''}. {cleanupWords(state.status.unsure.cleanup)} It needs a
-              fresh look before another change.
+              {[
+                t('pane.unsure', clean(state.status.unsure.op ?? t('pane.unsureOp'), 40), state.status.unsure.reason ? clean(state.status.unsure.reason, 160) : ''),
+                cleanupWords(state.status.unsure.cleanup, t),
+                t('pane.needsLook')
+              ]
+                .filter(Boolean)
+                .join(' ')}
             </span>
             <div style={S.row}>
-              <TextButton onClick={() => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session })}>Ask Kumi to look again</TextButton>
+              <TextButton onClick={() => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session })}>{t('pane.lookAgain')}</TextButton>
             </div>
           </div>
         )}
@@ -99,18 +103,18 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           </div>
         )}
       </div>
-      <Section title="Focus">
+      <Section title={t('pane.focus')}>
         <FocusView focus={state.focus} now={now} />
       </Section>
       {Object.keys(state.jobs).length > 0 && (
-        <Section title="Jobs">
+        <Section title={t('pane.jobs')}>
           <JobsView jobs={state.jobs} />
         </Section>
       )}
       <Section
         title={
           <>
-            History <span style={{ textTransform: 'none', letterSpacing: 0 }}>{undoable ? `· ${undoable} can be undone` : ''}</span>
+            {t('pane.history')} <span style={{ textTransform: 'none', letterSpacing: 0 }}>{undoable ? t('pane.undoable', undoable) : ''}</span>
           </>
         }
       >
@@ -119,16 +123,16 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           now={now}
           action={item =>
             canUndo(state.status, item) ? (
-              <TextButton onClick={() => void ask(ctx, undoRequest(item), { send: true, session })} title="Ask Kumi to undo this change">
-                Undo
+              <TextButton onClick={() => void ask(ctx, undoRequest(item), { send: true, session })} title={t('pane.undoTitle')}>
+                {t('pane.undo')}
               </TextButton>
             ) : null
           }
         />
       </Section>
       <div style={{ ...S.row, padding: '10px 12px', gap: 8 }}>
-        <TextButton onClick={onOpenMap}>Open the sound map</TextButton>
-        {!connected && state.status?.owner && <span style={S.faint}>Undo needs a connected Kumi.</span>}
+        <TextButton onClick={onOpenMap}>{t('pane.openMap')}</TextButton>
+        {!connected && state.status?.owner && <span style={S.faint}>{t('pane.undoNeedsConnection')}</span>}
       </div>
     </div>
   )

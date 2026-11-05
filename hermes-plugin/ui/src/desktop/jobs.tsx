@@ -4,17 +4,18 @@ import { T } from '@kumi/theme'
 
 import { jobWords } from '../shared/format.ts'
 import type { TrackedJob } from '../shared/store.ts'
-import { S } from '../shared/ui.tsx'
+import { S, useT } from '../shared/ui.tsx'
 
 const TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint } as const
 
 export function JobsView({ jobs }: { jobs: Record<string, TrackedJob> }) {
+  const t = useT()
   const shown = Object.entries(jobs)
   if (!shown.length) return null
   return (
     <ul style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
       {shown.map(([id, job]) => {
-        const words = jobWords(job)
+        const words = jobWords(job, t)
         return (
           <li key={id} style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
             <span style={{ ...S.row, gap: 6 }}>
@@ -23,7 +24,7 @@ export function JobsView({ jobs }: { jobs: Record<string, TrackedJob> }) {
             </span>
             {job.ended_at === null && (
               <span
-                aria-label={words.fraction === null ? `${words.title}: under way` : `${words.title}: ${Math.round(words.fraction * 100)}%`}
+                aria-label={words.fraction === null ? t('job.underWay', words.title) : t('job.percent', words.title, Math.round(words.fraction * 100))}
                 role="progressbar"
                 style={{ display: 'block', height: 3, borderRadius: 2, background: T.border, overflow: 'hidden' }}
               >

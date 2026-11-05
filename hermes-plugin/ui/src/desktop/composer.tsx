@@ -7,7 +7,7 @@ import { useCallback, useSyncExternalStore } from 'react'
 import { bpm, colorOf, focusPath } from '../shared/format.ts'
 import { useKumi, useWant } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
-import { Dot, S } from '../shared/ui.tsx'
+import { Dot, S, useT } from '../shared/ui.tsx'
 import { ownerSession } from './pane.tsx'
 
 const noChange = () => () => {}
@@ -24,6 +24,7 @@ function useFocusedChat(): null | string {
 }
 
 export function FocusHint({ store }: { store: KumiStore }) {
+  const t = useT()
   useWant(store, 'focus')
   const state = useKumi(store)
   const chat = useFocusedChat()
@@ -38,14 +39,10 @@ export function FocusHint({ store }: { store: KumiStore }) {
     <div
       data-unsure={unsure || undefined}
       style={{ ...S.row, gap: 6, padding: '2px 10px', maxWidth: '100%', opacity: unsure ? 0.5 : 1 }}
-      title={
-        unsure
-          ? "What Kumi last saw selected in your DAW. It isn't sure your project is as it was: ask it to look again."
-          : 'What Kumi sees selected in your DAW: words like “this track” in this chat mean it.'
-      }
+      title={unsure ? t('hint.titleUnsure') : t('hint.title')}
     >
       <Dot color={unsure ? T.faint : (colorOf(state.focus?.focus?.track) ?? T.faint)} size={7} />
-      <span style={{ ...S.faint, ...S.ellipsis }}>{`${unsure ? 'Kumi last saw' : 'Kumi sees'} ${path.join(' › ')}${tempo ? ` · ${tempo}` : ''}`}</span>
+      <span style={{ ...S.faint, ...S.ellipsis }}>{`${unsure ? t('hint.lastSaw') : t('hint.sees')} ${path.join(' › ')}${tempo ? ` · ${tempo}` : ''}`}</span>
     </div>
   )
 }

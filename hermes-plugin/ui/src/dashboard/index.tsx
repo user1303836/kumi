@@ -7,10 +7,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { canUndo, chipWords, clean, cleanupWords, LOOK_AGAIN_REQUEST, soundRequest, undoRequest } from '../shared/format.ts'
 import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
+import { translator } from '../shared/i18n.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
 import { KumiStore } from '../shared/store.ts'
 import type { AudioReply } from '../shared/types.ts'
-import { Dot, S, Section, TextButton } from '../shared/ui.tsx'
+import { Dot, I18n, S, Section, TextButton, useT } from '../shared/ui.tsx'
 import { SDK } from './react.ts'
 
 const BASE = '/api/plugins/kumi'
@@ -26,6 +27,7 @@ function useNow(every = 30_000): number {
 }
 
 function CopyButton({ text, label }: { text: string; label: string }) {
+  const t = useT()
   const [done, setDone] = useState(false)
   return (
     <TextButton
@@ -35,14 +37,26 @@ function CopyButton({ text, label }: { text: string; label: string }) {
           setTimeout(() => setDone(false), 1500)
         })
       }}
-      title={`Copy “${text}” to paste into a chat`}
+      title={t('dashboard.copyTitle', text)}
     >
-      {done ? 'Copied' : label}
+      {done ? t('dashboard.copied') : label}
     </TextButton>
   )
 }
 
+/** The dashboard's language (its own i18n context), for Kumi's words. */
 function KumiDashboard() {
+  const locale = (SDK.useI18n?.() as { locale?: unknown } | undefined)?.locale
+  const t = useMemo(() => translator(locale), [locale])
+  return (
+    <I18n.Provider value={t}>
+      <Dashboard />
+    </I18n.Provider>
+  )
+}
+
+function Dashboard() {
+  const t = useT()
   const store = useMemo(() => new KumiStore(path => SDK.fetchJSON(`${BASE}${path}`)), [])
   const audition = useMemo(() => new Audition(id => SDK.fetchJSON<AudioReply>(`${BASE}/audio?id=${encodeURIComponent(id)}`)), [])
   useWant(store, 'map')
@@ -62,15 +76,15 @@ function KumiDashboard() {
     }
   }, [store, audition])
 
-  const words = chipWords(state.status, state.focus?.transport?.tempo)
+  const words = chipWords(state.status, state.focus?.transport?.tempo, t)
   const tone = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint }[words.tone]
   const connected = Boolean(state.status?.connected)
 
   if (state.available === false) {
     return (
       <div style={{ padding: 24, color: T.text }}>
-        <p style={S.text}>Kumi's agent plugin is off in this profile.</p>
-        <p style={S.muted}>Turn it on (Hermes's plugins settings, or `hermes plugins enable kumi`) and restart the dashboard to see Kumi here.</p>
+        <p style={S.text}>{t('dashboard.agentOff')}</p>
+        <p style={S.muted}>{t('dashboard.agentOffHow')}</p>
       </div>
     )
   }
@@ -88,21 +102,25 @@ function KumiDashboard() {
       {state.status?.unsure && (
         <div style={{ ...S.row, gap: 10, padding: '0 2px', alignItems: 'flex-start' }}>
           <span style={{ ...S.muted, color: T.warn, flex: 1 }}>
-            Kumi isn't sure your project is as it was after {clean(state.status.unsure.op ?? 'its last action', 40)}
-            {state.status.unsure.reason ? `: ${clean(state.status.unsure.reason, 160)}` : ''}. {cleanupWords(state.status.unsure.cleanup)} Ask Kumi in
-            your chat to look again before another change.
+            {[
+              t('pane.unsure', clean(state.status.unsure.op ?? t('pane.unsureOp'), 40), state.status.unsure.reason ? clean(state.status.unsure.reason, 160) : ''),
+              cleanupWords(state.status.unsure.cleanup, t),
+              t('dashboard.askLook')
+            ]
+              .filter(Boolean)
+              .join(' ')}
           </span>
-          <CopyButton label="Copy request" text={LOOK_AGAIN_REQUEST} />
+          <CopyButton label={t('dashboard.copyRequest')} text={LOOK_AGAIN_REQUEST} />
         </div>
       )}
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(260px, 1fr) minmax(320px, 2fr)', gap: 12, alignItems: 'stretch' }}>
         <div style={{ border: `1px solid ${T.border}`, borderRadius: 6, background: T.card, overflow: 'hidden', alignSelf: 'start' }}>
-          <Section title="Focus">
+          <Section title={t('pane.focus')}>
             <FocusView focus={state.focus} now={now} />
           </Section>
-          <Section title="History">
+          <Section title={t('pane.history')}>
             <HistoryView
-              action={item => (canUndo(state.status, item) ? <CopyButton label="Copy undo" text={undoRequest(item)} /> : null)}
+              action={item => (canUndo(state.status, item) ? <CopyButton label={t('dashboard.copyUndo')} text={undoRequest(item)} /> : null)}
               history={state.history}
               now={now}
             />
@@ -114,12 +132,12 @@ function KumiDashboard() {
               const request = soundRequest(id, sound.name, state.map?.revision)
               return (
                 <>
-                  <TextButton onClick={() => (playing === id ? audition.stop() : void audition.play(id).catch(() => undefined))}>{playing === id ? '■ Stop' : '▶ Play'}</TextButton>
-                  {request && <CopyButton label="Copy request" text={request} />}
+                  <TextButton onClick={() => (playing === id ? audition.stop() : void audition.play(id).catch(() => undefined))}>{playing === id ? t('map.stop') : t('map.play')}</TextButton>
+                  {request && <CopyButton label={t('dashboard.copyRequest')} text={request} />}
                 </>
               )
             }}
-            empty={state.map === null ? 'Reading the sound map…' : "No sound map yet: add a sample folder in Kumi's settings and ask Kumi to scan it."}
+            empty={state.map === null ? t('map.reading') : t('dashboard.mapEmpty')}
             found={state.found}
             map={state.map}
             onPick={id => {

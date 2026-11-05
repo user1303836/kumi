@@ -6,6 +6,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { chipWords } from '../shared/format.ts'
 import { useKumi } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
+import { useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { nextStep, ownerSession } from './pane.tsx'
 
@@ -20,17 +21,18 @@ export function StatusChip({
   onOpenMap: () => void
   onOpenSettings: () => void
 }) {
+  const t = useT()
   const state = useKumi(store)
   // Nothing in the bar until Kumi's backend answers: no dead control when the agent half is off.
   if (state.available !== true) return null
-  const words = chipWords(state.status, state.focus?.transport?.tempo)
-  const step = nextStep(state)
+  const words = chipWords(state.status, state.focus?.transport?.tempo, t)
+  const step = nextStep(state, t)
   const connected = Boolean(state.status?.connected)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <button
-          aria-label={`Kumi: ${words.text}`}
+          aria-label={t('chip.label', words.text)}
           title="Kumi"
           type="button"
           style={{
@@ -54,14 +56,14 @@ export function StatusChip({
         </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" side="top">
-        <DropdownMenuItem onSelect={onOpenMap}>Open the sound map</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onOpenMap}>{t('chip.openMap')}</DropdownMenuItem>
         {step && (
           <DropdownMenuItem onSelect={() => void ask(ctx, step.request, { send: true, session: connected ? ownerSession(state) : null })}>
             {step.label}
           </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
-        <DropdownMenuItem onSelect={onOpenSettings}>Kumi settings</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onOpenSettings}>{t('chip.settings')}</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

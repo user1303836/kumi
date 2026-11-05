@@ -5,6 +5,8 @@ import type * as ReactTypes from 'react'
 interface DashboardSdk {
   React: typeof ReactTypes
   fetchJSON: <T>(url: string, init?: RequestInit) => Promise<T>
+  /** The dashboard's i18n context (`{locale, setLocale, t}`); older dashboards have none. */
+  useI18n?: () => unknown
 }
 
 declare global {
@@ -22,8 +24,10 @@ const React = sdk.React
 export default React
 export const {
   Fragment,
+  createContext,
   createElement,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,

@@ -1,7 +1,17 @@
 // Small pieces both UI halves draw with: they take every colour from the host's theme (`@kumi/theme`), so the same
-// component reads as native in Hermes Desktop and in the web dashboard.
+// component reads as native in Hermes Desktop and in the web dashboard. Their words come from the translator a UI
+// root provides (`I18n`): Desktop's for its language, the dashboard's for its locale, English outside any.
 import { T } from '@kumi/theme'
 import type { CSSProperties, ReactNode } from 'react'
+import { createContext, useContext } from 'react'
+
+import { english, type Translate } from './i18n.ts'
+
+export const I18n = createContext<Translate>(english)
+
+export function useT(): Translate {
+  return useContext(I18n)
+}
 
 export const S = {
   section: { display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderBottom: `1px solid ${T.border}` },

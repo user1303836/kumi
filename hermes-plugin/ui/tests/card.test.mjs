@@ -279,3 +279,14 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
 })
+
+test('a Japanese window reads FOCUS and HISTORY in Japanese; the rows keep their own names', async () => {
+  const { FocusView, HistoryView, I18n, translator } = await load('tests/i18n.entry.ts', { react: 'real' })
+  const inJapanese = element => renderToStaticMarkup(createElement(I18n.Provider, { value: translator('ja') }, element))
+  const history = { items: [{ id: 'h-1', label: 'c1', title: 'Drums volume −6.0 → −4.0 dB', family: 'mixer', state: 'undone', undo_available: false, at: 0, track: 'Drums' }] }
+  const rows = inJapanese(createElement(HistoryView, { history, now: 0 }))
+  for (const text of ['aria-label="取り消し済み"', 'Drums volume −6.0 → −4.0 dB', 'Drums · mixer · c1 · たった今']) assert.ok(rows.includes(text), `${text} in ${rows}`)
+  assert.ok(inJapanese(createElement(HistoryView, { history: { items: [] } })).includes('まだ変更はありません'))
+  const focus = inJapanese(createElement(FocusView, { focus: { stale: true, running: false, focus: { track: { name: 'Drums' } }, transport: { playing: false } }, now: 0 }))
+  for (const text of ['Drums', '■ 停止中', 'Kumi は停止中']) assert.ok(focus.includes(text), `${text} in ${focus}`)
+})
