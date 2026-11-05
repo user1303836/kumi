@@ -619,6 +619,11 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let Some(row) = ctx.history().row(id) else {
         return Ok(answer("refused", "There's no change by that id in HISTORY."));
     };
+    // A script's row (CC-19): Kumi can't undo what code did, preview or not, whole or a row of it, and the DAW isn't
+    // asked. It comes before CC-20's refusal and #1129's whole change, so neither reaches a script's row.
+    if row.script.is_some() {
+        return Ok(super::script::not_undoable(ctx, previewing(&call.args)));
+    }
     // A change only the DAW's own Undo takes back is refused with its words, before anything is asked (CC-20), whole or
     // a row of it.
     if row.reason.as_deref() == Some(DAW_UNDO) {
@@ -1047,6 +1052,7 @@ mod tests {
             call_outcome: None,
             change_id: None,
             sources: None,
+            script: None,
         }
     }
 

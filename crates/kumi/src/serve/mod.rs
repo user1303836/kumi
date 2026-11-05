@@ -23,6 +23,7 @@ pub mod map;
 pub mod mcp;
 pub mod read;
 pub mod registry;
+pub mod script;
 pub mod setup;
 pub mod snapshots;
 
