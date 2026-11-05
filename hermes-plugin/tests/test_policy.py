@@ -264,6 +264,17 @@ class Approvals(unittest.TestCase):
         self.assertEqual(decision["rule_key"], f"kumi:folder_read:{support.DRUMS}:s1")
         self.assertEqual(decision["message"].splitlines()[1:3], [f"• {support.DRUMS}", policy.AUDIO_ONLY],
                          "the folder as Kumi keeps it, and what it reads there (item 7: audio files only)")
+        deep = str(support.SAMPLES)
+        while len(deep) <= 205:  # a deep sample-library folder, longer than an approval's line
+            deep = os.path.join(deep, "A Sample Pack With A Long Name")
+        asked = self.hook("kumi_library", {"action": "add_folder", "folder": deep})
+        self.assertEqual(asked["action"], "approve", "a deep folder is shown, never refused for its length")
+        lines = asked["message"].splitlines()
+        shown = lines[1:lines.index(policy.AUDIO_ONLY)]
+        kept = asked["rule_key"].removeprefix("kumi:folder_read:").removesuffix(":s1")
+        self.assertEqual("".join(shown), f"• {kept}", "the whole path, cut nowhere")
+        self.assertGreater(len(shown), 1)
+        self.assertTrue(all(len(line) <= policy.STEP_LINE for line in shown), shown)
         refused = ["Samples", str(support.ROOT), os.path.expanduser("~"), support.DRUMS + "\nKicks",
                    os.path.join(str(support.ROOT), "Users", "me", "Samples", "..", "..", "..")]
         if os.name == "nt":

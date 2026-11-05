@@ -384,7 +384,7 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
         if refusal is not None:
             return block(f"Kumi didn't add the folder: {refusal}")
         return approve(["Kumi: read the audio files in this folder and its subfolders, to build your sound map:",
-                        f"• {folder}", AUDIO_ONLY], f"kumi:folder_read:{folder}")
+                        *_path_lines(folder), AUDIO_ONLY], f"kumi:folder_read:{folder}")
     try:
         status = _ask(host, "library", {"action": "status"}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
@@ -393,7 +393,20 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
     if not folders:
         return block("Kumi didn't scan anything: it has no approved sample folders yet. Add one first.")
     return approve(["Kumi: scan these sample folders and update your sound map, in the background:",
-                    *(f"• {folder}" for folder in folders), AUDIO_ONLY], "kumi:folder_read:scan")
+                    *(line for folder in folders for line in _path_lines(folder)), AUDIO_ONLY], "kumi:folder_read:scan")
+
+
+def _path_lines(path: str) -> list[str]:
+    """A folder's path as approval lines, "• " first: whole, since the path is what's approved, so one too long for a
+    line goes on over the next ones, each ending after a separator where one falls in its second half."""
+    lines, rest, lead = [], path, "• "
+    while len(lead) + len(rest) > STEP_LINE:
+        room = STEP_LINE - len(lead)
+        separator = max(rest.rfind("/", 0, room), rest.rfind("\\", 0, room))
+        cut = separator + 1 if separator > room // 2 else room
+        lines.append(lead + rest[:cut])
+        rest, lead = rest[cut:], ""
+    return [*lines, lead + rest]
 
 
 # Item 7 (the owner's decision): a scan indexes audio files only, and the approvals say so.
