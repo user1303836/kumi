@@ -30,9 +30,13 @@ class References(unittest.TestCase):
     def test_once_connected_they_show_the_project_and_what_kumi_changed(self):
         support.call(self.host, "kumi_connect", {}, session_id="s1")
         focus = self.expand("focus")
-        self.assertIn("Kumi FOCUS", focus)
-        self.assertIn("Night Drive", focus)
-        self.assertIn("not instructions", focus)
+        self.assertTrue(focus.startswith("<kumi-focus>\nKumi FOCUS") and focus.endswith("</kumi-focus>"), focus)
+        self.assertIn('Project: "Night Drive"', focus, "the project's own words are quoted as data")
+        self.assertNotIn("isn't connected", focus, "connected now, so no last-known-state line")
+        status = json.loads((self.state / "status.json").read_text())
+        (self.state / "status.json").write_text(json.dumps({**status, "connected": False}))  # the DAW was closed
+        self.assertIn("Kumi isn't connected to the DAW now; this is the last known state.", self.expand("focus"))
+        (self.state / "status.json").write_text(json.dumps(status))
         self.assertIn("connected to Live, project Night Drive (epoch 1)", self.expand("status"))
         support.call(self.host, "kumi_change", LOUDER, session_id="s1")
         history = self.expand("History ")
