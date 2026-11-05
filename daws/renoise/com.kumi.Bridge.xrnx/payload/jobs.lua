@@ -76,6 +76,20 @@ function M:add(record, request, fn, wrote)
   return job
 end
 
+-- Pure background work has no connection or wire request to answer. Its completion can fill an immutable-data cache,
+-- but must not use an old captured value to change the song or its journal. It retains the normal epoch/shape checks.
+function M:add_internal(fn, finished)
+  assert(type(finished) == "function", "internal work has its own completion")
+  local job = self:add(nil, {}, fn)
+  job.background, job.internal_finished = true, finished
+  return job
+end
+
+local function finish(self, job, ok, value)
+  if job.internal_finished then job.internal_finished(ok, value)
+  else self.ctx.finish(job, ok, value) end
+end
+
 function M:pending()
   return #self.list
 end
@@ -109,7 +123,7 @@ end
 function M:cancel(record)
   for i = #self.list, 1, -1 do
     local job = self.list[i]
-    if job.record == record then
+    if job.record == record and not job.internal_finished then
       if job.wrote then job.unheard = true else table.remove(self.list, i) end
     end
   end
@@ -128,7 +142,7 @@ function M:abort_all(code, message)
     if job.wrote then
       err = { code = "uncertain", message = job.wrote .. " stopped when " .. message:gsub(": ask again$", "") .. ": part of it may be in the song, look for it" }
     end
-    if not job.unheard then self.ctx.finish(job, false, err) end
+    if not job.unheard then finish(self, job, false, err) end
   end
   if any then self.ctx.on_active(false) end
 end
@@ -167,7 +181,7 @@ local function settle(self, finished)
   end
   if #finished > 0 and #self.list == 0 then self.ctx.on_active(false) end
   for _, done in ipairs(finished) do
-    if not done.job.unheard then self.ctx.finish(done.job, done.ok, done.value) end
+    if not done.job.unheard then finish(self, done.job, done.ok, done.value) end
   end
 end
 

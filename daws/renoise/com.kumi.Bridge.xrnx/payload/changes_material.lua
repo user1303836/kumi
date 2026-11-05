@@ -4,6 +4,7 @@
 local import = ...
 local base = import("changes_base")
 local rows = import("rows")
+local preset_prints = import("preset_prints")
 
 local fail = base.fail
 local M = {}
@@ -448,30 +449,80 @@ end
 -- producer's clicks, lab 2026-10-20), and the view (a device folded or not, a Doofer's devices shown, the chain a Splitter
 -- shows or monitors, where a plug-in's editor sits): what the journal compares to tell Renoise's undo and redo of a Doofer's,
 -- a Splitter's or a Notepad's contents, and what a change's fence of them holds.
-M.VIEW_STATE = { "IsMaximized", "ShowDevices", "CurrentlyVisibleChain", "MonitorVisibleChain", "PluginEditorWindowPosition" }
+M.VIEW_STATE = preset_prints.VIEW_STATE
 -- Whether preset data holds a meta device aimed at something: only what's inside a container says that (a device's own data keeps no
 -- aim, lab 3.5.4). What it aims at moves on its own, and that device's value in the data with it, stopped or playing (lab 2026-11-01).
-function M.aims_inside(xml)
-  for value in xml:gmatch("DestEffect>%s*<Value>(-?[%d%.]+)</Value>") do
-    if tonumber(value) >= 0 then return true end
-  end
-  return false
-end
+M.aims_inside = preset_prints.aims_inside
 
 function M.content_of(xml)
   local kept = M.prints_of(xml)
   local printed = kept.content
   if printed == nil then
-    local source = M.aims_inside(xml) and xml:gsub("<Value>[^<]*</Value>", "<Value/>") or xml
-    local content = source:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
-    content = content:gsub("<IsSelected>[^<]*</IsSelected>", "<IsSelected/>")
-    for _, tag in ipairs(M.VIEW_STATE) do
-      content = content:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
-    end
-    printed = print_now(content)
+    printed = preset_prints.content_now(xml, print_now)
     kept.content = printed
   end
   return printed
+end
+
+-- Background polls print a fresh immutable body in bounded steps. Ready prints share the ordinary exact-string cache;
+-- pending work never changes the journal. Cache pressure and oversized bodies retain the old synchronous check rather
+-- than silently stopping checks. Renoise's own indivisible active_preset_data getter is outside this Lua-work bound.
+M.PRINT_JOBS_KEPT, M.PRINT_JOBS_BYTES = 8, 64 * 1048576
+M.PRINT_INLINE_WORK, M.PRINT_JOB_WORK, M.PRINT_JOB_CHUNKS = 8192, 4096, 8
+local pending_prints, pending_count, pending_bytes = {}, 0, 0
+
+function M.pending_prints() return pending_count, pending_bytes end
+
+local function ready(kept) return kept.shape ~= nil and kept.content ~= nil end
+local function complete(xml, kept, result)
+  if result.synchronous then kept.poll_sync = true return false end
+  kept.shape, kept.content = result.shape, result.content
+  return true
+end
+local function synchronous_prints(xml, kept)
+  if kept.shape == nil then kept.shape = preset_prints.shape_now(xml, print_now) end
+  if kept.content == nil then kept.content = preset_prints.content_now(xml, print_now) end
+  return kept
+end
+
+-- schedule(work, finished) is internal scheduler work, with no connection or wire reply. Its closure holds only text
+-- and pure processor state; no device, song, journal entry or index can survive into a later slice.
+function M.polled_prints(xml, schedule)
+  local kept = M.prints_of(xml)
+  if ready(kept) then return kept end
+  if pending_prints[xml] then return nil end
+  if not schedule or kept.poll_sync or #xml > math.min(M.PRINT_JOBS_BYTES, M.PRINTS_BYTES)
+      or pending_count >= M.PRINT_JOBS_KEPT or pending_bytes + #xml > M.PRINT_JOBS_BYTES then
+    return synchronous_prints(xml, kept)
+  end
+  local processor = preset_prints.new(xml)
+  local result = processor:advance(M.PRINT_INLINE_WORK)
+  if result then
+    if complete(xml, kept, result) then return kept end
+    return synchronous_prints(xml, kept)
+  end
+  local task = {}
+  pending_prints[xml], pending_count, pending_bytes = task, pending_count + 1, pending_bytes + #xml
+  local function finished(ok, value)
+    if pending_prints[xml] ~= task then return end
+    pending_prints[xml], pending_count, pending_bytes = nil, pending_count - 1, pending_bytes - #xml
+    -- Even a stale completion only fills a cache selected by a future fresh read of exactly these bytes.
+    if ok and type(value) == "table" then complete(xml, M.prints_of(xml), value) end
+  end
+  local function work(job)
+    while true do
+      for _ = 1, M.PRINT_JOB_CHUNKS do
+        local value = processor:advance(M.PRINT_JOB_WORK)
+        if value then return value end
+        job.slice()
+      end
+      -- A stopped/mock clock cannot turn a slice into an unbounded loop over the whole body.
+      job.step()
+    end
+  end
+  local ok, err = pcall(schedule, work, finished)
+  if not ok then finished(false) error(err, 0) end
+  return nil
 end
 
 -- A device whose settings hold more than its parameters: a Doofer's or a Splitter's devices inside, a Notepad's text, a

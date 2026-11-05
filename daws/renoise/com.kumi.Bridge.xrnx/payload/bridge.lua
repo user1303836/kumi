@@ -906,6 +906,8 @@ local function on_tracks(op)
   })
 end
 
+local function preset_work(work, finished) return jobs:add_internal(work, finished) end
+
 local function flush_events()
   b.held_insert = nil -- (an undo or redo is over by the next callback: its pairs with it)
   if not observers:attached() then return end
@@ -935,7 +937,7 @@ local function flush_events()
   local now_ms = M.now_ms()
   if changes.journal_active(b.journal) and (b.polling or now_ms - (b.polled_ms or 0) >= M.POLL_MS) then
     if not b.polling then b.polled_ms = now_ms end
-    b.polling = not changes.journal_poll(b.journal, M.POLL_MOST, M.POLL_EACH)
+    b.polling = not changes.journal_poll(b.journal, M.POLL_MOST, M.POLL_EACH, preset_work)
   end
   for _, event in ipairs(changes.journal_take(b.journal)) do
     conns:event("undone_in_daw", { descs = json.array(event.descs), how = event.how, epoch = epoch() })

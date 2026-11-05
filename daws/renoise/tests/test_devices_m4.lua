@@ -2180,6 +2180,274 @@ test("devices m4: a Doofer's shape leaves out what Renoise's view shows of it, a
   eq(presets.shape_of(folded), presets.shape_of(viewed))
 end)
 
+-- The pre-slicing textual rules, deliberately independent of the incremental byte-state implementation. These are
+-- string substitutions, including on malformed XML, rather than an XML parser's interpretation.
+local function legacy_preset_prints(xml)
+  local material = T.load_payload_module("changes_material")
+  local tags = { "SelectedPresetIsModified", "IsSelected", "IsMaximized", "ShowDevices", "CurrentlyVisibleChain", "MonitorVisibleChain", "PluginEditorWindowPosition" }
+  local shape = xml:gsub("<Value>[^<]*</Value>", "<Value/>"):gsub("<ParameterChunk>.-</ParameterChunk>", "<ParameterChunk/>")
+  local moving = false
+  for value in xml:gmatch("DestEffect>%s*<Value>(-?[%d%.]+)</Value>") do
+    if tonumber(value) >= 0 then moving = true break end
+  end
+  local content = moving and xml:gsub("<Value>[^<]*</Value>", "<Value/>") or xml
+  for _, tag in ipairs(tags) do
+    shape = shape:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
+    content = content:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
+  end
+  return { shape = material.print_now(shape), content = material.print_now(content) }
+end
+
+test("devices m4: sliced preset prints preserve the textual fingerprints at every small work boundary", function()
+  local prints = T.load_payload_module("preset_prints")
+  local cases = { "", "abc", "<", "<Value>", "<Value></Value>", "<Value>1<IsSelected>x</IsSelected></Value>",
+    "<ParameterChunk>unclosed<Value>2</Value><ParameterChunk>also unclosed<ShowDevices>true</ShowDevices>",
+    "<ParameterChunk>outer<ParameterChunk>inner</ParameterChunk>tail</ParameterChunk>",
+    "<IsSelected><ParameterChunk>state</ParameterChunk></IsSelected>",
+    "<Value>unclosed</Val<Value>3</Value>", "<Value>\195\169\0\255</Value>",
+    "DestEffect> \n\t<Value>-1</Value><Value>4</Value>", "DestEffect><Value>-0.0</Value><Value>4</Value>",
+    "DestEffect><Value>1.2.3</Value>", "DestEffect><Value>0</Value>DestEffect><Value>1.2.3</Value>" }
+  local fragments = { "<Value>", "</Value>", "<ParameterChunk>", "</ParameterChunk>", "<IsSelected>", "</IsSelected>",
+    "<ShowDevices>", "</ShowDevices>", "<PluginEditorWindowPosition>", "</PluginEditorWindowPosition>", "x", "<", "0.5", "\195\169", "\0" }
+  local seed = 13
+  for _ = 1, 80 do
+    local pieces = {}
+    for _ = 1, 12 do
+      seed = (seed * 16807) % 2147483647
+      pieces[#pieces + 1] = fragments[seed % #fragments + 1]
+    end
+    cases[#cases + 1] = table.concat(pieces)
+  end
+  for _, xml in ipairs(cases) do
+    local old_ok, expected = pcall(legacy_preset_prints, xml)
+    for _, budget in ipairs({ 1, 2, 3, 7, 31, 4096 }) do
+      local state, result = prints.new(xml), nil
+      local new_ok = pcall(function()
+        for _ = 1, 40 * (#xml + 1) do
+          local used
+          result, used = state:advance(budget)
+          ok(used <= budget, "each resume respects the work bound")
+          if result then break end
+        end
+        ok(result ~= nil, "the finite text completes")
+      end)
+      eq(new_ok, old_ok, "the same malformed numeric captures are refused")
+      if old_ok then eq(result.shape, expected.shape) eq(result.content, expected.content) end
+    end
+  end
+  local long = "DestEffect><Value>-" .. string.rep("0", prints.NUMBER_BYTES + 1) .. "</Value><Value>7</Value>"
+  local state, result = prints.new(long)
+  repeat result = state:advance(17) until result
+  ok(result.synchronous and result.shape == nil and result.content == nil, "an unusually long conversion is explicitly synchronous, never a partial fence")
+end)
+
+local function with_print_limits(fn)
+  local material = T.load_payload_module("changes_material")
+  local names = { "PRINT_INLINE_WORK", "PRINT_JOB_WORK", "PRINT_JOB_CHUNKS", "PRINT_JOBS_KEPT", "PRINT_JOBS_BYTES", "PRINTS_KEPT" }
+  local saved = {}
+  for _, name in ipairs(names) do saved[name] = material[name] end
+  material.PRINT_INLINE_WORK, material.PRINT_JOB_WORK, material.PRINT_JOB_CHUNKS = 1, 64, 1
+  local success, err = pcall(fn, material)
+  for _, name in ipairs(names) do material[name] = saved[name] end
+  if not success then error(err, 0) end
+end
+
+test("devices m4: pending preset prints do not move a journal until a fresh read selects the completed exact body", function()
+  setup()
+  with_print_limits(function(material)
+    local base, specs = T.load_payload_module("changes_base"), T.load_payload_module("changes_presets")
+    local jobs = T.load_payload_module("jobs")
+    local generation, wire_finished = "song-A", 0
+    local scheduler = jobs.new({ now_ms = function() return 0 end, unix_ms = function() return 0 end,
+      epoch = function() return generation end, layout = function() return 0 end, shape = function() return 0 end,
+      finish = function() wire_finished = wire_finished + 1 end, on_active = function() end })
+    local function schedule(work, done) return scheduler:add_internal(work, done) end
+    local function finish()
+      for _ = 1, 10000 do if scheduler:pending() == 0 then break end scheduler:run() end
+      eq(scheduler:pending(), 0, "bounded text eventually completes")
+    end
+    scheduler:abort_all("test", "clean start")
+    local a = "<A>queued-journal-A<Value>1</Value><Text>" .. string.rep("a", 300) .. "</Text></A>"
+    local b = a:gsub("queued%-journal%-A", "queued-journal-B")
+    local current, alive, reads = a, true, 0
+    local object = setmetatable({}, { __index = function(_, name)
+      if name == "active_preset_data" then reads = reads + 1 return current end
+    end })
+    local original = base.KINDS["doofer-macro"]
+    local spec = { polled = true, reread = function() if alive then return object end end,
+      read = original.read, poll_read = original.poll_read, same = original.same }
+    local journal = base.journal_new()
+    journal.edits = function() return 0 end
+    for k = 1, 2 do
+      base.remember(journal, { desc = "queued " .. k, kind = "doofer-macro", place = { track = 1, device = 2 }, spec = spec,
+        prior = legacy_preset_prints(a), applied = legacy_preset_prints(b), state = "applied" })
+    end
+    material.PRINTS_KEPT = 4
+    local empty = material.prints_of(a)
+    reads = 0
+    base.journal_poll(journal, 8, 2, schedule)
+    eq(reads, 1, "one fresh native body for all entries of the device")
+    eq(material.pending_prints(), 1)
+    eq(journal.entries[1].state, "applied", "an incomplete print is not a fence")
+    -- A leaves the ordinary cache while its pure work remains pending; B is now the actual device's body.
+    material.PRINTS_KEPT = 1
+    material.prints_of("evict queued body")
+    material.PRINTS_KEPT = 4
+    current = b
+    finish()
+    ok(material.prints_of(a) ~= empty, "completion can refill an evicted exact-string record")
+    eq(journal.entries[1].state, "applied", "stale A's completion does not journal an undo")
+    eq(#base.journal_take(journal), 0)
+    base.journal_poll(journal, 8, 2, schedule)
+    finish()
+    base.journal_poll(journal, 8, 2, schedule)
+    eq(journal.entries[1].state, "applied", "a fresh B read remains applied")
+    current = a
+    base.journal_poll(journal, 8, 2, schedule)
+    eq(journal.entries[1].state, "undone", "a fresh exact A read may now use A's completed print")
+    eq(journal.entries[2].state, "undone")
+    local events = base.journal_take(journal)
+    eq(#events, 1) eq(#events[1].descs, 2)
+    current = b
+    base.journal_poll(journal, 8, 2, schedule)
+    eq(journal.entries[1].state, "applied", "the ready exact B permits normal redo detection")
+    base.journal_take(journal)
+    -- Removing the object/entries and switching songs cannot give a pending completion a journal to update.
+    current = "<A>deleted-device" .. string.rep("c", 300) .. "</A>"
+    base.journal_poll(journal, 8, 2, schedule)
+    ok(material.pending_prints() > 0)
+    alive = false
+    base.journal_device_event(journal, 1, "remove", 2, false)
+    finish()
+    eq(#journal.entries, 0) eq(#base.journal_take(journal), 0)
+    material.polled_prints("<A>new-song" .. string.rep("d", 300) .. "</A>", schedule)
+    generation = "song-B"
+    scheduler:run()
+    eq(material.pending_prints(), 0, "epoch abort drops pending text")
+    material.polled_prints("<A>reloading" .. string.rep("e", 300) .. "</A>", schedule)
+    scheduler:abort_all("reloading", "the payload stopped")
+    eq(material.pending_prints(), 0, "reload clears pending work")
+    eq(select(2, material.pending_prints()), 0, "and its retained bytes")
+    eq(wire_finished, 0, "internal completions never answer a nonexistent connection")
+  end)
+end)
+
+test("devices m4: continuously changing raw preset values cannot starve the journal's fresh check", function()
+  setup()
+  with_print_limits(function(material)
+    local base = T.load_payload_module("changes_base")
+    T.load_payload_module("changes_presets")
+    local jobs = T.load_payload_module("jobs")
+    local scheduler = jobs.new({ now_ms = function() return 0 end, unix_ms = function() return 0 end,
+      epoch = function() return "moving-preset" end, layout = function() return 0 end, shape = function() return 0 end,
+      finish = function() error("a pure preset job has no wire response") end, on_active = function() end })
+    local function schedule(work, done) return scheduler:add_internal(work, done) end
+    local function finish()
+      for _ = 1, 10000 do if scheduler:pending() == 0 then break end scheduler:run() end
+      eq(scheduler:pending(), 0, "every background body completes between polls")
+      eq(material.pending_prints(), 0, "queue pressure cannot force the fresh check in this fixture")
+    end
+    local padding = string.rep("x", 65536)
+    local function body(name, value)
+      -- A mapped meta device makes values move on their own; both fingerprints strip them, while the structural name
+      -- still distinguishes prior/applied. Every native getter returns new raw bytes, however fast its old job finished.
+      return "<P><DestEffect><Value>1</Value></DestEffect><Name>" .. name .. "</Name><Value>" .. value
+        .. "</Value><Pad>" .. padding .. "</Pad></P>"
+    end
+    local prior, applied = legacy_preset_prints(body("prior", 0)), legacy_preset_prints(body("applied", 0))
+    eq(legacy_preset_prints(body("prior", 123)).content, prior.content, "raw values do not change the normalized prior")
+    ok(prior.content ~= applied.content, "the structural change is observable")
+    local current, reads = "prior", 0
+    local object = setmetatable({}, { __index = function(_, name)
+      if name == "active_preset_data" then reads = reads + 1 return body(current, reads) end
+    end })
+    local original = base.KINDS["doofer-macro"]
+    local spec = { polled = true, reread = function() return object end,
+      read = original.read, poll_read = original.poll_read, same = original.same }
+    local journal = base.journal_new()
+    journal.edits = function() return 0 end
+    local function remember(k)
+      base.remember(journal, { desc = "moving body " .. k, kind = "doofer-macro", place = { track = 1, device = 2 }, spec = spec,
+        prior = prior, applied = applied, state = "applied" })
+    end
+    remember(1) remember(2)
+    local function poll()
+      local before = reads
+      base.journal_poll(journal, 8, 2, schedule)
+      eq(reads - before, 1, "one current XML read for the entire device group")
+      finish()
+    end
+    poll() poll()
+    eq(journal.entries[1].state, "applied", "completed stale raw bodies do not journal an undo")
+    eq(#base.journal_take(journal), 0)
+    remember(3) -- A newly added first group member must not reset the older members' two deferred checks.
+    poll()
+    for _, entry in ipairs(journal.entries) do eq(entry.state, "undone", "the third fresh poll detects undo despite raw churn") end
+    local events = base.journal_take(journal)
+    eq(#events, 1) eq(events[1].how, "undo") eq(#events[1].descs, 3)
+    current = "applied"
+    poll() poll()
+    eq(journal.entries[1].state, "undone", "stale completions cannot journal redo either")
+    poll()
+    for _, entry in ipairs(journal.entries) do eq(entry.state, "applied", "fresh checks remain bounded for redo") end
+    events = base.journal_take(journal)
+    eq(#events, 1) eq(events[1].how, "redo") eq(#events[1].descs, 3)
+    ok(not json.encode(events):find("_poll_misses", 1, true), "internal scheduling state is absent from wire events")
+  end)
+end)
+
+test("devices m4: preset print queue pressure and oversized texts keep the synchronous journal check", function()
+  with_print_limits(function(material)
+    local scheduled = {}
+    local function schedule(work, done) scheduled[#scheduled + 1] = { work = work, done = done } end
+    material.PRINT_JOBS_KEPT, material.PRINT_JOBS_BYTES = 1, 1000
+    local a, b = "<a>queue-first" .. string.rep("x", 200) .. "</a>", "<b>queue-second" .. string.rep("y", 200) .. "</b>"
+    eq(material.polled_prints(a, schedule), nil)
+    eq(material.pending_prints(), 1)
+    local ready = material.polled_prints(b, schedule)
+    eq(ready.content, legacy_preset_prints(b).content, "full queue checks synchronously rather than dropping the check")
+    eq(#scheduled, 1, "the queue's entry bound")
+    eq(select(2, material.pending_prints()), #a, "only queued immutable bytes are retained")
+    scheduled[1].done(false, { code = "reloading" })
+    material.PRINT_JOBS_BYTES = 20
+    ready = material.polled_prints("<large>" .. string.rep("z", 100) .. "</large>", schedule)
+    eq(ready.shape, legacy_preset_prints("<large>" .. string.rep("z", 100) .. "</large>").shape)
+    eq(material.pending_prints(), 0, "oversized text uses the explicit synchronous fallback")
+  end)
+end)
+
+test("devices m4: ping and status answer while a fresh preset body is still being printed, and unloading drops it", function()
+  local function expose_material(env)
+    local path = env.bundle .. "payload/changes_material.lua"
+    local text = assert(H.read(path))
+    local exposed, count = text:gsub("\nreturn M%s*$", "\nKUMI_PRESET_MATERIAL = M\nreturn M\n")
+    eq(count, 1)
+    local file = assert(io.open(path, "wb"))
+    file:write(exposed) file:close()
+  end
+  local env = H.setup({ song = { name = "Prints", file_name = "/s/prints.xrns", mixer_device = true,
+    tracks = { { name = "A", devices = { doofer() } } }, patterns = 1, pattern_lines = 16, instruments = 1 }, patch = expose_material })
+  local peer = H.connect(env)
+  H.frames(peer)
+  local epoch, layout = place(peer)
+  doofer_edit(peer, epoch, layout, epoch .. ":device:1.2", "doofer-macro", "<Name>Macro 1</Name>", "<Name>Drive</Name>", "Kumi: background prints")
+  local material = assert(KUMI_PRESET_MATERIAL)
+  material.PRINT_INLINE_WORK, material.PRINT_JOB_WORK, material.PRINT_JOB_CHUNKS = 1, 128, 1
+  local text, replaced = mock.song:track(1):device(2).active_preset_data:gsub("</DeviceSlot>", "<!--" .. string.rep("x", 8192) .. "--></DeviceSlot>", 1)
+  eq(replaced, 1)
+  device_data(1, 2).preset_data = text
+  mock.advance(1100)
+  ok(material.pending_prints() > 0, "the first bounded slices leave work pending")
+  ok(call(peer, "ping").result, "ping answers before the fingerprint completes")
+  ok(call(peer, "status").result, "status answers before the fingerprint completes")
+  ok(material.pending_prints() > 0, "the short requests did not finish the long work in their callbacks")
+  mock.fire(mock.tool.tool_will_unload_observable)
+  eq(material.pending_prints(), 0, "the stopped payload releases its pending immutable body")
+  eq(select(2, material.pending_prints()), 0)
+  KUMI_PRESET_MATERIAL = nil
+  H.no_dialogs()
+end)
+
 test("devices m4: a text's print and hash are the host's numbers, made sixteen bytes at a time as they were one at a time (perf N1)", function()
   local material = T.load_payload_module("changes_material")
   local base = T.load_payload_module("changes_base")

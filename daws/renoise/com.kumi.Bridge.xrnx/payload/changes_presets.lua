@@ -13,6 +13,7 @@ local refs = import("refs")
 local rows = import("rows")
 local base = import("changes_base")
 local material_ = import("changes_material")
+local preset_prints = import("preset_prints")
 local devices_ = import("changes_devices")
 local vst3_ = import("vst3_presets")
 local json_null = import("json").null
@@ -39,14 +40,7 @@ function M.shape_of(xml)
   local kept = material_.prints_of(xml)
   local printed = kept.shape
   if printed == nil then
-    local shape = xml:gsub("<Value>[^<]*</Value>", "<Value/>"):gsub("<ParameterChunk>.-</ParameterChunk>", "<ParameterChunk/>")
-    shape = shape:gsub("<SelectedPresetIsModified>[^<]*</SelectedPresetIsModified>", "<SelectedPresetIsModified/>")
-    shape = shape:gsub("<IsSelected>[^<]*</IsSelected>", "<IsSelected/>")
-    -- (and what Renoise's view shows of it: no change to what it holds)
-    for _, tag in ipairs(material_.VIEW_STATE) do
-      shape = shape:gsub("<" .. tag .. ">[^<]*</" .. tag .. ">", "<" .. tag .. "/>")
-    end
-    printed = material_.print_now(shape)
+    printed = preset_prints.shape_now(xml, material_.print_now)
     kept.shape = printed
   end
   return printed
@@ -589,6 +583,12 @@ local function polled_read(device)
   return { shape = M.shape_of(xml), content = M.content_of(xml) }
 end
 
+local function background_read(device, _, schedule)
+  local printed = material_.polled_prints(device.active_preset_data, schedule)
+  if printed then return { shape = printed.shape, content = printed.content } end
+  return nil
+end
+
 for _, spec in ipairs(XML_KINDS) do
   local kind = spec.kind
   -- (`was`: the device's preset data as the caller read it a moment ago, else it is read here)
@@ -640,6 +640,7 @@ for _, spec in ipairs(XML_KINDS) do
     end,
     reread = reread,
     read = polled_read,
+    poll_read = background_read,
     -- (by content where both say it: a value inside changes it, which no shape tells)
     same = function(a, b)
       if a.content and b.content then return a.content == b.content end
