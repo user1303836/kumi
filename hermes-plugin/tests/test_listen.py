@@ -41,9 +41,10 @@ class TrackListen(unittest.TestCase):
                                     task_id="t1")
 
     def test_a_track_listen_is_asked_in_the_runtimes_words_and_nothing_plays_first(self):
-        self.assertEqual(self.hook(track()), {"action": "approve", "rule_key": "kumi:playback:listen", "message": (
+        self.assertEqual(self.hook(track()), {"action": "approve", "rule_key": "kumi:playback:listen:s1", "message": (
             "Kumi: play the track Drums of Night Drive from beat 0 to beat 8 (Arrangement) through Kumi Ears and "
-            "measure it; routing and the transport change for a moment and are put back (about 3.87 s)")})
+            "measure it; routing and the transport change for a moment and are put back (about 3.87 s)\n"
+            f"{policy.CHAT_ONLY}")})
         self.assertEqual([args.get("preview") for args in asked(self.data)], [True])
         self.assertEqual(played(self.data), [])
 
