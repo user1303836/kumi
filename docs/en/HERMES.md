@@ -26,7 +26,7 @@ steps and an optional third, and Hermes asks before each:
 
 1. **Kumi's runtime:** Kumi's official release for your computer, 26–33 MB, from Kumi's GitHub releases. It's checked
    against the SHA-256 the plugin pins and unpacked into Hermes's own data for this profile (82–121 MB).
-2. **Kumi's part in your DAW:** Live's Remote Script (with the Kumi Ears device, for listening to tracks), REAPER's
+2. **Kumi's part in your DAW:** Live's Remote Script (with the Kumi Ears device), REAPER's
    extension or Renoise's tool, at the exact paths setup shows you. Quit Live first: its Remote Script can't be
    installed while Live runs. REAPER and Renoise can stay open; restart them after (on Windows, quit REAPER to update
    its extension).
@@ -103,15 +103,13 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
   the fallback providers Hermes is set to try for that task. Retries and fallbacks can add time and token cost.
 - **Audio stays here:** Kumi measures audio on your computer and sends none of it to a model. In a messaging app
   (Telegram, Discord…), a sound you ask Hermes to send you arrives there as an attachment, through that app.
-- **Listening to a track or the mix** asks first, and plays only the beat window you approve (60 seconds at most),
-  only while the DAW is stopped. Routing and transport may change briefly and are put back after. Live captures it
-  through Kumi Ears (Max for Live); REAPER and Renoise render it into the listening folder of the Kumi installation
-  that owns their part, and Kumi copies that one file and removes it. A REAPER or Renoise track needs Kumi's newer
-  part in that DAW: when Kumi says so, run setup again and restart the DAW. Renoise listens only to a window that
-  starts and ends on whole pattern lines inside the song, and refuses any other rather than play more than you
-  approved. REAPER may show the project as modified after a track listen, since only saving clears that flag; Kumi
-  never saves. After a track listen in Live, Live may show the Set as modified, and its own Undo history includes the
-  listen's temporary device steps: Undo in Live can bring Kumi Ears back.
+- **Listening to a REAPER or Renoise track or the mix** asks first, and plays only the beat window you approve (60
+  seconds at most), only while the DAW is stopped. Routing and transport may change briefly and are put back after.
+  The DAW renders it into the listening folder of the Kumi installation that owns its part, and Kumi copies that one
+  file and removes it. It needs Kumi's newer part in that DAW: when Kumi says so, run setup again and restart the DAW.
+  Renoise listens only to a window that starts and ends on whole pattern lines inside the song, and refuses any other
+  rather than play more than you approved. REAPER may show the project as modified after a track listen, since only
+  saving clears that flag; Kumi never saves.
 - **Scheduled jobs** (Hermes cron) read only Kumi's status and HISTORY as last published. Their answer (change titles,
   track names) leaves your computer only through where the job delivers; Kumi's job blueprints deliver locally by
   default.
@@ -122,6 +120,8 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
 - Your DAW must run on the computer that runs Hermes. Hermes Desktop connected to a remote Hermes controls that
   computer's DAW, not yours.
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
+- In Live, Kumi for Hermes doesn't listen to a track or the mix yet: it says so and plays nothing. It measures audio
+  files, library sounds and Kumi's own results in every DAW.
 - Kumi reads only the open project, the sample folders you list, and finished audio other Hermes plugins saved in
   Hermes's generated-audio folder (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates), to place or
   measure it.
@@ -160,6 +160,3 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
 - No Kumi tab in the web dashboard: if the dashboard was already running when you installed Kumi, restart it
   (`hermes dashboard`).
 - Live doesn't connect: check that AbletonMcpBridge is chosen as a Control Surface.
-- Listening to a Live track says Kumi Ears is missing: run setup again. If Kumi for Hermes uses another Kumi's
-  installation, set Live up again with that Kumi (`kumi --daw ableton bridge` for a standalone Kumi, or setup in its
-  own Hermes profile). Kumi Ears needs Max for Live.

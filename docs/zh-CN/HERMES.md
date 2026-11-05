@@ -20,7 +20,7 @@ hermes plugins enable kumi
 让 Hermes“为 Live 设置 Kumi”（REAPER 或 Renoise 也一样），或在终端运行 `hermes kumi setup`。设置分两步，另有可选的第三步，每一步之前 Hermes 都会征求你的同意：
 
 1. **Kumi 的运行时：** 从 Kumi 的 GitHub 发布页下载适用于你电脑的 Kumi 官方版本（26–33 MB），用插件固定的 SHA-256 校验，再解压到 Hermes 为这个配置保存的数据中（82–121 MB）。
-2. **Kumi 的 DAW 组件：** Live 的 Remote Script（含用于聆听音轨的 Kumi Ears 设备）、REAPER 的扩展或 Renoise 的工具，安装到设置向你展示的确切位置。请先退出 Live：Live 运行时无法安装它的 Remote Script。REAPER 和 Renoise 可以保持打开，装好后重启即可（在 Windows 上更新 REAPER 扩展时，请先退出 REAPER）。
+2. **Kumi 的 DAW 组件：** Live 的 Remote Script（含 Kumi Ears 设备）、REAPER 的扩展或 Renoise 的工具，安装到设置向你展示的确切位置。请先退出 Live：Live 运行时无法安装它的 Remote Script。REAPER 和 Renoise 可以保持打开，装好后重启即可（在 Windows 上更新 REAPER 扩展时，请先退出 REAPER）。
 3. **可选的 ffmpeg：** 如果你的电脑上已有 ffmpeg，设置会询问是否让 Kumi 用它读取 MP3、FLAC 等压缩音频。无论是否允许，设置都会完成；不使用时，Kumi 只能读取 WAV 和 AIFF。
 
 Hermes Desktop 会完整显示每一步要你确认的内容。终端里的对话或聊天应用可能只显示其中一部分，所以在那里 Kumi 绝不会只拿出一步的一部分来征求同意，而是请你在终端运行 `hermes kumi setup`，或改用 Hermes Desktop。
@@ -70,7 +70,7 @@ Hermes 会在每次修改前征求同意，因为它的确认功能是开启的�
 - **对话：** Kumi 记下的工程信息（FOCUS、变化）和测量结果，会作为对话的一部分发给你在 Hermes 中使用的模型。Kumi 的状态告诉模型设置进行到哪一步时，不会提到你电脑上的任何文件夹。
 - **用模型解读测量结果**（只有打开后才会）：把测量数值和一张小的频段能量图发给你在 Hermes 中为 Kumi 聆听任务设置的模型，或 Hermes 为该任务配置的后备服务商，绝不发送音频本身或文件路径。重试和后备可能增加时间和 token 费用。
 - **音频留在本地：** Kumi 在你的电脑上测量音频，不会把音频发给任何模型。在聊天应用（Telegram、Discord 等）中，如果你让 Hermes 把声音发给你，它会作为附件通过该应用送达。
-- **聆听音轨或混音**之前会先征求同意，只播放你批准的节拍范围（最多 60 秒），而且只在 DAW 停止时进行。路由和走带可能会短暂改变，结束后会恢复。Live 通过 Kumi Ears（Max for Live）采集；REAPER 和 Renoise 渲染到拥有 Kumi 的该 DAW 组件的那套 Kumi 安装的 listening 文件夹中，Kumi 只复制那一个文件，然后删除它。聆听 REAPER 或 Renoise 的音轨需要较新的 Kumi 的 DAW 组件：Kumi 提示时，请再运行一次设置并重启 DAW。Renoise 只聆听在歌曲内、起止都落在整行 pattern 上的范围，其他范围会直接拒绝，而不会多播放你未批准的内容。在 REAPER 中聆听音轨后，工程可能显示为已修改（只有保存才能清除这个标记，而 Kumi 从不保存）。在 Live 中聆听音轨后，Set 可能显示为已修改，而且 Live 自己的撤销历史中会包含这次聆听临时添加设备的步骤：在 Live 中按撤销可能会让 Kumi Ears 重新出现。
+- **在 REAPER 和 Renoise 中聆听音轨或混音**之前会先征求同意，只播放你批准的节拍范围（最多 60 秒），而且只在 DAW 停止时进行。路由和走带可能会短暂改变，结束后会恢复。DAW 会把它渲染到拥有 Kumi 的该 DAW 组件的那套 Kumi 安装的 listening 文件夹中，Kumi 只复制那一个文件，然后删除它。这需要较新的 Kumi 的 DAW 组件：Kumi 提示时，请再运行一次设置并重启 DAW。Renoise 只聆听在歌曲内、起止都落在整行 pattern 上的范围，其他范围会直接拒绝，而不会多播放你未批准的内容。在 REAPER 中聆听音轨后，工程可能显示为已修改（只有保存才能清除这个标记，而 Kumi 从不保存）。
 - **定时任务**（Hermes 的 cron）只读取 Kumi 最后发布的状态和 HISTORY。它的回答（修改标题、音轨名称）只会通过该任务的投递目标离开你的电脑；Kumi 的任务模板默认投递到本机。
 - Kumi for Hermes 绝不使用单独的 Kumi 的登录、模型服务商或更新程序，也不发送遥测数据。
 
@@ -78,6 +78,7 @@ Hermes 会在每次修改前征求同意，因为它的确认功能是开启的�
 
 - 你的 DAW 必须运行在运行 Hermes 的那台电脑上。连接到远程 Hermes 的 Hermes Desktop 控制的是那台电脑上的 DAW，而不是你本机的。
 - Live 支持 macOS 和 Windows；REAPER 和 Renoise 支持 macOS、Windows 和 Linux。
+- 在 Live 中，Kumi for Hermes 目前还不会聆听音轨或混音：它会说明这一点，并且不播放任何内容。在任何 DAW 中，它都能测量音频文件、音色库中的声音和 Kumi 自己的结果。
 - Kumi 只读取打开的工程、你列出的采样文件夹，以及其他 Hermes 插件保存在 Hermes 生成音频文件夹（`<HERMES_HOME>/cache/generated/audio`，Kumi 从不创建这个文件夹）中的已完成音频，用于放置或测量。
 - Kumi 能直接读取 WAV 和 AIFF。对于 MP3、FLAC 等压缩音频，如果你在设置时允许，它会使用电脑上已有的 ffmpeg（绝不下载）。每次启动前，Kumi 都会确认它仍是你允许的那个 ffmpeg 文件（不检查它加载的库，这些库可能随升级而变化）。ffmpeg 只会拿到 Kumi 正在读取的那一个文件：绝不是 URL 或播放列表，也不从网络读取任何内容。Kumi 可读取的文件最大 50 MiB，最多测量其中 12 分钟。
 - Kumi 的 REAPER 扩展会把每个已保存工程的 ID 存在工程里（ext state），Renoise 工具会把每首歌的 ID 存在歌曲的工具数据中，并随之一起保存。
@@ -95,4 +96,3 @@ Hermes 会在每次修改前征求同意，因为它的确认功能是开启的�
 - Hermes Desktop 中看不到 Kumi：检查 技能与工具 → 插件 里 Kumi 的 **Agent** 和**桌面**开关是否打开，以及 Hermes 中是否已启用（`hermes plugins enable kumi`）。
 - 网页仪表盘中没有 Kumi 标签页：如果安装 Kumi 时仪表盘已经在运行，请重启它（`hermes dashboard`）。
 - Live 连不上：检查是否已把 AbletonMcpBridge 选为控制界面。
-- 聆听 Live 音轨时提示缺少 Kumi Ears：再运行一次设置。如果 Kumi for Hermes 使用的是另一套 Kumi 的安装，请用那套 Kumi 重新设置 Live（单独的 Kumi 运行 `kumi --daw ableton bridge`，另一个 Hermes 配置则在那个配置中运行设置）。Kumi Ears 需要 Max for Live。

@@ -30,7 +30,7 @@ a DAW to work in.
 | `kumi_change` | One typed change of one or more steps, recorded in HISTORY | yes |
 | `kumi_undo` | Undoes a HISTORY entry while it can still be undone | yes |
 | `kumi_history` | Lists recent changes and whether each can be undone | no |
-| `kumi_listen` | Measures an audio file, a library sound, a result Kumi made, or a track or the mix | for a track or the mix |
+| `kumi_listen` | Measures an audio file, a library sound, a result Kumi made, or a REAPER or Renoise track or the mix (in Live it says it can't yet, and plays nothing) | for a track or the mix |
 | `kumi_sounds` | Searches your sound library | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan) | no |
@@ -124,15 +124,14 @@ everything.
   yolo too, and Kumi can't tell it apart.
 - **HISTORY and undo:** HISTORY records what actually happened, including when an outcome is uncertain. Kumi can undo
   a change only while the runtime that made it is still running; after that, use your DAW's own Undo.
-- **Listening to a track or the mix** also asks first: it plays only the beat window you approve (60 seconds at most),
-  only while the DAW is stopped, and may change routing and transport briefly, restoring them after. Live captures it
-  through Kumi Ears (Max for Live); REAPER and Renoise render it into the listening folder of the Kumi installation
-  that owns Kumi's part in that DAW, and Kumi copies the file it asked for and removes exactly that file. Listening
-  to a REAPER or Renoise track needs Kumi's newer part in that DAW: when Kumi says so, run setup again and restart the
-  DAW. Renoise listens only to a window that starts and ends on whole pattern lines inside the song, and refuses any
-  other rather than play more than you approved. REAPER may show the project as modified after a track listen, since
-  only saving clears that flag; Kumi never saves. After a track listen in Live, Live may show the Set as modified, and
-  its own Undo history includes the listen's temporary device steps: Undo in Live can bring Kumi Ears back.
+- **Listening to a REAPER or Renoise track or the mix** also asks first: it plays only the beat window you approve (60
+  seconds at most), only while the DAW is stopped, and may change routing and transport briefly, restoring them after.
+  The DAW renders it into the listening folder of the Kumi installation that owns Kumi's part in that DAW, and Kumi
+  copies the file it asked for and removes exactly that file. It needs Kumi's newer part in that DAW: when Kumi says
+  so, run setup again and restart the DAW. Renoise listens only to a window that starts and ends on whole pattern
+  lines inside the song, and refuses any other rather than play more than you approved. REAPER may show the project as
+  modified after a track listen, since only saving clears that flag; Kumi never saves. In Live, Kumi for Hermes
+  doesn't listen to a track or the mix yet: it says so and plays nothing.
 - **Project ids:** Kumi's REAPER extension keeps an id for each saved project in the project (ext state), and its
   Renoise tool one for each song in the song's tool data, saved with them.
 - **ffmpeg:** with your approval at setup, Kumi's runtime runs an ffmpeg already on this computer to decode compressed
