@@ -150,3 +150,4 @@ Kumi の中心の機能には、どちらも必要ありません。
 - Hermes Desktop に Kumi が出てこない: スキルとツール → プラグインで Kumi の **Agent** と **Desktop** のスイッチがオンか、Hermes で有効か（`hermes plugins enable kumi`）を確かめてください。
 - Web ダッシュボードに Kumi タブがない: Kumi をインストールしたときにダッシュボードがすでに動いていた場合は、再起動してください（`hermes dashboard`）。
 - Live につながらない: AbletonMcpBridge がコントロールサーフェスに選ばれているか確かめてください。
+- REAPER が応答しない（変更が「unsure」になる、または Kumi のステータスがダイアログが開いているようだと言う）: REAPER のウィンドウがあなたの操作を待っています（評価版の案内や、オーディオデバイスの質問など）。REAPER でそれを閉じてから、もう一度頼んでください。

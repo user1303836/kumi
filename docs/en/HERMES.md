@@ -257,3 +257,6 @@ those samples.
 - No Kumi tab in the web dashboard: if the dashboard was already running when you installed Kumi, restart it
   (`hermes dashboard`).
 - Live doesn't connect: check that AbletonMcpBridge is chosen as a Control Surface.
+- REAPER isn't answering (a change comes back "unsure", or Kumi's status says a dialog is probably open): a REAPER
+  window is waiting for you, such as the evaluation reminder or the audio device question. Close it in REAPER, then
+  ask again.

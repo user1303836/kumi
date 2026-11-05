@@ -150,3 +150,4 @@ Kumi 的核心功能不需要其中任何一个。
 - Hermes Desktop 中看不到 Kumi：检查 技能与工具 → 插件 里 Kumi 的 **Agent** 和**桌面**开关是否打开，以及 Hermes 中是否已启用（`hermes plugins enable kumi`）。
 - 网页仪表盘中没有 Kumi 标签页：如果安装 Kumi 时仪表盘已经在运行，请重启它（`hermes dashboard`）。
 - Live 连不上：检查是否已把 AbletonMcpBridge 选为控制界面。
+- REAPER 没有响应（某个修改显示 “unsure”，或 Kumi 的状态说可能有对话框开着）：REAPER 有一个窗口在等你处理，比如评估版提醒或音频设备的询问。在 REAPER 中关掉它，然后再让 Hermes 试一次。
