@@ -283,7 +283,10 @@ def _resolved(path: str) -> str | None:
             resolved, names = linked_to.anchor, [*linked_to.parts[1:], *names]
         else:
             names = [*linked_to.parts, *names]
-    return resolved if _on_this_computer(resolved) else None
+    if not _on_this_computer(resolved):
+        return None
+    real = os.path.realpath(resolved)  # no links are left: this only spells it canonically (Windows: 8.3 names, case)
+    return real if _on_this_computer(real) else None
 
 
 def _identity(path: str) -> dict | None:
