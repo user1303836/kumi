@@ -1,6 +1,8 @@
 """The tools' schemas as Hermes registers them (RESEARCH.md C1): what the model reads to choose and call a tool."""
 from __future__ import annotations
 
+from . import generate
+
 # Kumi's names for the DAWs it works in (its settings' and the runtime's): `ableton` is Ableton Live.
 DAWS = ("ableton", "reaper", "renoise")
 DAW_NAMES = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
@@ -182,19 +184,34 @@ KUMI_JOB = _tool(
 
 KUMI_GENERATE = _tool(
     "kumi_generate",
-    "Paid generation with Mirelo, only when the producer switched it on in Kumi's settings: a sound effect from a "
-    "prompt, or MIDI notes from an audio file. First `quote` (kind sfx with prompt and optional seconds, or kind "
-    "audio_to_midi with a source; sending that file to Mirelo is approved first). Then `create` with the quote_id: the "
-    "producer approves it from the quote itself, with its estimate in credits. Credits are Mirelo API credits: an "
-    "estimate and a reservation, never a price. The generation runs as a job: follow it with kumi_job. Never create a "
-    "quote again after an unsure answer.",
+    "Paid generation with Mirelo, each kind only when the producer switched it on in Kumi's settings: a sound effect "
+    "from a prompt (sfx), MIDI notes from audio (audio_to_midi), sound effects for a video (video_to_sfx), an audio "
+    "file extended with new audio after its end (extend), or a part of one replaced (inpaint). First `quote`, with "
+    "the kind's own fields only; a kind that sends a file to Mirelo has that approved first, and the whole file goes. "
+    "Then `create` with the quote_id: the producer approves it from the quote itself, with its estimate in credits. "
+    "Credits are Mirelo API credits: an estimate and a reservation, never a price. A quote's `seconds` is what's "
+    "billed (the sound's length, the video window, the added span or the region's width), and `source_seconds` the "
+    "measured source: never report `seconds` as the length of the file that comes back. extend and inpaint make a "
+    "new file with the whole edited audio; the original isn't changed. The generation runs as a job: follow it with "
+    "kumi_job. Never create a quote again after an unsure answer.",
     {"action": {"type": "string", "enum": ["quote", "create"]},
-     "kind": {"type": "string", "enum": ["sfx", "audio_to_midi"], "description": "quote: what to generate."},
-     "prompt": {"type": "string", "description": "quote, sfx: what the sound effect should be."},
-     "seconds": {"type": "number", "description": "quote, sfx: how long, in seconds (5 when left out)."},
+     "kind": {"type": "string", "enum": list(generate.KINDS),
+              "description": "quote: what to generate."},
+     "prompt": {"type": "string", "description": (
+         "quote: what it should sound like. Needed for sfx; optional for video_to_sfx (which may not follow it), "
+         "extend and inpaint.")},
+     "seconds": {"type": "number", "description": (
+         "quote, sfx: how long, in seconds (5 when left out). video_to_sfx: how much of the video to score, from its "
+         "start (the whole clip when left out).")},
+     "append_seconds": {"type": "number", "description": "quote, extend: how many seconds of new audio to add after "
+                                                         "its end."},
+     "region_start_seconds": {"type": "number", "description": "quote, inpaint: where the part to replace starts, in "
+                                                               "seconds from the file's start."},
+     "region_end_seconds": {"type": "number", "description": "quote, inpaint: where it ends (after the start)."},
      "source": {"type": "object", "description": (
-         "quote, audio_to_midi: the audio, as a source, never a path: {\"artifact_id\"} from a Kumi result, "
-         "{\"sound_id\", \"map_revision\"} from kumi_sounds, or {\"file\", \"provenance\": {\"host_tool\", "
-         "\"tool_call_id\"}} for a file another Hermes tool made in an approved folder.")},
+         "quote, every kind but sfx: the file, as a source, never a path: {\"artifact_id\"} from a Kumi result, "
+         "{\"sound_id\", \"map_revision\"} from kumi_sounds (audio only, never a video), or {\"file\", "
+         "\"provenance\": {\"host_tool\", \"tool_call_id\"}} for a file another Hermes tool made in an approved "
+         "folder.")},
      "quote_id": {"type": "string", "description": "create: the quote_id a quote returned."}},
     ("action",))

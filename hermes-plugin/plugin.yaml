@@ -40,7 +40,7 @@ config_schema:
     type: bool
     default: false
     label: Use Mirelo for paid generation
-    description: "Lets the agent ask for paid sound effects and audio-to-MIDI from Mirelo, each approved by you with its estimate in Mirelo API credits (never a price). Your prompt, and for MIDI the audio file you approve, go to Mirelo."
+    description: "Lets the agent ask Mirelo for paid generations, each approved by you with its estimate in Mirelo API credits (never a price), and each kind only once you switch it on below. Your prompt goes to Mirelo, and so does a file you approve sending: for MIDI, an extend or an inpaint the whole audio file, and for sound effects for a video the whole video, picture and sound, up to 50 MiB, never trimmed."
   mirelo_sfx_enabled:
     type: bool
     default: false
@@ -51,6 +51,21 @@ config_schema:
     default: false
     label: Mirelo audio to MIDI
     description: "Allows paid audio-to-MIDI from an audio file, which is sent to Mirelo only after you approve it."
+  mirelo_video_to_sfx_enabled:
+    type: bool
+    default: false
+    label: Mirelo sound effects for a video
+    description: "Allows paid sound effects for a video file. The whole video, picture and sound, goes to Mirelo only after you approve it; what comes back is sound effects only, without the video's speech."
+  mirelo_extend_enabled:
+    type: bool
+    default: false
+    label: Mirelo extend audio
+    description: "Allows paid extensions of an audio file: new audio after its end, in a new file with the original kept. The whole file goes to Mirelo only after you approve it."
+  mirelo_inpaint_enabled:
+    type: bool
+    default: false
+    label: Mirelo inpaint audio
+    description: "Allows paid replacement of a part of an audio file, in a new file with the original kept. The whole file goes to Mirelo only after you approve it."
   mirelo_credit_cap:
     type: int
     default: 0

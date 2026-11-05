@@ -15,13 +15,20 @@ from . import calls, runtime, snapshots
 
 log = logging.getLogger(__name__)
 
-KINDS = ("sfx", "audio_to_midi")
-# Each kind's own switch (plugin.yaml), and where Hermes keeps the key (its `mirelo_api_key` secret).
-SETTINGS = {"sfx": "mirelo_sfx_enabled", "audio_to_midi": "mirelo_midi_enabled"}
+KINDS = ("sfx", "audio_to_midi", "video_to_sfx", "extend", "inpaint")
+# Each kind's own switch (plugin.yaml), and where Hermes keeps the key (its `mirelo_api_key` secret). Every kind is off
+# until its own switch is on: an earlier acknowledgement or key never turns on one added later (CC-15).
+SETTINGS = {"sfx": "mirelo_sfx_enabled", "audio_to_midi": "mirelo_midi_enabled",
+            "video_to_sfx": "mirelo_video_to_sfx_enabled", "extend": "mirelo_extend_enabled",
+            "inpaint": "mirelo_inpaint_enabled"}
+# The kinds that send the producer's file to Mirelo, each upload approved first (13-R2, amendment A, CC-15's W2-a).
+UPLOADS = ("audio_to_midi", "video_to_sfx", "extend", "inpaint")
 KEY_ENV = "MIRELO_API_KEY"
-# A quote asks for an estimate (for MIDI it also prepares the approved file); a create posts the job. Both answer
-# quickly: the generation itself is a job, followed with kumi_job.
+# A sound effect's quote and a create answer quickly: the generation itself is a job, followed with kumi_job. A quote
+# that sends a file stages, measures and uploads it first, which the runtime bounds at 180 s; Kumi waits 30 s more
+# for its answer (CC-15's W2-d). One that times out made no quote, so nothing can be created or reserved from it.
 TIMEOUT = 60.0
+UPLOAD_TIMEOUT = 210.0
 PROMPT_MAX = 500
 # W3's frozen layout: the ledger is <plugin-data>/ledger.json, beside its lock. Opening it makes it, so a profile that
 # never used Mirelo has none, and kumi_job doesn't open it there.
@@ -37,6 +44,26 @@ LEDGER_RETRY_PAUSE = 0.5
 # The card event (13a): the public result, MIDI `notes` left out; one over this goes without its card.
 CARD_BYTES = 256 * 1024
 _SOURCE_KEYS = ({"artifact_id"}, {"sound_id", "map_revision"}, {"file", "provenance"})
+# A video is a file or an artifact, never a sound-map id (CC-15).
+_VIDEO_KEYS = ({"artifact_id"}, {"file", "provenance"})
+# Each quote's arguments beyond action and kind: those it needs, and those it may take. Any other is refused, never
+# dropped (CC-15's W2-c): a `seconds` on an extend most likely means "make it this long", which isn't what's billed.
+QUOTE_FIELDS = {
+    "sfx": ({"prompt"}, {"seconds"}),
+    "audio_to_midi": ({"source"}, set()),
+    "video_to_sfx": ({"source"}, {"prompt", "seconds"}),
+    "extend": ({"source", "append_seconds"}, {"prompt"}),
+    "inpaint": ({"source", "region_start_seconds", "region_end_seconds"}, {"prompt"}),
+}
+# What each field is, said when one is missing, misplaced or out of range.
+_FIELD_WORDS = {
+    "prompt": f"prompt, what it should sound like (at most {PROMPT_MAX} characters)",
+    "seconds": "seconds, how long a sound effect is, or how much of a video to score from its start",
+    "source": "source, the one file it starts from",
+    "append_seconds": "append_seconds, how much new audio an extend adds after the end",
+    "region_start_seconds": "region_start_seconds, where the part an inpaint replaces starts",
+    "region_end_seconds": "region_end_seconds, where it ends",
+}
 
 
 class LedgerUnavailable(Exception):
@@ -54,8 +81,9 @@ def error(code: str, reason: str, ledger: dict | None = None) -> dict:
 
 def refusal(args: dict) -> str | None:
     """What's wrong with a kumi_generate call's arguments, or None; the hook checks this, and the handler again. A quote
-    is one job: a sound effect from a prompt (and optional seconds), or MIDI notes from one CC-11 source. A create
-    names only the quote it carries out (13-R1)."""
+    is one job of one kind, with its own fields (QUOTE_FIELDS): a sound effect from a prompt, MIDI notes from audio,
+    sound effects for a video, or an audio file extended or inpainted. A create names only the quote it carries out
+    (13-R1). The runtime checks the limits Mirelo advertises; this checks the shape."""
     action = args.get("action")
     if action == "create":
         if set(args) - {"action", "quote_id"} or snapshots.file_id(args.get("quote_id")) is None:
@@ -64,23 +92,41 @@ def refusal(args: dict) -> str | None:
     if action != "quote":
         return "action is quote or create."
     kind = args.get("kind")
-    if kind == "sfx":
-        prompt, seconds = args.get("prompt"), args.get("seconds")
-        if set(args) - {"action", "kind", "prompt", "seconds"}:
-            return "a sound effect's quote takes a prompt and, if you like, seconds."
-        if not isinstance(prompt, str) or not prompt.strip() or len(prompt) > PROMPT_MAX:
-            return f"prompt is what the sound effect should be, at most {PROMPT_MAX} characters."
-        if seconds is not None and (isinstance(seconds, bool) or not isinstance(seconds, (int, float))
-                                    or not math.isfinite(seconds) or seconds <= 0):
-            return "seconds is how long the sound effect is: a number above 0."
-        return None
-    if kind == "audio_to_midi":
-        source = args.get("source")
-        if set(args) - {"action", "kind", "source"} or not isinstance(source, dict) or set(source) not in _SOURCE_KEYS:
-            return ("audio to MIDI takes one source: {artifact_id}, {sound_id, map_revision}, or {file, provenance} in "
-                    "an approved folder.")
-        return None
-    return "kind is sfx or audio_to_midi."
+    if kind not in QUOTE_FIELDS:
+        return f"kind is one of {', '.join(KINDS)}."
+    needs, may = QUOTE_FIELDS[kind]
+    given = set(args) - {"action", "kind"}
+    if given - needs - may or needs - given:
+        takes = [_FIELD_WORDS[name] for name in sorted(needs)] + [f"if you like, {_FIELD_WORDS[name]}"
+                                                                  for name in sorted(may)]
+        wrong = sorted(given - needs - may)
+        return (f"{kind} takes {'; '.join(takes)}." + (f" Not {', '.join(wrong)}: nothing is dropped, so say what you "
+                                                       "meant with this kind's own fields." if wrong else ""))
+    prompt = args.get("prompt")
+    if ("prompt" in needs or prompt is not None) and (not isinstance(prompt, str) or not prompt.strip()
+                                                       or len(prompt) > PROMPT_MAX):
+        return f"{_FIELD_WORDS['prompt']}."
+    for name in ("seconds", "append_seconds", "region_start_seconds", "region_end_seconds"):
+        value, zero = args.get(name), name == "region_start_seconds"
+        if (name in needs or value is not None) and not is_seconds(value, zero=zero):
+            return f"{_FIELD_WORDS[name]}: a number of seconds, {'0 or more' if zero else 'above 0'}."
+    if kind == "inpaint" and args["region_end_seconds"] <= args["region_start_seconds"]:
+        return "region_end_seconds comes after region_start_seconds: the part replaced is the time between them."
+    source = args.get("source")
+    if "source" in needs and (not isinstance(source, dict)
+                              or set(source) not in (_VIDEO_KEYS if kind == "video_to_sfx" else _SOURCE_KEYS)):
+        return ("a video is one source: {artifact_id}, or {file, provenance} in an approved folder (never a sound-map "
+                "id)." if kind == "video_to_sfx" else
+                "the audio is one source: {artifact_id}, {sound_id, map_revision}, or {file, provenance} in an approved "
+                "folder.")
+    return None
+
+
+def is_seconds(value: Any, *, zero: bool = False) -> bool:
+    """Whether `value` is a finite number of seconds: above 0, or 0 too where `zero` (W4-b's units for a quote's times,
+    which the create's approval reads too)."""
+    return (not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+            and (value >= 0 if zero else value > 0))
 
 
 def ready(host: Any, kind: Any, key: str | None) -> dict | None:
@@ -125,23 +171,30 @@ def call_id(kwargs: dict) -> str | None:
 
 
 def quote(host: Any, args: dict, identity: dict, kwargs: dict) -> dict:
-    """A quote (CC-13): the runtime prepares it (for MIDI, the approved file, pinned by the approval) and asks Mirelo
-    for its estimate; the ledger keeps the quote, so a create's approval is built from it, never from the model. While
-    the kind is off, the ledger isn't opened (or made)."""
+    """A quote (CC-13, CC-15): the runtime prepares it (for a kind that sends a file, the approved file, pinned by the
+    approval) and asks Mirelo for its estimate; the ledger keeps the quote, so a create's approval is built from it,
+    never from the model. While the kind is off, the ledger isn't opened (or made)."""
     key = host.mirelo_key()
-    not_ready = ready(host, args.get("kind"), key)
+    kind = args.get("kind")
+    not_ready = ready(host, kind, key)
     if not_ready:
         return not_ready
     try:
         ledger = host.ledger()
     except LedgerUnavailable as failure:
         return error(failure.code, failure.reason)
-    asked = {name: args[name] for name in ("action", "kind", "prompt", "seconds", "source") if name in args}
+    asked = {name: args[name] for name in ("action", "kind", *sorted(set().union(*QUOTE_FIELDS[kind]))) if name in args}
+    upload = kind in UPLOADS
     try:
-        result = host.live().call("generate", asked, identity, timeout=TIMEOUT, private=private(key))
+        result = host.live().call("generate", asked, identity, timeout=UPLOAD_TIMEOUT if upload else TIMEOUT,
+                                  private=private(key))
     except runtime.Refused as refused:
         return {**refused.as_json(), "ledger": _snapshot(ledger)}
     except runtime.Unavailable as failure:
+        if upload and failure.code in runtime.UNSURE_CODES:
+            return error(failure.code, f"{failure.reason} No quote was made, so nothing can be created or reserved "
+                                       "from it; the file the producer approved may already have gone to Mirelo.",
+                         _snapshot(ledger))
         return error(failure.code, failure.reason, _snapshot(ledger))
     if "error" in result or result.get("state") != "quoted":
         return {**result, "ledger": _snapshot(ledger)}

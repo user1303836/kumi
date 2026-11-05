@@ -134,7 +134,8 @@ def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
 
 
 # A paid call's key names its quote (CC-13's 13-R1): "Always" can never cover another, in this chat or any other, and
-# a quote is used once. An upload's key names its file and, like a change's, this chat (amendment A's A-c).
+# a quote is used once. An upload's key names what the file is sent for and the file and, like a change's, this chat
+# (amendment A's A-c; CC-15's W2-a): sending it for MIDI notes never approves sending it to be extended.
 ONE_THING = ("kumi:paid:",)
 
 
@@ -355,32 +356,46 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
 
 
 def _generate(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
-    """Paid generation (CC-13). A sound effect's quote is a read: an estimate costs nothing. Sending an audio file to
-    Mirelo is asked first, in the words of the runtime's own description of the file it resolved (13-R2), keyed by that
-    file's identity. A create is asked from the stored quote alone, never the model's words (13-R1), keyed by its
-    quote_id; its approval binds the quote's digest and estimate, which the handler checks again before it reserves.
-    Where nobody can answer, both are refused (decide, 13-R6).
+    """Paid generation (CC-13, CC-15). A sound effect's quote is a read: an estimate costs nothing. Sending a file to
+    Mirelo is asked first, in the words of the runtime's own description of the file it resolved (13-R2), keyed by what
+    it's sent for and that file's identity. A create is asked from the stored quote alone, never the model's words
+    (13-R1), keyed by its quote_id; its approval binds the quote's digest and estimate, which the handler checks again
+    before it reserves. Where nobody can answer, both are refused (decide, 13-R6).
 
     Its worst case stays within 15 s of Hermes's 30 s hook timeout (a timed-out hook blocks every tool for a minute):
     each ledger call waits at most generate.LEDGER_WAIT (2 s) for its lock (amendment B-c). A create makes four (open,
     configure, the quote, the totals): 8 s. An upload makes two, then the runtime's preview, at most PREVIEW_TIMEOUT
-    (10 s): 14 s."""
+    (10 s): 14 s. The preview only hashes the file; measuring and probing it are the quote's, after the approval."""
     refusal = generate.refusal(args)
     if refusal is not None:
         return block(f"Kumi didn't run: {refusal}"), {}
     if args["action"] == "quote":
-        return (None, {}) if args["kind"] == "sfx" else _upload(host, args, kwargs)
+        return _upload(host, args, kwargs) if args["kind"] in generate.UPLOADS else (None, {})
     return _paid(host, args)
 
 
+# What a kind sends its file to Mirelo for, as the upload's approval says it (CC-15's W2-a and 15c), and what it adds:
+# a video goes whole, picture and sound, and comes back as sound effects only.
+_SENT_FOR = {
+    "audio_to_midi": ("send {name} ({size}) to Mirelo, to turn it into MIDI notes", ()),
+    "video_to_sfx": ("send the video {name} ({size}) to Mirelo, to make sound effects for it",
+                     ("• The whole video goes, picture and sound. What comes back is sound effects only: its speech "
+                      "isn't kept.",)),
+    "extend": ("send {name} ({size}) to Mirelo, to extend it", ("• The whole file goes; the original isn't changed.",)),
+    "inpaint": ("send {name} ({size}) to Mirelo, to replace a part of it",
+                ("• The whole file goes; the original isn't changed.",)),
+}
+
+
 def _upload(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
-    """Sending an audio file to Mirelo (13-R2, amendment A). Where nobody can answer, it's refused before the runtime
-    looks at the file. The ledger is opened first, so the producer's current policy is in it before the runtime's
-    preview, a bounded local read (no network, copy or DSP); the approval names the file as that preview describes it,
-    under a key naming its content (A-a), in this chat (A-c)."""
+    """Sending the producer's file to Mirelo (13-R2, amendment A, CC-15). Where nobody can answer, it's refused before
+    the runtime looks at the file. The ledger is opened first, so the producer's current policy is in it before the
+    runtime's preview, a bounded local read (no network, copy or DSP); the approval names the file as that preview
+    describes it and what it's sent for, under a key naming both (A-a, W2-a), in this chat (A-c)."""
     if host.unattended():
         return block(UNATTENDED), {}
-    not_ready = generate.ready(host, "audio_to_midi", host.mirelo_key())
+    kind = args["kind"]
+    not_ready = generate.ready(host, kind, host.mirelo_key())
     if not_ready is not None:
         return block(f"Kumi didn't send anything: {not_ready['error']['reason']}"), {}
     try:
@@ -397,9 +412,10 @@ def _upload(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
             or not isinstance(size, int) or size < 0 or not isinstance(identity, str)
             or not _SHA256.fullmatch(identity)):
         return block("Kumi didn't send anything: its runtime couldn't describe the file."), {}
-    decision = approve([f"Kumi: send {quoted(name)} ({_size(size)}) to Mirelo, to turn it into MIDI notes",
+    sent, more = _SENT_FOR[kind]
+    decision = approve([f"Kumi: {sent.format(name=quoted(name), size=_size(size))}", *more,
                         "• Mirelo quotes it in credits first; nothing is paid until that quote is approved too."],
-                       f"kumi:upload:{identity}")
+                       f"kumi:upload:{kind}:{identity}")
     return decision, {}
 
 
@@ -451,16 +467,49 @@ def _paid(host: Any, args: dict) -> tuple[dict | None, dict]:
     if most > left:
         return block(f"Kumi didn't create anything: its estimate ({most} credits) is more than the {left} left under "
                      "the producer's credit cap."), {}
-    sfx = record.get("kind") == "sfx"
-    seconds = record.get("seconds")
-    lines = [f"Kumi: a paid Mirelo {'sound effect' if sfx else 'audio-to-MIDI job'}, from quote {quote_id}",
-             f"• Prompt: {quoted(record.get('prompt'))}" if sfx
-             else f"• From {quoted(record.get('file'))}, sent to Mirelo",
-             *([f"• {seconds:g} seconds"] if isinstance(seconds, (int, float)) and not isinstance(seconds, bool)
-               else []),
+    made = _made(record)
+    if made is None:
+        return block("Kumi didn't create anything: its stored quote doesn't say plainly what it makes. Quote again."), {}
+    lines = [f"Kumi: {_PAID_KINDS[record['kind']]}, from quote {quote_id}", *made,
              f"• Reserves up to {most} credits now (an estimate, not a price); {left - most} of the {cap} left after"]
     bound = {"quote_id": quote_id, "request_sha256": record.get("request_sha256"), "max_credits": most}
     return approve(lines, f"kumi:paid:{quote_id}"), bound
+
+
+_PAID_KINDS = {"sfx": "a paid Mirelo sound effect", "audio_to_midi": "a paid Mirelo audio-to-MIDI job",
+               "video_to_sfx": "paid Mirelo sound effects for a video",
+               "extend": "a paid Mirelo extension of an audio file", "inpaint": "a paid Mirelo inpainting of an audio file"}
+
+
+def _made(record: dict) -> list[str] | None:
+    """What a stored quote makes, in the approval's lines, from its typed fields alone (CC-15's W2-b): never its
+    `summary`, which is untrusted display text. Its times are seconds, as W4-b has them: finite and not negative, an
+    inpainted region inside its source. None when a field the kind needs is missing or breaks that, so the create is
+    refused rather than shown with a guess. `seconds` is what's billed (the window, the added span or the region's
+    width), never the length of the file that comes back."""
+    kind, file, seconds, source = (record.get(name) for name in ("kind", "file", "seconds", "source_seconds"))
+    prompt = record.get("prompt")
+    said = [f"• Prompt: {quoted(prompt)}"] if isinstance(prompt, str) and prompt.strip() else []
+    span = [f"• {seconds:g} seconds"] if generate.is_seconds(seconds) else []
+    if kind == "sfx":
+        return [f"• Prompt: {quoted(prompt)}", *span]
+    if kind == "audio_to_midi":
+        return [f"• From {quoted(file)}, sent to Mirelo", *span]
+    if (kind not in _PAID_KINDS or not isinstance(file, str) or not file.strip()
+            or not (generate.is_seconds(seconds) and generate.is_seconds(source))):
+        return None
+    whole = f"{quoted(file)} ({source:g} s)"
+    if kind == "video_to_sfx":
+        return [f"• From the video {whole}: sound for its first {seconds:g} s; its speech isn't kept", *said]
+    if kind == "extend":
+        added = record.get("append_seconds")
+        if not generate.is_seconds(added):
+            return None
+        return [f"• Adds {added:g} s after the end of {whole}; a new file, the original kept", *said]
+    start, end = record.get("region_start_seconds"), record.get("region_end_seconds")
+    if not (generate.is_seconds(start, zero=True) and generate.is_seconds(end) and start < end <= source):
+        return None
+    return [f"• Replaces {start:g}–{end:g} s of {whole}; a new file, the original kept", *said]
 
 
 def quoted(text: Any, limit: int = LINE) -> str:

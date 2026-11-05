@@ -27,9 +27,6 @@ WRITE_TIMEOUT = 120.0
 SETUP_TIMEOUT = 300.0
 UNSURE_HINT = ("What it did is unknown. Don't send it again: check kumi_history and the project (kumi_observe) "
                "first.")
-# How a write that was sent can end with its outcome unknown: no answer in time, the producer's Stop (both cancelled),
-# the runtime gone, or an answer that couldn't be read.
-UNSURE_CODES = ("timeout", "interrupted", "stopped", "protocol")
 
 
 class Host:
@@ -596,7 +593,7 @@ def _write(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
     try:
         return live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT, interrupted=host.stop_watch())
     except runtime.Unavailable as failure:
-        if failure.code not in UNSURE_CODES:
+        if failure.code not in runtime.UNSURE_CODES:
             raise
         return {"state": "unsure", "code": failure.code, "reason": failure.reason, "hint": UNSURE_HINT}
 
@@ -771,7 +768,7 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
         result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout,
                                   interrupted=host.stop_watch())
     except runtime.Unavailable as failure:
-        if failure.code not in UNSURE_CODES:
+        if failure.code not in runtime.UNSURE_CODES:
             raise
         return {"state": "unsure", "code": failure.code, "reason": failure.reason, "cleanup": "unsure",
                 "hint": UNSURE_HINT}

@@ -636,36 +636,63 @@ def logged(message: dict) -> dict:
     return {**message, "params": {**message["params"], "arguments": {**arguments, "_mirelo": sealed}}}
 
 
+# CC-15's kinds that send a file, the model release each uses, and the fixture's measured source length.
+UPLOADS = ("audio_to_midi", "video_to_sfx", "extend", "inpaint")
+MODELS = {"video_to_sfx": "sfx-2.0", "extend": "sfx-1.6", "inpaint": "sfx-1.6"}
+SOURCE_SECONDS = 12.0
+# What each kind's quote and job carry of its window, beyond seconds (W4-a).
+WINDOW = {"extend": ("append_seconds",), "inpaint": ("region_start_seconds", "region_end_seconds")}
+
+
 def generate(fixture: Fixture, args: dict, host: dict) -> dict:
-    """Mirelo generation as W3's native `generate` answers it (CC-13): a quote (for MIDI, first a preview naming the
-    file it would send, pinned to the host call it was for, and that call's quote is stale without it), a create that
-    needs the host's `_mirelo` with a reservation, and its job."""
+    """Mirelo generation as W3's native `generate` answers it (CC-13, CC-15): a quote (for a kind that sends a file,
+    first a preview naming the file it would send, pinned to the host call it was for, and that call's quote is stale
+    without it), a create that needs the host's `_mirelo` with a reservation, and its job."""
     action, sealed = args.get("action"), args.get("_mirelo") if isinstance(args.get("_mirelo"), dict) else {}
     if action == "quote":
         kind, source = args.get("kind"), args.get("source") if isinstance(args.get("source"), dict) else {}
-        name = next((sound["name"] for sound in SOUNDS if sound["sound_id"] == source.get("sound_id")), "a-1.wav")
+        named = next((sound["name"] for sound in SOUNDS if sound["sound_id"] == source.get("sound_id")), None)
+        name = named or ("clip.mp4" if kind == "video_to_sfx" else "a-1.wav")
         call = (host.get("profile_id"), host.get("session_id"), host.get("tool_call_id"))
         identity = hashlib.sha256(json.dumps(source, sort_keys=True).encode()).hexdigest()
-        if kind == "audio_to_midi" and args.get("preview"):
+        if kind in UPLOADS and args.get("preview"):
             if call[2] is not None:
                 fixture.previews[call] = identity
             return {"state": "preview", "upload": {"file": name, "bytes": 480044, "identity_sha256": identity}}
         if not sealed.get("api_key"):
             return error("not_configured", "no Mirelo key came with this quote")
-        if kind == "audio_to_midi" and fixture.previews.pop(call, None) != identity:
+        if kind in UPLOADS and fixture.previews.pop(call, None) != identity:
             return error("stale", "no upload preview was pinned for this call and file")
-        sfx = kind == "sfx"
-        seconds = float(args.get("seconds") or 5) if sfx else 0.42
-        request = {"kind": kind, "prompt": args.get("prompt"), "seconds": seconds, "source": source}
+        sfx, window = kind == "sfx", {field: args[field] for field in WINDOW.get(kind, ())}
+        if kind == "sfx":
+            seconds = float(args.get("seconds") or 5)
+        elif kind == "video_to_sfx":
+            seconds = float(args.get("seconds") or SOURCE_SECONDS)
+        elif kind == "extend":
+            seconds = float(window["append_seconds"])
+        elif kind == "inpaint":
+            seconds = float(window["region_end_seconds"] - window["region_start_seconds"])
+        else:
+            seconds = 0.42
+        if kind in MODELS and (seconds > SOURCE_SECONDS and kind == "video_to_sfx"
+                               or window.get("region_end_seconds", 0) > SOURCE_SECONDS):
+            return error("invalid", "that window is past the end of the source")
+        request = {"kind": kind, "prompt": args.get("prompt"), "seconds": seconds, "source": source, **window}
         quote_id = f"q-{os.getpid()}-{len(fixture.quoted) + 1}"  # unique across restarts, as the runtime's are
         credits = fixture.options.generate_estimate
         fixture.quoted[quote_id] = quote = {
-            "state": "quoted", "quote_id": quote_id, "kind": kind, "prompt": args.get("prompt") if sfx else None,
+            "state": "quoted", "quote_id": quote_id, "kind": kind,
+            "prompt": args.get("prompt") if kind != "audio_to_midi" else None,
             "file": None if sfx else name, "seconds": seconds, "estimate": {"credits": credits, "max_credits": credits},
             "credit_unit": "mirelo_credits", "upload": not sfx,
             "expires_at": int(time.time() * 1000) + fixture.options.generate_expires_ms,
             "request_sha256": hashlib.sha256(json.dumps(request, sort_keys=True).encode()).hexdigest(),
-            "summary": f"One {seconds:g}-second sound effect" if sfx else f"MIDI notes from {name}"}
+            "summary": {"sfx": f"One {seconds:g}-second sound effect", "audio_to_midi": f"MIDI notes from {name}",
+                        "video_to_sfx": f"Sound for the first {seconds:g} seconds of {name}",
+                        "extend": f"Append {seconds:g} seconds to {name}"}.get(
+                            kind, f"Inpaint {name} from {window.get('region_start_seconds', 0):g} to "
+                                  f"{window.get('region_end_seconds', 0):g} seconds"),
+            **({"source_seconds": SOURCE_SECONDS, "model": MODELS[kind], **window} if kind in MODELS else {})}
         return quote
     if action == "create":
         quote = fixture.quoted.get(args.get("quote_id"))
@@ -686,7 +713,7 @@ def generate(fixture: Fixture, args: dict, host: dict) -> dict:
                                                "kind": "generate", "state": "running"})  # as kumi serve lists its jobs
         return {"state": "running", "job_id": job_id, "quote_id": quote["quote_id"], "kind": quote["kind"],
                 "prompt": quote["prompt"], "seconds": quote["seconds"], "estimate": quote["estimate"],
-                "credit_unit": "mirelo_credits"}
+                "credit_unit": "mirelo_credits", **_window(quote)}
     if action == "job":
         return generation_job(fixture, args.get("job_id"))
     return error("invalid_request", "action is quote, create or job")
@@ -703,7 +730,7 @@ def generation_job(fixture: Fixture, job_id: object) -> dict:
     tag = kept(fixture, artifact)
     return {"job_id": job_id, "kind": "generate", "state": "done", "progress": {"done": 1, "total": 1},
             "result": {"quote_id": quote["quote_id"], "kind": quote["kind"], "prompt": quote["prompt"],
-                       "seconds": quote["seconds"], "provider": "mirelo", "provider_job_id": "v-1",
+                       "seconds": quote["seconds"], **_window(quote), "provider": "mirelo", "provider_job_id": "v-1",
                        "submission": "submitted", "artifact_id": artifact, "file": f"{artifact}.wav",
                        "output_type": "audio", "media_tag": tag,
                        "outputs": [{"artifact_id": artifact, "file": f"{artifact}.wav", "type": "audio",
@@ -711,6 +738,11 @@ def generation_job(fixture: Fixture, job_id: object) -> dict:
                        "credits": {"estimate": quote["estimate"]["credits"], "reserved": made["reserved"],
                                    "actual": None if actual < 0 else actual},
                        "credit_unit": "mirelo_credits"}}
+
+
+def _window(quote: dict) -> dict:
+    """A new kind's source length and window, as its quote had them, for the create answer and the job (W4-a)."""
+    return {field: quote[field] for field in ("source_seconds", *WINDOW.get(quote["kind"], ())) if field in quote}
 
 
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,

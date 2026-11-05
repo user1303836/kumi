@@ -36,6 +36,9 @@ RUNTIME_PROTOCOL = "kumi-serve/1"
 CLIENT_INFO = {"name": "kumi-hermes", "version": "1"}
 # C2's resources, each the snapshot (C3) it's read from: a runtime that offers subscriptions says when one has landed.
 RESOURCES = {"kumi://status": "status", "kumi://focus": "focus", "kumi://history": "history", "kumi://map": "map"}
+# How a call that was sent can end with its outcome unknown: no answer in time, the producer's Stop (both cancelled),
+# the runtime gone, or an answer that couldn't be read.
+UNSURE_CODES = ("timeout", "interrupted", "stopped", "protocol")
 # What `kumi serve` gets of Hermes's environment: what a program needs to start and to find the user's folders on each
 # system. Never a key, a token or Hermes's own settings (C2, catalog rule 11).
 LAUNCH_VARIABLES = frozenset({
@@ -439,7 +442,7 @@ class Client:
                 self._pending.pop(ident, None)
         if pending.gone is not None:
             raise Unavailable("stopped", pending.gone)
-        if pending.error is not None:  # unsure, not refused (tools.UNSURE_CODES): it may have done something
+        if pending.error is not None:  # unsure, not refused (UNSURE_CODES): it may have done something
             raise Unavailable("protocol", f"Kumi's runtime answered {method} with an error "
                                           f"({pending.error.get('message') or pending.error}); what it did is unknown.")
         return pending.result
