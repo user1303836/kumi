@@ -10,7 +10,7 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("set_mixer", "mixer"),
     PluginStep::new("rename", "rename"),
     PluginStep::new("add_tracks_and_scenes", "structure"),
-    PluginStep::new("write_midi_clip", "clip"),
+    PluginStep::new("write_midi_clip", "clip").noting(crate::context::NOTATION),
     PluginStep::new("load_device", "device"),
     PluginStep::new("set_device_parameter", "parameter"),
     // add-chain is the step's own word for insert-chain: Live gives Kumi no way to take a chain away again.
@@ -50,7 +50,7 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
          sample is where the file comes from: a sound from the map, a file Kumi made, or an approved file, never a path.",
     ),
     PluginStep::new("set_warp_markers", "clip").refusing(&[("action", &["delete"])]),
-    PluginStep::new("write_arrangement_clip", "clip"),
+    PluginStep::new("write_arrangement_clip", "clip").noting(crate::context::NOTATION),
     // Slices removed or cleared, and the slices reset, don't come back as they were; resend's effect isn't described.
     PluginStep::new("edit_device", "device").refusing(&[(
         "action",

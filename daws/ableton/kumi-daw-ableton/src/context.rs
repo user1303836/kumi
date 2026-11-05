@@ -5,6 +5,36 @@ use kumi_types::contracts::JsonObject;
 use serde_json::{json, Value};
 use std::sync::LazyLock;
 pub const INSTRUCTIONS: &str = include_str!("assets/instructions.txt");
+/// Kumi's notation as the instructions teach it, their own line, for the steps that take it (write_midi_clip,
+/// write_arrangement_clip) where a host reads a step without the instructions. A build without it fails.
+pub const NOTATION: &str = line_starting(INSTRUCTIONS, "Notes go in Kumi's notation");
+
+/// The line of `text` that starts with `start`, found while building.
+const fn line_starting(text: &'static str, start: &str) -> &'static str {
+    let (bytes, prefix) = (text.as_bytes(), start.as_bytes());
+    let mut at = 0;
+    while at + prefix.len() <= bytes.len() {
+        if at == 0 || bytes[at - 1] == b'\n' {
+            let mut same = 0;
+            while same < prefix.len() && bytes[at + same] == prefix[same] {
+                same += 1;
+            }
+            if same == prefix.len() {
+                let mut end = at;
+                while end < bytes.len() && bytes[end] != b'\n' {
+                    end += 1;
+                }
+                let line = bytes.split_at(end).0.split_at(at).1;
+                return match std::str::from_utf8(line) {
+                    Ok(line) => line,
+                    Err(_) => panic!("the instructions are UTF-8"),
+                };
+            }
+        }
+        at += 1;
+    }
+    panic!("the instructions have no such line")
+}
 pub static FIELDS: LazyLock<JsonObject> = LazyLock::new(|| serde_json::from_str(include_str!("assets/fields.json")).unwrap());
 pub static PARENTS: LazyLock<JsonObject> = LazyLock::new(|| serde_json::from_str(include_str!("assets/parents.json")).unwrap());
 pub use kumi_agent::core::refs::{query_key, ObservationError};
