@@ -29,7 +29,7 @@ const MAX_SNAPSHOT_BYTES: usize = 64 * 1024 * 1024;
 
 pub static SOUNDS: Operation = Operation {
     name: "sounds",
-    description: "Search the current approved sound catalog by words, kind (kick, snare, pad, loop, one-shot…), or a current sound_id's measured similarity. Includes sounds not yet positioned on the map. Returns revision-scoped IDs, never file paths. Does not scan or remap the library.",
+    description: "Search the current approved sound catalog by words, indexed class, kind, tempo, key or duration, or a current sound_id's measured similarity. Returns revision-scoped IDs, indexed values and match reasons, never file paths. Closeness is relative to this map, not a confidence or percent match. Includes unpositioned sounds; does not scan or remap.",
     schema: schema,
     effect: reads,
     run: run,
@@ -37,14 +37,14 @@ pub static SOUNDS: Operation = Operation {
 
 fn schema() -> Value {
     json!({"type":"object", "additionalProperties":false, "required":["query"], "properties":{
-        "query":{"type":"string", "maxLength":4096},
-        "near":{"type":"string", "minLength":1, "maxLength":128},
-        "kind":{"type":"string", "minLength":1, "maxLength":64},
-        "class":{"type":"string", "enum":CLASSES},
-        "bpm":{"type":"number", "exclusiveMinimum":0},
-        "key":{"type":"string"},
-        "min_seconds":{"type":"number", "minimum":0},
-        "max_seconds":{"type":"number", "minimum":0},
+        "query":{"type":"string", "maxLength":4096, "description":"Names and folder words, plus measured descriptors such as dark or bright; not genre or artist recognition."},
+        "near":{"type":"string", "minLength":1, "maxLength":128, "description":"A current sound_id. Closeness is relative to this map; the seed itself is omitted."},
+        "kind":{"type":"string", "minLength":1, "maxLength":64, "description":"loop or one-shot, optionally combined with class. Class words such as kick remain accepted here."},
+        "class":{"type":"string", "enum":CLASSES, "description":"The indexed instrument class; combine with kind for, for example, kick one-shots."},
+        "bpm":{"type":"number", "exclusiveMinimum":0, "description":"About this indexed tempo, also half or double time. A missing tempo cannot match."},
+        "key":{"type":"string", "description":"Indexed key, its relative major or minor, or a sample's root note. Nothing is transposed; a missing key and note cannot match."},
+        "min_seconds":{"type":"number", "minimum":0, "description":"Inclusive minimum indexed duration; a missing duration cannot match."},
+        "max_seconds":{"type":"number", "minimum":0, "description":"Inclusive maximum indexed duration; a missing duration cannot match."},
         "limit":{"type":"integer", "minimum":1, "maximum":100, "default":20}
     }})
 }
