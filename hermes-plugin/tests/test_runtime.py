@@ -40,6 +40,7 @@ class Runtimes(unittest.TestCase):
         self.runtimes = self.make()
 
     def make(self, **options):
+        options.setdefault("hermes", lambda: (None, None))  # never this machine's Hermes homes
         runtimes = runtime.Runtimes(events=lambda event, payload: self.events.append((event, payload)),
                                     environ=lambda: {"PATH": "/usr/bin:/bin", "HOME": str(self.data),
                                                      "OPENAI_API_KEY": "sk-secret", "MIRELO_API_KEY": "m-secret",
@@ -82,6 +83,16 @@ class Runtimes(unittest.TestCase):
         self.assertEqual(runtime.launch_environment({"Path": "C:\\Windows", "SystemRoot": "C:\\Windows",
                                                      "AWS_SECRET_ACCESS_KEY": "x"}, windows=True),
                          {"Path": "C:\\Windows", "SystemRoot": "C:\\Windows", "KUMI_NO_UPDATE_CHECK": "1"})
+
+    def test_the_runtime_is_told_hermess_homes_by_argument_never_by_its_environment(self):
+        home, root = str(self.data / "hermes" / "profiles" / "studio"), str(self.data / "hermes")
+        self.start(runtimes=self.make(hermes=lambda: (home, root)))  # where it takes no library root (#985)
+        started = self.started()
+        self.assertEqual(started["argv"][-4:], ["--hermes-home", home, "--hermes-root", root])
+        self.assertNotIn("HERMES_HOME", started["environment"])
+        argv = runtime.serve_argv(runtime.installed(self.data, support.VERSION), self.data / "state", "ableton",
+                                  hermes=("relative/home", None))
+        self.assertNotIn("--hermes-home", argv, "only a full path")
 
     @unittest.skipIf(os.name == "nt", "a session of its own is POSIX's; Windows gives it no console")
     def test_the_runtime_runs_in_a_session_of_its_own_so_hermess_ctrl_c_never_reaches_it(self):

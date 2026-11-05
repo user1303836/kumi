@@ -160,17 +160,37 @@ def launch_environment(environ: Mapping[str, str], windows: bool = os.name == "n
     return kept
 
 
-def serve_argv(install: Install, state_dir: Path, daw: str, library_roots: Iterable[str] = ()) -> list[str]:
+def serve_argv(install: Install, state_dir: Path, daw: str, library_roots: Iterable[str] = (),
+               hermes: tuple[str | None, str | None] = (None, None)) -> list[str]:
     """`kumi serve`'s arguments (C2; W1-REGISTRY): its state folder, Kumi's transport home, the DAW, each sample folder
-    the producer approved (`--library-root`, the runtime's only grant to read them), and the ffmpeg they allowed at
-    setup while it's unchanged (`--tool ffmpeg=`, CC-10). Read at each start."""
+    the producer approved (`--library-root`, the runtime's only grant to read them), the ffmpeg they allowed at setup
+    while it's unchanged (`--tool ffmpeg=`, CC-10), and Hermes's homes (`hermes_homes()`: `--hermes-home`,
+    `--hermes-root`), each only when it's a full path: inside them the runtime takes no library root and reads no
+    source, but for a media root it's given (#970). Read at each start."""
     argv = [str(install.kumi), "serve", "--stdio", "--state-dir", str(state_dir), "--kumi-home", str(install.kumi_home),
             "--daw", daw]
     for root in library_roots:
         argv += ["--library-root", root]
     if ffmpeg := allowed_tool(install.ffmpeg):
         argv += ["--tool", f"ffmpeg={ffmpeg}"]
+    for flag, home in zip(("--hermes-home", "--hermes-root"), hermes):
+        if isinstance(home, str) and home and Path(home).is_absolute():
+            argv += [flag, home]
     return argv
+
+
+def hermes_homes() -> tuple[str | None, str | None]:
+    """This profile's Hermes home and the root holding every profile (`<root>/profiles/<name>`), as Hermes resolves
+    them (`hermes_constants`, public: the platform's default, a data-dir suffix, a custom home), so the runtime never
+    re-derives Hermes's rules (#985). The environment stays scrubbed of HERMES_HOME. (None, None) where Hermes isn't
+    importable."""
+    try:
+        from hermes_constants import get_default_hermes_root, get_hermes_home  # Hermes's
+
+        home = get_hermes_home()
+        return str(home), str(get_default_hermes_root(home=home))
+    except Exception:
+        return None, None
 
 
 def _thread(target: Callable[..., Any], name: str, *args: Any) -> threading.Thread:
@@ -615,10 +635,12 @@ class Runtimes:
 
     def __init__(self, *, events: Callable[[str, dict], None] | None = None, spawn: Spawn = Client,
                  environ: Callable[[], Mapping[str, str]] = lambda: os.environ, start_timeout: float = 30.0,
-                 idle_after: float = IDLE_AFTER, stop_wait: float = STOP_WAIT, settle_wait: float = SETTLE_WAIT):
+                 idle_after: float = IDLE_AFTER, stop_wait: float = STOP_WAIT, settle_wait: float = SETTLE_WAIT,
+                 hermes: Callable[[], tuple[str | None, str | None]] = hermes_homes):
         self._events = events
         self._spawn = spawn
         self._environ = environ
+        self._hermes = hermes  # read at each start, in the starting call's context (its profile's home)
         self._start_timeout = start_timeout
         self._idle_after = idle_after
         self._stop_wait = stop_wait
@@ -681,7 +703,8 @@ class Runtimes:
             try:
                 install.kumi_home.mkdir(parents=True, exist_ok=True)
                 holder: dict[str, Runtime] = {}
-                client = self._spawn(serve_argv(install, state, daw, library_roots), launch_environment(self._environ()),
+                client = self._spawn(serve_argv(install, state, daw, library_roots, self._hermes()),
+                                     launch_environment(self._environ()),
                                      cwd=str(data_dir), keep_fds=lock.keep(),
                                      on_exit=lambda reason: self._exited(holder))
                 runtime = Runtime(client, install, data_dir, daw, session_id, lock, profile)
