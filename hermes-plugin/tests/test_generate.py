@@ -197,6 +197,19 @@ class Generation(unittest.TestCase):
         self.assertEqual(host.ledger().reservations(), [], "so it can't be released by hand as unknown")
         self.assertEqual(len(self.sent(data, "create")), 1, "nothing was created again")
 
+    def test_a_job_already_made_is_still_fetched_with_the_key_after_new_generations_are_switched_off(self):
+        host, ctx, data = self.host()
+        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        running = support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
+        ctx.settings.update(mirelo_acknowledged=False, mirelo_sfx_enabled=False)  # no new paid generations
+        done = support.call(host, "kumi_job", {"job_id": running["job_id"]}, session_id="s1")
+        self.assertEqual({key: done["result"]["ledger"][key] for key in ("spent", "reserved")},
+                         {"spent": 12, "reserved": 0}, "the job already paid for is fetched and settled")
+        [fetched] = self.sent(data, "job")
+        self.assertEqual(fetched["_mirelo"], {"api_key": "<given>", "acknowledged": False, "enabled": False},
+                         "the key for its GET, with the switches as they are now")
+        self.assertEqual(len(self.sent(data, "create")), 1)
+
     def test_a_create_kumi_can_not_send_holds_no_credits(self):
         host, _, data = self.host()
         quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]

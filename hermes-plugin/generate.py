@@ -275,12 +275,16 @@ def adopt(host: Any, job_id: Any, plain: Any) -> tuple[Any, dict] | None:
 
 
 def follow(host: Any, ledger: Any, found: dict, job_id: str, identity: dict, timeout: float) -> dict:
-    """Generation job `job_id` as kumi_job gives it. Its runtime reads the saved state, and with the producer's key
-    and switches still on, may only GET an already identified vendor job (never a create). Every answer goes to the
-    ledger (a finished one settles its reservation), and the result carries the fresh totals; an unknown charge stays
+    """Generation job `job_id` as kumi_job gives it. Its runtime reads the saved state, and with the producer's key may
+    only GET the vendor job the ledger already knows, never prepare, upload or create (W3-GENERATE.md: an approved,
+    billed job is still fetched after new generations are switched off). So the key goes whenever Hermes has it, with
+    the switches as they are now; without a key the runtime answers from what it saved. Every answer goes to the ledger
+    (a finished one settles its reservation), and the result carries the fresh totals; an unknown charge stays
     reserved."""
     key = host.mirelo_key()
-    sealed = private(key) if ready(host, found.get("kind"), key) is None else None
+    settings = host.generation()
+    sealed = {"_mirelo": {"api_key": key, "acknowledged": settings["acknowledged"],
+                          "enabled": settings["enabled"].get(found.get("kind")) is True}} if key else None
     envelope = host.live().call("generate", {"action": "job", "job_id": job_id}, identity, timeout=timeout,
                                 private=sealed)
     if isinstance(found.get("reservation_id"), str):
