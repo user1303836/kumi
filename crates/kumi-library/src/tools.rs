@@ -324,7 +324,11 @@ impl LibraryTool {
             let entry = if let Some(known) = known {
                 known
             } else {
-                match self.library.measure(path.clone(), MeasureOptions { signal: Some(signal.clone()), start, seconds }).await {
+                match self
+                    .library
+                    .measure(path.clone(), MeasureOptions { signal: Some(signal.clone()), start, seconds, ..Default::default() })
+                    .await
+                {
                     Ok(entry) => entry,
                     Err(error) => {
                         signal.check()?;

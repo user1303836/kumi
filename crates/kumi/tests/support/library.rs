@@ -157,6 +157,8 @@ impl Studio {
                 folders: Some(vec![self.extra.to_string_lossy().into()]),
                 ..Default::default()
             }),
+            approved_folders: None,
+            decode: Default::default(),
             set_folders: vec![],
             set_files: vec![],
             plugin_presets: vec![],

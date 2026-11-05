@@ -9,7 +9,7 @@ pub mod wavetable;
 pub mod worker;
 
 pub use analyze::{analyze_file, Analysis, AnalyzeOptions, SoundAnalysis, ANALYSIS_VERSION, BANDS};
-pub use decode::{open_audio, AudioError, AUDIO_EXTENSIONS};
+pub use decode::{open_audio, AudioError, DecodeOptions, AUDIO_EXTENSIONS};
 use kumi_common::{
     abort::SignalExt,
     js::number::{round, to_fixed, to_string},
@@ -22,7 +22,8 @@ pub async fn hear(path: &str, options: AnalyzeOptions) -> Result<Analysis, Audio
     if let Some(signal) = &options.signal {
         signal.check()?;
     }
-    let prepared = decode::prepare_audio_to(path, options.signal.clone(), Some(analyze::reach(&options))).await?;
+    let prepared =
+        decode::prepare_audio_to_with_options(path, options.signal.clone(), Some(analyze::reach(&options)), &options.decode).await?;
     let result =
         worker::in_worker(prepared.path.to_string_lossy().into_owned(), options, path.into(), prepared.format.clone(), prepared.seconds)
             .await;

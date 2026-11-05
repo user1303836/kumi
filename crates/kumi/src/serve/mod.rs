@@ -7,6 +7,7 @@
 //!
 //! The operations it offers are in [`registry`]; [`ctx`] is what each is given; [`mcp`] is the wire.
 
+pub mod artifacts;
 pub mod change;
 pub mod connection;
 pub mod ctx;
@@ -14,6 +15,9 @@ pub mod history;
 pub mod inflight;
 pub mod jobs;
 pub mod lease;
+pub mod library;
+pub mod listen;
+pub mod map;
 pub mod mcp;
 pub mod read;
 pub mod registry;
@@ -203,6 +207,7 @@ pub fn main(args: &[String]) -> i32 {
                 return 1;
             }
         };
+        library::start(ctx.clone());
         match mcp::serve(ctx, tokio::io::stdin(), tokio::io::stdout()).await {
             Ok(()) => 0,
             Err(error) => {

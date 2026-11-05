@@ -32,6 +32,7 @@ use kumi_common::{
     abort::{self, Signal},
     time::now_ms,
 };
+use kumi_media::audio::DecodeOptions;
 use kumi_net::web::WebClient;
 use kumi_types::contracts::{KernelTool, LibraryState as StatusState, LibraryStatus};
 use kumi_types::daw::{DawId, DawProfile};
@@ -75,7 +76,10 @@ pub struct LibraryOptions {
     pub dir: String,
     pub folders: Option<Vec<String>>,
     pub projects_dir: Option<String>,
+    /// Source discovery policy, including an optional exclusive `approved_folders` allowlist.
     pub sources: Option<SourceOptions>,
+    /// Applied to both scanning workers and reference measurements.
+    pub decode: DecodeOptions,
     pub fork: Option<bool>,
     pub workers: Option<usize>,
     pub delay_ms: Option<u64>,
@@ -193,12 +197,16 @@ impl Library {
             folders: self.options.folders.clone(),
             projects_dir: self.options.projects_dir.clone(),
             sources: self.options.sources.clone(),
+            decode: self.options.decode.clone(),
             find_sets: self.options.find_sets,
             workers: self.options.workers,
             daws: self.options.daws,
         }
     }
     async fn remembering(&self) -> Vec<String> {
+        if self.options.sources.as_ref().is_some_and(|options| options.approved_folders.is_some()) {
+            return vec![];
+        }
         let known = self.remembered.borrow().clone();
         if let Some(known) = known {
             return known;
@@ -216,15 +224,17 @@ impl Library {
             }
         }
         let mut options = self.options.sources.clone().unwrap_or_default();
-        options.folders = Some(
-            self.options
-                .folders
-                .clone()
-                .unwrap_or_default()
-                .into_iter()
-                .chain(self.remembered.borrow().clone().unwrap_or_default())
-                .collect(),
-        );
+        if options.approved_folders.is_none() {
+            options.folders = Some(
+                self.options
+                    .folders
+                    .clone()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .chain(self.remembered.borrow().clone().unwrap_or_default())
+                    .collect(),
+            );
+        }
         let daws = self.options.daws;
         let Ok(sources) = tokio::task::spawn_blocking(move || sources::library_sources(daws, &options)).await else {
             return self.source_cache.borrow().as_ref().map(|(_, sources)| sources.clone()).unwrap_or_default();
@@ -726,6 +736,9 @@ impl LibraryAccess for Library {
         }
     }
     fn remember(&self, folders: Vec<String>) {
+        if self.options.sources.as_ref().is_some_and(|options| options.approved_folders.is_some()) {
+            return;
+        }
         let weak = self.weak.clone();
         tokio::task::spawn_local(async move {
             if let Some(library) = weak.upgrade() {
@@ -766,8 +779,9 @@ impl LibraryAccess for Library {
     }
     async fn measure(&self, path: String, options: features::MeasureOptions) -> Result<SoundEntry, RuntimeError> {
         let relative = path.split(['\\', '/']).next_back().unwrap_or("").to_owned();
+        let decode = if self.options.decode.installed_only { self.options.decode.clone() } else { options.decode };
         measure_reference(
-            MeasureJob { id: 0, path, relative, size: 0, mtime: 0, start: options.start, seconds: options.seconds },
+            MeasureJob { id: 0, path, relative, size: 0, mtime: 0, start: options.start, seconds: options.seconds, decode },
             options.signal.unwrap_or_default(),
         )
         .await

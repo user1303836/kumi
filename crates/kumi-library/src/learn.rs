@@ -3,7 +3,7 @@ use super::{
     classify::{ClassFrom, SoundClass, SoundKind},
     presets::PresetCategory,
     sets::SetSummary,
-    sources::Source,
+    sources::{approved_path, Source},
     store::{Entries, Entry, Log, LogEntry},
 };
 use serde::{Deserialize, Serialize};
@@ -115,6 +115,11 @@ pub struct LearnProgress {
 pub struct LearnPlan {
     pub dir: String,
     pub sources: Vec<Source>,
+    /// Canonical roots captured by restricted planning. `Some([])` denies every source, including auxiliary walks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_folders: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "kumi_media::audio::DecodeOptions::is_default")]
+    pub decode: kumi_media::audio::DecodeOptions,
     #[serde(default)]
     pub set_folders: Vec<String>,
     #[serde(default)]
@@ -315,12 +320,17 @@ async fn walk(
     signal: &Signal,
     depth_limit: usize,
     skip: &HashSet<String>,
+    approved_folders: Option<&[String]>,
 ) -> Result<bool, RuntimeError> {
     let mut queue = vec![(source.path.clone(), 0)];
     let mut complete = true;
     let daw_library = source.is_daw_library();
     while let Some((path, depth)) = queue.pop() {
         signal.check()?;
+        if !approved_path(&path, approved_folders) {
+            complete = false;
+            continue;
+        }
         // A folder that can't be read (a NAS's hiccup, a placeholder nothing serves now) is skipped, and the walk
         // isn't whole: what was learned in it stays. One deleted meanwhile is gone.
         let mut entries = match tokio::fs::read_dir(&path).await {
@@ -370,6 +380,9 @@ async fn walk(
                 continue;
             }
             if !kind.is_file() {
+                continue;
+            }
+            if !approved_path(&full, approved_folders) {
                 continue;
             }
             let ext = extension(&lower);
@@ -545,6 +558,7 @@ async fn gated(options: &LearnOptions) -> Result<(), RuntimeError> {
 /// Learns changed files in source order, persisting partial progress before measuring the next batch.
 pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError> {
     let plan = &options.plan;
+    let approved_folders = plan.approved_folders.as_deref();
     let logs = library_logs(&plan.dir);
     if options.rebuild {
         tokio::try_join!(
@@ -570,6 +584,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     let mut found = Finds::default();
     let (mut walked_sounds, mut walked_presets, mut walked_sets) = (vec![], vec![], vec![]);
     let mut sources = plan.sources.clone();
+    if approved_folders.is_some() {
+        sources.retain(|source| source.kind == SourceKind::Folder && approved_path(&source.path, approved_folders));
+    }
     sources.sort_by_key(|s| order(s.kind));
     // A DAW's library inside another folder: what its layout reads is its own source's; the rest stays the outer folder's.
     let daw_libraries: HashSet<String> =
@@ -579,9 +596,19 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         progress.tell(false);
         let own = matches!(source.kind, SourceKind::UserLibrary | SourceKind::Place | SourceKind::Folder);
         let skip = if source.is_daw_library() { HashSet::new() } else { daw_libraries.clone() };
-        let layout = options.daws.layout(source);
-        if walk(source, layout, options.daws, Kinds { sounds: true, presets: true, sets: own }, &mut found, &options.signal, 16, &skip)
-            .await?
+        let layout = if approved_folders.is_some() { &Layout::NONE } else { options.daws.layout(source) };
+        if walk(
+            source,
+            layout,
+            options.daws,
+            Kinds { sounds: true, presets: true, sets: own },
+            &mut found,
+            &options.signal,
+            16,
+            &skip,
+            approved_folders,
+        )
+        .await?
         {
             walked_sounds.push(source.path.clone());
             walked_presets.push(source.path.clone());
@@ -605,6 +632,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             &options.signal,
             6,
             &source_paths,
+            approved_folders,
         )
         .await?
         {
@@ -612,6 +640,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         }
     }
     for path in &plan.set_files {
+        if !approved_path(path, approved_folders) {
+            continue;
+        }
         if found.seen.contains(path) || !set_extension(options.daws, &extension(&path.to_lowercase())) || skipped_set(options.daws, path) {
             continue;
         }
@@ -635,6 +666,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             &options.signal,
             6,
             &HashSet::new(),
+            approved_folders,
         )
         .await?
         {
@@ -664,6 +696,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     let mut preset_writer = Writer::new(logs.presets.clone());
     for file in &todo_presets {
         gated(&options).await?;
+        if !approved_path(&file.file.path, approved_folders) {
+            continue;
+        }
         let ext = extension(&file.file.path);
         let daw_library = file.source.is_daw_library();
         let format = if daw_library {
@@ -717,6 +752,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     let mut set_writer = Writer::new(logs.sets.clone());
     for file in &todo_sets {
         gated(&options).await?;
+        if !approved_path(&file.file.path, approved_folders) {
+            continue;
+        }
         let read = match options.daws.project_format(&extension(&file.file.path.to_lowercase())) {
             Some((daw, format)) => read_project(daw, format, &file.file.path, &options.signal).await,
             None => read_set(&file.file.path, Some(options.signal.clone())).await,
@@ -761,6 +799,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
                 // Several paused slots may resume together after another has taken the last file.
                 let Some(file) = todo.get(next.get()) else { break };
                 next.set(next.get() + 1);
+                if !approved_path(&file.file.path, options.plan.approved_folders.as_deref()) {
+                    continue;
+                }
                 progress.value.borrow_mut().at = Some(file.source.label.clone());
                 let job = MeasureJob {
                     id: 0,
@@ -770,6 +811,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
                     mtime: file.file.mtime,
                     start: None,
                     seconds: None,
+                    decode: options.plan.decode.clone(),
                 };
                 // A stop doesn't wait for the measurement (up to the pool's timeout): the pool ends its worker below.
                 let entry = tokio::select! {

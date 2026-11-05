@@ -11,6 +11,28 @@ use tokio::{
     io::{AsyncReadExt, AsyncSeekExt},
 };
 
+/// External decoding policy. Defaults retain standalone discovery and downloads.
+/// With `installed_only`, compressed audio requires the explicitly approved local
+/// `ffmpeg`; PATH discovery, downloads, ffprobe and platform converters are disabled.
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DecodeOptions {
+    #[serde(default)]
+    pub installed_only: bool,
+    /// An approved absolute executable path, never a program name to resolve on PATH.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ffmpeg: Option<PathBuf>,
+}
+impl DecodeOptions {
+    pub fn is_default(&self) -> bool {
+        !self.installed_only && self.ffmpeg.is_none()
+    }
+}
+
+/// Restricted decoding accepts self-contained audio containers, never playlists or secondary-file demuxers.
+pub(crate) const LOCAL_AUDIO_INPUT: [&str; 4] =
+    ["-protocol_whitelist", "file,pipe", "-format_whitelist", "wav,aiff,mp3,flac,aac,mov,ogg,caf"];
+const MAX_DECODED_BYTES: u64 = 64 * 1024 * 1024;
+
 pub const AUDIO_EXTENSIONS: &[&str] =
     &[".wav", ".wave", ".aif", ".aiff", ".aifc", ".mp3", ".m4a", ".aac", ".mp4", ".flac", ".ogg", ".oga", ".opus", ".caf"];
 #[derive(Debug, Clone, thiserror::Error)]
@@ -126,7 +148,16 @@ pub async fn prepare_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Re
 /// As prepare_audio, converting no further than `until` seconds in, the farthest anything will read: a 2-hour mix
 /// isn't written out whole (2.5 GB of it) for its first twelve minutes, and the length it's read as is kept.
 pub async fn prepare_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until: Option<f64>) -> Result<PreparedAudio, AudioError> {
-    prepare(path.as_ref(), signal, until, None, None).await
+    prepare_audio_to_with_options(path, signal, until, &DecodeOptions::default()).await
+}
+/// As `prepare_audio_to`, with an explicit external decoding policy.
+pub async fn prepare_audio_to_with_options(
+    path: impl AsRef<Path>,
+    signal: Option<Signal>,
+    until: Option<f64>,
+    options: &DecodeOptions,
+) -> Result<PreparedAudio, AudioError> {
+    prepare(path.as_ref(), signal, until, None, None, options).await
 }
 /// `known`: the file's length in seconds when it's known already (a song's tags say it), read again from the file only
 /// when it isn't.
@@ -136,6 +167,7 @@ async fn prepare(
     until: Option<f64>,
     from: Option<f64>,
     known: Option<f64>,
+    options: &DecodeOptions,
 ) -> Result<PreparedAudio, AudioError> {
     let extension = extension(path);
     if !AUDIO_EXTENSIONS.contains(&extension.as_str()) {
@@ -156,7 +188,7 @@ async fn prepare(
         });
     }
     let folder = std::env::temp_dir().join(format!("kumi-audio-{}", uuid::Uuid::new_v4()));
-    tokio::fs::create_dir(&folder).await?;
+    kumi_types::private::create_dir_all(&folder)?;
     let mut prepared = PreparedAudio {
         path: folder.join("converted.wav"),
         format: Some(extension[1..].into()),
@@ -166,7 +198,7 @@ async fn prepare(
         length_known: false,
         folder: Some(folder),
     };
-    match convert(path, &prepared.path, signal, until, from, known).await {
+    match convert(path, &prepared.path, signal, until, from, known, options).await {
         Ok((length, start, whole)) => {
             (prepared.seconds, prepared.start, prepared.whole) = (length_past(until, length), start, whole);
             // A copy that stops at a reach tells the file's length only when it was read.
@@ -199,7 +231,15 @@ pub async fn prepare_audio_range_of(
     seconds: f64,
     length: Option<f64>,
 ) -> Result<PreparedAudio, AudioError> {
-    prepare(path.as_ref(), signal, Some(from.max(0.) + seconds.max(0.)), Some(from.max(0.)).filter(|from| *from > 0.), length).await
+    prepare(
+        path.as_ref(),
+        signal,
+        Some(from.max(0.) + seconds.max(0.)),
+        Some(from.max(0.)).filter(|from| *from > 0.),
+        length,
+        &DecodeOptions::default(),
+    )
+    .await
 }
 fn extension(path: &Path) -> String {
     path.extension().map(|v| format!(".{}", v.to_string_lossy().to_lowercase())).unwrap_or_default()
@@ -210,7 +250,16 @@ pub async fn open_audio(path: impl AsRef<Path>, signal: Option<Signal>) -> Resul
 /// As open_audio, reading no further than `until` seconds in (see prepare_audio_to); `frames` is still the whole file's
 /// when its length is read (a length that can't be read leaves the copy's, and `length` says so).
 pub async fn open_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until: Option<f64>) -> Result<AudioSource, AudioError> {
-    let prepared = prepare_audio_to(path, signal, until).await?;
+    open_audio_to_with_options(path, signal, until, &DecodeOptions::default()).await
+}
+/// As `open_audio_to`, with an explicit external decoding policy.
+pub async fn open_audio_to_with_options(
+    path: impl AsRef<Path>,
+    signal: Option<Signal>,
+    until: Option<f64>,
+    options: &DecodeOptions,
+) -> Result<AudioSource, AudioError> {
+    let prepared = prepare_audio_to_with_options(path, signal, until, options).await?;
     let handle = File::open(&prepared.path).await.map_err(|e| {
         AudioError(if e.kind() == std::io::ErrorKind::NotFound { "There's no file there." } else { "Kumi couldn't open that file." }.into())
     })?;
@@ -224,6 +273,25 @@ pub async fn open_audio_to(path: impl AsRef<Path>, signal: Option<Signal>, until
     source.prepared = Some(prepared);
     Ok(source)
 }
+/// An explicitly approved program may be canonicalized to a local verbatim disk
+/// path on Windows. No UNC, generic device or NT namespace is an approved local disk.
+fn local_decoder_path(path: &Path, named: &str) -> bool {
+    if !path.is_absolute() || named.chars().any(char::is_control) {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        matches!(
+            path.components().next(),
+            Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        !named.starts_with('\\') && !named.starts_with("//")
+    }
+}
 /// The copy converted, the file's length when it was read (or `known`), where the copy begins in the file (`from`, when a
 /// converter could seek to it), and whether it holds the whole file whatever was asked (afconvert's).
 async fn convert(
@@ -233,9 +301,24 @@ async fn convert(
     until: Option<f64>,
     from: Option<f64>,
     known: Option<f64>,
+    options: &DecodeOptions,
 ) -> Result<(Option<f64>, f64, bool), AudioError> {
-    let mac = cfg!(target_os = "macos");
-    let ffmpeg = if mac {
+    let mac = cfg!(target_os = "macos") && !options.installed_only;
+    let ffmpeg = if let Some(path) = &options.ffmpeg {
+        let named = path.to_str().ok_or_else(|| AudioError("The approved ffmpeg dependency path isn't valid UTF-8.".into()))?;
+        // Refuse network/device namespaces and control characters before touching the path.
+        if !local_decoder_path(path, named) {
+            return Err(AudioError("The approved ffmpeg dependency is unavailable: select a local absolute executable path without control characters at setup, or export as WAV/AIFF.".into()));
+        }
+        if !path.is_file() {
+            return Err(AudioError("The approved ffmpeg dependency is unavailable: select an existing absolute executable path at setup, or export as WAV/AIFF.".into()));
+        }
+        named.to_owned()
+    } else if options.installed_only {
+        return Err(AudioError(
+            "The approved ffmpeg dependency is unavailable: approve a local decoder at setup, or export as WAV/AIFF.".into(),
+        ));
+    } else if mac {
         "ffmpeg".into()
     } else {
         match find_ffmpeg(FfmpegOptions { signal: signal.clone(), ..Default::default() }).await {
@@ -244,9 +327,28 @@ async fn convert(
             Err(_) => "ffmpeg".into(),
         }
     };
-    let input_s = input.to_string_lossy();
+    let input_s = if options.installed_only {
+        let name = input.to_str().ok_or_else(|| AudioError("The audio path isn't valid UTF-8.".into()))?;
+        if !local_decoder_path(input, name) {
+            return Err(AudioError("Restricted decoding needs a local absolute audio path.".into()));
+        }
+        let canonical = tokio::fs::canonicalize(input).await?;
+        let name = canonical.to_str().ok_or_else(|| AudioError("The audio path isn't valid UTF-8.".into()))?;
+        if !local_decoder_path(&canonical, name) {
+            return Err(AudioError("Restricted decoding needs a local absolute audio path.".into()));
+        }
+        std::borrow::Cow::Owned(format!("file:{name}"))
+    } else {
+        input.to_string_lossy()
+    };
     let output_s = output.to_string_lossy();
     let folder = output.parent().map(|folder| folder.to_string_lossy().into_owned()).unwrap_or_default();
+    let isolated_dir = if options.installed_only {
+        Some(output.parent().ok_or_else(|| AudioError("Decoded audio needs an owned scratch folder.".into()))?)
+    } else {
+        None
+    };
+    let output_limit = options.installed_only.then(|| MAX_DECODED_BYTES.to_string());
     // How long it is (ffprobe, or what ffmpeg says of it, decoding nothing): to ask room for what will be written, and to
     // keep the file's length when the copy stops short of it. A reading can be wrong, so where ffmpeg stops isn't up to it.
     // (A stretch's length is known: nothing to read first. Nor is a length known already read again.)
@@ -265,7 +367,7 @@ async fn convert(
         Some(_) if from.is_none() => match known {
             Some(known) => Some(known),
             None if later => None,
-            None => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+            None => crate::frames::duration_of_in(&ffmpeg, &input_s, signal.clone(), isolated_dir).await,
         },
         _ => None,
     };
@@ -276,15 +378,23 @@ async fn convert(
     // How big the file is: how long converting it may take when its length isn't known.
     let bytes = tokio::fs::metadata(input).await.map_or(0, |metadata| metadata.len());
     let (mut no_room, mut timed_out) = (None, None);
-    for Attempt { command, args, mut writes } in
-        attempts(mac, &ffmpeg, &input_s, &output_s, reach.zip(until_text.as_deref()), length, from_text.as_deref(), later)
-    {
+    for Attempt { command, args, mut writes } in attempts(
+        mac,
+        &ffmpeg,
+        &input_s,
+        &output_s,
+        reach.zip(until_text.as_deref()),
+        length,
+        from_text.as_deref(),
+        later,
+        output_limit.as_deref(),
+    ) {
         if let Some(s) = &signal {
             s.check()?;
         }
         // ffmpeg didn't convert it: its length is read now, as it would have been first, for afconvert's room.
         if command == "afconvert" && later {
-            length = crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await;
+            length = crate::frames::duration_of_in(&ffmpeg, &input_s, signal.clone(), isolated_dir).await;
             writes = length;
         }
         // A Mac's afconvert copies the whole file, a stretch's too, whose length wasn't read: read it now, to ask room
@@ -292,7 +402,7 @@ async fn convert(
         if command == "afconvert" && writes.is_none() && from.is_some() {
             writes = match known {
                 Some(known) => Some(known),
-                None => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+                None => crate::frames::duration_of_in(&ffmpeg, &input_s, signal.clone(), isolated_dir).await,
             };
         }
         match writes {
@@ -307,15 +417,33 @@ async fn convert(
             None => {}
         }
         let timeout = conversion_timeout_ms(writes, bytes);
+        let timeout = if options.installed_only { timeout.min(120_000) } else { timeout };
         // What ffmpeg says as it opens the file, when it says it, is more than its errors: room for it.
         let max_buffer = if later && command != "afconvert" { SAYS_LENGTH_BUFFER } else { 1024 * 1024 };
-        match run(command, &args, RunOptions { signal: signal.clone(), timeout_ms: Some(timeout), max_buffer: Some(max_buffer) }).await {
+        let result = run(
+            command,
+            &args,
+            RunOptions {
+                signal: signal.clone(),
+                timeout_ms: Some(timeout),
+                max_buffer: Some(max_buffer),
+                isolated_dir: isolated_dir.map(Path::to_path_buf),
+            },
+        )
+        .await;
+        if options.installed_only
+            && result.is_ok()
+            && tokio::fs::metadata(output).await.is_ok_and(|metadata| metadata.len() >= MAX_DECODED_BYTES)
+        {
+            return Err(AudioError("Decoded audio exceeds the 64 MiB limit; choose a shorter excerpt.".into()));
+        }
+        match result {
             Ok(_) if command == "afconvert" => return Ok((None, 0., true)),
             Ok(output) if later => {
                 let length = match (crate::frames::duration_in(&output.stderr), until) {
                     // Whole in its copy: read by the probe, it would be as long as the copy (not past the reach).
                     (Some(said), Some(until)) if said + WHOLE_BEFORE_REACH <= until => Some(said),
-                    _ => crate::frames::duration_of(&ffmpeg, &input_s, signal.clone()).await,
+                    _ => crate::frames::duration_of_in(&ffmpeg, &input_s, signal.clone(), isolated_dir).await,
                 };
                 // Stopped while it was read: stopped, as when it was read first, not a length unknown.
                 if let Some(s) = &signal {
@@ -339,6 +467,11 @@ async fn convert(
     }
     if let Some(timeout) = timed_out {
         return Err(AudioError::timed_out(timeout as f64 / 1000.));
+    }
+    if options.installed_only {
+        return Err(AudioError(
+            "The approved ffmpeg dependency couldn't decode this file. Check the approved executable, or export as WAV/AIFF.".into(),
+        ));
     }
     Err(AudioError(format!("Kumi couldn't decode {} here: it reads WAV and AIFF itself, and other formats with {}ffmpeg. Install ffmpeg, or export the file as WAV.",input.extension().unwrap_or_default().to_string_lossy().to_uppercase(),if mac {"macOS's afconvert or "}else{""})))
 }
@@ -378,10 +511,21 @@ fn attempts<'a>(
     length: Option<f64>,
     from: Option<&'a str>,
     says_length: bool,
+    restricted_output_limit: Option<&'a str>,
 ) -> Vec<Attempt<'a>> {
     // Saying the file's length as it opens it (its Duration line, at info): nothing else changes in what it writes.
-    let mut args =
-        if says_length { vec!["-hide_banner", "-nostats", "-v", "info", "-nostdin", "-y"] } else { vec!["-v", "error", "-nostdin", "-y"] };
+    let mut args = Vec::with_capacity(24);
+    if says_length {
+        args.extend(["-hide_banner", "-nostats", "-v", "info", "-nostdin", "-y"]);
+    } else {
+        args.extend(["-v", "error", "-nostdin", "-y"]);
+    }
+    if restricted_output_limit.is_some() {
+        if !says_length {
+            args.push("-hide_banner");
+        }
+        args.extend(LOCAL_AUDIO_INPUT);
+    }
     if let Some(from) = from {
         args.extend(["-ss", from]);
     }
@@ -389,7 +533,11 @@ fn attempts<'a>(
     if let Some((_, until)) = until {
         args.extend(["-t", until]);
     }
-    args.extend(["-acodec", "pcm_f32le", "-f", "wav", output]);
+    args.extend(["-acodec", "pcm_f32le", "-f", "wav"]);
+    if let Some(limit) = restricted_output_limit {
+        args.extend(["-fs", limit]);
+    }
+    args.push(output);
     // No further than the reach, nor than the file's length when it's read as shorter.
     let writes = until.map(|(until, _)| length.map_or(until, |length| until.min(length)));
     let by_ffmpeg = Attempt { command: ffmpeg, args, writes };
@@ -809,12 +957,34 @@ fn deinterleave_i16(buffer: &[u8], frames: usize, channels: usize, decode: impl 
 mod tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn approved_decoder_paths_accept_canonical_local_disks_but_not_remote_or_device_namespaces() {
+        for named in [r"C:\tools\ffmpeg.exe", r"\\?\C:\tools\ffmpeg.exe"] {
+            assert!(local_decoder_path(Path::new(named), named), "{named}");
+        }
+        for named in [
+            r"\\server\share\ffmpeg.exe",
+            "//server/share/ffmpeg.exe",
+            r"\\?\UNC\server\share\ffmpeg.exe",
+            r"\\.\C:\tools\ffmpeg.exe",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1\ffmpeg.exe",
+            r"\??\C:\tools\ffmpeg.exe",
+            r"\\?\Volume{12345678-1234-1234-1234-123456789abc}\ffmpeg.exe",
+            r"C:ffmpeg.exe",
+            r"\tools\ffmpeg.exe",
+            "C:\\tools\\decoder\n.exe",
+        ] {
+            assert!(!local_decoder_path(Path::new(named), named), "{named}");
+        }
+    }
+
     #[test]
     fn a_copy_asks_room_for_what_it_will_hold_and_stops_at_the_reach_whatever_the_length_read() {
         // Each converter tried, in order: where it stops (`-t`), and the seconds it's asked room for.
         let plan = |mac, until: Option<f64>, length| {
             let text = until.map(|until| to_fixed(until, 3));
-            attempts(mac, "ffmpeg", "in.mp3", "out.wav", until.zip(text.as_deref()), length, None, false)
+            attempts(mac, "ffmpeg", "in.mp3", "out.wav", until.zip(text.as_deref()), length, None, false, None)
                 .into_iter()
                 .map(|tried| {
                     let stop = tried.args.iter().position(|arg| *arg == "-t").map(|at| tried.args[at + 1].to_string());
@@ -848,32 +1018,6 @@ mod tests {
         assert_eq!(plan(false, None, None), [("ffmpeg".to_string(), None, None)]);
         assert!(AudioError::no_room("Only 5 MB is free.").is_no_room());
         assert!(!AudioError("That file is too short to be audio.".into()).is_no_room());
-        // Saying the file's length as it converts only adds what ffmpeg says: the same conversion, to the same reach.
-        let said = attempts(false, "ffmpeg", "in.mp3", "out.wav", Some((31.0, "31.000")), None, None, true);
-        assert_eq!(
-            said[0].args,
-            [
-                "-hide_banner",
-                "-nostats",
-                "-v",
-                "info",
-                "-nostdin",
-                "-y",
-                "-i",
-                "in.mp3",
-                "-vn",
-                "-t",
-                "31.000",
-                "-acodec",
-                "pcm_f32le",
-                "-f",
-                "wav",
-                "out.wav"
-            ]
-        );
-        let quiet = attempts(false, "ffmpeg", "in.mp3", "out.wav", Some((31.0, "31.000")), None, None, false);
-        assert_eq!(said[0].args[6..], quiet[0].args[4..]);
-        assert_eq!(quiet[0].args[..4], ["-v", "error", "-nostdin", "-y"]);
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -24,6 +24,8 @@ pub struct MeasureJob {
     pub start: Option<f64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub seconds: Option<f64>,
+    #[serde(default, skip_serializing_if = "kumi_media::audio::DecodeOptions::is_default")]
+    pub decode: kumi_media::audio::DecodeOptions,
 }
 #[derive(Debug, Serialize, Deserialize)]
 pub struct MeasureReply {
@@ -49,7 +51,7 @@ impl MeasureJob {
             &self.relative,
             self.size,
             self.mtime,
-            MeasureOptions { start: self.start, seconds: self.seconds, signal: None },
+            MeasureOptions { start: self.start, seconds: self.seconds, signal: None, decode: self.decode.clone() },
         )
         .await
         {

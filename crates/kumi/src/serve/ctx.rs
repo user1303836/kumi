@@ -357,6 +357,9 @@ pub struct Ctx {
     library_roots: RefCell<Vec<PathBuf>>,
     media_roots: Vec<PathBuf>,
     media: Media,
+    artifacts: super::artifacts::Artifacts,
+    maps: super::map::MapStore,
+    library: super::library::LibraryState,
     snapshots: Snapshots,
     jobs: Jobs,
     shutdown: Signal,
@@ -412,11 +415,16 @@ impl Ctx {
         let generation = format!("{:x}", started.max(0));
         let history = super::history::History::new(&state_dir, generation);
         let lease = super::lease::Lease::new(&args.kumi_home, args.daw.as_str());
+        let artifacts = super::artifacts::Artifacts::new(&state_dir).map_err(|error| error.reason().to_owned())?;
+        let maps = super::map::MapStore::new(&state_dir).map_err(|error| error.reason().to_owned())?;
         let ctx = Rc::new_cyclic(|me| Ctx {
             me: me.clone(),
             daw: args.daw,
             snapshots,
             jobs,
+            artifacts,
+            maps,
+            library: super::library::LibraryState::default(),
             paths: Paths { state_dir, kumi_home: args.kumi_home },
             env,
             library_roots: RefCell::new(granted("library", args.library_roots)),
@@ -520,6 +528,22 @@ impl Ctx {
 
     pub fn media(&self) -> &Media {
         &self.media
+    }
+
+    pub fn artifacts(&self) -> &super::artifacts::Artifacts {
+        &self.artifacts
+    }
+
+    pub fn maps(&self) -> &super::map::MapStore {
+        &self.maps
+    }
+
+    pub(crate) fn library_state(&self) -> &super::library::LibraryState {
+        &self.library
+    }
+
+    pub fn approved(&self, path: &Path) -> Result<PathBuf, OpError> {
+        super::artifacts::approved(path, &self.library_roots.borrow(), &self.media_roots, &self.artifacts)
     }
 
     pub fn snapshots(&self) -> &Snapshots {
