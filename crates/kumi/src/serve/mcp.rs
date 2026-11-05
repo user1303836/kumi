@@ -759,7 +759,7 @@ fn momentary(answer: &Value) -> bool {
     } else {
         content["code"].as_str().filter(|_| content["state"] == "refused")
     };
-    matches!(code, Some("leased" | "busy" | "not_connected" | "stale" | "ledger_unavailable"))
+    matches!(code, Some("leased" | "busy" | "not_connected" | "stale" | "ledger_unavailable" | "transport_running" | "render_busy" | "ears_missing"))
 }
 
 /// A snapshot bigger than a resource read gives.

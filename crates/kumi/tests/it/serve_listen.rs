@@ -182,6 +182,7 @@ case!(overlong_audio_is_unsure_discarded_and_audited_without_media, async {
     let (unsure, error) = wire.call("listen", args, Some("overlong-window")).await;
     assert!(!error, "{unsure}");
     assert_eq!(unsure["state"], "unsure", "{unsure}");
+    assert_eq!(unsure["cleanup"], "restored", "an audio overrun does not erase the verified restoration");
     no_audio(&unsure);
     assert!(!lab.home.path().join("state/artifacts.json").exists());
     assert_eq!(std::fs::read_dir(listening.folder()).unwrap().count(), 0);
@@ -264,6 +265,46 @@ case!(a_slower_tempo_after_approval_is_stale_without_starting_a_render, async {
     wire.end().await;
 });
 
+case!(a_slower_renoise_tempo_after_approval_refuses_without_rendering, async {
+    let script = RenoiseScript::new();
+    script.set_bpm(120.);
+    let listening = script.listening();
+    listening.set_render_preflight(true);
+    let bridge = script.clone();
+    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| bridge.config(secret, "/lab/Renoise")))).await;
+    listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Renoise).root.join("listening"));
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, _, _) = looked(&mut wire).await;
+    let args = approved_args(&mut wire, window(&key, epoch, json!({"mix":true}))).await;
+    script.set_bpm(60.);
+    let (stale, error) = wire.call("listen", args, Some("renoise-tempo-drift")).await;
+    assert!(!error && stale["state"] == "refused" && stale["code"] == "stale", "{stale}");
+    no_audio(&stale);
+    assert!(listening.renders().is_empty());
+    assert_eq!(lab.ctx.link().project().unwrap().epoch, epoch);
+    assert!(lab.ctx.history().rows(10).is_empty());
+    wire.end().await;
+});
+
+case!(a_busy_render_refusal_is_rechecked_without_replaying_a_completed_capture, async {
+    let (lab, listening) = listening_lab(Daw::Reaper).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, _, _) = looked(&mut wire).await;
+    let args = approved_args(&mut wire, window(&key, epoch, json!({"mix":true}))).await;
+    listening.set_playing(true);
+    let (busy, error) = wire.call("listen", args.clone(), Some("wait-for-idle")).await;
+    assert!(!error && busy["state"] == "refused" && busy["code"] == "render_busy", "{busy}");
+    no_audio(&busy);
+    assert!(listening.renders().is_empty());
+    listening.set_playing(false);
+    let (heard, error) = wire.call("listen", args.clone(), Some("wait-for-idle")).await;
+    assert!(!error && heard["state"] == "done", "{heard}");
+    let (again, error) = wire.call("listen", args, Some("wait-for-idle")).await;
+    assert!(!error && again["artifact_id"] == heard["artifact_id"], "{again}");
+    assert_eq!(listening.renders().len(), 1);
+    wire.end().await;
+});
+
 case!(a_native_queued_window_refusal_keeps_the_producers_new_tempo, async {
     let script = ReaperScript::new(3, 0);
     let listening = script.listening();
@@ -324,5 +365,175 @@ case!(reference_preparation_finishes_before_capture_and_an_expired_allowance_nev
     assert_eq!(listening.renders().len(), 2, "reference preparation never enters native capture");
     assert_eq!(lab.ctx.link().project().unwrap().epoch, epoch);
     assert!(lab.ctx.history().rows(10).is_empty());
+    wire.end().await;
+});
+
+#[cfg(unix)]
+case!(compressed_reference_preparation_never_holds_the_native_settle_guard, async {
+    use std::{os::unix::fs::PermissionsExt, time::Duration};
+    let source = tempfile::tempdir().unwrap();
+    let root = source.path().canonicalize().unwrap();
+    std::fs::write(root.join("reference.mp3"), b"compressed fixture decoded by the approved converter").unwrap();
+    daw_mcp_server::simulator::listening::write_noise(&root.join("decoded.wav"), 2., 0.2, 3).unwrap();
+    let converter = root.join("ffmpeg");
+    std::fs::write(&converter, b"#!/bin/sh\ndir=${0%/*}\n: > \"$dir/entered\"\nn=0\nwhile [ ! -f \"$dir/release\" ]; do\n n=$((n+1))\n [ \"$n\" -lt 500 ] || exit 1\n /bin/sleep 0.01\ndone\nfor last; do :; done\n/bin/cp \"$dir/decoded.wav\" \"$last\"\n").unwrap();
+    std::fs::set_permissions(&converter, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let script = ReaperScript::new(3, 0);
+    let listening = script.listening().clone();
+    listening.set_render_preflight(true);
+    listening.set_steps(10);
+    let media_root = root.clone();
+    let lab = Lab::configured(
+        DawId::Reaper, Daw::Reaper,
+        Some(Box::new(move |secret| script.config(secret, "/lab/REAPER"))),
+        false,
+        move |args| {
+            args.media_roots.push(media_root);
+            args.tools.insert("ffmpeg".into(), converter);
+        },
+    ).await;
+    listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Reaper).root.join("listening"));
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, _, _) = looked(&mut wire).await;
+    let mut args = window(&key, epoch, json!({"mix":true}));
+    args["compare_to"] = json!({"file": root.join("reference.mp3")});
+    let args = approved_args(&mut wire, args).await;
+    let native_seconds = args["_listen"]["deadline_seconds"].as_u64().unwrap();
+    let (result, ()) = tokio::join!(wire.call("listen", args, Some("slow-reference")), async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while !root.join("entered").exists() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap();
+        assert_eq!(lab.ctx.settle_bound(), None);
+        assert!(listening.renders().is_empty());
+        // Spend most of the separate 120-second preparation allowance, without
+        // spending a real minute or letting the converter finish first.
+        tokio::time::pause();
+        tokio::time::advance(Duration::from_secs(110)).await;
+        tokio::time::resume();
+        assert_eq!(lab.ctx.settle_bound(), None);
+        std::fs::write(root.join("release"), b"go").unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while listening.renders().is_empty() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap();
+        assert_eq!(lab.ctx.settle_bound(), Some(Duration::from_secs(native_seconds)));
+    });
+    let (heard, error) = result;
+    assert!(!error && heard["state"] == "done", "{heard}");
+    assert_eq!(heard["compare"]["metrics"]["seconds"], 2.);
+    assert_eq!(heard["capture"]["cleanup"], "restored");
+    assert_eq!(listening.renders().len(), 1);
+    assert_eq!(lab.ctx.settle_bound(), None);
+    wire.end().await;
+});
+
+case!(shutdown_cancels_capture_but_not_its_restoration_or_settle_guard, async {
+    use std::time::Duration;
+    let (lab, listening) = listening_lab(Daw::Renoise).await;
+    listening.set_steps(1000);
+    listening.set_slow_stop(true);
+    lab.call("connect", json!({"daw":"renoise"})).await.unwrap();
+    lab.call("observe", json!({"scope":"project"})).await.unwrap();
+    let project = lab.ctx.link().project().unwrap();
+    let mut args = window(&json!(project.key), project.epoch, json!({"mix":true}));
+    args["preview"] = json!(true);
+    let preview = lab.call("listen", args.clone()).await.unwrap();
+    args.as_object_mut().unwrap().remove("preview");
+    approve(&mut args, &preview);
+    let bounds = args.as_object_mut().unwrap().remove("_listen").unwrap();
+    let host = HostCall { private: [("_listen".into(), bounds)].into_iter().collect::<JsonObject>().into(), ..HostCall::default() };
+    let call = Call {
+        args: args.as_object().unwrap().clone(), host,
+        signal: lab.ctx.shutdown().clone(), progress: Progress::none(),
+    };
+    let operation = registry::OPERATIONS.iter().find(|operation| operation.name == "listen").unwrap();
+    let (heard, ()) = tokio::join!((operation.run)(&lab.ctx, call), async {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while listening.renders().is_empty() {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }).await.unwrap();
+        assert_eq!(lab.ctx.settle_bound(), Some(Duration::from_secs(preview["deadline_seconds"].as_u64().unwrap())));
+        lab.ctx.shutdown().cancel();
+    });
+    let heard = heard.unwrap();
+    assert_eq!(heard["state"], "cancelled", "{heard}");
+    assert_eq!(heard["cleanup"], "restored");
+    no_audio(&heard);
+    assert_eq!(listening.restored(), 1);
+    assert_eq!(lab.ctx.settle_bound(), None);
+    assert!(!lab.ctx.paths().state_dir.join("artifacts.json").exists());
+    assert!(std::fs::read_dir(listening.folder()).unwrap().next().is_none());
+    lab.ctx.link().close().await;
+});
+
+case!(a_queued_refusal_never_claims_restoration_from_missing_or_changed_render_state, async {
+    for missing in [false, true] {
+        let script = ReaperScript::new(3, 0);
+        let listening = script.listening().clone();
+        listening.set_render_preflight(true);
+        let bridge = script.clone();
+        let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| {
+            let mut config = bridge.config(secret, "/lab/REAPER");
+            let inner = config.respond.take().unwrap();
+            let terminal = std::sync::atomic::AtomicBool::new(false);
+            config.respond = Some(Arc::new(move |method, args| {
+                if method == "listen_status" {
+                    terminal.store(true, Ordering::SeqCst);
+                }
+                let mut answer = inner(method, args);
+                if terminal.load(Ordering::SeqCst) && method == "read" && args["kind"] == "render_preflight" {
+                    if let Some(Ok(value)) = &mut answer {
+                        if missing {
+                            value.as_object_mut().unwrap().remove("render_state");
+                        } else {
+                            value["render_state"]["numbers"]["RENDER_SRATE"] = json!(96_000.);
+                        }
+                    }
+                }
+                answer
+            }));
+            config
+        }))).await;
+        listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Reaper).root.join("listening"));
+        let mut wire = Wire::start(lab.ctx.clone()).await;
+        let (key, epoch, _, _) = looked(&mut wire).await;
+        let args = approved_args(&mut wire, window(&key, epoch, json!({"mix":true}))).await;
+        listening.fail_next("stale", "/private/producer/queued-render.wav");
+        let (unsure, error) = wire.call("listen", args, Some("unverified-queued-refusal")).await;
+        assert!(!error && unsure["state"] == "unsure" && unsure["cleanup"] == "unsure", "{unsure}");
+        assert!(!unsure.to_string().contains("/private/producer"), "{unsure}");
+        no_audio(&unsure);
+        assert!(lab.ctx.link().project().unwrap().epoch > epoch);
+        assert_eq!(lab.ctx.history().rows(10).len(), 1);
+        wire.end().await;
+    }
+});
+
+case!(track_sources_cannot_smuggle_destinations_implicit_windows_or_multiple_targets, async {
+    let (lab, listening) = listening_lab(Daw::Reaper).await;
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, reference, _) = looked(&mut wire).await;
+    let good = window(&key, epoch, json!({"ref":reference}));
+    let mut destination = good.clone();
+    destination["output"] = json!(lab.home.path().join("not-an-output.wav"));
+    let mut ambiguous = good.clone();
+    ambiguous["source"]["track"]["mix"] = json!(true);
+    let mut implicit = good.clone();
+    implicit["source"].as_object_mut().unwrap().remove("beats");
+    let mut rounded_end = good;
+    rounded_end["source"]["from_beat"] = json!(1e300);
+    for (index, mut args) in [destination, ambiguous, implicit, rounded_end].into_iter().enumerate() {
+        args["preview"] = json!(true);
+        let (refused, error) = wire.call("listen", args, Some(&format!("invalid-source-{index}"))).await;
+        assert!(error && refused["error"]["code"] == "invalid", "{refused}");
+        no_audio(&refused);
+    }
+    assert!(listening.renders().is_empty());
+    assert!(!lab.ctx.paths().state_dir.join("scratch/listen").exists());
+    assert!(!lab.home.path().join("not-an-output.wav").exists());
     wire.end().await;
 });

@@ -85,6 +85,16 @@ impl Lab {
         config: Option<Box<dyn FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig>>,
         adopted: bool,
     ) -> Lab {
+        Self::configured(daw, bridge, config, adopted, |_| {}).await
+    }
+
+    async fn configured(
+        daw: DawId,
+        bridge: Daw,
+        config: Option<Box<dyn FnOnce(daw_bridge::auth::Secret) -> SimulatorConfig>>,
+        adopted: bool,
+        configure: impl FnOnce(&mut Args),
+    ) -> Lab {
         let home = tempfile::tempdir().unwrap();
         let elsewhere = tempfile::tempdir().unwrap();
         let transport = if adopted { elsewhere.path().join(".kumi") } else { home.path().join("kumi-home") };
@@ -135,7 +145,7 @@ impl Lab {
         let answers = kumi_daw::io::Answers::default()
             .with(AbletonFactory(Rc::new(|_| panic!("a REAPER runtime makes no Ableton integration"))))
             .with(own_host);
-        let args = Args {
+        let mut args = Args {
             state_dir: home.path().join("state"),
             kumi_home: transport,
             hermes_home: None,
@@ -145,6 +155,7 @@ impl Lab {
             media_roots: vec![],
             tools: BTreeMap::new(),
         };
+        configure(&mut args);
         let ctx = Ctx::new(args, env, answers).unwrap();
         Lab { home, _elsewhere: elsewhere, ctx, simulator }
     }
@@ -301,6 +312,24 @@ case!(serve_never_asks_reaper_to_keep_the_projects_id_and_nothing_is_written_int
     assert_eq!(written.ids_written(), Vec::<String>::new(), "nothing written into the project");
     let status = lab.state("status.json");
     assert_eq!(status["connected"], true, "{status}");
+    lab.ctx.link().close().await;
+});
+
+case!(serve_never_requests_or_saves_a_renoise_identity, async {
+    let script = daw_mcp_server::renoise::simulator::RenoiseScript::new();
+    let saved = script.clone();
+    let lab = Lab::new(DawId::Renoise, Daw::Renoise, Some(Box::new(move |secret| script.config(secret, "/lab/Renoise")))).await;
+    let connected = lab.call("connect", json!({"daw": "renoise"})).await.unwrap();
+    assert_eq!(connected["connected"], true, "{connected}");
+    lab.call("observe", json!({"scope": "project"})).await.unwrap();
+    let simulator = lab.simulator.as_ref().unwrap();
+    let asks = identity_asks(simulator);
+    assert!(!asks.is_empty() && asks.iter().all(Option::is_none), "{asks:?}");
+    let native_epoch = lab.ctx.link().project().unwrap().native_epoch.unwrap();
+    let result = saved.respond()("project_save", &json!({"epoch": native_epoch})).unwrap().unwrap();
+    assert_eq!(result["dirty"], false);
+    assert!(saved.ids_written().is_empty(), "a producer's save while the plugin is connected must not keep a Kumi id");
+    assert!(!simulator.keeps_identity());
     lab.ctx.link().close().await;
 });
 

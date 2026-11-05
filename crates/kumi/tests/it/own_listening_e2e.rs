@@ -2497,14 +2497,6 @@ async fn restricted_renoise_restores_near_end_bpm_and_lpb_without_replaying() {
             assert_eq!(Path::new(&takes[0].file).parent(), Some(fixture.scratch.path().canonicalize().unwrap().as_path()));
             assert!(!takes[0].live);
             assert!(script.listening().previews().is_empty());
-            assert!(
-                script.asked().iter().any(|(method, args)| method == "change_apply" && args["kind"] == "song-bpm"),
-                "the adapter restored the actual changed BPM"
-            );
-            assert!(
-                script.asked().iter().any(|(method, args)| method == "change_apply" && args["kind"] == "song-lpb"),
-                "the adapter restored the actual changed LPB with an integer input"
-            );
             let after = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
             assert_eq!(after.seconds, preview.seconds);
             assert_eq!(script.listening().renders().len(), 1);
@@ -2537,7 +2529,7 @@ async fn restricted_renoise_cancellation_waits_for_terminal_state_and_independen
                 wait_for_render(|| !script.listening().renders().is_empty()).await;
                 signal.cancel();
             },);
-            assert!(matches!(heard, Err(RuntimeError::Aborted)), "{heard:?}");
+            assert!(matches!(heard, Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Cancelled { .. }))), "{heard:?}");
             assert_eq!(script.listening().restored(), 1);
             let calls: Vec<Value> = simulator
                 .transcript()

@@ -987,8 +987,9 @@ test("listening: render_preflight follows ZT and ZL timing, including the render
   eq(started.seconds, answer.seconds)
   eq(mock.renders[1].seconds, answer.seconds)
   mock.finish_render()
-  eq(mock.data.transport_fields.bpm, 60, "native render does not restore tempo a second time")
-  eq(mock.data.transport_fields.lpb, 8)
+  eq(status(peer, "jpf1").state, "done")
+  eq(mock.data.transport_fields.bpm, 120, "guarded completion restores the expected render-left tempo natively")
+  eq(mock.data.transport_fields.lpb, 4)
   env, peer = setup()
   mock.ops.set_effect(2, 4, 9, 1, timing_command("ZT"), 60)
   answer = result(preflight(peer, { fromBeat = 0, beats = 4 }))
@@ -1200,7 +1201,64 @@ test("listening: guarded queued launch uses fresh permissible timing rather than
   eq(mock.renders[1].seconds, 4)
   mock.finish_render()
   eq(job.state, "done")
-  eq(mock.data.transport_fields.bpm, 60, "no native tempo restoration")
+  eq(mock.data.transport_fields.bpm, 120, "guarded completion restores the launch snapshot, not the planned tempo")
+  H.no_dialogs()
+end)
+
+test("listening: guarded completion preserves a newer tempo pair and publishes no files", function()
+  for _, field in ipairs({ "bpm", "lpb" }) do
+    local setup_env, peer = setup()
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60)
+    env.before_render = nil
+    listening.launch(job, env)
+    local completed = mock.finish_render({ no_callback = true })
+    local changed = field == "bpm" and 137 or 7
+    mock.data.transport_fields[field] = changed
+    completed.done()
+    eq(job.state, "failed")
+    eq(job.code, "uncertain")
+    eq(mock.data.transport_fields[field], changed, "the newer producer state survives")
+    ok(not exists(job.sources[1].file), "no non-success audio remains")
+    H.no_dialogs()
+  end
+end)
+
+test("listening: guarded tempo cleanup refuses a changed epoch and reads writes back", function()
+  for _, fault in ipairs({ "epoch", "readback", "partial" }) do
+    local setup_env, peer = setup()
+    mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+    local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60)
+    env.before_render = nil
+    listening.launch(job, env)
+    local completed = mock.finish_render({ no_callback = true, fraction = fault == "partial" and 0.5 or nil })
+    if fault == "epoch" then
+      env.epoch = function() return "another-epoch" end
+    elseif fault == "readback" then
+      env.quiet = function(fn)
+        fn()
+        mock.data.transport_fields.bpm = 60
+      end
+    end
+    completed.done()
+    eq(job.state, "failed", fault)
+    eq(job.code, "uncertain", fault)
+    eq(mock.data.transport_fields.bpm, 60, fault)
+    ok(not exists(job.sources[1].file), "non-success never retains audio")
+    H.no_dialogs()
+  end
+end)
+
+test("listening: a cancelled guarded render leaves an unconfirmed tempo pair alone", function()
+  local env, peer = setup()
+  mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+  result((start(peer, "jguard-cancel", { { id = "mix", what = "master" } }, nil, { maxSeconds = 60 })))
+  result(call(peer, "listen_cancel", { jobId = "jguard-cancel" }))
+  mock.finish_render()
+  eq(status(peer, "jguard-cancel").state, "failed")
+  eq(status(peer, "jguard-cancel").code, "uncertain")
+  eq(mock.data.transport_fields.bpm, 60)
+  ok(not exists(env.listening .. "/jguard-cancel-mix.wav"))
   H.no_dialogs()
 end)
 

@@ -120,7 +120,7 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             (Some(staged), Some(path)) => Some(measure(ctx, staged, &path, &call.signal).await?),
             _ => None,
         };
-        retain(ctx, source, reference, &call.signal).await
+        retain(ctx, source, reference, &call.signal, None).await
     })
 }
 
@@ -179,7 +179,9 @@ pub async fn measure(ctx: &Ctx, file: StagedArtifact, original_name: &Path, sign
 
 /// Retain measured audio and its optional reference together, then produce the C1 result.
 /// Differences always mean current minus reference; MEDIA always names the retained current audio.
-pub async fn retain(ctx: &Ctx, source: MeasuredAudio, reference: Option<MeasuredAudio>, signal: &Signal) -> Result<Value, OpError> {
+pub async fn retain(
+    ctx: &Ctx, source: MeasuredAudio, reference: Option<MeasuredAudio>, signal: &Signal, deadline: Option<tokio::time::Instant>,
+) -> Result<Value, OpError> {
     check(signal)?;
     let differences = reference.as_ref().map(|reference| audio::compare(&source.metrics, &reference.metrics));
     let mut verdict_text = audio::tools::summary(&source.metrics);
@@ -193,7 +195,7 @@ pub async fn retain(ctx: &Ctx, source: MeasuredAudio, reference: Option<Measured
         Some(reference) => (Some((reference.file, reference.mime)), Some(reference.metrics)),
         None => (None, None),
     };
-    let (saved, saved_reference) = ctx.artifacts().publish_pair(ctx, source.file, source.mime, reference_file, "listen", signal).await?;
+    let (saved, saved_reference) = ctx.artifacts().publish_pair(ctx, source.file, source.mime, reference_file, signal, deadline).await?;
     let mut result = json!({
         "metrics": source.metrics,
         "artifact_id": saved.id,

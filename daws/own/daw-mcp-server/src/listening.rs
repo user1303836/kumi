@@ -361,6 +361,84 @@ fn files_of(answer: &Value) -> Vec<PathBuf> {
         .collect()
 }
 
+/// Renoise's owning Windows host, not its Lua tool or kumi serve, prepares its dedicated
+/// cache at startup and protects only verified files of completed jobs it started.
+#[cfg(windows)]
+pub(crate) struct WindowsStaging {
+    root: std::fs::File,
+    cache: std::fs::File,
+    path: PathBuf,
+}
+
+#[cfg(windows)]
+impl WindowsStaging {
+    fn open(path: &Path, directory: bool, write_acl: bool) -> Result<std::fs::File, String> {
+        use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
+        let access = 0x0002_0080 | if write_acl { 0x0004_0000 } else { 0 }; // READ_CONTROL, READ_ATTRIBUTES, WRITE_DAC
+        let file = std::fs::OpenOptions::new().access_mode(access)
+            // Exclusive directory protection suppresses propagation to existing children.
+            .share_mode(if directory && write_acl { 0 } else if directory { 3 } else { 1 })
+            .custom_flags(0x0020_0000 | if directory { 0x0200_0000 } else { 0 }).open(path)
+            .map_err(|_| "The staging entry could not be pinned safely.")?;
+        let meta = file.metadata().map_err(|_| "The staging entry could not be inspected.")?;
+        if (if directory { !meta.is_dir() } else { !meta.is_file() }) || meta.file_attributes() & 0x400 != 0 {
+            return Err("The staging entry has the wrong type or is a reparse point.".into());
+        }
+        Ok(file)
+    }
+
+    fn path_of(file: &std::fs::File) -> Result<PathBuf, String> {
+        daw_bridge::lifecycle::native_acl::file_path(file)
+    }
+
+    pub(crate) fn start(root: &Path) -> Result<Self, String> {
+        use daw_bridge::lifecycle::native_acl;
+        let pinned_root = Self::open(root, true, false)?;
+        if !native_acl::is_kumis_shape(root) || !native_acl::is_kumis_shape_handle(&pinned_root, true) {
+            return Err("The owning bridge root is not verifiably private.".into());
+        }
+        let path = root.join("listening");
+        match std::fs::symlink_metadata(&path) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                native_acl::create_kumis_folder(&path).map_err(|_| "The private listening cache could not be created.")?;
+            }
+            Err(_) => return Err("The listening cache could not be inspected.".into()),
+            Ok(_) => {}
+        }
+        let cache = Self::open(&path, true, false)?;
+        if Self::path_of(&cache)?.parent() != Some(Self::path_of(&pinned_root)?.as_path()) {
+            return Err("The listening cache is not inside the pinned owning bridge root.".into());
+        }
+        if !native_acl::is_kumis_shape_handle(&cache, true) {
+            let protection = Self::open(&path, true, true)?;
+            native_acl::protect_owned_directory(&cache, &protection)
+                .map_err(|_| "The listening cache is not owned by this account or could not be protected.")?;
+        }
+        Ok(Self { root: pinned_root, cache, path })
+    }
+
+    fn ready(&self) -> bool {
+        use daw_bridge::lifecycle::native_acl;
+        native_acl::is_kumis_shape_handle(&self.root, true)
+            && native_acl::is_kumis_shape_handle(&self.cache, true)
+            && Self::path_of(&self.cache).ok().is_some_and(|path| std::fs::canonicalize(&self.path).ok() == Some(path))
+    }
+
+    fn protect(&self, returned: &Path) -> Result<(), String> {
+        if !self.ready() || !returned.is_absolute()
+            || returned.file_name().is_none_or(|name| name.to_string_lossy().contains(':'))
+        {
+            return Err("The completed render's cache or filename is unsafe.".into());
+        }
+        let file = Self::open(returned, false, true)?;
+        if Self::path_of(&file)?.parent() != Some(Self::path_of(&self.cache)?.as_path()) {
+            return Err("The completed render is outside its pinned cache.".into());
+        }
+        daw_bridge::lifecycle::native_acl::protect_inherited_render(&file)
+            .map_err(|_| "The completed render is not a single-link, owned file with the cache's exact inherited ACL.".into())
+    }
+}
+
 impl Host {
     /// Where the bridges leave what they render: `<Kumi's folder>/bridges/<daw>/listening`.
     pub fn listening_folder(&self) -> PathBuf {
@@ -448,6 +526,38 @@ impl Host {
         self.start_job("render_start", "render", params, &pick).await
     }
 
+    /// Only this owning Windows/Renoise host may protect its completed render's exact
+    /// expected paths. Nonterminal and unsafe files are never exposed by this boundary.
+    #[cfg(windows)]
+    fn protect_job_answer(&self, mut answer: Value, job: &Job) -> Value {
+        let Some(staging) = &self.renoise_staging else { return answer };
+        if answer["state"] != "done" || job.kind != "render" {
+            if let Some(object) = answer.as_object_mut() { object.remove("files"); }
+            return answer;
+        }
+        let safe = (|| {
+            let staging = staging.as_ref().map_err(|_| ())?;
+            let files = answer["files"].as_array().filter(|files| !files.is_empty() && files.len() == job.files.len()).ok_or(())?;
+            for (index, file) in files.iter().enumerate() {
+                let path = file["file"].as_str().map(Path::new).ok_or(())?;
+                if !job.files.iter().any(|expected| expected == path)
+                    || files[..index].iter().any(|prior| prior["file"] == file["file"])
+                {
+                    return Err(());
+                }
+                staging.protect(path).map_err(|_| ())?;
+            }
+            Ok::<(), ()>(())
+        })();
+        if safe.is_err() {
+            if let Some(object) = answer.as_object_mut() { object.remove("files"); }
+            answer["state"] = "failed".into();
+            answer["code"] = "failed".into();
+            answer["error"] = "The completed render's staging could not be verified and protected; no files were exposed.".into();
+        }
+        answer
+    }
+
     /// `hear`: what the DAW is playing, captured live as a job (REAPER).
     pub async fn hear(&self, arguments: &Value) -> (Value, bool) {
         let pick = match Pick::from_arguments(arguments) {
@@ -481,6 +591,12 @@ impl Host {
 
     /// Starts a job on the bridge under an id of the host's, with the free room it may fill, and keeps it.
     async fn start_job(&self, method: &str, kind: &'static str, mut params: Map<String, Value>, pick: &Pick) -> (Value, bool) {
+        #[cfg(windows)]
+        if let Some(staging) = &self.renoise_staging {
+            if !staging.as_ref().is_ok_and(WindowsStaging::ready) {
+                return (json!({"error": "The owning bridge's listening cache could not be verified and protected; no render was started.", "code": "failed", "connected": true}), true);
+            }
+        }
         // (jobs nobody followed to their end: their ends are learnt before they count against this one or its room)
         self.learn_ends(pick, self.jobs().running().len() >= MAX_JOBS).await;
         let id = self.jobs().id('j');
@@ -499,6 +615,10 @@ impl Host {
         }
         answer["jobId"] = id.into();
         answer["kind"] = kind.into();
+        #[cfg(windows)]
+        if let Some(job) = self.jobs().get(answer["jobId"].as_str().expect("host job identity")) {
+            answer = self.protect_job_answer(answer, &job);
+        }
         (answer, false)
     }
 
@@ -539,6 +659,8 @@ impl Host {
                 }),
                 Err(error) => return (self.call_error(&error), true),
             };
+            #[cfg(windows)]
+            let answer = self.protect_job_answer(answer, &job);
             let ended = answer.get("state").and_then(Value::as_str).is_some_and(|state| TERMINAL.contains(&state));
             if ended {
                 self.jobs().ended(&id);
@@ -562,15 +684,17 @@ impl Host {
             Ok(id) => id.to_string(),
             Err(why) => return bad(why),
         };
-        if self.jobs().get(&id).is_none() {
-            return unknown_job(&id);
-        }
+        let Some(job) = self.jobs().get(&id) else { return unknown_job(&id) };
+        #[cfg(not(windows))]
+        let _ = job;
         match self.listening_call("listen_cancel", json!({"jobId": id}), &pick, self.limit(STATUS_TIMEOUT)).await {
             Ok(mut answer) => {
                 if answer.get("state").and_then(Value::as_str).is_some_and(|state| TERMINAL.contains(&state)) {
                     self.jobs().ended(&id);
                 }
                 answer["jobId"] = id.into();
+                #[cfg(windows)]
+                let answer = self.protect_job_answer(answer, &job);
                 (answer, false)
             }
             Err(refused) => refused,
@@ -674,6 +798,10 @@ impl Host {
                     }
                     answer["jobId"] = id.into();
                     answer["kind"] = "render".into();
+                    #[cfg(windows)]
+                    if let Some(job) = self.jobs().get(answer["jobId"].as_str().expect("host job identity")) {
+                        answer = self.protect_job_answer(answer, &job);
+                    }
                 }
                 (answer, false)
             }

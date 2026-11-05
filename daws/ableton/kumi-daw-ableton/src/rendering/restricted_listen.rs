@@ -46,7 +46,7 @@ struct Ready {
 }
 
 fn refused(code: &'static str, reason: impl Into<String>) -> RuntimeError {
-    HearFailure::Refused { code, reason: reason.into() }.into()
+    HearFailure::Refused { code, reason: reason.into(), marked_modified: false }.into()
 }
 
 fn unsure() -> RuntimeError {
@@ -54,6 +54,8 @@ fn unsure() -> RuntimeError {
         reason:
             "Live's capture did not verify restoration. Observe again and check the transport and Kumi Ears device before another action."
                 .into(),
+        restored: false,
+        marked_modified: false,
     }
     .into()
 }
@@ -107,7 +109,7 @@ impl LiveRenderer {
         let ready = self.restricted_preflight(request, signal).await?;
         Ok(HearPreview {
             label: ready.label, seconds: ready.seconds, method: HearMethod::Ears, deadline_seconds: CALL_DEADLINE_SECONDS,
-            disclosure: "Live captures Arrangement audio. The Set may look modified, and Live's own Undo history includes the temporary device steps (Undo in Live can bring the Ears device back).",
+            disclosure: "Live captures Arrangement audio. Live may show the Set as modified, and its own Undo history includes the listen's temporary device steps (pressing Undo in Live can bring the Ears device back)",
         })
     }
 
@@ -133,7 +135,10 @@ impl LiveRenderer {
                 .require_fresh_references(&args)
                 .map_err(|_| refused("stale", "That track ref is stale; observe again."))?;
         }
-        let (state, target, label) = self.capture_state(request, signal.clone()).await?;
+        let (state, target, label) = self.capture_state(request, signal.clone()).await.map_err(|error| match error {
+            RuntimeError::Hear(HearFailure::Refused { .. }) | RuntimeError::Aborted => error,
+            _ => unreadable(),
+        })?;
         if state.transport["playing"] != false || state.transport["arrangementRecord"] != false || state.transport["sessionRecord"] != false
         {
             return Err(refused("transport_running", "Stop playback and recording before listening to an Arrangement window."));
@@ -159,7 +164,8 @@ impl LiveRenderer {
             if !self.connection().has("live_browser_inspect") {
                 return Err(unreadable());
             }
-            let found = self.connection().call("live_browser_inspect", object(json!({"itemId":EARS_ITEM})), signal).await?;
+            let found = self.connection().call("live_browser_inspect", object(json!({"itemId":EARS_ITEM})), signal).await
+                .map_err(|error| if matches!(error, RuntimeError::Aborted) { error } else { unreadable() })?;
             if found.is_error == Some(true) {
                 return Err(refused(
                     "ears_missing",
@@ -279,7 +285,7 @@ impl LiveRenderer {
             self.rows("track", light.clone(), signal.clone()),
             self.rows("return-track", light.clone(), signal.clone()),
             self.rows("main-track", light, signal.clone()),
-            self.rows("selection", json!({}), signal.clone()),
+            self.rows("selection", json!({"fields":["selectedTrackRef","selectedDeviceRef"]}), signal.clone()),
             async {
                 payload(&self.connection().call("live_song_state", JsonObject::new(), signal.clone()).await?).map_err(RuntimeError::from)
             },
@@ -309,10 +315,12 @@ impl LiveRenderer {
             "sessionRecord":transport["sessionRecord"],"position":transport["position"],"loop":looped,
             "punchIn":transport["punchIn"],"punchOut":transport["punchOut"],
             "firedTargets":playback["firedTargets"],"playingTargets":playback["playingTargets"]});
-        flag(&song, "backToArranger")?;
-        let song = json!({"backToArranger":song["backToArranger"],"sessionRecord":song.get("sessionRecord"),
-            "sessionAutomationRecord":song.get("sessionAutomationRecord"),"overdub":song.get("overdub"),
-            "arrangementOverdub":song.get("arrangementOverdub"),"reEnableAutomationEnabled":song.get("reEnableAutomationEnabled")});
+        for key in ["backToArranger", "sessionRecord", "sessionAutomationRecord", "overdub", "arrangementOverdub", "reEnableAutomationEnabled"] {
+            flag(&song, key)?;
+        }
+        let song = json!({"backToArranger":song["backToArranger"],"sessionRecord":song["sessionRecord"],
+            "sessionAutomationRecord":song["sessionAutomationRecord"],"overdub":song["overdub"],
+            "arrangementOverdub":song["arrangementOverdub"],"reEnableAutomationEnabled":song["reEnableAutomationEnabled"]});
         let main = only(main)?;
         let all: Vec<_> = regular.into_iter().chain(returns).chain(std::iter::once(main)).collect();
         let target = if request.mix == Some(true) {
@@ -364,11 +372,16 @@ impl LiveRenderer {
         request: &HearRequest,
         original: Signal,
     ) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
-        if request.approval.is_none() {
+        let Some(approval) = request.approval else {
             return Err(refused("not_approved", "A restricted capture needs the host's approved window and native deadline."));
-        }
+        };
+        // Reserve the final fifth for capture measurement by the host. Production gets
+        // two fifths; independent restoration can use the remaining native allowance.
+        let native_ms = u64::from(approval.deadline_seconds) * 1000;
+        let cleanup_deadline = Instant::now() + Duration::from_millis(native_ms * 4 / 5);
+        let signal = abort::any([original.clone(), self.connection().lifetime.clone(), abort::timeout(native_ms * 2 / 5)]);
+        let cleanup = abort::any([self.connection().lifetime.clone(), abort::timeout(native_ms * 4 / 5)]);
         let directory = self.listening_policy.scratch_dir(request).await?;
-        let signal = abort::any([original.clone(), self.connection().lifetime.clone(), abort::timeout(120_000)]);
         let ready = self.restricted_preflight(request, signal.clone()).await?;
         // Unlike standalone setup, opening this link does not install, create a cache or spawn
         // a detached setup task. Every exit below closes the per-call socket.
@@ -414,20 +427,22 @@ impl LiveRenderer {
             .history
             .quietly(Some(&mut steps), async {
                 // The tap is the only device mutation, never a recording-track fallback.
-                let tap = self.place_tap(link.clone(), &ready.target, signal.clone()).await.map_err(|e| e.error)?;
+                let tap = self.place_tap(link.clone(), &ready.target, signal.clone()).await.map_err(|error| {
+                    if error.silent {
+                        refused("ears_missing", "The installed Kumi Ears did not start with the required version. Max for Live is required; listening never installs it.")
+                    } else {
+                        error.error
+                    }
+                })?;
                 rig.ears.as_mut().expect("per-call Ears").taps.insert(ready.label.clone(), tap.clone());
-                if !tap.version.is_finite() || tap.version < EARS_VERSION as f64 {
-                    return Err(refused(
-                        "ears_missing",
-                        "The installed Kumi Ears is too old to verify this window. Max for Live is required.",
-                    ));
+                if tap.version != EARS_VERSION as f64 {
+                    return Err(refused("ears_missing", "The installed Kumi Ears does not match the required version. Max for Live is required."));
                 }
-                self.capture_window(&ready, &link, &tap, &directory, &mut started, &mut transport_touched, signal.clone()).await
+                self.capture_window(&ready, &link, &tap, &directory, &mut started, &mut transport_touched, signal.clone(), cleanup.clone()).await
             })
             .await;
         rig.steps.extend(steps);
         // Never restore a different Set after the producer changed documents.
-        let cleanup = abort::any([self.connection().lifetime.clone(), abort::timeout(90_000)]);
         let same_set = self.capture_set_matches(&ready.state, cleanup.clone()).await;
         if same_set {
             for tap in rig.ears.as_ref().expect("per-call Ears").taps.values() {
@@ -436,7 +451,7 @@ impl LiveRenderer {
             if started {
                 let _ = self.capture_transport(&ready, CaptureTransport::Stop, cleanup.clone()).await;
             }
-            self.close_rig(&mut rig).await;
+            let _ = tokio::time::timeout_at(cleanup_deadline, self.close_rig(&mut rig)).await;
             if transport_touched {
                 let _ = self.capture_transport(&ready, CaptureTransport::Restore, cleanup.clone()).await;
             }
@@ -450,7 +465,7 @@ impl LiveRenderer {
         if original.is_cancelled() {
             return Err(RuntimeError::Aborted);
         }
-        let (file, seconds) = result.map_err(|error| match error {
+        let (mut file, seconds) = result.map_err(|error| match error {
             RuntimeError::Hear(HearFailure::Refused { .. }) => error,
             _ => refused(
                 "capture_incomplete",
@@ -459,7 +474,7 @@ impl LiveRenderer {
         })?;
         Ok(Ok(vec![HeardTake {
             label: ready.label,
-            file: file.to_string_lossy().into_owned(),
+            file: std::mem::take(&mut file.0).to_string_lossy().into_owned(),
             start: 0.0,
             seconds: Some(seconds),
             live: true,
@@ -477,7 +492,8 @@ impl LiveRenderer {
         started: &mut bool,
         transport_touched: &mut bool,
         signal: Signal,
-    ) -> Result<(PathBuf, f64), RuntimeError> {
+        stop_signal: Signal,
+    ) -> Result<(RawFile, f64), RuntimeError> {
         // Re-read immediately before playback; a successful load did not authorize stopping
         // someone else's playback or changing to Session clips.
         let playback = only(self.rows("session-playback", json!({}), signal.clone()).await?)?;
@@ -517,7 +533,6 @@ impl LiveRenderer {
             Ok::<_, RuntimeError>(())
         })
         .await;
-        let stop_signal = abort::any([self.connection().lifetime.clone(), abort::timeout(5_000)]);
         if !self.capture_set_matches(&ready.state, stop_signal.clone()).await {
             return Err(unsure());
         }
@@ -548,7 +563,10 @@ impl LiveRenderer {
         let window = ready.window;
         let (capture, first, last) = tokio::task::spawn_blocking(move || {
             let anchors = Anchors { first: Some(written.beats), after_jump: Some(window.from) };
-            let covered = cover(&runs(&capture, anchors), window.from, window.beats, capture.sample_rate).map_err(|_| unreadable())?;
+            // Live needs verified beat coverage, so a short capture is refused rather
+            // than published with A3's optional short-capture success notice.
+            let covered = cover(&runs(&capture, anchors), window.from, window.beats, capture.sample_rate)
+                .map_err(|_| refused("capture_incomplete", "Kumi Ears did not capture the complete approved beat window. No audio was published."))?;
             let first = frame_at(&covered, window.from).ok_or_else(unreadable)?;
             let last = (first as f64 + (window.beats * covered.samples_per_beat).round()) as usize;
             if last > covered.to
@@ -563,9 +581,9 @@ impl LiveRenderer {
         .await
         .map_err(|_| unreadable())??;
         signal.check()?;
-        let file = directory.join(format!("{}.wav", uuid::Uuid::new_v4()));
+        let file = RawFile(directory.join(format!("{}.wav", uuid::Uuid::new_v4())));
         let seconds = (last - first) as f64 / capture.sample_rate;
-        write_capture_wav(&file, &capture, first as f64, last as f64).await.map_err(|_| unreadable())?;
+        write_capture_wav(&file.0, &capture, first as f64, last as f64).await.map_err(|_| unreadable())?;
         Ok((file, seconds))
     }
 }

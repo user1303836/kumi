@@ -89,6 +89,8 @@ pub struct Host {
     /// The listening jobs started through this host (M5).
     jobs: crate::listening::Jobs,
     pub(crate) listening_mode: ListeningMode,
+    #[cfg(windows)]
+    pub(crate) renoise_staging: Option<Result<crate::listening::WindowsStaging, String>>,
     /// How the host starts the DAW's bridge, for a DAW whose bridge runs beside it; None for one that loads its bridge.
     spawn: Option<Spawn>,
     /// The least time a listening call is given ([`Host::with_listening_timeout`]); zero keeps each call's own limit.
@@ -178,6 +180,9 @@ impl Host {
             catchup: crate::catchup::Catchup::new(BridgePaths::new(kumi_home, daw).snapshots()),
             jobs: crate::listening::Jobs::default(),
             listening_mode,
+            #[cfg(windows)]
+            renoise_staging: (daw == Daw::Renoise && listening_mode == ListeningMode::Restricted)
+                .then(|| crate::listening::WindowsStaging::start(&BridgePaths::new(kumi_home, daw).root)),
             spawn: Spawn::of(daw, kumi_home),
             listening_floor: Duration::ZERO,
             keep_identity: false,

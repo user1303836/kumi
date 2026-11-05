@@ -36,7 +36,7 @@ use serde_json::{json, Value};
 mod bounded_listening;
 
 /// The tools a goal can reach, as the oracle's bridge lists them.
-const TOOLS: [&str; 38] = [
+const TOOLS: [&str; 39] = [
     "live_run_python",
     "server_status",
     "live_status",
@@ -60,6 +60,7 @@ const TOOLS: [&str; 38] = [
     "live_device_apply",
     "live_device_delete_preview",
     "live_device_delete_apply",
+    "live_browser_inspect",
     "live_browser_load_preview",
     "live_browser_load_apply",
     "live_transport_preview",
@@ -533,6 +534,11 @@ impl McpEndpoint for Set {
         }
         self.asked.borrow_mut().push(json!({"name":name,"args":args}));
         tokio::task::yield_now().await;
+        if name == "live_browser_inspect" {
+            let mut missing = reply(json!({"error":"item_not_found"}));
+            missing.is_error = Some(true);
+            return Ok(missing);
+        }
         Ok(reply(match name {
             "live_discover" => self.discover(&args),
             "live_song_state" if self.bounded.borrow().is_some() => self.bounded.borrow().as_ref().unwrap().song_state(),

@@ -82,6 +82,7 @@ struct State {
     /// tempo at this BPM (no undo step), as Renoise's does.
     render_bpm: Option<f64>,
     render_lpb: Option<u64>,
+    guarded_tempo: Option<GuardedTempo>,
     /// A failed native put-back leaves this actual track mute behind after the next successful render start.
     render_mute_residue: Option<(u64, bool)>,
     /// (M7) What Kumi's variations made: phrases with their lines, slots of variation patterns.
@@ -93,6 +94,13 @@ struct State {
     /// The files the song was saved to with its id written into its `tool_data`, in order: the tool writes it as the song
     /// is saved, only while a client asks.
     ids_written: Vec<String>,
+}
+
+struct GuardedTempo {
+    epoch: u32,
+    job: String,
+    before: [Value; 2],
+    rendered: [Value; 2],
 }
 
 /// A song that answers like the tool. Clones share the song.
@@ -236,6 +244,7 @@ impl RenoiseScript {
                 chains: Chains::default(),
                 render_bpm: None,
                 render_lpb: None,
+                guarded_tempo: None,
                 render_mute_residue: None,
                 takes: Takes::default(),
                 transport_playing: false,
@@ -395,7 +404,9 @@ impl RenoiseScript {
         if let Some(added) = state.devices.get(&number) {
             row["deviceCount"] = json!(row["deviceCount"].as_u64().unwrap_or(0) + added);
         }
-        Some(Ok(json!({"items": [row], "epoch": EPOCH, "layout": 0})))
+        let mut page = page.clone();
+        page["items"] = json!([row]);
+        Some(Ok(page))
     }
 
     /// What the lines a test wrote answer: a pattern track's `line` read, and a pattern read by its ref (from the
@@ -1069,7 +1080,7 @@ impl RenoiseScript {
 
     fn answer(&self, method: &str, params: &Value) -> Option<Result<Value, (String, String)>> {
         if LISTENING_METHODS.contains(&method) {
-            let (epoch, run_start) = {
+            let (epoch, run_start, guarded) = {
                 let mut state = self.state.lock().unwrap();
                 if method == "render_start" && params.get("maxSeconds").is_some() {
                     if !self.listening.supports_render_preflight() {
@@ -1098,7 +1109,16 @@ impl RenoiseScript {
                     }
                     self.listening.tempo_next(json!({"before": {"bpm": before, "lpb": lpb}, "bpm": after, "lpb": after_lpb}));
                 }
-                (state.epoch, state.run_start)
+                let guarded = (method == "render_start" && params.get("maxSeconds").is_some()).then(|| GuardedTempo {
+                    epoch: state.epoch,
+                    job: params["jobId"].as_str().unwrap_or_default().into(),
+                    before: [state.song["bpm"].clone(), state.song["lpb"].clone()],
+                    rendered: [
+                        state.render_bpm.map(Value::from).unwrap_or_else(|| state.song["bpm"].clone()),
+                        state.render_lpb.map(Value::from).unwrap_or_else(|| state.song["lpb"].clone()),
+                    ],
+                });
+                (state.epoch, state.run_start, guarded)
             };
             let params = &match carried_tracks(params, epoch, run_start, None) {
                 Ok(carried) => carried,
@@ -1112,6 +1132,7 @@ impl RenoiseScript {
             let result = self.listening.answer(method, params, &epoch.to_string(), &known);
             if method == "render_start" && result.as_ref().is_some_and(Result::is_ok) {
                 let mut state = self.state.lock().unwrap();
+                state.guarded_tempo = guarded;
                 if self.listening.supports_render_preflight() {
                     if let Some(after) = state.render_bpm {
                         state.song["bpm"] = after.into();
@@ -1122,6 +1143,20 @@ impl RenoiseScript {
                 }
                 if let Some((track, muted)) = state.render_mute_residue.take() {
                     state.mute.insert(track, muted);
+                }
+            }
+            if let Some(Ok(answer)) = &result {
+                if matches!(answer["state"].as_str(), Some("done" | "cancelled" | "failed")) {
+                    let mut state = self.state.lock().unwrap();
+                    if state.guarded_tempo.as_ref().is_some_and(|guard| params["jobId"] == guard.job) {
+                        let guard = state.guarded_tempo.take().unwrap();
+                        let current = [state.song["bpm"].as_f64(), state.song["lpb"].as_f64()];
+                        let expected = [guard.rendered[0].as_f64(), guard.rendered[1].as_f64()];
+                        if state.epoch == guard.epoch && answer["state"] == "done" && current == expected {
+                            state.song["bpm"] = guard.before[0].clone();
+                            state.song["lpb"] = guard.before[1].clone();
+                        }
+                    }
                 }
             }
             return result;

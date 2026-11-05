@@ -105,6 +105,13 @@ fn approval(call: &Call) -> Result<(HearApproval, u64), OpError> {
 /// Preparation cannot spend any of the approved native phase. Its cancellation reaches both
 /// the converter and the DSP worker before the unpublished stage is dropped.
 async fn prepare_reference(ctx: &Ctx, source: &Value, original: &Signal, seconds: u64) -> Result<listen::MeasuredAudio, OpError> {
+    if seconds == 0 {
+        return Err(OpError::Refused {
+            code: "prepare_timeout",
+            reason: "The reference has no preparation allowance; nothing was captured or rendered.".into(),
+            owner: None,
+        });
+    }
     let stop = Signal::new();
     let signal = abort::any([original.clone(), stop.clone()]);
     let work = async {
@@ -126,32 +133,47 @@ async fn prepare_reference(ctx: &Ctx, source: &Value, original: &Signal, seconds
     }
 }
 
-fn outcome(state: &str, code: &str, reason: &str, restored: bool) -> Value {
-    json!({"state":state,"code":code,"reason":one_line(reason, 500),"cleanup":if restored {"restored"} else {"unsure"}})
+fn outcome(state: &str, code: &str, reason: &str, restored: bool, marked_modified: bool) -> Value {
+    const MODIFIED: &str = " The DAW reports that the project is marked modified.";
+    let mut reason = one_line(reason, 500 - if marked_modified { MODIFIED.len() } else { 0 });
+    if marked_modified {
+        reason.push_str(MODIFIED);
+    }
+    json!({"state":state,"code":code,"reason":reason,"cleanup":if restored {"restored"} else {"unsure"}})
 }
 
 fn hearing_error(ctx: &Ctx, error: RuntimeError, dispatched: bool) -> Result<Value, OpError> {
     match error {
-        RuntimeError::Hear(HearFailure::Refused { code, reason }) => {
-            let mut result = outcome("refused", code, &reason, true);
-            if code == "ears_missing" {
+        RuntimeError::Hear(HearFailure::Refused { code, reason, marked_modified }) => {
+            let (reason, fix) = if code == "ears_missing" {
                 let owned = ctx.paths().state_dir.parent().is_some_and(|data| super::connection::inside(&ctx.paths().kumi_home, data));
-                result["fix"] = json!(if owned { "setup" } else { "owning_kumi" });
                 let instruction = if owned {
                     "Run the DAW setup step again to add or update its capture device."
                 } else {
                     "Run kumi bridge in the Kumi installation that owns this DAW bridge to add or update its capture device."
                 };
-                result["reason"] = json!(format!("{} {instruction}", one_line(&reason, 350)));
+                (format!("Kumi Ears needs a compatible preinstalled device and Max for Live. {instruction}"), Some(if owned { "setup" } else { "owning_kumi" }))
+            } else {
+                (reason, None)
+            };
+            let mut result = outcome("refused", code, &reason, true, marked_modified);
+            if let Some(fix) = fix {
+                result["fix"] = json!(fix);
             }
             Ok(result)
         }
-        RuntimeError::Hear(HearFailure::Unsure { reason }) => Ok(outcome("unsure", "restoration_unknown", &reason, false)),
-        RuntimeError::Aborted => Ok(outcome("cancelled", "cancelled", "Listening was cancelled; temporary DAW state is restored.", true)),
+        RuntimeError::Hear(HearFailure::Unsure { reason, restored, marked_modified }) => {
+            Ok(outcome("unsure", if restored { "capture_failed" } else { "restoration_unknown" }, &reason, restored, marked_modified))
+        }
+        RuntimeError::Hear(HearFailure::Cancelled { marked_modified }) => {
+            Ok(outcome("cancelled", "cancelled", "Listening was cancelled; temporary DAW state is restored.", true, marked_modified))
+        }
+        RuntimeError::Aborted => Ok(outcome("cancelled", "cancelled", "Listening was cancelled; temporary DAW state is restored.", true, false)),
         _ if dispatched => Ok(outcome(
             "unsure",
             "capture_failed",
             "The capture did not return a verified restoration result. Observe again before another action.",
+            false,
             false,
         )),
         _ => Err(OpError::Failed { reason: "The DAW could not provide a complete capture preflight; no capture started.".into() }),
@@ -249,6 +271,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 "capture_failed",
                 "The DAW returned no verified restoration outcome. Observe again before another action.",
                 false,
+                false,
             ))
         }
         Ok(Err(error)) => return hearing_error(ctx, error, true),
@@ -258,26 +281,29 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 "capture_timeout",
                 "The approved native deadline expired before restoration was verified. Observe again before another action.",
                 false,
+                false,
             ))
         }
     };
-    if call.signal.is_cancelled() {
-        return hearing_error(ctx, RuntimeError::Aborted, true);
-    }
     let [take] = takes.as_slice() else {
         return Ok(outcome(
             "unsure",
             "capture_failed",
             "The DAW returned an unexpected number of capture files; none was published.",
             false,
+            false,
         ));
     };
+    if call.signal.is_cancelled() {
+        return hearing_error(ctx, HearFailure::Cancelled { marked_modified: take.marked_modified }.into(), true);
+    }
     if take.start != 0. || !take.seconds.is_some_and(|seconds| seconds.is_finite() && seconds > 0. && seconds <= 65.) {
         return Ok(outcome(
             "unsure",
             "capture_bounds",
             "The DAW returned audio outside the approved capture bound; none was published.",
-            false,
+            true,
+            take.marked_modified,
         ));
     }
     call.progress.report(1., Some(3.), Some("DAW restoration verified; measuring the private capture."));
@@ -292,7 +318,13 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let measured = match tokio::time::timeout_at(deadline, measured).await {
         Ok(Ok(measured)) => measured,
         Ok(Err(error)) => {
-            return Ok(outcome(if call.signal.is_cancelled() { "cancelled" } else { "refused" }, error.code(), error.reason(), true))
+            return Ok(outcome(
+                if call.signal.is_cancelled() { "cancelled" } else { "refused" },
+                error.code(),
+                "The captured audio could not be validated after DAW restoration; no audio was published.",
+                true,
+                take.marked_modified,
+            ))
         }
         Err(_) => {
             stop.cancel();
@@ -301,15 +333,22 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 "measure_timeout",
                 "The native deadline expired during local measurement; DAW state is restored and no audio was published.",
                 true,
+                take.marked_modified,
             ));
         }
     };
     let seconds = measured.metrics.seconds;
     call.progress.report(2., Some(3.), Some("Measurements complete; retaining the approved capture."));
-    let mut result = match listen::retain(ctx, measured, reference, &call.signal).await {
+    let mut result = match listen::retain(ctx, measured, reference, &call.signal, Some(deadline)).await {
         Ok(result) => result,
         Err(error) => {
-            return Ok(outcome(if call.signal.is_cancelled() { "cancelled" } else { "refused" }, error.code(), error.reason(), true))
+            return Ok(outcome(
+                if error.code() == "cancelled" { "cancelled" } else { "refused" },
+                error.code(),
+                "The validated audio could not be retained after DAW restoration; no audio was published.",
+                true,
+                take.marked_modified,
+            ))
         }
     };
     result["state"] = json!("done");
@@ -326,4 +365,51 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     }
     call.progress.report(3., Some(3.), Some("Capture retained; temporary DAW state is restored."));
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::serve::Args;
+    use kumi_types::system::Env;
+    use std::collections::BTreeMap;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn missing_ears_points_to_the_actual_owning_installation_without_media() {
+        for owned in [true, false] {
+            let dir = tempfile::tempdir().unwrap();
+            let data = dir.path().join("plugin-data");
+            let home = if owned { data.join("kumi-home") } else { dir.path().join("standalone-kumi") };
+            std::fs::create_dir_all(&home).unwrap();
+            let ctx = Ctx::new(
+                Args {
+                    state_dir: data.join("state"),
+                    kumi_home: home,
+                    hermes_home: None,
+                    hermes_root: None,
+                    daw: DawId::Ableton,
+                    library_roots: vec![],
+                    media_roots: vec![],
+                    tools: BTreeMap::new(),
+                },
+                Env::new(),
+                Default::default(),
+            ).unwrap();
+            let error = HearFailure::Refused {
+                code: "ears_missing",
+                reason: "/private/producer/device.amxd".into(),
+                marked_modified: false,
+            }.into();
+            let result = hearing_error(&ctx, error, false).unwrap();
+            assert_eq!(result["state"], "refused");
+            assert_eq!(result["code"], "ears_missing");
+            assert_eq!(result["fix"], if owned { "setup" } else { "owning_kumi" });
+            assert_eq!(result["cleanup"], "restored");
+            for field in ["artifact_id", "media_tag", "metrics"] {
+                assert!(result.get(field).is_none(), "{result}");
+            }
+            assert!(!result.to_string().contains("/private/producer"), "{result}");
+            assert!(!ctx.paths().state_dir.join("artifacts.json").exists());
+        }
+    }
 }

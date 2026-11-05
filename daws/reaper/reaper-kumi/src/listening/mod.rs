@@ -105,7 +105,11 @@ fn guarded_folder(folder: &Path, create: bool) -> Result<(), Fault> {
     let refuse = || failed("guarded render cache and its parent must be private owned directories, not symlinks");
     let private = |path: &Path| {
         std::fs::symlink_metadata(path).is_ok_and(|meta| {
-            if !meta.is_dir() || meta.file_type().is_symlink() || !daw_bridge::owner::is_owner_only(path) {
+            #[cfg(windows)]
+            let owner_only = daw_bridge::lifecycle::native_acl::is_kumis_shape(path);
+            #[cfg(not(windows))]
+            let owner_only = daw_bridge::owner::is_owner_only(path);
+            if !meta.is_dir() || meta.file_type().is_symlink() || !owner_only {
                 return false;
             }
             #[cfg(unix)]
@@ -132,7 +136,9 @@ fn guarded_folder(folder: &Path, create: bool) -> Result<(), Fault> {
                 use std::os::unix::fs::DirBuilderExt;
                 std::fs::DirBuilder::new().mode(0o700).create(folder)
             };
-            #[cfg(not(unix))]
+            #[cfg(windows)]
+            let made = daw_bridge::lifecycle::native_acl::create_kumis_folder(folder);
+            #[cfg(not(any(unix, windows)))]
             let made = std::fs::create_dir(folder);
             made.map_err(|error| failed(format!("couldn't create the private render cache: {error}")))?;
             if private(folder) {
@@ -253,8 +259,50 @@ impl Listening {
         }
     }
 
+    #[cfg(windows)]
+    fn prepare_owned_folder(folder: &Path) -> Result<(), String> {
+        use daw_bridge::lifecycle::native_acl;
+        use std::os::windows::fs::OpenOptionsExt;
+        if folder.file_name() != Some(std::ffi::OsStr::new("listening")) {
+            return Err("not the component's dedicated listening directory".into());
+        }
+        match std::fs::symlink_metadata(folder) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err("the existing listening directory could not be inspected".into()),
+            Ok(_) => {}
+        }
+        let parent = folder.parent().ok_or("the listening directory has no parent")?;
+        let open = |path: &Path, access, share| {
+            std::fs::OpenOptions::new().access_mode(access).share_mode(share)
+                .custom_flags(0x0220_0000).open(path)
+        };
+        // Pin the owning bridge directory, then this exact existing cache; the native
+        // helper verifies current-account ownership and type before changing its handle.
+        let pinned_parent = open(parent, 0x0002_0080, 3).map_err(|_| "the owning bridge directory could not be pinned")?;
+        if !native_acl::is_kumis_shape(parent) || !native_acl::is_kumis_shape_handle(&pinned_parent, true) {
+            return Err("the owning bridge directory is not verifiably private".into());
+        }
+        if native_acl::is_kumis_shape(folder) {
+            return Ok(());
+        }
+        let original = open(folder, 0x0002_0080, 3).map_err(|_| "the existing listening directory could not be pinned")?;
+        // Exclusive access suppresses SetSecurityInfo's propagation to old cache children.
+        let current = open(folder, 0x0006_0080, 0).map_err(|_| "the existing listening directory could not be protected")?;
+        if native_acl::file_path(&current)?.parent() != Some(native_acl::file_path(&pinned_parent)?.as_path()) {
+            return Err("the listening directory is outside its pinned owning bridge root".into());
+        }
+        native_acl::protect_owned_directory(&original, &current)
+    }
     /// Where listening's files go, once the bridge knows Kumi's folder (from its reference).
     pub fn set_folder(&self, folder: PathBuf) {
+        #[cfg(windows)]
+        if self.folder.borrow().is_none() {
+            // Upgrade only the component's dedicated directory at startup, never an
+            // adopted runtime path during a capture or a replacement after startup.
+            if Self::prepare_owned_folder(&folder).is_err() {
+                crate::log::line("The component's existing listening directory could not be verified and protected; guarded rendering will refuse it.");
+            }
+        }
         *self.folder.borrow_mut() = Some(folder);
     }
 

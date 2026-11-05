@@ -76,18 +76,20 @@ impl fmt::Display for KumiError {
 
 impl std::error::Error for KumiError {}
 
-/// A restricted capture either refused before changing the DAW, or could not prove restoration.
-/// Kept separate from human notes so hosts never infer safety by matching prose.
+/// A restricted capture can refuse, finish cancellation with verified restoration, or remain
+/// uncertain. Hosts take cleanup and modified-state evidence from fields, never from prose.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum HearFailure {
-    Refused { code: &'static str, reason: String },
-    Unsure { reason: String },
+    Refused { code: &'static str, reason: String, marked_modified: bool },
+    Cancelled { marked_modified: bool },
+    Unsure { reason: String, restored: bool, marked_modified: bool },
 }
 
 impl fmt::Display for HearFailure {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Refused { reason, .. } | Self::Unsure { reason } => f.write_str(reason),
+            Self::Refused { reason, .. } | Self::Unsure { reason, .. } => f.write_str(reason),
+            Self::Cancelled { .. } => f.write_str("Listening was cancelled; temporary DAW state is restored."),
         }
     }
 }

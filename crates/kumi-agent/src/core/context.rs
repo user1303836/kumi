@@ -43,6 +43,7 @@ impl ListeningPolicy {
         let refused = || HearFailure::Refused {
             code: "scratch_invalid",
             reason: "Restricted listening requires a private per-call scratch directory inside its configured root.".into(),
+            marked_modified: false,
         };
         let Self::Restricted { scratch_root, .. } = self else { return Err(refused()) };
         let Some(directory) = request.scratch_dir.as_ref() else { return Err(refused()) };

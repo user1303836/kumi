@@ -262,6 +262,7 @@ impl Integration for FallbackIntegration {
             Err(kumi_types::errors::HearFailure::Refused {
                 code: "not_connected",
                 reason: self.not_connected(&format!("hear the {}", self.primary.profile().or_live().words.place)),
+                marked_modified: false,
             }
             .into())
         }

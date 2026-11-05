@@ -130,14 +130,28 @@ pub fn write_noise(path: &Path, seconds: f64, level: f64, seed: u32) -> std::io:
     file.extend_from_slice(&(data.len() as u32).to_le_bytes());
     file.extend_from_slice(&data);
     if let Some(folder) = path.parent() {
-        let mut builder = std::fs::DirBuilder::new();
-        builder.recursive(true);
-        #[cfg(unix)]
+        #[cfg(not(windows))]
         {
-            use std::os::unix::fs::DirBuilderExt;
-            builder.mode(0o700);
+            let mut builder = std::fs::DirBuilder::new();
+            builder.recursive(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::DirBuilderExt;
+                builder.mode(0o700);
+            }
+            builder.create(folder)?;
         }
-        builder.create(folder)?;
+        #[cfg(windows)]
+        {
+            if let Some(parent) = folder.parent() {
+                std::fs::create_dir_all(parent)?;
+            }
+            match daw_bridge::lifecycle::native_acl::create_kumis_folder(folder) {
+                Ok(()) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                Err(error) => return Err(error),
+            }
+        }
     }
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -147,7 +161,26 @@ pub fn write_noise(path: &Path, seconds: f64, level: f64, seed: u32) -> std::io:
         options.mode(0o600);
     }
     use std::io::Write;
-    options.open(path)?.write_all(&file)
+    #[cfg(not(windows))]
+    {
+        options.open(path)?.write_all(&file)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // The simulated renderer uses the same explicit ACL as the real component,
+        // never the Windows profile's inherited SYSTEM/Administrators grants.
+        options.access_mode(0xC006_0000).share_mode(0).create_new(true);
+        let mut output = match options.open(path) {
+            Ok(output) => {
+                daw_bridge::lifecycle::native_acl::protect_created_file(&output, &output).map_err(std::io::Error::other)?;
+                output
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => options.create_new(false).open(path)?,
+            Err(error) => return Err(error),
+        };
+        output.write_all(&file)
+    }
 }
 
 impl SimListening {

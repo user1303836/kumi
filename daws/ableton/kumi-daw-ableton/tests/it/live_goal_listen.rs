@@ -2,7 +2,7 @@
 use super::*;
 use kumi_agent::core::context::HostPolicy;
 use kumi_daw_ableton::ears::{
-    device::EARS_ITEM,
+    device::{EARS_ITEM, EARS_VERSION},
     link::{Armed, EarsError, EarsLink, Tap, Transport, Written},
 };
 use kumi_types::errors::HearFailure;
@@ -19,6 +19,9 @@ pub(super) struct State {
     back_to_arrangement: Cell<bool>,
     advancing: Cell<bool>,
     ignore_restore: Cell<bool>,
+    ignore_stop: Cell<bool>,
+    selected_device: Cell<&'static str>,
+    missing: Cell<Option<(&'static str, &'static str)>>,
     switch_set: Cell<bool>,
     cancel: RefCell<Option<Signal>>,
     starts: Cell<usize>,
@@ -30,6 +33,8 @@ pub(super) struct State {
     written: Cell<usize>,
     armed_from: Cell<f64>,
     tap_version: Cell<f64>,
+    tap_available: Cell<bool>,
+    raw_frames: Cell<usize>,
 }
 impl State {
     fn new() -> Rc<Self> {
@@ -44,6 +49,9 @@ impl State {
             back_to_arrangement: Cell::new(false),
             advancing: Cell::new(true),
             ignore_restore: Cell::new(false),
+            ignore_stop: Cell::new(false),
+            selected_device: Cell::new("7:device:0:d0"),
+            missing: Cell::new(None),
             switch_set: Cell::new(false),
             cancel: RefCell::new(None),
             starts: Cell::new(0),
@@ -54,7 +62,9 @@ impl State {
             written: Cell::new(0),
             armed_from: Cell::new(0.),
             armed_locations: RefCell::new(Vec::new()),
-            tap_version: Cell::new(4.),
+            tap_version: Cell::new(EARS_VERSION as f64),
+            tap_available: Cell::new(true),
+            raw_frames: Cell::new(16_000),
         })
     }
     pub(super) fn epoch(&self) -> f64 {
@@ -69,12 +79,23 @@ impl State {
         self.transactions.borrow().get(transaction) == Some(&self.epoch.get())
     }
     pub(super) fn song_state(&self) -> Value {
-        json!({"backToArranger":self.back_to_arrangement.get(),"sessionRecord":false,
-            "sessionAutomationRecord":false,"overdub":false,"arrangementOverdub":false,"reEnableAutomationEnabled":false})
+        let mut song = json!({"backToArranger":self.back_to_arrangement.get(),"sessionRecord":false,
+            "sessionAutomationRecord":false,"overdub":false,"arrangementOverdub":false,"reEnableAutomationEnabled":false});
+        self.omit("song", &mut song);
+        song
+    }
+    fn omit(&self, kind: &str, row: &mut Value) {
+        if let Some((missing_kind, pointer)) = self.missing.get() {
+            if missing_kind == kind {
+                let (parent, key) = pointer.rsplit_once('/').unwrap();
+                row.pointer_mut(parent).unwrap().as_object_mut().unwrap().remove(key);
+            }
+        }
     }
     pub(super) fn discover(&self, set: &Set, args: &JsonObject) -> Option<Vec<Value>> {
         let tracks = set.tracks.borrow();
-        Some(match text(&args["kind"]) {
+        let kind = text(&args["kind"]);
+        let mut rows: Vec<Value> = match kind {
             "set" => vec![json!({"ref":"7:set:song","objectIdentity":*self.identity.borrow(),"name":"Fixture Set",
                 "tempo":self.tempo.get(),"position":self.position.get(),"playing":set.playing.get(),
                 "loop":{"enabled":self.looped.get(),"length":16}})],
@@ -92,13 +113,32 @@ impl State {
             "main-track" => vec![json!({"ref":format!("7:track:{}",tracks.len() - 1),"parentRef":"7:set:song",
                 "objectIdentity":tracks.last().unwrap().id,"name":"Main","armed":false,"monitoringState":null})],
             "selection" => vec![json!({"ref":"7:selection:current","parentRef":"7:set:song",
-                "selectedTrackRef":"7:track:0","selectedDeviceRef":"7:device:0:d0"})],
+                "selectedTrackRef":"7:track:0","selectedDeviceRef":self.selected_device.get()})],
             "session-playback" => vec![json!({"ref":"7:session_playback:0","transport":{
                 "playing":set.playing.get(),"arrangementRecord":self.recording.get(),"sessionRecord":false,
                 "position":self.position.get(),"loop":{"enabled":self.looped.get(),"start":4,"length":16},
                 "punchIn":false,"punchOut":false},"firedTargets":[],"playingTargets":[]})],
+            "device" => {
+                let parent = text(&args["parent"]);
+                let at = places(parent)[0];
+                tracks[at].devices.iter().enumerate().map(|(index, device)| {
+                    json!({"ref":format!("7:device:{at}:d{index}"),"parentRef":parent,"name":device.name,
+                        "className":device.class,"classDisplayName":device.class,"enabled":true,"objectIdentity":device.identity})
+                }).collect()
+            }
             _ => return None,
-        })
+        };
+        for row in &mut rows {
+            self.omit(kind, row);
+            // Remote Script trims every explicitly requested field list, including an
+            // empty one, while retaining the row's ref and parentRef.
+            if let Some(fields) = args.get("fields").and_then(Value::as_array) {
+                row.as_object_mut().unwrap().retain(|key, _| {
+                    matches!(key.as_str(), "ref" | "parentRef") || fields.iter().any(|field| field.as_str() == Some(key.as_str()))
+                });
+            }
+        }
+        Some(rows)
     }
     pub(super) fn apply(&self, set: &Set, tool: &str, args: &JsonObject, transaction: &str) -> Option<Value> {
         let mut answer = json!({"transactionId":transaction,"state":"applied"});
@@ -119,7 +159,9 @@ impl State {
                     self.starts.set(self.starts.get() + 1);
                 }
                 Some("stop") => {
-                    set.playing.set(false);
+                    if !self.ignore_stop.get() {
+                        set.playing.set(false);
+                    }
                     self.stops.set(self.stops.get() + 1);
                 }
                 other => panic!("a restricted capture cannot perform {other:?}"),
@@ -149,6 +191,9 @@ impl EarsLink for Ears {
         18000
     }
     fn taps(&self) -> Vec<Tap> {
+        if !self.state.tap_available.get() {
+            return vec![];
+        }
         let tracks = self.set.tracks.borrow();
         let main = tracks.len() - 1;
         tracks
@@ -172,7 +217,7 @@ impl EarsLink for Ears {
             .collect()
     }
     async fn wait_for(&self, accept: Rc<dyn for<'a> Fn(&'a Tap) -> bool>, _: u64, _: Option<Signal>) -> Option<Tap> {
-        self.taps().into_iter().find(|tap| accept(tap))
+        self.taps().into_iter().find(|tap| tap.version == EARS_VERSION as f64 && accept(tap))
     }
     async fn arm(&self, tap: &Tap, seconds: f64, quiet: bool, _: Option<Signal>) -> Result<Armed, EarsError> {
         assert!(!quiet, "a listen cannot mute the producer's track");
@@ -185,7 +230,7 @@ impl EarsLink for Ears {
         self.state.written.set(self.state.written.get() + 1);
         let mut raw = std::fs::File::create(file).unwrap();
         // Four channels, 8 kHz: a known two-second tone, sample clock and actual beat positions.
-        for frame in 0..16_000 {
+        for frame in 0..self.state.raw_frames.get() {
             let beat = self.state.armed_from.get() + frame as f64 / 4000.;
             let sample = (frame as f64 * std::f64::consts::TAU * 200. / 8000.).sin() as f32 * 0.2;
             for value in [sample, sample, 1. + beat.fract() as f32, beat as f32] {
@@ -231,6 +276,7 @@ async fn bounded(ears: bool) -> (Live, Rc<State>, HearRequest) {
             }
         }
         options.policy = HostPolicy::plugin(scratch, root.join("quarantine"));
+        options.ears = None; // Without an injected link, exercise the real read-only browser lookup.
         *set.bounded.borrow_mut() = Some(configured.clone());
         if ears {
             let link = Rc::new(Ears { set: set.clone(), state: configured.clone() });
@@ -291,20 +337,27 @@ fn capture_trims_the_approved_window_and_verifies_restoration() {
         assert_eq!(state.arms.borrow().as_slice(), [7.]);
         assert_eq!(state.closed.get(), 1);
         restored(&live, &state);
-        assert!(!live
-            .set
-            .asked
-            .borrow()
-            .iter()
-            .any(|call| matches!(call["name"].as_str(), Some("live_recording_apply" | "live_session_structure_apply"))));
+        for call in live.set.asked.borrow().iter() {
+            let name = call["name"].as_str().unwrap();
+            assert_ne!(name, "live_run_python", "no script fallback");
+            assert_ne!(name, "live_session_emergency_stop", "no unfenced stop");
+            if name.ends_with("_apply") {
+                assert!(matches!(name, "live_browser_load_apply" | "live_transport_apply" | "live_transport_action_apply"),
+                    "forbidden mutation: {call}");
+            }
+            if name == "live_transport_preview" {
+                assert!(call["args"].as_object().unwrap().keys().all(|key| matches!(key.as_str(), "position" | "loopEnabled")),
+                    "no loop range, punch, tempo or recording-mode mutation: {call}");
+            }
+        }
     });
 }
 
 #[test]
-fn back_to_arrangement_playback_recording_and_missing_ears_refuse_before_mutation() {
+fn back_to_arrangement_playback_and_recording_refuse_before_mutation() {
     on_a_paused_clock(async {
-        for case in ["back", "playing", "recording", "ears"] {
-            let (live, state, request) = bounded(case != "ears").await;
+        for case in ["back", "playing", "recording"] {
+            let (live, state, request) = bounded(true).await;
             match case {
                 "back" => state.back_to_arrangement.set(true),
                 "playing" => live.set.playing.set(true),
@@ -387,6 +440,7 @@ fn cancellation_waits_for_cleanup_and_an_acknowledged_but_failed_restore_is_unsu
         assert!(matches!(live.rendering.hear_in_set(&request, cancel).await, Err(RuntimeError::Aborted)));
         restored(&live, &state);
         assert_eq!(state.closed.get(), 1);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
 
         let (live, state, mut request) = bounded(true).await;
         state.ignore_restore.set(true);
@@ -394,6 +448,7 @@ fn cancellation_waits_for_cleanup_and_an_acknowledged_but_failed_restore_is_unsu
         request.from_beat = Some(4.);
         assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
         assert_eq!(state.closed.get(), 1);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
     });
 }
 
@@ -412,18 +467,24 @@ fn a_new_set_is_not_stopped_or_cleaned_up_as_if_it_were_the_capture_set() {
 }
 
 #[test]
-fn obsolete_ears_never_starts_playback_or_installs_a_replacement() {
+fn incompatible_or_silent_ears_never_starts_playback_or_installs_a_replacement() {
     on_a_paused_clock(async {
-        let (live, state, request) = bounded(true).await;
-        state.tap_version.set(3.);
-        assert!(matches!(
-            live.rendering.hear_in_set(&request, Signal::new()).await,
-            Err(RuntimeError::Hear(HearFailure::Refused { code: "ears_missing", .. }))
-        ));
-        assert_eq!(state.starts.get(), 0);
-        assert_eq!(state.arms.borrow().len(), 0);
-        assert_eq!(state.closed.get(), 1);
-        restored(&live, &state);
+        for version in [None, Some(EARS_VERSION as f64 - 1.), Some(EARS_VERSION as f64 + 1.)] {
+            let (live, state, request) = bounded(true).await;
+            state.tap_available.set(version.is_some());
+            state.tap_version.set(version.unwrap_or(EARS_VERSION as f64));
+            assert!(matches!(
+                live.rendering.hear_in_set(&request, Signal::new()).await,
+                Err(RuntimeError::Hear(HearFailure::Refused { code: "ears_missing", .. }))
+            ), "{version:?}");
+            assert_eq!(state.starts.get(), 0);
+            assert!(state.arms.borrow().is_empty());
+            assert_eq!(state.closed.get(), 1);
+            assert_eq!(live.set.asked_for("live_browser_load_apply"), 1, "load the preinstalled device only once");
+            assert_eq!(live.set.asked_for("live_undo"), 1, "remove even a device that never greeted the link");
+            restored(&live, &state);
+            assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+        }
     });
 }
 
@@ -605,5 +666,164 @@ fn a_capture_requires_approval_with_room_for_its_native_cleanup() {
         assert_eq!(state.starts.get(), 0);
         assert_eq!(live.set.next.get(), 0);
         restored(&live, &state);
+    });
+}
+
+#[test]
+fn missing_preinstalled_ears_is_typed_and_never_loads_or_writes_a_device() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(false).await;
+        for preview in [true, false] {
+            let error = if preview {
+                live.rendering.preview_hear(&request, Signal::new()).await.unwrap_err()
+            } else {
+                live.rendering.hear_in_set(&request, Signal::new()).await.unwrap_err()
+            };
+            assert!(matches!(error, RuntimeError::Hear(HearFailure::Refused { code: "ears_missing", .. })));
+        }
+        assert_eq!(live.set.asked_for("live_browser_inspect"), 2, "exercise the actual preinstalled-item lookup");
+        assert_eq!(state.opened.get(), 0);
+        assert_eq!(live.set.next.get(), 0);
+        for call in live.set.asked.borrow().iter() {
+            let name = call["name"].as_str().unwrap();
+            assert!(!name.starts_with("live_browser_load") && !name.ends_with("_apply") && name != "live_run_python",
+                "no device load, setup or write: {call}");
+        }
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn an_unreadable_preflight_refuses_without_claiming_uncertain_restoration() {
+    on_a_paused_clock(async {
+        for failed_read in ["live_discover", "live_song_state"] {
+            let (live, state, request) = bounded(true).await;
+            *live.set.on_call.borrow_mut() = Some(Box::new(move |name, _| {
+                if name == failed_read {
+                    return Err(RuntimeError::plain("bridge read failed at /private/producer/set"));
+                }
+                Ok(())
+            }));
+            for preview in [true, false] {
+                let error = if preview {
+                    live.rendering.preview_hear(&request, Signal::new()).await.unwrap_err()
+                } else {
+                    live.rendering.hear_in_set(&request, Signal::new()).await.unwrap_err()
+                };
+                let RuntimeError::Hear(HearFailure::Refused { code: "unsupported", reason, .. }) = error else {
+                    panic!("preflight must refuse without a restoration claim: {error:?}");
+                };
+                assert!(!reason.contains("/private/"));
+            }
+            assert_eq!(state.opened.get(), 0);
+            assert_eq!(live.set.next.get(), 0);
+            restored(&live, &state);
+            assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+        }
+    });
+}
+
+#[test]
+fn an_acknowledged_stop_that_leaves_live_playing_is_unsure_and_discards_audio() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        state.ignore_stop.set(true);
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Unsure { .. }))
+        ));
+        assert!(state.stops.get() > 0, "the bridge acknowledged a stop");
+        assert!(live.set.playing.get(), "the independent transport read still sees playback");
+        assert_eq!(state.written.get(), 1, "discard even audio already written before the restoration read");
+        assert_eq!(live.set.chain("Bass"), ["Synth"]);
+        assert_eq!(state.closed.get(), 1);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn a_changed_selected_device_after_cleanup_is_unsure_and_discards_audio() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        let s = state.clone();
+        *live.set.on_call.borrow_mut() = Some(Box::new(move |name, _| {
+            if name == "live_undo" {
+                s.selected_device.set("7:device:1:d0");
+            }
+            Ok(())
+        }));
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Unsure { .. }))
+        ));
+        assert_eq!(state.selected_device.get(), "7:device:1:d0", "do not overwrite the producer's selection");
+        assert_eq!(state.written.get(), 1);
+        assert_eq!(state.closed.get(), 1);
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
+    });
+}
+
+#[test]
+fn every_required_state_field_must_be_read_before_and_after_capture() {
+    on_a_paused_clock(async {
+        for missing in [
+            ("set", "/objectIdentity"), ("set", "/tempo"),
+            ("selection", "/selectedTrackRef"), ("selection", "/selectedDeviceRef"),
+            ("track", "/objectIdentity"), ("track", "/armed"), ("track", "/monitoringState"),
+            ("main-track", "/objectIdentity"), ("main-track", "/armed"), ("main-track", "/monitoringState"),
+            ("device", "/objectIdentity"),
+            ("session-playback", "/transport/playing"), ("session-playback", "/transport/arrangementRecord"),
+            ("session-playback", "/transport/sessionRecord"), ("session-playback", "/transport/position"),
+            ("session-playback", "/transport/loop/enabled"), ("session-playback", "/transport/loop/start"),
+            ("session-playback", "/transport/loop/length"), ("session-playback", "/transport/punchIn"),
+            ("session-playback", "/transport/punchOut"), ("session-playback", "/firedTargets"), ("session-playback", "/playingTargets"),
+            ("song", "/backToArranger"), ("song", "/sessionRecord"), ("song", "/sessionAutomationRecord"),
+            ("song", "/overdub"), ("song", "/arrangementOverdub"), ("song", "/reEnableAutomationEnabled"),
+        ] {
+            for before in [true, false] {
+                let (live, state, request) = bounded(true).await;
+                if before {
+                    state.missing.set(Some(missing));
+                } else {
+                    let s = state.clone();
+                    *live.set.on_call.borrow_mut() = Some(Box::new(move |name, _| {
+                        if name == "live_undo" {
+                            s.missing.set(Some(missing));
+                        }
+                        Ok(())
+                    }));
+                }
+                let result = live.rendering.hear_in_set(&request, Signal::new()).await;
+                if before {
+                    assert!(matches!(result, Err(RuntimeError::Hear(HearFailure::Refused { .. }))), "{missing:?}: {result:?}");
+                    assert_eq!(state.opened.get(), 0);
+                    assert_eq!(live.set.next.get(), 0);
+                } else {
+                    assert!(matches!(result, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))), "{missing:?}: {result:?}");
+                    assert_eq!(state.written.get(), 1);
+                    assert_eq!(state.closed.get(), 1);
+                }
+                assert_eq!(live.set.chain("Bass"), ["Synth"], "{missing:?}");
+                assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none(), "{missing:?}, before={before}");
+            }
+        }
+    });
+}
+
+#[test]
+fn a_short_live_capture_is_refused_not_published_as_a_short_success() {
+    on_a_paused_clock(async {
+        let (live, state, request) = bounded(true).await;
+        state.raw_frames.set(8000);
+        assert!(matches!(
+            live.rendering.hear_in_set(&request, Signal::new()).await,
+            Err(RuntimeError::Hear(HearFailure::Refused { code: "capture_incomplete", .. }))
+        ));
+        assert_eq!(state.written.get(), 1);
+        assert_eq!(state.closed.get(), 1);
+        restored(&live, &state);
+        assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
     });
 }

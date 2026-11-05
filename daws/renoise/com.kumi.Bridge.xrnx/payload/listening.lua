@@ -798,9 +798,28 @@ local function note_tempo(job, env, song)
     beat_text(transport.bpm), transport.lpb, beat_text(before.bpm), before.lpb)
 end
 
+-- Guarded completion is one native compare-and-restore, never a later adapter write.
+-- Only a full render has a known final tempo. Any other pair may be the producer's.
+local function restore_guarded_tempo(job, env, song, state)
+  if not job.max_seconds or not job.tempo_before then return true end
+  if not song or env.document() ~= job.document or env.epoch() ~= job.epoch or song.rendering then return false end
+  local transport, before, expected = song.transport, job.tempo_before, job.tempo_expected
+  if transport.bpm == before.bpm and transport.lpb == before.lpb then return true end
+  if state ~= "done" or not job.full_render or not expected or transport.bpm ~= expected.bpm or transport.lpb ~= expected.lpb then return false end
+  local restored = pcall(env.quiet, function()
+    if transport.bpm ~= before.bpm then transport.bpm = before.bpm end
+    if transport.lpb ~= before.lpb then transport.lpb = before.lpb end
+  end)
+  return restored and transport.bpm == before.bpm and transport.lpb == before.lpb
+end
+
 local function finish(job, env, state, code, message)
   local song = renoise.song()
   restore(job, env, song)
+  if not restore_guarded_tempo(job, env, song, state) then
+    state, code, message = "failed", "uncertain",
+      "Renoise's BPM or LPB could not be restored without overwriting a newer state. Observe again."
+  end
   note_tempo(job, env, song)
   job.state = state
   job.rendering = nil
@@ -876,6 +895,9 @@ local function rendered(job, env, k)
     return finish(job, env, "failed", "failed", string.format("Renoise stopped the render after %.1f of %.1f s", info.seconds, job.range.seconds))
   end
   source.seconds, source.channels, source.rate, source.frames = info.seconds, info.channels, info.rate, info.frames
+  -- Require the complete planned duration, not the short-file acceptance margin, before
+  -- attributing the final BPM/LPB pair to a successful render.
+  job.full_render = info.frames + 1 >= expected
   if not windows() and io.chmod then pcall(io.chmod, source.file, 600) end
   if job.stopping then
     job.notes[#job.notes + 1] = "Renoise finished the render before it could stop."
@@ -912,6 +934,7 @@ start_render = function(job, env, k)
     sample_rate = job.rate, bit_depth = 32, interpolation = "precise", priority = "high",
   }
   job.current, job.rendering = k, { started_ms = now_ms() }
+  job.full_render = false
   local this_job = job
   local started, result, why = pcall(song.render, song, options, source.file, function()
     -- (a callback of Renoise's: nothing raises past here)
@@ -971,7 +994,7 @@ end
 
 local function stopped(song)
   if song.rendering or song.transport.playing or song.transport.edit_mode then
-    fail("busy", "guarded listening requires stopped playback, recording and rendering; nothing changed")
+    fail("busy", "guarded listening requires stopped playback and rendering with Edit Mode off; nothing changed")
   end
 end
 
@@ -1022,6 +1045,7 @@ function M.refresh_restricted(job, env, song)
   end
   job.range, job.irregular = range, timeline.irregular
   job.line_seconds = M.line_seconds(timeline, range.state.bpm, range.state.lpb)
+  job.tempo_expected = M.render_state(timeline, range["end"][1], range["end"][2])
   for _, source in ipairs(job.sources) do
     if not source.frames then source.seconds = range.seconds end
   end
