@@ -53,6 +53,8 @@ fn run_connect(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         // A first look, for the project's key and epoch: a DAW that doesn't answer yet leaves it for observe.
         if let Ok(observation) = connection.integration.observe(call.signal.clone(), None).await {
             ctx.link().saw(&observation);
+            let epoch = super::read::page_epoch_now(&observation.tools, call.signal.clone()).await;
+            ctx.link().saw_page_epoch(epoch);
             connection::publish_focus(&ctx.handle());
         }
         Ok(publish_status(ctx, false).await)
@@ -89,6 +91,8 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             .map_err(|error| OpError::Failed { reason: format!("Kumi couldn't look at the project: {error}") })?;
         let project = ctx.link().saw(&observation);
         ctx.link().clear_unsure();
+        let epoch = super::read::page_epoch_now(&observation.tools, call.signal.clone()).await;
+        ctx.link().saw_page_epoch(epoch);
         let (focus, transport, catch_up) = (connection.focus(), connection.transport(), connection.take_catch_up());
         let scope = call.args.get("scope").and_then(Value::as_str).unwrap_or("project");
         let text = match scope {
@@ -128,7 +132,7 @@ fn focus_text(
 ) -> String {
     let mut lines = vec![format!("{} (epoch {})", project.name, project.epoch)];
     match focus {
-        Some(focus) => lines.push(format!("Selected: {}", serde_json::to_string(focus).unwrap_or_default())),
+        Some(focus) => lines.push(format!("Selected: {}", connection::focus_value(focus))),
         None => lines.push("Selected: nothing the DAW has said yet".into()),
     }
     if let Some(transport) = transport {
@@ -140,14 +144,16 @@ fn focus_text(
     lines.join("\n")
 }
 
-/// `text` cut to at most `most` characters, saying how much more there was.
-fn bounded(text: &str, most: usize) -> String {
+/// `text` cut to at most `most` characters, saying how much more there was (the saying included).
+pub(super) fn bounded(text: &str, most: usize) -> String {
     let total = text.chars().count();
     if total <= most {
         return text.to_string();
     }
-    let kept: String = text.chars().take(most).collect();
-    format!("{kept}\n… ({} more characters: ask again with a larger max_chars, or read what you need)", total - most)
+    let said = |more: usize| format!("\n… ({more} more characters: ask again with a larger max_chars, or read what you need)");
+    let room = most.saturating_sub(said(total).chars().count());
+    let kept: String = text.chars().take(room).collect();
+    format!("{kept}{}", said(total - room))
 }
 
 fn project_value(project: &Project) -> Value {

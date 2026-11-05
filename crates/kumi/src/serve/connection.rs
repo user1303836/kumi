@@ -112,6 +112,9 @@ pub struct Link {
     ref_names: RefCell<HashMap<String, String>>,
     /// A write whose outcome is unsure, until the next look (CC-2's R6): `{at, op, reason, cleanup}`.
     unsure: RefCell<Option<Value>>,
+    /// The epoch an own bridge's reader gave at the last look: a page of another (a tab switched since) isn't the
+    /// looked project's.
+    page_epoch: RefCell<Option<String>>,
 }
 
 impl Link {
@@ -127,6 +130,7 @@ impl Link {
             tools: RefCell::new(Vec::new()),
             ref_names: RefCell::new(HashMap::new()),
             unsure: RefCell::new(None),
+            page_epoch: RefCell::new(None),
         }
     }
 
@@ -201,7 +205,19 @@ impl Link {
         let project = Project { key, name, epoch: self.epoch.get(), seen_at: kumi_common::time::now_ms() };
         *self.project.borrow_mut() = Some(project.clone());
         *self.tools.borrow_mut() = observation.tools.clone();
+        *self.page_epoch.borrow_mut() = None;
         project
+    }
+
+    /// The epoch an own bridge's reader gave right after the last look.
+    pub fn saw_page_epoch(&self, epoch: Option<String>) {
+        *self.page_epoch.borrow_mut() = epoch;
+    }
+
+    /// Whether an own bridge's page with this epoch is of the state of the project the last look saw: both known, and
+    /// the same.
+    pub fn page_is_looked(&self, epoch: Option<&str>) -> bool {
+        matches!((self.page_epoch.borrow().as_deref(), epoch), (Some(looked), Some(now)) if looked == now)
     }
 
     /// Moves the epoch on (a write's outcome is unsure): refs from earlier looks no longer hold.
@@ -428,30 +444,56 @@ pub fn publish_focus(ctx: &Weak<Ctx>) {
 /// is a whole path (a take or sample named by its file) cut to the file's name, so no folder of the producer's leaves
 /// the runtime. Refs (`…Ref`) are the DAW's own and stay as they are.
 pub fn focus_value(focus: &DawFocus) -> Value {
-    fn whole_path(text: &str) -> bool {
-        let bytes = text.as_bytes();
-        text.starts_with('/') || text.starts_with("\\\\") || (bytes.len() > 2 && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
-    }
-    fn names_only(value: &mut Value) {
-        match value {
-            Value::String(text) if whole_path(text) => {
-                let name = text.rsplit(['/', '\\']).next().unwrap_or_default().to_string();
-                *text = name;
-            }
-            Value::Array(items) => items.iter_mut().for_each(names_only),
-            Value::Object(fields) => {
-                for (key, field) in fields.iter_mut() {
-                    if !key.ends_with("Ref") {
-                        names_only(field);
-                    }
-                }
-            }
-            _ => {}
-        }
-    }
     let mut value = serde_json::to_value(focus).unwrap_or(Value::Null);
     names_only(&mut value);
     value
+}
+
+/// A whole path: an absolute one, a drive's or a share's.
+fn whole_path(text: &str) -> bool {
+    let bytes = text.as_bytes();
+    text.starts_with('/') || text.starts_with("\\\\") || (bytes.len() > 2 && bytes[1] == b':' && matches!(bytes[2], b'\\' | b'/'))
+}
+
+/// Every string in `value` that's a whole path cut to its file name, the DAW's refs aside: what the runtime shows of
+/// the producer's files is their names, never their folders.
+pub(super) fn names_only(value: &mut Value) {
+    match value {
+        Value::String(text) if whole_path(text) => {
+            let name = text.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or_default().to_string();
+            *text = name;
+        }
+        Value::Array(items) => items.iter_mut().for_each(names_only),
+        Value::Object(fields) => {
+            for (key, field) in fields.iter_mut() {
+                if !(key == "ref" || key.ends_with("Ref") || key.ends_with("Refs")) {
+                    names_only(field);
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The same for text that isn't JSON: each whole path in it (as far as a space or a quote) cut to its file name.
+pub(super) fn names_only_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        let end = rest.find(|c: char| c.is_whitespace() || c == '"' || c == '\'').unwrap_or(rest.len());
+        let (word, after) = rest.split_at(end);
+        if whole_path(word) {
+            out.push_str(word.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or_default());
+        } else {
+            out.push_str(word);
+        }
+        let mut chars = after.chars();
+        if let Some(stop) = chars.next() {
+            out.push(stop);
+        }
+        rest = chars.as_str();
+    }
+    out
 }
 
 /// The transport as C3 names it (`playing`, `tempo`, `position` in beats), with the bar's beats, the meter and a

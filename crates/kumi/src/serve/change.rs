@@ -50,6 +50,31 @@ fn change_schema() -> Value {
     }})
 }
 
+/// What a file step's file field takes in a plugin's plan (CC-11): where the file comes from, never its path. A sound
+/// from the map (of its current revision), a file Kumi made and keeps, or a file in an approved folder, with the host
+/// tool that made it.
+pub(super) fn source_schema() -> Value {
+    json!({
+        "description": "Where the file comes from, never its path: a sound from the map, a file Kumi made, or an approved file",
+        "anyOf": [
+            {"type": "object", "additionalProperties": false, "required": ["sound_id", "map_revision"], "properties": {
+                "sound_id": {"type": "string", "minLength": 1, "maxLength": 128},
+                "map_revision": {"type": "string", "minLength": 1, "maxLength": 64}
+            }},
+            {"type": "object", "additionalProperties": false, "required": ["artifact_id"], "properties": {
+                "artifact_id": {"type": "string", "minLength": 1, "maxLength": 128}
+            }},
+            {"type": "object", "additionalProperties": false, "required": ["file", "provenance"], "properties": {
+                "file": {"type": "string", "minLength": 1, "maxLength": 4096},
+                "provenance": {"type": "object", "additionalProperties": false, "required": ["host_tool"], "properties": {
+                    "host_tool": {"type": "string", "minLength": 1, "maxLength": 128},
+                    "tool_call_id": {"type": "string", "maxLength": 256}
+                }}
+            }}
+        ]
+    })
+}
+
 /// A preview reads; the plan writes.
 fn change_effect(args: &JsonObject) -> Effect {
     if previewing(args) {

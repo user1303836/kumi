@@ -4,9 +4,10 @@
 use super::change;
 use super::core;
 use super::ctx::Operation;
+use super::read;
 
 pub static OPERATIONS: &[&Operation] =
-    &[&core::STATUS, &core::CONNECT, &core::OBSERVE, &change::CHANGE, &change::UNDO, &change::HISTORY, &core::JOB];
+    &[&core::STATUS, &core::CONNECT, &core::OBSERVE, &read::READ, &change::CHANGE, &change::UNDO, &change::HISTORY, &core::JOB];
 
 #[cfg(test)]
 mod tests {
