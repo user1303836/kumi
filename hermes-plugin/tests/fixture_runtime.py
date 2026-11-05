@@ -70,6 +70,7 @@ class Fixture:
         self.seq = 0
         self.connected = False
         self.daw = options.daw
+        self.takes = 0  # the highest take number given (CC-24: numbering goes on, V3 after V2)
         self.epoch = "1"
         self.set = copy.deepcopy(SET)
         # As kumi serve's History::new: an earlier runtime's rows stay for the record, none of them undoable from here.
@@ -767,9 +768,57 @@ def generation_job(fixture: Fixture, job_id: object) -> dict:
                        "credit_unit": "mirelo_credits"}}
 
 
+# CC-24's variations op, as the lead's contract has serve route the DAW's own variations tool.
+VARIATIONS_ROOM = 6  # the empty places the fixture's Set has for takes
+
+
+def drawn_takes(fixture: Fixture, args: dict) -> list[dict]:
+    """The takes a make would draw now: numbered on from the set, so a make in between changes them (W1-a)."""
+    recipes = args.get("takes") or [{"direction": f"take {index + 1}"} for index in range(int(args.get("count") or 2))]
+    return [{"take": f"V{fixture.takes + index + 1}", "direction": recipe.get("direction") or "a take",
+             "line": f"{recipe.get('direction') or 'a take'}, 8 bars, 31 notes"} for index, recipe in enumerate(recipes)]
+
+
+def takes_digest(takes: list[dict], seed: int) -> str:
+    return hashlib.sha256(json.dumps([seed, takes], sort_keys=True).encode("utf-8")).hexdigest()
+
+
+def variations(fixture: Fixture, args: dict, host: dict) -> dict:
+    action = args.get("action")
+    if action in ("drop", "extract") or "force" in args or "listen" in args:
+        return {"state": "refused", "code": "not_allowed", "reason": "Kumi for Hermes doesn't do that with takes."}
+    if action == "list":
+        return {"set": 1, "source": "Bassline", "takes": [{"take": f"V{number}"} for number in range(1, fixture.takes + 1)]}
+    if (args.get("expected_project_key"), str(args.get("expected_epoch"))) != (fixture.set["key"], fixture.epoch):
+        return {"state": "refused", "code": "stale", "reason": "The project or its epoch changed since it was read."}
+    takes, seed = drawn_takes(fixture, args), int(args.get("seed") or 7)
+    if len(takes) > VARIATIONS_ROOM:
+        return {"state": "refused", "code": "no_room",
+                "reason": f"Only {VARIATIONS_ROOM} empty places are left for takes: ask for fewer."}
+    if args.get("preview"):
+        return {"state": "preview", "seed": seed, "source": "Bassline", "takes": takes, "skipped": [],
+                "takes_digest": takes_digest(takes, seed), "fits": VARIATIONS_ROOM,
+                "project": {"key": fixture.set["key"], "epoch": fixture.epoch}}
+    if args.get("expect_takes") != takes_digest(takes, seed):
+        return {"state": "refused", "code": "stale", "reason": "The takes would come out differently now: preview them again."}
+    ids = []
+    for take in takes:
+        ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+        fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
+                                "runtime_generation": fixture.generation, "title": f"Variation {take['take']}",
+                                "family": "clip", "at": now(), "state": "applied", "undo_available": True,
+                                "track": "Bass", "tool_call_id": host.get("tool_call_id"), "call_outcome": "applied",
+                                "before": copy.deepcopy(fixture.set)})
+        ids.append(ident)
+    fixture.takes += len(takes)
+    fixture.publish("history", "focus")
+    return {"state": "applied", "set": 1, "source": "Bassline", "takes": takes, "skipped": [], "history_ids": ids,
+            "project": {"key": fixture.set["key"], "epoch": fixture.epoch}}
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
-         "setup_daw": setup_daw, "generate": generate}
+         "setup_daw": setup_daw, "generate": generate, "variations": variations}
 
 
 def main() -> None:

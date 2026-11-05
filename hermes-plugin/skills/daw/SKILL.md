@@ -152,6 +152,16 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
   - **REAPER:** `track_add`, then `fx_add` with a drum plug-in the producer has (as REAPER's FX browser names it), then `item_add` and `notes_add`. Use General MIDI keys (36 kick, 38 snare, 42 hat), or the plug-in's own map. REAPER's `drum_kit` step is refused.
   - **Renoise:** an existing kit instrument, or `instrument_add`, then `sample_load` for each sound, then `keyzone_drumkit`. Then `notes_write` on an existing pattern, with keys from `C-4`. Renoise's `instrument_kit` step is refused.
 
+## Variations
+For "make some variations of this clip" (a Live clip, a REAPER MIDI item, a Renoise pattern), use `kumi_variations`. Each take is a new clip, item or pattern, never written over the source.
+- **`make`:** the source by its ref (from `kumi_observe` or `kumi_read`), and either `count` or `takes`, each with a `direction` in the producer's words ("busier hats", "sadder chords 2 and 3").
+  - Keep it to 2 to 4 takes unless asked for more (8 at most). Name the notes that must stay with `anchors`.
+  - The producer approves the exact takes the preview drew, by V number and direction.
+  - Where there's no empty place for every take, Kumi refuses rather than make fewer: say so, and offer fewer.
+- **"Make the second and third chords jazzier, but keep it resolving":** `make` with one take per idea, whose direction names those chords and the resolution. It is never a rewrite of the source.
+- **`change`** rewrites named takes, never a kept take or the source, and never one the producer has edited since. **`keep`** marks the takes the producer likes. **`list`** shows the set.
+- **A take they don't want:** `kumi_undo` with its HISTORY id. "Undo that" right after a make takes the whole make back. Kumi for Hermes never drops takes another way.
+
 ## Tutorials
 When the producer names a video tutorial ("make the bass from this video"):
 - **Words first:** get the transcript with Hermes's `youtube-content` skill. From it, list the steps and every value the tutor says aloud, with the time they say it.

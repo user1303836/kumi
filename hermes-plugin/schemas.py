@@ -227,3 +227,39 @@ KUMI_GENERATE = _tool(
          "\"tool_call_id\"}} for a file another Hermes tool made in an approved folder.")},
      "quote_id": {"type": "string", "description": "create: the quote_id a quote returned."}},
     ("action",))
+
+# CC-24: variations of a clip, item or pattern (the DAW's own variations tool, through serve).
+MOST_TAKES = 8
+
+KUMI_VARIATIONS = _tool(
+    "kumi_variations",
+    "Variations of a clip (Live), MIDI item (REAPER) or pattern (Renoise): numbered takes V1, V2… of a source, each "
+    "written as its own new clip, item or pattern, never over the source. make draws takes (count, or takes as recipes "
+    "with a short direction each); change rewrites named takes; keep marks takes kept; list shows the set. The producer "
+    "approves make, change and keep after reading every take's line. A take the producer doesn't want is undone with "
+    "kumi_undo and its HISTORY id (\"undo that\" takes a whole make back). Where there's no empty place for every take, "
+    "make is refused rather than trimmed.",
+    {"action": {"type": "string", "enum": ["make", "change", "keep", "list"]},
+     "set": {"type": ["integer", "string"], "description": "Which set of takes: its number, or its source's name."},
+     "source": {"type": "object", "description": "make: what to vary, by the refs kumi_observe or kumi_read gave "
+                "(Live: the clip; REAPER: the MIDI item or take; Renoise: the pattern and track)."},
+     "anchors": {"type": "array", "maxItems": 512, "items": {"type": "integer", "minimum": 0},
+                 "description": "make: the source's notes that stay, by index as read."},
+     "place": {"type": "string", "description": "make: where the takes go, in the DAW's own words."},
+     "count": {"type": "integer", "minimum": 1, "maximum": MOST_TAKES},
+     "takes": {"type": "array", "maxItems": MOST_TAKES, "items": {
+         "type": "object", "additionalProperties": False, "properties": {
+             "direction": {"type": "string", "maxLength": 80, "description": "The take in a few words: \"busier hats\"."},
+             "from": {"type": "string", "description": "Another take to start from, such as V2."},
+             "ops": {"type": "array", "maxItems": 12, "items": {"type": "object"}},
+             "lines": {"type": "array", "maxItems": 512, "items": {"type": "object"}}}}},
+     "names": {"type": "array", "maxItems": 32, "items": {"type": "string"},
+               "description": "change, keep: the takes, such as V3, or \"rest\"."},
+     "novelty": {"type": "string", "enum": ["subtle", "clear", "bold"]},
+     "minDistance": {"type": "number", "minimum": 0, "maximum": 1},
+     "seed": {"type": "integer", "minimum": 0},
+     "options": {"type": "object"},
+     "at": {"type": "object", "description": "keep: one empty place to put one kept take."},
+     "expected_project_key": {"type": "string"},
+     "expected_epoch": {"type": "string"}},
+    ("action",))
