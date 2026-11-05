@@ -375,19 +375,41 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
 
 /// A plan's steps as its preview says them, one line each; a step only the DAW's own Undo takes back is marked so.
 fn preview_steps(names: &HashMap<String, String>, steps: &[Value], checked: &Checked) -> Vec<Value> {
+    let names = shown_names(names, steps);
     steps
         .iter()
         .zip(&checked.families)
         .zip(&checked.daw_undo)
         .map(|((step, family), daw_undo)| {
             let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
-            let mut line = describe(names, tool, family, step.get("input").unwrap_or(&Value::Null));
+            let mut line = describe(&names, tool, family, step.get("input").unwrap_or(&Value::Null));
             if *daw_undo {
                 line["undo"] = json!("daw");
             }
             line
         })
         .collect()
+}
+
+/// How a preview names the refs its steps point at: by the name the last look gave each, quoted; and what an earlier
+/// step of the plan makes (`@alias`), by the name that step gives it ("the new "Reverb" (step 1)"), or by its number.
+fn shown_names(names: &HashMap<String, String>, steps: &[Value]) -> HashMap<String, String> {
+    let mut shown: HashMap<String, String> = names.iter().map(|(reference, name)| (reference.clone(), quoted(name, NAME))).collect();
+    for (at, step) in steps.iter().enumerate() {
+        let Some(alias) = step.get("as").and_then(Value::as_str) else { continue };
+        let input = step.get("input").unwrap_or(&Value::Null);
+        let name = input
+            .get("name")
+            .and_then(Value::as_str)
+            .or_else(|| input.get("itemId").and_then(Value::as_str).and_then(|item| item.rsplit('/').next()))
+            .filter(|name| !name.trim().is_empty());
+        let said = match name {
+            Some(name) => format!("the new {} (step {})", quoted(name, NAME), at + 1),
+            None => format!("what step {} makes", at + 1),
+        };
+        shown.insert(format!("@{alias}"), said);
+    }
+    shown
 }
 
 /// The project may have changed: the epoch moves on, and `focus.json` gives the new one.
@@ -495,11 +517,7 @@ fn describe(names: &HashMap<String, String>, tool: &str, family: &str, input: &V
     }
     targets.dedup();
     let set = if settings.is_empty() { String::new() } else { format!(": {}", settings.join(", ")) };
-    let on = if targets.is_empty() {
-        String::new()
-    } else {
-        format!(" — on {}", targets.iter().map(|name| quoted(name, NAME)).collect::<Vec<_>>().join(", "))
-    };
+    let on = if targets.is_empty() { String::new() } else { format!(" — on {}", targets.join(", ")) };
     let text = one_line(&format!("{}{set}{on}", capitalized(&tool.replace('_', " "))), LINE);
     json!({"tool": tool, "family": family, "effect": "write", "text": text})
 }
@@ -509,10 +527,7 @@ fn describe(names: &HashMap<String, String>, tool: &str, family: &str, input: &V
 fn shown(names: &HashMap<String, String>, value: &Value) -> String {
     let more = |n: usize| if n > FIRST { format!(", +{} more", n - FIRST) } else { String::new() };
     match value {
-        Value::String(text) => match target(names, text) {
-            Some(name) => quoted(&name, NAME),
-            None => quoted(text, QUOTED),
-        },
+        Value::String(text) => target(names, text).unwrap_or_else(|| quoted(text, QUOTED)),
         Value::Number(number) => number.to_string(),
         Value::Bool(flag) => (if *flag { "on" } else { "off" }).into(),
         Value::Null => "none".into(),
@@ -527,7 +542,7 @@ fn shown(names: &HashMap<String, String>, value: &Value) -> String {
     }
 }
 
-/// What a ref is called: the name the last look gave it, or what a step before makes (`@name`).
+/// What a ref is called, as a preview shows it ([`shown_names`]): its name, or what a step before makes (`@name`).
 fn target(names: &HashMap<String, String>, text: &str) -> Option<String> {
     names.get(text).cloned().or_else(|| text.strip_prefix('@').map(|made| format!("what {made} makes")))
 }
@@ -1094,6 +1109,7 @@ mod tests {
         ]
         .into_iter()
         .collect();
+        let names = shown_names(&names, &[]);
         let line = describe(&names, "set_mixer", "mixer", &json!({"trackRef": "7:track:1", "volume": 0.85, "mute": false}));
         assert_eq!(
             (line["family"].clone(), line["text"].clone()),
@@ -1120,6 +1136,18 @@ mod tests {
         );
         let long = describe(&names, "rename", "rename", &json!({"ref": "x", "name": "a".repeat(500), "other": "b".repeat(500)}));
         assert!(long["text"].as_str().unwrap().chars().count() <= LINE, "{long}");
+        // What an earlier step makes is named by that step's own name for it, and the step: never by its alias.
+        let plan = [
+            json!({"tool": "track_add", "input": {"name": "Reverb"}, "as": "rev"}),
+            json!({"tool": "fx_add", "input": {"ref": "@rev", "name": "ReaVerbate (Cockos)"}}),
+            json!({"tool": "load_device", "input": {"itemId": "audio_effects/Reverb"}, "as": "verb"}),
+            json!({"tool": "track_add", "input": {}, "as": "blank"}),
+        ];
+        let made = shown_names(&HashMap::new(), &plan);
+        let fx = describe(&made, "fx_add", "device", &plan[1]["input"]);
+        assert_eq!(fx["text"], "Fx add: name \"ReaVerbate (Cockos)\" — on the new \"Reverb\" (step 1)");
+        assert_eq!(made["@verb"], "the new \"Reverb\" (step 3)", "a loaded device by its Browser name");
+        assert_eq!(made["@blank"], "what step 4 makes");
     }
 
     #[test]
