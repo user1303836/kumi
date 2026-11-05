@@ -159,9 +159,12 @@ KUMI_LIBRARY = _tool(
     "kumi_library",
     "The producer's sample library: its folders and scan state (status), add a folder Kumi may read (add_folder, which "
     "the producer approves), or scan the approved folders to build the sound map (scan, which the producer approves; it "
-    "runs as a job: follow it with kumi_job). Kumi reads only folders added here.",
-    {"action": {"type": "string", "enum": ["status", "add_folder", "scan"]},
-     "folder": {"type": "string", "description": "add_folder: an absolute folder path."}},
+    "runs as a job: follow it with kumi_job). cancel stops the scan named by job_id: the reply only acknowledges the "
+    "request, and kumi_job says cancelled once the scan has stopped. Kumi reads only folders added here.",
+    {"action": {"type": "string", "enum": ["status", "add_folder", "scan", "cancel"]},
+     "folder": {"type": "string", "description": "add_folder: an absolute folder path."},
+     "job_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$",
+                "description": "cancel: the job_id the scan returned."}},
     ("action",))
 
 KUMI_JOB = _tool(
