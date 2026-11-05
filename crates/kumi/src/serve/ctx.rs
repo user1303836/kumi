@@ -309,18 +309,22 @@ pub struct Ctx {
     link: Link,
     lease: super::lease::Lease,
     history: super::history::History,
-    /// The calls' own settle bounds (a track listen's render and restoration), each while its guard lives.
+    /// The calls' own settle bounds (a track listen's render and restoration), each while its guard lives, and the
+    /// last guard's number.
     settles: Rc<RefCell<Vec<(u64, std::time::Duration)>>>,
+    settle_ids: Cell<u64>,
     /// When a stop that waits on a call's own bound gives up (ms), while it waits.
     settling_until: Cell<Option<i64>>,
 }
 
-/// The most a stop waits for a call's own settle bound.
-pub const SETTLE_MOST: std::time::Duration = std::time::Duration::from_secs(360);
+/// The most a stop waits for a call's own settle bound, in seconds: CC-2's largest approved deadline. #989's host waits
+/// 390 s for a stopping runtime, which this, the DAW's close and the exit fit in.
+pub const SETTLE_MOST_SECONDS: u16 = 360;
+pub const SETTLE_MOST: std::time::Duration = std::time::Duration::from_secs(SETTLE_MOST_SECONDS as u64);
 
 /// A call's own bound for settling when the runtime stops (a track listen's render, then the DAW put back): while it
-/// lives, a stop waits up to the largest live bound ([`SETTLE_MOST`] at most) for the calls to finish, not just the
-/// runtime's own few seconds.
+/// lives, a stop waits up to the largest live bound for the calls to finish, not just the runtime's own few seconds.
+/// The bound counts from the stop's start, so it bounds the whole stop.
 pub struct Settling {
     settles: Rc<RefCell<Vec<(u64, std::time::Duration)>>>,
     id: u64,
@@ -361,6 +365,7 @@ impl Ctx {
             offered: Cell::new(super::registry::OPERATIONS),
             scratches: Cell::new(0),
             settles: Rc::new(RefCell::new(Vec::new())),
+            settle_ids: Cell::new(0),
             settling_until: Cell::new(None),
             started,
             answers,
@@ -490,13 +495,22 @@ impl Ctx {
         Ok(Scratch { path })
     }
 
-    /// A guard holding a stop to `bound` (at most [`SETTLE_MOST`]) while it lives: take it just before the work whose
-    /// cleanup must finish (a render and the DAW put back), and drop it once that's done.
-    pub fn settling(&self, bound: std::time::Duration) -> Settling {
-        let id = self.scratches.get() + 1;
-        self.scratches.set(id);
-        self.settles.borrow_mut().push((id, bound.min(SETTLE_MOST)));
-        Settling { settles: self.settles.clone(), id }
+    /// A guard holding a stop to `deadline_seconds` from the stop's start while it lives: take it just before the work
+    /// whose cleanup must finish (a render and the DAW put back), and drop it once that's done.
+    ///
+    /// - The bound is the call's approved deadline (CC-2's `deadline_seconds`, 1 to [`SETTLE_MOST_SECONDS`]), never
+    ///   a number the model gave: anything else is refused.
+    /// - The cleanup it covers must run on a signal the stop doesn't cancel. A stop cancels `ctx.shutdown()` first, and
+    ///   every call's `signal` has it in it, so a restoration awaited on `call.signal` would be cut off as it began.
+    pub fn settling(&self, deadline_seconds: u16) -> Result<Settling, OpError> {
+        if !(1..=SETTLE_MOST_SECONDS).contains(&deadline_seconds) {
+            let reason = format!("A call's settle bound is 1 to {SETTLE_MOST_SECONDS} seconds, not {deadline_seconds}.");
+            return Err(OpError::Failed { reason });
+        }
+        let id = self.settle_ids.get() + 1;
+        self.settle_ids.set(id);
+        self.settles.borrow_mut().push((id, std::time::Duration::from_secs(deadline_seconds.into())));
+        Ok(Settling { settles: self.settles.clone(), id })
     }
 
     /// The largest bound a live guard holds a stop to, if any.
