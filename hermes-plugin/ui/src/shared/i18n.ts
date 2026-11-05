@@ -51,6 +51,7 @@ const en = {
     undoable: (n: number) => `· ${n} can be undone`,
     undo: 'Undo',
     undoTitle: 'Ask Hermes to undo this change',
+    undoChangeTitle: (n: number) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
     undoLabel: (change: string) => `Undo ${change}`,
     openMap: 'Open the sound map',
     undoNeedsConnection: 'Undo needs a connected Kumi.'
@@ -328,6 +329,7 @@ const ja: Shape<typeof en> = {
     undoable: n => `· ${n} 件取り消せます`,
     undo: '取り消す',
     undoTitle: 'この変更の取り消しを Hermes に頼む',
+    undoChangeTitle: n => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
     undoLabel: change => `${change} を取り消す`,
     openMap: 'サンプルマップを開く',
     undoNeedsConnection: '取り消すには Kumi の接続が必要です。'
@@ -603,6 +605,7 @@ const zh: Shape<typeof en> = {
     undoable: n => `· ${n} 项可撤销`,
     undo: '撤销',
     undoTitle: '让 Hermes 撤销这次改动',
+    undoChangeTitle: n => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
     undoLabel: change => `撤销 ${change}`,
     openMap: '打开采样地图',
     undoNeedsConnection: '撤销需要 Kumi 已连接。'

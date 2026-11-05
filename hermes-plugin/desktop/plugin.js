@@ -44,6 +44,7 @@ var en = {
     undoable: (n) => `· ${n} can be undone`,
     undo: "Undo",
     undoTitle: "Ask Hermes to undo this change",
+    undoChangeTitle: (n) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
     undoLabel: (change) => `Undo ${change}`,
     openMap: "Open the sound map",
     undoNeedsConnection: "Undo needs a connected Kumi."
@@ -316,6 +317,7 @@ var ja = {
     undoable: (n) => `· ${n} 件取り消せます`,
     undo: "取り消す",
     undoTitle: "この変更の取り消しを Hermes に頼む",
+    undoChangeTitle: (n) => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
     undoLabel: (change) => `${change} を取り消す`,
     openMap: "サンプルマップを開く",
     undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
@@ -587,6 +589,7 @@ var zh = {
     undoable: (n) => `· ${n} 项可撤销`,
     undo: "撤销",
     undoTitle: "让 Hermes 撤销这次改动",
+    undoChangeTitle: (n) => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
     undoLabel: (change) => `撤销 ${change}`,
     openMap: "打开采样地图",
     undoNeedsConnection: "撤销需要 Kumi 已连接。"
@@ -957,6 +960,22 @@ function canUndo(status, item) {
 }
 function undoRequest(item) {
   return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
+}
+function changesOf(items) {
+  const byChange = /* @__PURE__ */ new Map();
+  for (const item of items) {
+    const key = typeof item.change_id === "string" && item.change_id ? `change:${item.change_id}` : `row:${item.id}`;
+    const rows = byChange.get(key);
+    if (rows) rows.push(item);
+    else byChange.set(key, [item]);
+  }
+  return [...byChange.values()];
+}
+function undoRowOf(rows) {
+  return rows.find((row2) => row2.state !== "undone");
+}
+function canUndoChange(status, rows) {
+  return canUndo(status, undoRowOf(rows));
 }
 var QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟｢｣﹁﹂﹃﹄]/g;
 function quotable(name, max = 80) {
@@ -2097,7 +2116,9 @@ function KumiPane({ ctx, store, onOpenMap }) {
   const session = ownerSession(state);
   const connected = Boolean(state.status?.connected);
   const setupMessage = setupWords(state);
-  const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
+  const changes = changesOf(state.history?.items ?? []);
+  const changeOf = new Map(changes.flatMap((rows) => rows.map((row2) => [row2, rows])));
+  const undoable = changes.filter((rows) => canUndoChange(state.status, rows)).length;
   return /* @__PURE__ */ jsxs5("div", { style: { height: "100%", overflowY: "auto", overflowX: "hidden", color: T.text }, children: [
     /* @__PURE__ */ jsxs5("div", { style: { ...S.section, gap: 8 }, children: [
       /* @__PURE__ */ jsxs5("div", { style: { ...S.row, gap: 8 }, children: [
@@ -2138,15 +2159,20 @@ function KumiPane({ ctx, store, onOpenMap }) {
               history: state.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,
               now,
-              action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(
-                TextButton,
-                {
-                  label: t("pane.undoLabel", clean(item.title ?? item.label ?? item.id, 120)),
-                  onClick: () => void ask(ctx, undoRequest(item), { send: true, session }),
-                  title: t("pane.undoTitle"),
-                  children: t("pane.undo")
-                }
-              ) : null
+              action: (item) => {
+                const rows = changeOf.get(item);
+                if (!rows || undoRowOf(rows) !== item || !canUndoChange(state.status, rows)) return null;
+                const left = rows.filter((row2) => row2.state !== "undone").length;
+                return /* @__PURE__ */ jsx5(
+                  TextButton,
+                  {
+                    label: t("pane.undoLabel", clean(item.title ?? item.label ?? item.id, 120)),
+                    onClick: () => void ask(ctx, undoRequest(item), { send: true, session }),
+                    title: left > 1 ? t("pane.undoChangeTitle", left) : t("pane.undoTitle"),
+                    children: t("pane.undo")
+                  }
+                );
+              }
             }
           ),
           !connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && /* @__PURE__ */ jsx5("span", { style: S.faint, children: t("pane.undoNeedsConnection") })
@@ -3342,13 +3368,14 @@ var plugin = {
           keywords: ["kumi", "undo", "history", "revert"],
           run: () => {
             const state = store.get();
-            const last = state.history?.items.find((item) => item.state !== "undone");
-            if (!last || !canUndo(state.status, last)) {
-              const unsure = Boolean(state.status?.unsure) || last?.state === "unsure" || last?.state === "partial";
+            const last = changesOf(state.history?.items ?? []).find((rows) => undoRowOf(rows) !== void 0);
+            const next = last && undoRowOf(last);
+            if (!last || !next || !canUndoChange(state.status, last)) {
+              const unsure = Boolean(state.status?.unsure) || next?.state === "unsure" || next?.state === "partial";
               host6.notify({ kind: "info", message: wordsOf(ctx)(unsure ? "notify.undoUnsure" : "notify.nothingToUndo") });
               return;
             }
-            void ask(ctx, undoRequest(last), { send: true, session: ownerSession(state) });
+            void ask(ctx, undoRequest(next), { send: true, session: ownerSession(state) });
           }
         }
       },

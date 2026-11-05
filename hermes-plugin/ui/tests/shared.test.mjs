@@ -42,6 +42,23 @@ test('undo is offered only while Kumi is connected, answering and sure, for an u
   assert.equal(format.canUndo(null, row), false)
 })
 
+test("a change's rows are one change (CC-3 A2): undone as one from its newest row, and offered while its next row can be", () => {
+  const live = { connected: true, stale: false, unsure: null }
+  const row = (id, change, state = 'applied') => ({ id, ...(change ? { change_id: change } : {}), state, undo_available: state === 'applied' })
+  // Newest first, with another change between two rows of the first, and two rows from before A2 (no change_id).
+  const items = [row('h-c9', 'x-2'), row('h-c8', 'x-1'), row('h-c7', 'x-2'), row('h-c6', 'x-2'), row('h-c5'), row('h-c4')]
+  const changes = format.changesOf(items)
+  assert.deepEqual(changes.map(rows => rows.map(r => r.id)), [['h-c9', 'h-c7', 'h-c6'], ['h-c8'], ['h-c5'], ['h-c4']])
+  assert.equal(format.undoRequest(changes[0][0]), 'Undo Kumi change h-c9', 'named by its newest row, as before')
+  // The deciding row is the newest one not already undone: a whole-change undo goes newest first and stops at the first
+  // row it can't undo, so rows undone before it are passed over, and one Kumi can't undo blocks the rest.
+  assert.equal(format.canUndoChange(live, [row('h-c9', 'x', 'undone'), row('h-c7', 'x'), row('h-c6', 'x')]), true, 'partly undone: the rest')
+  assert.equal(format.undoRowOf([row('h-c9', 'x', 'undone'), row('h-c7', 'x'), row('h-c6', 'x')]).id, 'h-c7', 'its Undo sits on the row it starts from')
+  assert.equal(format.canUndoChange(live, [row('h-c9', 'x', 'unsure'), row('h-c7', 'x')]), false, 'stuck behind an unsure row')
+  assert.equal(format.canUndoChange(live, [row('h-c9', 'x', 'undone'), row('h-c7', 'x', 'undone')]), false, 'all undone')
+  assert.equal(format.canUndoChange({ ...live, connected: false }, [row('h-c9', 'x')]), false, 'only while connected')
+})
+
 test('the other requests name the DAW, and words from the backend stay on one plain line', () => {
   assert.equal(format.setupRequest('ableton'), 'Set up Kumi for Live')
   assert.equal(format.connectRequest('renoise'), 'Connect Kumi to Renoise')
