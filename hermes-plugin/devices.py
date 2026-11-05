@@ -138,14 +138,14 @@ def summary(controls: list[dict], limit: int) -> str:
 
 
 def next_step(built: dict) -> str:
-    """What the model does with a built device (22f): observe, then load and place it in one ordinary approved change.
-    Kumi can undo the load, not yet a move on Live (#1139), as the daw skill says."""
+    """What the model does with a built device (22f): observe, load it in a change of its own, and move it in another
+    only if it belongs elsewhere. Kumi can undo the load; only Live's Undo takes back a move (#1139), as the skill says."""
     step = ("The device is in the User Library, not yet in the Set. To use it, first kumi_observe for the track's ref "
-            "and the project key and epoch, then call kumi_change with a load_device step "
-            f"{{\"itemId\": {json.dumps(built.get('item'), ensure_ascii=False)}, \"trackRef\": …}}, which puts it at the "
-            "end of the chain, and a move_device step only if it belongs elsewhere (\"before the Saturator\"), in that "
-            "one change: the producer approves it on its own. Kumi can undo the load, but not yet a move on Live: a "
-            "moved device is taken back with Live's own Undo. The file stays in the User Library after an undo.")
+            "and the project key and epoch, then call kumi_change with only a load_device step "
+            f"{{\"itemId\": {json.dumps(built.get('item'), ensure_ascii=False)}, \"trackRef\": …}}: it goes at the end "
+            "of the chain, the producer approves it on its own, and Kumi can undo it. Only if it belongs elsewhere "
+            "(\"before the Saturator\"), observe again and move it with a second kumi_change holding move_device alone: "
+            "Kumi can't undo a move on Live, only Live's own Undo can. The file stays in the User Library after an undo.")
     if built.get("listed") is False:
         step += " Live's Browser hasn't listed it yet; the load waits for it."
     return step
