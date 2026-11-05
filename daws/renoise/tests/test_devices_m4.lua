@@ -2187,8 +2187,8 @@ test("devices m4: a text's print and hash are the host's numbers, made sixteen b
   eq(material.print_of(""), "0000150500000000:0")
   eq(base.hash("abc"), "0b885c8b3025f862")
   -- (the print as it was made before: a byte at a time; the hash is its first 16 digits)
-  local function one_at_a_time(text)
-    local a, b = 5381, 0
+  local function one_at_a_time(text, seed_a, seed_b)
+    local a, b = seed_a or 5381, seed_b or 0
     for i = 1, #text do
       local c = text:byte(i)
       a = (a * 33 + c) % 4294967296
@@ -2209,6 +2209,22 @@ test("devices m4: a text's print and hash are the host's numbers, made sixteen b
     local text = random_text(n)
     eq(material.print_now(text), one_at_a_time(text), n .. " bytes")
     eq(base.hash(text), one_at_a_time(text):sub(1, 16), n .. " bytes hashed")
+    -- Every boundary, including empty fragments and either side of the four/16-byte unroll, continues the same sums.
+    for _, seeds in ipairs({ { 5381, 0 }, { 4294967295, 4294967295 }, { 2147483648, 2147483647 } }) do
+      local expected = one_at_a_time(text, seeds[1], seeds[2])
+      for cut = 0, n do
+        local a, b = base.sums_from(text:sub(1, cut), seeds[1], seeds[2])
+        a, b = base.sums_from(text:sub(cut + 1), a, b)
+        eq(string.format("%08x%08x:%d", a, b, n), expected, n .. " bytes split at " .. cut)
+      end
+      local a, b, at = seeds[1], seeds[2], 1
+      for _, length in ipairs({ 0, 1, 3, 4, 15, 0, 16, 17, 2, n }) do
+        local fragment = text:sub(at, at + length - 1)
+        a, b = base.sums_from(fragment, a, b)
+        at = at + #fragment
+      end
+      eq(string.format("%08x%08x:%d", a, b, n), expected, n .. " bytes in multiple fragments")
+    end
   end
   for _, n in ipairs({ 4095, 4096, 4097, 65537 }) do
     local text = random_text(n)

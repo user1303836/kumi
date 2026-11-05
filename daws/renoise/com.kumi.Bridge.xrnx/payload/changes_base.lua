@@ -72,8 +72,7 @@ end
 -- 5.1.5: 36 ms a megabyte, then 20).
 local byte = string.byte
 local M32 = 4294967296
-function M.sums(text)
-  local a, b = 5381, 0
+function M.sums_from(text, a, b)
   local n, i = #text, 1
   while i + 15 <= n do
     local c1, c2, c3, c4, c5, c6, c7, c8, c9, c10, c11, c12, c13, c14, c15, c16 = byte(text, i, i + 15)
@@ -106,6 +105,9 @@ function M.sums(text)
   end
   return a, b
 end
+
+-- Continue the same sums across fragments without concatenating them; ordinary callers retain the fixed initial state.
+function M.sums(text) return M.sums_from(text, 5381, 0) end
 
 -- A text's short print: its two sums as 16 hex digits (the fingerprints the changes keep).
 function M.hash(text)
