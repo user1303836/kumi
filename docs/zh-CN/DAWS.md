@@ -197,3 +197,4 @@ Kumi 每次查看时都会读取这首歌曲的设置并照着做：BPM（2 倍�
 - 暂不支持保存、实时音频采集或渲染。在支持的 LYNX 正式版本及配套桥接可用之前，此集成保持实验性。
 - 在 LYNX 常规设置中启用 LYNX Remote Control（默认关闭）。界面显示运行状态，Windows、macOS、Linux 均使用仅当前用户可访问的本地连接。`LYNX_CONTROL_ENABLED=1` 和 `LYNX_CONTROL_DISCOVERY` 是显式启动设置，不改变自动更新行为。
 - 使用 `lynx_read` 的 `kind: document` 和 `args.path`（JSON Pointer）分页查看完整项目，包括路由、自动化、原生音源参数和嵌套设备状态。将返回的 `snapshotId`、`documentHash` 和 revision 交给 `lynx_project_edit`，可把 1–128 个 JSON Patch 操作原子提交为一个原生撤销步骤。
+- 文档编辑可复用项目中已有的资源引用和插件 ID，不允许引入新的资源路径、录音输出位置或原生脚本代码。重置宿主插件应使用专用的替换或加载工具，不能通过文档补丁清空不透明状态。快照失效或设备变化使哈希失效时，请用 `args.refresh: true` 重新读取。
