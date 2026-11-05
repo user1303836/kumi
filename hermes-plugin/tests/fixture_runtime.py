@@ -38,6 +38,7 @@ DAW_NAMES = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
 # serve/change.rs's words for a change an earlier runtime made (agent-s, kumi-adv's D2).
 RESTARTED = ("Kumi restarted since this change, so it can't undo it safely: undo it in {daw} if it's still the latest "
              "step there, or ask Hermes to set it back.")
+RESOURCES = ("kumi://status", "kumi://focus", "kumi://history", "kumi://map")  # C2's, as #1047's kumi serve offers
 # The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`), with
 # the HISTORY family each one is in Live's change table (#965: a preview's `family`, so an approval's rule key).
 STEPS = {"set_track_volume": "mixer", "replace_sample": "device"}
@@ -74,6 +75,8 @@ class Fixture:
         self.running = True
         self.since = now()
         self.seen_at: int | None = None  # the last look (connect or observe), as focus.json's project.seen_at
+        self.subscribed: set[str] = set()  # the resources the host subscribed to (C2)
+        self.map_revision: str | None = None
         self.slow = dict(item.split("=", 1) for item in options.slow)
         self.writing = threading.Lock()
         self.counting = threading.Lock()
@@ -90,6 +93,8 @@ class Fixture:
             sys.stdout.flush()
 
     def serve(self) -> None:
+        if self.options.publish_at_start:  # as #1047's kumi serve: a new runtime's HISTORY and FOCUS, before any call
+            self.publish("history", "focus")
         for line in sys.stdin:
             message = json.loads(line)
             with open(self.state / "fixture-requests.jsonl", "a", encoding="utf-8") as log:
@@ -123,12 +128,18 @@ class Fixture:
 
     def answer(self, method: str, params: dict) -> dict:
         if method == "initialize":
+            offered = {} if self.options.no_resources else {"resources": {"subscribe": True, "listChanged": False}}
             return {"protocolVersion": MCP, "serverInfo": {"name": "kumi-serve", "version": self.options.server_version},
-                    "capabilities": {"tools": {}}}
+                    "capabilities": {"tools": {}, **offered}}
         if method == "tools/list":
             return {"tools": [{"name": name, "inputSchema": {"type": "object"}} for name in TOOLS]}
         if method == "tools/call":
             return self.call(params["name"], dict(params.get("arguments") or {}))
+        if method in ("resources/subscribe", "resources/unsubscribe") and not self.options.no_resources:
+            if params.get("uri") not in RESOURCES or params.get("uri") in self.options.refuse_subscribe:
+                raise LookupError(f"no resource {params.get('uri')!r}")
+            (self.subscribed.add if method == "resources/subscribe" else self.subscribed.discard)(params["uri"])
+            return {}
         raise LookupError(f"no method {method}")
 
     def call(self, name: str, args: dict) -> dict:
@@ -166,6 +177,24 @@ class Fixture:
             seq = self.next_seq()
             body = {"status": self.status, "focus": self.focus, "history": self.history_snapshot}[name]()
             self.record(f"{name}.json", {"schema": 1, "seq": seq, "at": now(), "owner": self.owner, **body})
+            self.landed(f"kumi://{name}")
+
+    def publish_map(self, revision: str) -> None:
+        """A scan's map (C3), as kumi serve ends one: the revision's file, then its pointer flips to it."""
+        self.record(f"map/{revision}.json", {
+            "schema": 1, "seq": self.next_seq(), "at": now(), "revision": revision, "made": now(), "points": [],
+            "groups": {}, "sounds": {sound["sound_id"]: {key: sound[key] for key in ("name", "kind", "class", "folder",
+                                                                                      "duration")} for sound in SOUNDS}})
+        pointer = self.state / "map" / "current"
+        pointer.with_name("current.tmp").write_text(f"{revision}\n", encoding="utf-8")
+        os.replace(pointer.with_name("current.tmp"), pointer)
+        self.map_revision = revision
+        self.landed("kumi://map")
+
+    def landed(self, uri: str) -> None:
+        """A resource's snapshot is on disk anew: a subscriber hears of it (notifications/resources/updated)."""
+        if uri in self.subscribed and uri not in self.options.quiet:
+            self.send({"jsonrpc": "2.0", "method": "notifications/resources/updated", "params": {"uri": uri}})
 
     def project(self) -> dict | None:
         return {"name": self.set["name"], "key": self.set["key"], "epoch": self.epoch} if self.connected else None
@@ -544,7 +573,8 @@ def listen_track(fixture: Fixture, args: dict, host: dict) -> dict:
 
 
 def job(fixture: Fixture, args: dict, host: dict) -> dict:
-    """A scan's job. It settles when it's next read: a cancelled one as cancelled, any other as done."""
+    """A scan's job. It settles when it's next read: a cancelled one as cancelled, any other as done, its map then the
+    current one."""
     job_id = args.get("job_id")
     state = fixture.scans.get(job_id)
     if state is None:
@@ -552,6 +582,8 @@ def job(fixture: Fixture, args: dict, host: dict) -> dict:
     fixture.scans[job_id] = "cancelled" if state in ("cancelling", "cancelled") else "done"
     if fixture.scans[job_id] == "cancelled":
         return {"state": "cancelled"}
+    if fixture.map_revision != "r1":
+        fixture.publish_map("r1")
     return {"state": "done", "progress": 1.0, "result": {"sounds": len(SOUNDS), "map_revision": "r1"}}
 
 
@@ -603,6 +635,10 @@ def main() -> None:
     parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
     parser.add_argument("--generation", default="g1", help="this runtime's generation, as HISTORY's ids carry it")
+    parser.add_argument("--no-resources", action="store_true", help="offer no resources, as kumi serve before #1047")
+    parser.add_argument("--refuse-subscribe", action="append", default=[], help="refuse a subscription to this URI")
+    parser.add_argument("--quiet", action="append", default=[], help="never tell a subscriber this URI changed")
+    parser.add_argument("--publish-at-start", action="store_true", help="write HISTORY and FOCUS as it starts")
     parser.add_argument("--library-root", action="append", default=[])
     parser.add_argument("--hermes-home", help="the profile's Hermes home, as kumi serve takes it (#985)")
     parser.add_argument("--hermes-root", help="the root holding every Hermes profile, as kumi serve takes it (#985)")
