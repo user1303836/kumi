@@ -189,7 +189,10 @@ const plugin: HermesPlugin = {
     ctx.onEvent(`plugin.${PLUGIN_ID}.listen.done`, event => {
       const payload = payloadOf(event)
       const id = callId(payload.tool_call_id)
-      if (!id || !forChatInFront(payload) || calls.has(id) || waiting.has(id)) return
+      if (!id || !forChatInFront(payload)) return
+      // A comparison counts toward its reference's rounds however it's shown (the store counts one audio once).
+      store.noteListen(payload.result)
+      if (calls.has(id) || waiting.has(id)) return
       // A result too large to carry comes as none (the tab then points to Kumi's reply); one that isn't a measurement
       // opens nothing.
       const result = payload.result ?? null
@@ -215,6 +218,7 @@ const plugin: HermesPlugin = {
       // ended. `kumi_job` only reads a job that exists, which may have ended long ago.
       store.trackJob(jobOf(payload.result), name !== 'kumi_job')
       const id = callId(payload.tool_id)
+      if (name === 'kumi_listen') store.noteListen(payload.result)
       if (name === 'kumi_listen' && id) {
         // Its tool part shows, card and all: no tab.
         calls.add(id)
@@ -291,7 +295,7 @@ const plugin: HermesPlugin = {
           tools: ['kumi_listen'],
           render: (props: ToolMediaRendererProps) => (
             <WithT>
-              <ListenCard audition={audition} media={props} />
+              <ListenCard audition={audition} media={props} store={store} />
             </WithT>
           )
         }

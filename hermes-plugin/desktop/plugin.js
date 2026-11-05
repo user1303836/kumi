@@ -158,6 +158,20 @@ var en = {
     crest: "Crest",
     tempo: "Tempo",
     key: "Key",
+    peakToLoudness: "Peak to loudness",
+    tilt: "Tilt",
+    perOctave: (value) => `${value} dB/oct`,
+    width: "Stereo width",
+    lowEnd: "Low end",
+    mono: "mono",
+    notMono: "not mono",
+    overlay: "Band levels, level-matched",
+    overlayBand: (name, hz2, mine, reference, difference) => `${name} (${hz2} Hz): this ${mine} dB, reference ${reference} dB, ${difference} dB`,
+    round: (number) => `Round ${number}`,
+    roundTitle: "Each comparison with this reference since this window opened, oldest first: this minus reference",
+    loudnessGap: (trend) => `loudness ${trend} LU`,
+    tiltGap: (trend) => `tilt ${trend} dB/oct`,
+    widthGap: (trend) => `width ${trend}`,
     interpretation: "Interpretation",
     noInterpretation: (why) => `No model interpretation: ${why}`,
     more: "More",
@@ -433,6 +447,20 @@ var ja = {
     crest: "クレスト",
     tempo: "テンポ",
     key: "キー",
+    peakToLoudness: "ピーク対ラウドネス",
+    tilt: "ティルト",
+    perOctave: (value) => `${value} dB/oct`,
+    width: "ステレオ幅",
+    lowEnd: "低域",
+    mono: "モノ",
+    notMono: "モノではない",
+    overlay: "帯域レベル（レベル合わせ済み）",
+    overlayBand: (name, hz2, mine, reference, difference) => `${name}（${hz2} Hz）: これ ${mine} dB、リファレンス ${reference} dB、差 ${difference} dB`,
+    round: (number) => `ラウンド ${number}`,
+    roundTitle: "このウィンドウを開いてからの、このリファレンスとの各比較（古い順、これ − リファレンス）",
+    loudnessGap: (trend) => `ラウドネス ${trend} LU`,
+    tiltGap: (trend) => `ティルト ${trend} dB/oct`,
+    widthGap: (trend) => `幅 ${trend}`,
     interpretation: "解釈",
     noInterpretation: (why) => `モデルによる解釈なし: ${why}`,
     more: "もっと見る",
@@ -707,6 +735,20 @@ var zh = {
     crest: "峰值因数",
     tempo: "速度",
     key: "调性",
+    peakToLoudness: "峰值响度比",
+    tilt: "倾斜",
+    perOctave: (value) => `${value} dB/oct`,
+    width: "立体声宽度",
+    lowEnd: "低频",
+    mono: "单声道",
+    notMono: "非单声道",
+    overlay: "频段电平（已对齐电平）",
+    overlayBand: (name, hz2, mine, reference, difference) => `${name}（${hz2} Hz）：当前 ${mine} dB，参考 ${reference} dB，差 ${difference} dB`,
+    round: (number) => `第 ${number} 轮`,
+    roundTitle: "本窗口打开以来与此参考的每次比较（从旧到新，当前减参考）",
+    loudnessGap: (trend) => `响度 ${trend} LU`,
+    tiltGap: (trend) => `倾斜 ${trend} dB/oct`,
+    widthGap: (trend) => `宽度 ${trend}`,
     interpretation: "解读",
     noInterpretation: (why) => `没有模型解读：${why}`,
     more: "展开",
@@ -1207,9 +1249,13 @@ function listenView(result, t = english) {
   const rows = [
     row(t("listen.loudness"), mine.loudness?.integratedLufs, theirs(reference?.loudness?.integratedLufs), (v) => `${num(v)} LUFS`, differences?.loudness?.differenceLu, (v) => `${signed(v)} LU`),
     row(t("listen.truePeak"), mine.loudness?.truePeakDbtp, theirs(reference?.loudness?.truePeakDbtp), (v) => `${num(v)} dBTP`, void 0, (v) => `${signed(v)} dB`),
-    row(t("listen.brightness"), mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
     row(t("listen.range"), mine.loudness?.rangeLu, theirs(reference?.loudness?.rangeLu), (v) => `${num(v)} LU`, void 0, (v) => `${signed(v)} LU`),
     row(t("listen.crest"), mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
+    row(t("listen.peakToLoudness"), mine.dynamics?.peakToLoudnessDb, theirs(reference?.dynamics?.peakToLoudnessDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
+    row(t("listen.tilt"), mine.balance?.tiltDbPerOctave, theirs(reference?.balance?.tiltDbPerOctave), (v) => t("listen.perOctave", num(v)), void 0, (v) => t("listen.perOctave", signed(v))),
+    row(t("listen.brightness"), mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
+    row(t("listen.width"), mine.stereo?.width, theirs(reference?.stereo?.width), (v) => num(v, 2), void 0, (v) => signed(v, 2)),
+    lowEnd(t, mine.stereo?.lowEndMono, compare ? reference?.stereo?.lowEndMono ?? null : void 0),
     row(t("listen.tempo"), mine.tempo?.bpm, theirs(reference?.tempo?.bpm), (v) => `${num(v)} BPM`, void 0, (v) => `${signed(v)} BPM`)
   ].filter((value) => value !== null);
   const key = mine.sound ? void 0 : mine.key?.name;
@@ -1223,14 +1269,17 @@ function listenView(result, t = english) {
   const levelBands = (Array.isArray(mine.balance?.bands) ? mine.balance.bands : []).flatMap(
     (band) => band && finite(band.db) ? [{ name: clean(band.name ?? band.hz ?? "", 16), value: band.db }] : []
   );
+  const headlines = Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [];
+  const said = typeof result.verdict_text === "string" ? headlines.length ? result.verdict_text.split("\n")[0] : result.verdict_text : "";
   const view = {
     title: fileName(mine, t("listen.measuredAudio")),
     mineId: typeof result.artifact_id === "string" ? result.artifact_id : void 0,
     rows,
     bands: differenceBands.length ? differenceBands : levelBands,
     bandsAre: differenceBands.length ? "difference" : "level",
-    headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [],
-    verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0,
+    overlay: compare ? overlayOf(mine, reference) : [],
+    headlines,
+    verdict: said.trim() ? clean(said, 400) : void 0,
     capture: captureWords(result.capture, t),
     // CC-2 A3: one line of at most 200 characters, shown as it is and never read for a decision.
     captureNote: typeof result.capture?.note === "string" && result.capture.note.trim() ? clean(result.capture.note, 200) : void 0
@@ -1248,11 +1297,64 @@ function listenView(result, t = english) {
   }
   return view;
 }
+function overlayOf(mine, reference) {
+  const ours = Array.isArray(mine.balance?.bands) ? mine.balance.bands : [];
+  const theirs = Array.isArray(reference?.balance?.bands) ? reference.balance.bands : [];
+  if (!ours.length || ours.length !== theirs.length) return [];
+  const overlay = [];
+  for (const [index, band] of ours.entries()) {
+    const other = theirs[index];
+    if (!band || !other || band.name !== other.name || !finite(band.db) || !finite(other.db)) return [];
+    overlay.push({ name: clean(band.name ?? "", 16), hz: clean(band.hz ?? "", 16), mine: band.db, reference: other.db });
+  }
+  return overlay;
+}
+function lowEnd(t, mine, reference) {
+  const words = (value) => value === true ? t("listen.mono") : value === false ? t("listen.notMono") : "—";
+  if (typeof mine !== "boolean" && typeof reference !== "boolean") return null;
+  return { label: t("listen.lowEnd"), mine: words(mine), ...reference === void 0 ? {} : { reference: words(reference) }, direction: 0 };
+}
+function referenceKey(result) {
+  const reference = result.compare?.metrics;
+  if (!reference) return null;
+  const lufs = reference.loudness?.integratedLufs;
+  return [reference.file ?? "", finite(lufs) ? lufs.toFixed(1) : "", finite(reference.seconds) ? reference.seconds.toFixed(1) : ""].join("|");
+}
+function gapsOf(result) {
+  const mine = result.metrics ?? {};
+  const reference = result.compare?.metrics;
+  if (!reference) return {};
+  const gap = (a, b) => finite(a) && finite(b) ? Math.round((a - b) * 100) / 100 : void 0;
+  const loudness = finite(result.compare?.differences?.loudness?.differenceLu) ? result.compare.differences.loudness.differenceLu : gap(mine.loudness?.integratedLufs, reference.loudness?.integratedLufs);
+  const out = {};
+  if (loudness !== void 0) out.loudness = loudness;
+  const tilt = gap(mine.balance?.tiltDbPerOctave, reference.balance?.tiltDbPerOctave);
+  if (tilt !== void 0) out.tilt = tilt;
+  const width = gap(mine.stereo?.width, reference.stereo?.width);
+  if (width !== void 0) out.width = width;
+  return out;
+}
+function roundWords(number, rounds, t = english) {
+  if (number < 2 || rounds.length < 2) return void 0;
+  const trend = (pick2, digits) => {
+    const values = rounds.map(pick2);
+    return values.every(finite) ? values.map((value) => signed(value, digits)).join(" → ") : void 0;
+  };
+  const parts = [
+    [trend((gaps) => gaps.loudness, 1), (text) => t("listen.loudnessGap", text)],
+    [trend((gaps) => gaps.tilt, 1), (text) => t("listen.tiltGap", text)],
+    [trend((gaps) => gaps.width, 2), (text) => t("listen.widthGap", text)]
+  ];
+  const said = parts.flatMap(([text, words]) => text ? [words(text)] : []);
+  return [t("listen.round", number), ...said].join(" · ");
+}
 
 // src/shared/store.ts
 var JOB_KEPT_MS = 6e4;
 var MOST_JOBS = 20;
-var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null };
+var MOST_ROUNDS = 6;
+var MOST_REFERENCES = 8;
+var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} };
 function finished(job) {
   return typeof job.state === "string" && job.state !== "running";
 }
@@ -1389,6 +1491,20 @@ var KumiStore = class {
   /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
   measure(toolCallId, result) {
     this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
+  }
+  /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
+   *  that reference's next round. The same audio twice (both signals for one call) counts once. */
+  noteListen(result) {
+    const parsed = parseListen(result);
+    const key = parsed ? referenceKey(parsed) : null;
+    const id = typeof parsed?.artifact_id === "string" ? parsed.artifact_id : null;
+    if (!parsed || !key || !id) return;
+    const before = this.state.rounds[key] ?? [];
+    if (before.some((round) => round.id === id)) return;
+    const rounds = { ...this.state.rounds, [key]: [...before, { id, gaps: gapsOf(parsed) }].slice(-MOST_ROUNDS) };
+    const keys = Object.keys(rounds);
+    if (keys.length > MOST_REFERENCES) delete rounds[keys[0]];
+    this.set({ rounds });
   }
   /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when
    *  the source says it was running: a call that started it, or an event that reported it running. */
@@ -1724,8 +1840,39 @@ function Rows({ view }) {
     ] })
   );
 }
+function Overlay({ view }) {
+  const t = useT();
+  const values = view.overlay.flatMap((band) => [band.mine, band.reference]);
+  const low = Math.min(...values) - 3;
+  const high = Math.max(...values) + 1;
+  const at = (value) => `${Math.max(2, (value - low) / (high - low) * 100)}%`;
+  return /* @__PURE__ */ jsxs2("div", { style: { display: "flex", flexDirection: "column", gap: 3 }, children: [
+    /* @__PURE__ */ jsxs2("span", { style: { ...S.row, gap: 10, flexWrap: "wrap" }, children: [
+      /* @__PURE__ */ jsx2("span", { style: S.faint, children: t("listen.overlay") }),
+      /* @__PURE__ */ jsxs2("span", { style: { ...S.row, gap: 4, ...S.faint }, children: [
+        /* @__PURE__ */ jsx2("span", { "aria-hidden": true, style: { width: 8, height: 8, background: T.accent, opacity: 0.8 } }),
+        t("listen.this")
+      ] }),
+      /* @__PURE__ */ jsxs2("span", { style: { ...S.row, gap: 4, ...S.faint }, children: [
+        /* @__PURE__ */ jsx2("span", { "aria-hidden": true, style: { width: 10, borderTop: `2px solid ${T.text}` } }),
+        t("listen.reference")
+      ] })
+    ] }),
+    /* @__PURE__ */ jsx2("div", { style: { display: "flex", alignItems: "stretch", gap: 3, height: 64 }, children: view.overlay.map((band) => {
+      const label = t("listen.overlayBand", band.name, band.hz, num(band.mine), num(band.reference), signed(band.mine - band.reference));
+      return /* @__PURE__ */ jsxs2("div", { role: "img", "aria-label": label, title: label, style: { flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 2, minWidth: 0 }, children: [
+        /* @__PURE__ */ jsxs2("div", { style: { position: "relative", flex: 1, width: "100%" }, children: [
+          /* @__PURE__ */ jsx2("div", { style: { position: "absolute", left: "18%", right: "18%", bottom: 0, height: at(band.mine), background: T.accent, opacity: 0.8 } }),
+          /* @__PURE__ */ jsx2("div", { style: { position: "absolute", left: 0, right: 0, bottom: at(band.reference), borderTop: `2px solid ${T.text}` } })
+        ] }),
+        /* @__PURE__ */ jsx2("span", { style: { fontSize: 9, color: T.faint, ...S.ellipsis, maxWidth: "100%" }, children: band.name })
+      ] }, band.name);
+    }) })
+  ] });
+}
 function Bands({ view }) {
   const t = useT();
+  if (view.overlay.length) return /* @__PURE__ */ jsx2(Overlay, { view });
   if (!view.bands.length) return null;
   const top = Math.max(...view.bands.map((band) => Math.abs(band.value)), view.bandsAre === "difference" ? 3 : 1);
   return /* @__PURE__ */ jsxs2("div", { style: { display: "flex", flexDirection: "column", gap: 3 }, children: [
@@ -1768,15 +1915,20 @@ function Interpretation({ view }) {
     long && /* @__PURE__ */ jsx2("span", { children: /* @__PURE__ */ jsx2(TextButton, { onClick: () => setOpen(!open), children: open ? t("listen.less") : t("listen.more") }) })
   ] });
 }
-function ListenCard({ media, audition }) {
+function ListenCard({ media, audition, store }) {
   if (media.file?.kind !== "audio") return media.fallback;
-  return /* @__PURE__ */ jsx2(ListenResultCard, { audition, fallback: media.fallback, result: media.result });
+  return /* @__PURE__ */ jsx2(ListenResultCard, { audition, fallback: media.fallback, result: media.result, store });
 }
-function ListenResultCard({ result, audition, fallback }) {
+function ListenResultCard({ result, audition, fallback, store }) {
   const t = useT();
+  const { rounds } = useKumi(store);
   const parsed = parseListen(result);
   if (!parsed) return fallback;
   const view = listenView(parsed, t);
+  const key = referenceKey(parsed);
+  const seen = key ? rounds[key] ?? [] : [];
+  const index = seen.findIndex((round2) => round2.id === parsed.artifact_id);
+  const round = index < 0 ? void 0 : roundWords(index + 1, seen.slice(Math.max(0, index - 2), index + 1).map((each) => each.gaps), t);
   return /* @__PURE__ */ jsxs2(
     "div",
     {
@@ -1795,13 +1947,14 @@ function ListenResultCard({ result, audition, fallback }) {
         view.capture && /* @__PURE__ */ jsx2("span", { style: S.faint, title: t("listen.captureTitle"), children: view.capture }),
         view.captureNote && /* @__PURE__ */ jsx2("span", { style: { ...S.muted, whiteSpace: "normal" }, children: view.captureNote }),
         view.verdict && /* @__PURE__ */ jsx2("span", { style: S.text, children: view.verdict }),
+        round && /* @__PURE__ */ jsx2("span", { style: { ...S.muted, fontVariantNumeric: "tabular-nums" }, title: t("listen.roundTitle"), children: round }),
         view.mineId ? /* @__PURE__ */ jsxs2("div", { style: { ...S.row, gap: 12, flexWrap: "wrap", alignItems: "flex-start" }, children: [
           /* @__PURE__ */ jsx2(Wave, { audition, id: view.mineId, label: view.title }),
           view.referenceId && /* @__PURE__ */ jsx2(Wave, { audition, id: view.referenceId, label: view.referenceTitle ?? t("listen.reference") })
         ] }) : fallback,
         /* @__PURE__ */ jsx2(Rows, { view }),
         /* @__PURE__ */ jsx2(Bands, { view }),
-        view.headlines.length > 0 && /* @__PURE__ */ jsx2("ul", { style: { margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 1 }, children: view.headlines.map((line, index) => /* @__PURE__ */ jsx2("li", { style: S.muted, children: line }, index)) }),
+        view.headlines.length > 0 && /* @__PURE__ */ jsx2("ul", { style: { margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 1 }, children: view.headlines.map((line, index2) => /* @__PURE__ */ jsx2("li", { style: S.muted, children: line }, index2)) }),
         /* @__PURE__ */ jsx2(Interpretation, { view })
       ]
     }
@@ -2995,7 +3148,7 @@ function MeasurementsWorkspace({ store, audition }) {
   const note = (text) => /* @__PURE__ */ jsx11("span", { style: S.muted, children: text });
   return /* @__PURE__ */ jsx11("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs11(Fragment3, { children: [
     /* @__PURE__ */ jsx11("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
-    /* @__PURE__ */ jsx11(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result })
+    /* @__PURE__ */ jsx11(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result, store })
   ] }) });
 }
 
@@ -3280,7 +3433,9 @@ var plugin = {
     ctx.onEvent(`plugin.${PLUGIN_ID}.listen.done`, (event) => {
       const payload = payloadOf(event);
       const id = callId(payload.tool_call_id);
-      if (!id || !forChatInFront(payload) || calls.has(id) || waiting.has(id)) return;
+      if (!id || !forChatInFront(payload)) return;
+      store.noteListen(payload.result);
+      if (calls.has(id) || waiting.has(id)) return;
       const result = payload.result ?? null;
       if (result !== null && !parseListen(result)) return;
       waiting.set(
@@ -3301,6 +3456,7 @@ var plugin = {
       refresh();
       store.trackJob(jobOf(payload.result), name !== "kumi_job");
       const id = callId(payload.tool_id);
+      if (name === "kumi_listen") store.noteListen(payload.result);
       if (name === "kumi_listen" && id) {
         calls.add(id);
         waiting.get(id)?.();
@@ -3361,7 +3517,7 @@ var plugin = {
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_listen"],
-          render: (props) => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(ListenCard, { audition, media: props }) })
+          render: (props) => /* @__PURE__ */ jsx13(WithT, { children: /* @__PURE__ */ jsx13(ListenCard, { audition, media: props, store }) })
         }
       });
       contributions.push({

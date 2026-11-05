@@ -2,6 +2,7 @@
 // reads `/status` on a poll and on events, and reads FOCUS, HISTORY and the map again when their revision isn't the
 // one it holds, or when the runtime's liveness changed (the routes say per read whether anything can be undone).
 import { plainId } from './format.ts'
+import { gapsOf, parseListen, referenceKey, type Gaps } from './listen.ts'
 import type { Focus, History, Job, SetupStatus, SoundMap, Status } from './types.ts'
 
 export type Fetch = <T>(path: string) => Promise<T>
@@ -25,6 +26,10 @@ export interface KumiState {
   /** The latest `kumi_listen` result a `listen.done` event brought when the transcript showed none (CC-9); `result`
    *  is null when the event left it out for its size. */
   measured: { tool_call_id: string; result: unknown; at: number } | null
+  /** Comparisons against each reference this window saw arrive (a mastering pass's rounds), oldest first, by
+   *  `referenceKey`: each one's own audio id and its gaps. Only what arrived while the window was open, so a round is
+   *  never numbered from a partial past. */
+  rounds: Record<string, { id: string; gaps: Gaps }[]>
 }
 
 export interface TrackedJob extends Job {
@@ -37,8 +42,11 @@ export interface TrackedJob extends Job {
 /** How long a finished job stays in view, and how many jobs are followed at once (ids come from events). */
 export const JOB_KEPT_MS = 60_000
 export const MOST_JOBS = 20
+/** Comparisons kept per reference, and references kept: a mastering pass is three rounds at most. */
+const MOST_ROUNDS = 6
+const MOST_REFERENCES = 8
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null }
+const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null, rounds: {} }
 
 function finished(job: Job): boolean {
   return typeof job.state === 'string' && job.state !== 'running'
@@ -193,6 +201,22 @@ export class KumiStore {
   /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
   measure(toolCallId: string, result: unknown): void {
     this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } })
+  }
+
+  /** A `kumi_listen` result as it arrived (its call's `tool.complete` or `listen.done`): one against a reference is
+   *  that reference's next round. The same audio twice (both signals for one call) counts once. */
+  noteListen(result: unknown): void {
+    const parsed = parseListen(result)
+    const key = parsed ? referenceKey(parsed) : null
+    const id = typeof parsed?.artifact_id === 'string' ? parsed.artifact_id : null
+    if (!parsed || !key || !id) return
+    const before = this.state.rounds[key] ?? []
+    if (before.some(round => round.id === id)) return
+    // A few references, each with a few rounds: a pass is three at most, and older ones drop off.
+    const rounds = { ...this.state.rounds, [key]: [...before, { id, gaps: gapsOf(parsed) }].slice(-MOST_ROUNDS) }
+    const keys = Object.keys(rounds)
+    if (keys.length > MOST_REFERENCES) delete rounds[keys[0]]
+    this.set({ rounds })
   }
 
   /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. `started` when

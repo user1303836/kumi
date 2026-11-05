@@ -131,6 +131,58 @@ test("a passage's key shows; one sound's, which the runtime's own summary never 
   assert.equal(keyOf({ ...keyed, sound: { pitch: null, envelope: { attack_ms: 0 } } }), undefined)
 })
 
+// A mix against a mastered reference (flow A): each band a share of its own file's energy.
+const mix = (lufs, tilt, width, artifact, bands = [{ name: 'sub', hz: '20–60', db: -12 }, { name: 'bass', hz: '60–120', db: -8 }]) => ({
+  metrics: { ...analysis(lufs, -1, 2000, '/mix/Night Drive.wav'), balance: { centroidHz: 2000, tiltDbPerOctave: tilt, bands }, stereo: { width, correlation: 0.6, lowEndMono: true }, dynamics: { crestDb: 12, peakToLoudnessDb: 9.5 } },
+  artifact_id: artifact,
+  compare: {
+    artifact_id: `r-${artifact}`,
+    metrics: { ...analysis(-8.6, -0.2, 2600, '/refs/Reference.wav'), balance: { centroidHz: 2600, tiltDbPerOctave: -3.1, bands: [{ name: 'sub', hz: '20–60', db: -10 }, { name: 'bass', hz: '60–120', db: -7.5 }] }, stereo: { width: 0.31, correlation: 0.5, lowEndMono: false }, dynamics: { crestDb: 9, peakToLoudnessDb: 8.4 } },
+    differences: { loudness: { differenceLu: Math.round((lufs + 8.6) * 10) / 10 } }
+  }
+})
+
+test('a comparison sets dynamics, tilt and stereo width beside the reference, and overlays both spectra level-matched', () => {
+  const view = listen.listenView(mix(-12.7, -3.9, 0.22, 'a-1'))
+  const rows = Object.fromEntries(view.rows.map(row => [row.label, row]))
+  assert.deepEqual(rows['Peak to loudness'], { label: 'Peak to loudness', mine: '9.5 dB', reference: '8.4 dB', delta: '+1.1 dB', direction: 1 })
+  assert.deepEqual(rows.Tilt, { label: 'Tilt', mine: '−3.9 dB/oct', reference: '−3.1 dB/oct', delta: '−0.8 dB/oct', direction: -1 })
+  assert.deepEqual(rows['Stereo width'], { label: 'Stereo width', mine: '0.22', reference: '0.31', delta: '−0.09', direction: -1 })
+  assert.deepEqual(rows['Low end'], { label: 'Low end', mine: 'mono', reference: 'not mono', direction: 0 })
+  assert.deepEqual(view.overlay, [{ name: 'sub', hz: '20–60', mine: -12, reference: -10 }, { name: 'bass', hz: '60–120', mine: -8, reference: -7.5 }])
+  // Bands that don't line up aren't overlaid as if they did.
+  assert.deepEqual(listen.listenView(mix(-12.7, -3.9, 0.22, 'a-1', [{ name: 'air', hz: '10k–20k', db: -30 }])).overlay, [])
+  // Without a reference: no reference column, no overlay.
+  const alone = listen.listenView({ metrics: mix(-12.7, -3.9, 0.22, 'a-1').metrics })
+  assert.deepEqual(alone.overlay, [])
+  assert.equal(alone.rows.find(row => row.label === 'Low end').reference, undefined)
+  // Serve's verdict is its summary, then the headlines the card lists below it: the summary shows, each headline once.
+  const told = mix(-12.7, -3.9, 0.22, 'a-1')
+  told.verdict_text = '-12.7 LUFS\n4.1 LU quieter overall (-12.7 vs -8.6 LUFS)'
+  told.compare.differences.headlines = ['4.1 LU quieter overall (-12.7 vs -8.6 LUFS)']
+  assert.equal(listen.listenView(told).verdict, '-12.7 LUFS')
+})
+
+test('each comparison with the same reference is its next round, counted once, and its line shows the gaps narrowing', () => {
+  const kumi = new store.KumiStore(async () => ({}))
+  kumi.noteListen(mix(-12.7, -3.9, 0.22, 'a-1'))
+  // The same call's tool.complete and listen.done both bring it: one round.
+  kumi.noteListen(JSON.stringify(mix(-12.7, -3.9, 0.22, 'a-1')))
+  kumi.noteListen(mix(-10.2, -3.4, 0.27, 'a-2'))
+  kumi.noteListen(mix(-9.0, -3.2, 0.3, 'a-3'))
+  // Against another reference, or none: not this pass's rounds.
+  kumi.noteListen({ ...mix(-9, -3, 0.3, 'b-1'), compare: { ...mix(-9, -3, 0.3, 'b-1').compare, metrics: { ...mix(-9, -3, 0.3, 'b-1').compare.metrics, file: 'Other.wav' } } })
+  kumi.noteListen({ metrics: mix(-9, -3, 0.3, 'c-1').metrics, artifact_id: 'c-1' })
+  const rounds = kumi.get().rounds[listen.referenceKey(mix(-12.7, -3.9, 0.22, 'a-1'))]
+  assert.deepEqual(rounds.map(round => round.id), ['a-1', 'a-2', 'a-3'])
+  assert.equal(Object.keys(kumi.get().rounds).length, 2)
+  assert.equal(
+    listen.roundWords(3, rounds.map(round => round.gaps)),
+    'Round 3 · loudness −4.1 → −1.6 → −0.4 LU · tilt −0.8 → −0.3 → −0.1 dB/oct · width −0.09 → −0.04 → −0.01'
+  )
+  assert.equal(listen.roundWords(1, [rounds[0].gaps]), undefined)
+})
+
 test("a model's reading shows only when given, under a plain heading with the model it reports", () => {
   const withModel = listen.listenView({ ...compared, interpretation: { text: 'Less 2–6 kHz energy.', model: 'm-1' } })
   assert.equal(withModel.interpretation.label, 'Interpretation · m-1')
