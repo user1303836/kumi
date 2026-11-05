@@ -996,6 +996,19 @@ mod tests {
                 call(&ctx, &crate::serve::change::UNDO, json!({"history_id": id})).await,
                 json!({"state": "refused", "code": "not_undoable", "reason": note})
             );
+            // A whole-change undo (#1129; the plugin's "undo that") meets the same refusal first, previewed or sent, so
+            // nothing is asked of the DAW and nothing is undone.
+            assert_eq!(
+                call(&ctx, &crate::serve::change::UNDO, json!({"history_id": id, "whole_change": true, "preview": true})).await,
+                json!({"state": "preview", "undo_available": false, "reason": "not_undoable", "note": note})
+            );
+            assert_eq!(
+                call(&ctx, &crate::serve::change::UNDO, json!({"history_id": id, "whole_change": true, "expect_rows": "0".repeat(64)}))
+                    .await,
+                json!({"state": "refused", "code": "not_undoable", "reason": note})
+            );
+            assert_eq!(ctx.history().row(&id).unwrap().state, "applied", "nothing undone");
+            assert_eq!(given.borrow().len(), 1, "the DAW was asked nothing more");
         })
         .await;
     }
