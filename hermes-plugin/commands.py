@@ -54,7 +54,7 @@ def status_text(host: tools.Host) -> str:
     if owner.get("age_ms") is None:
         lines.append("Runtime: not running.")
     elif owner.get("stale"):
-        lines.append(f"Runtime: not running (last heard {round(owner['age_ms'] / 1000)} s ago).")
+        lines.append(f"Runtime: not running (last heard {max(0, round(owner['age_ms'] / 1000))} s ago).")
     else:
         pid = f" (pid {holder['pid']})" if holder.get("pid") else ""
         chat = f", for chat {holder['session_id']}" if holder.get("session_id") else ""

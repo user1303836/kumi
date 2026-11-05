@@ -63,6 +63,7 @@ class Fixture:
         self.slow = dict(item.split("=", 1) for item in options.slow)
         self.writing = threading.Lock()
         self.counting = threading.Lock()
+        self.beating = threading.RLock()  # owner.json's writes: a heartbeat never lands after stopped()'s
         self.record("fixture-start.json", {"argv": sys.argv[1:], "environment": sorted(os.environ)})
         if options.stderr_flood:
             sys.stderr.write("noise " * (options.stderr_flood // 6) + "\n")
@@ -98,12 +99,13 @@ class Fixture:
 
     def stopped(self) -> None:
         """At exit, as kumi serve's publish_stopped: status.json says stale and not connected, owner.json not running."""
-        self.running = False
-        if self.owner is None:
-            return
-        self.record("status.json", {"schema": 1, "seq": self.next_seq(), "at": now(), "owner": self.owner,
-                                    **self.status(), "stale": True, "connected": False})
-        beat(self)
+        with self.beating:  # no heartbeat lands after this one
+            self.running = False
+            if self.owner is None:
+                return
+            self.record("status.json", {"schema": 1, "seq": self.next_seq(), "at": now(), "owner": self.owner,
+                                        **self.status(), "stale": True, "connected": False})
+            beat(self)
 
     def answer(self, method: str, params: dict) -> dict:
         if method == "initialize":
@@ -216,17 +218,23 @@ def connect(fixture: Fixture, args: dict, host: dict) -> dict:
 
 def beat(fixture: Fixture) -> None:
     """owner.json as kumi serve writes it: who runs it, its heartbeat, and whether it's still running."""
-    fixture.record("owner.json", {"schema": 1, "seq": fixture.next_seq(), "at": now(), "owner": fixture.owner,
-                                  **fixture.owner, "since": fixture.since, "heartbeat": now(),
-                                  "running": fixture.running, "lease": "free"})
+    with fixture.beating:
+        fixture.record("owner.json", {"schema": 1, "seq": fixture.next_seq(), "at": now(), "owner": fixture.owner,
+                                      **fixture.owner, "since": fixture.since, "heartbeat": now(),
+                                      "running": fixture.running, "lease": "free"})
 
 
 def heartbeat(fixture: Fixture) -> None:
     """owner.json's heartbeat, every 2 s while the runtime runs (C3: one older than 10 s means stale)."""
     while fixture.running:
         time.sleep(2)
-        if fixture.running:
-            beat(fixture)
+        with fixture.beating:
+            if not fixture.running:
+                return
+            try:
+                beat(fixture)
+            except OSError:
+                pass  # Windows: a reader has owner.json open, so it can't be replaced now; the next beat will
 
 
 def observe(fixture: Fixture, args: dict, host: dict) -> dict:

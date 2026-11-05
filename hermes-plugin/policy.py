@@ -15,6 +15,7 @@ from __future__ import annotations
 import logging
 import re
 from typing import Any
+import unicodedata
 
 from . import runtime, tools
 
@@ -83,9 +84,11 @@ def preview_timeout(hook_timeout: float | None) -> float:
 
 
 def one_line(text: Any, limit: int = LINE) -> str:
-    """`text` as one line of at most `limit` characters: no line breaks or control characters (model-written text must
-    never push the runtime's own words out of an approval)."""
-    line = " ".join(_CONTROL.sub(" ", str(text)).split())
+    """`text` as one line of at most `limit` characters: no line breaks, control characters, or invisible format
+    characters (zero-width, direction overrides, Unicode tags), so model- or project-written text can neither push the
+    runtime's own words out of an approval nor say something a person reading it can't see."""
+    visible = "".join(char for char in _CONTROL.sub(" ", str(text)) if unicodedata.category(char) != "Cf")
+    line = " ".join(visible.split())
     return line if len(line) <= limit else line[:limit - 1].rstrip() + "…"
 
 

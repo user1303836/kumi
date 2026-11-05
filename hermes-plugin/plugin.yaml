@@ -17,7 +17,7 @@ config_schema:
     type: bool
     default: true
     label: Tell the agent what you're looking at
-    description: "Adds a short FOCUS and catch-up note to each turn of the chat connected to Kumi."
+    description: "Adds a short FOCUS and catch-up note to the chat connected to Kumi when what you're looking at changes. Notes stay in the chat's history."
   daw:
     type: str
     choices: [ableton, reaper, renoise]
