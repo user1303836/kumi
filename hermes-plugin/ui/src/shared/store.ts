@@ -260,7 +260,7 @@ export class KumiStore {
  *  Kumi's part" as the word of the moment. The runtime's own look at the part (`status.setup.component`) decides: the
  *  bundled version installed, or no report at all (an older runtime), hides the step. An older part, or none
  *  installed, still asks: right after a bridge bump, that update is the next step (rgzm, #1019). The settings page
- *  still lists what setup knows. */
+ *  says ready and shows the part as in use then, with setup's own facts (its path, the runtime) as they are. */
 export function dawPartWorks(state: KumiState): boolean {
   const setup = state.setup
   const onlyDawPart = setup?.state === 'needs_daw_component' || (setup?.state === 'ready' && setup.next_step === 'install_daw_component')

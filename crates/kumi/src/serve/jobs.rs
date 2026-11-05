@@ -4,7 +4,7 @@
 //!
 //! When the runtime stops, every job is cancelled and given the runtime's settling time; one still running then is
 //! written `interrupted`. A job a runtime left `running` (it was killed) reads `interrupted` at the next start. Nothing is
-//! resumed or replayed.
+//! resumed or replayed by itself: only the operation that owns a job's kind resumes one, by its id ([`Jobs::resume`]).
 
 use super::ctx::{Ctx, OpError};
 use super::snapshots::Snapshots;
@@ -35,7 +35,7 @@ pub enum State {
     Running,
     Done,
     Failed,
-    /// Stopped before it finished: the runtime stopped.
+    /// Stopped before it finished: the runtime stopped or the producer cancelled this owned job.
     Cancelled,
     /// A runtime stopped without settling it: found `running` at the next start.
     Interrupted,
@@ -127,19 +127,79 @@ impl Jobs {
         let n = self.next.get() + 1;
         self.next.set(n);
         let id = format!("j{}-{n}", kumi_common::time::now_ms());
+        self.order.borrow_mut().push_back(id.clone());
+        self.run(ctx, id.clone(), kind, json!({"done": 0}), None, secrets, work);
+        Ok(id)
+    }
+
+    /// Runs `work` again as the job `id` of `kind`, which isn't running: one this runtime ran, or one an earlier runtime
+    /// left in its file (interrupted, failed, cancelled or done). Whether a settled job may run again is the operation
+    /// that owns its kind's to decide (a generation the vendor took, say, fetched by its id again); the job keeps its id,
+    /// its progress and what it had come to (its last checkpoint, or its result) until the new run says otherwise.
+    /// False when it's running already; refused `busy` while [`RUNNING`] jobs run, and `not_resumable` for no job of
+    /// that id and kind. `secrets` as [`Jobs::start`]'s.
+    pub(crate) fn resume<W, F>(&self, ctx: Rc<Ctx>, id: &str, kind: &'static str, secrets: Vec<String>, work: W) -> Result<bool, OpError>
+    where
+        W: FnOnce(Rc<Ctx>, JobHandle) -> F + 'static,
+        F: Future<Output = Result<Value, OpError>> + 'static,
+    {
+        let not_resumable =
+            || OpError::Refused { code: "not_resumable", reason: format!("There's no {kind} job by that id to resume."), owner: None };
+        let known = self.jobs.borrow().get(id).cloned();
+        let (progress, came_to) = match known {
+            Some(job) if job.kind != kind => return Err(not_resumable()),
+            Some(job) if job.state.get() == State::Running => return Ok(false),
+            Some(job) => {
+                let came_to = match &*job.outcome.borrow() {
+                    Some(Ok(result)) => Some(result.clone()),
+                    _ => job.checkpoint.borrow().clone(),
+                };
+                (job.progress.borrow().clone(), came_to)
+            }
+            None => {
+                let kept = self.get(id, &ctx.paths().state_dir).ok_or_else(not_resumable)?;
+                if kept["kind"] != kind {
+                    return Err(not_resumable());
+                }
+                self.order.borrow_mut().push_back(id.to_string());
+                (kept["progress"].clone(), kept.get("result").cloned())
+            }
+        };
+        if self.running.get() >= RUNNING {
+            let reason = format!("{RUNNING} jobs are running already: wait for one to finish (job tells when)");
+            return Err(OpError::Refused { code: "busy", reason, owner: None });
+        }
+        self.run(ctx, id.to_string(), kind, progress, came_to, secrets, work);
+        Ok(true)
+    }
+
+    /// Runs `work` as the job `id` (in [`Jobs::order`] already), from `progress` and what it had `come_to`.
+    #[allow(clippy::too_many_arguments)]
+    fn run<W, F>(
+        &self,
+        ctx: Rc<Ctx>,
+        id: String,
+        kind: &'static str,
+        progress: Value,
+        came_to: Option<Value>,
+        secrets: Vec<String>,
+        work: W,
+    ) where
+        W: FnOnce(Rc<Ctx>, JobHandle) -> F + 'static,
+        F: Future<Output = Result<Value, OpError>> + 'static,
+    {
         let own = Signal::new();
         let job = Rc::new(Job {
             kind,
             state: Cell::new(State::Running),
-            progress: RefCell::new(json!({"done": 0})),
+            progress: RefCell::new(progress),
             outcome: RefCell::new(None),
-            checkpoint: RefCell::new(None),
+            checkpoint: RefCell::new(came_to),
             secrets,
             signal: own.clone(),
             written: Cell::new(None),
         });
         self.jobs.borrow_mut().insert(id.clone(), job.clone());
-        self.order.borrow_mut().push_back(id.clone());
         self.running.set(self.running.get() + 1);
         write(ctx.snapshots(), &id, &job);
         let handle = JobHandle { id: id.clone(), job: job.clone(), ctx: ctx.clone(), signal: abort::any([own, ctx.shutdown().clone()]) };
@@ -166,7 +226,6 @@ impl Jobs {
                 jobs.settled.notify_waiters();
             }
         });
-        Ok(id)
     }
 
     /// Past [`KEPT`] jobs, the oldest finished ones are forgotten, their files with them.
@@ -193,6 +252,17 @@ impl Jobs {
                 write(snapshots, id, job);
             }
         }
+    }
+
+    /// Signal only this runtime's matching running job. A repeated request while it settles is acknowledged;
+    /// the worker's ordinary completion path records cancellation and releases the running slot.
+    pub fn cancel(&self, id: &str, kind: &str) -> bool {
+        let jobs = self.jobs.borrow();
+        let Some(job) = jobs.get(id).filter(|job| job.kind == kind && job.state.get() == State::Running) else {
+            return false;
+        };
+        job.signal.cancel();
+        true
     }
 
     /// Job `id` as `job` answers: `{job_id, kind, state, progress, result?, error?}`. One from an earlier run is read
@@ -339,6 +409,8 @@ mod tests {
         let args = Args {
             state_dir: state.to_path_buf(),
             kumi_home: state.join("home"),
+            hermes_home: None,
+            hermes_root: None,
             daw: DawId::Reaper,
             library_roots: vec![],
             media_roots: vec![],
@@ -355,6 +427,66 @@ mod tests {
 
     async fn local<F: Future<Output = ()>>(test: F) {
         tokio::task::LocalSet::new().run_until(test).await;
+    }
+
+    #[tokio::test]
+    async fn a_job_resumes_under_its_own_id_from_what_it_came_to_once_and_only_as_its_own_kind() {
+        local(async {
+            let dir = tempfile::tempdir().unwrap();
+            // An earlier runtime's generation the vendor took, then the runtime died.
+            let earlier = runtime(dir.path());
+            let id = earlier
+                .start_job("generate", |_ctx, job| async move {
+                    job.checkpoint(json!({"submission": "submitted", "provider_job_id": "v-9"})).await?;
+                    std::future::pending::<()>().await;
+                    Ok(json!({}))
+                })
+                .unwrap();
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+            earlier.snapshots().flush();
+            let ctx = runtime(dir.path());
+            assert_eq!(ctx.jobs().get(&id, dir.path()).unwrap()["state"], "interrupted");
+            // As another kind, or a job there isn't: not resumable.
+            for (other, kind) in [(id.as_str(), "scan"), ("j1-999", "generate")] {
+                let refused = ctx.resume_job(other, kind, |_ctx, _job| async { Ok(json!({})) });
+                assert!(matches!(refused, Err(OpError::Refused { code: "not_resumable", .. })), "{other} as {kind}");
+            }
+            let (go, gone) = tokio::sync::oneshot::channel::<()>();
+            let (told, said) = tokio::sync::oneshot::channel::<String>();
+            let resumed = ctx
+                .resume_job(&id, "generate", move |_ctx, job| async move {
+                    let _ = told.send(job.id().to_string());
+                    let _ = gone.await;
+                    Ok(json!({"submission": "submitted", "provider_job_id": "v-9", "delivered": true}))
+                })
+                .unwrap();
+            assert!(resumed);
+            assert_eq!(said.await.unwrap(), id, "under its own id");
+            let running = ctx.jobs().get(&id, dir.path()).unwrap();
+            assert_eq!(
+                (running["state"].clone(), running["result"]["provider_job_id"].clone()),
+                (json!("running"), json!("v-9")),
+                "running again, from what it had come to"
+            );
+            // Asked again while it runs: false, and nothing else runs.
+            assert!(!ctx.resume_job(&id, "generate", |_ctx, _job| async { Ok(json!({})) }).unwrap());
+            go.send(()).unwrap();
+            ctx.jobs().all_settled().await;
+            let done = file(&ctx, &id);
+            assert_eq!((done["state"].clone(), done["result"]["delivered"].clone()), (json!("done"), json!(true)));
+            // A settled job runs again too, when its owner asks: a failed one, under its id.
+            let failing =
+                ctx.start_job("generate", |_ctx, _job| async { Err(OpError::Failed { reason: "the download failed".into() }) }).unwrap();
+            ctx.jobs().all_settled().await;
+            assert_eq!(ctx.jobs().get(&failing, dir.path()).unwrap()["state"], "failed");
+            assert!(ctx.resume_job(&failing, "generate", |_ctx, _job| async { Ok(json!({"delivered": true})) }).unwrap());
+            ctx.jobs().all_settled().await;
+            let again = ctx.jobs().get(&failing, dir.path()).unwrap();
+            assert_eq!((again["state"].clone(), again.get("error")), (json!("done"), None), "the earlier error gone with the new run");
+            earlier.jobs().interrupt_running(earlier.snapshots());
+        })
+        .await;
     }
 
     #[tokio::test]

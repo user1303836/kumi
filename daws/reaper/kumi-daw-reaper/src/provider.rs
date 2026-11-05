@@ -43,6 +43,8 @@ pub static PROVIDER: Own = Own {
         Some(beside.join(if cfg!(windows) { name.to_string() } else { format!("lib{name}") }))
     },
     version_file: |source| source.with_extension("version"),
+    // (the library itself: the version file beside it isn't the extension's own)
+    identity_file: |source| source.to_path_buf(),
     placed: |own, env| reaper_target(reaper_install(&reapers(own, env))?, Os::current()).map_err(Some),
     elsewhere: |_| vec![],
     reopens: |target| reopens_in(&target.dir.parent().unwrap_or(&target.dir).join("reaper.ini")),

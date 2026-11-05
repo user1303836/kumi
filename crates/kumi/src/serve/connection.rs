@@ -11,6 +11,7 @@ use super::say;
 use kumi_agent::core::context::{HostPolicy, IntegrationContext};
 use kumi_agent::core::contracts::{CatchUp, ConnectionState, Integration, Observation, Reference};
 use kumi_agent::core::view::{DawFocus, Transport};
+use kumi_daw::component::same_folder;
 use kumi_daw::provider::DawSession;
 use kumi_types::contracts::{KernelTool, ToolRole};
 use serde_json::{json, Value};
@@ -119,7 +120,21 @@ pub struct Link {
     /// switched since) isn't the looked project's. Never read again after the look, so a switch between the two can't
     /// pair the looked project's key with another's epoch.
     native_epoch: RefCell<Option<String>>,
+    /// What each previewed plan with files approved (CC-11's 11b), by its host call (or, a call without one, by its
+    /// plan): its dispatch must be the same plan, placing the same files. The newest [`PINNED`].
+    pinned: RefCell<std::collections::VecDeque<Pin>>,
 }
+
+/// A preview's approval of a plan with files: the call it's for, the plan as approved (digested as the host's digest
+/// reads it) and each file's identity.
+struct Pin {
+    key: String,
+    approved: String,
+    files: Vec<Value>,
+}
+
+/// The most previewed plans whose files are kept for their dispatch.
+const PINNED: usize = 64;
 
 impl Link {
     /// No connection yet. Epochs count up from `base` (the runtime's start, ms), so no plan made in an earlier
@@ -135,6 +150,7 @@ impl Link {
             ref_names: RefCell::new(HashMap::new()),
             unsure: RefCell::new(None),
             native_epoch: RefCell::new(None),
+            pinned: RefCell::new(std::collections::VecDeque::new()),
         }
     }
 
@@ -187,6 +203,24 @@ impl Link {
         self.unsure.borrow().clone()
     }
 
+    /// A preview of the call `key` names approved the plan `approved` digests, which places these files: its dispatch
+    /// must be that plan, with the same files.
+    pub fn pin_files(&self, key: &str, approved: &str, files: Vec<Value>) {
+        let mut pinned = self.pinned.borrow_mut();
+        pinned.retain(|pin| pin.key != key);
+        pinned.push_back(Pin { key: key.to_string(), approved: approved.to_string(), files });
+        while pinned.len() > PINNED {
+            pinned.pop_front();
+        }
+    }
+
+    /// What the preview of the call `key` names approved, taken: a dispatch holds to it once.
+    pub fn take_pin(&self, key: &str) -> Option<(String, Vec<Value>)> {
+        let mut pinned = self.pinned.borrow_mut();
+        let at = pinned.iter().position(|pin| pin.key == key)?;
+        pinned.remove(at).map(|pin| (pin.approved, pin.files))
+    }
+
     /// An `observe` completed: the model sees the project as it is now, so nothing is unsure any more (R6).
     pub fn clear_unsure(&self) {
         *self.unsure.borrow_mut() = None;
@@ -227,6 +261,11 @@ impl Link {
     /// the same.
     pub fn page_is_looked(&self, epoch: Option<&str>) -> bool {
         matches!((self.native_epoch.borrow().as_deref(), epoch), (Some(looked), Some(now)) if looked == now)
+    }
+
+    /// The epoch the refs of the last look are of, moved on since by any write's unsure outcome.
+    pub fn epoch(&self) -> u64 {
+        self.epoch.get()
     }
 
     /// Moves the epoch on (a write's outcome is unsure): refs from earlier looks no longer hold.
@@ -288,6 +327,18 @@ fn project_key(key: &str, open: Option<&str>) -> String {
     format!("p-{}", digest.finalize()[..8].iter().map(|byte| format!("{byte:02x}")).collect::<String>())
 }
 
+/// Why Kumi's part in the DAW, another Kumi's, isn't used, and what the producer does: for Live, set up again and
+/// approve using that installation (setup adopts it).
+pub fn owned_elsewhere(daw: kumi_types::daw::DawId) -> String {
+    let app = daw.profile().words.app;
+    match daw {
+        kumi_types::daw::DawId::Ableton => format!(
+            "Kumi's part in {app} belongs to another Kumi on this computer. Ask Hermes to set Kumi up again, and approve using that installation."
+        ),
+        _ => format!("Kumi's part in {app} belongs to another Kumi on this computer: set {app} up for Hermes, or adopt that installation, first."),
+    }
+}
+
 /// Connects to the DAW: its integration made with the plugin's host policy and started. One start at a time: a second
 /// `connect` waits for the first and takes its connection. Refused when Kumi's part isn't in the DAW, when the part in
 /// the DAW is another Kumi's (its home isn't `--kumi-home`), and, for REAPER and Renoise, when `--kumi-home` is a home
@@ -300,7 +351,7 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
     let Some(provider) = crate::daw::provider(ctx.daw()) else {
         return Err(OpError::Refused {
             code: "unsupported",
-            reason: format!("Kumi doesn't work with {} here.", ctx.daw().as_str()),
+            reason: format!("Kumi doesn't work with {} here.", ctx.daw().profile().words.app),
             owner: None,
         });
     };
@@ -312,9 +363,7 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
     let home = &ctx.paths().kumi_home;
     let owner = provider.bridge_owner(&bridge_config, ctx.env());
     if !owner.as_deref().is_some_and(|owner| same_folder(Path::new(owner), home)) {
-        let reason = format!(
-            "Kumi's part in {app} belongs to another Kumi on this computer: set {app} up for Hermes, or adopt that installation, first."
-        );
+        let reason = owned_elsewhere(ctx.daw());
         return Err(OpError::Refused { code: "owned_elsewhere", reason, owner: Some(json!({"kumi_home": owner})) });
     }
     let plugins = ctx.paths().state_dir.parent().map(Path::to_path_buf).unwrap_or_default();
@@ -518,13 +567,8 @@ pub fn transport_value(transport: &Transport) -> Value {
     })
 }
 
-/// Whether `a` and `b` are the same folder on disk (links resolved); false when either isn't there.
-fn same_folder(a: &Path, b: &Path) -> bool {
-    matches!((std::fs::canonicalize(a), std::fs::canonicalize(b)), (Ok(a), Ok(b)) if a == b)
-}
-
 /// Whether `path` is inside `folder` on disk (links resolved); false when either isn't there.
-fn inside(path: &Path, folder: &Path) -> bool {
+pub(super) fn inside(path: &Path, folder: &Path) -> bool {
     matches!((std::fs::canonicalize(path), std::fs::canonicalize(folder)), (Ok(path), Ok(folder)) if path.starts_with(&folder))
 }
 

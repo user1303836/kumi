@@ -169,6 +169,8 @@ impl Home {
         LearnPlan {
             dir: self.dir.path().to_string_lossy().into(),
             sources: library_sources(&self.options()),
+            approved_folders: None,
+            decode: Default::default(),
             set_folders: vec![],
             set_files: vec![],
             plugin_presets: vec![],

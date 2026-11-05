@@ -119,11 +119,17 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
         }
       >
         <HistoryView
+          daw={state.status?.daw}
           history={state.history}
+          live={Boolean(state.status?.connected) && state.status?.stale !== true}
           now={now}
           action={item =>
             canUndo(state.status, item) ? (
-              <TextButton onClick={() => void ask(ctx, undoRequest(item), { send: true, session })} title={t('pane.undoTitle')}>
+              <TextButton
+                label={t('pane.undoLabel', clean(item.title ?? item.label ?? item.id, 120))}
+                onClick={() => void ask(ctx, undoRequest(item), { send: true, session })}
+                title={t('pane.undoTitle')}
+              >
                 {t('pane.undo')}
               </TextButton>
             ) : null

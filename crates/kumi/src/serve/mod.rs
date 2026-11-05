@@ -7,16 +7,22 @@
 //!
 //! The operations it offers are in [`registry`]; [`ctx`] is what each is given; [`mcp`] is the wire.
 
+pub mod artifacts;
 pub mod change;
 pub mod connection;
 pub mod ctx;
 pub mod history;
+pub mod import;
 pub mod inflight;
 pub mod jobs;
 pub mod lease;
+pub mod library;
+pub mod listen;
+pub mod map;
 pub mod mcp;
 pub mod read;
 pub mod registry;
+pub mod setup;
 pub mod snapshots;
 
 mod core;
@@ -35,6 +41,7 @@ pub const MCP_PROTOCOL: &str = "2025-11-25";
 pub const DAWS: [DawId; 3] = [DawId::Ableton, DawId::Reaper, DawId::Renoise];
 
 const USAGE: &str = "usage: kumi serve --stdio --state-dir <folder> --kumi-home <folder> --daw <ableton|reaper|renoise>
+                  [--hermes-home <folder>] [--hermes-root <folder>]
                   [--library-root <folder>]... [--media-root <folder>]... [--tool <name>=<path>]...";
 
 /// What `kumi serve` is started with. Every folder and program is an absolute path: the host resolves them.
@@ -44,6 +51,10 @@ pub struct Args {
     pub state_dir: PathBuf,
     /// The Kumi home the DAW bridge's transport files are in.
     pub kumi_home: PathBuf,
+    /// The active Hermes profile; a protected boundary, never a file-reading grant.
+    pub hermes_home: Option<PathBuf>,
+    /// The Hermes root containing all profiles, supplied by the host rather than inferred from its environment.
+    pub hermes_root: Option<PathBuf>,
     pub daw: DawId,
     /// The sample folders the producer approved: the only ones the library reads.
     pub library_roots: Vec<PathBuf>,
@@ -60,6 +71,8 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut parsed = Args {
         state_dir: PathBuf::new(),
         kumi_home: PathBuf::new(),
+        hermes_home: None,
+        hermes_root: None,
         daw: DawId::Ableton,
         library_roots: vec![],
         media_roots: vec![],
@@ -72,6 +85,8 @@ pub fn parse(args: &[String]) -> Result<Args, String> {
             "--stdio" => stdio = true,
             "--state-dir" => state_dir = Some(absolute("--state-dir", &value("--state-dir")?)?),
             "--kumi-home" => kumi_home = Some(absolute("--kumi-home", &value("--kumi-home")?)?),
+            "--hermes-home" => parsed.hermes_home = Some(absolute("--hermes-home", &value("--hermes-home")?)?),
+            "--hermes-root" => parsed.hermes_root = Some(absolute("--hermes-root", &value("--hermes-root")?)?),
             "--daw" => {
                 let name = value("--daw")?;
                 daw = Some(
@@ -202,6 +217,7 @@ pub fn main(args: &[String]) -> i32 {
                 return 1;
             }
         };
+        library::start(ctx.clone());
         match mcp::serve(ctx, tokio::io::stdin(), tokio::io::stdout()).await {
             Ok(()) => 0,
             Err(error) => {
@@ -275,6 +291,10 @@ mod tests {
         assert!(refused(&["--stdio", "--state-dir", &state, "--kumi-home", &kumi_home, "--daw", "reaper", "--tool", "ffmpeg"])
             .contains("<name>=<path>"));
         assert!(refused(&["--stdio", "--state-dir", &state, "--kumi-home", &kumi_home, "--daw", "reaper", "--yes"]).contains("unknown"));
+        for flag in ["--hermes-home", "--hermes-root"] {
+            assert!(refused(&["--stdio", "--state-dir", &state, "--kumi-home", &kumi_home, "--daw", "reaper", flag, "relative"])
+                .contains("whole path"));
+        }
         assert!(refused(&["--stdio", "--state-dir"]).contains("needs a value"));
     }
 

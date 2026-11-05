@@ -5,6 +5,7 @@ use super::{
     store::read_json,
 };
 use indexmap::IndexSet;
+use kumi_media::audio::DecodeOptions;
 use kumi_types::{daw::DawId, place::Place};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -21,6 +22,8 @@ pub struct PlanOptions {
     pub projects_dir: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<SourceOptions>,
+    #[serde(default, skip_serializing_if = "DecodeOptions::is_default")]
+    pub decode: DecodeOptions,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub find_sets: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -80,8 +83,22 @@ pub async fn kumi_sets(projects_dir: Option<&str>, daws: Daws) -> Vec<String> {
     found
 }
 pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
-    let remembered = remembered_folders(&options.dir).await;
     let original_sources = options.sources.unwrap_or_default();
+    if original_sources.approved_folders.is_some() {
+        let sources = library_sources(options.daws, &original_sources);
+        let approved_folders = Some(sources.iter().map(|source| source.path.clone()).collect());
+        return LearnPlan {
+            dir: options.dir,
+            sources,
+            approved_folders,
+            decode: options.decode,
+            set_folders: vec![],
+            set_files: vec![],
+            plugin_presets: vec![],
+            workers: options.workers,
+        };
+    }
+    let remembered = remembered_folders(&options.dir).await;
     let home = original_sources.home.clone().unwrap_or_else(homedir);
     let platform = original_sources.platform.clone().unwrap_or_else(|| current_platform().into());
     let mut source_options = original_sources.clone();
@@ -107,6 +124,8 @@ pub async fn plan_learning(options: PlanOptions) -> LearnPlan {
     LearnPlan {
         dir: options.dir,
         sources,
+        approved_folders: None,
+        decode: options.decode,
         set_folders: if find_sets { set_folders(&recent, Some(&home), Some(&platform)) } else { vec![] },
         set_files: recent,
         plugin_presets: if find_sets {

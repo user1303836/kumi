@@ -45,6 +45,26 @@ impl ChangeContext for Context {
         self.calls.borrow_mut().push(json!(["drumPads", device]));
         self.pads.clone()
     }
+    async fn mixer_for_display(&self, track: &str, asked: &Value) -> Result<Result<Value, String>, RuntimeError> {
+        self.calls.borrow_mut().push(json!(["mixerForDisplay", track, asked]));
+        // As Live 12.4 shows it: its own labels for the fader and the sends (to a thousandth of a dB, "2.555 dB"), and
+        // its own pan labels.
+        let level = |label: &Value| match label.as_str() {
+            Some("-6.0 dB") => json!({"value": 0.6667, "shown": "-6.0 dB"}),
+            Some("2.0 dB") => json!({"value": 0.9112, "shown": "2.0 dB"}),
+            Some("-inf dB") => json!({"value": 0.0, "shown": "-inf dB"}),
+            Some("-12.0 dB") => json!({"value": 0.5223, "shown": "-12.0 dB"}),
+            Some(_) => json!({"near": ["2.555 dB", "2.556 dB"]}),
+            None => Value::Null,
+        };
+        let pan = match asked["pan"].as_str() {
+            Some("25L") => json!({"value": -0.5, "shown": "25L"}),
+            Some(_) => json!({"near": ["49L", "50L"]}),
+            None => Value::Null,
+        };
+        let sends: Vec<Value> = asked["sends"].as_array().map(|sends| sends.iter().map(level).collect()).unwrap_or_default();
+        Ok(Ok(json!({"volume": level(&asked["volume"]), "pan": pan, "sends": sends})))
+    }
 }
 fn kind(case: &Value) -> &'static ChangeKind {
     CHANGES.iter().find(|k| k.tool == case["tool"]).unwrap()
@@ -103,7 +123,8 @@ fn change_schemas_outputs_permanence_and_human_messages_match_source() {
         assert_eq!(serde_json::to_value(hex_color(&case["value"])).unwrap(), case["color"]);
         assert_eq!(format_number(value, None), case["format"]);
     }
-    assert_eq!(crate::pads_in_order::legacy_json(&serde_json::to_value(&*CHANGES).unwrap()), data["kinds"]);
+    let kinds = crate::mixer_in_db::legacy_kinds(&crate::pads_in_order::legacy_json(&serde_json::to_value(&*CHANGES).unwrap()));
+    assert_eq!(kinds, data["kinds"]);
     assert_eq!(*SAMPLE_INPUT, data["sampleInput"].as_object().unwrap().clone());
     assert_eq!(*REFERENCE_FIELDS, serde_json::from_value::<Vec<String>>(data["referenceFields"].clone()).unwrap());
     assert_eq!(
@@ -321,4 +342,65 @@ async fn samples_given_no_note_fill_the_racks_next_empty_pads_in_order() {
     // Every note given: nothing read.
     let named = json!([{"sample": "/samples/Kick.wav", "note": 36}, {"sample": "/samples/Snare.wav", "note": 38}]);
     assert_eq!(kit(named, context(None)).await, (vec![json!(36), json!(38)], 0));
+}
+
+fn mixer_context() -> Context {
+    Context { calls: RefCell::new(vec![]), parameters: vec![], display: false, pads: None }
+}
+
+/// The level a producer names in dB (or a pan as Live shows it) is set where Live itself shows it: Live's fader curve
+/// isn't linear, so no formula gives "+2 dB".
+#[tokio::test]
+async fn a_mixer_level_given_as_live_shows_it_is_set_where_live_shows_it() {
+    let mixer = kind(&json!({"tool": "set_mixer"}));
+    // As before when no level is given as Live shows it: nothing read.
+    let context = mixer_context();
+    let raw = json!({"trackRef": "1:track:0", "volume": 0.8});
+    assert_eq!(mixer.prepare(raw.as_object().unwrap(), &context).await.unwrap().unwrap(), *raw.as_object().unwrap());
+    assert!(context.calls.borrow().is_empty());
+    // Each one asked of Live by its label, and set at the value Live shows it at.
+    let context = mixer_context();
+    let given = json!({"trackRef": "1:track:0", "volumeDb": 2, "panDisplay": "25L", "sendsDb": [-12, "-inf"], "mute": false});
+    let prepared = mixer.prepare(given.as_object().unwrap(), &context).await.unwrap().unwrap();
+    assert_eq!(
+        Value::Object(prepared),
+        json!({"trackRef": "1:track:0", "mute": false, "volume": 0.9112, "pan": -0.5, "sends": [0.5223, 0.0]})
+    );
+    assert_eq!(
+        context.calls.borrow()[0],
+        json!(["mixerForDisplay", "1:track:0", {"volume": "2.0 dB", "pan": "25L", "sends": ["-12.0 dB", "-inf dB"]}])
+    );
+    // A level Live shows nowhere is refused, with the nearest it shows; nothing is set.
+    let context = mixer_context();
+    let between = json!({"trackRef": "1:track:0", "volumeDb": 2.5555});
+    let refused = mixer.prepare(between.as_object().unwrap(), &context).await.unwrap().unwrap_err();
+    assert!(refused.contains("2.5555 dB") && refused.contains("2.555 dB") && refused.contains("2.556 dB"), "{refused}");
+    // Both forms of one control at once, or a level that isn't one, is refused before Live is asked: a pan only as Live
+    // writes one, never a sign, a bare number, a zero or a number Python would read ("-25L" isn't 25R).
+    let context = mixer_context();
+    let mut wrong = vec![
+        json!({"trackRef": "1:track:0", "volume": 0.8, "volumeDb": -6}),
+        json!({"trackRef": "1:track:0", "volumeDb": "loud"}),
+        json!({"trackRef": "1:track:0", "sendsDb": [-6, "half"]}),
+    ];
+    for pan in ["-25L", "25", "0L", "05R", "2_5L", "1E1L", "25l", " 25L", "25L\n", "C\"", "100L", ""] {
+        wrong.push(json!({"trackRef": "1:track:0", "panDisplay": pan}));
+    }
+    for wrong in wrong {
+        assert!(mixer.prepare(wrong.as_object().unwrap(), &context).await.unwrap().is_err(), "{wrong}");
+    }
+    assert!(context.calls.borrow().is_empty());
+}
+
+#[test]
+fn set_mixers_schema_offers_levels_as_live_shows_them_beside_its_own() {
+    let mixer = kind(&json!({"tool": "set_mixer"}));
+    let bridge = json!({"type": "object", "additionalProperties": false, "required": ["trackRef"], "properties": {
+        "trackRef": {"type": "string"}, "volume": {"type": "number", "minimum": 0, "maximum": 1}
+    }});
+    let schema = Value::Object(mixer.schema(bridge.as_object().unwrap()));
+    for field in ["trackRef", "volume", "volumeDb", "panDisplay", "sendsDb"] {
+        assert!(schema["properties"].get(field).is_some(), "{field}: {schema}");
+    }
+    assert_eq!(schema["required"], json!(["trackRef"]));
 }

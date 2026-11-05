@@ -29,7 +29,13 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("phrase_add", "structure").refusing(&[("clear", &["*"])]),
     // Replacing a sample's audio in place makes it a `.deletes()` kind, but Kumi keeps the audio it replaces and
     // undo_change puts it back. The import step fills `path` from an approved source.
-    PluginStep::new("sample_load", "structure").file("path"),
+    PluginStep::new("sample_load", "structure").file(
+        "path",
+        "Load an audio file as a new sample of an instrument (ref: the instrument; at index, its number from 0, the end \
+         by default), or into a sample in place of its audio (ref: the sample; Kumi keeps the audio it replaces to put \
+         back), named name. path is where the file comes from: a sound from the map, a file Kumi made, or an approved \
+         file, never a path. Up to 96 MB.",
+    ),
     PluginStep::new("song_bpm", "tempo"),
     PluginStep::new("song_lpb", "tempo"),
     PluginStep::new("song_tpl", "tempo"),

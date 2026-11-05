@@ -311,7 +311,7 @@ impl Server {
         // A call that only reads is run again; any other is run once per host call.
         let seen = match (effect, &prepared.host.tool_call_id) {
             (Effect::Read, _) | (_, None) => None,
-            (_, Some(host_call)) => match self.seen(host_call, &asked) {
+            (_, Some(_)) => match self.seen(&prepared.host, &asked) {
                 Ok(seen) => Some(seen),
                 Err(refused) => return self.send_result(id, tool_result(Err(refused))),
             },
@@ -360,13 +360,18 @@ impl Server {
             Err(refused) => return tool_result(Err(refused)),
         };
         super::core::publish_owner(&self.ctx, true);
-        let identity = CallIdentity { tool_call_id: host.tool_call_id.as_deref(), digest: asked };
+        let identity = CallIdentity::of(host, asked);
         let answer = match super::inflight::begin(&self.ctx, operation.name, title, identity) {
             Err(error) => tool_result(Err(error)),
             Ok(record) => {
                 let run = CALL_PRIVATE.scope(host.private.clone(), (operation.run)(&self.ctx, call));
                 let ran = AssertUnwindSafe(run).catch_unwind().await;
                 let answer = match ran {
+                    // An unsure outcome the operation didn't keep in HISTORY itself (CC-2's W1-b, W1-c), whichever
+                    // operation answered it: audited, said in status, and the epoch moved on.
+                    Ok(Ok(outcome)) if outcome["state"] == "unsure" && outcome.get("history_ids").is_none() => {
+                        tool_result(Ok(self.unsure(operation.name, title, identity, outcome).await))
+                    }
                     Ok(outcome) => tool_result(outcome),
                     Err(_) => tool_result(Ok(self.broke(operation.name, title, identity).await)),
                 };
@@ -381,6 +386,26 @@ impl Server {
 
     /// A write that failed unexpectedly part way may have changed the DAW: it's unsure (CC-2's W1-b), never "failed".
     /// Its rows so far and an audit row, the epoch moved on, and `status.unsure` until the next look.
+    /// A write, playback or import that answered `unsure` with no HISTORY of its own (a track listen whose cleanup Kumi
+    /// can't confirm, say): its audit row, `status.unsure` until the next look, and the epoch moved on, as `change` does
+    /// for its own, with the row's id in the answer.
+    async fn unsure(&self, op: &str, title: Option<&str>, identity: CallIdentity<'_>, mut outcome: Value) -> Value {
+        let reason = outcome["reason"].as_str().map(str::to_string).unwrap_or_else(|| {
+            format!("{op} didn't confirm it put the DAW back, so it may have changed: look at the project before another change.")
+        });
+        let cleanup = outcome["cleanup"].as_str().filter(|cleanup| !cleanup.is_empty()).unwrap_or("unsure").to_string();
+        let history = self.ctx.history();
+        let project = self.ctx.link().project().map(|project| project.key).unwrap_or_default();
+        let audit = history.audit(title.unwrap_or(op), &project, &reason, identity, self.ctx.snapshots());
+        history.call_came_to(std::slice::from_ref(&audit.id), "unsure", self.ctx.snapshots());
+        self.ctx.link().note_unsure(op, &reason, &cleanup);
+        self.ctx.link().advance();
+        super::connection::publish_focus(&self.ctx.handle());
+        super::core::publish_status(&self.ctx, false).await;
+        outcome["history_ids"] = json!([audit.id]);
+        outcome
+    }
+
     async fn broke(&self, op: &str, title: Option<&str>, identity: CallIdentity<'_>) -> Value {
         say(&format!("kumi serve: {op} failed unexpectedly"));
         let history = self.ctx.history();
@@ -423,25 +448,32 @@ impl Server {
     /// The host call `host_call` asking `digest`: (it, true) when it's new and this call runs it; (it, false) when
     /// it's running or has run, and this call takes its answer. Refused when it asked something else. One the
     /// in-memory table doesn't know (an earlier runtime's, or one long forgotten) is looked for in HISTORY (C5-3).
-    fn seen(&self, host_call: &str, digest: &str) -> Result<(Rc<SeenCall>, bool), OpError> {
+    fn seen(&self, host: &Host, digest: &str) -> Result<(Rc<SeenCall>, bool), OpError> {
         let duplicate = |reason: String| OpError::Refused { code: "duplicate", reason, owner: None };
-        if let Some(earlier) = self.seen.borrow().calls.get(host_call) {
+        // A host's call ids are unique within a chat: the same id in another session or profile is another call.
+        let host_call = format!(
+            "{}\u{1f}{}\u{1f}{}",
+            host.profile_id.as_deref().unwrap_or_default(),
+            host.session_id.as_deref().unwrap_or_default(),
+            host.tool_call_id.as_deref().unwrap_or_default()
+        );
+        if let Some(earlier) = self.seen.borrow().calls.get(&host_call) {
             if earlier.digest != digest {
                 return Err(duplicate("This host call already ran with other arguments: a call is run once, as first asked.".into()));
             }
             return Ok((earlier.clone(), false));
         }
         let new = Rc::new(SeenCall { digest: digest.to_string(), answer: RefCell::new(None), answered: Notify::new() });
-        match self.ctx.history().ran(host_call, digest) {
+        match self.ctx.history().ran(CallIdentity::of(host, digest)) {
             Some(Err(reason)) => Err(duplicate(reason)),
             Some(Ok(outcome)) => {
                 *new.answer.borrow_mut() = Some(tool_result(Ok(outcome)));
-                self.seen.borrow_mut().calls.insert(host_call.to_string(), new.clone());
+                self.seen.borrow_mut().calls.insert(host_call, new.clone());
                 self.remember(&new);
                 Ok((new, false))
             }
             None => {
-                self.seen.borrow_mut().calls.insert(host_call.to_string(), new.clone());
+                self.seen.borrow_mut().calls.insert(host_call, new.clone());
                 Ok((new, true))
             }
         }
@@ -794,6 +826,23 @@ mod tests {
     /// [`RESTORE`] as a track listen is: it plays the DAW, so under the write lease and with its in-flight record.
     static PLAY: Operation =
         Operation { name: "play", description: "Plays, then restores.", schema: object, effect: playback, run: restore };
+
+    /// Plays and can't confirm it put the DAW back; with `hold`, it says so having kept HISTORY itself.
+    static SPILL: Operation =
+        Operation { name: "spill", description: "Plays, unsure after.", schema: object, effect: playback, run: spill };
+    fn spill(_ctx: &Ctx, call: Call) -> OpFuture<'_> {
+        Box::pin(async move {
+            RUNS.with(|runs| runs.set(runs.get() + 1));
+            if call.args.get("word").and_then(Value::as_str) == Some("fine") {
+                return Ok(json!({"state": "applied", "cleanup": "restored"}));
+            }
+            let mut outcome = json!({"state": "unsure", "reason": "The render ran past its window, and Live's routing may not be back.", "cleanup": "unsure"});
+            if call.args.get("hold").and_then(Value::as_bool) == Some(true) {
+                outcome["history_ids"] = json!(["h-own-1"]);
+            }
+            Ok(outcome)
+        })
+    }
     fn playback(_: &JsonObject) -> Effect {
         Effect::Playback
     }
@@ -811,11 +860,11 @@ mod tests {
             if call.args.get("hold").and_then(Value::as_bool) == Some(true) {
                 call.signal.cancelled().await;
             }
-            Ok(json!({"state": "applied", "keyed": keyed}))
+            Ok(json!({"state": "applied", "keyed": keyed, "bounded": call.host.private.get("_listen").is_some()}))
         })
     }
 
-    static OPERATIONS: &[&Operation] = &[&WAIT, &ECHO, &BOOM, &SCAN, &PLACE, &SMASH, &HOLD, &RESTORE, &PLAY, &PAY];
+    static OPERATIONS: &[&Operation] = &[&WAIT, &ECHO, &BOOM, &SCAN, &PLACE, &SMASH, &HOLD, &RESTORE, &PLAY, &PAY, &SPILL];
 
     struct Session {
         to: Option<DuplexStream>,
@@ -836,6 +885,8 @@ mod tests {
             let args = Args {
                 state_dir: state.path().join("state"),
                 kumi_home: state.path().join("home"),
+                hermes_home: None,
+                hermes_root: None,
                 daw: DawId::Reaper,
                 library_roots: vec![],
                 media_roots: vec![],
@@ -928,7 +979,7 @@ mod tests {
             session.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
             let listed = session.next().await.unwrap();
             let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().filter_map(|tool| tool["name"].as_str()).collect();
-            assert_eq!(names, ["wait", "echo", "boom", "scan", "place", "smash", "hold", "restore", "play", "pay"]);
+            assert_eq!(names, ["wait", "echo", "boom", "scan", "place", "smash", "hold", "restore", "play", "pay", "spill"]);
             assert_eq!(listed["result"]["tools"][1]["inputSchema"], object());
             let mut asked = call(json!("c3"), "echo", json!({"word": "hi", "_host": {"profile_id": "default", "tool_call_id": "t9"}}));
             asked["params"]["_meta"] = json!({"progressToken": "p3"});
@@ -1203,7 +1254,8 @@ mod tests {
             let session = Session::start().initialized().await;
             // A place the runtime dispatched and never saw settle (killed, say): its record stays.
             let asked = json!({"word": "snare"});
-            let identity = CallIdentity { tool_call_id: Some("tc-7"), digest: &digest("place", asked.as_object().unwrap()) };
+            let asked_digest = digest("place", asked.as_object().unwrap());
+            let identity = CallIdentity { profile_id: None, session_id: None, tool_call_id: Some("tc-7"), digest: &asked_digest };
             drop(crate::serve::inflight::begin(&session.ctx, "place", Some("Place the snare"), identity).unwrap());
             let state = session.stopped().await;
             let mut session = Session::at(state).initialized().await;
@@ -1339,6 +1391,58 @@ mod tests {
             let hosted = json!({"word": "kick", "_host": {}, "_mirelo": {"api_key": "sk-sentinel-77"}});
             session.send(call(json!(2), "pay", hosted)).await;
             assert_eq!(session.next().await.unwrap()["result"]["structuredContent"]["keyed"], true);
+            // A2's `_listen` (a track listen's approved bounds) is the host's the same way: refused without `_host`;
+            // with it, given to the call and outside what the call asked, so a retry with other bounds is the same call.
+            let bounds = |deadline: u64| json!({"estimated_seconds": 8, "prepare_seconds": 0, "deadline_seconds": deadline});
+            session.send(call(json!(3), "pay", json!({"word": "snare", "_listen": bounds(120)}))).await;
+            let refused = session.next().await.unwrap();
+            assert_eq!(refused["result"]["structuredContent"]["error"]["code"], "invalid", "{refused}");
+            let timed = json!({"word": "snare", "_host": {"tool_call_id": "tc-l"}, "_listen": bounds(120)});
+            session.send(call(json!(4), "pay", timed)).await;
+            let first = session.next().await.unwrap()["result"]["structuredContent"].clone();
+            assert_eq!((first["state"].clone(), first["bounded"].clone()), (json!("applied"), json!(true)), "{first}");
+            let again = json!({"word": "snare", "_host": {"tool_call_id": "tc-l"}, "_listen": bounds(300)});
+            session.send(call(json!(5), "pay", again)).await;
+            assert_eq!(session.next().await.unwrap()["result"]["structuredContent"], first, "the same call, answered again");
+            assert_eq!(RUNS.with(Cell::get), 2, "the snare ran once");
+            session.end().await;
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn an_unsure_playback_is_audited_said_and_moves_the_epoch_on_once() {
+        local(async {
+            let mut session = Session::start().initialized().await;
+            let before = session.ctx.link().epoch();
+            session.send(call(json!(1), "spill", json!({"_host": {"tool_call_id": "tc-1"}}))).await;
+            let answered = session.next().await.unwrap()["result"]["structuredContent"].clone();
+            let ids = answered["history_ids"].as_array().cloned().unwrap_or_default();
+            assert_eq!((answered["state"].clone(), ids.len()), (json!("unsure"), 1), "{answered}");
+            let history = session.state("history.json");
+            let row = &history["items"][0];
+            assert_eq!(
+                (row["id"].clone(), row["state"].clone(), row["undo_available"].clone()),
+                (ids[0].clone(), json!("unsure"), json!(false))
+            );
+            assert_eq!(row["tool_call_id"], "tc-1");
+            let status = session.state("status.json");
+            assert_eq!((status["unsure"]["op"].clone(), status["unsure"]["cleanup"].clone()), (json!("spill"), json!("unsure")));
+            assert_eq!(session.ctx.link().epoch(), before + 1, "refs from before it no longer hold");
+            // Its retry is the same call: answered as before, with no second row and no second move.
+            session.send(call(json!(2), "spill", json!({"_host": {"tool_call_id": "tc-1"}}))).await;
+            let again = session.next().await.unwrap()["result"]["structuredContent"].clone();
+            assert_eq!(again, answered, "the stored answer");
+            // One that kept its own HISTORY (as change and undo do) isn't audited again, nor its epoch moved twice.
+            session.send(call(json!(3), "spill", json!({"hold": true, "_host": {"tool_call_id": "tc-2"}}))).await;
+            let own = session.next().await.unwrap()["result"]["structuredContent"].clone();
+            assert_eq!(own["history_ids"], json!(["h-own-1"]));
+            // One that came to anything but unsure is the operation's own to record: no row, no move.
+            session.send(call(json!(4), "spill", json!({"word": "fine", "_host": {"tool_call_id": "tc-3"}}))).await;
+            assert_eq!(session.next().await.unwrap()["result"]["structuredContent"]["state"], "applied");
+            assert_eq!(session.state("history.json")["items"].as_array().map(Vec::len), Some(1));
+            assert_eq!(session.ctx.link().epoch(), before + 1);
+            assert_eq!(RUNS.with(Cell::get), 3, "the retry wasn't run");
             session.end().await;
         })
         .await;
@@ -1457,6 +1561,24 @@ mod tests {
             assert_eq!((again["state"].clone(), again["replayed"].clone()), (json!("unsure"), json!(true)), "{again}");
             assert!(crate::serve::inflight::left_over(&next.ctx.paths().state_dir).is_empty(), "recovered once");
             next.end().await;
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_runtime_whose_host_exits_mid_call_settles_on_its_own_and_stops() {
+        local(async {
+            let mut session = Session::start().initialized().await;
+            session.send(call(json!(1), "wait", json!({}))).await;
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            // The host exits with the call still running: its ends of both pipes close, and nobody reads the answer.
+            drop(session.to.take());
+            let (_, gone) = tokio::io::duplex(1);
+            session.from = BufReader::new(gone);
+            let served = tokio::time::timeout(Duration::from_secs(30), &mut session.served).await.expect("stopped within its bound");
+            served.expect("no panic").expect("a clean stop");
+            assert!(SETTLED.with(Cell::get), "the call settled first");
+            assert_eq!(session.state("status.json")["stale"], true);
         })
         .await;
     }

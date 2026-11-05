@@ -68,6 +68,10 @@ pub struct SourceOptions {
     pub env: Option<HashMap<String, String>>,
     /// Folders the producer named (settings.json's libraryFolders, folders Kumi was asked to search): absolute or ~/….
     pub folders: Option<Vec<String>>,
+    /// Exclusive, explicitly approved canonical absolute local folders (including Windows `VerbatimDisk` paths).
+    /// `Some([])` scans nothing; `None` keeps standalone discovery. Ignores home/DAW/remembered folders and `folders`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_folders: Option<Vec<String>>,
     /// Where Live's apps are (macOS) and its shared files (Windows), for tests.
     pub applications: Option<String>,
     pub program_data: Option<String>,
@@ -512,9 +516,92 @@ pub fn place(path: Option<&str>, label: &str, kind: SourceKind) -> Option<Source
     Some(Source { path: on_disk(&resolve(path)), label: label.to_string(), kind })
 }
 
+/// Reject network/device namespaces before touching the filesystem, on every host (not just Windows).
+pub fn local_absolute_path(path: &str) -> bool {
+    if path.chars().any(char::is_control) {
+        return false;
+    }
+    let path = Path::new(path);
+    if !path.is_absolute() || path.components().any(|part| matches!(part, Component::ParentDir)) {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        // Parse the namespace, not its string prefix: only local drive paths, including canonicalize's \\?\C:\ form.
+        matches!(
+            path.components().next(),
+            Some(Component::Prefix(prefix)) if matches!(prefix.kind(), Prefix::Disk(_) | Prefix::VerbatimDisk(_))
+        )
+    }
+    #[cfg(not(windows))]
+    {
+        let text = path.as_os_str().as_encoded_bytes();
+        // Also refuse foreign network/device spellings rather than interpreting them as local Unix filenames.
+        !(text.len() >= 2 && matches!(text[0], b'/' | b'\\') && matches!(text[1], b'/' | b'\\'))
+    }
+}
+
+/// A canonical local path with no symlink or reparse-point traversal. Callers must separately check containment
+/// against the roots captured when permission was granted.
+pub fn canonical_local_path(path: &str) -> Option<PathBuf> {
+    if !local_absolute_path(path) {
+        return None;
+    }
+    // These are canonical approvals, not aliases. Check ancestors without following links before canonicalizing:
+    // a root (or parent) replaced by a link must not send even this validation to an unapproved/network target.
+    let mut prefix = PathBuf::new();
+    for part in Path::new(path).components() {
+        prefix.push(part.as_os_str());
+        if matches!(part, Component::Prefix(_)) {
+            continue;
+        }
+        let metadata = std::fs::symlink_metadata(&prefix).ok()?;
+        if metadata.file_type().is_symlink() {
+            return None;
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            // Junctions and other reparse points can redirect traversal without being symbolic links.
+            if metadata.file_attributes() & 0x400 != 0 {
+                return None;
+            }
+        }
+    }
+    let canonical = std::fs::canonicalize(path).ok()?;
+    local_absolute_path(canonical.to_str()?).then_some(canonical)
+}
+
+/// The restriction is captured in the plan, not reconstructed from saved folders or discovery.
+pub(crate) fn approved_sources(folders: &[String]) -> Vec<Source> {
+    let mut sources: Vec<Source> = Vec::new();
+    for folder in folders {
+        let Some(path) = canonical_local_path(folder) else { continue };
+        if path != Path::new(folder) || !path.is_dir() || sources.iter().any(|source| path.starts_with(&source.path)) {
+            continue;
+        }
+        sources.retain(|source| !Path::new(&source.path).starts_with(&path));
+        let path = path.to_string_lossy().into_owned();
+        sources.push(Source { label: basename(&path), path, kind: SourceKind::Folder });
+    }
+    sources
+}
+
+/// Both the lexical path and its current target must stay inside the roots captured at approval/planning time.
+pub(crate) fn approved_path(path: &str, roots: Option<&[String]>) -> bool {
+    let Some(roots) = roots else { return true };
+    if !local_absolute_path(path) || !roots.iter().any(|root| Path::new(path).starts_with(root)) {
+        return false;
+    }
+    canonical_local_path(path).is_some_and(|path| roots.iter().any(|root| path.starts_with(root)))
+}
+
 /// Where everything is: each DAW's places before the folders the producer named (Live's User Library first), those
 /// folders, and each DAW's places after them.
 pub fn library_sources(daws: Daws, options: &SourceOptions) -> Vec<Source> {
+    if let Some(folders) = &options.approved_folders {
+        return approved_sources(folders);
+    }
     debug_assert!(
         daws.0.is_empty() || daws.iter().any(|daw| daw.profile().id == Some(options.daw.unwrap_or(DawId::Ableton))),
         "a registered DAW's places"
@@ -555,6 +642,9 @@ pub fn library_sources(daws: Daws, options: &SourceOptions) -> Vec<Source> {
 
 /// The projects the DAWs opened lately, the producer's own (Live's Sets, from its log): each DAW's, in turn.
 pub fn recent_projects(daws: Daws, options: &SourceOptions) -> Vec<String> {
+    if options.approved_folders.is_some() {
+        return vec![];
+    }
     debug_assert!(
         daws.0.is_empty() || daws.iter().any(|daw| daw.profile().id == Some(options.daw.unwrap_or(DawId::Ableton))),
         "a registered DAW's projects"
@@ -575,4 +665,30 @@ pub fn browser_path(source: &Source, relative_path: &str) -> Option<String> {
         _ => return None,
     };
     Some(root.into_iter().chain(parts).collect::<Vec<_>>().join("/"))
+}
+
+#[cfg(all(test, windows))]
+mod restricted_path_tests {
+    use super::local_absolute_path;
+
+    #[test]
+    fn restricted_paths_accept_only_absolute_local_drive_namespaces() {
+        for path in [r"C:\Samples", r"\\?\C:\Samples"] {
+            assert!(local_absolute_path(path), "{path}");
+        }
+        for path in [
+            r"\\server\share",
+            r"\\?\UNC\server\share",
+            r"\\.\C:\Samples",
+            r"\\?\GLOBALROOT\Device\HarddiskVolume1",
+            r"\??\C:\Samples",
+            r"C:Samples",
+            r"\Samples",
+            r"C:\Samples\..\outside",
+            r"\\?\C:\Samples\..\outside",
+            "relative",
+        ] {
+            assert!(!local_absolute_path(path), "{path}");
+        }
+    }
 }

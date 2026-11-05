@@ -335,6 +335,7 @@ impl KernelTool for ListenTool {
             start: if from_set { from } else { number("from_seconds") },
             seconds: if from_set { seconds } else { number("seconds") },
             signal: Some(signal.clone()),
+            ..Default::default()
         };
         let result: Result<ToolResult, ListenError> = async {
             let path = self.locate(&file, signal.clone()).await?;

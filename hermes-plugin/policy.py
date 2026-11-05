@@ -46,6 +46,8 @@ PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_histor
 ASKED = {"kumi_change", "kumi_undo", "kumi_setup"}
 UNATTENDED = ("Nobody is here to approve this (a one-shot query, a webhook or an API call), so Kumi didn't run it. Ask "
               "in a chat.")
+UNATTENDED_CANCEL = ("Kumi stops a scan only for someone in a chat, and this call came from a webhook or an API call, so "
+                     "the scan goes on.")
 FOOTER = "(Values as Kumi read them just now.)"
 APPROVED = ("once", "session", "always")
 _CONTROL = re.compile(r"[\x00-\x1f\x7f-\x9f\u2028\u2029]+")
@@ -99,6 +101,8 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
         return block(tools.SCHEDULED), {}
     if unattended and tool in ASKED:
         return block(UNATTENDED), {}
+    if unattended and tool == "kumi_library" and args.get("action") == "cancel":  # CC-14: a chat's, never a webhook's
+        return block(UNATTENDED_CANCEL), {}
     decision, extra = _decide(host, tool, args, kwargs)
     if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
@@ -272,11 +276,12 @@ def _undo(host: Any, args: dict, kwargs: dict) -> dict:
 
 
 def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
-    action = args.get("action")
-    if action == "status":
+    refusal = tools.library_refusal(args)
+    if refusal is not None:
+        return block(f"Kumi didn't run: {refusal}")
+    action = args["action"]
+    if action in ("status", "cancel"):  # reads: a cancel only stops this runtime's own scan (CC-14)
         return None
-    if action not in ("add_folder", "scan"):
-        return block("Kumi didn't run: kumi_library's action is status, add_folder or scan.")
     try:
         _live(host)
     except runtime.Unavailable as failure:

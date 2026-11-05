@@ -18,9 +18,13 @@ use std::rc::Rc;
 /// The most steps a plan takes (C2).
 pub const MOST_STEPS: usize = 20;
 
-/// The most of a step's preview line, and of a quoted value in it.
+/// The most of a step's preview line, of one field's value in it, of a quoted string, and of a name; and how many of a
+/// list's or a group's values it shows.
 const LINE: usize = 200;
+const FIELD: usize = 80;
 const QUOTED: usize = 120;
+const NAME: usize = 40;
+const FIRST: usize = 3;
 
 pub static CHANGE: Operation = Operation {
     name: "change",
@@ -101,15 +105,20 @@ fn refusal(error: OpError) -> Value {
     refused(error.code(), error.reason())
 }
 
+/// A plan's steps as checked: each one's HISTORY family, and its file field when it places a file (CC-11).
+struct Checked {
+    families: Vec<&'static str>,
+    files: Vec<(usize, &'static str)>,
+}
+
 /// A plan's steps, each checked against the DAW's allowlist, what the DAW says it keeps no undo for, and what the step
-/// takes: their families, in order.
-fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Vec<&'static str>, Value> {
+/// takes. A file step's field holds a source, so its input is checked once the source is resolved to a file.
+fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Checked, Value> {
     let Some(provider) = crate::daw::provider(ctx.daw()) else {
         return Err(refused("unsupported", "This runtime's DAW isn't one this build integrates."));
     };
     let offered = offered_steps(&plan.input_schema());
-    let tools = ctx.link().tools();
-    let mut families = Vec::new();
+    let mut checked = Checked { families: Vec::new(), files: Vec::new() };
     for (n, step) in steps.iter().enumerate() {
         let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
         let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
@@ -122,28 +131,74 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Vec<
         if let Some(why) = provider.plugin_refuses(tool, &input) {
             return Err(refused("not_allowed", format!("Step {at} ({tool}): {why}")));
         }
-        // A file goes in only through the import step (CC-11), which resolves its source to a checked file: until then a
-        // file step isn't run, whatever its field holds.
-        if allowed.file_field.is_some() {
-            let why = "places a file, which needs the import step (a sound, an artifact or an approved file), not in this runtime yet.";
-            return Err(refused("not_allowed", format!("Step {at}: {tool} {why}")));
+        match allowed.file_field {
+            Some(field) if input.get(field).is_some() => checked.files.push((n, field)),
+            _ => step_takes(ctx, n, tool, &input)?,
         }
-        // What the step takes, as its own tool says: a step with none to check it against isn't run.
-        let Some(own) = tools.iter().find(|candidate| candidate.name() == tool) else {
-            return Err(refused("invalid", format!("Step {at}: {tool}'s input can't be checked here, so it isn't run.")));
-        };
-        if let Some(problem) = kumi_agent::kernel::schema::problem(&Value::Object(own.input_schema()), &input) {
-            return Err(refused("invalid", format!("Step {at} ({tool}): {problem}")));
-        }
-        families.push(allowed.family);
+        checked.families.push(allowed.family);
     }
-    Ok(families)
+    Ok(checked)
+}
+
+/// Step `n` (`tool`) takes `input`, as its own tool says: a step with none to check it against isn't run.
+fn step_takes(ctx: &Ctx, n: usize, tool: &str, input: &Value) -> Result<(), Value> {
+    let at = n + 1;
+    let tools = ctx.link().tools();
+    let Some(own) = tools.iter().find(|candidate| candidate.name() == tool) else {
+        return Err(refused("invalid", format!("Step {at}: {tool}'s input can't be checked here, so it isn't run.")));
+    };
+    match kumi_agent::kernel::schema::problem(&Value::Object(own.input_schema()), input) {
+        Some(problem) => Err(refused("invalid", format!("Step {at} ({tool}): {problem}"))),
+        None => Ok(()),
+    }
+}
+
+/// Each file step's source resolved (CC-11) and put in its field: the file's name for a preview, its path for the
+/// dispatch, each step's input then checked as it'll be run. A dispatch whose files aren't the ones its preview pinned
+/// (11b) places nothing; otherwise a host's file is copied into the artifacts first. With the sources as HISTORY keeps
+/// them, and the identity of each file they named.
+async fn placed(
+    ctx: &Ctx,
+    steps: &mut [Value],
+    files: &[(usize, &'static str)],
+    dispatch: Option<Vec<Value>>,
+    signal: &kumi_common::abort::Signal,
+) -> Result<(Vec<Value>, Vec<Value>), Value> {
+    let at = |n: usize, error: OpError| refused(error.code(), format!("Step {}: {}", n + 1, error.reason()));
+    let mut found = Vec::new();
+    for (n, field) in files {
+        let source = steps[*n]["input"][*field].clone();
+        found.push((*n, *field, super::import::find(ctx, &source, signal).await.map_err(|error| at(*n, error))?));
+    }
+    let named: Vec<Value> = found.iter().map(|(_, _, found)| found.named.clone()).collect();
+    let Some(pinned) = dispatch else {
+        for (n, field, found) in &found {
+            steps[*n]["input"][*field] = json!(found.name);
+            let tool = steps[*n].get("tool").and_then(Value::as_str).unwrap_or_default().to_string();
+            step_takes(ctx, *n, &tool, &steps[*n]["input"])?;
+        }
+        return Ok((Vec::new(), named));
+    };
+    if pinned != named {
+        return Err(refused("stale", "A file this plan places changed since it was approved: preview it again."));
+    }
+    let mut sources = Vec::new();
+    for (n, field, found) in found {
+        let (path, mut record) = super::import::keep(ctx, found, signal).await.map_err(|error| at(n, error))?;
+        steps[n]["input"][field] = json!(path.display().to_string());
+        let tool = steps[n].get("tool").and_then(Value::as_str).unwrap_or_default().to_string();
+        step_takes(ctx, n, &tool, &steps[n]["input"])?;
+        record["field"] = json!(field);
+        record["step"] = json!(n + 1);
+        sources.push(record);
+    }
+    Ok((sources, named))
 }
 
 async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let args = &call.args;
     let title = args.get("title").and_then(Value::as_str).unwrap_or_default().to_string();
-    let steps: Vec<Value> = args.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();
+    let mut steps: Vec<Value> = args.get("steps").and_then(Value::as_array).cloned().unwrap_or_default();
     let key = args.get("expected_project_key").and_then(Value::as_str).unwrap_or_default();
     let Some(epoch) = epoch_of(args, "expected_epoch") else {
         return Ok(refused("invalid", "expected_epoch is the epoch an observe gave: a whole number, or its digits."));
@@ -158,15 +213,49 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let Some(plan) = ctx.link().plan_tool() else {
         return Ok(refused("unsupported", "This DAW's integration offers no plan of changes here."));
     };
-    let families = match checked(ctx, &plan, &steps) {
-        Ok(families) => families,
+    let checked = match checked(ctx, &plan, &steps) {
+        Ok(checked) => checked,
         Err(refusal) => return Ok(refusal),
     };
-    if previewing(args) {
+    // The plan as the host's approval saw it, whatever `preview` says, read as the host's own digest reads it: its
+    // hook previews the model's arguments as written, its handler dispatches them coerced ("4" then 4). A dispatch
+    // with files must be that plan, by the same host call, placing the same files (11b).
+    let approved = {
+        let mut asked = args.clone();
+        asked.remove("preview");
+        super::mcp::digest(CHANGE.name, &loose(&asked))
+    };
+    let pin = pin_key(&call.host, &approved);
+    let previewed = previewing(args);
+    let dispatch = if previewed || checked.files.is_empty() {
+        None
+    } else {
+        // Its own call's preview, or one that came with no call id (bound by its plan alone).
+        let by_plan = pin_key(&super::ctx::Host::default(), &approved);
+        let found = ctx.link().take_pin(&pin).or_else(|| if pin == by_plan { None } else { ctx.link().take_pin(&by_plan) });
+        match found {
+            Some((plan, files)) if plan == approved => Some(files),
+            Some(_) => return Ok(refused("stale", "This plan isn't the one approved: preview it again.")),
+            None => {
+                return Ok(refused(
+                    "stale",
+                    "Kumi has no approval of this plan's files to hold it to (the runtime restarted, say): preview it again.",
+                ))
+            }
+        }
+    };
+    let (sources, named) = match placed(ctx, &mut steps, &checked.files, dispatch, &call.signal).await {
+        Ok(placed) => placed,
+        Err(refusal) => return Ok(refusal),
+    };
+    if previewed {
+        if !named.is_empty() {
+            ctx.link().pin_files(&pin, &approved, named);
+        }
         let names = ctx.link().ref_names();
         let described: Vec<Value> = steps
             .iter()
-            .zip(&families)
+            .zip(&checked.families)
             .map(|(step, family)| {
                 let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
                 describe(&names, tool, family, step.get("input").unwrap_or(&Value::Null))
@@ -180,20 +269,41 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         }));
     }
     let asked = super::mcp::digest(CHANGE.name, args);
-    let identity = CallIdentity { tool_call_id: call.host.tool_call_id.as_deref(), digest: &asked };
+    let identity = CallIdentity::of(&call.host, &asked);
     let input: Map<String, Value> = [("steps".to_string(), Value::Array(steps))].into_iter().collect();
     let history = ctx.history();
     history.begin_call();
     let ran = plan.execute(input, call.signal.clone()).await;
     let rows = history.end_call(identity, ctx.snapshots());
-    let outcome = outcome(ran, &rows);
+    let mut outcome = outcome(ran, &rows);
+    // What the DAW said of a step can name the file it was given: its name only, as everywhere else.
+    connection::names_only(&mut outcome.steps);
+    outcome.reason = outcome.reason.map(|reason| connection::names_only_text(&reason));
+    // Each row keeps the files its own step placed (by the step the plan says made it); a row it doesn't place keeps
+    // them all.
+    let steps_of: HashMap<String, u64> = outcome.steps["done"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|done| Some((done.get("change")?.as_str()?.to_string(), done.get("step")?.as_u64()?)))
+        .collect();
+    for row in &rows {
+        let own: Vec<Value> = match steps_of.get(&row.label) {
+            Some(step) => sources.iter().filter(|source| source["step"].as_u64() == Some(*step)).cloned().collect(),
+            None => sources.clone(),
+        };
+        history.placed(std::slice::from_ref(&row.id), &own, ctx.snapshots());
+    }
     let mut ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
     if outcome.state == "unsure" {
         let reason = outcome
             .reason
             .clone()
             .unwrap_or_else(|| "The DAW didn't confirm every step: look at the project before another change.".into());
-        ids.push(history.audit(&title, &project.key, &reason, identity, ctx.snapshots()).id);
+        let audit = history.audit(&title, &project.key, &reason, identity, ctx.snapshots()).id;
+        // Which steps ran is what's unsure: the audit row keeps every file the plan was given.
+        history.placed(std::slice::from_ref(&audit), &sources, ctx.snapshots());
+        ids.push(audit);
         ctx.link().note_unsure("change", &reason, "unsure");
     }
     history.call_came_to(&ids, outcome.state, ctx.snapshots());
@@ -207,7 +317,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         "state": outcome.state,
         "history_ids": ids,
         "steps": outcome.steps,
-        "summary": outcome.summary,
+        "summary": connection::names_only_text(&outcome.summary),
         "undo_available": rows.iter().any(|row| row.undo_available),
         "project_key": project_now.key,
         "epoch": project_now.epoch,
@@ -298,43 +408,61 @@ pub(super) fn offered_steps(schema: &JsonObject) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// One step as the host's approval says it (CC-3), on one line of at most [`LINE`] characters: its change, what it's
-/// on (by the names the last look gave its refs), and the values it sets as given, strings quoted; a list or a group
-/// of values by how many there are. Never a value it would have to read from the DAW.
+/// One step as the host's approval says it (CC-3), on one line of at most [`LINE`] characters: its change, the values
+/// it sets as given (strings quoted, a list or a group of values by their first few), then what it's on, by the names
+/// the last look gave its refs, quoted and each at most [`NAME`] characters. Values come first, so a long name never
+/// pushes them out of a cut line. Never a value it would have to read from the DAW.
 fn describe(names: &HashMap<String, String>, tool: &str, family: &str, input: &Value) -> Value {
     let mut targets = Vec::new();
     let mut settings = Vec::new();
     if let Value::Object(fields) = input {
         for (field, value) in fields {
             match value {
-                Value::String(text) => match target(names, text) {
-                    Some(named) => targets.push(named),
-                    None => settings.push(format!("{field} \"{}\"", one_line(text, QUOTED).replace('"', "'"))),
-                },
-                Value::Number(number) => settings.push(format!("{field} {number}")),
-                Value::Bool(flag) => settings.push(format!("{field} {}", if *flag { "on" } else { "off" })),
-                Value::Null => settings.push(format!("{field} none")),
-                Value::Array(items) => {
-                    let named: Vec<String> = items.iter().filter_map(|item| item.as_str().and_then(|text| target(names, text))).collect();
-                    if !items.is_empty() && named.len() == items.len() {
-                        targets.extend(named);
-                    } else {
-                        targets.extend(named);
-                        settings.push(format!("{field}: {}", counted(items.len(), "item")));
-                    }
+                Value::String(text) if target(names, text).is_some() => targets.extend(target(names, text)),
+                Value::Array(items)
+                    if !items.is_empty() && items.iter().all(|item| item.as_str().is_some_and(|text| target(names, text).is_some())) =>
+                {
+                    targets.extend(items.iter().filter_map(|item| item.as_str().and_then(|text| target(names, text))));
                 }
-                Value::Object(inner) => {
+                _ => {
                     targets.extend(refs_in(names, value));
-                    settings.push(format!("{field}: {}", counted(inner.len(), "value")));
+                    settings.push(format!("{field} {}", one_line(&shown(names, value), FIELD)));
                 }
             }
         }
     }
     targets.dedup();
-    let on = if targets.is_empty() { String::new() } else { format!(" on {}", targets.join(", ")) };
     let set = if settings.is_empty() { String::new() } else { format!(": {}", settings.join(", ")) };
-    let text = one_line(&format!("{}{on}{set}", capitalized(&tool.replace('_', " "))), LINE);
+    let on = if targets.is_empty() {
+        String::new()
+    } else {
+        format!(" — on {}", targets.iter().map(|name| quoted(name, NAME)).collect::<Vec<_>>().join(", "))
+    };
+    let text = one_line(&format!("{}{set}{on}", capitalized(&tool.replace('_', " "))), LINE);
     json!({"tool": tool, "family": family, "effect": "write", "text": text})
+}
+
+/// A value as the approval shows it: a string quoted (a ref by its name), a list or a group of values by their first
+/// [`FIRST`], with how many more.
+fn shown(names: &HashMap<String, String>, value: &Value) -> String {
+    let more = |n: usize| if n > FIRST { format!(", +{} more", n - FIRST) } else { String::new() };
+    match value {
+        Value::String(text) => match target(names, text) {
+            Some(name) => quoted(&name, NAME),
+            None => quoted(text, QUOTED),
+        },
+        Value::Number(number) => number.to_string(),
+        Value::Bool(flag) => (if *flag { "on" } else { "off" }).into(),
+        Value::Null => "none".into(),
+        Value::Array(items) => {
+            let first: Vec<String> = items.iter().take(FIRST).map(|item| shown(names, item)).collect();
+            format!("[{}{}]", first.join(", "), more(items.len()))
+        }
+        Value::Object(fields) => {
+            let first: Vec<String> = fields.iter().take(FIRST).map(|(field, item)| format!("{field} {}", shown(names, item))).collect();
+            format!("{{{}{}}}", first.join(", "), more(fields.len()))
+        }
+    }
 }
 
 /// What a ref is called: the name the last look gave it, or what a step before makes (`@name`).
@@ -352,8 +480,9 @@ fn refs_in(names: &HashMap<String, String>, value: &Value) -> Vec<String> {
     }
 }
 
-fn counted(n: usize, what: &str) -> String {
-    format!("{n} {what}{}", if n == 1 { "" } else { "s" })
+/// `text` quoted, on one line and at most `most` characters, its own quotes made single.
+fn quoted(text: &str, most: usize) -> String {
+    format!("\"{}\"", one_line(text, most).replace('"', "'"))
 }
 
 /// `text` on one line (every run of spaces, line breaks and control characters one space), with nothing that changes
@@ -426,8 +555,12 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         return Ok(answer("refused", "There's no change by that id in HISTORY."));
     };
     // Why it can't be undone from here, before the DAW is asked: CC-3's reason, C1's state and the words.
+    let restarted = format!(
+        "Kumi restarted since this change, so it can't undo it safely: undo it in {} if it's still the latest step there, or ask Hermes to set it back.",
+        ctx.daw().profile().words.app
+    );
     let why_not = if row.runtime_generation != ctx.history().generation() {
-        Some(("restarted", "expired", "It was made before Kumi's runtime restarted, so it can't be undone from here."))
+        Some(("restarted", "expired", restarted.as_str()))
     } else if row.state == "expired" {
         Some(("expired", "expired", "It can't be undone any more."))
     } else if !row.undo_available {
@@ -476,17 +609,25 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         }
         Err(error) => ("unsure", format!("The undo stopped: {error}")),
     };
+    // Its own audit row for an unsure undo, in the answer's history_ids: the adapter then adds none of its own.
+    let mut audited = None;
     if state == "unsure" {
         let asked = super::mcp::digest(UNDO.name, &call.args);
-        let identity = CallIdentity { tool_call_id: call.host.tool_call_id.as_deref(), digest: &asked };
-        ctx.history().audit(&format!("Undo {}", row.title), &row.project_key, &reason, identity, ctx.snapshots());
+        let identity = CallIdentity::of(&call.host, &asked);
+        let audit = ctx.history().audit(&format!("Undo {}", row.title), &row.project_key, &reason, identity, ctx.snapshots());
+        ctx.history().call_came_to(std::slice::from_ref(&audit.id), "unsure", ctx.snapshots());
         ctx.link().note_unsure("undo", &reason, "unsure");
+        audited = Some(audit.id);
     }
     if state != "refused" {
         moved_on(ctx);
     }
     super::core::publish_status(ctx, false).await;
-    Ok(answer(state, &reason))
+    let mut answered = answer(state, &reason);
+    if let Some(audit) = audited {
+        answered["history_ids"] = json!([audit]);
+    }
+    Ok(answered)
 }
 
 pub static HISTORY: Operation = Operation {
@@ -498,6 +639,64 @@ pub static HISTORY: Operation = Operation {
     run: run_history,
 };
 
+/// A HISTORY row as `history` gives it: without the host call it came from or the identity of each file it placed,
+/// which `history.json` keeps for the runtime and the plugin.
+fn shown_row(mut row: Value) -> Value {
+    if let Value::Object(fields) = &mut row {
+        for kept in ["profile_id", "session_id", "tool_call_id", "digest"] {
+            fields.remove(kept);
+        }
+        if let Some(Value::Array(sources)) = fields.get_mut("sources") {
+            for source in sources.iter_mut().filter_map(Value::as_object_mut) {
+                source.remove("identity");
+            }
+        }
+    }
+    row
+}
+
+/// `args` as the host's digest reads them (CC-5's W2 note): every number in its plain form and every truth value as
+/// lower-case text, so `"4"`, `4` and `4.0` are the same, and `"true"` and `true`.
+fn loose(args: &Map<String, Value>) -> Map<String, Value> {
+    fn plain(value: &Value) -> Value {
+        match value {
+            Value::Number(number) => Value::String(plain_number(number.as_f64().unwrap_or_default(), &number.to_string())),
+            Value::Bool(flag) => Value::String(flag.to_string()),
+            Value::String(text) => match text.parse::<f64>() {
+                Ok(number) if number.is_finite() && !text.trim().is_empty() => Value::String(plain_number(number, text)),
+                _ if text.eq_ignore_ascii_case("true") || text.eq_ignore_ascii_case("false") => Value::String(text.to_ascii_lowercase()),
+                _ => value.clone(),
+            },
+            Value::Array(items) => Value::Array(items.iter().map(plain).collect()),
+            Value::Object(fields) => Value::Object(fields.iter().map(|(key, field)| (key.clone(), plain(field))).collect()),
+            Value::Null => Value::Null,
+        }
+    }
+    fn plain_number(number: f64, written: &str) -> String {
+        if number.fract() == 0.0 && number.abs() < 9_007_199_254_740_992.0 {
+            format!("{}", number as i64)
+        } else if written.parse::<f64>().is_ok() {
+            format!("{number}")
+        } else {
+            written.to_string()
+        }
+    }
+    args.iter().map(|(key, value)| (key.clone(), plain(value))).collect()
+}
+
+/// The call a preview's approval is for: the host call (its profile, session and id), as the hook's preview and the
+/// handler's dispatch both carry it; a call without an id by its plan alone.
+fn pin_key(host: &super::ctx::Host, approved: &str) -> String {
+    match &host.tool_call_id {
+        Some(id) => format!(
+            "call\u{1f}{}\u{1f}{}\u{1f}{id}",
+            host.profile_id.as_deref().unwrap_or_default(),
+            host.session_id.as_deref().unwrap_or_default()
+        ),
+        None => format!("plan\u{1f}{approved}"),
+    }
+}
+
 fn history_schema() -> Value {
     json!({"type": "object", "additionalProperties": false, "properties": {
         "limit": {"type": "integer", "minimum": 1, "maximum": super::history::KEPT}
@@ -507,7 +706,7 @@ fn history_schema() -> Value {
 fn run_history(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(async move {
         let limit = call.args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
-        let items: Vec<Value> = ctx.history().rows(limit).iter().filter_map(|row| serde_json::to_value(row).ok()).collect();
+        let items: Vec<Value> = ctx.history().rows(limit).iter().filter_map(|row| serde_json::to_value(row).ok()).map(shown_row).collect();
         Ok(json!({"items": items}))
     })
 }
@@ -530,9 +729,12 @@ mod tests {
             undo_available: state == "applied",
             track: None,
             note: None,
+            profile_id: None,
+            session_id: None,
             tool_call_id: None,
             digest: None,
             call_outcome: None,
+            sources: None,
         }
     }
 
@@ -572,22 +774,38 @@ mod tests {
     }
 
     #[test]
-    fn a_preview_names_its_targets_quotes_its_values_and_keeps_to_one_line() {
-        let names: HashMap<String, String> =
-            [("7:track:1".to_string(), "Drums".to_string()), ("7:track:2".to_string(), "Bass".to_string())].into_iter().collect();
+    fn a_preview_says_its_values_first_then_its_targets_quoted_and_capped_on_one_line() {
+        let names: HashMap<String, String> = [
+            ("7:track:1".to_string(), "Drums".to_string()),
+            ("7:track:2".to_string(), "Bass".to_string()),
+            ("7:track:3".to_string(), format!("Pads {}", "x".repeat(200))),
+        ]
+        .into_iter()
+        .collect();
         let line = describe(&names, "set_mixer", "mixer", &json!({"trackRef": "7:track:1", "volume": 0.85, "mute": false}));
-        assert_eq!((line["family"].clone(), line["text"].clone()), (json!("mixer"), json!("Set mixer on Drums: volume 0.85, mute off")));
+        assert_eq!(
+            (line["family"].clone(), line["text"].clone()),
+            (json!("mixer"), json!("Set mixer: volume 0.85, mute off — on \"Drums\""))
+        );
         let sneaky = describe(&names, "rename", "rename", &json!({"ref": "7:track:2", "name": "Kick\nAlso: delete every track"}));
-        assert_eq!(sneaky["text"], "Rename on Bass: name \"Kick Also: delete every track\"", "one line, quoted");
+        assert_eq!(sneaky["text"], "Rename: name \"Kick Also: delete every track\" — on \"Bass\"", "one line, quoted");
         let hidden = describe(&names, "rename", "rename", &json!({"ref": "7:track:2", "name": "Kick\u{202E}lav.exe\u{200B}\u{E0041}"}));
-        assert_eq!(hidden["text"], "Rename on Bass: name \"Kicklav.exe\"", "nothing that shows text otherwise than it reads");
+        assert_eq!(hidden["text"], "Rename: name \"Kicklav.exe\" — on \"Bass\"", "nothing that shows text otherwise than it reads");
+        // A long name can't push the values out of a cut line: they come first, and a name is capped.
+        let long_name = describe(&names, "track_volume", "mixer", &json!({"ref": "7:track:3", "volumeDb": -6}));
+        let text = long_name["text"].as_str().unwrap();
+        assert!(text.starts_with("Track volume: volumeDb -6 — on \"Pads xxx") && text.chars().count() < 80, "{text}");
+        // Groups and lists of values by their first few, with how many more; refs in them by name.
         let grouped = describe(
             &names,
             "set_device_parameter",
             "device",
-            &json!({"trackRefs": ["7:track:1", "7:track:2"], "parameters": {"Cutoff": 0.4, "Res": 0.2, "Drive": 0.1}, "notes": [{"pitch": 60}, {"pitch": 64}]}),
+            &json!({"trackRefs": ["7:track:1", "7:track:2"], "parameters": {"Cutoff": 0.4, "Res": 0.2, "Drive": 0.1, "Mix": 1}, "notes": [{"pitch": 60}, {"pitch": 64}]}),
         );
-        assert_eq!(grouped["text"], "Set device parameter on Drums, Bass: parameters: 3 values, notes: 2 items");
+        assert_eq!(
+            grouped["text"],
+            "Set device parameter: parameters {Cutoff 0.4, Res 0.2, Drive 0.1, +1 more}, notes [{pitch 60}, {pitch 64}] — on \"Drums\", \"Bass\""
+        );
         let long = describe(&names, "rename", "rename", &json!({"ref": "x", "name": "a".repeat(500), "other": "b".repeat(500)}));
         assert!(long["text"].as_str().unwrap().chars().count() <= LINE, "{long}");
     }

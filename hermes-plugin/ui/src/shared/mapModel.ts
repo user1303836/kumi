@@ -116,6 +116,107 @@ export function pick(model: MapModel, view: MapViewport, size: number, px: numbe
   return best
 }
 
+/** What a key does on the map. Only keys no host types with or claims first: Desktop's keybind dispatcher listens on
+ *  the window in the capture phase, so it sees a key before the map does. It sends printable keys (Space, +, −, 0…) to
+ *  the composer's draft, takes Enter to focus the composer and Escape to cancel the turn, and has PageUp and PageDown
+ *  scroll the chat. So: the arrows move to the nearest sound that way, Shift+←/→ step through every sound in the map's
+ *  own order (the arrows alone can't reach a sound on the same spot as another), Shift+↑/↓ zoom, and Home shows the
+ *  whole map. Null for any other key, and for any key held with Alt, Control or Command. */
+export type MapKey = { move: [number, number] } | { order: 1 | -1 } | { zoom: number } | { fit: true }
+
+export function mapKey(event: { key: string; shiftKey: boolean; altKey: boolean; ctrlKey: boolean; metaKey: boolean }): MapKey | null {
+  if (event.altKey || event.ctrlKey || event.metaKey) return null
+  const direction = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] } as Record<string, [number, number]>)[event.key]
+  if (direction) {
+    if (!event.shiftKey) return { move: direction }
+    return direction[0] ? { order: direction[0] as 1 | -1 } : { zoom: direction[1] < 0 ? 1.5 : 1 / 1.5 }
+  }
+  return event.key === 'Home' && !event.shiftKey ? { fit: true } : null
+}
+
+/** The sound a move or an order step picks, from point `from` (an index, or undefined before any): see `step` and
+ *  `stepOrder`. -1 when there's none. */
+export function moveWith(
+  model: MapModel,
+  view: MapViewport,
+  size: number,
+  from: number | undefined,
+  key: { move: [number, number] } | { order: 1 | -1 },
+  middle: [number, number],
+  visible?: (index: number) => boolean
+): number {
+  return 'move' in key ? step(model, view, size, from, key.move, middle, visible) : stepOrder(model, from, key.order, visible)
+}
+
+/** The next (`delta` 1) or previous (-1) visible point in the map's own order, wrapping around; with no point yet, the
+ *  first or the last. Every visible sound is one of these steps away, sounds on the same spot included. -1 when none is
+ *  visible. */
+export function stepOrder(model: MapModel, from: number | undefined, delta: 1 | -1, visible?: (index: number) => boolean): number {
+  const count = model.points.length
+  let index = from ?? (delta > 0 ? -1 : count)
+  for (let tried = 0; tried < count; tried++) {
+    index = (((index + delta) % count) + count) % count
+    if (index !== from && (!visible || visible(index))) return index
+  }
+  return -1
+}
+
+/** The point an arrow key moves to: from point `from` (an index), the nearest visible one in `direction` (screen
+ *  `[dx, dy]`, e.g. `[1, 0]` for right). One within 45° of that way wins; failing any, the nearest anywhere on that side.
+ *  Nearer in line beats nearer off to the side. -1 when there's none that way; a point on the very same spot is never
+ *  one (`stepOrder` reaches it). With no point yet (`from` undefined), the visible point nearest the middle of the
+ *  screen `[cx, cy]`. */
+export function step(
+  model: MapModel,
+  view: MapViewport,
+  size: number,
+  from: number | undefined,
+  direction: [number, number],
+  middle: [number, number],
+  visible?: (index: number) => boolean
+): number {
+  const origin = from === undefined ? middle : toScreen(view, size, model.points[from].x, model.points[from].y)
+  // [within 45°, anywhere on that side]
+  const best = [-1, -1]
+  const bestScore = [Infinity, Infinity]
+  model.points.forEach((point, index) => {
+    if (index === from || (visible && !visible(index))) return
+    const [x, y] = toScreen(view, size, point.x, point.y)
+    const ox = x - origin[0]
+    const oy = y - origin[1]
+    let score: number
+    let side = 0
+    if (from === undefined) {
+      score = ox * ox + oy * oy
+    } else {
+      const along = ox * direction[0] + oy * direction[1]
+      if (along <= 0.5) return
+      const across = Math.abs(ox * direction[1] - oy * direction[0])
+      score = along + 2 * across
+      side = across <= along ? 0 : 1
+    }
+    if (score < bestScore[side]) {
+      best[side] = index
+      bestScore[side] = score
+    }
+  })
+  return best[0] >= 0 ? best[0] : best[1]
+}
+
+/** The view moved just enough that screen point (`px`, `py`) sits inside a `width`×`height` box with `margin` around
+ *  it; the same view when it already does. */
+export function keepInView(view: MapViewport, px: number, py: number, width: number, height: number, margin = 24): MapViewport {
+  const shiftX = px < margin ? margin - px : px > width - margin ? width - margin - px : 0
+  const shiftY = py < margin ? margin - py : py > height - margin ? height - margin - py : 0
+  return shiftX || shiftY ? { ...view, dx: view.dx + shiftX, dy: view.dy + shiftY } : view
+}
+
+/** A sound's name as the canvas draws it beside its point: `clean()`ed and cut at 28 characters. `fillText` applies
+ *  the bidi algorithm, so a raw name holding a bidi control could reorder its own label. */
+export function mapLabel(name: unknown): string {
+  return clean(name, 28)
+}
+
 /** The sounds a search names: every word must appear in the name, class, kind or folder. Null for no search. */
 export function searchSounds(model: MapModel, query: string): Set<string> | null {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)

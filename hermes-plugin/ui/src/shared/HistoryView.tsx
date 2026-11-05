@@ -3,24 +3,34 @@
 import { T } from '@kumi/theme'
 import type { ReactNode } from 'react'
 
-import { ago, bpm, catchUpLines, clean, cleanupWords, colorOf, focusParameter, focusPath, focusPlace, nameOf } from './format.ts'
+import { ago, bpm, catchUpLines, clean, cleanupWords, colorOf, dawName, focusParameter, focusPath, focusPlace, nameOf } from './format.ts'
 import { english, type Translate } from './i18n.ts'
 import type { Focus, History, HistoryItem } from './types.ts'
 import { Chip, Dot, S, useT } from './ui.tsx'
 
-// Each state's mark, tone, and word (a catalog key).
+// Each state's mark, tone, and word (a catalog key). `kept` is muted, not a success: the producer changed it since,
+// so Kumi left it as it is.
 const STATE: Record<string, { mark: string; tone: 'bad' | 'good' | 'muted' | 'warn'; word: string }> = {
   applied: { mark: '✓', tone: 'good', word: 'history.applied' },
   undone: { mark: '↺', tone: 'muted', word: 'history.undone' },
-  kept: { mark: '✓', tone: 'good', word: 'history.kept' },
+  kept: { mark: '✓', tone: 'muted', word: 'history.kept' },
+  expired: { mark: '·', tone: 'muted', word: 'history.expired' },
   partial: { mark: '◐', tone: 'warn', word: 'history.partial' },
   unsure: { mark: '?', tone: 'warn', word: 'history.unsure' },
   refused: { mark: '✕', tone: 'muted', word: 'history.refused' },
   failed: { mark: '✕', tone: 'bad', word: 'history.failed' }
 }
 
-export function stateOf(item: HistoryItem, t: Translate = english): { mark: string; tone: 'bad' | 'good' | 'muted' | 'warn'; word: string } {
-  const known = STATE[item.state ?? '']
+/** A row Kumi restarted since, so it can't undo it safely: `expired`, or an earlier runtime's `applied` row (no undo
+ *  while a live runtime answers). A stale snapshot sets every row's undo false, so only a live one says so. A row
+ *  with the runtime's own note keeps its note. */
+export function restartedSince(item: HistoryItem, live: boolean): boolean {
+  if (item.note) return false
+  return item.state === 'expired' || (live && item.state === 'applied' && item.undo_available === false)
+}
+
+export function stateOf(item: HistoryItem, t: Translate = english, live = false): { mark: string; tone: 'bad' | 'good' | 'muted' | 'warn'; word: string } {
+  const known = STATE[restartedSince(item, live) ? 'expired' : (item.state ?? '')]
   if (known) return { ...known, word: t(known.word) }
   return { mark: '·', tone: 'muted', word: item.state ? clean(item.state, 20) : t('history.recorded') }
 }
@@ -77,7 +87,21 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
   )
 }
 
-export function HistoryView({ history, now, action }: { history: History | null; now?: number; action?: (item: HistoryItem) => ReactNode }) {
+/** HISTORY's rows. `live`: the runtime answers now (connected, not stale), so a row without undo was a restart's;
+ *  `daw` names where to undo it then. */
+export function HistoryView({
+  history,
+  now,
+  action,
+  live = false,
+  daw
+}: {
+  history: History | null
+  now?: number
+  action?: (item: HistoryItem) => ReactNode
+  live?: boolean
+  daw?: unknown
+}) {
   const t = useT()
   const items = history?.items ?? []
   if (!items.length) {
@@ -86,7 +110,7 @@ export function HistoryView({ history, now, action }: { history: History | null;
   return (
     <ol style={{ listStyle: 'none', margin: 0, padding: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
       {items.map(item => {
-        const state = stateOf(item, t)
+        const state = stateOf(item, t, live)
         const track = nameOf(item.track)
         return (
           <li key={item.id} style={{ ...S.row, gap: 7, padding: '4px 0', borderTop: `1px solid ${T.border}`, opacity: item.state === 'undone' ? 0.7 : 1 }}>
@@ -110,8 +134,12 @@ export function HistoryView({ history, now, action }: { history: History | null;
                     .join(' ')}
                 </span>
               ) : (
-                // The runtime's own words for any other row: why an undo didn't happen, say.
-                item.note && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{clean(item.note, 200)}</span>
+                // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
+                item.note ? (
+                  <span style={{ ...S.muted, whiteSpace: 'normal' }}>{clean(item.note, 200)}</span>
+                ) : (
+                  restartedSince(item, live) && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{t('history.restartedSince', dawName(daw, t))}</span>
+                )
               )}
             </span>
             {action?.(item)}

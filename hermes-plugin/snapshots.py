@@ -121,7 +121,8 @@ def read(state: Path, name: str) -> dict | None:
     return data
 
 
-def _file_id(value: object) -> str | None:
+def file_id(value: object) -> str | None:
+    """`value` when it's an id the runtime names a snapshot file by (a job, a map revision), else None."""
     return value if isinstance(value, str) and _FILE_ID.fullmatch(value) and ".." not in value else None
 
 
@@ -159,7 +160,7 @@ def map_current(state: Path) -> str | None:
     """The current map revision's id (`map/current` holds it)."""
     try:
         with (state / "map" / "current").open("r", encoding="utf-8") as file:
-            return _file_id(file.read(256).strip())
+            return file_id(file.read(256).strip())
     except (OSError, ValueError):
         return None
 
@@ -215,7 +216,7 @@ def history(state: Path, limit: object = 20, now_ms: int | None = None) -> dict:
 
 def map_revision(state: Path, revision: str | None = None) -> dict | None:
     """One map revision (the current one when none is named)."""
-    name = _file_id(revision) if revision is not None else map_current(state)
+    name = file_id(revision) if revision is not None else map_current(state)
     return read(state, f"map/{name}") if name else None
 
 
@@ -254,7 +255,7 @@ def public_map(state: Path, revision: str | None = None) -> dict | None:
 
 
 def job(state: Path, job_id: str) -> dict | None:
-    name = _file_id(job_id)
+    name = file_id(job_id)
     return read(state, f"jobs/{name}") if name else None
 
 

@@ -25,14 +25,19 @@ try {
   $env:KUMI_PROCESSES = 'none'
   # A profile that names its test binaries (`binary(…)`, or a crate's `binary_id(<crate>::it)`, in its default-filter,
   # .config/nextest.toml) builds only those: nextest builds every binary it could run, whatever the filter, and runs the
-  # ones the filter leaves.
+  # ones the filter leaves. A crate's library tests it names (`binary_id(<crate>)`) are built and run after those, on
+  # their own and only for the crates this run takes ($libraries): `--lib` beside the others' `it` binaries would build
+  # every library's tests. Such a crate's `it` binary is in the profile too, so `dev.py select --tested-by` takes it.
   [string[]]$only = @()
+  [string[]]$libraries = @()
   if ($env:KUMI_NEXTEST_BUILD_PROFILE) {
     $config = Get-Content -Raw (Join-Path $PSScriptRoot '..\.config\nextest.toml')
     $section = [regex]::Match($config, '(?ms)^\[profile\.' + [regex]::Escape($env:KUMI_NEXTEST_BUILD_PROFILE) + '\]\s*$(.*?)(?=^\[|\z)').Groups[1].Value
     $names = [regex]::Matches($section, 'binary\(([a-z0-9_]+)\)|binary_id\([a-z0-9_-]+::(it)\)') |
       ForEach-Object { if ($_.Groups[1].Success) { $_.Groups[1].Value } else { $_.Groups[2].Value } } | Sort-Object -Unique
     $only = $names | ForEach-Object { '--test'; $_ }
+    $libraries = [regex]::Matches($section, 'binary_id\(([a-z0-9_-]+)\)') | ForEach-Object { $_.Groups[1].Value } |
+      Sort-Object -Unique
   }
   if ($env:KUMI_NEXTEST -ne '0') {
     # (Windows PowerShell 5.1 can throw on a native command's stderr under 'Stop')
@@ -60,6 +65,30 @@ try {
       [IO.File]::WriteAllLines($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:KUMI_NEXTEST_LIST), [string[]]$listed)
     }
     & cargo nextest run @build @args
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    if ($libraries -and -not $env:KUMI_NEXTEST_ARCHIVE) {
+      # The crates this run takes (its -p, else the workspace less its --exclude), the run's other arguments kept.
+      [string[]]$rest = @(); [string[]]$taken = @(); [string[]]$excluded = @(); $workspace = $true
+      for ($i = 0; $i -lt $args.Count; $i++) {
+        $arg = [string]$args[$i]
+        if ($arg -ceq '-p' -or $arg -ceq '--package') { $workspace = $false; $i++; $taken += [string]$args[$i] }
+        elseif ($arg -ceq '--exclude') { $i++; $excluded += [string]$args[$i] }
+        elseif ($arg -clike '--package=*') { $workspace = $false; $taken += $arg.Substring(10) }
+        elseif ($arg -clike '-p?*') { $workspace = $false; $taken += $arg.Substring(2) }
+        elseif ($arg -cne '--workspace') { $rest += $arg }
+      }
+      [string[]]$picked = $libraries | Where-Object { $taken -ccontains $_ -or ($workspace -and $excluded -cnotcontains $_) } |
+        ForEach-Object { '-p'; $_ }
+      if ($picked) {
+        if ($env:KUMI_NEXTEST_LIST) {
+          $listed = & cargo nextest list --locked --lib @picked @rest --message-format json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $path = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($env:KUMI_NEXTEST_LIST)
+          [IO.File]::WriteAllLines(($path -replace '\.json$', '') + '.lib.json', [string[]]$listed)
+        }
+        & cargo nextest run --locked --lib @picked @rest
+      }
+    }
   } else { & cargo test --workspace --locked @args }
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {

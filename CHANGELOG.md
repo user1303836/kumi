@@ -3,6 +3,27 @@
 Kumi's releases. The Ableton bridge (`crates/ableton-mcp-server`) is versioned on its own;
 each Kumi release names the bridge it ships with.
 
+## 1.24.67 — 2026-11-05
+
+Ships with bridge 1.0.105, which Live loads when it restarts. After updating, Kumi offers to quit Live
+(it asks to save first) and opens it again with the new bridge; or run `kumi bridge` with Live closed.
+
+- Connect a Mirelo account for sound effects, audio extension and inpainting, and audio-to-MIDI;
+  enable it separately for each task in /audio after explicit onboarding.
+- Configure self-hosted audio alternatives and optional fallback, including native MuScriptor
+  audio-to-MIDI servers.
+- Removing Kumi, or `kumi bridge` updating its copy, now leaves alone a copy of REAPER's extension or
+  Renoise's tool in another of the DAW's folders that another Kumi installation put in, or that no
+  longer says which Kumi installation it belongs to.
+
+Tested with Live 12.4 on macOS. On Windows, installing and updating are tested; using Kumi with Live
+there is still new.
+
+### Bridge 1.0.105
+
+- On Windows, Live starts without waiting for AbletonMcpBridge's check of its files' permissions,
+  which now runs beside it.
+
 ## 1.24.66 — 2026-11-04
 
 Ships with bridge 1.0.104, as 1.24.65 did.

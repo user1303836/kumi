@@ -274,6 +274,29 @@ class Tools(unittest.TestCase):
                 self.assertEqual((arguments["_host"]["profile_id"], arguments["_host"]["session_id"]),
                                  (self.host.profile(), "s1"), "Hermes's identity, never the model's")
 
+    def test_a_running_scan_is_cancelled_by_its_id_and_another_starts_only_once_it_has_stopped(self):
+        self.ctx.settings["library_folders"] = [support.DRUMS]
+        support.call(self.host, "kumi_connect", {}, session_id="s1")
+
+        def library(args: dict, **context) -> dict:
+            return support.call(self.host, "kumi_library", args, session_id="s1", **context)
+
+        job_id = library({"action": "scan"})["job_id"]
+        cancel = {"action": "cancel", "job_id": job_id}
+        for other in ("j-scan-9", "j-1"):
+            self.assertEqual(library({**cancel, "job_id": other})["error"]["code"], "not_running")
+        sent = len(self.received("library"))
+        for wrong in ({**cancel, "folder": support.DRUMS}, {"action": "cancel", "job_id": "../jobs/j"}):
+            with self.subTest(args=wrong):
+                self.assertEqual(support.handle(self.host, "kumi_library", wrong)["error"]["code"], "invalid")
+        self.assertEqual(len(self.received("library")), sent, "nothing reached the runtime")
+        self.assertEqual(library(cancel), {"job_id": job_id, "cancel_requested": True}, "it was still running")
+        self.assertEqual(library(cancel), {"job_id": job_id, "cancel_requested": True}, "a repeat while it settles")
+        self.assertEqual(library({"action": "scan"})["error"]["code"], "busy", "the guard holds until it has stopped")
+        self.assertEqual(support.call(self.host, "kumi_job", {"job_id": job_id})["state"], "cancelled")
+        self.assertEqual(library(cancel)["error"]["code"], "not_running", "a settled scan")
+        self.assertNotEqual(library({"action": "scan"})["job_id"], job_id, "and a new scan starts")
+
     def test_every_tool_answers_json_whatever_it_gets(self):
         for name, _, _, _ in tools.TOOLS:
             for args in (None, [], {"daw": "logic"}, {"unknown": 1}):

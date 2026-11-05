@@ -252,6 +252,22 @@ class Approvals(unittest.TestCase):
                     self.assertIsNone(snapshots.library_folder(folder)[0])
         touched.assert_not_called()
 
+    def test_a_scan_is_cancelled_by_its_job_id_from_a_chat_with_nothing_asked(self):
+        cancel = {"action": "cancel", "job_id": "j-scan-1"}
+        self.assertIsNone(self.hook("kumi_library", cancel), "a read: nothing asked, no rule key")
+        for args in ({"action": "cancel"}, {"action": "cancel", "job_id": "../jobs/j"}, {"action": "cancel", "job_id": "j..1"},
+                     {**cancel, "folder": support.DRUMS}, {"action": "scan", "job_id": "j-scan-1"},
+                     {"action": "status", "job_id": "j-scan-1"}):
+            with self.subTest(args=args):
+                self.assertEqual(self.hook("kumi_library", args)["action"], "block")
+        for surface in ("api_server", "webhook", "msgraph_webhook"):  # a read there, but never a cancel (CC-14)
+            with self.subTest(surface=surface):
+                self.ctx.surface = surface
+                self.assertEqual(self.hook("kumi_library", cancel)["message"], policy.UNATTENDED_CANCEL)
+                self.assertIsNone(self.hook("kumi_library", {"action": "status"}))
+        self.ctx.surface, self.ctx.cron_execution = "tui", object()
+        self.assertEqual(self.hook("kumi_library", cancel)["message"], tools.SCHEDULED)
+
     def test_a_scan_names_the_folders_the_runtime_reads_and_needs_one(self):
         self.assertIn("no approved sample folders", self.hook("kumi_library", {"action": "scan"})["message"])
         support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS}, session_id="s1")
@@ -392,6 +408,17 @@ class CallIds(unittest.TestCase):
         self.hook("kumi_history", {"limit": "5"}, "coerced")  # the model wrote "5"; Hermes's handler gets 5
         support.handle(self.host, "kumi_history", {"limit": 5}, session_id="s1", task_id="t1")
         self.assertEqual(self.received("history")[-1]["_host"]["tool_call_id"], "coerced")
+
+    def test_a_preview_the_hook_asks_for_names_the_same_call_as_its_dispatch(self):
+        # The runtime keys what a preview pinned on the call it's for (#1005), so the hook's preview and the
+        # approved call carry the same tool-call id.
+        self.hook("kumi_change", change(), "w-1")
+        self.assertEqual(support.handle(self.host, "kumi_change", change(), session_id="s1", task_id="t1")["state"],
+                         "applied")
+        sent = [m["params"]["arguments"] for m in support.requests(self.data / "state")
+                if m.get("params", {}).get("name") == "change"]
+        self.assertEqual([(args.get("preview") is True, args["_host"]["session_id"], args["_host"]["tool_call_id"])
+                          for args in sent], [(True, "s1", "w-1"), (False, "s1", "w-1")])
 
 
 class ThroughHermes(unittest.TestCase):

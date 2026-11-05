@@ -1,13 +1,26 @@
 //! The operations `kumi serve` offers, in the order `tools/list` gives them: one line per module. The runtime core's
-//! are W1's; the library, map and file listening (W3) and track listening (W6) add their own modules here.
+//! are W1's; the library, map and file listening (W3) and track listening (W6) add their own modules here, and setup
+//! (W5) its own.
 
 use super::change;
 use super::core;
 use super::ctx::Operation;
-use super::read;
+use super::{library, listen, map, read, setup};
 
-pub static OPERATIONS: &[&Operation] =
-    &[&core::STATUS, &core::CONNECT, &core::OBSERVE, &read::READ, &change::CHANGE, &change::UNDO, &change::HISTORY, &core::JOB];
+pub static OPERATIONS: &[&Operation] = &[
+    &core::STATUS,
+    &core::CONNECT,
+    &core::OBSERVE,
+    &read::READ,
+    &change::CHANGE,
+    &change::UNDO,
+    &change::HISTORY,
+    &core::JOB,
+    &setup::SETUP_DAW,
+    &library::LIBRARY,
+    &map::SOUNDS,
+    &listen::LISTEN,
+];
 
 #[cfg(test)]
 mod tests {

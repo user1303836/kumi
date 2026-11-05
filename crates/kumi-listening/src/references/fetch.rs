@@ -76,9 +76,13 @@ impl Fetcher {
             vec!["--flat-playlist".into(), "-J".into(), "--no-warnings".into(), "--playlist-end".into(), (count * 2).to_string()];
         args.extend(extras);
         args.extend(["--".into(), url.into()]);
-        let found = run(&ytdlp, &args, RunOptions { signal: Some(signal), timeout_ms: Some(60_000), max_buffer: Some(8 << 20) })
-            .await
-            .map_err(|error| format!("Kumi couldn't read that playlist: {}", error.message()))?;
+        let found = run(
+            &ytdlp,
+            &args,
+            RunOptions { signal: Some(signal), timeout_ms: Some(60_000), max_buffer: Some(8 << 20), ..Default::default() },
+        )
+        .await
+        .map_err(|error| format!("Kumi couldn't read that playlist: {}", error.message()))?;
         let listed: Value = serde_json::from_str(&found.stdout_text()).map_err(|_| "yt-dlp's playlist wasn't JSON.".to_string())?;
         Ok(entries(&listed)
             .into_iter()
@@ -102,9 +106,13 @@ impl Fetcher {
         let mut args: Vec<String> = vec!["--flat-playlist".into(), "-J".into(), "--no-warnings".into()];
         args.extend(extras);
         args.extend(["--".into(), format!("ytsearch5:{terms}")]);
-        let found = run(&ytdlp, &args, RunOptions { signal: Some(signal.clone()), timeout_ms: Some(60_000), max_buffer: Some(8 << 20) })
-            .await
-            .map_err(|error| format!("YouTube search for {terms} failed: {}", error.message()))?;
+        let found = run(
+            &ytdlp,
+            &args,
+            RunOptions { signal: Some(signal.clone()), timeout_ms: Some(60_000), max_buffer: Some(8 << 20), ..Default::default() },
+        )
+        .await
+        .map_err(|error| format!("YouTube search for {terms} failed: {}", error.message()))?;
         let listed: Value = serde_json::from_str(&found.stdout_text()).map_err(|_| "yt-dlp's search wasn't JSON.".to_string())?;
         let found = entries(&listed);
         // An upload whose title (or channel) names both the track and the artist.
@@ -164,8 +172,12 @@ impl Fetcher {
         ];
         args.extend(extras);
         args.extend(["--".into(), watch_url(&id)]);
-        let fetched =
-            run(&ytdlp, &args, RunOptions { signal: Some(signal.clone()), timeout_ms: Some(300_000), max_buffer: Some(1 << 20) }).await;
+        let fetched = run(
+            &ytdlp,
+            &args,
+            RunOptions { signal: Some(signal.clone()), timeout_ms: Some(300_000), max_buffer: Some(1 << 20), ..Default::default() },
+        )
+        .await;
         if let Err(error) = fetched {
             let_go(&self.folder, &id);
             return Err(format!("Kumi couldn't fetch {url}: {}", error.message()));

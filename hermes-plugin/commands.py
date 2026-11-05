@@ -96,20 +96,24 @@ def cli_parser(parser: argparse.ArgumentParser) -> None:
     actions.add_parser("status", help="where Kumi stands in this profile (what `hermes kumi` alone shows)")
     setup_parser = actions.add_parser("setup", help="set Kumi up in this profile, asking before each step")
     setup_parser.add_argument("--daw", choices=schemas.DAWS, help="the DAW to set up for (default: the DAW setting)")
+    setup_parser.add_argument("--use", action="store_true",
+                              help="make that DAW Kumi's DAW in this profile, even when another one is set up")
 
 
 def cli(host: tools.Host, args: argparse.Namespace) -> int:
     if getattr(args, "kumi_action", None) == "setup":
-        return cli_setup(host, getattr(args, "daw", None) or host.daw())
+        return cli_setup(host, getattr(args, "daw", None) or host.daw(), use=getattr(args, "use", False) is True)
     print(status_text(host))  # `status`, or no action at all
     return 0
 
 
-def cli_setup(host: tools.Host, daw: str, *, stdin: TextIO | None = None, stdout: TextIO | None = None) -> int:
-    """setup.cli_main with this profile's plugin data. The DAW step uses a runtime this command starts, which stops
-    before the command ends."""
+def cli_setup(host: tools.Host, daw: str, *, use: bool = False, stdin: TextIO | None = None,
+              stdout: TextIO | None = None) -> int:
+    """setup.cli_main with this profile's plugin data and DAW setting, which an approved step making `daw` Kumi's DAW
+    sets. The DAW step uses a runtime this command starts, which stops before the command ends."""
     try:
         return setup.cli_main(daw, setup_daw=tools.setup_daw_caller(host, daw, {}), data_dir=host.data_dir(),
-                              plugin_dir=host.plugin_dir, stdin=stdin, stdout=stdout)
+                              plugin_dir=host.plugin_dir, stdin=stdin, stdout=stdout, current=host.daw(), use=use,
+                              make_current=host.set_daw)
     finally:
         host.runtimes.stop_all()

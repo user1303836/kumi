@@ -53,7 +53,13 @@ export function Wave({ audition, id, label, caption = label }: { audition: Audit
     <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: '1 1 160px', minWidth: 140 }}>
       <div style={{ ...S.row, justifyContent: 'space-between' }}>
         <span style={{ ...S.faint, ...S.ellipsis }}>{caption}</span>
-        <TextButton onClick={() => (playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)))}>{playing ? '■' : '▶'}</TextButton>
+        <TextButton
+          label={playing ? t('listen.stop', label) : t('listen.play', label)}
+          onClick={() => (playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)))}
+          pressed={playing}
+        >
+          {playing ? '■' : '▶'}
+        </TextButton>
       </div>
       <svg aria-label={t('listen.waveform', label)} height={36} preserveAspectRatio="none" role="img" viewBox="0 0 96 36" width="100%">
         {(peaks ?? []).map((peak, index) => (
@@ -71,10 +77,13 @@ function Rows({ view }: { view: ListenView }) {
   const compared = view.referenceTitle !== undefined
   const cell = { padding: '2px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' } as const
   return (
-    <table style={{ borderCollapse: 'collapse', fontSize: 12, color: T.text, width: '100%' }}>
+    // The card sits in the chat's markdown, whose prose styles reach any table in it: a 2em margin above and below,
+    // a taller line, and a bright line under each row and the header. The table sets its own, so only its rows' quiet
+    // lines show.
+    <table style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, color: T.text, width: '100%', margin: 0 }}>
       {compared && (
-        <thead>
-          <tr style={{ color: T.muted, fontSize: 11 }}>
+        <thead style={{ border: 'none' }}>
+          <tr style={{ color: T.muted, fontSize: 11, border: 'none' }}>
             <th style={{ ...cell, textAlign: 'left', fontWeight: 400 }} />
             <th style={{ ...cell, fontWeight: 400 }}>{t('listen.this')}</th>
             <th style={{ ...cell, fontWeight: 400 }}>{t('listen.reference')}</th>
@@ -84,7 +93,7 @@ function Rows({ view }: { view: ListenView }) {
       )}
       <tbody>
         {view.rows.map(row => (
-          <tr key={row.label} style={{ borderTop: `1px solid ${T.border}` }}>
+          <tr key={row.label} style={{ border: 'none', borderTop: `1px solid ${T.border}` }}>
             <td style={{ ...cell, textAlign: 'left', color: T.muted }}>{row.label}</td>
             <td style={cell}>{row.mine}</td>
             {compared && <td style={{ ...cell, color: T.muted }}>{row.reference ?? '—'}</td>}

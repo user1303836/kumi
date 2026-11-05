@@ -23,7 +23,7 @@ import { Audition } from '../shared/hooks.ts'
 import { english, MESSAGES, type Translate } from '../shared/i18n.ts'
 import { parseListen } from '../shared/listen.ts'
 import { foundSounds, jobOf, KumiStore } from '../shared/store.ts'
-import { I18n } from '../shared/ui.tsx'
+import { FocusStyle, I18n } from '../shared/ui.tsx'
 import { ask, wordsOf } from './actions.ts'
 import { ListenCard } from './card.tsx'
 import { GenerateCard } from './generate.tsx'
@@ -33,6 +33,7 @@ import { callId, Calls, forAnotherProfile, forChatInFront, forThisProfile, paylo
 import { MapWorkspace } from './map.tsx'
 import { MeasurementsWorkspace } from './measurements.tsx'
 import { KumiPane, ownerSession } from './pane.tsx'
+import { PET_LINES, petLine } from './pet.ts'
 import { OPEN_MAP_ON_FIND, SettingsPage } from './settings.tsx'
 export const PLUGIN_ID = 'kumi'
 export const MAP_WORKSPACE = 'kumi-sound-map'
@@ -51,7 +52,12 @@ const usePluginWords: ((pluginId: string) => Translate) | null = typeof sdk.useP
 /** Every Desktop root draws inside this: its components' `useT()` gets Desktop's words for the app's language. */
 function WithT({ children }: { children: ReactNode }) {
   const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english
-  return <I18n.Provider value={t}>{children}</I18n.Provider>
+  return (
+    <I18n.Provider value={t}>
+      <FocusStyle />
+      {children}
+    </I18n.Provider>
+  )
 }
 
 const plugin: HermesPlugin = {
@@ -228,6 +234,21 @@ const plugin: HermesPlugin = {
       closeMeasurements?.()
       audition.dispose()
     })
+
+    // The pet's bubble (newer Desktops): a finished change or job, once the producer turned it on in Kumi's settings.
+    // A store reset (another profile or connection) reads HISTORY afresh, which holds nothing new to say.
+    const pet = ctx.pet
+    if (pet && typeof pet.say === 'function') {
+      let last = store.get()
+      ctx.onDispose(
+        store.subscribe(() => {
+          const now = store.get()
+          const line = ctx.storage.get(PET_LINES, false) && pet.visible.get() ? petLine(last, now, wordsOf(ctx)) : null
+          last = now
+          if (line) pet.say(line.text, { id: line.id, tone: line.tone, ttlMs: 8000 })
+        })
+      )
+    }
 
     const contributions: PluginContribution[] = [
       {

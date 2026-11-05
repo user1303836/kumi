@@ -10,6 +10,8 @@ import { load } from './load.mjs'
 
 const { ListenCard } = await load('src/desktop/card.tsx', { react: 'real' })
 const { Audition } = await load('src/shared/hooks.ts', { react: 'real' })
+// The catalog's English, so a test checks what a surface says by its meaning, not by one wording of it.
+const { english } = await load('src/shared/i18n.ts')
 
 const analysis = (lufs, peak, centroid, file) => ({
   file,
@@ -97,12 +99,12 @@ test("the pane warns while Kumi isn't sure of the project and offers no Undo, un
     return renderToStaticMarkup(createElement(KumiPane, { ctx: {}, store, onOpenMap() {} }))
   }
   const warned = await render({ unsure })
-  for (const text of ['listen_track', 'Live stopped answering during the capture', 'Kumi put back what it changed meanwhile.', 'Ask Kumi to look again']) {
+  for (const text of ['listen_track', 'Live stopped answering during the capture', 'Kumi put back what it changed meanwhile.', english('pane.lookAgain')]) {
     assert.ok(warned.includes(text), `${text} in the pane`)
   }
   assert.ok(!warned.includes('>Undo<'))
   const cleared = await render({ unsure: null })
-  assert.ok(!cleared.includes('Ask Kumi to look again'))
+  assert.ok(!cleared.includes(english('pane.lookAgain')))
   assert.ok(cleared.includes('>Undo<'))
 })
 
@@ -268,6 +270,39 @@ test('Settings says whether Kumi can read compressed audio, in setup\'s own word
   assert.ok(!(await page({ state: 'ready' })).includes('Audio formats'))
 })
 
+test("Settings doesn't tell a producer connected through a current Live part to install it, and still does for an older one", async () => {
+  const { SettingsPage } = await load('src/desktop/settings.tsx', { react: 'real' })
+  const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
+  // An adopted Kumi's part: setup didn't install it, so setup says it's missing.
+  const setup = {
+    state: 'needs_daw_component',
+    next_step: 'install_daw_component',
+    message: "Kumi's runtime is ready; next, install Kumi's part in Live.",
+    daw: 'ableton',
+    daw_component: { name: 'DAW component', state: 'not_installed' }
+  }
+  const page = async component => {
+    const store = new KumiStore(async path => {
+      if (path.startsWith('/status')) return { connected: true, daw: 'ableton', revisions: {}, setup: { component } }
+      if (path.startsWith('/setup')) return setup
+      throw Object.assign(new Error('not here'), { status: 404 })
+    })
+    await store.refreshStatus()
+    await store.refresh('setup')
+    const ctx = { storage: { get: (_key, fallback) => fallback, set: () => {} } }
+    // The words as a producer reads them: markup escapes the apostrophe in "Kumi's".
+    return renderToStaticMarkup(createElement(SettingsPage, { ctx, store, onOpenMap: () => {} })).replaceAll('&#x27;', "'")
+  }
+  const current = await page({ installed: true, version: '1.0.104', bundled: '1.0.104' })
+  assert.ok(current.includes(english('settings.states.ready')) && current.includes(english('settings.partInUse')), current)
+  assert.ok(!current.includes(english('settings.states.needs_daw_component')) && !current.includes("install Kumi's part"), current)
+  // Right after a bridge bump the part Kumi is connected through is older than the one it ships: installing it is next.
+  const older = await page({ installed: true, version: '1.0.99', bundled: '1.0.104' })
+  for (const text of [english('settings.states.needs_daw_component'), "install Kumi's part in Live", english('settings.componentStates.not_installed')]) {
+    assert.ok(older.includes(text), `${text} in ${older}`)
+  }
+})
+
 test('what the agent found, or a search, is also listed by name above the map, for the keyboard', async () => {
   const { MapCanvas } = await load('src/shared/MapCanvas.tsx', { react: 'real' })
   const ids = Array.from({ length: 8 }, (_, index) => `s-r7-00${10 + index}`)
@@ -278,13 +313,15 @@ test('what the agent found, or a search, is also listed by name above the map, f
     sounds: { ...Object.fromEntries(ids.map((id, index) => [id, { name: `Dusty Snare ${index + 1}.wav`, class: 'snare' }])), 's-r7-0099': { name: 'Kick 1.wav', class: 'kick' } }
   }
   const draw = (found, selected = null) =>
-    renderToStaticMarkup(createElement(MapCanvas, { map, found, playing: null, selected, onPick: () => {}, empty: 'none' }))
+    renderToStaticMarkup(createElement(MapCanvas, { map, found, playing: null, selected, onPick: () => {}, onSelect: () => {}, empty: 'none' }))
+  // The listed rows: after the list's label, before the canvas (the legend's toggles are pressed buttons too).
+  const rows = html => html.slice(html.indexOf('role="group"'), html.indexOf('<canvas'))
   const html = draw({ revision: 'r7', ids: ids.slice(0, 2) }, ids[1])
   assert.ok(html.includes('aria-label="Sounds Kumi found"'), html)
   assert.ok(html.includes('Dusty Snare 1.wav') && html.includes('Dusty Snare 2.wav') && !html.includes('Kick 1.wav'), html)
-  assert.equal(html.split('aria-pressed="true"').length - 1, 1, 'the picked sound is the pressed row')
+  assert.equal(rows(html).split('aria-pressed="true"').length - 1, 1, 'the picked sound is the pressed row')
   const many = draw({ revision: 'r7', ids })
-  assert.equal(many.split('<button aria-pressed').length - 1, 6)
+  assert.equal(rows(many).split('<button aria-pressed').length - 1, 6)
   assert.ok(many.includes('and 2 more on the map'), many)
   // A find from another map revision names sounds this map may not have: no list.
   assert.ok(!draw({ revision: 'r6', ids }).includes('Sounds Kumi found'))
@@ -302,9 +339,15 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
     ]
   }
   const html = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, action: () => null }))
-  for (const text of ['Live stopped answering mid-change.', 'Ask Kumi to look again before another change.', 'Bass was changed by hand since, so Kumi kept it.', 'Bass · mixer · c3', 'Tempo 120 → 124']) {
+  for (const text of ['Live stopped answering mid-change.', english('history.lookFirst'), 'Bass was changed by hand since, so Kumi kept it.', 'Bass · mixer · c3', 'Tempo 120 → 124']) {
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
+  // An earlier runtime's applied row, while Kumi answers: it can't be undone because Kumi restarted since, and says
+  // where to undo it. A stale snapshot clears every row's undo, so there it says nothing of a restart.
+  const restarted = english('history.restartedSince', 'Live').replaceAll("'", '&#x27;')
+  const live = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, live: true, daw: 'ableton' }))
+  assert.ok(live.includes(restarted) && live.includes(english('history.expired').replaceAll("'", '&#x27;')), live)
+  assert.ok(!html.includes(restarted))
 })
 
 test('a Japanese window reads FOCUS and HISTORY in Japanese; the rows keep their own names', async () => {

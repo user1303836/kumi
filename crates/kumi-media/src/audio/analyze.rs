@@ -1,7 +1,7 @@
 //! One pass measures loudness, balance, stereo, dynamics, tempo, key, pitch, harmonics and movement.
 
 use super::{
-    decode::{open_audio_to, AudioError, AudioSource},
+    decode::{open_audio_to_with_options, AudioError, AudioSource, DecodeOptions},
     dsp::*,
 };
 use kumi_common::abort::{Signal, SignalExt};
@@ -107,6 +107,7 @@ pub struct AnalyzeOptions {
     pub seconds: Option<f64>,
     pub signal: Option<Signal>,
     pub transcribe: bool,
+    pub decode: DecodeOptions,
 }
 /// How much of a file an analysis hears when it isn't told, in seconds; and the most it hears when asked (a whole
 /// song heard in the Set, a long reference), an hour.
@@ -117,7 +118,7 @@ pub fn reach(options: &AnalyzeOptions) -> f64 {
     options.start.unwrap_or(0.0).max(0.0) + options.seconds.unwrap_or(USUAL).clamp(0.0, LONGEST) + 1.0
 }
 pub async fn analyze_file(path: &str, options: AnalyzeOptions) -> Result<Analysis, AudioError> {
-    let mut source = open_audio_to(path, options.signal.clone(), Some(reach(&options))).await?;
+    let mut source = open_audio_to_with_options(path, options.signal.clone(), Some(reach(&options)), &options.decode).await?;
     let result = analyze_source(&mut source, path, options).await;
     source.close().await?;
     result

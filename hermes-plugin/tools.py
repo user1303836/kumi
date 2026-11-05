@@ -159,6 +159,11 @@ class Host:
     def set_library_folders(self, folders: list[str]) -> None:
         self._ctx.set_config("library_folders", folders)
 
+    def set_daw(self, daw: str) -> None:
+        """Make `daw` Kumi's DAW in this profile (the plugin's `daw` setting), after the producer approved a setup
+        plan that says so."""
+        self._ctx.set_config("daw", daw)
+
     def install(self, data_dir: Path) -> runtime.Install:
         return runtime.installed(data_dir, self._pinned())
 
@@ -207,14 +212,16 @@ class Host:
         return None
 
     def identity(self, kwargs: dict) -> dict:
-        """Hermes's identity for one call, which the runtime records and dedups on (C2 `_host`, CC-5). Hermes gives a
-        tool handler its session and task; the model's tool-call id comes from the approval hook's record of this
-        call, and is null without one (never made up)."""
+        """Hermes's identity for one call, which the runtime records and dedups on (C2 `_host`, CC-5), and keys a
+        preview's pins on, so a hook's preview and its dispatch name the same call. Hermes gives the approval hook the
+        model's tool-call id (`tool_call_id`), and a tool handler only its session and task, so a handler takes the id
+        from the hook's record of this call (`kumi_call`). Null without either (never made up)."""
         call = kwargs.get("kumi_call")
+        ident = call.tool_call_id if isinstance(call, calls.Entry) else kwargs.get("tool_call_id")
         return {"profile_id": self.profile(),
                 "session_id": kwargs.get("session_id") or None,
                 "task_id": kwargs.get("task_id") or None,
-                "tool_call_id": call.tool_call_id if isinstance(call, calls.Entry) else None,
+                "tool_call_id": ident if isinstance(ident, str) and ident else None,
                 "request_id": uuid.uuid4().hex}
 
     def on_session_finalize(self, session_id: str | None = None, **kwargs: Any) -> None:
@@ -414,14 +421,20 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
         return {"error": {"code": "invalid", "reason": f"Kumi works in {', '.join(schemas.DAWS)}, not {daw!r}."}}
     data_dir = host.data_dir()
     setup_daw = setup_daw_caller(host, daw, kwargs)
+    current = host.daw()  # the plugin's DAW setting: a DAW set up first becomes it, in the plan's own approval
     if action == "plan":
         try:
-            planned = setup.plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=host.plugin_dir)
+            planned = setup.plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=host.plugin_dir,
+                                 current=current)
         except setup.SetupError as error:
             return {"error": {"code": error.code, "reason": setup.reason_for_model(error.code, error.message)}}
         next_action = {"runtime": "install", "daw_component": "install", "owned_elsewhere": "adopt",
+                       "use_daw": "install",
                        "ffmpeg": "install (optional: ask the producer; setup is done either way)"}.get(planned["step"])
-        return {**setup.plan_for_model(planned), "next": f"kumi_setup {next_action}" if next_action else None}
+        shown = {**setup.plan_for_model(planned), "next": f"kumi_setup {next_action}" if next_action else None}
+        if planned["step"] == "none" and setup.next_daw(daw, current):  # set up, but another DAW stays Kumi's
+            shown["next"] = setup.next_daw(daw, current) + " The producer runs it in a terminal."
+        return shown
     call = kwargs.get("kumi_call")
     digest = call.extra.get("digest") if isinstance(call, calls.Entry) else None
     if not isinstance(digest, str) or not digest:
@@ -429,14 +442,25 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
                                                             "approved setup plan. Run kumi_setup plan first."}}
     if action == "install":
         result = setup.install(daw, expected_digest=digest, setup_daw=setup_daw, data_dir=data_dir,
-                               plugin_dir=host.plugin_dir)
+                               plugin_dir=host.plugin_dir, current=current)
     else:
         result = setup.adopt(daw, expected_digest=digest, setup_daw=setup_daw, data_dir=data_dir,
-                             plugin_dir=host.plugin_dir)
+                             plugin_dir=host.plugin_dir, current=current)
     if not result.get("ok"):
         error = result.get("error") or {}
         code = error.get("code") or "failed"
         return {"error": {"code": code, "reason": setup.reason_for_model(code, error.get("message"))}}
+    if result.get("use_daw") == daw:  # the producer approved making it Kumi's DAW (the runtime already works in it)
+        name = schemas.DAW_NAMES[daw]
+        try:
+            host.set_daw(daw)
+            said = f"{name} is Kumi's DAW in this profile now."
+        except Exception:
+            log.warning("Kumi couldn't change its DAW setting")
+            said = (f"Kumi couldn't change its DAW setting, so it still connects to {schemas.DAW_NAMES[current]}: "
+                    f"the producer sets it to {daw} in Hermes's settings for the Kumi plugin.")
+            result = {key: value for key, value in result.items() if key != "use_daw"}
+        result = {**result, "message": f"{result['message']} {said}".strip()}
     if action == "adopt" or result.get("step") in ("runtime", "ffmpeg"):
         host.runtimes.stop(data_dir)  # the next start uses the new runtime, the adopted --kumi-home or the ffmpeg
     return {**result, "status": setup.for_model(result.get("status") or {})}
@@ -710,12 +734,35 @@ def kumi_sounds(host: Host, args: dict, **kwargs: Any) -> dict:
     return result
 
 
+LIBRARY_ACTIONS = ("status", "add_folder", "scan", "cancel")
+
+
+def library_refusal(args: dict) -> str | None:
+    """What's wrong with a kumi_library call's arguments, or None; the hook checks this, and the handler again, before
+    anything reaches the runtime (CC-14): the action, a cancel's job id in the runtime's job-id form, a folder never
+    with cancel and a job id only with it."""
+    action = args.get("action")
+    if action not in LIBRARY_ACTIONS:
+        return "kumi_library's action is status, add_folder, scan or cancel."
+    if action != "cancel":
+        return "job_id goes only with cancel." if args.get("job_id") is not None else None
+    if args.get("folder") is not None:
+        return "cancel takes the scan's job_id, never a folder."
+    if snapshots.file_id(args.get("job_id")) is None:
+        return "cancel needs the scan's job_id, as the scan returned it."
+    return None
+
+
 def kumi_library(host: Host, args: dict, **kwargs: Any) -> dict:
     """The library tool; a folder the producer approved adding is also kept in the plugin's library_folders setting, so
-    the next runtime starts with it (`--library-root`)."""
-    action = args.get("action")
-    if action not in ("status", "add_folder", "scan"):
-        return {"error": {"code": "invalid", "reason": "action is status, add_folder or scan."}}
+    the next runtime starts with it (`--library-root`). A cancel asks the runtime to stop the scan it names (CC-14): the
+    reply acknowledges the request, and kumi_job says `cancelled` once the scan has stopped."""
+    refusal = library_refusal(args)
+    if refusal is not None:
+        return {"error": {"code": "invalid", "reason": refusal}}
+    action = args["action"]
+    if action == "cancel":
+        args = {"action": "cancel", "job_id": args["job_id"]}
     if action == "add_folder":
         folder, refusal = snapshots.library_folder(args.get("folder"), hermes_home=host.hermes_home())
         if refusal is not None:

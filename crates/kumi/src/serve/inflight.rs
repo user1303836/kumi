@@ -44,6 +44,8 @@ pub fn begin(ctx: &Ctx, op: &str, title: Option<&str>, identity: CallIdentity) -
     let record = json!({
         "op": op,
         "title": title,
+        "profile_id": identity.profile_id,
+        "session_id": identity.session_id,
         "tool_call_id": identity.tool_call_id,
         "digest": identity.digest,
         "project_key": ctx.link().project().map(|project| project.key),

@@ -1,23 +1,29 @@
 // The sound map, drawn on a canvas: each sound of the library where Kumi's layout put it, coloured by its group.
 // Wheel zooms, a drag pans, a click picks the sound under the pointer. Search and the legend dim what they leave out;
 // sounds the agent just found get a ring. What a search or a find picks out is also listed by name, for the keyboard.
+// On the keyboard (`mapKey`), the arrows move to the nearest sound that way, Shift+←/→ step through every sound in turn,
+// Shift+↑/↓ zoom and Home shows the whole map; each sound reached is named to a screen reader, and Tab goes on to its
+// Play and Use….
 // Both UI halves use it; what a picked sound can do comes from `actions`.
 import { CANVAS, T } from '@kumi/theme'
-import type { ReactNode } from 'react'
+import type { KeyboardEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num, seconds } from './format.ts'
-import { buildModel, fitView, frame, type MapViewport, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
+import { buildModel, fitView, frame, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
-import { Chip, S, useT } from './ui.tsx'
+import { Chip, FOCUSABLE, S, useT } from './ui.tsx'
 
 export interface MapCanvasProps {
   map: SoundMap | null
   found: KumiState['found']
   playing: string | null
   selected: string | null
+  /** A click, or a found list's row: pick that sound and play it. */
   onPick: (id: string) => void
+  /** The keyboard moved to a sound: picked, not played (its Play is the next tab stop). */
+  onSelect: (id: string) => void
   actions?: (id: string, sound: MapSound) => ReactNode
   empty: ReactNode
 }
@@ -42,7 +48,10 @@ function resolve(canvas: HTMLCanvasElement): Record<keyof typeof CANVAS, string>
   }
 }
 
-export function MapCanvas({ map, found, playing, selected, onPick, actions, empty }: MapCanvasProps) {
+// Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
+let maps = 0
+
+export function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }: MapCanvasProps) {
   const t = useT()
   const model = useMemo(() => buildModel(map), [map])
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
@@ -53,6 +62,9 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
   const [hidden, setHidden] = useState<Set<number>>(() => new Set())
   const [hover, setHover] = useState<{ index: number; x: number; y: number } | null>(null)
   const drag = useRef<{ x: number; y: number; moved: boolean; view: MapViewport } | null>(null)
+  // What a screen reader is told when the keyboard moves to a sound.
+  const [said, setSaid] = useState('')
+  const [hintId] = useState(() => `kumi-map-keys-${(maps += 1)}`)
   const mapSize = Math.max(1, Math.min(size.width, size.height) - 32)
   // The canvas exists only once the map has points: the effects that attach to it wait for that.
   const hasPoints = model.points.length > 0
@@ -77,6 +89,20 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
     const ids = searched ?? foundIds
     return ids ? [...ids].filter(id => indexOf.has(id) && visible(indexOf.get(id) as number)) : []
   }, [searched, foundIds, indexOf, visible])
+
+  // The canvas paints the theme's colours itself, and neither host tells a plugin its theme changed (Desktop's
+  // useTheme is newer than some Desktops; the dashboard has none): it looks at them once a second, and a light or dark
+  // switch redraws it.
+  const [painted, setPainted] = useState('')
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const timer = setInterval(() => {
+      const now = Object.values(resolve(canvas)).join()
+      setPainted(current => (current === now ? current : now))
+    }, 1000)
+    return () => clearInterval(timer)
+  }, [hasPoints])
 
   // Follow the box's size (the pane or tab is resized all the time).
   useEffect(() => {
@@ -129,8 +155,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
     const colors = resolve(canvas)
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
     context.clearRect(0, 0, size.width, size.height)
-    const radius = Math.min(5, 2.2 + Math.log2(view.scale) * 0.8)
+    // A small map (a fresh folder of a few sounds) draws bigger points than a library of thousands.
+    const count = model.points.length
+    const base = count <= 40 ? 5 : count <= 300 ? 3.2 : 2.2
+    const radius = Math.max(1.5, Math.min(base + 3, base + Math.log2(view.scale) * 0.8))
     const groupColor = new Map(model.groups.map(group => [group.key, group.color]))
+    const labelled: [number, number, string][] = []
     // Dimmed points first, then the ones the search and legend keep, so those sit on top.
     for (const pass of [false, true]) {
       context.globalAlpha = pass ? 0.92 : 0.16
@@ -142,7 +172,26 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
         context.beginPath()
         context.arc(x, y, radius, 0, Math.PI * 2)
         context.fill()
+        if (pass) labelled.push([x, y, model.sounds[point.id]?.name ?? ''])
       })
+    }
+    // Few enough on screen (a small map, a narrow search, or zoomed in) to read: each one's name beside it, the sound
+    // file's own name drawn as canvas text, never markup. A name that would overlap one already drawn is left out, so
+    // a tight cluster stays legible (its sounds are named on hover and in the list above).
+    if (labelled.length <= 40) {
+      context.globalAlpha = 0.85
+      context.fillStyle = colors.text
+      context.font = `11px ${getComputedStyle(canvas).fontFamily || 'sans-serif'}`
+      context.textBaseline = 'middle'
+      const placed: [number, number, number, number][] = []
+      for (const [x, y, name] of labelled) {
+        const text = mapLabel(name)
+        if (!text) continue
+        const box: [number, number, number, number] = [x + radius + 4, y - 7, context.measureText(text).width, 14]
+        if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue
+        placed.push(box)
+        context.fillText(text, box[0], y)
+      }
     }
     context.globalAlpha = 1
     const ring = (id: string, color: string, extra: number, width: number) => {
@@ -158,11 +207,36 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
     foundIds?.forEach(id => ring(id, colors.accent, 3, 1.5))
     if (playing) ring(playing, colors.accent, 6, 2)
     if (selected) ring(selected, colors.strong, 4, 2)
-  }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize])
+  }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize, painted])
 
   const at = (event: { clientX: number; clientY: number }): [number, number] => {
     const rect = canvasRef.current?.getBoundingClientRect()
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0]
+  }
+
+  const onKey = (event: KeyboardEvent<HTMLCanvasElement>) => {
+    const key = mapKey(event)
+    if (!view || !key) return
+    event.preventDefault()
+    const from = selected === null ? undefined : indexOf.get(selected)
+    const picked = from !== undefined && visible(from) ? from : undefined
+    const middle: [number, number] = [size.width / 2, size.height / 2]
+    if ('fit' in key) {
+      setView(fitView(size.width, size.height))
+    } else if ('zoom' in key) {
+      // Around the sound picked, so it stays where it is; else around the middle.
+      const [x, y] = picked === undefined ? middle : toScreen(view, mapSize, model.points[picked].x, model.points[picked].y)
+      setView(zoomAt(view, key.zoom, x, y))
+    } else {
+      const next = moveWith(model, view, mapSize, picked, key, middle, visible)
+      if (next < 0) return
+      const point = model.points[next]
+      const [x, y] = toScreen(view, mapSize, point.x, point.y)
+      setView(keepInView(view, x, y, size.width, size.height))
+      onSelect(point.id)
+      const sound = model.sounds[point.id]
+      setSaid([clean(sound?.name ?? point.id, 80), clean(sound?.class, 16), clean(sound?.folder, 60)].filter(Boolean).join(', '))
+    }
   }
 
   if (!model.points.length) {
@@ -179,6 +253,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
       <div style={{ ...S.row, flexWrap: 'wrap', padding: '8px 10px', gap: 6, borderBottom: `1px solid ${T.border}` }}>
         <input
           aria-label={t('map.search')}
+          className={FOCUSABLE}
           onChange={event => setQuery(event.target.value)}
           placeholder={t('map.searchHint')}
           style={{ flex: '1 1 180px', minWidth: 140, font: 'inherit', fontSize: 12, padding: '3px 8px', borderRadius: 3, border: `1px solid ${T.border}`, background: 'transparent', color: T.text }}
@@ -194,6 +269,8 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
           const off = hidden.has(group.key)
           return (
             <button
+              aria-pressed={!off}
+              className={FOCUSABLE}
               key={group.key}
               onClick={() =>
                 setHidden(current => {
@@ -220,6 +297,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
             return (
               <button
                 aria-pressed={selected === id}
+                className={FOCUSABLE}
                 key={id}
                 onClick={() => onPick(id)}
                 type="button"
@@ -236,7 +314,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
       <div ref={boxRef} style={{ position: 'relative', flex: 1, minHeight: 160, overflow: 'hidden' }}>
         <canvas
           ref={canvasRef}
+          aria-describedby={hintId}
           aria-label={t('map.canvas')}
+          aria-roledescription={t('map.roledescription')}
+          className={FOCUSABLE}
+          onKeyDown={onKey}
           onPointerDown={event => {
             if (!view) return
             event.currentTarget.setPointerCapture?.(event.pointerId)
@@ -265,8 +347,17 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
           }}
           onPointerLeave={() => setHover(null)}
           onDoubleClick={() => setView(fitView(size.width, size.height))}
-          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', cursor: hover ? 'pointer' : drag.current?.moved ? 'grabbing' : 'grab', touchAction: 'none' }}
+          role="application"
+          tabIndex={0}
+          // The box clips what's outside it: the focus ring sits inside the canvas's edge.
+          style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', outlineOffset: -3, cursor: hover ? 'pointer' : drag.current?.moved ? 'grabbing' : 'grab', touchAction: 'none' }}
         />
+        <span id={hintId} style={S.hidden}>
+          {t('map.keys')}
+        </span>
+        <span aria-live="polite" style={S.hidden}>
+          {said}
+        </span>
         {hovered && hoveredSound && hover && (
           <div
             style={{ position: 'absolute', left: Math.min(hover.x + 12, Math.max(0, size.width - 220)), top: Math.max(0, hover.y - 34), maxWidth: 220, pointerEvents: 'none', padding: '3px 7px', borderRadius: 3, background: T.card, border: `1px solid ${T.border}`, fontSize: 11.5, color: T.text, ...S.ellipsis }}
