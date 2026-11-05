@@ -5,15 +5,17 @@
 use async_trait::async_trait;
 use kumi_common::abort::{Signal, SignalExt};
 use kumi_library::{
-    daws::{Daws, LibrarySources, ProjectFormat},
+    create_library,
+    daws::{Daws, Layout, LibrarySources, Places, ProjectFormat},
     features::MeasureOptions,
     learn::{learn, library_logs, LearnOptions, LearnPlan, PresetEntry, SetEntry, SoundEntry},
-    plan::kumi_sets,
+    plan::{kumi_sets, plan_learning, PlanOptions},
     search::SoundIndex,
     sets::{Clips, SetSummary, SetTrack},
-    sources::{Source, SourceKind},
+    sources::{library_sources, recent_projects, Source, SourceKind, SourceOptions},
     store::Entry,
     tools::{library_tools_for, LearningState, LibraryAccess, LibraryToolsOptions},
+    LibraryOptions,
 };
 use kumi_types::{
     daw::{DawId, DawProfile},
@@ -97,6 +99,8 @@ async fn a_daws_project_files_are_learned_as_its_projects_beside_lives_sets_leav
             let plan = LearnPlan {
                 dir: dir.to_string_lossy().into(),
                 sources: vec![Source { path: music.to_string_lossy().into(), label: "Music".into(), kind: SourceKind::Folder }],
+                approved_folders: None,
+                decode: Default::default(),
                 set_folders: vec![],
                 set_files: vec![recent.to_string_lossy().into(), recent_copy.to_string_lossy().into()],
                 plugin_presets: vec![],
@@ -121,6 +125,8 @@ async fn a_daws_project_files_are_learned_as_its_projects_beside_lives_sets_leav
             let plan = LearnPlan {
                 dir: dir.to_string_lossy().into(),
                 sources: vec![Source { path: music.to_string_lossy().into(), label: "Music".into(), kind: SourceKind::Folder }],
+                approved_folders: None,
+                decode: Default::default(),
                 set_folders: vec![],
                 set_files: vec![],
                 plugin_presets: vec![],
@@ -324,6 +330,8 @@ async fn a_project_learning_couldnt_read_is_told_with_why() {
             let plan = LearnPlan {
                 dir: dir.to_string_lossy().into(),
                 sources: vec![Source { path: music.to_string_lossy().into(), label: "Music".into(), kind: SourceKind::Folder }],
+                approved_folders: None,
+                decode: Default::default(),
                 set_folders: vec![],
                 set_files: vec![],
                 plugin_presets: vec![],
@@ -370,4 +378,200 @@ async fn the_projects_kumi_saw_open_include_a_registered_daws_by_its_extension()
     };
     assert_eq!(seen(kumi_sets(projects.to_str(), Daws(&WITH_SONGS)).await), ["Night Drive.als", "Tracker Song.song"]);
     assert_eq!(seen(kumi_sets(projects.to_str(), Daws::default()).await), ["Night Drive.als"]);
+}
+
+/// Discovery would consult the producer's DAW/home paths. Restricted planning must never call any of it.
+struct ForbiddenDiscovery;
+
+impl LibrarySources for ForbiddenDiscovery {
+    fn profile(&self) -> &'static DawProfile {
+        &DawProfile::ABLETON
+    }
+    fn places(&self, _: &SourceOptions) -> Places {
+        panic!("restricted sources consulted Live/Splice places")
+    }
+    fn own_library(&self, _: &SourceOptions) -> Vec<Source> {
+        panic!("restricted sources consulted a DAW library")
+    }
+    fn recent_projects(&self, _: &SourceOptions) -> Vec<String> {
+        panic!("restricted sources consulted recent projects")
+    }
+    fn layout(&self) -> &'static Layout {
+        panic!("restricted sources consulted a DAW layout")
+    }
+}
+
+static FORBIDDEN_DISCOVERY: ForbiddenDiscovery = ForbiddenDiscovery;
+static NO_DISCOVERY: [&'static dyn LibrarySources; 1] = [&FORBIDDEN_DISCOVERY];
+
+fn canonical_folder(path: &Path) -> String {
+    path.canonicalize().unwrap().to_string_lossy().into_owned()
+}
+
+#[tokio::test]
+async fn restricted_sources_ignore_discovery_remembered_folders_and_revoked_approvals() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let dir = home.path().join("index");
+            let approved = home.path().join("approved");
+            put(&approved.join("Approved.als"), LIVE_SET);
+            let approved = canonical_folder(&approved);
+            let forbidden = ["Live/User Library", "Splice", "Music", "Library/Audio/Presets", "remembered", "settings", "recent"];
+            for folder in forbidden {
+                put(&home.path().join(folder).join("Forbidden.als"), LIVE_SET);
+            }
+            let remembered = vec![home.path().join("remembered").to_string_lossy().into_owned(), approved.clone()];
+            let saved = serde_json::to_string(&remembered).unwrap();
+            put(&dir.join("folders.json"), &saved);
+            let projects = home.path().join("projects");
+            let project = home.path().join("recent/Forbidden.als");
+            put(&projects.join("a".repeat(32)).join("last-seen.json"), &json!({"path": project}).to_string());
+
+            // The second run revokes the only approval; folders.json still lists it, but cannot reauthorize it.
+            for roots in [vec![approved.clone()], vec![]] {
+                let source_options = SourceOptions {
+                    home: Some(home.path().to_string_lossy().into()),
+                    platform: Some("darwin".into()),
+                    folders: Some(vec![home.path().join("settings").to_string_lossy().into()]),
+                    approved_folders: Some(roots.clone()),
+                    ..Default::default()
+                };
+                let sources = library_sources(Daws(&NO_DISCOVERY), &source_options);
+                assert_eq!(sources.iter().map(|source| source.path.clone()).collect::<Vec<_>>(), roots);
+                assert!(sources.iter().all(|source| source.kind == SourceKind::Folder));
+                assert!(recent_projects(Daws(&NO_DISCOVERY), &source_options).is_empty());
+                let planning = PlanOptions {
+                    dir: dir.to_string_lossy().into(),
+                    folders: source_options.folders.clone(),
+                    sources: Some(source_options.clone()),
+                    projects_dir: Some(projects.to_string_lossy().into()),
+                    ..Default::default()
+                };
+                // This is the forked learner's serialization boundary: DAWs are injected by the child.
+                let mut planning: PlanOptions = serde_json::from_value(serde_json::to_value(planning).unwrap()).unwrap();
+                planning.daws = Daws(&NO_DISCOVERY);
+                let plan = plan_learning(planning).await;
+                let plan: LearnPlan = serde_json::from_value(serde_json::to_value(plan).unwrap()).unwrap();
+                assert_eq!(plan.sources, sources);
+                assert_eq!(plan.approved_folders, Some(roots.clone()));
+                assert!(plan.set_folders.is_empty());
+                assert!(plan.set_files.is_empty());
+                assert!(plan.plugin_presets.is_empty());
+                let learned = learn(LearnOptions { rebuild: true, daws: Daws(&NO_DISCOVERY), ..LearnOptions::new(plan, Signal::new()) })
+                    .await
+                    .unwrap();
+                assert_eq!(learned.sets.known, roots.len());
+                assert_eq!(learned.sounds.known, 0);
+                assert_eq!(learned.presets.known, 0);
+                // Old log rows cannot make an empty allowlist fall back to all known sounds.
+                for path in [Path::new(&approved).join("Old.wav"), home.path().join("remembered/Old.wav")] {
+                    put(&path, "");
+                    library_logs(&dir.to_string_lossy())
+                        .sounds
+                        .append(&[SoundEntry {
+                            file: Entry { path: path.to_string_lossy().into(), size: 0, mtime: 1, gone: None },
+                            ..Default::default()
+                        }])
+                        .await
+                        .unwrap();
+                }
+                let library = create_library(LibraryOptions {
+                    dir: dir.to_string_lossy().into(),
+                    folders: source_options.folders.clone(),
+                    projects_dir: Some(projects.to_string_lossy().into()),
+                    sources: Some(source_options),
+                    daws: Daws(&NO_DISCOVERY),
+                    fork: Some(false),
+                    ..Default::default()
+                });
+                assert_eq!(library.sources().await, sources);
+                assert_eq!(library.sound_index().await.unwrap().entries.len(), roots.len());
+                library.remember(vec![home.path().join("remembered").to_string_lossy().into()]);
+                assert_eq!(library.sources().await, sources);
+                assert_eq!(std::fs::read_to_string(dir.join("folders.json")).unwrap(), saved);
+                library.close().await;
+            }
+        })
+        .await;
+}
+
+#[test]
+fn restricted_sources_reject_network_device_and_relative_roots() {
+    let sources = SourceOptions {
+        approved_folders: Some(
+            [
+                r"\\server\share",
+                "//server/share",
+                r"\\?\UNC\server\share",
+                r"\\?\GLOBALROOT\Device\HarddiskVolume1",
+                r"\\.\C:\Samples",
+                r"\??\C:\Samples",
+                "~/Music",
+                "relative",
+            ]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        ),
+        ..Default::default()
+    };
+    assert!(library_sources(Daws(&NO_DISCOVERY), &sources).is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn restricted_learning_skips_escaped_symlinks_and_confines_auxiliary_walks() {
+    use std::os::unix::fs::symlink;
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let home = tempfile::tempdir().unwrap();
+            let approved = home.path().join("approved");
+            let outside = home.path().join("approved-other");
+            put(&approved.join("Allowed.als"), LIVE_SET);
+            put(&outside.join("Escaped.als"), LIVE_SET);
+            let approved = canonical_folder(&approved);
+            let outside = canonical_folder(&outside);
+            symlink(&outside, Path::new(&approved).join("escaped-directory")).unwrap();
+            symlink(Path::new(&outside).join("Escaped.als"), Path::new(&approved).join("escaped-file.als")).unwrap();
+            let source_options = SourceOptions { approved_folders: Some(vec![approved.clone()]), ..Default::default() };
+            let mut plan = plan_learning(PlanOptions {
+                dir: home.path().join("index").to_string_lossy().into(),
+                sources: Some(source_options),
+                daws: Daws(&NO_DISCOVERY),
+                ..Default::default()
+            })
+            .await;
+            // Even stale auxiliary inputs in a serialized plan cannot grant another root.
+            plan.sources.push(Source { path: outside.clone(), label: "Outside".into(), kind: SourceKind::Folder });
+            plan.sources.push(Source { path: approved.clone(), label: "DAW".into(), kind: SourceKind::Daw(DawId::Ableton) });
+            plan.set_folders = vec![outside.clone()];
+            plan.set_files = vec![Path::new(&outside).join("Escaped.als").to_string_lossy().into()];
+            plan.plugin_presets = vec![outside.clone()];
+            let plan: LearnPlan = serde_json::from_value(serde_json::to_value(plan).unwrap()).unwrap();
+            let dir = plan.dir.clone();
+            let learned = learn(LearnOptions { daws: Daws(&NO_DISCOVERY), ..LearnOptions::new(plan, Signal::new()) }).await.unwrap();
+            assert_eq!(learned.sets.known, 1);
+            assert_eq!(learned.failed, 0);
+            let sets = library_logs(&dir).sets.load().await;
+            assert_eq!(sets.keys().collect::<Vec<_>>(), vec![Path::new(&approved).join("Allowed.als").to_string_lossy().into_owned()]);
+
+            // Replacing the approved root after planning must not turn its new symlink target into an approval.
+            let options = SourceOptions { approved_folders: Some(vec![approved.clone()]), ..Default::default() };
+            let plan = plan_learning(PlanOptions {
+                dir: home.path().join("replaced-index").to_string_lossy().into(),
+                sources: Some(options.clone()),
+                daws: Daws(&NO_DISCOVERY),
+                ..Default::default()
+            })
+            .await;
+            std::fs::rename(&approved, home.path().join("old-approved")).unwrap();
+            symlink(&outside, &approved).unwrap();
+            assert!(library_sources(Daws(&NO_DISCOVERY), &options).is_empty());
+            let learned = learn(LearnOptions { daws: Daws(&NO_DISCOVERY), ..LearnOptions::new(plan, Signal::new()) }).await.unwrap();
+            assert_eq!(learned.sets.known, 0);
+            assert_eq!(learned.sounds.known, 0);
+            assert_eq!(learned.presets.known, 0);
+        })
+        .await;
 }

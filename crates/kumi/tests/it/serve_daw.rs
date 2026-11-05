@@ -134,6 +134,8 @@ impl Lab {
         let args = Args {
             state_dir: home.path().join("state"),
             kumi_home: transport,
+            hermes_home: None,
+            hermes_root: None,
             daw,
             library_roots: vec![],
             media_roots: vec![],
@@ -351,6 +353,8 @@ async fn live_connect_with(owner: Option<&std::path::Path>, legacy: bool) -> (Re
     let args = Args {
         state_dir: home.path().join("state"),
         kumi_home: transport,
+        hermes_home: None,
+        hermes_root: None,
         daw: DawId::Ableton,
         library_roots: vec![],
         media_roots: vec![],

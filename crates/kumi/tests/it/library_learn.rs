@@ -158,6 +158,7 @@ async fn native_measurement_pool_learns_reuses_processes_and_replaces_lost_or_ti
         mtime: 1,
         start: None,
         seconds: None,
+        decode: Default::default(),
     };
     let pool =
         MeasurePool::with_worker(1, WorkerProgram::new(env!("CARGO_BIN_EXE_kumi").into(), "library-measure"), Duration::from_secs(10));
@@ -188,13 +189,60 @@ async fn native_measurement_pool_learns_reuses_processes_and_replaces_lost_or_ti
     assert_eq!([progress.sounds.known, progress.presets.known, progress.sets.known], [7, 4, 2]);
     assert_eq!(progress.failed, 0);
 }
+
+#[tokio::test]
+async fn measurement_worker_keeps_installed_only_decoder_policy_per_job() {
+    use kumi_media::audio::DecodeOptions;
+
+    let root = tempfile::tempdir().unwrap();
+    let pcm = root.path().join("Kick.wav");
+    put(&pcm, fixture::wav(&[fixture::kick(50., 0.2)], 44100));
+    let pool =
+        MeasurePool::with_worker(1, WorkerProgram::new(env!("CARGO_BIN_EXE_kumi").into(), "library-measure"), Duration::from_secs(10));
+    for ffmpeg in [None, Some(root.path().join("missing-decoder"))] {
+        let mut job = MeasureJob {
+            id: 0,
+            path: pcm.to_string_lossy().into(),
+            relative: "Kick.wav".into(),
+            size: std::fs::metadata(&pcm).unwrap().len(),
+            mtime: 1,
+            start: None,
+            seconds: None,
+            decode: DecodeOptions { installed_only: true, ffmpeg },
+        };
+        let encoded = serde_json::to_value(&job).unwrap();
+        let decoded: MeasureJob = serde_json::from_value(encoded).unwrap();
+        assert_eq!(decoded.decode, job.decode);
+        let entry = pool.run(0, decoded).await.unwrap();
+        assert!(entry.error.is_none(), "{:?}", entry.error);
+        assert!(entry.vector.is_some());
+
+        let compressed = root.path().join("Kick.mp3");
+        put(&compressed, b"not a compressed audio stream");
+        job.path = compressed.to_string_lossy().into();
+        job.relative = "Kick.mp3".into();
+        let entry = pool.run(0, job).await.unwrap();
+        assert!(entry.error.as_deref().unwrap().starts_with("The approved ffmpeg dependency is unavailable"));
+        assert!(entry.vector.is_none());
+    }
+    pool.close().await;
+}
 #[tokio::test]
 async fn a_worker_that_cant_start_says_nothing_about_the_file() {
     let root = tempfile::tempdir().unwrap();
     // The binary gone for a moment (an update, an antivirus): no entry, so the file isn't kept as unreadable.
     let pool =
         MeasurePool::with_worker(1, WorkerProgram::new(root.path().join("missing-worker"), "library-measure"), Duration::from_secs(1));
-    let job = MeasureJob { id: 0, path: "/x.wav".into(), relative: "x.wav".into(), size: 1, mtime: 1, start: None, seconds: None };
+    let job = MeasureJob {
+        id: 0,
+        path: "/x.wav".into(),
+        relative: "x.wav".into(),
+        size: 1,
+        mtime: 1,
+        start: None,
+        seconds: None,
+        decode: Default::default(),
+    };
     assert!(pool.run(0, job).await.is_err());
     pool.close().await;
 }
@@ -214,7 +262,16 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it(
     );
     std::fs::set_permissions(&worker, std::fs::Permissions::from_mode(0o700)).unwrap();
     let pool = MeasurePool::with_worker(1, WorkerProgram::new(worker, "library-measure"), Duration::from_millis(1000));
-    let job = MeasureJob { id: 0, path: "/x.mp3".into(), relative: "x.mp3".into(), size: 1, mtime: 1, start: None, seconds: None };
+    let job = MeasureJob {
+        id: 0,
+        path: "/x.mp3".into(),
+        relative: "x.mp3".into(),
+        size: 1,
+        mtime: 1,
+        start: None,
+        seconds: None,
+        decode: Default::default(),
+    };
     assert_eq!(pool.run(0, job).await.unwrap().error.as_deref(), Some("it took too long to read"));
     let temp = std::fs::read_to_string(root.path().join("temp")).unwrap();
     assert!(!std::path::Path::new(&temp).exists(), "{temp} is still there");
@@ -282,7 +339,16 @@ async fn a_stopped_worker_takes_what_it_started_and_its_temporary_files_with_it_
         ),
     );
     let pool = MeasurePool::with_worker(1, WorkerProgram::new(worker, "library-measure"), Duration::from_secs(12));
-    let job = MeasureJob { id: 0, path: "C:\\x.mp3".into(), relative: "x.mp3".into(), size: 1, mtime: 1, start: None, seconds: None };
+    let job = MeasureJob {
+        id: 0,
+        path: "C:\\x.mp3".into(),
+        relative: "x.mp3".into(),
+        size: 1,
+        mtime: 1,
+        start: None,
+        seconds: None,
+        decode: Default::default(),
+    };
     assert_eq!(pool.run(0, job).await.unwrap().error.as_deref(), Some("it took too long to read"));
     let child: u32 = std::fs::read_to_string(root.path().join("child")).expect("the child held the copy").trim().parse().unwrap();
     let temp = std::fs::read_to_string(root.path().join("temp")).unwrap();

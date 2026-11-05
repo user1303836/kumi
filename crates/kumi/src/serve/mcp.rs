@@ -878,6 +878,8 @@ mod tests {
             let args = Args {
                 state_dir: state.path().join("state"),
                 kumi_home: state.path().join("home"),
+                hermes_home: None,
+                hermes_root: None,
                 daw: DawId::Reaper,
                 library_roots: vec![],
                 media_roots: vec![],

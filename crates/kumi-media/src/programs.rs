@@ -117,6 +117,9 @@ pub struct RunOptions {
     pub signal: Option<Signal>,
     pub timeout_ms: Option<u64>,
     pub max_buffer: Option<usize>,
+    /// Run in owned scratch with a private home/temp and no inherited secrets, proxies, or loader overrides.
+    /// None preserves the standalone caller's working directory and environment.
+    pub isolated_dir: Option<PathBuf>,
 }
 
 /// What a program wrote: its stdout as bytes (text when it was text), its stderr as text.
@@ -227,6 +230,18 @@ pub async fn run<S: AsRef<OsStr>>(command: &str, args: &[S], options: RunOptions
     }
     let mut spawning = Command::new(command);
     spawning.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
+    if let Some(dir) = &options.isolated_dir {
+        spawning.current_dir(dir).env_clear().env("LC_ALL", "C");
+        for name in ["HOME", "USERPROFILE", "TMPDIR", "TMP", "TEMP"] {
+            spawning.env(name, dir);
+        }
+        #[cfg(windows)]
+        for name in ["SystemRoot", "WINDIR"] {
+            if let Some(value) = std::env::var_os(name) {
+                spawning.env(name, value);
+            }
+        }
+    }
     #[cfg(windows)]
     {
         // windowsHide: no console window flashes up for the program.
@@ -315,7 +330,7 @@ const YTDLP_FRESH_MS: f64 = 30.0 * 24.0 * 60.0 * 60_000.0;
 
 /// Whether `command` runs (asked for its version).
 async fn runs(command: &str, version_arg: &str, signal: Option<Signal>) -> bool {
-    run(command, &[version_arg], RunOptions { timeout_ms: Some(20_000), signal, max_buffer: None }).await.is_ok()
+    run(command, &[version_arg], RunOptions { timeout_ms: Some(20_000), signal, ..Default::default() }).await.is_ok()
 }
 
 #[derive(Clone, Default)]
@@ -536,7 +551,7 @@ async fn fetch_yt_dlp(asset: &str, folder: &str, options: &ProgramOptions) -> Re
             run(
                 &system_program_default(SystemProgram::Tar),
                 &["-xf", &fetched, "-C", &unpacked],
-                RunOptions { timeout_ms: Some(120_000), signal: options.signal.clone(), max_buffer: None },
+                RunOptions { timeout_ms: Some(120_000), signal: options.signal.clone(), ..Default::default() },
             )
             .await?;
         } else {
@@ -615,7 +630,7 @@ static RUNTIMES: LazyLock<Mutex<HashMap<String, Extras>>> = LazyLock::new(|| Mut
 
 /// None when yt-dlp couldn't be asked its version (it didn't start, failed or took too long).
 async fn probe_runtimes(ytdlp: String) -> Option<Vec<String>> {
-    let output = run(&ytdlp, &["--version"], RunOptions { timeout_ms: Some(60_000), signal: None, max_buffer: None }).await.ok()?;
+    let output = run(&ytdlp, &["--version"], RunOptions { timeout_ms: Some(60_000), ..Default::default() }).await.ok()?;
     let text = output.stdout_text();
     let mut parts = trim(&text).split('.').map(|part| parse(part).unwrap_or(f64::NAN));
     let year = parts.next().unwrap_or(0.0);
@@ -960,7 +975,7 @@ pub async fn find_ffmpeg(options: FfmpegOptions) -> Result<Option<String>, Video
         run(
             &system_program_default(SystemProgram::Tar),
             &["-xf", &archive, "-C", &unpacked],
-            RunOptions { timeout_ms: Some(300_000), signal: options.signal.clone(), max_buffer: None },
+            RunOptions { timeout_ms: Some(300_000), signal: options.signal.clone(), ..Default::default() },
         )
         .await?;
         let inside = names_under(Path::new(&unpacked)).await?.into_iter().find(|name| {
@@ -1174,7 +1189,7 @@ pub async fn find_whisper(options: &ProgramOptions) -> Result<Option<String>, Vi
         run(
             &system_program_default(SystemProgram::Tar),
             &["-xf", &archive, "-C", &unpacked],
-            RunOptions { timeout_ms: Some(120_000), signal: options.signal.clone(), max_buffer: None },
+            RunOptions { timeout_ms: Some(120_000), signal: options.signal.clone(), ..Default::default() },
         )
         .await?;
         let inside = names_under(Path::new(&unpacked)).await?.into_iter().find(|name| path_parts(name).last() == Some(&program));
@@ -1323,5 +1338,32 @@ mod user_agent_tests {
         super::CLIENT.get(&url).send().await.unwrap();
         let request = server.await.unwrap();
         assert!(request.contains(&format!("user-agent: kumi/{}\r\n", kumi_types::version::KUMI_VERSION)), "{request}");
+    }
+}
+
+#[cfg(all(test, unix))]
+mod isolated_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn installed_only_process_uses_private_home_and_drops_parent_secrets() {
+        let dir = tempfile::tempdir().unwrap();
+        let scratch = dir.path().canonicalize().unwrap();
+        let previous = std::env::var_os("KUMI_PRIVATE_DECODER_TEST_SECRET");
+        std::env::set_var("KUMI_PRIVATE_DECODER_TEST_SECRET", "not-a-real-secret");
+        let result = run(
+            "/bin/sh",
+            &["-c", "printf '%s' \"${KUMI_PRIVATE_DECODER_TEST_SECRET-unset}\" > secret; printf '%s' \"$HOME\" > home; printf '%s' \"$TMPDIR\" > temp; pwd -P > cwd"],
+            RunOptions { isolated_dir: Some(scratch.clone()), timeout_ms: Some(5_000), ..Default::default() },
+        ).await;
+        match previous {
+            Some(value) => std::env::set_var("KUMI_PRIVATE_DECODER_TEST_SECRET", value),
+            None => std::env::remove_var("KUMI_PRIVATE_DECODER_TEST_SECRET"),
+        }
+        result.unwrap();
+        assert_eq!(std::fs::read_to_string(scratch.join("secret")).unwrap(), "unset");
+        for name in ["home", "temp", "cwd"] {
+            assert_eq!(std::fs::read_to_string(scratch.join(name)).unwrap().trim(), scratch.to_str().unwrap());
+        }
     }
 }

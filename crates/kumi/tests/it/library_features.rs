@@ -95,7 +95,7 @@ async fn files_keep_full_duration_measure_requested_part_and_cancel() {
     let path = path.to_str().unwrap();
     let full = measure_sound(path, MeasureOptions::default()).await.unwrap();
     assert_eq!(full.seconds, 1.);
-    let part = measure_sound(path, MeasureOptions { start: Some(0.25), seconds: Some(0.2), signal: None }).await.unwrap();
+    let part = measure_sound(path, MeasureOptions { start: Some(0.25), seconds: Some(0.2), ..Default::default() }).await.unwrap();
     assert_eq!(part.seconds, 1.);
     assert!(part.peak_db < full.peak_db);
     let quantized: Vec<_> =
@@ -107,4 +107,23 @@ async fn files_keep_full_duration_measure_requested_part_and_cancel() {
     let signal = kumi_common::abort::Signal::new();
     signal.cancel();
     assert!(measure_sound(path, MeasureOptions { signal: Some(signal), ..Default::default() }).await.is_err());
+}
+
+#[tokio::test]
+async fn installed_only_measurement_reads_pcm_and_refuses_unapproved_decoders() {
+    use kumi_media::audio::DecodeOptions;
+
+    let root = tempfile::tempdir().unwrap();
+    let pcm = root.path().join("Kick.wav");
+    std::fs::write(&pcm, wav(&[kick(50., 0.2)], 44100)).unwrap();
+    let expected = measure_sound(pcm.to_str().unwrap(), MeasureOptions::default()).await.unwrap();
+    for ffmpeg in [None, Some(root.path().join("missing-decoder"))] {
+        let decode = DecodeOptions { installed_only: true, ffmpeg };
+        let measured = measure_sound(pcm.to_str().unwrap(), MeasureOptions { decode: decode.clone(), ..Default::default() }).await.unwrap();
+        assert_eq!(measured, expected);
+        let compressed = root.path().join("Kick.mp3");
+        std::fs::write(&compressed, b"not a compressed audio stream").unwrap();
+        let error = measure_sound(compressed.to_str().unwrap(), MeasureOptions { decode, ..Default::default() }).await.unwrap_err();
+        assert!(error.0.starts_with("The approved ffmpeg dependency is unavailable"), "{error}");
+    }
 }

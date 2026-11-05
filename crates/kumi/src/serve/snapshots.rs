@@ -34,6 +34,8 @@ enum Write {
     File {
         path: PathBuf,
         snapshot: Value,
+        /// Compact JSON whose complete envelope must fit this reader limit; None retains the ordinary pretty format.
+        max_bytes: Option<usize>,
         /// Told once the file is on disk, or why it isn't.
         done: Option<Written>,
     },
@@ -89,7 +91,7 @@ impl Snapshots {
     /// [`Snapshots::write`] taking `body` itself: the envelope goes into it here, and it's serialized and written on the
     /// writer thread, in order with every other write, so the runtime's thread neither copies nor serializes it.
     pub fn write_owned(&self, name: &str, body: Value) -> std::io::Result<u64> {
-        let (seq, write) = self.stamped(name, body, None)?;
+        let (seq, write) = self.stamped(name, body, None, None)?;
         self.send(write)?;
         Ok(seq)
     }
@@ -98,15 +100,25 @@ impl Snapshots {
     /// says why it isn't: for a file something else then relies on (an artifact's record, before its id is given out).
     /// Writes land in the order they're made, so one made after this returns lands after it.
     pub async fn write_durably(&self, name: &str, body: Value) -> std::io::Result<u64> {
+        self.write_wait(name, body, None).await
+    }
+
+    /// A large reader-bounded snapshot: compact serialization, including the envelope, refuses before replacement
+    /// if it exceeds `max_bytes`. Serialization stays on the ordered writer thread.
+    pub async fn write_durably_bounded(&self, name: &str, body: Value, max_bytes: usize) -> std::io::Result<u64> {
+        self.write_wait(name, body, Some(max_bytes)).await
+    }
+
+    async fn write_wait(&self, name: &str, body: Value, max_bytes: Option<usize>) -> std::io::Result<u64> {
         let (done, written) = tokio::sync::oneshot::channel();
-        let (seq, write) = self.stamped(name, body, Some(done))?;
+        let (seq, write) = self.stamped(name, body, Some(done), max_bytes)?;
         self.send(write)?;
         written.await.map_err(|_| std::io::Error::other("the snapshot writer stopped"))??;
         Ok(seq)
     }
 
     /// Snapshot `name`'s write: `body`'s fields in the envelope, with its `seq`.
-    fn stamped(&self, name: &str, body: Value, done: Option<Written>) -> std::io::Result<(u64, Write)> {
+    fn stamped(&self, name: &str, body: Value, done: Option<Written>, max_bytes: Option<usize>) -> std::io::Result<(u64, Write)> {
         let path = self.path(name)?;
         let seq = (self.seq.get() + 1).max(now_us());
         self.seq.set(seq);
@@ -119,7 +131,7 @@ impl Snapshots {
         snapshot.insert("seq".into(), json!(seq));
         snapshot.insert("at".into(), json!(kumi_common::time::now_ms()));
         snapshot.insert("owner".into(), json!({"profile": owner.profile_id, "session_id": owner.session_id, "pid": std::process::id()}));
-        Ok((seq, Write::File { path, snapshot: Value::Object(snapshot), done }))
+        Ok((seq, Write::File { path, snapshot: Value::Object(snapshot), max_bytes, done }))
     }
 
     /// To the writer thread; written in place only when there's none to take it.
@@ -128,8 +140,8 @@ impl Snapshots {
             Some(writer) => writer.send(write).err().map(|failed| failed.0),
             None => Some(write),
         };
-        if let Some(Write::File { path, snapshot, done }) = unsent {
-            let written = serialized(&snapshot).and_then(|bytes| replace(&path, &bytes));
+        if let Some(Write::File { path, snapshot, max_bytes, done }) = unsent {
+            let written = serialized(&snapshot, max_bytes).and_then(|bytes| replace(&path, &bytes));
             let failed = written.as_ref().err().map(|error| std::io::Error::new(error.kind(), error.to_string()));
             if let Some(done) = done {
                 let _ = done.send(written);
@@ -205,12 +217,12 @@ fn write_files(writes: Receiver<Write>) {
         let mut waiting = waiting.into_iter().peekable();
         while let Some(write) = waiting.next() {
             match write {
-                Write::File { path, snapshot, done } => {
+                Write::File { path, snapshot, max_bytes, done } => {
                     let superseded = done.is_none() && matches!(waiting.peek(), Some(Write::File { path: next, .. }) if *next == path);
                     if superseded {
                         continue;
                     }
-                    let written = serialized(&snapshot).and_then(|bytes| replace(&path, &bytes));
+                    let written = serialized(&snapshot, max_bytes).and_then(|bytes| replace(&path, &bytes));
                     if let Err(error) = &written {
                         say(&format!("kumi serve: {} not written: {error}", path.display()));
                     }
@@ -226,11 +238,37 @@ fn write_files(writes: Receiver<Write>) {
     }
 }
 
-/// A snapshot as its file holds it: pretty JSON and a newline.
-fn serialized(snapshot: &Value) -> std::io::Result<Vec<u8>> {
+/// A reader-bounded snapshot is compact; ordinary snapshots keep their readable format.
+fn serialized(snapshot: &Value, max_bytes: Option<usize>) -> std::io::Result<Vec<u8>> {
+    if let Some(max) = max_bytes {
+        let mut output = BoundedBytes { bytes: Vec::new(), max };
+        serde_json::to_writer(&mut output, snapshot)
+            .map_err(|error| std::io::Error::new(error.io_error_kind().unwrap_or(std::io::ErrorKind::InvalidData), error))?;
+        output.write_all(b"\n")?;
+        return Ok(output.bytes);
+    }
     let mut bytes = serde_json::to_vec_pretty(snapshot).map_err(std::io::Error::other)?;
     bytes.push(b'\n');
     Ok(bytes)
+}
+
+struct BoundedBytes {
+    bytes: Vec<u8>,
+    max: usize,
+}
+
+impl std::io::Write for BoundedBytes {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        if bytes.len() > self.max.saturating_sub(self.bytes.len()) {
+            return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "snapshot exceeds its reader's byte limit"));
+        }
+        self.bytes.extend_from_slice(bytes);
+        Ok(bytes.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 /// `path` replaced by `bytes` at once: an owner-only file written beside it and flushed, renamed over it, its folder
@@ -296,6 +334,22 @@ mod tests {
         let seq = snapshots.write_durably("map/current", json!({"revision": "r7"})).await.unwrap();
         assert_eq!(read(&dir.path().join("map/current.json"))["seq"], json!(seq), "on disk, without a flush");
         assert_eq!(read(&dir.path().join("map/r7.json"))["revision"], "r7", "the map it points at landed first");
+    }
+
+    #[tokio::test]
+    async fn a_reader_bound_includes_escaping_and_the_envelope_and_preserves_the_prior_file_on_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        snapshots.write_durably_bounded("map/r1", json!({"revision":"r1","sounds":{}}), 1024).await.unwrap();
+        let path = dir.path().join("map/r1.json");
+        let before = std::fs::read(&path).unwrap();
+        // The raw string fits; its JSON escaping plus the envelope does not.
+        let error = snapshots.write_durably_bounded("map/r1", json!({"name":"\n".repeat(512)}), 1024).await.unwrap_err();
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        assert_eq!(read(&path)["revision"], "r1");
+        assert_eq!(snapshots.write_durably_bounded("map/r2", json!({}), 2).await.unwrap_err().kind(), std::io::ErrorKind::InvalidData,);
+        assert!(!dir.path().join("map/r2.json").exists());
     }
 
     #[tokio::test]

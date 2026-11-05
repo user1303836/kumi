@@ -5,8 +5,7 @@
 use super::change;
 use super::core;
 use super::ctx::Operation;
-use super::read;
-use super::setup;
+use super::{library, listen, map, read, setup};
 
 pub static OPERATIONS: &[&Operation] = &[
     &core::STATUS,
@@ -18,6 +17,9 @@ pub static OPERATIONS: &[&Operation] = &[
     &change::HISTORY,
     &core::JOB,
     &setup::SETUP_DAW,
+    &library::LIBRARY,
+    &map::SOUNDS,
+    &listen::LISTEN,
 ];
 
 #[cfg(test)]

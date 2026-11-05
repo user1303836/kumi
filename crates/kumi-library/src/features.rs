@@ -6,7 +6,7 @@ use kumi_common::{
 };
 use kumi_media::audio::{
     analyze::{estimate_key, estimate_tempo, track_pitch, Key, Tempo},
-    decode::{open_audio_to, AudioError},
+    decode::{open_audio_to_with_options, AudioError, DecodeOptions},
     dsp::{db_amplitude, fft, k_weighting, percentile, window, Window},
 };
 use serde::{Deserialize, Serialize};
@@ -392,11 +392,12 @@ pub struct MeasureOptions {
     pub signal: Option<Signal>,
     pub start: Option<f64>,
     pub seconds: Option<f64>,
+    pub decode: DecodeOptions,
 }
 /// Measures at most 30 seconds, decoding non-PCM formats through the same audio source as listening.
 pub async fn measure_sound(path: &str, options: MeasureOptions) -> Result<SoundFeatures, AudioError> {
     let reach = options.start.unwrap_or(0.).max(0.) + options.seconds.unwrap_or(MAX_SECONDS).clamp(0., MAX_SECONDS) + 1.;
-    let mut source = open_audio_to(path, options.signal.clone(), Some(reach)).await?;
+    let mut source = open_audio_to_with_options(path, options.signal.clone(), Some(reach), &options.decode).await?;
     let result = async {
         let total = source.frames as f64 / source.sample_rate;
         let start_frame = (options.start.unwrap_or(0.) * source.sample_rate).floor().min(source.frames as f64).max(0.) as usize;

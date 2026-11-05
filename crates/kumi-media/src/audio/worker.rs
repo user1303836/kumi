@@ -1,6 +1,6 @@
 use super::{
     analyze::{analyze_source, Analysis, AnalyzeOptions},
-    decode::{open_audio, AudioError},
+    decode::{open_audio_to_with_options, AudioError},
 };
 /// Run the meter on a worker thread so it cannot hold up terminal input or screen updates. `seconds` is the file's
 /// length when `path` is a converted copy that stops short of it.
@@ -14,7 +14,7 @@ pub async fn in_worker(
     tokio::task::spawn_blocking(move || {
         let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().map_err(|e| AudioError(e.to_string()))?;
         runtime.block_on(async move {
-            let mut source = open_audio(&path, options.signal.clone()).await?;
+            let mut source = open_audio_to_with_options(&path, options.signal.clone(), None, &options.decode).await?;
             if let Some(seconds) = seconds {
                 source.as_long_as(seconds);
             }

@@ -35,7 +35,7 @@ pub enum State {
     Running,
     Done,
     Failed,
-    /// Stopped before it finished: the runtime stopped.
+    /// Stopped before it finished: the runtime stopped or the producer cancelled this owned job.
     Cancelled,
     /// A runtime stopped without settling it: found `running` at the next start.
     Interrupted,
@@ -254,6 +254,17 @@ impl Jobs {
         }
     }
 
+    /// Signal only this runtime's matching running job. A repeated request while it settles is acknowledged;
+    /// the worker's ordinary completion path records cancellation and releases the running slot.
+    pub fn cancel(&self, id: &str, kind: &str) -> bool {
+        let jobs = self.jobs.borrow();
+        let Some(job) = jobs.get(id).filter(|job| job.kind == kind && job.state.get() == State::Running) else {
+            return false;
+        };
+        job.signal.cancel();
+        true
+    }
+
     /// Job `id` as `job` answers: `{job_id, kind, state, progress, result?, error?}`. One from an earlier run is read
     /// from its file. None: no job of that id.
     pub fn get(&self, id: &str, state_dir: &Path) -> Option<Value> {
@@ -398,6 +409,8 @@ mod tests {
         let args = Args {
             state_dir: state.to_path_buf(),
             kumi_home: state.join("home"),
+            hermes_home: None,
+            hermes_root: None,
             daw: DawId::Reaper,
             library_roots: vec![],
             media_roots: vec![],

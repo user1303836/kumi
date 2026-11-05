@@ -235,30 +235,46 @@ pub async fn sound_between(
     Ok(path.into())
 }
 pub async fn duration_of(ffmpeg: &str, file: &str, signal: Option<Signal>) -> Option<f64> {
-    let probe = if ffmpeg == "ffmpeg" {
-        "ffprobe".into()
-    } else {
-        Path::new(ffmpeg)
-            .parent()
-            .unwrap_or(Path::new("."))
-            .join(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" })
-            .to_string_lossy()
-            .into_owned()
-    };
-    let probed = run(
-        &probe,
-        &["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file],
-        RunOptions { timeout_ms: Some(20_000), signal: signal.clone(), ..Default::default() },
-    )
-    .await;
-    if let Ok(output) = probed {
-        return output.stdout_text().trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.0);
+    duration_of_in(ffmpeg, file, signal, None).await
+}
+/// A restricted decoder probes only through its approved ffmpeg, in private scratch, with the same input fence as
+/// conversion. None keeps standalone discovery of a sibling ffprobe and the caller's environment.
+pub(crate) async fn duration_of_in(ffmpeg: &str, file: &str, signal: Option<Signal>, isolated_dir: Option<&Path>) -> Option<f64> {
+    if isolated_dir.is_none() {
+        let probe = if ffmpeg == "ffmpeg" {
+            "ffprobe".into()
+        } else {
+            Path::new(ffmpeg)
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join(if cfg!(windows) { "ffprobe.exe" } else { "ffprobe" })
+                .to_string_lossy()
+                .into_owned()
+        };
+        let probed = run(
+            &probe,
+            &["-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0", file],
+            RunOptions { timeout_ms: Some(20_000), signal: signal.clone(), ..Default::default() },
+        )
+        .await;
+        if let Ok(output) = probed {
+            return output.stdout_text().trim().parse::<f64>().ok().filter(|n| n.is_finite() && *n > 0.0);
+        }
     }
     // Kumi's own ffmpeg comes without ffprobe: what ffmpeg says of the file it opens, then (it reads nothing past that).
+    let [protocol_key, protocols, format_key, formats] = crate::audio::decode::LOCAL_AUDIO_INPUT;
+    let normal = ["-hide_banner", "-nostdin", "-i", file, "-t", "0", "-f", "null", "-"];
+    let restricted = ["-hide_banner", "-nostdin", protocol_key, protocols, format_key, formats, "-i", file, "-t", "0", "-f", "null", "-"];
+    let args: &[&str] = if isolated_dir.is_some() { &restricted } else { &normal };
     let output = run(
         ffmpeg,
-        &["-hide_banner", "-nostdin", "-i", file, "-t", "0", "-f", "null", "-"],
-        RunOptions { timeout_ms: Some(20_000), signal, ..Default::default() },
+        args,
+        RunOptions {
+            timeout_ms: Some(20_000),
+            signal,
+            max_buffer: isolated_dir.map(|_| 1024 * 1024),
+            isolated_dir: isolated_dir.map(Path::to_path_buf),
+        },
     )
     .await
     .ok()?;

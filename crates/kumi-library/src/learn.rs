@@ -3,7 +3,7 @@ use super::{
     classify::{ClassFrom, SoundClass, SoundKind},
     presets::PresetCategory,
     sets::SetSummary,
-    sources::Source,
+    sources::{approved_path, Source},
     store::{Entries, Entry, Log, LogEntry},
 };
 use serde::{Deserialize, Serialize};
@@ -115,6 +115,11 @@ pub struct LearnProgress {
 pub struct LearnPlan {
     pub dir: String,
     pub sources: Vec<Source>,
+    /// Canonical roots captured by restricted planning. `Some([])` denies every source, including auxiliary walks.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approved_folders: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "kumi_media::audio::DecodeOptions::is_default")]
+    pub decode: kumi_media::audio::DecodeOptions,
     #[serde(default)]
     pub set_folders: Vec<String>,
     #[serde(default)]
@@ -184,7 +189,7 @@ use std::{
     io,
     path::PathBuf,
     rc::Rc,
-    sync::LazyLock,
+    sync::{Arc, LazyLock},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -306,6 +311,16 @@ pub fn mtime(time: SystemTime) -> i64 {
 fn io_error(error: io::Error) -> RuntimeError {
     RuntimeError::plain(error.to_string())
 }
+
+/// Restricted no-follow validation touches every path component. Keep that work off the caller's runtime;
+/// unrestricted learning retains its existing path policy and incurs no worker or allocation here.
+async fn approved(path: &str, roots: Option<&Arc<Vec<String>>>) -> Result<bool, RuntimeError> {
+    let Some(roots) = roots else { return Ok(true) };
+    let (path, roots) = (path.to_owned(), Arc::clone(roots));
+    tokio::task::spawn_blocking(move || approved_path(&path, Some(roots.as_slice())))
+        .await
+        .map_err(|error| RuntimeError::plain(error.to_string()))
+}
 async fn walk(
     source: &Source,
     layout: &Layout,
@@ -315,12 +330,18 @@ async fn walk(
     signal: &Signal,
     depth_limit: usize,
     skip: &HashSet<String>,
+    approved_folders: Option<&Arc<Vec<String>>>,
+    progress: &Progress,
 ) -> Result<bool, RuntimeError> {
     let mut queue = vec![(source.path.clone(), 0)];
     let mut complete = true;
     let daw_library = source.is_daw_library();
     while let Some((path, depth)) = queue.pop() {
         signal.check()?;
+        if !approved(&path, approved_folders).await? {
+            complete = false;
+            continue;
+        }
         // A folder that can't be read (a NAS's hiccup, a placeholder nothing serves now) is skipped, and the walk
         // isn't whole: what was learned in it stays. One deleted meanwhile is gone.
         let mut entries = match tokio::fs::read_dir(&path).await {
@@ -333,6 +354,7 @@ async fn walk(
         };
         let parent = basename(&path).to_lowercase();
         loop {
+            signal.check()?;
             let entry = match entries.next_entry().await {
                 Ok(Some(entry)) => entry,
                 Ok(None) => break,
@@ -399,6 +421,9 @@ async fn walk(
             } else {
                 continue;
             };
+            if !approved(&full, approved_folders).await? {
+                continue;
+            }
             if !found.seen.insert(full.clone()) {
                 continue;
             }
@@ -421,7 +446,21 @@ async fn walk(
                 source: source.clone(),
                 relative,
             });
+            if approved_folders.is_some() {
+                // During Looking these are discovered candidates, not a total estimate. The measurement phases
+                // replace them with their changed-file counts once walking finishes.
+                let mut value = progress.value.borrow_mut();
+                value.sounds.todo = found.sounds.len();
+                value.presets.todo = found.presets.len();
+                value.sets.todo = found.sets.len();
+                drop(value);
+                // Show the first discovery immediately, then throttle large walks as before.
+                progress.tell(found.sounds.len() + found.presets.len() + found.sets.len() == 1);
+            }
         }
+    }
+    if approved_folders.is_some() {
+        progress.tell(true);
     }
     Ok(complete)
 }
@@ -545,6 +584,8 @@ async fn gated(options: &LearnOptions) -> Result<(), RuntimeError> {
 /// Learns changed files in source order, persisting partial progress before measuring the next batch.
 pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError> {
     let plan = &options.plan;
+    let approved_roots = plan.approved_folders.as_ref().map(|roots| Arc::new(roots.clone()));
+    let approved_folders = approved_roots.as_ref();
     let logs = library_logs(&plan.dir);
     if options.rebuild {
         tokio::try_join!(
@@ -570,6 +611,15 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     let mut found = Finds::default();
     let (mut walked_sounds, mut walked_presets, mut walked_sets) = (vec![], vec![], vec![]);
     let mut sources = plan.sources.clone();
+    if let Some(roots) = approved_folders {
+        let roots = Arc::clone(roots);
+        sources = tokio::task::spawn_blocking(move || {
+            sources.retain(|source| source.kind == SourceKind::Folder && approved_path(&source.path, Some(roots.as_slice())));
+            sources
+        })
+        .await
+        .map_err(|error| RuntimeError::plain(error.to_string()))?;
+    }
     sources.sort_by_key(|s| order(s.kind));
     // A DAW's library inside another folder: what its layout reads is its own source's; the rest stays the outer folder's.
     let daw_libraries: HashSet<String> =
@@ -579,9 +629,20 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         progress.tell(false);
         let own = matches!(source.kind, SourceKind::UserLibrary | SourceKind::Place | SourceKind::Folder);
         let skip = if source.is_daw_library() { HashSet::new() } else { daw_libraries.clone() };
-        let layout = options.daws.layout(source);
-        if walk(source, layout, options.daws, Kinds { sounds: true, presets: true, sets: own }, &mut found, &options.signal, 16, &skip)
-            .await?
+        let layout = if approved_folders.is_some() { &Layout::NONE } else { options.daws.layout(source) };
+        if walk(
+            source,
+            layout,
+            options.daws,
+            Kinds { sounds: true, presets: true, sets: own },
+            &mut found,
+            &options.signal,
+            16,
+            &skip,
+            approved_folders,
+            &progress,
+        )
+        .await?
         {
             walked_sounds.push(source.path.clone());
             walked_presets.push(source.path.clone());
@@ -605,6 +666,8 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             &options.signal,
             6,
             &source_paths,
+            approved_folders,
+            &progress,
         )
         .await?
         {
@@ -613,6 +676,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     }
     for path in &plan.set_files {
         if found.seen.contains(path) || !set_extension(options.daws, &extension(&path.to_lowercase())) || skipped_set(options.daws, path) {
+            continue;
+        }
+        if !approved(path, approved_folders).await? {
             continue;
         }
         let Ok(info) = tokio::fs::metadata(path).await else { continue };
@@ -635,6 +701,8 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             &options.signal,
             6,
             &HashSet::new(),
+            approved_folders,
+            &progress,
         )
         .await?
         {
@@ -664,6 +732,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     let mut preset_writer = Writer::new(logs.presets.clone());
     for file in &todo_presets {
         gated(&options).await?;
+        if !approved(&file.file.path, approved_folders).await? {
+            continue;
+        }
         let ext = extension(&file.file.path);
         let daw_library = file.source.is_daw_library();
         let format = if daw_library {
@@ -717,6 +788,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     let mut set_writer = Writer::new(logs.sets.clone());
     for file in &todo_sets {
         gated(&options).await?;
+        if !approved(&file.file.path, approved_folders).await? {
+            continue;
+        }
         let read = match options.daws.project_format(&extension(&file.file.path.to_lowercase())) {
             Some((daw, format)) => read_project(daw, format, &file.file.path, &options.signal).await,
             None => read_set(&file.file.path, Some(options.signal.clone())).await,
@@ -761,6 +835,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
                 // Several paused slots may resume together after another has taken the last file.
                 let Some(file) = todo.get(next.get()) else { break };
                 next.set(next.get() + 1);
+                if !approved(&file.file.path, approved_folders).await? {
+                    continue;
+                }
                 progress.value.borrow_mut().at = Some(file.source.label.clone());
                 let job = MeasureJob {
                     id: 0,
@@ -770,6 +847,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
                     mtime: file.file.mtime,
                     start: None,
                     seconds: None,
+                    decode: options.plan.decode.clone(),
                 };
                 // A stop doesn't wait for the measurement (up to the pool's timeout): the pool ends its worker below.
                 let entry = tokio::select! {
@@ -821,4 +899,70 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
     progress.value.borrow_mut().finished_at = Some(now_ms());
     progress.phase(LearnPhase::Done);
     Ok(progress.value.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn restricted_walking_reports_discovered_audio_and_keeps_other_files_untouched() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let audio = root.join("sound.wav");
+        let unrelated = root.join("notes.bin");
+        std::fs::write(&audio, [0u8; 128]).unwrap();
+        std::fs::write(&unrelated, [1u8; 128]).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&audio, root.join("alias.wav")).unwrap();
+        let source = Source { path: root.to_string_lossy().into_owned(), label: "Samples".into(), kind: SourceKind::Folder };
+        let roots = Arc::new(vec![source.path.clone()]);
+        let reports = Rc::new(RefCell::new(Vec::new()));
+        let reported = reports.clone();
+        let progress = Progress {
+            value: RefCell::new(LearnProgress::default()),
+            told: Cell::new(0),
+            callback: Some(Rc::new(move |progress| reported.borrow_mut().push(progress))),
+        };
+        let mut found = Finds::default();
+        assert!(walk(
+            &source,
+            &Layout::NONE,
+            Daws::default(),
+            Kinds { sounds: true, presets: true, sets: true },
+            &mut found,
+            &Signal::new(),
+            16,
+            &HashSet::new(),
+            Some(&roots),
+            &progress,
+        )
+        .await
+        .unwrap());
+        assert_eq!(found.sounds.len(), 1);
+        assert_eq!(Path::new(&found.sounds[0].file.path), audio);
+        assert!(found.presets.is_empty());
+        assert!(found.sets.is_empty());
+        assert!(reports.borrow().iter().any(|report| report.phase == LearnPhase::Looking && report.sounds.todo == 1));
+        assert_eq!(std::fs::read(audio).unwrap(), [0u8; 128]);
+        assert_eq!(std::fs::read(unrelated).unwrap(), [1u8; 128]);
+
+        let denied = Arc::new(Vec::new());
+        let mut found = Finds::default();
+        assert!(!walk(
+            &source,
+            &Layout::NONE,
+            Daws::default(),
+            Kinds { sounds: true, presets: true, sets: true },
+            &mut found,
+            &Signal::new(),
+            16,
+            &HashSet::new(),
+            Some(&denied),
+            &progress,
+        )
+        .await
+        .unwrap());
+        assert!(found.sounds.is_empty());
+    }
 }
