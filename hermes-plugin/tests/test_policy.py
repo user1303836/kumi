@@ -270,6 +270,12 @@ class Approvals(unittest.TestCase):
         rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
         self.assertEqual([rows[ident] for ident in both["history_ids"]], ["undone", "undone"])
         self.assertEqual(rows[single["history_ids"][0]], "applied", "the earlier change stays")
+        support.call(self.host, "kumi_change", change(volume("t1", -8), title="Long " * 40), session_id="s1")
+        long = self.hook("kumi_undo", {})
+        self.assertEqual(long["action"], "approve", "a step too long for a line is cut to fit, never blocking the undo")
+        step = long["message"].split("\n")[1]
+        self.assertTrue(step.startswith("• Undo Long Long") and step.endswith("…") and len(step) <= policy.STEP_LINE,
+                        step)
 
     def test_undo_that_is_only_ever_this_chats_change_and_refused_when_it_moved_since_the_approval(self):
         decision = policy.pre_tool_call(self.host, tool_name="kumi_undo", args={}, session_id="s2", tool_call_id="u0")

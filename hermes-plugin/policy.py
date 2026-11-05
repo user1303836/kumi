@@ -388,7 +388,8 @@ def _undo(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
             or not all(isinstance(row.get("family"), str) and row["family"].strip() for row in pending)):
         return block("Kumi didn't undo anything: its runtime couldn't say which steps that change made."), {}
     families = sorted({one_line(row["family"], 40) for row in pending})
-    shown = [f"• {one_line(row.get('text') or row.get('title'), STEP_LINE)}" for row in pending[:UNDO_ROWS]]
+    # A step's own words, cut to fit its line: HISTORY has them whole, and an undo is never blocked by a long one.
+    shown = [f"• {one_line(row.get('text') or row.get('title'), STEP_LINE - 2)}" for row in pending[:UNDO_ROWS]]
     more = len(pending) - len(shown)
     lines = [f"Kumi: undo a whole change, {len(pending)} step{'s' if len(pending) != 1 else ''}, newest first",
              *shown, *([f"• …and {more} more step{'s' if more != 1 else ''}"] if more > 0 else [])]
