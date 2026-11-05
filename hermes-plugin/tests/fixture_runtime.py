@@ -411,14 +411,15 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
     first = steps[0]["input"]
     track = fixture.track(first["track_ref"]) if "track_ref" in first else fixture.simpler(first["deviceRef"])[0]
     ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
-    # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note) and CC-5's
-    # (tool_call_id, digest, call_outcome), which the plugin never passes on.
+    # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note), CC-5's
+    # (tool_call_id, digest, call_outcome) and CC-3 A2's change_id, which the plugin never passes on.
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
                             "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
                             "family": STEPS[steps[0]["tool"]], "at": now(), "state": "applied",
                             "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
                             "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
-                            "call_outcome": "applied", "before": before})
+                            "call_outcome": "applied", "change_id": f"x-{fixture.generation}-{len(fixture.history) + 1}",
+                            "before": before})
     fixture.publish("history", "focus")
     done = [{"step": index + 1, "tool": step["tool"]} for index, step in enumerate(steps)]
     return {"state": "applied", "history_ids": [ident],

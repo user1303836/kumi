@@ -672,6 +672,9 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         let (refused, _) = wire.call("change", plan(&key, epoch, steps), Some(&format!("tc-refused-{n}"))).await;
         assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")), "{refused}");
     }
+    // A step REAPER's list keeps out says why, at the plan and at a look at its input.
+    let (lua, _) = wire.call("change", plan(&key, epoch, json!([{"tool": "run_lua", "input": {"code": "x = 1"}}])), Some("tc-why")).await;
+    assert!(lua["reason"].as_str().is_some_and(|reason| reason.ends_with("It runs Lua code in REAPER.")), "{lua}");
 
     // A sound from a map this runtime hasn't made: stale at its preview, and nothing runs.
     let sound = json!([{"tool": "item_import", "input": {"ref": reference, "path": {"sound_id": "s-r1-1", "map_revision": "r1"}}}]);
@@ -705,6 +708,7 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         (first["history_ids"][0].clone(), json!("mixer"), key.clone())
     );
     assert!(row.get("tool_call_id").is_none() && row.get("digest").is_none(), "{row}");
+    assert!(row["change_id"].is_string(), "the change it's part of, for an undo of it whole: {row}");
     let kept = lab.state("history.json");
     assert_eq!(kept["items"][0]["tool_call_id"], "tc-1");
     assert_eq!(kept["items"][0]["digest"].as_str().map(str::len), Some(64));
@@ -771,7 +775,13 @@ case!(serve_says_a_change_reaper_didnt_confirm_is_unsure_until_the_next_look, as
     let kept = lab.state("history.json");
     let audit = kept["items"].as_array().unwrap().iter().find(|row| row["family"] == "unsure").unwrap().clone();
     assert_eq!((audit["undo_available"].clone(), audit["tool_call_id"].clone()), (json!(false), json!("tc-1")));
-    assert!(changed["history_ids"].as_array().unwrap().contains(&audit["id"]));
+    let ids = changed["history_ids"].as_array().unwrap();
+    assert!(ids.contains(&audit["id"]));
+    // What the call recorded, its audit row among it, is one change.
+    let mut changes: Vec<Value> =
+        kept["items"].as_array().unwrap().iter().filter(|row| ids.contains(&row["id"])).map(|row| row["change_id"].clone()).collect();
+    changes.dedup();
+    assert!(changes.len() == 1 && changes[0].is_string(), "{changes:?}");
     assert_eq!(lab.state("status.json")["unsure"]["op"], "change");
     let (stale, _) = wire.call("change", plan(&key, epoch, down), Some("tc-2")).await;
     assert_eq!(stale["code"], "stale");
@@ -849,6 +859,7 @@ case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins
     assert!(import["input_schema"]["properties"]["path"]["anyOf"].is_array(), "{import}");
     let (lua, error) = wire.call("read", json!({"action": "schema", "tool": "run_lua"}), None).await;
     assert!(error && lua["error"]["code"] == "invalid", "{lua}");
+    assert!(lua["error"]["reason"].as_str().is_some_and(|reason| reason.ends_with("It runs Lua code in REAPER.")), "{lua}");
 
     // The reader's rows, as REAPER gives them, names and not folders; never an API function by name, a query its
     // schema doesn't take, nor a tool that isn't a reader.

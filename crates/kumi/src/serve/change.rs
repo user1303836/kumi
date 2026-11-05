@@ -9,7 +9,7 @@
 
 use super::connection;
 use super::ctx::{epoch_of, epoch_schema, Call, Ctx, Effect, JsonObject, OpError, OpFuture, Operation};
-use super::history::{CallIdentity, Row};
+use super::history::{CallIdentity, History, Row, DAW_UNDO};
 use kumi_types::contracts::{ChangeState, KernelTool};
 use serde_json::{json, Map, Value};
 use std::collections::HashMap;
@@ -105,30 +105,61 @@ fn refusal(error: OpError) -> Value {
     refused(error.code(), error.reason())
 }
 
-/// A plan's steps as checked: each one's HISTORY family, and its file field when it places a file (CC-11).
+/// A plan's steps as checked: each one's HISTORY family, its file field when it places a file (CC-11), whether it's a
+/// change only the DAW's own Undo takes back (CC-20), and the reasons such steps give, with the DAW's name to say them.
 struct Checked {
     families: Vec<&'static str>,
     files: Vec<(usize, &'static str)>,
+    daw_undo: Vec<bool>,
+    because: Vec<&'static str>,
+    app: &'static str,
 }
 
-/// A plan's steps, each checked against the DAW's allowlist, what the DAW says it keeps no undo for, and what the step
-/// takes. A file step's field holds a source, so its input is checked once the source is resolved to a file.
+impl Checked {
+    /// What Kumi says of the change when a step of it is one only the DAW's own Undo takes back, on the system `os`
+    /// names: CC-20's words, then each reason such steps give, once (twelve pad loads give theirs once).
+    fn undo_note(&self, os: &str) -> Option<String> {
+        use kumi_daw::plugin::{daw_undo_said, DAW_UNDO_NOTE};
+        if !self.daw_undo.contains(&true) {
+            return None;
+        }
+        let mut said = vec![daw_undo_said(DAW_UNDO_NOTE, self.app, os)];
+        for why in &self.because {
+            let why = daw_undo_said(why, self.app, os);
+            if !said.contains(&why) {
+                said.push(why);
+            }
+        }
+        Some(said.join(" "))
+    }
+}
+
+/// A plan's steps, each checked against the DAW's allowlist, what the DAW says it keeps no undo for (unless the step is
+/// one only the DAW's own Undo takes back), and what the step takes. A file step's field holds a source, so its input is
+/// checked once the source is resolved to a file.
 fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Checked, Value> {
     let Some(provider) = crate::daw::provider(ctx.daw()) else {
         return Err(refused("unsupported", "This runtime's DAW isn't one this build integrates."));
     };
     let offered = offered_steps(&plan.input_schema());
-    let mut checked = Checked { families: Vec::new(), files: Vec::new() };
+    let mut checked =
+        Checked { families: Vec::new(), files: Vec::new(), daw_undo: Vec::new(), because: Vec::new(), app: provider.profile().words.app };
     for (n, step) in steps.iter().enumerate() {
         let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
         let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
         let at = n + 1;
+        // A step the DAW keeps out of a plugin's plans says why, whether or not this DAW offers it now.
+        if let Some((_, why)) = provider.plugin_refused().iter().find(|(name, _)| *name == tool) {
+            return Err(refused("not_allowed", format!("Step {at}: Kumi for Hermes doesn't make {tool} here. {why}")));
+        }
         if !offered.iter().any(|name| name == tool) {
             return Err(refused("unknown_step", format!("Step {at}: {tool} isn't a change this DAW makes.")));
         }
         let allowed = kumi_daw::plugin::check(provider.plugin_steps(), tool, &input)
             .map_err(|why| refused("not_allowed", format!("Step {at}: {why}")))?;
-        if let Some(why) = provider.plugin_refuses(tool, &input) {
+        // A step marked as a change only the DAW's own Undo takes back is one the DAW keeps no undo for (CC-20).
+        let daw_undo = allowed.daw_undo_only(&input);
+        if let Some(why) = provider.plugin_refuses(tool, &input).filter(|_| !daw_undo) {
             return Err(refused("not_allowed", format!("Step {at} ({tool}): {why}")));
         }
         match allowed.file_field {
@@ -136,6 +167,10 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
             _ => step_takes(ctx, n, tool, &input)?,
         }
         checked.families.push(allowed.family);
+        checked.daw_undo.push(daw_undo);
+        if daw_undo {
+            checked.because.extend(allowed.daw_undo_because);
+        }
     }
     Ok(checked)
 }
@@ -259,26 +294,28 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             ctx.link().pin_files(&pin, &approved, named);
         }
         let names = ctx.link().ref_names();
-        let described: Vec<Value> = steps
-            .iter()
-            .zip(&checked.families)
-            .map(|(step, family)| {
-                let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
-                describe(&names, tool, family, step.get("input").unwrap_or(&Value::Null))
-            })
-            .collect();
-        return Ok(json!({
+        let mut preview = json!({
             "state": "preview",
             "title": title,
             "project": {"key": project.key, "epoch": project.epoch},
-            "steps": described,
-        }));
+            "steps": preview_steps(&names, &steps, &checked),
+        });
+        // A change holding a step only the DAW's own Undo takes back is one Kumi undoes nothing of (CC-20).
+        if let Some(note) = checked.undo_note(std::env::consts::OS) {
+            preview["undo"] = json!("daw");
+            preview["undo_note"] = json!(note);
+        }
+        return Ok(preview);
     }
     let asked = super::mcp::digest(CHANGE.name, args);
     let identity = CallIdentity::of(&call.host, &asked);
     let input: Map<String, Value> = [("steps".to_string(), Value::Array(steps))].into_iter().collect();
     let history = ctx.history();
     history.begin_call();
+    // Every row of a change holding a step only the DAW's own Undo takes back says so, however the call ends (CC-20).
+    if let Some(note) = checked.undo_note(std::env::consts::OS) {
+        history.daw_undo_call(note);
+    }
     let ran = plan.execute(input, call.signal.clone()).await;
     let rows = history.end_call(identity, ctx.snapshots());
     let mut outcome = outcome(ran, &rows);
@@ -312,6 +349,8 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         ids.push(audit);
         ctx.link().note_unsure("change", &reason, "unsure");
     }
+    // Every row this call recorded, its audit row included, is one change (CC-3 A2).
+    history.one_change(&ids, ctx.snapshots());
     history.call_came_to(&ids, outcome.state, ctx.snapshots());
     // Whatever ran, the refs an earlier look gave may no longer hold: the next plan is made on a fresh look.
     if outcome.state != "refused" {
@@ -332,6 +371,23 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         answer["reason"] = json!(reason);
     }
     Ok(answer)
+}
+
+/// A plan's steps as its preview says them, one line each; a step only the DAW's own Undo takes back is marked so.
+fn preview_steps(names: &HashMap<String, String>, steps: &[Value], checked: &Checked) -> Vec<Value> {
+    steps
+        .iter()
+        .zip(&checked.families)
+        .zip(&checked.daw_undo)
+        .map(|((step, family), daw_undo)| {
+            let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
+            let mut line = describe(names, tool, family, step.get("input").unwrap_or(&Value::Null));
+            if *daw_undo {
+                line["undo"] = json!("daw");
+            }
+            line
+        })
+        .collect()
 }
 
 /// The project may have changed: the epoch moves on, and `focus.json` gives the new one.
@@ -560,6 +616,10 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let Some(row) = ctx.history().row(id) else {
         return Ok(answer("refused", "There's no change by that id in HISTORY."));
     };
+    // A change only the DAW's own Undo takes back is refused with its words, before anything is asked (CC-20).
+    if row.reason.as_deref() == Some(DAW_UNDO) {
+        return Ok(daw_undo_refusal(ctx.history(), &row, previewing(&call.args)));
+    }
     // Why it can't be undone from here, before the DAW is asked: CC-3's reason, C1's state and the words.
     let restarted = format!(
         "Kumi restarted since this change, so it can't undo it safely: undo it in {} if it's still the latest step there, or ask Hermes to set it back.",
@@ -648,6 +708,8 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         audited = Some(audit.id);
     }
     if state != "refused" {
+        // Kumi's undo is a step of the DAW's own undo too: a change only that undo takes back is under it now.
+        ctx.history().wrote(&row.project_key);
         moved_on(ctx);
     }
     super::core::publish_status(ctx, false).await;
@@ -656,6 +718,22 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         answered["history_ids"] = json!([audit]);
     }
     Ok(answered)
+}
+
+/// The answer to an undo of a change only the DAW's own Undo takes back (CC-20's 20e): refused with the change's words,
+/// or a preview saying so (CC-3's `reason`), with where the change stands in that undo when that's known.
+fn daw_undo_refusal(history: &History, row: &Row, previewed: bool) -> Value {
+    let note = row.note.clone().unwrap_or_default();
+    let mut answer = if previewed {
+        let text = format!("Undo {}{}", row.title, on_track(&row.title, row.track.as_deref()));
+        json!({"state": "preview", "text": text, "undo_available": false, "reason": DAW_UNDO, "note": note})
+    } else {
+        json!({"state": "refused", "code": DAW_UNDO, "reason": note})
+    };
+    if let Some(place) = history.daw_undo_place(row) {
+        answer["daw_undo"] = json!(place);
+    }
+    answer
 }
 
 pub static HISTORY: Operation = Operation {
@@ -734,7 +812,8 @@ fn history_schema() -> Value {
 fn run_history(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(async move {
         let limit = call.args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
-        let items: Vec<Value> = ctx.history().rows(limit).iter().filter_map(|row| serde_json::to_value(row).ok()).map(shown_row).collect();
+        let history = ctx.history();
+        let items: Vec<Value> = history.rows(limit).iter().filter_map(|row| history.row_json(row)).map(shown_row).collect();
         Ok(json!({"items": items}))
     })
 }
@@ -758,6 +837,7 @@ fn on_track(words: &str, track: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use kumi_daw::plugin::{daw_undo_said, DAW_UNDO_NOTE};
     use kumi_types::contracts::ToolResult;
 
     /// An undo's words say the track once: not again when the change's title names it, and not for a name that's only
@@ -784,11 +864,13 @@ mod tests {
             undo_available: state == "applied",
             track: None,
             note: None,
+            reason: None,
             profile_id: None,
             session_id: None,
             tool_call_id: None,
             digest: None,
             call_outcome: None,
+            change_id: None,
             sources: None,
         }
     }
@@ -863,5 +945,44 @@ mod tests {
         );
         let long = describe(&names, "rename", "rename", &json!({"ref": "x", "name": "a".repeat(500), "other": "b".repeat(500)}));
         assert!(long["text"].as_str().unwrap().chars().count() <= LINE, "{long}");
+    }
+
+    #[test]
+    fn a_preview_marks_only_the_steps_only_the_daws_undo_takes_back() {
+        let steps = [
+            json!({"tool": "set_mixer", "input": {"trackRef": "7:track:1", "volume": 0.5}}),
+            json!({"tool": "edit_rack", "input": {"rackRef": "7:device:1", "action": "add-chain"}}),
+        ];
+        let checked =
+            Checked { families: vec!["mixer", "device"], files: Vec::new(), daw_undo: vec![false, true], because: Vec::new(), app: "Live" };
+        let lines = preview_steps(&HashMap::new(), &steps, &checked);
+        assert_eq!(lines.iter().map(|line| line.get("undo").cloned()).collect::<Vec<_>>(), [None, Some(json!("daw"))]);
+        // The key the note names is the one on the machine Kumi runs on.
+        let note = daw_undo_said(DAW_UNDO_NOTE, "Live", "macos");
+        assert_eq!(checked.undo_note("macos"), Some(note.clone()));
+        assert!(checked.undo_note("windows").unwrap().contains("Live's own Undo (Ctrl+Z)"));
+        // CC-20's words come first, then each reason the marked steps give, once.
+        let pads = Checked { because: vec!["Kumi can't tell.", "Kumi can't tell."], ..checked };
+        assert_eq!(pads.undo_note("macos"), Some(format!("{note} Kumi can't tell.")));
+        assert_eq!(Checked { daw_undo: vec![false, false], ..pads }.undo_note("macos"), None, "no marked step, no note");
+    }
+
+    #[test]
+    fn an_undo_of_a_change_only_the_daws_undo_takes_back_is_refused_with_its_words() {
+        let dir = tempfile::tempdir().unwrap();
+        let history = History::new(dir.path(), "g".into());
+        let note = "Kumi can't undo this change. Live's own Undo (Cmd+Z) takes all of it back while it's still Live's latest step.";
+        let row = Row { reason: Some(DAW_UNDO.into()), note: Some(note.into()), undo_available: false, ..row("applied") };
+        let preview = daw_undo_refusal(&history, &row, true);
+        assert_eq!(
+            (preview["state"].clone(), preview["undo_available"].clone(), preview["reason"].clone(), preview["note"].clone()),
+            (json!("preview"), json!(false), json!(DAW_UNDO), json!(note))
+        );
+        let refused = daw_undo_refusal(&history, &row, false);
+        assert_eq!(
+            (refused["state"].clone(), refused["code"].clone(), refused["reason"].clone()),
+            (json!("refused"), json!(DAW_UNDO), json!(note))
+        );
+        assert!(refused.get("daw_undo").is_none(), "where it stands isn't known to a runtime that didn't make it");
     }
 }
