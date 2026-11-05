@@ -77,7 +77,9 @@ impl Args {
             || [self.min_seconds, self.max_seconds].into_iter().flatten().any(|v| !v.is_finite() || v < 0.0)
             || self.min_seconds.zip(self.max_seconds).is_some_and(|(min, max)| min > max)
         {
-            return Err(OpError::Invalid { reason: "bpm must be positive and finite; duration bounds must be finite, nonnegative and ordered".into() });
+            return Err(OpError::Invalid {
+                reason: "bpm must be positive and finite; duration bounds must be finite, nonnegative and ordered".into(),
+            });
         }
         let mut query = SoundQuery { words: kumi_library::search::tokens(&self.query), limit: self.limit, ..Default::default() };
         if let Some(kind) = &self.kind {
@@ -102,9 +104,11 @@ impl Args {
         query.bpm = self.bpm;
         query.min_seconds = self.min_seconds;
         query.max_seconds = self.max_seconds;
-        query.key = self.key.as_deref().map(|key| {
-            parse_key(key).ok_or_else(|| OpError::Invalid { reason: "key must name a known musical key".into() })
-        }).transpose()?;
+        query.key = self
+            .key
+            .as_deref()
+            .map(|key| parse_key(key).ok_or_else(|| OpError::Invalid { reason: "key must name a known musical key".into() }))
+            .transpose()?;
         Ok(query)
     }
 }
@@ -609,11 +613,16 @@ async fn worker(entries: Vec<SoundEntry>, sources: Vec<Source>) -> Result<mpsc::
                             seconds: entry.seconds.unwrap_or_default(),
                         });
                     }
-                    Ok(index.search_indexed(&request.query).hits.into_iter().map(|hit| Match {
-                        path: hit.entry.file.path,
-                        why: public_reasons(hit.why),
-                        closeness: hit.closeness.filter(|v| v.is_finite()).map(|v| v.clamp(0.0, 100.0) as u8),
-                    }).collect())
+                    Ok(index
+                        .search_indexed(&request.query)
+                        .hits
+                        .into_iter()
+                        .map(|hit| Match {
+                            path: hit.entry.file.path,
+                            why: public_reasons(hit.why),
+                            closeness: hit.closeness.filter(|v| v.is_finite()).map(|v| v.clamp(0.0, 100.0) as u8),
+                        })
+                        .collect())
                 })();
                 let _ = request.reply.send(result);
             }
@@ -731,7 +740,11 @@ mod tests {
         async fn search(&self, query: &str, near: Option<String>, kind: Option<&str>) -> Result<Value, OpError> {
             self.ctx
                 .maps()
-                .search(&self.ctx, Args { query: query.into(), near, kind: kind.map(str::to_owned), limit: 20, ..Default::default() }, &Signal::new())
+                .search(
+                    &self.ctx,
+                    Args { query: query.into(), near, kind: kind.map(str::to_owned), limit: 20, ..Default::default() },
+                    &Signal::new(),
+                )
                 .await
         }
 
@@ -842,10 +855,18 @@ mod tests {
     async fn indexed_filters_combine_and_duration_boundaries_are_inclusive() {
         let fixture = Fixture::new();
         fixture.publish().await;
-        let result = filtered(&fixture, json!({"query":"", "kind":"one-shot", "class":"kick",
-            "min_seconds":1.25, "max_seconds":1.25})).await;
+        let result = filtered(
+            &fixture,
+            json!({"query":"", "kind":"one-shot", "class":"kick",
+            "min_seconds":1.25, "max_seconds":1.25}),
+        )
+        .await;
         assert_eq!(result["items"].as_array().unwrap().len(), 2);
-        assert!(result["items"].as_array().unwrap().iter().all(|hit| hit["duration"] == 1.25 && hit["class"] == "kick" && hit["kind"] == "one-shot"));
+        assert!(result["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|hit| hit["duration"] == 1.25 && hit["class"] == "kick" && hit["kind"] == "one-shot"));
         assert!(filtered(&fixture, json!({"query":"", "min_seconds":1.26})).await["items"].as_array().unwrap().is_empty());
         assert!(filtered(&fixture, json!({"query":"", "max_seconds":1.24})).await["items"].as_array().unwrap().is_empty());
         assert_eq!(filtered(&fixture, json!({"query":"", "kind":"kick", "class":"kick"})).await["items"].as_array().unwrap().len(), 3);
@@ -854,9 +875,13 @@ mod tests {
     #[test]
     fn invalid_filters_are_refused() {
         for extra in [
-            json!({"kind":"kick","class":"pad"}), json!({"class":"imaginary"}),
-            json!({"key":"nonsense"}), json!({"bpm":0}), json!({"bpm":-1}),
-            json!({"min_seconds":-1}), json!({"max_seconds":-1}),
+            json!({"kind":"kick","class":"pad"}),
+            json!({"class":"imaginary"}),
+            json!({"key":"nonsense"}),
+            json!({"bpm":0}),
+            json!({"bpm":-1}),
+            json!({"min_seconds":-1}),
+            json!({"max_seconds":-1}),
             json!({"min_seconds":2,"max_seconds":1}),
         ] {
             let mut value = json!({"query":""});
@@ -914,8 +939,12 @@ mod tests {
         fixture.index = SoundIndex::new(entries, &fixture.sources);
         fixture.publish().await;
         for extra in [
-            json!({"kind":"one-shot"}), json!({"class":"kick"}), json!({"bpm":120}),
-            json!({"key":"A minor"}), json!({"min_seconds":0}), json!({"max_seconds":100}),
+            json!({"kind":"one-shot"}),
+            json!({"class":"kick"}),
+            json!({"bpm":120}),
+            json!({"key":"A minor"}),
+            json!({"min_seconds":0}),
+            json!({"max_seconds":100}),
         ] {
             let mut args = json!({"query":""});
             args.as_object_mut().unwrap().extend(extra.as_object().unwrap().clone());
@@ -966,8 +995,17 @@ mod tests {
         }
         let result = filtered(&fixture, json!({"query":"", "min_seconds":0})).await;
         assert!(!result["items"].as_array().unwrap().iter().any(|hit| hit["name"] == "Kick close"));
-        let reasons = public_reasons(vec!["/private/pack".into(), "C:\\pack".into(), "bad\ntext".into(), "é".repeat(61),
-            "é".repeat(60), "one".into(), "two".into(), "three".into(), "four".into()]);
+        let reasons = public_reasons(vec![
+            "/private/pack".into(),
+            "C:\\pack".into(),
+            "bad\ntext".into(),
+            "é".repeat(61),
+            "é".repeat(60),
+            "one".into(),
+            "two".into(),
+            "three".into(),
+            "four".into(),
+        ]);
         assert_eq!(reasons.len(), 4);
         assert_eq!(reasons[0].chars().count(), 60);
         assert!(reasons.iter().all(|reason| !reason.contains('/') && !reason.contains('\\')));
@@ -981,7 +1019,16 @@ mod tests {
         let revoked = context(fixture._dir.path().join("revoked-search"), vec![]);
         let result = fixture.ctx.maps().search(&revoked, Args { limit: 20, ..Default::default() }, &Signal::new()).await.unwrap();
         assert!(result["items"].as_array().unwrap().is_empty());
-        assert_eq!(fixture.ctx.maps().search(&revoked, Args { near: Some(seed.clone()), limit: 20, ..Default::default() }, &Signal::new()).await.unwrap_err().code(), "stale");
+        assert_eq!(
+            fixture
+                .ctx
+                .maps()
+                .search(&revoked, Args { near: Some(seed.clone()), limit: 20, ..Default::default() }, &Signal::new())
+                .await
+                .unwrap_err()
+                .code(),
+            "stale"
+        );
         std::fs::remove_file(fixture.root.join("Kick seed.wav")).unwrap();
         assert!(fixture.search("seed", None, None).await.unwrap()["items"].as_array().unwrap().is_empty());
         assert_eq!(fixture.search("", Some(seed), None).await.unwrap_err().code(), "stale");
@@ -1042,16 +1089,14 @@ mod tests {
         assert!(snapshot["made"].is_null());
         assert!(snapshot["points"].as_array().unwrap().is_empty());
         assert_eq!(snapshot["sounds"].as_object().unwrap().len(), 4);
-        let result =
-            store.search(&fixture.ctx, Args { limit: 20, ..Default::default() }, &Signal::new()).await.unwrap();
+        let result = store.search(&fixture.ctx, Args { limit: 20, ..Default::default() }, &Signal::new()).await.unwrap();
         assert_eq!(result["items"].as_array().unwrap().len(), 4);
         let unmeasured =
             store.search(&fixture.ctx, Args { query: "unknown".into(), limit: 20, ..Default::default() }, &Signal::new()).await.unwrap();
         assert_eq!(unmeasured["items"].as_array().unwrap().len(), 1);
         let revoked = context(fixture._dir.path().join("revoked"), vec![]);
         revoked.maps().project(&revoked, None, &fixture.index, fixture.sources.clone(), &Signal::new()).await.unwrap();
-        let result =
-            revoked.maps().search(&revoked, Args { limit: 20, ..Default::default() }, &Signal::new()).await.unwrap();
+        let result = revoked.maps().search(&revoked, Args { limit: 20, ..Default::default() }, &Signal::new()).await.unwrap();
         assert!(result["items"].as_array().unwrap().is_empty());
         let signal = Signal::new();
         signal.cancel();

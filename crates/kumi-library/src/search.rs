@@ -732,14 +732,27 @@ impl SoundIndex {
                             why.push(format!(
                                 "a {} by its {}",
                                 entry.r#class.unwrap(),
-                                if entry.class_from == Some(ClassFrom::Sound) { "sound" } else { "folder" }
+                                if entry.class_from == Some(ClassFrom::Sound) {
+                                    if indexed {
+                                        "measured sound"
+                                    } else {
+                                        "sound"
+                                    }
+                                } else {
+                                    "folder"
+                                }
                             ));
                         }
                     }
                     for (describe, rank) in describing.iter().zip(&ranks) {
                         if let Some(value) = measure_of(entry, describe.measure) {
                             if (!indexed || value.is_finite()) && rank.get(&row).copied().unwrap_or(0.) >= 0.6 {
-                                why.push(format!("{}{}: {}", if indexed { "measured " } else { "" }, describe.says, measure_words(describe.measure, value)));
+                                why.push(format!(
+                                    "{}{}: {}",
+                                    if indexed { "measured " } else { "" },
+                                    describe.says,
+                                    measure_words(describe.measure, value)
+                                ));
                             }
                         }
                     }
