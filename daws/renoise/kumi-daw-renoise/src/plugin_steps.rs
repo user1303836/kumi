@@ -34,7 +34,7 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
         "Load an audio file as a new sample of an instrument (ref: the instrument; at index, its number from 0, the end \
          by default), or into a sample in place of its audio (ref: the sample; Kumi keeps the audio it replaces to put \
          back), named name. path is where the file comes from: a sound from the map, a file Kumi made, or an approved \
-         file, never a path. Up to 96 MB.",
+         file, never a path. Renoise takes up to 96 MB; an approved file, which Kumi copies first, is at most 50 MB.",
     ),
     PluginStep::new("song_bpm", "tempo"),
     PluginStep::new("song_lpb", "tempo"),

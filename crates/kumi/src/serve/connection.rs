@@ -507,10 +507,12 @@ fn whole_path(text: &str) -> bool {
 /// the producer's files is their names, never their folders.
 pub(super) fn names_only(value: &mut Value) {
     match value {
+        // A whole path cut to its name (spaces and all), and each path in a sentence ("Couldn't load /Users/…/x.wav").
         Value::String(text) if whole_path(text) => {
             let name = text.trim_end_matches(['/', '\\']).rsplit(['/', '\\']).next().unwrap_or_default().to_string();
             *text = name;
         }
+        Value::String(text) => *text = names_only_text(text),
         Value::Array(items) => items.iter_mut().for_each(names_only),
         Value::Object(fields) => {
             for (key, field) in fields.iter_mut() {
@@ -644,6 +646,16 @@ mod tests {
         assert!(!text.contains("/Users/") && !text.contains("\\Users\\"), "{text}");
         let known: Vec<&str> = value.as_object().unwrap().keys().map(String::as_str).collect();
         assert_eq!(known, ["track", "trackRef", "clip", "item"], "nothing but DawFocus's own fields");
+    }
+
+    #[test]
+    fn a_path_in_what_the_daw_says_of_a_step_is_its_file_name() {
+        let mut said = json!({"refused": [{"step": 2, "error": "Couldn't load /Users/producer/Samples/kick.wav: too long"}],
+            "done": [{"changed": "Simpler now plays C:\\Users\\producer\\snare.wav", "trackRef": "7:track:0"}]});
+        names_only(&mut said);
+        assert_eq!(said["refused"][0]["error"], "Couldn't load kick.wav: too long");
+        assert_eq!(said["done"][0]["changed"], "Simpler now plays snare.wav");
+        assert_eq!(said["done"][0]["trackRef"], "7:track:0", "refs are the DAW's");
     }
 
     #[test]

@@ -8,6 +8,7 @@
 //! The resolved file's identity is pinned (11b): the preview's and the dispatch's must be the same file, unchanged.
 //! Only its name reaches the preview and HISTORY (11c); the path goes to the DAW alone.
 
+use super::artifacts::StagedArtifact;
 use super::ctx::{Ctx, OpError};
 use kumi_common::abort::Signal;
 use serde_json::{json, Value};
@@ -74,22 +75,55 @@ pub async fn find(ctx: &Ctx, source: &Value, signal: &Signal) -> Result<Found, O
     Ok(Found { path, name, record, mime, named })
 }
 
-/// The file the DAW gets for `found`, with the source as HISTORY keeps it: a host's file copied into the artifacts
-/// first (11a), since the host may clean the folder it came from; a map sound or an artifact as it is.
-pub async fn keep(ctx: &Ctx, found: Found, signal: &Signal) -> Result<(PathBuf, Value), OpError> {
+/// A host's file for `found` copied into the artifacts' private staging (11a), not yet kept: only the one the approval
+/// pinned, read through one opened handle, so another put in its place since is refused stale (11b). None for a map
+/// sound or an artifact, which the DAW gets as they are. A staged copy that's never kept goes with it.
+pub async fn stage(ctx: &Ctx, found: &Found, signal: &Signal) -> Result<Option<StagedArtifact>, OpError> {
+    if found.record.get("host_tool").is_none() {
+        return Ok(None);
+    }
+    Ok(Some(ctx.artifacts().stage(ctx, &found.path, Some(&found.named), signal).await?))
+}
+
+/// The file the DAW gets for `found` ([`stage`]'s copy kept in the artifacts, or the file as it is), with the source
+/// as HISTORY keeps it and the identity of the file the DAW gets.
+pub async fn keep(ctx: &Ctx, found: Found, staged: Option<StagedArtifact>, signal: &Signal) -> Result<(PathBuf, Value), OpError> {
     let mut record = found.record;
-    let path = if record.get("host_tool").is_some() {
-        // Copied from the file the approval named, through one opened handle: another put in its place since is
-        // refused stale (11b), whatever its path says.
-        let saved = ctx.artifacts().add(ctx, &found.path, Some(&found.named), "audio", found.mime, "change", signal).await?;
-        record["artifact_id"] = json!(saved.id);
-        saved.path
-    } else {
-        found.path
+    let (path, kept) = match staged {
+        Some(staged) => {
+            let saved = ctx.artifacts().publish(ctx, staged, "audio", found.mime, "change", signal).await?;
+            record["artifact_id"] = json!(saved.id);
+            let kept = identity(&saved.path)?;
+            (saved.path, kept)
+        }
+        // The file as the dispatch checked it against the approval.
+        None => (found.path, found.named),
     };
     record["file"] = json!(super::change::one_line(&found.name, 120));
-    record["identity"] = identity(&path)?;
-    Ok((path, record))
+    record["identity"] = kept;
+    Ok((plain(path), record))
+}
+
+/// `path` as a DAW opens it: on Windows without the `\\?\` verbatim prefix canonicalizing gives (`\\?\C:\…` as `C:\…`,
+/// `\\?\UNC\server\share\…` as `\\server\share\…`), which some DAWs don't take; elsewhere as it is.
+fn plain(path: PathBuf) -> PathBuf {
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+        let mut components = path.components();
+        if let Some(Component::Prefix(prefix)) = components.next() {
+            let rest = components.as_path();
+            match prefix.kind() {
+                Prefix::VerbatimDisk(letter) => return PathBuf::from(format!("{}:\\", letter as char)).join(rest),
+                Prefix::VerbatimUNC(server, share) => {
+                    let root = format!("\\\\{}\\{}\\", server.to_string_lossy(), share.to_string_lossy());
+                    return PathBuf::from(root).join(rest);
+                }
+                _ => {}
+            }
+        }
+    }
+    path
 }
 
 /// The identity of the file at `path`, as the artifacts' copy checks it ([`super::artifacts::file_identity`]: its
@@ -98,4 +132,16 @@ fn identity(path: &Path) -> Result<Value, OpError> {
     let unreadable = |error: std::io::Error| OpError::Failed { reason: format!("Kumi couldn't read the file: {error}") };
     let file = std::fs::File::open(path).map_err(unreadable)?;
     super::artifacts::file_identity(&file).map_err(unreadable)
+}
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_daw_gets_a_windows_path_without_the_verbatim_prefix() {
+        assert_eq!(plain(PathBuf::from(r"\\?\C:\Samples\kick.wav")), PathBuf::from(r"C:\Samples\kick.wav"));
+        assert_eq!(plain(PathBuf::from(r"\\?\UNC\studio\share\kick.wav")), PathBuf::from(r"\\studio\share\kick.wav"));
+        assert_eq!(plain(PathBuf::from(r"D:\Samples\kick.wav")), PathBuf::from(r"D:\Samples\kick.wav"));
+    }
 }
