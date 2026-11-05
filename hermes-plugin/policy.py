@@ -18,6 +18,7 @@ returns at once, the runtime is never waited for, and a preview gets at most hal
 """
 from __future__ import annotations
 
+import itertools
 import logging
 import re
 import textwrap
@@ -37,8 +38,15 @@ TITLE = LINE - len("".join(TITLE_LABEL))
 # The longest line of a change's preview the runtime writes (W1: values first, each name quoted and capped at 40, one
 # line of at most 200). A longer one is never cut: the approval is blocked (research-1's review, item 2).
 STEP_LINE = 200
-TOO_LONG = ("Kumi didn't run this: its approval is longer than this window shows whole, and Kumi asks only with every "
-            "line in view. Split it into smaller changes, or approve it in Hermes Desktop.")
+TOO_LONG = ("Kumi didn't run this: its approval doesn't fit this window whole, even with like steps grouped, and Kumi "
+            "asks only with every step in view. Split it into smaller changes, each its own approval (by track, or by "
+            "kind of step), or approve it in Hermes Desktop.")
+# Where a change's plain approval (one line per step) doesn't show whole, a compact one is tried: adjacent steps of
+# one kind share a bullet, every step's own words whole and in plan order. Steps are never grouped across another
+# kind's, since the order carries meaning (beastmode). The footer and the chat note share one row. Nothing is dropped
+# or cut: if even that doesn't show whole, the plan isn't asked (TOO_LONG).
+COMPACT_CLOSING = "(Values Kumi just read; its approvals cover this chat only.)"
+_COMPACT = "_compact"
 # A track listen's one line: which track or the mix, the exact beats, and what's put back after. The runtime writes it
 # and bounds the names in it, so it's cut only far past what a preview says.
 PLAYBACK_LINE = 600
@@ -106,13 +114,19 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
     if unattended and tool == "kumi_library" and args.get("action") == "cancel":  # CC-14: a chat's, never a webhook's
         return block(UNATTENDED_CANCEL), {}
     decision, extra = _decide(host, tool, args, kwargs)
+    compact = decision.pop(_COMPACT, None) if isinstance(decision, dict) else None
     if unattended and decision is not None and decision["action"] == "approve":
         return block(UNATTENDED), {}
     if decision is not None and decision["action"] == "approve" and not decision["rule_key"].startswith("kumi:setup:"):
-        if not decision["rule_key"].startswith(ONE_THING):
+        scoped = not decision["rule_key"].startswith(ONE_THING)
+        if scoped:
             decision = chat_scoped(decision, args, kwargs)
-        if not shows_whole(decision["message"], host.session_surface()):
-            return block(TOO_LONG), {}
+        surface = host.session_surface()
+        if not shows_whole(decision["message"], surface):
+            tight = "\n".join([*compact, COMPACT_CLOSING if scoped else FOOTER]) if compact else None
+            if tight is None or not shows_whole(tight, surface):
+                return block(TOO_LONG), {}
+            decision = {**decision, "message": tight}
     return decision, extra
 
 
@@ -256,8 +270,61 @@ def _change(host: Any, args: dict, kwargs: dict) -> dict:
     effects = sorted({one_line(step["effect"], 20) for step in steps})
     families = sorted({one_line(step["family"], 40) for step in steps})
     title = agents_title(answer.get("title") or args.get("title") or "a change")
-    return approve([title, *(f"• {step['text']}" for step in steps)], f"kumi:{'+'.join(effects)}:{'+'.join(families)}",
-                   footer=FOOTER)
+    rule_key = f"kumi:{'+'.join(effects)}:{'+'.join(families)}"
+    decision = approve([title, *(f"• {step['text']}" for step in steps)], rule_key, footer=FOOTER)
+    if decision["action"] == "approve" and (lines := compact_lines(title, steps)):
+        decision[_COMPACT] = lines
+    return decision
+
+
+def compact_lines(title: str, steps: list[dict]) -> list[str] | None:
+    """A change's approval lines with adjacent steps of one kind sharing a bullet, for a window too small for one line
+    per step: `• Set mixer ×3, volumeDb: -4 — on "Drums" · -6 — on "Bass" · …`.
+    - Only the repeated step name goes, and a setting's name when every step in the run sets just that one.
+    - Each step's own words stay whole, in plan order, as the runtime wrote them.
+    - A run is one line, which the window wraps (its steps never cut by Kumi). STEP_LINE bounds what the runtime writes
+      for one step; a run's line isn't that, and splitting it at a length would waste the panel's part-filled rows.
+    None when no two adjacent steps share a kind: there's nothing to gain."""
+    lines, grouped = [title], False
+    for tool, run in itertools.groupby(steps, key=lambda step: step.get("tool")):
+        texts = [one_line(step["text"], STEP_LINE + 1) for step in run]
+        name = tool.replace("_", " ")[:1].upper() + tool.replace("_", " ")[1:] if isinstance(tool, str) else ""
+        rests = [_after(text, name) for text in texts] if name else []
+        if len(texts) < 2 or not rests or any(rest is None for rest in rests):
+            lines.extend(f"• {text}" for text in texts)
+            continue
+        grouped = True
+        head, parts = f"• {name} ×{len(texts)}", rests
+        if (shared := _one_setting(rests)) is not None:
+            head, parts = f"{head}, {shared}", [rest[len(shared) + 1:] for rest in rests]
+        lines.append(f"{head}: {' · '.join(parts)}")
+    return lines if grouped else None
+
+
+def _after(text: str, name: str) -> str | None:
+    """What a step's line says after its step name (`volumeDb -4 — on "Drums"`), or None when it doesn't start with
+    it as the runtime writes it (then the step keeps its own line)."""
+    if not text.startswith(name):
+        return None
+    rest = text[len(name):]
+    if rest.startswith(": ") and rest[2:].strip():
+        return rest[2:]
+    if rest.startswith(" — ") and rest[3:].strip():
+        return rest[1:]
+    return None
+
+
+def _one_setting(rests: list[str]) -> str | None:
+    """The setting every step of a run sets, when each sets just that one (`volumeDb`): its name can lead the bullet
+    once. None when any step sets more, or another, or none."""
+    names = set()
+    for rest in rests:
+        settings = rest.split(" — on ", 1)[0]
+        name, _, value = settings.partition(" ")
+        if ", " in settings or not value or rest.startswith("— "):
+            return None
+        names.add(name)
+    return names.pop() if len(names) == 1 else None
 
 
 def agents_title(title: Any) -> str:

@@ -141,15 +141,43 @@ class Approvals(unittest.TestCase):
 
     def test_a_plan_is_shown_whole_or_not_asked_never_cut(self):
         plan = change(*[volume("t1", -db) for db in range(1, 21)])
-        self.assertEqual(self.hook("kumi_change", plan), {"action": "block", "message": policy.TOO_LONG},
-                         "twenty steps don't fit the terminal's panel: refused, the model told to split it")
+        # Twenty steps of one kind fit the terminal's panel grouped: the step name and setting once, every value and
+        # target whole, in plan order, with the footer and the chat note on one row.
+        decision = self.hook("kumi_change", plan)
+        self.assertEqual(decision["action"], "approve")
+        lines = decision["message"].splitlines()
+        self.assertTrue(lines[1].startswith('• Set track volume ×20, volume_db: -1 — on "Drums" · -2 — on "Drums"'), lines)
+        self.assertEqual(lines[-1], policy.COMPACT_CLOSING)
+        shown = " ".join(lines[1:-1])
+        self.assertEqual([shown.index(f'-{db} — on "Drums"') < shown.index(f'-{db + 1} — on "Drums"') for db in range(1, 20)],
+                         [True] * 19, "every step, in plan order")
+        self.assertTrue(policy.shows_whole(decision["message"], "cli"))
         self.ctx.surface = "desktop"
-        lines = self.hook("kumi_change", plan)["message"].splitlines()
-        self.assertEqual(len([line for line in lines if line.startswith("• ")]), 20, "Desktop shows every step")
+        plain = self.hook("kumi_change", plan)
+        lines = plain["message"].splitlines()
+        self.assertEqual(len([line for line in lines if line.startswith("• ")]), 20, "Desktop shows one line a step")
         self.assertEqual(lines[-2:], [policy.FOOTER, policy.CHAT_ONLY])
+        self.assertEqual(plain["rule_key"], decision["rule_key"], "the same approval in either form")
         self.ctx.surface = RuntimeError("the plugin host's channel is gone")
         self.assertEqual(self.host.session_surface(), "unknown")
         self.assertFalse(policy.shows_whole("Kumi: Louder drums", "unknown"), "never taken as whole")
+
+    def test_steps_group_only_with_their_neighbours_and_a_plan_that_still_cant_fit_isnt_asked(self):
+        sample = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1", "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
+        lines = policy.compact_lines("T", [
+            {"tool": "set_track_volume", "text": 'Set track volume: volume_db -4 — on "Drums"'},
+            {"tool": "set_track_volume", "text": 'Set track volume: volume_db -6 — on "Bass"'},
+            {"tool": "replace_sample", "text": 'Replace sample: sample "Snare 04" — on "Drums"'},
+            {"tool": "set_track_volume", "text": 'Set track volume: volume_db -2 — on "Keys"'},
+        ])
+        self.assertEqual(lines, ["T", '• Set track volume ×2, volume_db: -4 — on "Drums" · -6 — on "Bass"',
+                                 '• Replace sample: sample "Snare 04" — on "Drums"', '• Set track volume: volume_db -2 — on "Keys"'],
+                         "never grouped across another kind's step: the order carries meaning")
+        self.assertIsNone(policy.compact_lines("T", [{"tool": "a", "text": "A: x 1"}, {"tool": "b", "text": "B: y 2"}]),
+                          "nothing to group, no compact form")
+        # Kinds that alternate can't share a bullet: twenty such steps stay too long for the panel, and aren't asked.
+        alternating = change(*[step for db in range(1, 11) for step in (volume("t1", -db), sample)])
+        self.assertEqual(self.hook("kumi_change", alternating), {"action": "block", "message": policy.TOO_LONG})
 
     def test_the_terminals_panel_shows_a_change_undo_or_listen_whole_at_its_longest_step(self):
         def message(lines, footer=None):
