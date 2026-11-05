@@ -30,6 +30,8 @@ log = logging.getLogger(__name__)
 
 PREVIEW_TIMEOUT = 10.0
 LINE = 120
+# The most of the agent's title an approval quotes: its first line, label and quotes included, stays within LINE.
+TITLE = 90
 # The longest line of a change's preview the runtime writes (W1: values first, each name quoted and capped at 40, one
 # line of at most 200). A longer one is never cut: the approval is blocked (research-1's review, item 2).
 STEP_LINE = 200
@@ -239,9 +241,16 @@ def _change(host: Any, args: dict, kwargs: dict) -> dict:
         return block("Kumi didn't change anything: its runtime couldn't describe every step of this plan.")
     effects = sorted({one_line(step["effect"], 20) for step in steps})
     families = sorted({one_line(step["family"], 40) for step in steps})
-    title = f"Kumi: {answer.get('title') or args.get('title') or 'a change'}"
+    title = agents_title(answer.get("title") or args.get("title") or "a change")
     return approve([title, *(f"• {step['text']}" for step in steps)], f"kumi:{'+'.join(effects)}:{'+'.join(families)}",
                    footer=FOOTER)
+
+
+def agents_title(title: Any) -> str:
+    """A plan's title as the approval's first line: the model's own words, quoted and labelled as the agent's, never
+    as Kumi's (research-1's review, item 3). Its quotes can't close early, and it's cut so the line stays whole."""
+    words = one_line(title, TITLE).replace('"', "'")
+    return f"Kumi, for the agent's \"{words}\":"
 
 
 def _undo(host: Any, args: dict, kwargs: dict) -> dict:
