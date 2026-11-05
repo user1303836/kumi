@@ -22,10 +22,10 @@ CONNECT_TIMEOUT = 60.0
 READ_TIMEOUT = 30.0
 WRITE_TIMEOUT = 120.0
 # A track listen waits for the runtime's own deadline, which its preview gives (`deadline_seconds`: capture or render,
-# restore and measure), plus a margin; without one, for CC-2's longest: an offline render's 240 s, restore and measure.
-TRACK_TIMEOUT = 300.0
+# restore and measure), plus a margin. CC-2's A2: a whole number of seconds from 1 to 360 (a 60 s window's offline
+# render with restoring and measuring); a preview without one isn't approved, and no deadline is ever guessed.
 TRACK_MARGIN = 30.0
-TRACK_LONGEST = 900.0  # a preview's deadline past this isn't believed
+TRACK_DEADLINE_MAX = 360
 # Installing Kumi's part in a DAW unpacks and copies its bridge: it gets longer than a change.
 SETUP_TIMEOUT = 300.0
 UNSURE_HINT = ("What it did is unknown. Don't send it again: check kumi_history and the project (kumi_observe) "
@@ -294,6 +294,14 @@ def is_track_listen(args: dict) -> bool:
     return isinstance(source, dict) and "track" in source
 
 
+def track_deadline(value: Any) -> int | None:
+    """A track listen preview's `deadline_seconds` (CC-2's A2: the runtime's whole bound for the real call) when it's a
+    whole number of seconds from 1 to 360; None otherwise, and then the listen isn't approved."""
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= TRACK_DEADLINE_MAX:
+        return None
+    return value
+
+
 def listen_refusal(args: dict) -> str | None:
     """Why `kumi_listen` can't take these arguments, or None. A source is a file, a sound or an artifact, or one track
     or the mix over a beat window (CC-2); `compare_to` is never a track. The runtime checks the window against the
@@ -369,9 +377,11 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
         return host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
     # A track listen plays the project: sent once, and an answer that never came is unsure, never resent (CC-2).
     call = kwargs.get("kumi_call")
-    deadline = call.extra.get("deadline") if isinstance(call, calls.Entry) else None
-    timeout = (deadline + TRACK_MARGIN if isinstance(deadline, (int, float)) and not isinstance(deadline, bool)
-               and 0 < deadline <= TRACK_LONGEST else TRACK_TIMEOUT)
+    deadline = track_deadline(call.extra.get("deadline")) if isinstance(call, calls.Entry) else None
+    if deadline is None:  # approved_only let it through, so the hook approved it with its deadline; never guess one
+        return {"error": {"code": "not_approved", "reason": "Kumi didn't play anything: this listen came without "
+                                                            "its runtime's deadline."}}
+    timeout = deadline + TRACK_MARGIN
     try:
         result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout)
     except runtime.Unavailable as failure:

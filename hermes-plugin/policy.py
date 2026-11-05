@@ -153,15 +153,17 @@ def _listen(host: Any, args: dict, kwargs: dict) -> tuple[dict | None, dict]:
         answer = _ask(host, "listen", {**tools.listen_args(args), "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
         return block(f"Kumi didn't play anything: {_reason(failure)}"), {}
-    text = answer.get("text")
+    text, deadline = answer.get("text"), tools.track_deadline(answer.get("deadline_seconds"))
     if answer.get("state") != "preview" or not isinstance(text, str) or not text.strip():
         return block(f"Kumi didn't play anything: {answer.get('reason') or 'its runtime refused this listen.'}"), {}
+    if deadline is None:  # its own bound for the real call (CC-2); nothing is guessed in its place
+        return block("Kumi didn't play anything: its runtime didn't say how long this listen may take."), {}
     seconds = answer.get("estimated_seconds")
     about = (f" (about {seconds:.3g} s)" if isinstance(seconds, (int, float)) and not isinstance(seconds, bool)
              and seconds > 0 else "")
     decision = {"action": "approve", "message": one_line(f"Kumi: {text}{about}", PLAYBACK_LINE),
                 "rule_key": "kumi:playback:listen"}
-    return decision, {"deadline": answer.get("deadline_seconds")}
+    return decision, {"deadline": deadline}
 
 
 def _change(host: Any, args: dict, kwargs: dict) -> dict:

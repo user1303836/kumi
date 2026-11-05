@@ -494,8 +494,9 @@ def main() -> None:
     parser.add_argument("--library-root", action="append", default=[])
     parser.add_argument("--listen-outcome", default="measured",
                         choices=["measured", "refused", "cancelled", "unsure", "unsure-with-media"])
-    parser.add_argument("--listen-deadline", type=float, default=75.0,
-                        help="the preview's deadline_seconds: the capture's 65 s cap, restoring and measuring")
+    parser.add_argument("--listen-deadline", type=int, default=75,
+                        help="the preview's deadline_seconds (whole seconds): the capture's 65 s cap, restoring and "
+                             "measuring")
     parser.add_argument("--component-state", default="missing",
                         choices=["missing", "same", "older", "newer", "other_owner"])
     parser.add_argument("--component-owner")

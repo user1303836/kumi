@@ -64,6 +64,16 @@ class TrackListen(unittest.TestCase):
         self.assertIn("kumi_connect", decision["message"])
         self.assertEqual(played(self.data), [])
 
+    def test_a_preview_that_names_no_deadline_isnt_asked_and_nothing_plays(self):
+        for deadline in ("0", "-5", "361"):  # outside CC-2's A2 (whole seconds, 1 to 360): no deadline Kumi waits for
+            with self.subTest(deadline=deadline):
+                host, _, data = support.host(self, None, "--listen-deadline", deadline)
+                support.call(host, "kumi_connect", {}, session_id="s1")
+                decision = policy.pre_tool_call(host, tool_name="kumi_listen", args=track(), session_id="s1")
+                self.assertEqual(decision, policy.block(
+                    "Kumi didn't play anything: its runtime didn't say how long this listen may take."))
+                self.assertEqual(played(data), [])
+
     def test_a_window_or_source_kumi_doesnt_take_is_blocked_without_asking_the_runtime(self):
         for args in (track(beats=0), track(beats=257), track(beats=float("nan")), track(from_beat=-1),
                      track(from_beat="soon"), {**track(), "expected_epoch": None},
@@ -113,16 +123,23 @@ class Outcomes(unittest.TestCase):
                     self.assertEqual((result["cleanup"], result["hint"]), ("unsure", tools.UNSURE_HINT))
 
     def test_an_answer_past_the_runtimes_own_deadline_is_unsure_and_never_sent_again(self):
-        with mock.patch.object(tools, "TRACK_MARGIN", 0.3):  # the preview says 0.2 s; the answer takes 2 s
-            result, data = self.listen("--slow", "listen=2", "--listen-deadline", "0.2")
+        with mock.patch.object(tools, "TRACK_MARGIN", 0):  # the preview says 1 s; the answer takes 2 s
+            result, data = self.listen("--slow", "listen=2", "--listen-deadline", "1")
         self.assertEqual((result["state"], result["code"], result["cleanup"]), ("unsure", "timeout", "unsure"))
         self.assertEqual(result["hint"], tools.UNSURE_HINT)
         self.assertEqual([args.get("preview") for args in asked(data)], [True, None], "previewed, then sent once")
 
     def test_a_slow_listen_within_the_runtimes_deadline_is_waited_for(self):
-        with mock.patch.object(tools, "TRACK_TIMEOUT", 0.5):  # what a preview without a deadline would get
-            result, _ = self.listen("--slow", "listen=1", "--listen-deadline", "5")
+        result, _ = self.listen("--slow", "listen=1", "--listen-deadline", "5")
         self.assertEqual(result["capture"]["cleanup"], "restored")
+
+    def test_a_track_listen_recorded_without_its_runtimes_deadline_never_plays(self):
+        host, _, data = support.host(self)
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        host.calls.record("kumi_listen", track(), {"session_id": "s1", "tool_call_id": "l9"}, {"approved": True})
+        refused = support.handle(host, "kumi_listen", track(), session_id="s1")
+        self.assertEqual(refused["error"]["code"], "not_approved", "no deadline is ever guessed")
+        self.assertEqual(played(data), [])
 
 
 if __name__ == "__main__":
