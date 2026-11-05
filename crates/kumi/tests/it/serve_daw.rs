@@ -305,11 +305,31 @@ impl kumi_agent::core::contracts::Integration for Silent {
 /// A runtime for Live whose Remote Script's reference names a configuration in `owner`'s home (the runtime's own when
 /// None); and whether it started Live's integration.
 async fn live_connect(owner: Option<&std::path::Path>) -> (Result<Value, OpError>, bool) {
+    live_connect_with(owner, false).await
+}
+
+/// [`live_connect`], with the configuration where an earlier install keeps it (`legacy`): in a folder of its own, naming
+/// the server in its owner's `bridge/<version>/package`.
+async fn live_connect_with(owner: Option<&std::path::Path>, legacy: bool) -> (Result<Value, OpError>, bool) {
     let home = tempfile::tempdir().unwrap();
     let transport = home.path().join("kumi-home");
-    let config = owner.unwrap_or(&transport).join("bridge/state/bridge-config.json");
-    std::fs::create_dir_all(config.parent().unwrap()).unwrap();
-    std::fs::write(&config, "{}").unwrap();
+    let owner = owner.unwrap_or(&transport);
+    let config = if legacy {
+        let server = owner.join("bridge/1.0.104-1793822317831/package/ableton-mcp-server");
+        std::fs::create_dir_all(server.parent().unwrap()).unwrap();
+        std::fs::write(&server, "").unwrap();
+        let config = home.path().join(".config/ableton-mcp-release-a8a291e/bridge-config.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        let body = json!({"version": 2, "server": {"command": server, "args": ["--config", config]}, "bridge": {"host": "127.0.0.1", "port": 9765}});
+        std::fs::write(&config, body.to_string()).unwrap();
+        config
+    } else {
+        let config = owner.join("bridge/state/bridge-config.json");
+        std::fs::create_dir_all(config.parent().unwrap()).unwrap();
+        std::fs::write(&config, "{}").unwrap();
+        config
+    };
+    std::fs::create_dir_all(&transport).unwrap();
     let scripts = home.path().join("Remote Scripts");
     std::fs::create_dir_all(scripts.join("AbletonMcpBridge")).unwrap();
     std::fs::write(scripts.join("AbletonMcpBridge/bridge-reference.json"), json!({"config": config}).to_string()).unwrap();
@@ -351,6 +371,18 @@ case!(serve_wont_take_over_lives_bridge_when_another_kumi_installed_it, async {
     assert_eq!(code, "owned_elsewhere");
     assert_eq!(owner.unwrap()["kumi_home"], std::fs::canonicalize(other.path()).unwrap().display().to_string());
     assert!(!started, "its bridge isn't started");
+});
+
+case!(serve_knows_the_home_an_earlier_live_install_belongs_to_by_the_server_it_starts, async {
+    // The producer's own Kumi installed the bridge before state lived in its home: the configuration is in a folder of
+    // its own, and names the server in that Kumi's bridge folder.
+    let (connected, started) = live_connect_with(None, true).await;
+    assert!(connected.is_ok() && started, "the runtime's own home's install: {connected:?}");
+    let other = tempfile::tempdir().unwrap();
+    let (connected, started) = live_connect_with(Some(other.path()), true).await;
+    let Err(OpError::Refused { code, owner, .. }) = connected else { panic!("took over another Kumi's bridge") };
+    assert_eq!((code, started), ("owned_elsewhere", false));
+    assert_eq!(owner.unwrap()["kumi_home"], std::fs::canonicalize(other.path()).unwrap().display().to_string());
 });
 
 case!(serve_connects_to_live_through_the_bridge_its_own_home_installed, async {
