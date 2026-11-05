@@ -248,6 +248,20 @@ class Runtimes(unittest.TestCase):
         self.assertTrue(eventually(lambda: live.gone.is_set()), "it settled and exited")
         self.assertIs(json.loads(owner.read_text(encoding="utf-8"))["running"], False, "a clean stop, never a kill")
 
+    def test_a_late_answer_clears_the_mark_so_a_later_stop_is_quick_again(self):
+        live = self.start("--slow", "history=1")
+        with self.assertRaises(runtime.Unavailable):
+            live.call("history", {}, self.host(), timeout=0.2)
+        self.assertTrue(live.client.unsettled)
+        self.assertTrue(eventually(lambda: not live.client.unsettled), "its late answer came")
+        self.runtimes.stop_session("s1")
+        self.assertFalse(live.client.running, "an idle runtime is waited for, as before")
+
+    def test_a_stopped_runtime_gets_at_least_as_long_to_settle_as_any_call_of_the_plugins_waits(self):
+        tools = support.module("tools")
+        self.assertGreaterEqual(runtime.SETTLE_WAIT, max(tools.SETUP_TIMEOUT, tools.WRITE_TIMEOUT,
+                                                         tools.CONNECT_TIMEOUT, runtime.TRACK_DEADLINE_MAX))
+
     def test_a_request_caught_by_a_stop_is_refused_unsent_never_reported_unknown(self):
         live = self.start()
         live.client.end_input()  # the stop ended its input just before this call queued its line

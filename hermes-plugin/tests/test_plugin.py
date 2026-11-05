@@ -168,7 +168,8 @@ class Tools(unittest.TestCase):
             time.sleep(0.02)
         host.on_session_finalize("s1")  # the chat ends with its call in flight
         status = support.call(host, "kumi_status", {})
-        self.assertEqual((status["running"], status["settling"], status["owner"]), (True, True, {"session_id": "s1"}))
+        self.assertEqual((status["running"], status["settling"], status["owner"]["session_id"]), (True, True, "s1"),
+                         "the holder the runtime last published")
         decision = policy.pre_tool_call(host, tool_name="kumi_change", args=LOUDER, session_id="s2", tool_call_id="c1")
         self.assertEqual(decision["action"], "block")
         self.assertNotIn("change", [m.get("params", {}).get("name") for m in support.requests(data / "state")],

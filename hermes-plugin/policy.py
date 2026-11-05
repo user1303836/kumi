@@ -228,8 +228,10 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
         return None
     if action not in ("add_folder", "scan"):
         return block("Kumi didn't run: kumi_library's action is status, add_folder or scan.")
-    if host.runtimes.get(host.data_dir()) is None:
-        return block("Kumi didn't read any folder: it isn't connected. Call kumi_connect first.")
+    try:
+        _live(host)
+    except runtime.Unavailable as failure:
+        return block(f"Kumi didn't read any folder: {_reason(failure)}")
     if action == "add_folder":
         folder, refusal = tools.library_folder(args.get("folder"))
         if refusal is not None:

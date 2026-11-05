@@ -334,6 +334,9 @@ class Client:
         self._outbox: queue.Queue[bytes | None] = queue.Queue()
         self._gone: str | None = None
         self._input_ended = False  # once true, nothing more is written: a request then is refused, never queued
+        # Requests given up on (timed out, and cancelled) whose answer hasn't come: cancelling isn't settling, so the
+        # runtime may still be at them (research-2). An answer, however late, or the runtime's end clears each.
+        self._abandoned: set[int] = set()
         self._on_notification = on_notification
         self._on_exit = on_exit
         self._exit_wait = exit_wait
@@ -363,6 +366,8 @@ class Client:
             self._outbox.put(_line({"jsonrpc": "2.0", "id": ident, "method": method, "params": params or {}}))
         try:
             if not pending.done.wait(timeout):
+                with self._lock:
+                    self._abandoned.add(ident)
                 self.notify("notifications/cancelled", {"requestId": ident, "reason": "Hermes stopped waiting"})
                 raise Unavailable("timeout", f"Kumi didn't answer {method} within {timeout:g} s; it was cancelled, and "
                                              "what it did is unknown.")
@@ -379,6 +384,12 @@ class Client:
         with self._lock:
             if self._gone is None and not self._input_ended:
                 self._outbox.put(_line({"jsonrpc": "2.0", "method": method, "params": params or {}}))
+
+    @property
+    def unsettled(self) -> bool:
+        """A request given up on (it timed out, and was cancelled) is still unanswered: the runtime may be at it."""
+        with self._lock:
+            return bool(self._abandoned)
 
     def end_input(self) -> None:
         """End the runtime's stdin once what's queued is written: it settles what's in flight, then exits. Nothing is
@@ -438,6 +449,7 @@ class Client:
         if method is None:
             with self._lock:
                 pending = self._pending.get(message.get("id"))
+                self._abandoned.discard(message.get("id"))
             if pending is not None:
                 pending.result, pending.error = message.get("result"), message.get("error")
                 pending.done.set()
@@ -463,6 +475,7 @@ class Client:
         with self._lock:
             self._gone = reason
             waiting = list(self._pending.values())
+            self._abandoned.clear()
             self._outbox.put(None)
         for pending in waiting:
             if not pending.done.is_set():  # an answer read before the end stands
@@ -517,9 +530,6 @@ class Runtime:
     info: dict = field(default_factory=dict)
     last_used: float = field(default_factory=time.monotonic)
     in_flight: int = 0
-    # A call was sent and its answer lost (it timed out and was cancelled): cancelling isn't settling, so the runtime
-    # may still be at it (research-2). Never cleared: a stop of this runtime always lets it settle.
-    unsettled: bool = False
     closing: bool = False
     retired: bool = False
     gone: threading.Event = field(default_factory=threading.Event)
@@ -540,10 +550,6 @@ class Runtime:
         try:
             result = self.client.request("tools/call", {"name": tool, "arguments": {**args, "_host": host}},
                                          timeout=timeout)
-        except Unavailable as failure:
-            if failure.code == "timeout":
-                self.unsettled = True
-            raise
         finally:
             with self._lock:
                 self.in_flight -= 1
@@ -687,7 +693,7 @@ class Runtimes:
             return
         with runtime._lock:
             stopping, runtime.closing = runtime.closing, True
-            settling = runtime.in_flight > 0 or runtime.unsettled
+            settling = runtime.in_flight > 0 or runtime.client.unsettled
         if stopping:  # another stop, or the idle watch, is already ending it
             return
         if settling:

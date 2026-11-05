@@ -23,8 +23,6 @@ READ_TIMEOUT = 30.0
 WRITE_TIMEOUT = 120.0
 # Installing Kumi's part in a DAW unpacks and copies its bridge: it gets longer than a change.
 SETUP_TIMEOUT = 300.0
-# A stopped runtime with a call in flight is given at least as long to settle as that call waits for its answer.
-assert runtime.SETTLE_WAIT >= max(SETUP_TIMEOUT, WRITE_TIMEOUT, CONNECT_TIMEOUT)
 UNSURE_HINT = ("What it did is unknown. Don't send it again: check kumi_history and the project (kumi_observe) "
                "first.")
 
@@ -302,8 +300,9 @@ def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
     if live is None:
         settling = host.runtimes.settling(data_dir)
         if settling is not None:  # stopping: it holds the profile until it has settled and exited
-            report.update({"running": True, "settling": True, "daw": settling.daw,
-                           "owner": {"session_id": settling.owner_session}, "message": runtime.BUSY})
+            published = snapshots.owner(Path(data_dir) / "state").get("owner")  # the runtime's last holder (C3)
+            report.update({"running": True, "settling": True, "daw": settling.daw, "message": runtime.BUSY,
+                           "owner": published if isinstance(published, dict) else None})
             return report
         report["message"] = "Kumi's runtime isn't running: kumi_connect starts it and connects to the DAW."
         return report
