@@ -142,28 +142,10 @@ fn outcome(state: &str, code: &str, reason: &str, restored: bool, marked_modifie
     json!({"state":state,"code":code,"reason":reason,"cleanup":if restored {"restored"} else {"unsure"}})
 }
 
-fn hearing_error(ctx: &Ctx, error: RuntimeError, dispatched: bool) -> Result<Value, OpError> {
+fn hearing_error(error: RuntimeError, dispatched: bool) -> Result<Value, OpError> {
     match error {
         RuntimeError::Hear(HearFailure::Refused { code, reason, marked_modified }) => {
-            let (reason, fix) = if code == "ears_missing" {
-                let owned = ctx.paths().state_dir.parent().is_some_and(|data| super::connection::inside(&ctx.paths().kumi_home, data));
-                let instruction = if owned {
-                    "Run the DAW setup step again to add or update its capture device."
-                } else {
-                    "Run kumi bridge in the Kumi installation that owns this DAW bridge to add or update its capture device."
-                };
-                (
-                    format!("Kumi Ears needs a compatible preinstalled device and Max for Live. {instruction}"),
-                    Some(if owned { "setup" } else { "owning_kumi" }),
-                )
-            } else {
-                (reason, None)
-            };
-            let mut result = outcome("refused", code, &reason, true, marked_modified);
-            if let Some(fix) = fix {
-                result["fix"] = json!(fix);
-            }
-            Ok(result)
+            Ok(outcome("refused", code, &reason, true, marked_modified))
         }
         RuntimeError::Hear(HearFailure::Unsure { reason, restored, marked_modified }) => {
             Ok(outcome("unsure", if restored { "capture_failed" } else { "restoration_unknown" }, &reason, restored, marked_modified))
@@ -211,7 +193,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     request.expected_native_epoch = project.native_epoch;
     let connection = ctx.connection()?;
     if call.signal.is_cancelled() {
-        return hearing_error(ctx, RuntimeError::Aborted, false);
+        return hearing_error(RuntimeError::Aborted, false);
     }
     let preview_only = call.args.get("preview") == Some(&Value::Bool(true));
     let approved = if !preview_only || call.host.private.get("_listen").is_some() { Some(approval(&call)?) } else { None };
@@ -230,7 +212,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     if preview_only {
         let preview = match connection.integration.preview_hear(&request, call.signal.clone()).await {
             Ok(preview) => preview,
-            Err(error) => return hearing_error(ctx, error, false),
+            Err(error) => return hearing_error(error, false),
         };
         if !preview.seconds.is_finite() || preview.seconds <= 0. || preview.seconds > 60. || !(1..=360).contains(&preview.deadline_seconds)
         {
@@ -279,7 +261,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 false,
             ))
         }
-        Ok(Err(error)) => return hearing_error(ctx, error, true),
+        Ok(Err(error)) => return hearing_error(error, true),
         Err(_) => {
             return Ok(outcome(
                 "unsure",
@@ -300,7 +282,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         ));
     };
     if call.signal.is_cancelled() {
-        return hearing_error(ctx, HearFailure::Cancelled { marked_modified: take.marked_modified }.into(), true);
+        return hearing_error(HearFailure::Cancelled { marked_modified: take.marked_modified }.into(), true);
     }
     if take.start != 0. || !take.seconds.is_some_and(|seconds| seconds.is_finite() && seconds > 0. && seconds <= 65.) {
         return Ok(outcome(
@@ -372,48 +354,3 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     Ok(result)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::serve::Args;
-    use kumi_types::system::Env;
-    use std::collections::BTreeMap;
-
-    #[tokio::test(flavor = "current_thread")]
-    async fn missing_ears_points_to_the_actual_owning_installation_without_media() {
-        for owned in [true, false] {
-            let dir = tempfile::tempdir().unwrap();
-            let data = dir.path().join("plugin-data");
-            let home = if owned { data.join("kumi-home") } else { dir.path().join("standalone-kumi") };
-            std::fs::create_dir_all(&home).unwrap();
-            let ctx = Ctx::new(
-                Args {
-                    state_dir: data.join("state"),
-                    kumi_home: home,
-                    hermes_home: None,
-                    hermes_root: None,
-                    daw: DawId::Ableton,
-                    library_roots: vec![],
-                    media_roots: vec![],
-                    tools: BTreeMap::new(),
-                },
-                Env::new(),
-                Default::default(),
-            )
-            .unwrap();
-            let error =
-                HearFailure::Refused { code: "ears_missing", reason: "/private/producer/device.amxd".into(), marked_modified: false }
-                    .into();
-            let result = hearing_error(&ctx, error, false).unwrap();
-            assert_eq!(result["state"], "refused");
-            assert_eq!(result["code"], "ears_missing");
-            assert_eq!(result["fix"], if owned { "setup" } else { "owning_kumi" });
-            assert_eq!(result["cleanup"], "restored");
-            for field in ["artifact_id", "media_tag", "metrics"] {
-                assert!(result.get(field).is_none(), "{result}");
-            }
-            assert!(!result.to_string().contains("/private/producer"), "{result}");
-            assert!(!ctx.paths().state_dir.join("artifacts.json").exists());
-        }
-    }
-}

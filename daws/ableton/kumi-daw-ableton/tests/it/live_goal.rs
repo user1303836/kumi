@@ -32,11 +32,8 @@ use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
-#[path = "live_goal_listen.rs"]
-mod bounded_listening;
-
 /// The tools a goal can reach, as the oracle's bridge lists them.
-const TOOLS: [&str; 41] = [
+const TOOLS: [&str; 38] = [
     "live_run_python",
     "server_status",
     "live_status",
@@ -60,7 +57,6 @@ const TOOLS: [&str; 41] = [
     "live_device_apply",
     "live_device_delete_preview",
     "live_device_delete_apply",
-    "live_browser_inspect",
     "live_browser_load_preview",
     "live_browser_load_apply",
     "live_transport_preview",
@@ -76,8 +72,6 @@ const TOOLS: [&str; 41] = [
     "live_session_emergency_stop",
     "live_routing_preview",
     "live_routing_apply",
-    "live_selection_preview",
-    "live_selection_apply",
 ];
 
 #[derive(Clone)]
@@ -147,8 +141,6 @@ enum Undo {
     Remove(Vec<u32>),
     /// The track goes back as it was.
     Restore(Track),
-    /// The exact device a bounded capture placed, preserving other edits on its track.
-    RemoveDevice(u32),
 }
 
 /// Live, as far as a goal can tell: refs are places, as Live's are, so a device or a track put in above moves them.
@@ -157,7 +149,6 @@ struct Set {
     /// The one file every take plays.
     take: PathBuf,
     playing: Cell<bool>,
-    bounded: RefCell<Option<Rc<bounded_listening::State>>>,
     next: Cell<u32>,
     previews: RefCell<HashMap<String, (String, JsonObject)>>,
     undos: RefCell<HashMap<String, Undo>>,
@@ -192,7 +183,6 @@ impl Set {
             tracks: RefCell::new(tracks.iter().map(|(name, devices)| Track::new(name, devices)).collect()),
             take: take.into(),
             playing: Cell::new(false),
-            bounded: RefCell::new(None),
             next: Cell::new(0),
             previews: RefCell::default(),
             undos: RefCell::default(),
@@ -303,11 +293,6 @@ impl Set {
         self.asked.borrow().iter().filter(|call| call["name"] == name).count()
     }
     fn discover(&self, args: &JsonObject) -> Value {
-        if let Some(state) = self.bounded.borrow().as_ref() {
-            if let Some(items) = state.discover(self, args) {
-                return json!({"epoch":state.epoch(),"kind":args["kind"],"items":items,"revision":"r1","truncated":false});
-            }
-        }
         let tracks = self.tracks.borrow();
         let kind = text(&args["kind"]);
         let parent = args.get("parent").map(text).unwrap_or_default();
@@ -391,28 +376,12 @@ impl Set {
             Some(tracks) => tracks.iter().map(|track| json!({"kind":"track","name":track["name"],"trackKind":track["kind"]})).collect(),
             None => vec![],
         };
-        let epoch = self.bounded.borrow().as_ref().map_or(7., |state| state.prepared(&transaction));
-        let mut answer = json!({"transactionId":transaction,"epoch":epoch,"confirmation":"apply",
-            "prior":{"tracks":prior,"scenes":[]},"proposed":proposed});
-        if tool == "live_selection" {
-            if let Some(state) = self.bounded.borrow().as_ref() {
-                answer["prior"] = state.selection_preview(&transaction, args);
-            }
-        }
-        Ok(answer)
+        Ok(json!({"transactionId":transaction,"epoch":7,"confirmation":"apply","prior":{"tracks":prior,"scenes":[]},"proposed":proposed}))
     }
     fn apply(&self, args: &JsonObject) -> Value {
         let transaction = text(&args["transactionId"]).to_owned();
-        if self.bounded.borrow().as_ref().is_some_and(|state| !state.transaction_matches(&transaction)) {
-            return json!({"transactionId":transaction,"state":"refused","reason":"Set epoch changed"});
-        }
         let (tool, asked) = self.previews.borrow_mut().remove(&transaction).unwrap();
         let mut answer = json!({"transactionId":transaction,"state":"applied"});
-        if let Some(state) = self.bounded.borrow().as_ref() {
-            if let Some(answer) = state.apply(self, &tool, &asked, &transaction) {
-                return answer;
-            }
-        }
         let mut tracks = self.tracks.borrow_mut();
         match tool.as_str() {
             "live_session_structure" => {
@@ -497,25 +466,12 @@ impl Set {
     }
     fn undo(&self, args: &JsonObject) -> Value {
         let transaction = text(&args["transactionId"]);
-        if self.bounded.borrow().as_ref().is_some_and(|state| !state.transaction_matches(transaction)) {
-            return json!({"transactionId":transaction,"state":"kept","reason":"Set epoch changed"});
-        }
         let mut tracks = self.tracks.borrow_mut();
         match self.undos.borrow_mut().remove(transaction) {
             Some(Undo::Remove(made)) => tracks.retain(|track| !made.contains(&track.id)),
             Some(Undo::Restore(was)) => {
                 if let Some(track) = tracks.iter_mut().find(|track| track.id == was.id) {
                     *track = was;
-                }
-            }
-            Some(Undo::RemoveDevice(identity)) => {
-                for (at, track) in tracks.iter_mut().enumerate() {
-                    if let Some(index) = track.devices.iter().position(|device| device.identity == identity) {
-                        track.devices.remove(index);
-                        if let Some(state) = self.bounded.borrow().as_ref() {
-                            state.deleted(at, index, track.devices.len());
-                        }
-                    }
                 }
             }
             None => {}
@@ -546,19 +502,11 @@ impl McpEndpoint for Set {
         }
         self.asked.borrow_mut().push(json!({"name":name,"args":args}));
         tokio::task::yield_now().await;
-        if name == "live_browser_inspect" {
-            let mut missing = reply(json!({"error":"item_not_found"}));
-            missing.is_error = Some(true);
-            return Ok(missing);
-        }
         Ok(reply(match name {
             "live_discover" => self.discover(&args),
-            "live_song_state" if self.bounded.borrow().is_some() => self.bounded.borrow().as_ref().unwrap().song_state(),
             "live_undo" => self.undo(&args),
             "live_run_python" => self.python(&args),
-            "live_status" => {
-                json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":self.bounded.borrow().as_ref().map_or(7., |state| state.epoch())})
-            }
+            "live_status" => json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":7}),
             "live_transaction_release" => json!({}),
             _ => match (name.strip_suffix("_preview"), name.strip_suffix("_apply")) {
                 (Some(tool), _) => self.preview(tool, &args)?,
@@ -716,6 +664,30 @@ impl Live {
     fn was_told(&self, text: &str) -> bool {
         self.told.borrow().iter().any(|line| line.contains(text))
     }
+}
+
+#[test]
+fn restricted_live_preview_and_capture_refuse_without_touching_the_daw() {
+    use kumi_agent::core::context::HostPolicy;
+    use kumi_types::errors::HearFailure;
+
+    on_a_paused_clock(async {
+        let live = Live::configured(&[("Drums", &["Simpler"])], |_, options, folder| {
+            options.policy = HostPolicy::plugin(folder.join("scratch"), folder.join("quarantine"));
+        })
+        .await;
+        live.set.asked.borrow_mut().clear();
+        let request = serde_json::from_value(json!({"tracks":["7:track:0"],"fromBeat":0,"beats":4})).unwrap();
+        let preview = live.rendering.preview_hear(&request, Signal::new()).await.unwrap_err();
+        let capture = live.rendering.hear_in_set(&request, Signal::new()).await.unwrap_err();
+        for error in [preview, capture] {
+            assert!(matches!(error, RuntimeError::Hear(HearFailure::Refused { code: "unsupported", marked_modified: false, .. })));
+        }
+        assert!(live.set.asked.borrow().is_empty(), "an unsupported capture must not load Ears, change transport or render");
+        assert!(!live.set.playing.get());
+        assert!(!live._folder.path().join("scratch").exists());
+        assert_eq!(live.set.tracks.borrow()[0].devices.len(), 1);
+    });
 }
 fn slot_named(goal: &Rc<dyn GoalRig>, name: &str) -> GoalSlotInfo {
     goal.slots().into_iter().find(|slot| slot.name == name).unwrap()

@@ -1078,12 +1078,12 @@ mod tests {
         let file = child.join("kept");
         std::fs::write(&file, b"unchanged").unwrap();
         let untouched = [dir.path(), neighbor.as_path(), child.as_path(), file.as_path()];
-        let before: Vec<_> = untouched.iter().map(|path| shapes::descriptor(path)).collect();
+        let before: Vec<_> = untouched.iter().map(|path| shapes::stored_descriptor(path)).collect();
         make_private_dir(&state).unwrap();
         assert!(is_kumis_shape(&state));
         make_private_dir(&state).unwrap();
         for (path, descriptor) in untouched.into_iter().zip(before) {
-            assert_eq!(shapes::descriptor(path), descriptor, "changed {}", path.display());
+            assert_eq!(shapes::stored_descriptor(path), descriptor, "changed {}", path.display());
         }
         assert_eq!(std::fs::read(file).unwrap(), b"unchanged");
     }

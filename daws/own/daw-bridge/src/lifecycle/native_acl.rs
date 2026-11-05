@@ -105,6 +105,7 @@ unsafe extern "system" {
 #[link(name = "ntdll")]
 unsafe extern "system" {
     fn NtSetSecurityObject(handle: Handle, information: u32, descriptor: *mut c_void) -> i32;
+    fn NtQuerySecurityObject(handle: Handle, information: u32, descriptor: *mut c_void, length: u32, needed: *mut u32) -> i32;
     fn NtCreateFile(
         handle: *mut Handle,
         access: u32,
@@ -802,6 +803,37 @@ pub mod shapes {
             let result = String::from_utf16_lossy(std::slice::from_raw_parts(text, length as usize - 1));
             LocalFree(text.cast());
             result
+        }
+    }
+
+    /// The stored owner/DACL, queried directly rather than recomputing inheritance
+    /// against the parent's current ACL. Aligned words include the descriptor's control bits.
+    pub fn stored_descriptor(path: &Path) -> Vec<u32> {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        let file = std::fs::OpenOptions::new()
+            .access_mode(0x0002_0000) // READ_CONTROL
+            .share_mode(7)
+            .custom_flags(0x0220_0000) // BACKUP_SEMANTICS | OPEN_REPARSE_POINT
+            .open(path)
+            .unwrap();
+        let information = OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION;
+        // SAFETY: the file remains open; the second call receives an aligned buffer
+        // sized from the first call. These test paths are not concurrently changed.
+        unsafe {
+            let mut needed = 0;
+            assert!(NtQuerySecurityObject(file.as_raw_handle(), information, null_mut(), 0, &mut needed) < 0);
+            assert!((1..=65536).contains(&needed));
+            let mut buffer = vec![0u32; (needed as usize).div_ceil(4)];
+            assert!(
+                NtQuerySecurityObject(
+                    file.as_raw_handle(),
+                    information,
+                    buffer.as_mut_ptr().cast(),
+                    (buffer.len() * 4) as u32,
+                    &mut needed,
+                ) >= 0
+            );
+            buffer
         }
     }
 
