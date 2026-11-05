@@ -102,11 +102,12 @@ def decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None,
 
 
 # kumi-adv's decision: "this session" and "always" cover a kind of Kumi change within one chat, the convenience quick
-# tweaks need, but never another chat, a scheduled job or a one-shot run, which Hermes then asks about or refuses. So
-# the rule key ends with the chat's session id (Hermes's, as C1's identity has it); without one, with the plan's own
-# digest, never a family alone. Setup's key is its plan's digest already (and a paid call's will be its quote's).
-# Hermes keeps an "always" in its config's command allowlist; Kumi never edits that.
-CHAT_ONLY = "(Approving for this session or always applies to this chat only.)"
+# tweaks need, never a new chat, a scheduled job or a webhook, which Hermes then asks about or refuses. So the rule key
+# ends with the chat's session id (Hermes's, as C1's identity has it); without one, with the plan's own digest, never a
+# family alone. A one-shot run that resumes a chat (`hermes chat -q --resume`) is that chat, and its approvals apply
+# there. Setup's key is its plan's digest already (and a paid call's will be its quote's). Hermes keeps an "always" in
+# its config's command allowlist; Kumi never edits that.
+CHAT_ONLY = "(Session and Always apply to this chat only, including a one-shot run that resumes it.)"
 
 
 def chat_scoped(decision: dict, args: dict, kwargs: dict) -> dict:
