@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
 from types import SimpleNamespace
 import unittest
 from unittest import mock
@@ -14,6 +16,7 @@ import support
 kumi = support.plugin()
 runtime = support.module("runtime")
 tools = support.module("tools")
+policy = support.module("policy")
 
 PROJECT = {"expected_project_key": "live:night-drive", "expected_epoch": "1"}
 LOUDER = {"title": "Louder drums", "steps": [{"tool": "set_track_volume", "input": {"track_ref": "t1", "volume_db": -4}}],
@@ -151,6 +154,24 @@ class Tools(unittest.TestCase):
         self.assertEqual((published["from"], len(published["items"])), ("last_published", 1))
         self.assertIn("scheduled job", published["note"])
         self.assertEqual(len(self.received("history")), asked, "the runtime was never asked (12d)")
+
+    def test_while_a_stopped_runtime_settles_status_and_the_hook_say_so(self):
+        host, _, data = support.host(self, None, "--slow", "history=3")
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        live = host.runtimes.get(data)
+        caller = threading.Thread(target=lambda: support.call(host, "kumi_history", {}, session_id="s1"))
+        caller.start()
+        self.addCleanup(live.gone.wait, 15)  # after the call: the runtime settles and exits before its folder goes
+        self.addCleanup(caller.join)
+        deadline = time.monotonic() + 10
+        while live.in_flight != 1 and time.monotonic() < deadline:  # the call is in flight
+            time.sleep(0.02)
+        host.on_session_finalize("s1")  # the chat ends with its call in flight
+        status = support.call(host, "kumi_status", {})
+        self.assertEqual((status["running"], status["settling"], status["message"]), (True, True, runtime.BUSY))
+        self.assertEqual(status["owner"], {"session_id": "s1"})
+        decision = policy.pre_tool_call(host, tool_name="kumi_change", args=LOUDER, session_id="s2", tool_call_id="c1")
+        self.assertEqual(decision, {"action": "block", "message": f"Kumi didn't change anything: {runtime.BUSY}"})
 
     def test_a_write_whose_answer_never_came_is_unsure_and_never_sent_again(self):
         host, _, data = support.host(self, None, "--slow", "change=2")

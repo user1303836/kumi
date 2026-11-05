@@ -21,13 +21,10 @@ STATUS_TIMEOUT = 15.0
 CONNECT_TIMEOUT = 60.0
 READ_TIMEOUT = 30.0
 WRITE_TIMEOUT = 120.0
-# A track listen waits for the runtime's own deadline, which its preview gives (`deadline_seconds`: capture or render,
-# restore and measure), plus a margin. CC-2's A2: a whole number of seconds from 1 to 360 (a 60 s window's offline
-# render with restoring and measuring); a preview without one isn't approved, and no deadline is ever guessed.
-TRACK_MARGIN = 30.0
-TRACK_DEADLINE_MAX = 360
 # Installing Kumi's part in a DAW unpacks and copies its bridge: it gets longer than a change.
 SETUP_TIMEOUT = 300.0
+# A stopped runtime with a call in flight is given at least as long to settle as that call waits for its answer.
+assert runtime.SETTLE_WAIT >= max(SETUP_TIMEOUT, WRITE_TIMEOUT, CONNECT_TIMEOUT)
 UNSURE_HINT = ("What it did is unknown. Don't send it again: check kumi_history and the project (kumi_observe) "
                "first.")
 
@@ -120,13 +117,11 @@ class Host:
         return runtime.installed(data_dir, self._pinned())
 
     def live(self) -> runtime.Runtime:
-        """This profile's running runtime, or Unavailable saying what to do first."""
+        """This profile's running runtime, or Unavailable saying what to do first (`busy` while one is still
+        stopping)."""
         data_dir = self.data_dir()
         self.install(data_dir)
-        live = self.runtimes.get(data_dir)
-        if live is None:
-            raise runtime.Unavailable("not_connected", "Kumi isn't connected to the DAW: call kumi_connect first.")
-        return live
+        return self.runtimes.require(data_dir)
 
     def profile(self) -> str:
         """The Hermes profile this call runs in (its plugin data is that profile's)."""
@@ -305,6 +300,11 @@ def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
         return report
     live = host.runtimes.get(data_dir)
     if live is None:
+        settling = host.runtimes.settling(data_dir)
+        if settling is not None:  # stopping: it holds the profile until it has settled and exited
+            report.update({"running": True, "settling": True, "daw": settling.daw,
+                           "owner": {"session_id": settling.owner_session}, "message": runtime.BUSY})
+            return report
         report["message"] = "Kumi's runtime isn't running: kumi_connect starts it and connects to the DAW."
         return report
     status = live.call("status", {}, host.identity(kwargs), timeout=STATUS_TIMEOUT)
@@ -489,7 +489,7 @@ def is_track_listen(args: dict) -> bool:
 def track_deadline(value: Any) -> int | None:
     """A track listen preview's `deadline_seconds` (CC-2's A2: the runtime's whole bound for the real call) when it's a
     whole number of seconds from 1 to 360; None otherwise, and then the listen isn't approved."""
-    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= TRACK_DEADLINE_MAX:
+    if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= runtime.TRACK_DEADLINE_MAX:
         return None
     return value
 
@@ -574,7 +574,7 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
     if deadline is None:  # approved_only let it through, so the hook approved it with its deadline; never guess one
         return {"error": {"code": "not_approved", "reason": "Kumi didn't play anything: this listen came without "
                                                             "its runtime's deadline."}}
-    timeout = deadline + TRACK_MARGIN
+    timeout = deadline + runtime.TRACK_MARGIN
     try:
         result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout)
     except runtime.Unavailable as failure:

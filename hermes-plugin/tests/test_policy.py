@@ -239,7 +239,7 @@ class Blocked(unittest.TestCase):
 
         class Host:
             def __init__(self, answer):
-                self.runtimes = type("Runtimes", (), {"get": lambda _, data: Live(answer)})()
+                self.runtimes = type("Runtimes", (), {"require": lambda _, data: Live(answer)})()
 
             def data_dir(self):
                 return None

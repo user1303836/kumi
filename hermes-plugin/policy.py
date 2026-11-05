@@ -145,11 +145,9 @@ def block(message: str) -> dict:
 
 
 def _live(host: Any) -> runtime.Runtime:
-    """This profile's running runtime, without waiting for one that's starting (C6: the hook never waits)."""
-    live = host.runtimes.get(host.data_dir())
-    if live is None:
-        raise runtime.Unavailable("not_connected", "Kumi isn't connected to the DAW: call kumi_connect first.")
-    return live
+    """This profile's running runtime, without waiting for one that's starting (C6: the hook never waits), else
+    Unavailable: `busy` while one is still stopping, `not_connected` otherwise."""
+    return host.runtimes.require(host.data_dir())
 
 
 def _ask(host: Any, tool: str, args: dict, kwargs: dict) -> dict:

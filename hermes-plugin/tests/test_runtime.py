@@ -194,16 +194,66 @@ class Runtimes(unittest.TestCase):
         caller = threading.Thread(target=lambda: answers.append(live.call("history", {}, self.host(), timeout=30)))
         caller.start()
         self.assertTrue(eventually(lambda: live.in_flight == 1), "the call is in flight")
+        self.events.clear()
         self.runtimes.stop_session("s1")
         self.assertTrue(live.client.running, "the stop returned without waiting for the call to settle")
-        with self.assertRaises(runtime.Unavailable) as busy:
-            self.runtimes.start(self.data, live.install, "ableton", "s2", profile="studio")
-        self.assertEqual(busy.exception.code, "busy", "nothing starts over a runtime still settling")
+        self.assertIn(("status.changed", {"seq": None, "profile": "studio", "settling": True}), self.events)
+        self.assertIs(self.runtimes.settling(self.data), live)
+        for attempt in (lambda: self.runtimes.start(self.data, live.install, "ableton", "s2", profile="studio"),
+                        lambda: self.runtimes.require(self.data)):
+            with self.assertRaises(runtime.Unavailable) as busy:
+                attempt()
+            self.assertEqual((busy.exception.code, busy.exception.reason), ("busy", runtime.BUSY),
+                             "nothing starts over a runtime still settling, and nothing says to connect")
+        self.runtimes.stop_all()  # a second stop, as an unload after the chat's end, returns at once
+        self.assertTrue(live.client.running)
         caller.join()
         self.assertEqual(len(answers), 1, "the call in flight was answered as the runtime settled")
         self.assertTrue(eventually(lambda: not live.client.running and self.runtimes.get(self.data) is None))
         self.assertTrue(eventually(lambda: live.gone.is_set()), "then it exited and was retired")
         self.start(session="s2")  # and the profile came free with its exit
+
+    def test_a_runtime_that_doesnt_settle_in_time_is_ended_and_frees_the_profile(self):
+        runtimes = self.make(settle_wait=0.5)
+        live = self.start("--slow", "history=30", "--ignore-eof", runtimes=runtimes)  # never exits on its own
+        failures = []
+
+        def call():
+            try:
+                live.call("history", {}, self.host(), timeout=60)
+            except runtime.Unavailable as failure:
+                failures.append(failure.code)
+
+        caller = threading.Thread(target=call)
+        caller.start()
+        self.assertTrue(eventually(lambda: live.in_flight == 1))
+        runtimes.stop_session("s1")
+        caller.join()
+        self.assertEqual(failures, ["stopped"], "its call ended unknown, never resent")
+        self.assertTrue(eventually(lambda: live.gone.is_set() and not live.client.running))
+        lock = runtime.StateLock(self.data / "state" / "runtime.lock")
+        self.assertTrue(eventually(lambda: _takes(lock)), "the profile came free")
+        lock.release()
+
+    def test_a_call_whose_answer_was_lost_still_gets_its_settle(self):
+        runtimes = self.make(stop_wait=0.5)  # an idle stop would end it long before its call is done
+        live = self.start("--slow", "history=3", runtimes=runtimes)
+        live.call("connect", {"daw": "ableton"}, self.host(), timeout=10)  # it publishes owner.json from here on
+        with self.assertRaises(runtime.Unavailable) as lost:
+            live.call("history", {}, self.host(), timeout=0.3)  # cancelled: what it did is unknown, still running
+        self.assertEqual((lost.exception.code, live.in_flight), ("timeout", 0))
+        runtimes.stop_session("s1")
+        owner = self.data / "state" / "owner.json"
+        self.assertTrue(eventually(lambda: live.gone.is_set()), "it settled and exited")
+        self.assertIs(json.loads(owner.read_text(encoding="utf-8"))["running"], False, "a clean stop, never a kill")
+
+    def test_a_request_caught_by_a_stop_is_refused_unsent_never_reported_unknown(self):
+        live = self.start()
+        live.client.end_input()  # the stop ended its input just before this call queued its line
+        with self.assertRaises(runtime.Unavailable) as refused:
+            live.client.request("tools/call", {"name": "history", "arguments": {}}, timeout=5)
+        self.assertEqual(refused.exception.code, "not_running")
+        self.assertIn("Nothing was sent", refused.exception.reason)
 
     def test_a_second_hermes_process_on_the_profile_starts_no_runtime(self):
         live = self.start()

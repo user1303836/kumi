@@ -251,7 +251,7 @@ class Imports(StateTest):
             "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
             "print(module.focus(Path(sys.argv[1]))['focus']['track']['name'], 'plugins' in sys.modules)"
         )
-        done = subprocess.run([sys.executable, "-I", "-S", "-c", code, str(self.state)], capture_output=True, text=True, timeout=60)
+        done = subprocess.run([sys.executable, "-I", "-S", "-B", "-c", code, str(self.state)], capture_output=True, text=True, timeout=60)
         self.assertEqual((done.returncode, done.stdout.strip()), (0, "Drums False"), done.stderr)
 
 
