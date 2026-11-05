@@ -94,8 +94,8 @@ description: What Kumi's audio measurements mean and how to report them honestly
     - EQ toward the reference's balance: Live `EQ Eight` (`audio_effects/EQ Eight`), REAPER `ReaEQ (Cockos)`, Renoise `EQ 10`;
     - gentle glue compression: Live `Glue Compressor` (`audio_effects/Glue Compressor`; where the Browser has none, `Compressor`), REAPER `ReaComp (Cockos)`, Renoise `Bus Compressor`;
     - a limiter: Live `Limiter` (`audio_effects/Limiter`), REAPER `ReaLimit (Cockos)`, Renoise `Maximizer`.
-  - **Each limiter's gain and ceiling:**
-    - Live `Limiter`: raise `Gain` toward the reference's LUFS, with `Ceiling` under the true-peak target.
+  - **Each limiter's gain and ceiling.** Use the parameter names Kumi reads on the device, for native devices as for Ozone: names change across versions and modes.
+    - Live `Limiter`: its gain control (`Input Gain` in Live 12.4; its Maximize mode has its own threshold and output controls), raised toward the reference's LUFS, with the ceiling under the true-peak target.
     - REAPER `ReaLimit`: lower `Threshold` for gain, with `Ceiling` a few tenths of a dB under the target.
     - Renoise `Maximizer`: raise `Boost` for gain, with `Ceiling` under the target. Renoise's master fader tops out at +3 dB.
   - **In one plan, name each device as you load it, then set it:** load the EQ (`as: "eq"`), set `@eq`, then the compressor, then the limiter. Later rounds read the devices again and change only their settings.
