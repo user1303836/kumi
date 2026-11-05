@@ -157,6 +157,8 @@ class SetupTest(unittest.TestCase):
         asked = setup.approval("ableton", data_dir=self.data)
         self.assertIn(URL, asked["message"])
         self.assertEqual(asked["digest"], plan["digest"])
+        self.assertEqual((asked["title"], asked["effects"]), (f"Kumi: set up Kumi {VERSION}'s runtime", plan["effects"]),
+                         "each effect is its own line, its URL and folder in full")
         self.assertIsNone(setup.approval("reaper", data_dir=self.data), "a plan for Live doesn't approve REAPER")
         later = plan["made_at"] + setup.PLAN_TTL_MS + 1
         self.assertIsNone(setup.approval("ableton", data_dir=self.data, now=later), "a stale plan approves nothing")

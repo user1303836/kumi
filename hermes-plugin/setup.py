@@ -359,27 +359,34 @@ def _cached_plan(daw: str, data_dir: Path, now: int | None = None, path: Path | 
 
 
 def approval(daw: str, *, action: str = "install", data_dir: Path | None = None, now: int | None = None) -> dict | None:
-    """What the producer approves for `kumi_setup` `install` or `adopt`: `{"message", "digest"}`, from the recorded
-    plan only (no network, no subprocess), or None when there is no fresh plan for `daw` that this action carries out
-    (the hook then blocks: "run kumi_setup plan first"). `install()` and `adopt()` carry out only the plan with that
-    digest (their `expected_digest`), so what runs is what was approved, even if another chat plans meanwhile."""
+    """What the producer approves for `kumi_setup` `install` or `adopt`: `{"title", "effects", "message", "digest"}`
+    (`message` is the title and one effect per line, every path in full), from the recorded plan only (no network, no
+    subprocess), or None when there is no fresh plan for `daw` that this action carries out (the hook then blocks:
+    "run kumi_setup plan first"). `install()` and `adopt()` carry out only the plan with that digest (their
+    `expected_digest`), so what runs is what was approved, even if another chat plans meanwhile."""
     cached = _cached_plan(daw, data_dir or default_data_dir(), now)
-    message = _approval_text(cached, daw, action) if cached else None
-    return {"message": message, "digest": cached["digest"]} if message else None
+    lines = _approval_lines(cached, daw, action) if cached else None
+    if not lines:
+        return None
+    return {"title": lines[0], "effects": lines[1:], "message": "\n".join(lines), "digest": cached["digest"]}
 
 
-def _approval_text(plan: Mapping[str, Any], daw: str, action: str) -> str | None:
+def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str] | None:
+    """The approval's title, then each effect of the plan, as the producer reads them."""
     if action == "adopt":
         home = _owner_home(plan)
         if plan.get("step") != "owned_elsewhere" or home is None:
             return None
-        return (f"Kumi will use the existing Kumi installation at {home} for its connection to {DAWS[daw]}. Kumi's "
-                "runtime will read that installation's DAW connection files and write its own connection state "
-                "there (never its sign-in, settings or account), and the "
-                f"{plan['component'].get('component') or 'DAW component'} it installed stays as it is.")
+        component = plan["component"].get("component") or "DAW component"
+        return [f"Kumi: use the existing Kumi installation at {home} for {DAWS[daw]}",
+                "Kumi's runtime will read that installation's DAW connection files and write its own connection state "
+                "there (never its sign-in, settings or account)",
+                f"The {component} it installed stays as it is"]
     if action != "install" or plan.get("step") not in ("runtime", "daw_component"):
         return None
-    return "Kumi setup will: " + "; ".join(plan["effects"]) + "."
+    title = (f"Kumi: set up Kumi {plan['version']}'s runtime" if plan["step"] == "runtime"
+             else f"Kumi: install Kumi's part in {DAWS[daw]}")
+    return [title, *plan["effects"]]
 
 
 def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -> dict:
@@ -399,7 +406,7 @@ def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -
         taken.unlink(missing_ok=True)
     if claimed is None or claimed.get("digest") != expected_digest:
         raise SetupError("plan_changed", "The setup plan changed after it was approved; plan again and approve that.")
-    if _approval_text(claimed, daw, action) is None:
+    if _approval_lines(claimed, daw, action) is None:
         if action == "install" and claimed.get("step") == "owned_elsewhere":
             raise SetupError("owned_elsewhere", "Another Kumi installation owns this DAW's component; adopt it "
                                                 "explicitly (kumi_setup action adopt) or keep them separate.")
@@ -650,11 +657,11 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
             return 0
         adopting = step["step"] == "owned_elsewhere"
         if adopting:
-            text = _approval_text(step, daw, "adopt")
-            if text is None:
+            lines = _approval_lines(step, daw, "adopt")
+            if lines is None:
                 print("Another Kumi installation owns this DAW's component:", *step["effects"], sep="\n  ", file=stdout)
                 return 1
-            print(text, file=stdout)
+            print(lines[0], *lines[1:], sep="\n  ", file=stdout)
         else:
             print("Kumi setup will:", *step["effects"], sep="\n  ", file=stdout)
         print("Go ahead? [y/N] ", end="", file=stdout, flush=True)
