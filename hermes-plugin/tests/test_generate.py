@@ -93,8 +93,9 @@ class Generation(unittest.TestCase):
         running = support.call(host, "kumi_generate", create, session_id="s1")
         self.assertEqual((running["state"], running["ledger"]["reserved"]), ("running", 15), running)
         [dispatched] = self.sent(data, "create")
+        [held] = host.ledger().reservations()
         self.assertEqual(dispatched["_mirelo"], {"api_key": "<given>", "acknowledged": True, "enabled": True,
-                                                 "reservation_id": "r-1", "reserved_credits": 15})
+                                                 "reservation_id": held["reservation_id"], "reserved_credits": 15})
         done = support.call(host, "kumi_job", {"job_id": running["job_id"]}, session_id="s1")
         self.assertEqual(done["state"], "done")
         self.assertEqual({key: done["result"]["ledger"][key] for key in ("spent", "reserved", "left")},
@@ -250,8 +251,10 @@ class Generation(unittest.TestCase):
         self.assertFalse([text for text in said if KEY in text], "nowhere: answers, events, logs, the state folder")
 
     def test_hermes_kumi_credits_lists_whats_held_and_changes_it_only_after_a_yes_in_a_terminal(self):
-        host, _, _ = self.host(None, "--generate-actual", "-1")  # Mirelo never says what it charged
-        self.generation(host)
+        host, _, _ = self.host(None, "--slow", "generate=2")
+        quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
+        with mock.patch.object(generate, "TIMEOUT", 0.3):  # whether Mirelo got it is unknown: release's only case
+            support.call(host, "kumi_generate", {"action": "create", "quote_id": quote_id}, session_id="s1")
         [held] = host.ledger().reservations()
         out = io.StringIO()
         self.assertEqual(commands.cli_credits(host, None, stdout=out), 0)

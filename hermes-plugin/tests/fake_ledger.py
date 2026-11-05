@@ -117,7 +117,7 @@ class Ledger:
 
     def release(self, reservation_id: str) -> dict:
         held = self.book["reservations"].get(reservation_id)
-        if held is None or held["settled"] is not None:
-            raise LedgerError("invalid_request", "No unsettled reservation has that id.")
+        if held is None or held["settled"] is not None or held["submission"] != "unknown":
+            raise LedgerError("stale", "Only an unsettled reservation whose sending is unknown can be released.")
         held["settled"] = "released"
         return self.snapshot()
