@@ -28,15 +28,18 @@ use std::{
 fn positional_refs_are_revision_scoped_and_never_carried_to_a_different_channel() {
     let refs = LynxRefs;
     assert!(refs.positional());
-    assert_eq!(refs.kind_of("l:track:0:7"), Some("track"));
-    assert_eq!(refs.kind_of("l:device:mixer:2:1:7"), Some("device"));
+    assert_eq!(refs.kind_of("l:track:0:0123456789abcdef:7"), Some("track"));
+    assert_eq!(refs.kind_of("l:device:mixer:2:1:0123456789abcdef:7"), Some("device"));
     for invalid in ["l:track:0", "l:track::7", "l:track:0:old", "r:track:0:7"] {
         assert_eq!(refs.kind_of(invalid), None, "{invalid}");
     }
-    assert_eq!(refs.refs_in("move l:track:0:7, inspect l:device:mixer:2:1:7."), ["l:track:0:7", "l:device:mixer:2:1:7"]);
-    assert_eq!(refs.moved(&Shift::default(), "l:track:0:7"), Moved::Gone);
-    assert_eq!(refs.track_of("l:track:0:7"), Some("l:track:0:7".into()));
-    assert_eq!(refs.track_of("l:pattern:0:7"), None);
+    assert_eq!(
+        refs.refs_in("move l:track:0:0123456789abcdef:7, inspect l:device:mixer:2:1:0123456789abcdef:7."),
+        ["l:track:0:0123456789abcdef:7", "l:device:mixer:2:1:0123456789abcdef:7"]
+    );
+    assert_eq!(refs.moved(&Shift::default(), "l:track:0:0123456789abcdef:7"), Moved::Gone);
+    assert_eq!(refs.track_of("l:track:0:0123456789abcdef:7"), Some("l:track:0:0123456789abcdef:7".into()));
+    assert_eq!(refs.track_of("l:pattern:0:0123456789abcdef:7"), None);
 }
 
 #[test]
@@ -93,7 +96,7 @@ impl Host {
         json!({"epoch":format!("process:project:{}",self.revision.get()),"layout":self.revision.get(),
             "project":{"id":"1234567890abcdef1234567890abcdef","identity":"project-a","name":"Current song","path":"/tmp/kumi-fixture.lynx","revision":self.revision.get()},
             "transport":{"playing":false,"tempo":120,"positionBeats":0,"beatsPerBar":4},
-            "tracks":[{"ref":format!("l:track:0:{}",self.revision.get()),"name":"Bass","type":"instrument","mixer":{"volume":0.8,"pan":0}}],"selection":{}})
+            "tracks":[{"ref":format!("l:track:0:0123456789abcdef:{}",self.revision.get()),"name":"Bass","type":"instrument","mixer":{"volume":0.8,"pan":0}}],"selection":{}})
     }
 }
 #[async_trait(?Send)]

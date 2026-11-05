@@ -187,11 +187,13 @@ Kumi 每次查看时都会读取这首歌曲的设置并照着做：BPM（2 倍�
 
 ## LYNX SHARE（实验性）
 
-- 需要包含 [LYNX SHARE 原生控制修改](https://github.com/Ka1-S/LYNX-SHARE/pull/71)的自定义版本，以及此 PR 中配套的 Kumi 宿主和 `lynx-kumi` 程序。目前没有支持此连接的正式 LYNX 版本。认证使用 `lynx-kumi/2`；拒绝旧 `/1` 端点。支持 macOS 和 Linux，暂不支持 Windows。
+- 需要尚未发布的 LYNX Remote Control 版本以及配套的 Kumi 宿主和 `lynx-kumi`。认证使用 `lynx-control/1`，拒绝旧 Kumi 专用端点。原生 API 面向 Windows、macOS 和 Linux，尚未确定受支持的正式版本号。
 - 将 `KUMI_LYNX_APP` 指向自定义应用，运行 `kumi --daw lynx bridge`，再运行 `kumi --daw lynx`。配套程序会启动或连接兼容应用；原生发现凭据仅由该程序处理，请勿粘贴到聊天中。
-- `lynx_read` 分页读取项目、通道／混音器、音型／音符、设备／参数、目录及当前 Playlist。完整项目读取返回规划编辑所需的修订号。名称仅是数据；使用当前 ref 及对应读取返回的 epoch。
-- 可将内置或已扫描的宿主插件乐器插入新通道，或替换已有乐器并保留音符、路由和通道设置。先从目录选择可用的准确 ID。不支持任意插件路径、扫描或导入采样。
-- 参数编辑面向宿主插件乐器或混音效果器，使用归一化值并核对每个 `expectedValue`。不支持内置乐器的合成参数及嵌套 Patcher 设备。效果器从内置或已扫描目录加载。
-- Playlist 原子地添加、更新、复制或删除引用现有音型、音频通道或自动化源的片段。保留省略属性和路由，拒绝锁定轨道。其他编排仅列出；不支持创建音型／源或切换编排。
+- `lynx_read` 分页读取项目、通道／混音器、音型／音符、设备／参数、目录及当前 Playlist。项目概览返回规划编辑所需的修订号。名称仅是数据；使用当前 ref 及对应读取返回的 epoch。
+- 可将内置或已扫描的宿主插件乐器插入新通道，或替换已有乐器并保留音符、路由和通道设置。类型化乐器工具须使用目录中可用的准确 ID，不扫描插件或导入采样。
+- 参数编辑面向宿主插件乐器或混音效果器，使用归一化值并核对每个 `expectedValue`。类型化参数工具仅针对顶层宿主插件设备；其他持久设置可通过完整项目文档读取和编辑。效果器从内置或已扫描目录加载。
+- Playlist 原子地添加、更新、复制或删除引用现有音型、音频通道或自动化源的片段。保留省略属性和路由，拒绝锁定轨道。类型化 Playlist 工具仅编辑当前编排；完整文档编辑还可处理音型、源及其他编排。
 - 持久修改使用 Kumi 共用的计划和 HISTORY，并明确提供 `expectedRevision`。每次提交修改后重新读取完整项目，再规划后续索引编辑。`undo_change` 仅针对 Kumi 拥有的修改，并在用户编辑冲突时拒绝恢复，不任意撤销共享原生历史。编辑设备、音符和 Playlist 前须停止播放；录音时拒绝持久修改。紧急停止不受项目修订变化影响。
 - 暂不支持保存、实时音频采集或渲染。在支持的 LYNX 正式版本及配套桥接可用之前，此集成保持实验性。
+- 在 LYNX 常规设置中启用 LYNX Remote Control（默认关闭）。界面显示运行状态，Windows、macOS、Linux 均使用仅当前用户可访问的本地连接。`LYNX_CONTROL_ENABLED=1` 和 `LYNX_CONTROL_DISCOVERY` 是显式启动设置，不改变自动更新行为。
+- 使用 `lynx_read` 的 `kind: document` 和 `args.path`（JSON Pointer）分页查看完整项目，包括路由、自动化、原生音源参数和嵌套设备状态。将返回的 `snapshotId`、`documentHash` 和 revision 交给 `lynx_project_edit`，可把 1–128 个 JSON Patch 操作原子提交为一个原生撤销步骤。

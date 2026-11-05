@@ -5,8 +5,19 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 pub const PAGE_BYTES: usize = 48 * 1024;
-pub const READ_OPS: &[&str] =
-    &["session.inspect", "pattern.notes", "plugin.inspect", "effect.catalog", "instrument.catalog", "playlist.inspect"];
+pub const READ_OPS: &[&str] = &[
+    "api.describe",
+    "status",
+    "changes",
+    "device.state",
+    "project.read",
+    "session.inspect",
+    "pattern.notes",
+    "plugin.inspect",
+    "effect.catalog",
+    "instrument.catalog",
+    "playlist.inspect",
+];
 pub const WRITE_OPS: &[&str] = &[
     "tempo.set",
     "mixer.set",
@@ -18,25 +29,44 @@ pub const WRITE_OPS: &[&str] = &[
     "playlist.edit",
     "channel.create",
     "instrument.replace",
+    "project.edit",
 ];
 
 pub struct Bridge {
     pub client: Client,
     pub(crate) journal: Journal,
+    pub(crate) document: Option<crate::document::Document>,
     /// Only pages actually returned whole to the host count as complete note reads.
     notes_read: HashMap<(String, u64), Vec<(u64, u64)>>,
 }
 impl Bridge {
     pub fn new(client: Client) -> Self {
-        Self { client, journal: Journal::default(), notes_read: HashMap::new() }
+        Self { client, journal: Journal::default(), document: None, notes_read: HashMap::new() }
     }
 
     pub async fn session(&mut self) -> Result<Value> {
-        let session = self.client.call("session.inspect", json!({})).await?;
+        let session = match self.client.call("session.inspect", json!({})).await {
+            Ok(session) => session,
+            Err(error) if error.message.starts_with("LYNX [limit]:") => {
+                let mut status = self.status().await?;
+                status["overviewUnavailable"] = true.into();
+                for key in ["channels", "mixer", "patterns", "playlist"] {
+                    status[key] = json!([]);
+                }
+                status
+            }
+            Err(error) => return Err(error),
+        };
         identity(&session)?;
         let current = epoch(&session);
         self.notes_read.retain(|(of, _), _| *of == current);
         Ok(session)
+    }
+
+    pub async fn status(&self) -> Result<Value> {
+        let status = self.client.call("status", json!({})).await?;
+        identity(&status)?;
+        Ok(status)
     }
 
     pub async fn read(&mut self, params: &Value) -> Result<Value> {
@@ -63,9 +93,18 @@ impl Bridge {
             return self.call_read(params, &session).await;
         }
         let kind = alias(kind);
+        if kind == "document" {
+            return self.document_read(params, &session).await;
+        }
         let limit = params.get("limit").map(|_| integer(params, "limit")).transpose()?.unwrap_or(50);
         if !(1..=200).contains(&limit) {
             return Err(Error::bad("limit must be from 1 to 200"));
+        }
+        if session["overviewUnavailable"] == true && matches!(kind, "track" | "mixer" | "pattern") {
+            return Err(Error::new(
+                code::FAILED,
+                "This project exceeds the bounded overview. Read kind document with args.path to inspect every native project field",
+            ));
         }
         let key = format!("{kind}:{}", params["parent"].as_str().unwrap_or(""));
         let offset = match &direct {
@@ -231,7 +270,7 @@ impl Bridge {
         let total = array(&session, "channels").len();
         let mut snapshot = json!({"epoch":epoch(&session),"layout":revision(&session)?,"revision":revision(&session)?,
             "project":project(&session),"transport":transport(&session),"tracks":tracks,"selection":selection(&session),
-            "markers":[],"setup":{"capabilities":session["capabilities"],"nativeProtocol":"lynx-kumi/2"}});
+            "markers":[],"setup":{"capabilities":session["capabilities"],"nativeProtocol":"lynx-control/1"}});
         if snapshot["tracks"].as_array().unwrap().len() < total {
             snapshot["truncated"] = json!({"tracks":{"total":total,"nextCursor":cursor(&session,"track:",snapshot["tracks"].as_array().unwrap().len() as u64)}});
         }
@@ -376,7 +415,7 @@ pub fn project(session: &Value) -> Value {
     result["identity"] = format!("{}:{}", session["controlEpoch"].as_str().unwrap_or(""), result["id"].as_str().unwrap_or("")).into();
     result["tempo"] = session["bpm"].clone();
     result["revision"] = session["revision"].clone();
-    result["counts"] = json!({"channels":array(session,"channels").len(),"mixer":array(session,"mixer").len(),"patterns":array(session,"patterns").len(),"clips":array(session,"playlist").len()});
+    result["counts"] = json!({"channels":session.get("channelCount").cloned().unwrap_or_else(||array(session,"channels").len().into()),"mixer":array(session,"mixer").len(),"patterns":array(session,"patterns").len(),"clips":array(session,"playlist").len()});
     result["ref"] = reference("project", &[0], session).into();
     result
 }
@@ -387,7 +426,16 @@ pub fn selection(session: &Value) -> Value {
     json!({"patternRef":reference("pattern",&[session["currentPattern"].as_u64().unwrap_or(0)],session)})
 }
 pub fn reference(kind: &str, parts: &[u64], session: &Value) -> String {
-    format!("l:{}:{}:{}", alias(kind), parts.iter().map(u64::to_string).collect::<Vec<_>>().join(":"), session["revision"])
+    format!(
+        "l:{}:{}:{}:{}",
+        alias(kind),
+        parts.iter().map(u64::to_string).collect::<Vec<_>>().join(":"),
+        ref_epoch(session),
+        session["revision"]
+    )
+}
+fn ref_epoch(session: &Value) -> String {
+    auth::sha256_hex(format!("{}:{}", session["controlEpoch"], session["project"]["id"]).as_bytes())[..16].into()
 }
 fn row_at(row: &Value, kind: &str, parts: &[u64], session: &Value) -> Value {
     let mut row = row.clone();
@@ -396,14 +444,17 @@ fn row_at(row: &Value, kind: &str, parts: &[u64], session: &Value) -> Value {
 }
 pub fn parse_ref(reference: &str, session: &Value) -> Result<(String, Vec<u64>)> {
     let parts = reference.split(':').collect::<Vec<_>>();
-    if parts.len() < 4 || parts[0] != "l" {
+    if parts.len() < 5 || parts[0] != "l" {
         return Err(Error::bad("Use an exact LYNX ref returned by a current read"));
     }
     let rev = parts.last().and_then(|s| s.parse::<u64>().ok()).ok_or_else(|| Error::bad("Malformed LYNX ref revision"))?;
     if rev != revision(session)? {
         return Err(Error::new(code::CHANGED, "That positional ref predates a project edit; read again"));
     }
-    let indices = parts[2..parts.len() - 1]
+    if parts[parts.len() - 2] != ref_epoch(session) {
+        return Err(Error::new(code::STALE, "That ref belongs to another process or project; read again"));
+    }
+    let indices = parts[2..parts.len() - 2]
         .iter()
         .map(|n| n.parse::<u64>().map_err(|_| Error::bad("Malformed LYNX ref index")))
         .collect::<Result<Vec<_>>>()?;
@@ -454,10 +505,10 @@ fn bounded_rows(rows: impl Iterator<Item = Value>, limit: usize) -> Result<Vec<V
     }
     Ok(result)
 }
-fn cursor(session: &Value, key: &str, offset: u64) -> String {
+pub(crate) fn cursor(session: &Value, key: &str, offset: u64) -> String {
     format!("c:{offset}:{}", &auth::sha256_hex(format!("{}:{key}", epoch(session)).as_bytes())[..24])
 }
-fn cursor_offset(params: &Value, session: &Value, key: &str) -> Result<u64> {
+pub(crate) fn cursor_offset(params: &Value, session: &Value, key: &str) -> Result<u64> {
     let Some(given) = params["cursor"].as_str() else { return Ok(0) };
     let parts = given.split(':').collect::<Vec<_>>();
     let offset =

@@ -15,21 +15,22 @@ fn main() -> ExitCode {
     }
     let launching = args.first().is_some_and(|arg| arg == "launch");
     let (mut kumi_home, mut native_path, mut session) = (None, None, None);
+    let mut background = false;
     let mut iter = args.iter().skip(usize::from(launching));
     while let Some(arg) = iter.next() {
         match arg.as_str() {
             "--kumi-home" => match iter.next() {
                 Some(path) => kumi_home = Some(PathBuf::from(path)),
-                None => return failed("--kumi-home needs a folder"),
+                None => return usage("--kumi-home needs a folder"),
             },
             "--native-config" => match iter.next() {
                 Some(path) => native_path = Some(PathBuf::from(path)),
-                None => return failed("--native-config needs an absolute file"),
+                None => return usage("--native-config needs an absolute file"),
             },
-            "--background" if launching => {}
+            "--background" if launching => background = true,
             name if launching && !name.starts_with('-') && session.is_none() => session = Some(PathBuf::from(name)),
             _ => {
-                return failed(
+                return usage(
                     "usage: lynx-kumi [launch] [--kumi-home <folder>] [--native-config <absolute discovery file>] [session for launch]",
                 )
             }
@@ -46,7 +47,7 @@ fn main() -> ExitCode {
         Err(_) => return failed("Cannot start the bridge runtime"),
     };
     if launching {
-        let result = runtime.block_on(launch::run(&home, &native_path, session.as_deref()));
+        let result = runtime.block_on(launch::run(&home, &native_path, session.as_deref(), background));
         runtime.shutdown_background();
         return match result {
             Ok(value) => {
@@ -84,31 +85,28 @@ fn failed(message: &str) -> ExitCode {
     ExitCode::FAILURE
 }
 fn serving_lock(folder: &Path, pid: u32) -> std::io::Result<Option<std::fs::File>> {
-    daw_bridge::owner::create_owner_only_dir(folder)?;
+    launch::private_directory(folder).map_err(std::io::Error::other)?;
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true).write(true).create(true).truncate(false);
     #[cfg(unix)]
     {
-        use std::os::{fd::AsRawFd, unix::fs::OpenOptionsExt};
-        let file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .mode(0o600)
-            .custom_flags(libc::O_NOFOLLOW)
-            .open(folder.join(format!("serving-{pid}.lock")))?;
-        // SAFETY: this open regular file owns the descriptor throughout the lock.
-        if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } != 0 {
-            let error = std::io::Error::last_os_error();
-            if error.kind() == std::io::ErrorKind::WouldBlock {
-                return Ok(None);
-            }
-            return Err(error);
-        }
-        Ok(Some(file))
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600).custom_flags(libc::O_NOFOLLOW);
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
     {
-        let _ = pid;
-        Err(std::io::Error::new(std::io::ErrorKind::Unsupported, "Native LYNX endpoint is POSIX-only"))
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x0020_0000);
     }
+    let file = options.open(folder.join(format!("serving-{pid}.lock")))?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    }
+}
+
+fn usage(message: &str) -> ExitCode {
+    let _ = writeln!(std::io::stderr(), "lynx-kumi: {message}");
+    ExitCode::from(2)
 }

@@ -24,12 +24,22 @@ pub static PROVIDER: Beside = Beside {
     restart_why: "LYNX must provide the opt-in authenticated native control endpoint used by lynx-kumi.",
     watch_words: WatchWords {
         starting: "Waiting for LYNX's native control connection.",
-        unreachable: "LYNX is unavailable. Use the matching custom native-control build and run kumi --daw lynx bridge to connect it.",
+        unreachable: "Enable LYNX Remote Control in General settings in a compatible build, then run kumi --daw lynx bridge.",
         answered: "Connected to the current LYNX project through Kumi's bridge.",
     },
     used: |env| detected(env, detect::detect_lynx).is_some(),
     here: |env| detected(env, detect::detect_lynx).is_some(),
     app: |env| detected(env, detect::detect_lynx).map(|found| found.path),
     app_version: |env, is| detected(env, detect::detect_lynx).filter(|found| is(&found.path)).and_then(|found| found.version),
-    last_session: |_| None,
+    last_session: |env| {
+        let home = daw_bridge::paths::kumi_home_from(&|name| env.get(name).cloned(), env.get("HOME").map(std::path::PathBuf::from))?;
+        let path = home.join("bridges/lynx/launched.json");
+        let meta = std::fs::symlink_metadata(&path).ok()?;
+        if !meta.is_file() || meta.file_type().is_symlink() || meta.len() > 65536 {
+            return None;
+        }
+        let value: serde_json::Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+        let path = value["path"].as_str()?;
+        (std::path::Path::new(path).is_absolute() && std::path::Path::new(path).is_file()).then(|| path.to_owned())
+    },
 };

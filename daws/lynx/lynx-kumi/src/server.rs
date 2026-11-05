@@ -139,19 +139,38 @@ async fn look(
             break;
         }
         let Ok(mut work) = work.try_lock() else { continue };
-        let session = match work.session().await {
-            Ok(s) => s,
+        let status = match work.status().await {
+            Ok(status) => status,
             Err(_) => {
                 seen_lock(&seen).busy = true;
                 continue;
             }
+        };
+        let previous = seen_lock(&seen).session.clone();
+        let changed = previous["revision"] != status["revision"]
+            || previous["controlEpoch"] != status["controlEpoch"]
+            || previous["project"]["id"] != status["project"]["id"];
+        let session = if changed {
+            match work.session().await {
+                Ok(session) => session,
+                Err(_) => {
+                    seen_lock(&seen).busy = true;
+                    continue;
+                }
+            }
+        } else {
+            let mut session = previous;
+            if let (Some(to), Some(from)) = (session.as_object_mut(), status.as_object()) {
+                to.extend(from.clone());
+            }
+            session
         };
         let mut old = seen_lock(&seen);
         let project_changed = old.session["controlEpoch"] != session["controlEpoch"]
             || ["id", "name", "path"].iter().any(|field| old.session["project"][*field] != session["project"][*field]);
         let changed = old.session["revision"] != session["revision"];
         let transport = project::transport(&session);
-        if project::transport(&old.session) != transport {
+        if ["playing", "recording", "tempo", "timeSignature"].iter().any(|key| project::transport(&old.session)[*key] != transport[*key]) {
             let _ = events.send((event::TRANSPORT.into(), transport));
         }
         if changed {
@@ -167,7 +186,7 @@ async fn look(
         if project_changed {
             let _ = events.send((event::PROJECT.into(), serde_json::to_value(&old.identity.project).unwrap_or(Value::Null)));
         }
-        if project_changed || changed {
+        if project_changed {
             let _ = files::write_discovery(&dir, &notice(&old.identity, port, started));
         }
     }

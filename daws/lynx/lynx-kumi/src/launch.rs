@@ -9,26 +9,31 @@ use std::{
 };
 
 pub fn native_path() -> Option<PathBuf> {
-    std::env::var_os("KUMI_LYNX_CONFIG").or_else(|| std::env::var_os("LYNX_KUMI_DISCOVERY")).map(PathBuf::from).or_else(|| {
+    std::env::var_os("KUMI_LYNX_CONFIG").or_else(|| std::env::var_os("LYNX_CONTROL_DISCOVERY")).map(PathBuf::from).or_else(|| {
+        #[cfg(windows)]
+        {
+            return std::env::var_os("APPDATA").map(PathBuf::from).map(|folder| folder.join("LYNX/control/connection.json"));
+        }
+        #[cfg(not(windows))]
         std::env::var_os("HOME").map(PathBuf::from).map(|home| {
             if cfg!(target_os = "macos") {
-                home.join("Library/Application Support/LYNX/kumi/connection.json")
+                home.join("Library/Application Support/LYNX/control/connection.json")
             } else {
                 std::env::var_os("XDG_CONFIG_HOME")
                     .map(PathBuf::from)
                     .unwrap_or_else(|| home.join(".config"))
-                    .join("LYNX/kumi/connection.json")
+                    .join("LYNX/control/connection.json")
             }
         })
     })
 }
 
-pub async fn run(home: &Path, path: &Path, session: Option<&Path>) -> Result<Value> {
+pub async fn run(home: &Path, path: &Path, session: Option<&Path>, background: bool) -> Result<Value> {
     if !path.is_absolute() {
         return Err(Error::bad("Native discovery path must be absolute"));
     }
     let folder = home.join("bridges/lynx");
-    owner::create_owner_only_dir(&folder).map_err(|_| Error::bad("Cannot create the private LYNX bridge folder"))?;
+    private_directory(&folder)?;
     let _lock = launch_lock(&folder)?;
     let app = find_app();
     if let Ok(found) = native::discovery(path) {
@@ -38,7 +43,7 @@ pub async fn run(home: &Path, path: &Path, session: Option<&Path>) -> Result<Val
     }
     let var = |name: &str| std::env::var(name).ok();
     if detect::list_processes(&var).iter().any(|(_, name)| detect::process_is(Daw::Lynx, name)) {
-        return Err(Error::new(code::FAILED,"LYNX is already open without a compatible authenticated endpoint. Save the project and reopen the custom native-control build; no second copy was started"));
+        return Err(Error::new(code::FAILED,"LYNX is already open without a compatible Remote Control endpoint. Enable LYNX Remote Control in General settings; if this build has no such setting, save and reopen a compatible build. No second copy was started"));
     }
     let app =
         app.ok_or_else(|| Error::bad("A compatible custom LYNX build was not found; set KUMI_LYNX_APP to its absolute application path"))?;
@@ -47,24 +52,23 @@ pub async fn run(home: &Path, path: &Path, session: Option<&Path>) -> Result<Val
     }
     let executable = executable(&app)?;
     if let Some(parent) = path.parent() {
-        owner::create_owner_only_dir(parent).map_err(|_| Error::bad("Cannot prepare LYNX's private native discovery directory"))?;
+        private_directory(parent)?;
     }
-    let mut command = Command::new(executable);
-    command.env("LYNX_KUMI_DISCOVERY", path).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
     if let Some(session) = session {
         if !session.is_absolute() || !session.is_file() {
             return Err(Error::bad("The session must be an existing absolute local file"));
         }
-        command.arg(session);
     }
-    let mut child = command.spawn().map_err(|_| Error::new(code::FAILED, "The selected LYNX application could not start"))?;
+    let mut child = start_apart(&app, &executable, path, session, background)?;
     let until = Instant::now() + Duration::from_secs(30);
     while Instant::now() < until {
-        if child.try_wait().map_err(|_| Error::new(code::FAILED, "Cannot inspect the started LYNX process"))?.is_some() {
-            return Err(Error::new(code::FAILED, "The selected LYNX application ended before its native endpoint became ready"));
+        if let Some(child) = child.as_mut() {
+            if child.try_wait().map_err(|_| Error::new(code::FAILED, "Cannot inspect the started LYNX process"))?.is_some() {
+                return Err(Error::new(code::FAILED, "The selected LYNX application ended before its native endpoint became ready"));
+            }
         }
         if let Ok(found) = native::discovery(path) {
-            if found.pid != child.id() {
+            if !process_matches(found.pid, &executable) {
                 return Err(Error::new(
                     code::FAILED,
                     "A different LYNX process published discovery during startup; no request was sent to it",
@@ -80,6 +84,116 @@ pub async fn run(home: &Path, path: &Path, session: Option<&Path>) -> Result<Val
         code::FAILED,
         "LYNX opened but its compatible native endpoint did not become ready. The application was left open; no project was closed",
     ))
+}
+
+/// Refuse an existing shared directory instead of changing somebody's permissions.
+pub fn private_directory(path: &Path) -> Result<()> {
+    #[cfg(windows)]
+    let private = |path: &Path| crate::windows::private_directory(path);
+    #[cfg(not(windows))]
+    let private = |path: &Path| owner::is_owner_only(path);
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() && private(path) => Ok(()),
+        Ok(_) => Err(Error::bad("The LYNX control/bridge directory must already be private and cannot be a link")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            owner::create_owner_only_dir(path).map_err(|_| Error::bad("Cannot create the private LYNX control directory"))?;
+            if private(path) {
+                Ok(())
+            } else {
+                Err(Error::bad("The new LYNX directory failed its privacy check"))
+            }
+        }
+        Err(_) => Err(Error::bad("Cannot inspect the LYNX control directory")),
+    }
+}
+
+fn start_apart(
+    app: &Path,
+    executable: &Path,
+    discovery: &Path,
+    session: Option<&Path>,
+    background: bool,
+) -> Result<Option<std::process::Child>> {
+    #[cfg(target_os = "macos")]
+    if app.extension().is_some_and(|ext| ext == "app") {
+        let mut command = Command::new("/usr/bin/open");
+        command.arg("-n");
+        if background {
+            command.arg("-g");
+        }
+        command.arg("-a").arg(app).arg("--args");
+        if let Some(session) = session {
+            command.arg(session);
+        }
+        command
+            .env("LYNX_CONTROL_ENABLED", "1")
+            .env("LYNX_CONTROL_DISCOVERY", discovery)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        let status = command.status().map_err(|_| Error::new(code::FAILED, "LaunchServices could not start LYNX"))?;
+        if !status.success() {
+            return Err(Error::new(code::FAILED, "LaunchServices refused the selected LYNX application"));
+        }
+        return Ok(None);
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, background);
+    let mut command = Command::new(executable);
+    command
+        .env("LYNX_CONTROL_ENABLED", "1")
+        .env("LYNX_CONTROL_DISCOVERY", discovery)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    if let Some(session) = session {
+        command.arg(session);
+    }
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    #[cfg(windows)]
+    let child = {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0100_0000);
+        command.spawn().or_else(|_| command.creation_flags(0x0000_0008 | 0x0000_0200).spawn())
+    };
+    #[cfg(not(windows))]
+    let child = command.spawn();
+    child.map(Some).map_err(|_| Error::new(code::FAILED, "The selected LYNX application could not start"))
+}
+
+fn process_matches(pid: u32, expected: &Path) -> bool {
+    #[cfg(target_os = "macos")]
+    let actual = {
+        #[link(name = "proc")]
+        unsafe extern "C" {
+            fn proc_pidpath(pid: libc::c_int, buffer: *mut std::ffi::c_void, size: u32) -> libc::c_int;
+        }
+        let mut bytes = vec![0u8; 4096];
+        // SAFETY: the mutable buffer is valid for its full size; proc_pidpath writes a terminated path.
+        let size = unsafe { proc_pidpath(pid as libc::c_int, bytes.as_mut_ptr().cast(), bytes.len() as u32) };
+        if size <= 0 {
+            None
+        } else {
+            bytes.truncate(bytes.iter().position(|b| *b == 0).unwrap_or(size as usize));
+            String::from_utf8(bytes).ok().map(PathBuf::from)
+        }
+    };
+    #[cfg(not(target_os = "macos"))]
+    let actual = detect::program_of(pid);
+    let Some((actual, expected)) =
+        actual.and_then(|actual| Some((std::fs::canonicalize(actual).ok()?, std::fs::canonicalize(expected).ok()?)))
+    else {
+        return false;
+    };
+    #[cfg(windows)]
+    {
+        actual.to_string_lossy().eq_ignore_ascii_case(&expected.to_string_lossy())
+    }
+    #[cfg(not(windows))]
+    {
+        actual == expected
+    }
 }
 fn record(folder: &Path, path: &Path, app: Option<&Path>, pid: u32, version: &str, inspected: &Value, started: bool) -> Result<Value> {
     let value = json!({"schema":"lynx-kumi-launch/1","pid":pid,"app":app,"version":version,"nativeConfig":path,
@@ -134,4 +248,32 @@ fn launch_lock(folder: &Path) -> Result<std::fs::File> {
     let file = options.open(folder.join("launch.lock")).map_err(|_| Error::bad("Cannot open the private launch lock"))?;
     file.try_lock().map_err(|_| Error::new(code::BUSY, "Another LYNX launch is being prepared; try again once it finishes"))?;
     Ok(file)
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::*;
+    use std::os::unix::fs::{MetadataExt, PermissionsExt};
+
+    #[test]
+    fn an_app_is_started_in_a_separate_process_group_from_kumis_terminal() {
+        let dir = tempfile::tempdir().unwrap();
+        let shell = std::fs::canonicalize("/bin/sh").unwrap();
+        let mut child = start_apart(&shell, &shell, &dir.path().join("control.json"), None, true).unwrap().unwrap();
+        // SAFETY: getpgid/getpgrp inspect existing process IDs and mutate no process.
+        let (group, parent) = unsafe { (libc::getpgid(child.id() as libc::pid_t), libc::getpgrp()) };
+        child.wait().unwrap();
+        assert_eq!(group, child.id() as libc::pid_t);
+        assert_ne!(group, parent);
+    }
+
+    #[test]
+    fn an_existing_shared_control_directory_is_refused_without_changing_its_mode() {
+        let dir = tempfile::tempdir().unwrap();
+        let control = dir.path().join("control");
+        std::fs::create_dir(&control).unwrap();
+        std::fs::set_permissions(&control, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(private_directory(&control).is_err());
+        assert_eq!(std::fs::metadata(control).unwrap().mode() & 0o777, 0o755);
+    }
 }

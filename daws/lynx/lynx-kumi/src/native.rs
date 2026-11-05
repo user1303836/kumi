@@ -15,7 +15,7 @@ use tokio::{
     net::TcpStream,
 };
 
-pub const PROTOCOL: &str = "lynx-kumi/2";
+pub const PROTOCOL: &str = "lynx-control/1";
 pub const MAX_MESSAGE: usize = 1024 * 1024;
 const MAX_CONFIG: u64 = 16 * 1024;
 
@@ -35,9 +35,6 @@ pub fn discovery(path: &Path) -> Result<Discovery> {
     if !path.is_absolute() {
         return Err(Error::bad("LYNX discovery path must be absolute"));
     }
-    if !cfg!(unix) {
-        return Err(Error::bad("This experimental native LYNX endpoint is available only on POSIX builds"));
-    }
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
     #[cfg(unix)]
@@ -45,12 +42,29 @@ pub fn discovery(path: &Path) -> Result<Discovery> {
         use std::os::unix::fs::OpenOptionsExt;
         options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
     }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Open the reparse point itself, then refuse it below. Allow atomic discovery replacement.
+        options.custom_flags(0x0020_0000).share_mode(7);
+        let parent = path.parent().ok_or_else(|| Error::bad("Discovery needs its private control directory"))?;
+        if !crate::windows::private_directory(parent) {
+            return Err(Error::bad("LYNX discovery and its directory must have a protected current-user-only DACL"));
+        }
+    }
     let file = options
         .open(path)
         .map_err(|_| Error::new(code::FAILED, "LYNX native discovery is unavailable; start a compatible opt-in control build"))?;
     let meta = file.metadata().map_err(|_| Error::bad("Cannot inspect LYNX discovery"))?;
     if !meta.is_file() || meta.len() > MAX_CONFIG {
         return Err(Error::bad("Invalid LYNX discovery file"));
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        if meta.file_attributes() & 0x400 != 0 || !crate::windows::private_file(&file) {
+            return Err(Error::bad("LYNX discovery cannot be a Windows reparse point"));
+        }
     }
     #[cfg(unix)]
     {
@@ -74,7 +88,7 @@ pub fn discovery(path: &Path) -> Result<Discovery> {
         || found.token.len() != 64
         || !found.token.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
     {
-        return Err(Error::bad("Incompatible LYNX native protocol, address or credentials; authenticated protocol 2 is required"));
+        return Err(Error::bad("Incompatible LYNX native protocol, address or credentials; lynx-control/1 is required"));
     }
     if !process_alive(found.pid) {
         return Err(Error::new(code::FAILED, "LYNX discovery belongs to a process that has ended"));
@@ -102,15 +116,23 @@ impl Client {
         }
         let timeout = if matches!(
             operation,
-            "channel.create" | "instrument.replace" | "plugin.parameters_set" | "effect.load" | "history.undo" | "history.redo"
+            "channel.create"
+                | "instrument.replace"
+                | "project.edit"
+                | "project.read"
+                | "device.state"
+                | "plugin.parameters_set"
+                | "effect.load"
+                | "history.undo"
+                | "history.redo"
         ) {
             Duration::from_secs(65)
         } else {
             Duration::from_secs(10)
         };
-        tokio::time::timeout(timeout, self.exchange(&found, operation, args)).await.map_err(|_| {
-            Error::new(code::UNCERTAIN, "LYNX did not answer in time; a sent change may have run. Read the state before retrying")
-        })?
+        tokio::time::timeout(timeout, self.exchange(&found, operation, args))
+            .await
+            .map_err(|_| lost(operation, "LYNX did not answer in time"))?
     }
 
     async fn exchange(&self, found: &Discovery, operation: &str, args: Value) -> Result<Value> {
@@ -144,23 +166,41 @@ impl Client {
         if request.to_string().len() > MAX_MESSAGE {
             return Err(Error::bad("LYNX native request exceeds 1 MiB"));
         }
-        send(&mut stream, &request)
-            .await
-            .map_err(|_| Error::new(code::UNCERTAIN, "LYNX request failed; a change may have run. Inspect before retrying"))?;
-        let result = line(&mut stream, MAX_MESSAGE, 64).await.map_err(|_| {
-            Error::new(code::UNCERTAIN, "LYNX response was lost or invalid; a change may have run. Inspect before retrying")
-        })?;
+        send(&mut stream, &request).await.map_err(|_| lost(operation, "LYNX request failed"))?;
+        let result = line(&mut stream, MAX_MESSAGE, 64).await.map_err(|_| lost(operation, "LYNX response was lost or invalid"))?;
         match result["ok"].as_bool() {
             Some(true) => Ok(result.get("result").cloned().unwrap_or(Value::Null)),
             Some(false) => {
                 let message = result["error"].as_str().unwrap_or("operation refused").replace(&found.token, "[redacted]");
+                let reported = result["code"].as_str().unwrap_or(code::FAILED);
+                let error_code = if result["uncertain"] == true || reported == code::UNCERTAIN {
+                    code::UNCERTAIN
+                } else if matches!(reported, "changed" | "stale") {
+                    code::CHANGED
+                } else if reported == code::BUSY {
+                    code::BUSY
+                } else {
+                    code::FAILED
+                };
                 Err(Error::new(
-                    code::FAILED,
-                    format!("LYNX: {}", message.chars().filter(|c| !c.is_control()).take(1000).collect::<String>()),
+                    error_code,
+                    format!(
+                        "LYNX{}: {}",
+                        if reported == "limit" { " [limit]" } else { "" },
+                        message.chars().filter(|c| !c.is_control()).take(1000).collect::<String>()
+                    ),
                 ))
             }
-            None => Err(Error::new(code::UNCERTAIN, "Invalid LYNX response envelope; inspect before retrying")),
+            None => Err(lost(operation, "Invalid LYNX response envelope")),
         }
+    }
+}
+
+fn lost(operation: &str, why: &str) -> Error {
+    if crate::project::READ_OPS.contains(&operation) {
+        Error::new(code::FAILED, format!("{why}; read the current state again"))
+    } else {
+        Error::new(code::UNCERTAIN, format!("{why}; a sent change may have run. Inspect before retrying"))
     }
 }
 

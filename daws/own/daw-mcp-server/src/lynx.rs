@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 
 pub const READ_KINDS: &[&str] = &[
     "project",
+    "document",
     "track",
     "channel",
     "mixer",

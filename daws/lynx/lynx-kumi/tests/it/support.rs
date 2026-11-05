@@ -19,6 +19,7 @@ pub struct State {
     pub tokens_on_wire: usize,
     pub after_bad_challenge: Option<String>,
     pub gui_value: f64,
+    pub opaque_device_state: String,
     pub drop_mutation_response: bool,
     history: Vec<(Value, Vec<Value>)>,
 }
@@ -42,6 +43,7 @@ impl Fake {
             tokens_on_wire: 0,
             after_bad_challenge: None,
             gui_value: 0.5,
+            opaque_device_state: "fixture-state".into(),
             drop_mutation_response: false,
             history: vec![],
         }));
@@ -122,7 +124,25 @@ fn execute(state: &mut State, op: &str, args: &Value) -> Value {
         json!({"ok":true,"result":result})
     };
     match op {
-        "session.inspect" => json!({"ok":true,"result":state.session}),
+        "session.inspect" | "status" => json!({"ok":true,"result":state.session}),
+        "api.describe" => metadata(state, json!({"protocol":PROTOCOL,"operations":["project.read","project.edit"]})),
+        "device.state" => metadata(state, json!({"deviceStateHash":device_hash(state)})),
+        "project.read" => {
+            use base64::{engine::general_purpose::STANDARD, Engine};
+            let bytes = document(state).to_string().into_bytes();
+            let hash = daw_bridge::auth::sha256_hex(&bytes);
+            let offset = args["offset"].as_u64().unwrap_or(0) as usize;
+            let limit = args["limit"].as_u64().unwrap_or(32768) as usize;
+            if offset > bytes.len() || (offset > 0 && (args["snapshotId"] != "e".repeat(32) || args["expectedDocumentHash"] != hash)) {
+                return json!({"ok":false,"code":"changed","error":"stale snapshot","uncertain":false});
+            }
+            let end = (offset + limit).min(bytes.len());
+            let mut result = json!({"encoding":"base64","data":STANDARD.encode(&bytes[offset..end]),"snapshotId":"e".repeat(32),"documentHash":hash,"offset":offset,"totalBytes":bytes.len()});
+            if end < bytes.len() {
+                result["nextOffset"] = end.into();
+            }
+            metadata(state, result)
+        }
         "pattern.notes" => {
             let offset = args["offset"].as_u64().unwrap_or(0) as usize;
             let limit = args["limit"].as_u64().unwrap_or(256) as usize;
@@ -150,7 +170,7 @@ fn execute(state: &mut State, op: &str, args: &Value) -> Value {
                 )
             }
         }
-        "tempo.set" | "pattern.replace_notes" | "history.undo" => {
+        "tempo.set" | "pattern.replace_notes" | "project.edit" | "history.undo" => {
             if args["expectedProjectId"] != state.session["project"]["id"]
                 || args["expectedEpoch"] != state.session["controlEpoch"]
                 || args["expectedRevision"].as_u64() != state.session["revision"].as_u64()
@@ -166,6 +186,18 @@ fn execute(state: &mut State, op: &str, args: &Value) -> Value {
                 state.history.push((state.session.clone(), state.notes.clone()));
                 if op == "tempo.set" {
                     state.session["bpm"] = args["bpm"].clone();
+                } else if op == "project.edit" {
+                    if args["expectedDocumentHash"] != daw_bridge::auth::sha256_hex(document(state).to_string().as_bytes()) {
+                        state.history.pop();
+                        return json!({"ok":false,"code":"changed","error":"document changed","uncertain":false});
+                    }
+                    for patch in args["patch"].as_array().unwrap() {
+                        match patch["path"].as_str().unwrap() {
+                            "/tempo" => state.session["bpm"] = patch["value"].clone(),
+                            "/channels/0/name" => state.session["channels"][0]["name"] = patch["value"].clone(),
+                            _ => panic!("test patch path not implemented"),
+                        }
+                    }
                 } else {
                     state.notes = args["notes"].as_array().unwrap().clone();
                     state.session["patterns"][0]["noteCount"] = state.notes.len().into();
@@ -192,4 +224,11 @@ async fn read(stream: &mut BufReader<TcpStream>) -> Option<Value> {
 }
 async fn send(stream: &mut BufReader<TcpStream>, value: &Value) -> bool {
     stream.get_mut().write_all(format!("{value}\n").as_bytes()).await.is_ok()
+}
+
+fn document(state: &State) -> Value {
+    json!({"format":"lynx","projectId":state.session["project"]["id"],"tempo":state.session["bpm"],"channels":state.session["channels"],"mixer":state.session["mixer"],"patterns":[{"name":state.session["patterns"][0]["name"],"notes":state.notes}],"playlist":state.session["playlist"]})
+}
+fn device_hash(state: &State) -> String {
+    daw_bridge::auth::sha256_hex(format!("{}:{}", state.gui_value, state.opaque_device_state).as_bytes())
 }

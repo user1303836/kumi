@@ -3,10 +3,13 @@
 //! Kumi reaches this program through its normal own-bridge MCP host. Only this
 //! program reads LYNX's private discovery and speaks its native endpoint.
 mod changes;
+mod document;
 pub mod launch;
 pub mod native;
 pub mod project;
 pub mod server;
+#[cfg(windows)]
+mod windows;
 
 use serde_json::Value;
 

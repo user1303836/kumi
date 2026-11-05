@@ -17,6 +17,7 @@ name = "lynx-kumi"
 path = "src/main.rs"
 
 [dependencies]
+base64.workspace = true
 daw-bridge.workspace = true
 serde.workspace = true
 serde_json.workspace = true

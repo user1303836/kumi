@@ -2331,13 +2331,14 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
                 "ref": {"type": "string", "description": "One object's ref, from this turn: reads it alone, as it is now"},
                 "parent": {"type": "string", "description": "The ref of what it's in (a track's items, an FX's parameters…), from this turn"},
                 "cursor": {"type": "string", "description": "The cursor an earlier page gave, for the next page"},
+                "epoch": {"type":"string", "description":"The state epoch returned by the read that supplied these refs or this cursor"},
                 "limit": {"type": "integer", "minimum": 1, "maximum": MOST_ROWS, "description": "How many rows (50 by default)"},
             },
         });
-        // A REAPER API function that only reads, by name, with its arguments.
+        // An operation that this DAW exposes for read-only calls.
         if self.daw.read_kinds.contains(&"call") {
-            schema["properties"]["fn"] = json!({"type": "string", "description": "For kind call: a REAPER API function that only reads (GetMediaTrackInfo_Value, TrackFX_GetParamName…)"});
-            schema["properties"]["args"] = json!({"type": ["array", "object"], "description": "For kind call: its arguments, in order or by the SDK's names; tracks, items, takes and envelopes as refs"});
+            schema["properties"]["fn"] = json!({"type": "string", "description": "For kind call: an exact read-only operation exposed by this DAW; see its integration instructions"});
+            schema["properties"]["args"] = json!({"type": ["array", "object"], "description": "The read operation's arguments; use current refs wherever it accepts them"});
         }
         // A tracker's lines are read one track at a time.
         if self.daw.read_kinds.contains(&"line") {

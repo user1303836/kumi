@@ -45,14 +45,17 @@ impl Journal {
         self.entries
             .iter()
             .position(|e| e.id == id)
-            .ok_or_else(|| Error::new("unknown", "This bridge no longer holds that preview or undo record; inspect and preview again"))
+            .ok_or_else(|| Error::new(code::CHANGED, "This bridge no longer holds that preview or undo record; inspect and preview again"))
     }
     fn trim(&mut self) -> Result<()> {
         let bytes =
             |e: &Entry| e.input.to_string().len() + e.fence.to_string().len() + e.answer.as_ref().map_or(0, |a| a.to_string().len()) + 2048;
         while self.entries.len() >= MAX_RECORDS || self.entries.iter().map(bytes).sum::<usize>() > MAX_BYTES {
-            let Some(index) = self.entries.iter().position(|e| e.phase != Phase::Uncertain) else {
-                return Err(Error::new("limit", "The bridge's uncertain-change journal is full; reconnect after inspecting the project"));
+            let Some(index) = self.entries.iter().position(|e| matches!(e.phase, Phase::Previewed | Phase::Undone)) else {
+                return Err(Error::new(
+                    code::BUSY,
+                    "The bridge's uncertain-change journal is full; reconnect after inspecting the project",
+                ));
             };
             let old = self.entries.remove(index).unwrap();
             self.owned.retain(|id| *id != old.id);
@@ -197,6 +200,7 @@ impl Bridge {
         let native = match self.client.call(&kind, input).await {
             Ok(result) => result,
             Err(error) => {
+                let error = self.classify_write_failure(error, &project, &control, expected).await;
                 if error.code != code::UNCERTAIN {
                     self.journal.entries[index].phase = Phase::Previewed;
                 }
@@ -213,28 +217,22 @@ impl Bridge {
         let after = after.unwrap();
         let changed = after > expected;
         let epoch_after = format!("{control}:{project}:{after}");
+        // The native response proves the operation landed. A missing ownership fence
+        // disables targeted undo; it must not turn a known successful apply into an uncertain write.
         let fingerprint = if changed {
-            let inspected = self.session().await.map_err(|_| {
-                Error::new(code::UNCERTAIN, "The change ran, but its post-apply state could not be inspected; native undo will be withheld")
-            })?;
-            if epoch(&inspected) != epoch_after {
-                return Err(Error::new(
-                    code::UNCERTAIN,
-                    "The project changed while establishing undo ownership; inspect before any history action",
-                ));
+            match self.session().await {
+                Ok(inspected) if epoch(&inspected) == epoch_after => self.parameter_fingerprint(&inspected).await.ok(),
+                _ => None,
             }
-            Some(self.parameter_fingerprint(&inspected).await.map_err(|_| {
-                Error::new(
-                    code::UNCERTAIN,
-                    "The change ran, but a complete device parameter fingerprint could not be established; native undo will be withheld",
-                )
-            })?)
         } else {
             None
         };
         let entry = &mut self.journal.entries[index];
-        let answer = json!({"epoch":epoch_after,"layout":after,"applied":native,"display":entry.display,"target":entry.target,
-            "undo":{"desc":desc,"entry":changed,"covered":false}});
+        let mut answer = json!({"epoch":epoch_after,"layout":after,"applied":native,"display":entry.display,"target":entry.target,
+            "undo":{"desc":desc,"entry":changed,"covered":true}});
+        if changed && fingerprint.is_none() {
+            answer["display"]["note"] = "Applied as a native undo step. Kumi could not establish the device-state fence, so targeted undo is withheld; inspect the project before continuing.".into();
+        }
         entry.phase = Phase::Applied;
         entry.after_revision = Some(after);
         entry.desc = Some(desc);
@@ -243,7 +241,6 @@ impl Bridge {
         if changed {
             self.journal.owned.push(id.into());
         }
-        self.journal.trim()?;
         Ok(answer)
     }
 
@@ -254,7 +251,7 @@ impl Bridge {
             .entries
             .iter()
             .position(|e| e.desc.as_deref() == Some(desc))
-            .ok_or_else(|| Error::new("unknown", "This bridge no longer owns that undo record"))?;
+            .ok_or_else(|| Error::new(code::CHANGED, "This bridge no longer owns that undo record"))?;
         let entry = &self.journal.entries[index];
         if params["kind"] != entry.kind {
             return Err(Error::bad("Undo kind does not match the applied change"));
@@ -298,19 +295,25 @@ impl Bridge {
             .await
             .map_err(|_| Error::new(code::CHANGED, "Device state could not be verified; native undo was intentionally withheld"))?;
         if fingerprint.as_deref() != Some(current.as_str()) {
-            return Err(Error::new(code::CHANGED,"An exposed device parameter changed after this apply, even though the song revision may be unchanged; native undo was intentionally withheld"));
+            return Err(Error::new(code::CHANGED,"Device state changed after this apply, even though the song revision may be unchanged; native undo was intentionally withheld"));
         }
-        let args = json!({"expectedProjectId":project,"expectedEpoch":control,"expectedRevision":expected});
+        let args =
+            json!({"expectedProjectId":project,"expectedEpoch":control,"expectedRevision":expected,"expectedDeviceStateHash":current});
         self.journal.entries[index].phase = Phase::Uncertain;
         let native = match self.client.call("history.undo", args).await {
             Ok(result) => result,
             Err(error) => {
+                let error = self.classify_write_failure(error, &project, &control, expected).await;
                 if error.code != code::UNCERTAIN {
                     self.journal.entries[index].phase = Phase::Applied;
                 }
                 return Err(error);
             }
         };
+        if native["changed"] == false && native["revision"].as_u64() == Some(expected) {
+            self.journal.entries[index].phase = Phase::Applied;
+            return Err(Error::new(code::CHANGED, "The native undo step is no longer present; nothing was undone"));
+        }
         let after = native["revision"].as_u64().filter(|n| *n > expected);
         if native["projectId"] != project || native["controlEpoch"] != control || native["changed"] != true || after.is_none() {
             return Err(Error::new(code::UNCERTAIN, "Native undo ownership could not be verified; it will not be repeated"));
@@ -339,56 +342,28 @@ impl Bridge {
         self.client.call("transport.play", json!({"expectedProjectId":project,"expectedEpoch":control,"expectedRevision":revision})).await
     }
 
-    /// Reads every exposed writable parameter. The private hash is an undo fence,
-    /// never model context; meters are excluded because they are observations.
+    async fn classify_write_failure(&self, error: Error, project: &str, control: &str, expected: u64) -> Error {
+        if error.code == code::UNCERTAIN {
+            return error;
+        }
+        match self.status().await {
+            Ok(status) if identity(&status).is_ok_and(|(p, c, r)| p == project && c == control && r == expected) => error,
+            _ => Error::new(
+                code::UNCERTAIN,
+                "LYNX refused or lost a write response, but the unchanged revision could not be proved; inspect before retrying",
+            ),
+        }
+    }
+
+    /// Native hash includes opaque hosted and nested device state, not just exposed parameters.
     async fn parameter_fingerprint(&self, session: &Value) -> Result<String> {
-        let inventory = self.client.call("plugin.inspect", json!({})).await?;
-        crate::project::check_native_result(&inventory, session)?;
-        let devices = array(&inventory, "devices");
-        if devices.len() > 4096 {
-            return Err(Error::new("limit", "Too many devices to establish a bounded undo fingerprint"));
-        }
-        let (mut bytes, mut parameters) = (Vec::new(), 0usize);
-        for device in devices {
-            if device["available"] != true {
-                return Err(Error::new(code::FAILED, "An existing device is unavailable for an undo ownership check"));
-            }
-            let count = integer(device, "parameterCount")?;
-            if count > 100000 {
-                return Err(Error::new("limit", "Device parameter count exceeds undo ownership bound"));
-            }
-            bytes.extend_from_slice(device.to_string().as_bytes());
-            let mut offset = 0;
-            while offset < count {
-                let page = self.client.call("plugin.inspect", json!({"target":device["target"],"offset":offset,"limit":256})).await?;
-                crate::project::check_native_result(&page, session)?;
-                if integer(&page, "parameterCount")? != count {
-                    return Err(Error::new(code::CHANGED, "Device parameter count changed during undo ownership check"));
-                }
-                let values = array(&page, "parameters");
-                if values.is_empty() || values.len() > 256 {
-                    return Err(Error::new(code::FAILED, "Device parameter paging did not progress"));
-                }
-                for (i, parameter) in values.iter().enumerate() {
-                    if parameter["index"].as_u64() != Some(offset + i as u64) {
-                        return Err(Error::new(code::FAILED, "Device parameter paging lost an index"));
-                    }
-                    if parameter["readOnly"] != true {
-                        bytes.extend_from_slice(
-                            json!({"index":parameter["index"],"value":parameter["value"],"parameterId":parameter["parameterId"]})
-                                .to_string()
-                                .as_bytes(),
-                        );
-                    }
-                }
-                offset += values.len() as u64;
-                parameters += values.len();
-                if offset > count || parameters > 100000 || bytes.len() > 4 * 1024 * 1024 {
-                    return Err(Error::new("limit", "Device state exceeds the bounded undo ownership budget"));
-                }
-            }
-        }
-        Ok(auth::sha256_hex(&bytes))
+        let value = self.client.call("device.state", json!({})).await?;
+        crate::project::check_native_result(&value, session)?;
+        value["deviceStateHash"]
+            .as_str()
+            .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase()))
+            .map(str::to_owned)
+            .ok_or_else(|| Error::new(code::FAILED, "Native device-state fence is missing or malformed"))
     }
 }
 
@@ -401,6 +376,34 @@ fn validate_target(kind: &str, input: &Value, session: &Value) -> Result<()> {
         Ok(())
     };
     match kind {
+        "project.edit" => {
+            for (key, size) in [("snapshotId", 32), ("expectedDocumentHash", 64)] {
+                if !input[key]
+                    .as_str()
+                    .is_some_and(|text| text.len() == size && text.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase()))
+                {
+                    return Err(Error::bad(format!("{key} must come from the complete document read")));
+                }
+            }
+            let patch = input["patch"]
+                .as_array()
+                .filter(|patch| !patch.is_empty() && patch.len() <= 128)
+                .ok_or_else(|| Error::bad("patch must contain 1–128 JSON Patch operations"))?;
+            for operation in patch {
+                let action = operation["op"].as_str().ok_or_else(|| Error::bad("Each patch operation requires op"))?;
+                let path = operation["path"]
+                    .as_str()
+                    .filter(|path| path.len() <= 4096 && path.starts_with('/'))
+                    .ok_or_else(|| Error::bad("Each patch path must be a bounded non-root JSON Pointer"))?;
+                let _ = path;
+                if !matches!(action, "test" | "add" | "replace" | "remove") || (action != "remove" && operation.get("value").is_none()) {
+                    return Err(Error::bad("Patch op must be test/add/replace/remove with value except for remove"));
+                }
+                if operation.as_object().is_none_or(|fields| fields.keys().any(|key| !matches!(key.as_str(), "op" | "path" | "value"))) {
+                    return Err(Error::bad("JSON Patch contains an unknown operation field"));
+                }
+            }
+        }
         "mixer.set" => index("index", array(session, "mixer").len(), false)?,
         "channel.set" => index("index", array(session, "channels").len(), false)?,
         "pattern.replace_notes" => {
@@ -459,6 +462,7 @@ fn display(kind: &str, input: &Value, session: &Value) -> Value {
         "effect.load" => format!("Load {} on mixer insert {}", input["effectId"].as_str().unwrap_or("effect"), input["mixerIndex"]),
         "effect.remove" => format!("Remove effect {} from mixer insert {}", input["effectIndex"], input["mixerIndex"]),
         "playlist.edit" => format!("Edit {} Playlist clips", array(input, "edits").len()),
+        "project.edit" => format!("Edit project document in {} atomic operations", array(input, "patch").len()),
         _ => kind.into(),
     };
     let unchanged = kind == "tempo.set" && input["bpm"].as_f64() == session["bpm"].as_f64();

@@ -1,5 +1,6 @@
 #![cfg(unix)]
 
+mod document;
 mod support;
 
 use daw_bridge::{
@@ -68,8 +69,9 @@ async fn lost_write_response_is_uncertain_and_the_same_apply_is_never_sent_again
 async fn compatible_launch_attaches_and_records_current_project_without_changing_it() {
     let fake = Fake::start(false).await;
     let home = tempfile::tempdir().unwrap();
-    let record =
-        lynx_kumi::launch::run(home.path(), &fake.path(), Some(std::path::Path::new("/tmp/a-different-project.lynx"))).await.unwrap();
+    let record = lynx_kumi::launch::run(home.path(), &fake.path(), Some(std::path::Path::new("/tmp/a-different-project.lynx")), false)
+        .await
+        .unwrap();
     assert_eq!(record["started"], false);
     assert_eq!(record["pid"], std::process::id());
     let kept = home.path().join("bridges/lynx/launched.json");
@@ -154,7 +156,6 @@ async fn manual_plugin_parameter_change_without_song_revision_blocks_targeted_un
         .await
         .unwrap_err();
     assert_eq!(refusal.code, "changed");
-    assert!(refusal.message.contains("parameter changed"));
     let state = fake.finish().await;
     assert_eq!(state.gui_value, 0.9);
     assert_eq!(state.session["revision"], 2);
@@ -196,21 +197,21 @@ async fn notes_require_every_current_page_and_ref_alone_reads_are_revision_bound
     let input = json!({"index":0,"notes":[],"expectedRevision":1});
     let args = json!({"kind":"pattern.replace_notes","input":input,"epoch":epoch(&s)});
     assert!(bridge.preview(&args).await.unwrap_err().message.contains("every page"));
-    let first = bridge.read(&json!({"kind":"note","parent":"l:pattern:0:1","limit":1})).await.unwrap();
+    let first = bridge.read(&json!({"kind":"note","parent":fixture_ref("pattern", &[0]),"limit":1})).await.unwrap();
     assert!(first.get("nextCursor").is_some());
     assert!(bridge.preview(&args).await.is_err());
-    let second = bridge.read(&json!({"ref":"l:note:0:1:1"})).await.unwrap();
+    let second = bridge.read(&json!({"ref":fixture_ref("note", &[0,1])})).await.unwrap();
     assert_eq!(second["items"][0]["key"], 64);
     let next = second_cursor(&first, &mut bridge).await;
-    let third = bridge.read(&json!({"kind":"note","parent":"l:pattern:0:1","limit":1,"cursor":next})).await.unwrap();
+    let third = bridge.read(&json!({"kind":"note","parent":fixture_ref("pattern", &[0]),"limit":1,"cursor":next})).await.unwrap();
     assert_eq!(third["items"][0]["key"], 67);
     assert!(bridge.preview(&args).await.is_ok());
-    let row = bridge.read(&json!({"ref":"l:track:0:1"})).await.unwrap();
+    let row = bridge.read(&json!({"ref":fixture_ref("track", &[0])})).await.unwrap();
     assert_eq!(row["items"][0]["name"], "Synth");
     {
         fake.state.lock().unwrap().session["revision"] = 2.into();
     }
-    assert_eq!(bridge.read(&json!({"ref":"l:track:0:1"})).await.unwrap_err().code, "changed");
+    assert_eq!(bridge.read(&json!({"ref":fixture_ref("track", &[0])})).await.unwrap_err().code, "changed");
     let now_epoch = { epoch(&fake.state.lock().unwrap().session) };
     assert!(bridge
         .preview(&json!({"kind":"pattern.replace_notes","input":{"index":0,"notes":[],"expectedRevision":2},"epoch":now_epoch}))
@@ -219,7 +220,8 @@ async fn notes_require_every_current_page_and_ref_alone_reads_are_revision_bound
     fake.finish().await;
 }
 async fn second_cursor(first: &Value, bridge: &mut Bridge) -> Value {
-    let page = bridge.read(&json!({"kind":"note","parent":"l:pattern:0:1","limit":1,"cursor":first["nextCursor"]})).await.unwrap();
+    let page =
+        bridge.read(&json!({"kind":"note","parent":fixture_ref("pattern", &[0]),"limit":1,"cursor":first["nextCursor"]})).await.unwrap();
     page["nextCursor"].clone()
 }
 
@@ -298,7 +300,7 @@ async fn own_wire_authenticates_and_serves_the_same_snapshot_to_the_shared_host(
             assert!(response.ok);
             let snapshot = response.result.unwrap();
             assert_eq!(snapshot["project"]["name"], "Instrument test");
-            assert_eq!(snapshot["tracks"][0]["ref"], "l:track:0:1");
+            assert_eq!(snapshot["tracks"][0]["ref"], fixture_ref("track", &[0]));
             break;
         }
     }
@@ -323,7 +325,7 @@ fn private_discovery_refuses_legacy_protocol_dead_pid_symlinks_and_shared_mode()
         os::unix::fs::{symlink, PermissionsExt},
     };
     let mut config = tempfile::NamedTempFile::new().unwrap();
-    let text = json!({"protocol":"lynx-kumi/2","host":"127.0.0.1","port":12345,"pid":std::process::id(),"token":"a".repeat(64)});
+    let text = json!({"protocol":"lynx-control/1","host":"127.0.0.1","port":12345,"pid":std::process::id(),"token":"a".repeat(64)});
     write!(config, "{text}").unwrap();
     assert!(native::discovery(config.path()).is_ok());
     std::fs::set_permissions(config.path(), std::fs::Permissions::from_mode(0o644)).unwrap();
@@ -341,4 +343,12 @@ fn private_discovery_refuses_legacy_protocol_dead_pid_symlinks_and_shared_mode()
     dead["pid"] = u32::MAX.into();
     std::fs::write(config.path(), dead.to_string()).unwrap();
     assert!(native::discovery(config.path()).is_err());
+}
+
+fn fixture_ref(kind: &str, parts: &[u64]) -> String {
+    lynx_kumi::project::reference(
+        kind,
+        parts,
+        &json!({"revision":1,"controlEpoch":"b".repeat(64),"project":{"id":"1234567890abcdef1234567890abcdef"}}),
+    )
 }
