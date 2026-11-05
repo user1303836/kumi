@@ -1422,6 +1422,7 @@
       strong: read(CANVAS.strong, "#ddd")
     };
   }
+  var ROUNDS = 8;
   var maps = 0;
   function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }) {
     const t = useT();
@@ -1546,7 +1547,7 @@
       const labelled = [];
       let onScreen = 0;
       for (const pass of [0, 1]) {
-        const paths = /* @__PURE__ */ new Map();
+        const rounds = Array.from({ length: ROUNDS }, () => /* @__PURE__ */ new Map());
         for (let index = 0; index < count; index++) {
           if (mask[index] !== pass) continue;
           const point = points[index];
@@ -1554,6 +1555,7 @@
           const y = point.y * unit + view.dy;
           if (x < left || y < top || x > right || y > bottom) continue;
           const color = groupColor2.get(point.group) ?? colors.faint;
+          const paths = rounds[index % ROUNDS];
           let path = paths.get(color);
           if (!path) {
             path = new Path2D();
@@ -1564,9 +1566,11 @@
           if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
         }
         context.globalAlpha = pass ? 0.92 : 0.16;
-        for (const [color, path] of paths) {
-          context.fillStyle = color;
-          context.fill(path);
+        for (const paths of rounds) {
+          for (const [color, path] of paths) {
+            context.fillStyle = color;
+            context.fill(path);
+          }
         }
       }
       if (onScreen <= 40) {

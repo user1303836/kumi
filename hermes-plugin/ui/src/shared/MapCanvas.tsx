@@ -48,6 +48,10 @@ function resolve(canvas: HTMLCanvasElement): Record<keyof typeof CANVAS, string>
   }
 }
 
+// How many interleaved paths each group's points are drawn in: enough that overlapping groups mix about as the map's
+// own order would, few enough that a pass stays a few hundred fills.
+const ROUNDS = 8
+
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
@@ -174,8 +178,10 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     return () => canvas.removeEventListener('wheel', wheel)
   }, [hasPoints])
 
-  // Draw whenever anything shown changes. One path per group colour and pass, filled once: a 25,000-sound map is a few
-  // dozen fills, not 25,000.
+  // Draw whenever anything shown changes. Points are batched into one path per group colour, so a 25,000-sound map is a
+  // few hundred fills, not 25,000. Each colour's points are split into `ROUNDS` interleaved paths, drawn round by round:
+  // where groups overlap, their colours still mix as the map's own order left them, instead of the last colour covering
+  // the rest.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !view || size.width === 0) return
@@ -204,7 +210,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
     let onScreen = 0
     // Dimmed points first, then the ones the search and legend keep, so those sit on top.
     for (const pass of [0, 1]) {
-      const paths = new Map<string, Path2D>()
+      const rounds = Array.from({ length: ROUNDS }, () => new Map<string, Path2D>())
       for (let index = 0; index < count; index++) {
         if (mask[index] !== pass) continue
         const point = points[index]
@@ -212,6 +218,7 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         const y = point.y * unit + view.dy
         if (x < left || y < top || x > right || y > bottom) continue
         const color = groupColor.get(point.group) ?? colors.faint
+        const paths = rounds[index % ROUNDS]
         let path = paths.get(color)
         if (!path) {
           path = new Path2D()
@@ -222,9 +229,11 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
         if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[point.id]?.name ?? ''])
       }
       context.globalAlpha = pass ? 0.92 : 0.16
-      for (const [color, path] of paths) {
-        context.fillStyle = color
-        context.fill(path)
+      for (const paths of rounds) {
+        for (const [color, path] of paths) {
+          context.fillStyle = color
+          context.fill(path)
+        }
       }
     }
     // Few enough on screen (a small map, a narrow search, or zoomed in) to read: each one's name beside it, the sound
