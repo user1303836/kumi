@@ -11,6 +11,7 @@ stays in a chat's transcript.
 from __future__ import annotations
 
 from pathlib import Path
+import re
 from typing import Any
 
 from . import listening, policy, schemas, setup, snapshots, tools
@@ -162,14 +163,16 @@ def _runtime(report: dict, shown: dict) -> dict:
 
 
 def _version(text: Any) -> tuple[int, ...] | None:
-    numbers = [int(part) for part in str(text or "").split("-")[0].split(".") if part.isdigit()]
-    return tuple(numbers) if numbers else None
+    """A dotted release number, or None for anything else (missing, `dev`, a pre-release): only those compare."""
+    text = str(text or "")
+    return tuple(int(part) for part in text.split(".")) if re.fullmatch(r"\d+(?:\.\d+)*", text) else None
 
 
 def _part(report: dict, shown: dict, status: dict, daw: str, app: str) -> dict:
-    """Kumi's part in the DAW. What the runtime itself last read of it (`status.setup.component`, when it runs for this
-    DAW) comes first: setup's record survives a runtime upgrade, so only the runtime can say the part is this Kumi's
-    version. Without a running runtime, setup's record is the last word, and is labelled so."""
+    """Kumi's part in the DAW. Setup's record names its sub-parts (Kumi Ears beside Live's Remote Script); the
+    runtime's own reading of the part's version (`status.setup.component`, when it runs for this DAW) comes before the
+    record's, which survives a runtime upgrade. Only two dotted versions that compare equal make a match. A part
+    another installation put in (adopted) is that installation's to update: this profile's setup refuses it."""
     name = f"Kumi's part in {app}"
     if report.get("state") in ("no_pin", "unsupported_platform", "needs_runtime", "outdated_runtime",
                                "damaged_runtime"):
@@ -178,26 +181,38 @@ def _part(report: dict, shown: dict, status: dict, daw: str, app: str) -> dict:
     existing = shown.get("existing_kumi") or {}
     if component.get("state") == "not_installed":
         return _item(name, FIX, f"Kumi's part in {app} isn't set up in this profile.", _SET_UP)
+    adopted = component.get("state") == "unknown" or existing.get("adopted") is True
+    part = f"the part another Kumi installation put in {app}" if adopted else f"Kumi's part in {app}"
+    update = (f"Update it with the Kumi that put it in: kumi --daw {daw} bridge for a standalone Kumi, or setup in "
+              "that Kumi's own Hermes profile.") if adopted else _SET_UP
+    parts = [entry for entry in component.get("parts") or [] if isinstance(entry, dict)]
+    behind = [_said(entry.get("name"), 60) for entry in parts if entry.get("state") not in (None, "same")]
+    if behind:
+        return _item(name, FIX, f"{_cap(part)} ({_said(component.get('version'), 40)}) isn't complete: "
+                                f"{', '.join(behind)}.", update)
     setup_now = status.get("setup") if isinstance(status.get("setup"), dict) else {}
     live = setup_now.get("component") if not status.get("stale") and status.get("daw") == daw else None
     if isinstance(live, dict) and live.get("installed"):
         have, bundled = _version(live.get("version")), _version(live.get("bundled"))
-        said, ours = _said(live.get("version"), 40), _said(live.get("bundled"), 40)
-        if have and bundled and have < bundled:
-            return _item(name, FIX, f"Kumi's part in {app} is {said}, older than this Kumi's {ours}.", _SET_UP)
-        if have and bundled and have > bundled:
-            return _item(name, CHECK, f"Kumi's part in {app} is {said}, newer than this Kumi's {ours}.",
+        said, ours = _said(live.get("version") or "unknown", 40), _said(live.get("bundled") or "unknown", 40)
+        if have is None or bundled is None:
+            return _item(name, CHECK, f"Kumi can't compare the version of {part} ({said}) with this Kumi's ({ours}).",
+                         f"If Kumi says the part is too old: {update}")
+        if have < bundled:
+            return _item(name, FIX, f"{_cap(part)} is {said}, older than this Kumi's {ours}.", update)
+        if have > bundled:
+            return _item(name, CHECK, f"{_cap(part)} is {said}, newer than this Kumi's {ours}.",
                          "Update the Kumi plugin (hermes plugins update kumi).")
-        return _item(name, OK, f"Kumi's part in {app} is {said}, this Kumi's own, as its runtime read it just now.")
-    if component.get("state") == "unknown" or existing.get("adopted"):
+        return _item(name, OK, f"{_cap(part)} is {said}, the same as this Kumi's, as its runtime read it just now.")
+    if adopted:
         return _item(name, OK, f"Kumi uses another Kumi installation's part in {app}: set up and updated there.")
-    parts = [part for part in component.get("parts") or [] if isinstance(part, dict)]
-    behind = [_said(part.get("name"), 60) for part in parts if part.get("state") not in (None, "same")]
-    version = _said(component.get("version"), 40)
-    if behind:
-        return _item(name, FIX, f"Kumi's part in {app} ({version}) isn't complete: {', '.join(behind)}.", _SET_UP)
-    return _item(name, OK, f"Kumi's part in {app} is set up ({_said(component.get('name'), 60)} {version}), as setup "
-                           "last recorded it; Kumi's runtime checks it against its own when it runs.")
+    return _item(name, OK, f"Kumi's part in {app} is set up ({_said(component.get('name'), 60)} "
+                           f"{_said(component.get('version'), 40)}), as setup last recorded it; Kumi's runtime checks "
+                           "it against its own when it runs.")
+
+
+def _cap(text: str) -> str:
+    return text[:1].upper() + text[1:]
 
 
 def _connection(status: dict, report: dict, daw: str) -> dict:

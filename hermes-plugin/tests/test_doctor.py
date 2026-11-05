@@ -167,15 +167,47 @@ class Doctor(unittest.TestCase):
         host, _, _ = self.ready(settings={"library_folders": []})
         self.assertEqual(self.item(doctor.checks(host), "Sound map")["state"], doctor.CHECK, "a map is optional")
 
+    def recorded(self, data: Path, *, parts: list | None = None, adopted: bool = False) -> None:
+        """Setup's record of Kumi's part in Live: its sub-parts' states, or adopted from a standalone Kumi here."""
+        path = data / "setup" / "receipt.json"
+        receipt = json.loads(path.read_text(encoding="utf-8"))
+        component = receipt["daw_components"]["ableton"]
+        component["parts"] = parts or []
+        if adopted:
+            (self.home / ".kumi").mkdir(exist_ok=True)
+            receipt["adopted"] = {"kumi_home": str(self.home / ".kumi"), "daw": "ableton", "at": 0}
+            component["adopted"] = True
+        path.write_text(json.dumps(receipt), encoding="utf-8")
+
     def test_the_runtimes_own_reading_of_the_daw_part_comes_before_setups_record(self):
-        part = lambda **published: self.item(doctor.checks(self.ready(**published)[0]), "Kumi's part in Live")
+        def part(parts: list | None = None, adopted: bool = False, **published) -> dict:
+            host, _, data = self.ready(**published)
+            self.recorded(data, parts=parts, adopted=adopted)
+            return self.item(doctor.checks(host), "Kumi's part in Live")
+
         reading = lambda version: {"installed": True, "version": version, "bundled": "1.0.105"}
         older = part(component=reading("1.0.99"))
         self.assertEqual(older["state"], doctor.FIX, "setup's record says the same; the runtime knows better")
         self.assertIn("older than this Kumi's 1.0.105", older["detail"])
         self.assertIn("hermes kumi setup", older["fix"])
         self.assertEqual(part(component=reading("1.0.106"))["state"], doctor.CHECK)
-        self.assertIn("as its runtime read it just now", part(component=reading("1.0.105"))["detail"])
+        same = part(component=reading("1.0.105"))
+        self.assertEqual(same["state"], doctor.OK)
+        self.assertIn("the same as this Kumi's, as its runtime read it just now", same["detail"])
+        for version in (None, "dev", "1.0.105-rc1"):
+            with self.subTest(version=version):
+                unsure = part(component=reading(version))
+                self.assertEqual(unsure["state"], doctor.CHECK, "only two dotted versions that compare equal match")
+                self.assertIn("can't compare", unsure["detail"])
+        ears = [{"name": "Remote Script", "state": "same"}, {"name": "Kumi Ears", "state": "other_owner"}]
+        incomplete = part(ears, component=reading("1.0.105"))
+        self.assertEqual(incomplete["state"], doctor.FIX, "the runtime reads the Remote Script's version, not Ears'")
+        self.assertIn("isn't complete: Kumi Ears", incomplete["detail"])
+        adopted = part(adopted=True, component=reading("1.0.99"))
+        self.assertEqual(adopted["state"], doctor.FIX)
+        self.assertIn("another Kumi installation put in Live", adopted["detail"])
+        self.assertIn("kumi --daw ableton bridge", adopted["fix"], "this profile's setup refuses an adopted part")
+        self.assertNotIn("hermes kumi setup", adopted["fix"])
         for published in ({"component": reading("1.0.99"), "stopped": True},
                           {"component": reading("1.0.99"), "daw": "reaper"}, {}):
             with self.subTest(published=published):
