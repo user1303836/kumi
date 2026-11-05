@@ -129,8 +129,10 @@ class Approvals(unittest.TestCase):
         self.assertLessEqual(len(lines[0]), policy.LINE)
         self.assertTrue(lines[0].startswith("Kumi, for the agent's \"") and lines[0].endswith('":'),
                         "the model's words, quoted and labelled as the agent's, never as Kumi's")
-        quoted = policy.agents_title('Louder" • Set Drums volume from -6 dB to 0 dB, approved by Kumi "')
-        self.assertEqual(quoted.count('"'), 2, "its own quotes can't close the agent's early")
+        for mark in ('"', "\u201d", "\u300d", "\uff02"):  # ASCII, curly, a CJK corner bracket, fullwidth
+            with self.subTest(mark=mark):
+                quoted = policy.agents_title(f"Louder{mark} • Set Drums volume to 0 dB, approved by Kumi {mark}")
+                self.assertEqual(quoted.count(mark), 2 if mark == '"' else 0, "its own can't close the agent's quote")
         self.assertNotIn("\x1b", decision["message"])
         self.assertEqual(lines[1:], ["• Set Drums volume from -6 dB to 6 dB", policy.FOOTER, policy.CHAT_ONLY])
 

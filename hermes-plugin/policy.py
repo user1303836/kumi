@@ -248,9 +248,16 @@ def _change(host: Any, args: dict, kwargs: dict) -> dict:
 
 def agents_title(title: Any) -> str:
     """A plan's title as the approval's first line: the model's own words, quoted and labelled as the agent's, never
-    as Kumi's (research-1's review, item 3). Its quotes can't close early, and it's cut so the line stays whole."""
-    words = one_line(title, TITLE).replace('"', "'")
+    as Kumi's (research-1's review, item 3). Every mark that reads as a quote (#994's list: curly, low, prime, CJK
+    corner brackets, guillemets…) becomes ', so none can seem to close the quote early; it's cut so the line stays
+    whole."""
+    words = _QUOTE_MARKS.sub("'", one_line(title, TITLE))
     return f"Kumi, for the agent's \"{words}\":"
+
+
+# What reads as a double quote (#994's QUOTE_MARKS in the UI): a title's own can't close the agent's.
+_QUOTE_MARKS = re.compile('["\u201c\u201d\u201e\u201f\u2033\u2036\u3003\uff02\u00ab\u00bb\u300c\u300d\u300e\u300f'
+                          '\u301d\u301e\u301f\uff62\uff63\ufe41\ufe42\ufe43\ufe44]')
 
 
 def _undo(host: Any, args: dict, kwargs: dict) -> dict:
