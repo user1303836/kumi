@@ -392,6 +392,20 @@ jobs:
         if: steps.affected.outputs.reaper_extension == 'true'
         run: |
           python scripts/build-native-release.py --check-extension "$REAPER_KUMI_ARTIFACT" --target "$(rustc -vV | sed -n 's/^host: //p')" --thin
+      # CC-8: setup reads this mark in the library to say the extension keeps a project's id only when a connection asks
+      # (daw_bridge::contract::KEEPS_IDENTITY_ONLY_WHEN_ASKED). A build that lost it would have setup say it keeps one.
+      - name: It carries the mark setup reads, built and stripped as it ships
+        if: steps.affected.outputs.reaper_extension == 'true'
+        run: |
+          python - "$REAPER_KUMI_ARTIFACT" <<'PY'
+          import re, sys
+          source = open("daws/own/daw-bridge/src/contract.rs", encoding="utf-8").read()
+          mark = re.search(r'pub const KEEPS_IDENTITY_ONLY_WHEN_ASKED: &str = "([^"]+)";', source)[1]
+          library = open(sys.argv[1], "rb").read()
+          if mark.encode() not in library:
+              sys.exit(f"{sys.argv[1]} doesn't carry {mark!r}: setup would say REAPER's extension keeps a project's id")
+          print(f"{sys.argv[1]} carries {mark!r}")
+          PY
       - name: It loads, with REAPER's entry point
         if: steps.affected.outputs.reaper_extension == 'true'
         run: cargo test -p reaper-kumi --locked --test it -- "loads::"
