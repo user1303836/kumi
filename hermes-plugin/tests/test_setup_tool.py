@@ -73,6 +73,20 @@ class Surface(unittest.TestCase):
                     self.assertNotIn("Kumi Ears.amxd", refused["message"], "it doesn't ask with part of the plan")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data), "nothing was installed")
 
+    def test_a_plan_that_fits_the_terminal_panel_is_asked_there_whole(self):
+        host, ctx, data = desktop_host(self, daw_component=False)
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        real = setup.approval
+
+        def short_plan(*args, **kwargs):  # shorter than the panel on any machine
+            return {**real(*args, **kwargs), "title": "Kumi: install Kumi's part in Live", "effects": ["Writes: /Kumi/part"]}
+
+        ctx.surface = "tui"
+        with mock.patch.object(setup, "approval", side_effect=short_plan):
+            asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1", tool_call_id="c1")
+        self.assertEqual((asked["action"], asked["message"]),
+                         ("approve", "Kumi: install Kumi's part in Live\n• Writes: /Kumi/part"))
+
     def test_a_plan_shown_whole_is_asked_on_every_surface_and_a_chat_app_that_would_cut_it_refuses(self):
         short = "Kumi: set up Kumi 1.24.67's runtime\n• Download Kumi 1.24.67 (26.0 MB)"
         for surface in ("cli", "tui", "desktop", "telegram", "discord", "slack", "acp", ""):
