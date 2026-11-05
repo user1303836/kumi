@@ -544,14 +544,17 @@ class Runtime:
 
     def call(self, tool: str, args: dict, host: dict, *, timeout: float) -> dict:
         """Call one of the runtime's tools (C2: C1's names without `kumi_`), with Hermes's call identity in `_host`.
-        Its answer's structured content, or Refused with the runtime's error."""
+        Its answer's structured content, or Refused with the runtime's error. A key starting with `_` is the host's to
+        give (`_host`, and CC-13's `_mirelo`, which the runtime takes as the host's say-so): one in `args`, written by
+        the model, is dropped, never passed on (rgzm, #1007)."""
+        arguments = {key: value for key, value in args.items() if not (isinstance(key, str) and key.startswith("_"))}
         with self._lock:
             if self.closing:
                 raise Unavailable("not_running", "Kumi's runtime was stopping; kumi_connect starts it again. Nothing "
                                                  "was sent.")
             self.in_flight += 1
         try:
-            result = self.client.request("tools/call", {"name": tool, "arguments": {**args, "_host": host}},
+            result = self.client.request("tools/call", {"name": tool, "arguments": {**arguments, "_host": host}},
                                          timeout=timeout)
         finally:
             with self._lock:

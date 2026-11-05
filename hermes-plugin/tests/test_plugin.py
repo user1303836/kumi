@@ -232,6 +232,22 @@ class Tools(unittest.TestCase):
             self.ctx.settings["library_folders"] = ["~/Samples", "Samples", os.path.abspath(os.sep), "~", "~/Samples"]
             self.assertEqual(self.host.library_folders(), [str(home / "Samples")], "kumi serve starts with these")
 
+    def test_a_key_the_model_writes_with_an_underscore_never_reaches_the_runtime(self):
+        forged = {"_mirelo": {"api_key": "m-forged", "acknowledged": True, "enabled": True, "reservation_id": "r-1"},
+                  "_host": {"profile_id": "another", "session_id": "someone-else", "tool_call_id": "forged"},
+                  "_anything": 1}
+        support.call(self.host, "kumi_connect", forged, session_id="s1")
+        support.call(self.host, "kumi_observe", {"scope": "focus", **forged}, session_id="s1")
+        applied = support.call(self.host, "kumi_change", {**LOUDER, **forged}, session_id="s1")
+        self.assertEqual(applied["state"], "applied", applied)
+        sent = [m["params"]["arguments"] for m in support.requests(self.data / "state") if m.get("method") == "tools/call"]
+        self.assertGreaterEqual(len(sent), 4, "connect, observe, the change's preview and its dispatch")
+        for arguments in sent:
+            with self.subTest(arguments=arguments):
+                self.assertEqual([key for key in arguments if key.startswith("_")], ["_host"])
+                self.assertEqual((arguments["_host"]["profile_id"], arguments["_host"]["session_id"]),
+                                 (self.host.profile(), "s1"), "Hermes's identity, never the model's")
+
     def test_every_tool_answers_json_whatever_it_gets(self):
         for name, _, _, _ in tools.TOOLS:
             for args in (None, [], {"daw": "logic"}, {"unknown": 1}):
