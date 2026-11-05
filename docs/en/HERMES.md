@@ -127,6 +127,10 @@ run without asking there, and Kumi can't tell it from a chat.
 - Stop in Hermes Desktop or Hermes's terminal UI, or `/stop` or `/new` in a chat app, cancels a Kumi change, undo or
   track listen still running. Kumi can't then tell whether it finished, so check HISTORY before asking again. In the
   classic `hermes chat` CLI, Stop doesn't reach Kumi: the call runs until it finishes or reaches its time limit.
+- In Live, Kumi won't undo a change to a track's mixer, the tempo or a device's parameters if you've changed that
+  value by hand since: the undo says so and changes nothing. Before it asks, an undo shows each value as it is now and
+  as the undo would put it back. After Kumi's runtime restarts, Live changes made before the restart can't be undone
+  through Kumi. REAPER's and Renoise's undo work as before.
 - Kumi in Hermes leaves out what would act without Hermes's approval: running code inside the DAW, driving Live's
   menus, recording, and saving or opening projects.
 
