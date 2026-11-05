@@ -29,6 +29,15 @@ def eventually(check, timeout: float = 10.0) -> bool:
     return check()
 
 
+def _takes(lock) -> bool:
+    """Whether `lock` (a StateLock) can be taken now; it's held when this says so."""
+    try:
+        lock.acquire()
+    except runtime.Unavailable:
+        return False
+    return True
+
+
 class Runtimes(unittest.TestCase):
     def setUp(self):
         folder = tempfile.TemporaryDirectory()
@@ -198,6 +207,31 @@ class Runtimes(unittest.TestCase):
         lock = runtime.StateLock(self.data / "state" / "runtime.lock")
         lock.acquire()  # the runtime's end freed it
         lock.release()
+
+    def test_a_chat_ending_or_an_unload_while_its_runtime_starts_ends_that_runtime(self):
+        for stop in (lambda: self.runtimes.stop_session("s1"), self.runtimes.stop_all):
+            with self.subTest(stop=stop):
+                outcome = []
+
+                def start():
+                    try:
+                        outcome.append(self.start("--slow", "status=1.5"))
+                    except runtime.Unavailable as failure:
+                        outcome.append(failure)
+
+                starter = threading.Thread(target=start)
+                starter.start()
+                started = self.data / "state" / "fixture-start.json"
+                self.assertTrue(eventually(started.exists), "the runtime is starting")
+                stop()
+                starter.join()
+                self.assertIsInstance(outcome[0], runtime.Unavailable)
+                self.assertEqual(outcome[0].code, "not_running")
+                self.assertIsNone(self.runtimes.get(self.data))
+                lock = runtime.StateLock(self.data / "state" / "runtime.lock")
+                self.assertTrue(eventually(lambda: _takes(lock)), "the profile's lock came free")
+                lock.release()
+                started.unlink()
 
     def test_a_live_runtime_named_in_owner_json_holds_the_folder(self):
         state = self.data / "state"

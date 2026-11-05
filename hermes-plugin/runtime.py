@@ -205,12 +205,16 @@ if os.name == "nt":
     import ctypes
     import msvcrt
 
+    # Windows's locks are mandatory: the locked byte lies far past the pid written at the start, which another process
+    # then can still read for its message.
+    _LOCKED_BYTE = 1 << 30
+
     def _lock(file) -> None:
-        file.seek(0)
+        file.seek(_LOCKED_BYTE)
         msvcrt.locking(file.fileno(), msvcrt.LK_NBLCK, 1)
 
     def _unlock(file) -> None:
-        file.seek(0)
+        file.seek(_LOCKED_BYTE)
         msvcrt.locking(file.fileno(), msvcrt.LK_UNLCK, 1)
 
     def _alive(pid: int) -> bool:
@@ -521,6 +525,9 @@ class Runtimes:
         self._lock = threading.Lock()  # the registry only: never held while a runtime starts or stops
         self._running: dict[Path, Runtime] = {}
         self._starting: dict[Path, threading.Lock] = {}
+        # Starts under way (profile → the chat starting it), and those a stop overtook: they end as they finish.
+        self._pending: dict[Path, str | None] = {}
+        self._cancelled: set[Path] = set()
         self._watching = False
 
     def get(self, data_dir: Path) -> Runtime | None:
@@ -545,6 +552,9 @@ class Runtimes:
             state = data_dir / "state"
             lock = StateLock(state / "runtime.lock")
             lock.acquire()
+            with self._lock:
+                self._pending[key] = session_id
+                self._cancelled.discard(key)
             client = None
             try:
                 install.kumi_home.mkdir(parents=True, exist_ok=True)
@@ -555,38 +565,54 @@ class Runtimes:
                                      on_exit=lambda reason: self._exited(holder))
                 runtime = Runtime(client, install, data_dir, daw, session_id, lock)
                 runtime.info = self._handshake(runtime)
+                holder["runtime"] = runtime
+                with self._lock:  # the mark is checked and the runtime published as one step, so no stop falls between
+                    cancelled = key in self._cancelled
+                    self._pending.pop(key, None)
+                    self._cancelled.discard(key)
+                    if not cancelled:
+                        self._running[key] = runtime
+                        watch, self._watching = not self._watching, True
+                if cancelled:  # its chat ended, or the plugin unloaded, while it started
+                    raise Unavailable("not_running", "Kumi's runtime was stopped as it started (its chat ended, or "
+                                                     "the plugin unloaded). Nothing was sent.")
             except BaseException:
+                with self._lock:
+                    self._pending.pop(key, None)
+                    self._cancelled.discard(key)
                 if client is not None:
                     client.close(timeout=STOP_WAIT)
                 lock.release()
                 raise
-            holder["runtime"] = runtime
-            with self._lock:
-                self._running[key] = runtime
-                watch, self._watching = not self._watching, True
         if watch:
             _thread(self._watch_idle, "kumi-runtime-idle").start()
         self._emit("status.changed", {"seq": None})
         return runtime
 
     def stop(self, data_dir: Path, *, wait: float = STOP_WAIT) -> None:
+        key = data_dir.resolve()
         with self._lock:
-            runtime = self._running.get(data_dir.resolve())
+            runtime = self._running.get(key)
+            if key in self._pending:
+                self._cancelled.add(key)
         if runtime is not None:
             runtime.closing = True
             runtime.client.close(timeout=wait)
             self._retire(runtime)
 
     def stop_session(self, session_id: str | None) -> None:
-        """Stop the runtimes `session_id` owns (its chat ended)."""
+        """Stop the runtimes `session_id` owns (its chat ended), a start of its own under way included."""
+        if not session_id:
+            return
         with self._lock:
-            owned = [key for key, runtime in self._running.items() if session_id and runtime.owner_session == session_id]
+            owned = {key for key, runtime in self._running.items() if runtime.owner_session == session_id}
+            owned |= {key for key, starter in self._pending.items() if starter == session_id}
         for key in owned:
             self.stop(key)
 
     def stop_all(self) -> None:
         with self._lock:
-            keys = list(self._running)
+            keys = set(self._running) | set(self._pending)
         for key in keys:
             self.stop(key)
 
