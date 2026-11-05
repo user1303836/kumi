@@ -148,9 +148,9 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
   3. The producer approves it as one change. Report the track, the clip, its bars and the pattern in words, and the HISTORY id.
   4. To hear it, the producer plays the clip in Live. Offer variations as new clips in empty slots, never by deleting this one.
 
-  - **With sounds the producer picked** (`kumi_sounds`), make it three changes, since Kumi can't undo a pad load:
+  - **With sounds the producer picked** (`kumi_sounds`), make it separate changes, since Kumi can't undo a pad load:
     1. the track and an empty `Drum Rack` (`load_device`);
-    2. the pads, in a change of their own: one `load_sample_to_pad` per sound (`deviceRef`: the rack, from a fresh look). Leave `note` out and the pads fill in order from C1, so a kick, a snare and a hat land on `C1`, `C#1` and `D1`;
+    2. the pads, in a change of their own (one pad a change when Kumi refuses several): `load_sample_to_pad` per sound (`deviceRef`: the rack, from a fresh look). Leave `note` out and the pads fill in order from C1, so a kick, a snare and a hat land on `C1`, `C#1` and `D1`;
     3. the clip, with lanes named by pitch.
 
   - **REAPER:** `track_add`, then `fx_add` with a drum plug-in the producer has (as REAPER's FX browser names it), then `item_add` and `notes_add`. Use General MIDI keys (36 kick, 38 snare, 42 hat), or the plug-in's own map. REAPER's `drum_kit` step is refused.
