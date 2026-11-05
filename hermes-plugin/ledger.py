@@ -10,7 +10,8 @@ billing facts. Hashed quote/receipt/host/job/provider indexes resolve one receip
 scanning history. Receipt/index files become visible only at the atomic manifest commit;
 an index must also name the canonical receipt's reservation to exclude abandoned copies.
 No earlier ledger format shipped; only schema 2 manifests are accepted.
-Pending and manual-release evidence is never auto-expired.
+Pending and manual-release evidence is never auto-expired. Manual releases hold zero
+credits even after submission is discovered; any positive late charge freezes creates.
 """
 from __future__ import annotations
 
@@ -49,7 +50,7 @@ _MESSAGES = {
     "quote_consumed": "This quote or create call has already been used; it cannot be sent again.",
     "stale": "The generation identity or receipt conflicts with the saved approval.",
     "cap_exceeded": "The current lifetime credit cap does not allow this reservation.",
-    "ledger_frozen": "New generations are paused because an actual charge exceeded its estimate.",
+    "ledger_frozen": "New generations are paused because an actual charge exceeded its held credits.",
     "ledger_unavailable": "The generation ledger is unavailable; no new generation was authorized.",
 }
 
@@ -190,7 +191,7 @@ def _validate_storage(data: object) -> dict:
         if r["settlement"] == "not_submitted":
             _require(r["submission"] == "not_submitted")
         if r["settlement"] == "manual_release":
-            _require(r["submission"] == "unknown")
+            _require(r["submission"] in {"unknown", "submitted"})
     _require(all(q["consumed"] == (key in used_quotes) for key, q in data["quotes"].items()))
     _totals(data)
     return data
@@ -357,13 +358,13 @@ class Ledger:
             data = self._load(directory, initialized=os.fstat(fd).st_size != 0)
             if os.fstat(fd).st_size == 0:
                 # Use the locked handle itself (Windows locks are handle-specific).
-                # The marker precedes the initial manifest: a crash fails closed.
+                # _load commits the initial manifest first; retry an interrupted marker
+                # against existing validated evidence, never replace it with an empty ledger.
                 os.lseek(fd, 0, os.SEEK_SET)
                 os.write(fd, b"initialized\n")
                 _sync(fd)
                 if directory is not None:
                     _sync(directory)
-                self._write_record("ledger.json", self._encode(data), directory)
             yield data, directory
         except (OSError, ValueError, TypeError, OverflowError, RecursionError):
             raise LedgerError("ledger_unavailable") from None
@@ -404,7 +405,9 @@ class Ledger:
             data = self._read_record("ledger.json", directory)
         except FileNotFoundError:
             _require(not initialized, "ledger_unavailable")
-            return _empty()
+            data = _empty()
+            self._write_record("ledger.json", self._encode(data), directory)
+            return data
         try:
             data = _validate_storage(data)
         except (LedgerError, ValueError, TypeError, KeyError, RecursionError):
@@ -552,6 +555,14 @@ class Ledger:
         _require(archived is None or archived["reservation"]["reservation_id"] == r["reservation_id"], "stale")
         r["job_id"] = job_id
 
+    def _check_provider(self, data: dict, directory: int | None, r: dict, provider: str | None) -> None:
+        _require(r["provider_job_id"] in (None, provider) or provider is None, "stale")
+        if provider is not None:
+            _require(not any(other["reservation_id"] != r["reservation_id"] and other["provider_job_id"] == provider
+                             for other in data["reservations"].values()), "stale")
+            archived = self._history(data, directory, "provider", provider)
+            _require(archived is None or archived["reservation"]["reservation_id"] == r["reservation_id"], "stale")
+
     def configure(self, *, acknowledged: bool, enabled: dict[str, bool]) -> None:
         with self._locked() as (data, directory):
             _require(type(acknowledged) is bool and type(enabled) is dict and set(enabled) == _KINDS)
@@ -609,11 +620,30 @@ class Ledger:
             self._save(data, directory)
             return {key: r[key] for key in ("reservation_id", "quote_id", "kind", "reserved_credits", "expires_at")}
 
-    def bind(self, reservation_id: str, job_id: str) -> dict:
+    def bind(self, reservation_id: str, job_id: str, *, receipt: dict | None = None) -> dict:
+        """Adopt a released native job using its receipt, without settling or holding credits."""
         with self._locked() as (data, directory):
             r = self._reservation(data, directory, reservation_id)
-            _require(r["settlement"] == "pending" or r["job_id"] == job_id, "stale")
+            _require(r["settlement"] in {"pending", "manual_release"} or r["job_id"] == job_id, "stale")
+            _require(r["settlement"] != "manual_release" or r["job_id"] is not None or receipt is not None, "stale")
+            evidence = None
+            if receipt is not None:
+                quote = self._quote(data, directory, r["quote_id"])
+                try:
+                    evidence = _job_receipt(receipt, quote, r)
+                    _require(evidence is not None and receipt["job_id"] == job_id, "stale")
+                except LedgerError:
+                    raise LedgerError("stale") from None
+                submission, provider, actual = evidence
+                self._check_provider(data, directory, r, provider)
+                _require(r["submission"] != "submitted" or submission != "not_submitted", "stale")
+                _require(r["settlement"] != "not_submitted" or submission == "not_submitted", "stale")
+                if r["settlement"] == "charged" and actual is not None:
+                    _require(receipt["state"] in _TERMINAL and actual == r["actual_credits"], "stale")
             self._bind(data, directory, r, job_id)
+            if evidence is not None and r["settlement"] in {"pending", "manual_release"}:
+                if submission == "submitted":
+                    r.update(submission=submission, provider_job_id=provider)
             self._save(data, directory)
             return self._snapshot(data)
 
@@ -640,41 +670,30 @@ class Ledger:
             _require(r["settlement"] in {"pending", "manual_release"} or r["job_id"] == job["job_id"], "stale")
             self._bind(data, directory, r, job["job_id"])
             submission, provider, actual = receipt
-            _require(r["provider_job_id"] in (None, provider) or provider is None, "stale")
-            if provider is not None:
-                _require(not any(other["reservation_id"] != reservation_id and other["provider_job_id"] == provider
-                                 for other in data["reservations"].values()), "stale")
-                archived = self._history(data, directory, "provider", provider)
-                _require(archived is None or archived["reservation"]["reservation_id"] == reservation_id, "stale")
+            self._check_provider(data, directory, r, provider)
             terminal = job["state"] in _TERMINAL
-            # A producer override is not a refund. Later native evidence restores the
-            # reservation until actual billing is known, or accounts the charge immediately.
-            if r["settlement"] == "manual_release" and submission == "submitted":
-                r["manually_released"] = True
-                r["settlement"] = "pending"
-            if r["settlement"] != "pending":
+            # A manual release holds zero forever; only terminal billing settles it.
+            held = r["reserved_credits"] if r["settlement"] == "pending" else 0
+            if r["settlement"] not in {"pending", "manual_release"}:
                 if r["settlement"] == "charged":
                     _require(actual is None or (terminal and actual == r["actual_credits"] and provider == r["provider_job_id"]), "stale")
                     _require(submission != "not_submitted", "stale")
                 elif r["settlement"] == "not_submitted":
                     _require(submission == "not_submitted" and actual is None and provider is None, "stale")
-                else:
-                    _require(submission == "unknown" and actual is None and provider is None, "stale")
-                    self._save(data, directory)
                 return self._snapshot(data)
             if r["submission"] == "submitted":
                 _require(submission != "not_submitted", "stale")
                 # Delayed unknown snapshots must not erase an already-known vendor ID.
-            else:
+            elif r["settlement"] == "pending" or submission == "submitted":
                 r["submission"] = submission
             if provider is not None:
                 r["provider_job_id"] = provider
             if terminal and actual is not None:
                 r.update(settlement="charged", actual_credits=actual)
-                if actual > r["reserved_credits"]:
+                if actual > held:
                     data.update(frozen=True, freeze_reason="actual_exceeded_estimate")
             elif terminal and submission == "not_submitted":
-                r["settlement"] = "not_submitted"
+                r.update(submission="not_submitted", settlement="not_submitted")
             self._save(data, directory)
             return self._snapshot(data)
 
@@ -696,8 +715,10 @@ class Ledger:
 
     def reservations(self) -> list[dict]:
         with self._locked() as (data, directory):
-            return [{key: r[key] for key in ("reservation_id", "quote_id", "job_id", "kind", "reserved_credits", "submission", "created_at")}
-                    for r in data["reservations"].values() if r["settlement"] == "pending"]
+            # reserved_credits is the original approval, not the amount currently held.
+            return [{key: r[key] for key in ("reservation_id", "quote_id", "job_id", "kind", "reserved_credits",
+                                            "submission", "settlement", "created_at")}
+                    for r in data["reservations"].values() if r["settlement"] in {"pending", "manual_release"}]
 
     def unfreeze(self) -> dict:
         with self._locked() as (data, directory):

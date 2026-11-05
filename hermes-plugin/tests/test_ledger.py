@@ -223,7 +223,7 @@ class LedgerTest(unittest.TestCase):
         self.assertEqual(restarted.find_job("j-one")["settlement"], "pending")
         self.assertIsNone(restarted.find_job("j-one")["actual_credits"])
         self.assertEqual(restarted.reservations(), [{"reservation_id": reservation, "quote_id": "q-one", "job_id": "j-one",
-                                                    "kind": "sfx", "reserved_credits": 15, "submission": "unknown",
+                                                    "kind": "sfx", "reserved_credits": 15, "submission": "unknown", "settlement": "pending",
                                                     "created_at": self.stored()["reservations"][reservation]["created_at"]}])
 
     def test_missing_receipt_and_running_charge_never_refund_or_spend(self):
@@ -311,7 +311,7 @@ class LedgerTest(unittest.TestCase):
         record = self.stored()["reservations"][reservation]
         self.assertEqual((record["submission"], record["settlement"], record["actual_credits"]), ("unknown", "manual_release", None))
         self.assertTrue(self.store.quote("q-one")["consumed"])
-        self.assertEqual(self.store.reservations(), [])
+        self.assertEqual(self.store.reservations()[0]["settlement"], "manual_release")
         second, r2 = self.reserve(quoted("q-two"), call="create-two")
         self.store.reconcile(r2, envelope(second, job_id="j-two"))
         self.assert_code("stale", self.store.release, r2)
@@ -584,15 +584,131 @@ store.configure(acknowledged=True, enabled={"sfx": True, "audio_to_midi": True})
         self.assertEqual(self.store.find_job("j-one")["actual_credits"], 16)
         self.assert_code("stale", self.store.reconcile, reservation, envelope(quote, state="done", actual=17))
 
-    def test_manual_release_late_submission_restores_unknown_charge_reservation(self):
+    def test_manual_release_late_submission_keeps_zero_held_credits(self):
         quote, reservation = self.reserve()
         self.store.bind(reservation, "j-one")
         self.store.release(reservation)
         result = self.store.reconcile(reservation, envelope(quote))
-        self.assertEqual((result["spent"], result["reserved"]), (0, 15))
+        self.assertEqual((result["spent"], result["reserved"]), (0, 0))
+        self.assertEqual(self.store.find_job("j-one")["settlement"], "manual_release")
         self.assertTrue(self.saved_reservation(reservation)["manually_released"])
         self.assertEqual(self.store.find_job("j-one")["provider_job_id"], "vendor-one")
-        self.assertEqual(self.store.reconcile(reservation, envelope(quote, state="done", actual=12))["spent"], 12)
+        settled = self.store.reconcile(reservation, envelope(quote, state="done", actual=12))
+        self.assertEqual((settled["spent"], settled["reserved"], settled["frozen"]), (12, 0, True))
+
+    def test_lost_answer_release_discovery_binding_late_charge_and_unfreeze_replay(self):
+        quote, reservation = self.reserve()
+        released = self.store.release(reservation)
+        restarted = ledger.Ledger(self.data, credit_cap=100)
+        self.assertEqual(restarted.reservations(), [{
+            "reservation_id": reservation, "quote_id": quote["quote_id"], "job_id": None,
+            "kind": "sfx", "reserved_credits": 15, "submission": "unknown", "settlement": "manual_release",
+            "created_at": self.saved_reservation(reservation)["created_at"],
+        }])
+        unknown = envelope(quote, submission="unknown")
+        self.assertEqual(restarted.bind(reservation, "j-one", receipt=unknown), released)
+        self.assertEqual(restarted.bind(reservation, "j-one"), released)
+        submitted = envelope(quote)
+        self.assertEqual(restarted.reconcile(reservation, submitted), released)
+        self.assertEqual(restarted.bind(reservation, "j-one", receipt=submitted), released)
+        self.assertEqual(restarted.reconcile(reservation, unknown), released)
+        row = restarted.find_job("j-one")
+        self.assertEqual((row["submission"], row["settlement"], row["actual_credits"]), ("submitted", "manual_release", None))
+        self.assertEqual(row["provider_job_id"], "vendor-one")
+        self.assert_code("stale", restarted.release, reservation)
+        charged = envelope(quote, state="done", actual=12)
+        settled = restarted.reconcile(reservation, charged)
+        self.assertEqual((settled["spent"], settled["reserved"], settled["frozen"]), (12, 0, True))
+        self.assertEqual(restarted.reservations(), [])
+        self.assertEqual(restarted.reconcile(reservation, charged), settled)
+        self.assertEqual(restarted.bind(reservation, "j-one", receipt=charged), settled)
+        cleared = restarted.unfreeze()
+        restarted = ledger.Ledger(self.data, credit_cap=100)
+        self.assertEqual(restarted.reconcile(reservation, charged), cleared)
+        self.assertEqual(restarted.bind(reservation, "j-one", receipt=charged), cleared)
+        self.assertEqual((cleared["spent"], cleared["reserved"], cleared["frozen"]), (12, 0, False))
+        self.assertEqual(self.stored()["archived_count"], 1)
+        self.assertEqual(self.stored()["archived_spent"], 12)
+
+    def test_released_binding_requires_matching_receipt_without_mutation(self):
+        quote, reservation = self.reserve()
+        self.store.release(reservation)
+        before = (self.data / "ledger.json").read_bytes()
+        self.assert_code("stale", self.store.bind, reservation, "j-one")
+        cases = [{"job_id": "j-one", "kind": "generate", "state": "interrupted"}]
+        for key, value in (("quote_id", "q-other"), ("kind", "audio_to_midi"), ("provider", "other"),
+                           ("submission", "unknown"), ("provider_job_id", None)):
+            candidate = envelope(quote)
+            candidate["result"][key] = value
+            cases.append(candidate)
+        for field in ("estimate", "reserved"):
+            candidate = envelope(quote)
+            candidate["result"]["credits"][field] = 14
+            cases.append(candidate)
+        cases.append(envelope(quote, job_id="j-other"))
+        for candidate in cases:
+            with self.subTest(receipt=candidate):
+                self.assert_code("stale", self.store.bind, reservation, "j-one", receipt=candidate)
+                self.assertEqual((self.data / "ledger.json").read_bytes(), before)
+        self.store.bind(reservation, "j-one", receipt=envelope(quote))
+        before = (self.data / "ledger.json").read_bytes()
+        self.assert_code("stale", self.store.bind, reservation, "j-other", receipt=envelope(quote, job_id="j-other"))
+        self.assert_code("stale", self.store.bind, reservation, "j-one", receipt=envelope(quote, provider="vendor-other"))
+        self.assertEqual((self.data / "ledger.json").read_bytes(), before)
+
+    def test_released_binding_cannot_reuse_active_or_archived_job_or_provider(self):
+        first, r1 = self.reserve()
+        second, r2 = self.reserve(quoted("q-two"), call="create-two")
+        self.store.release(r2)
+        self.store.reconcile(r1, envelope(first))
+        for archived in (False, True):
+            if archived:
+                self.store.reconcile(r1, envelope(first, state="done", actual=12))
+            before = (self.data / "ledger.json").read_bytes()
+            for job, provider in (("j-one", "vendor-two"), ("j-two", "vendor-one")):
+                self.assert_code("stale", self.store.bind, r2, job,
+                                 receipt=envelope(second, job_id=job, provider=provider))
+                self.assertEqual((self.data / "ledger.json").read_bytes(), before)
+
+    def test_released_binding_known_charge_does_not_settle_and_zero_does_not_freeze(self):
+        quote, reservation = self.reserve()
+        self.store.release(reservation)
+        charged = envelope(quote, state="done", actual=12)
+        bound = self.store.bind(reservation, "j-one", receipt=charged)
+        self.assertEqual((bound["spent"], bound["reserved"], bound["frozen"]), (0, 0, False))
+        self.assertIsNone(self.store.find_job("j-one")["actual_credits"])
+        self.assertEqual(self.store.find_job("j-one")["settlement"], "manual_release")
+        self.assertEqual(self.store.reconcile(reservation, charged)["spent"], 12)
+        self.store.unfreeze()
+        second, r2 = self.reserve(quoted("q-two"), call="create-two")
+        self.store.release(r2)
+        zero = self.store.reconcile(r2, envelope(second, job_id="j-two", provider="vendor-two", state="done", actual=0))
+        self.assertEqual((zero["spent"], zero["reserved"], zero["frozen"]), (12, 0, False))
+
+    def test_released_terminal_not_submitted_settles_without_charge(self):
+        quote, reservation = self.reserve()
+        self.store.release(reservation)
+        running = envelope(quote, submission="not_submitted")
+        self.store.bind(reservation, "j-one", receipt=running)
+        self.assertEqual(self.store.reconcile(reservation, running)["reserved"], 0)
+        self.assertEqual(self.store.find_job("j-one")["settlement"], "manual_release")
+        result = self.store.reconcile(reservation, envelope(quote, submission="not_submitted", state="failed"))
+        self.assertEqual((result["spent"], result["reserved"], result["frozen"]), (0, 0, False))
+        self.assertEqual(self.store.find_job("j-one")["settlement"], "not_submitted")
+        self.assertEqual(self.store.reservations(), [])
+
+    def test_released_submitted_storage_requires_consistent_identity_and_unknown_actual(self):
+        quote, reservation = self.reserve()
+        self.store.release(reservation)
+        self.store.bind(reservation, "j-one", receipt=envelope(quote))
+        valid = self.stored()
+        self.assertEqual(self.store.snapshot()["reserved"], 0)
+        for field, value in (("job_id", None), ("provider_job_id", None), ("submission", "unknown"), ("actual_credits", 0)):
+            invalid = copy.deepcopy(valid)
+            invalid["reservations"][reservation][field] = value
+            (self.data / "ledger.json").write_text(json.dumps(invalid))
+            with self.subTest(field=field):
+                self.assert_code("ledger_unavailable", self.store.snapshot)
 
     def test_expired_unused_quotes_are_pruned_but_unknown_and_manual_evidence_remain(self):
         _, pending = self.reserve(quoted("q-pending"), call="create-pending")
@@ -673,7 +789,7 @@ store.configure(acknowledged=True, enabled={"sfx": True, "audio_to_midi": True})
         self.assertEqual(self.store.snapshot()["spent"], 23)
         self.assertEqual(self.stored()["archived_count"], 2)
 
-    def test_missing_initialized_manifest_and_interrupted_initial_save_fail_closed(self):
+    def test_missing_initialized_manifest_fails_closed_but_failed_first_save_retries(self):
         (self.data / "ledger.json").unlink()
         self.assert_code("ledger_unavailable", self.store.snapshot)
         self.assert_code("ledger_unavailable", self.store.configure, acknowledged=True, enabled={"sfx": True, "audio_to_midi": True})
@@ -681,8 +797,34 @@ store.configure(acknowledged=True, enabled={"sfx": True, "audio_to_midi": True})
         fresh = ledger.Ledger(fresh_path, credit_cap=100)
         with mock.patch.object(fresh, "_write_record", side_effect=OSError(errno.EIO, "simulated")):
             self.assert_code("ledger_unavailable", fresh.snapshot)
+        self.assertEqual((fresh_path / "ledger.lock").stat().st_size, 0)
+        self.assertFalse((fresh_path / "ledger.json").exists())
+        fresh.configure(acknowledged=True, enabled={"sfx": True, "audio_to_midi": True})
+        quote, reservation = self.reserve(store=fresh)
+        self.assertEqual(fresh.snapshot()["reserved"], 15)
+        self.assertEqual(fresh.reservations()[0]["reservation_id"], reservation)
+        self.assertTrue(fresh.quote(quote["quote_id"])["consumed"])
         self.assertGreater((fresh_path / "ledger.lock").stat().st_size, 0)
-        self.assert_code("ledger_unavailable", fresh.snapshot)
+
+    def test_failed_marker_write_retries_without_discarding_persisted_evidence(self):
+        quote, reservation = self.reserve()
+        self.store.reconcile(reservation, envelope(quote, state="done", actual=12))
+        _, pending = self.reserve(quoted("q-pending"), call="create-pending")
+        # Simulate an initial marker not yet committed, with a valid manifest already present.
+        (self.data / "ledger.lock").write_bytes(b"")
+        before = (self.data / "ledger.json").read_bytes()
+        with mock.patch.object(ledger.os, "write", side_effect=OSError(errno.EIO, "simulated")):
+            self.assert_code("ledger_unavailable", self.store.snapshot)
+        self.assertEqual((self.data / "ledger.lock").stat().st_size, 0)
+        self.assertEqual((self.data / "ledger.json").read_bytes(), before)
+        with mock.patch.object(self.store, "_write_record", wraps=self.store._write_record) as write:
+            restored = self.store.snapshot()
+        write.assert_not_called()
+        self.assertEqual((restored["spent"], restored["reserved"]), (12, 15))
+        self.assertEqual(self.store.find_job("j-one")["actual_credits"], 12)
+        self.assertEqual(self.store.reservations()[0]["reservation_id"], pending)
+        self.assertEqual((self.data / "ledger.json").read_bytes(), before)
+        self.assertGreater((self.data / "ledger.lock").stat().st_size, 0)
 
     def test_bom_utf16_and_utf8_decode_fail_closed(self):
         raw = json.dumps(self.stored())

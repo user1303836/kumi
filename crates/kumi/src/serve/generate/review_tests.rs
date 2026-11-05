@@ -113,6 +113,97 @@ async fn an_unreadable_ledger_does_not_consume_the_opaque_prepared_request() {
 }
 
 #[tokio::test]
+async fn corrupt_unrelated_history_does_not_block_preview_or_get_recovery_but_blocks_creates() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            let server = Server::new().await;
+            server.download_fails.store(true, Ordering::SeqCst);
+            let mut fixture = Fixture::new(&server);
+            let quote = fixture.call(sfx(), "quote-one", None).await.unwrap();
+            fixture.reserve(&quote, "r-one", "create-one");
+            let started =
+                fixture.call(json!({"action":"create", "quote_id":quote["quote_id"]}), "create-one", Some(("r-one", 15))).await.unwrap();
+            let id = started["job_id"].as_str().unwrap();
+            let failed = fixture.done(id).await;
+            assert_eq!(failed["state"], "failed");
+            assert_eq!(failed["result"]["credits"]["actual"], 12);
+            fixture.ledger["reservations"]["r-one"]["job_id"] = json!(id);
+            fixture.ledger["reservations"]["r-one"]["provider_job_id"] = json!("sfx-job");
+            fixture.ledger["reservations"]["r-one"]["submission"] = json!("submitted");
+            fixture.save();
+            let unsent = fixture.call(sfx(), "quote-unsent", None).await.unwrap();
+            fixture.reserve(&unsent, "r-unsent", "create-unsent");
+            let corrupt = fixture.ctx.paths().state_dir.join("jobs/j1-1.json");
+            std::fs::write(&corrupt, b"broken unrelated job").unwrap();
+            fixture = fixture.restart(&server);
+            assert!(corrupt.is_file());
+            let requests = server.requests.lock().unwrap().len();
+            let artifacts = std::fs::read_dir(fixture.ctx.paths().state_dir.join("artifacts")).unwrap().count();
+            let source = fixture.source.join("melody.wav");
+            std::fs::write(&source, wav()).unwrap();
+            let preview = fixture
+                .call(
+                    json!({"action":"quote", "kind":"audio_to_midi", "preview":true,
+                        "source":{"file":source, "provenance":{"host_tool":"fixture"}}}),
+                    "preview-call",
+                    None,
+                )
+                .await
+                .unwrap();
+            assert_eq!(preview["upload"]["bytes"], wav().len());
+            assert_eq!(server.requests.lock().unwrap().len(), requests);
+            assert_eq!(std::fs::read_dir(fixture.ctx.paths().state_dir.join("artifacts")).unwrap().count(), artifacts);
+            assert!(!fixture.ctx.generation().records.borrow().loaded().unwrap());
+
+            server.download_fails.store(false, Ordering::SeqCst);
+            fixture.call(json!({"action":"job", "job_id":id}), "recover-call", None).await.unwrap();
+            let recovered = fixture.done(id).await;
+            assert_eq!(recovered["state"], "done");
+            assert_eq!(recovered["result"]["credits"]["actual"], 12);
+            assert!(!fixture.ctx.generation().records.borrow().loaded().unwrap());
+            assert!(server.requests.lock().unwrap()[requests..].iter().all(|request| request.method == "GET"));
+            assert_eq!(server.creates(), 1);
+
+            // Incomplete history cannot prove that a missing prepared quote was never submitted.
+            let missing = fixture
+                .call(json!({"action":"create", "quote_id":unsent["quote_id"]}), "create-unsent", Some(("r-unsent", 15)))
+                .await
+                .unwrap_err();
+            assert_eq!(missing.code(), "ledger_unavailable");
+            let next = fixture.call(sfx(), "quote-next", None).await.unwrap();
+            fixture.reserve(&next, "r-next", "create-next");
+            let denied = fixture
+                .call(json!({"action":"create", "quote_id":next["quote_id"]}), "create-next", Some(("r-next", 15)))
+                .await
+                .unwrap_err();
+            assert_eq!(denied.code(), "ledger_unavailable");
+            assert_eq!(server.creates(), 1);
+            assert!(!fixture.ctx.generation().records.borrow().loaded().unwrap());
+        })
+        .await;
+}
+
+#[tokio::test]
+async fn an_incomplete_live_index_never_proves_absence_or_no_unsettled_overrun() {
+    let server = Server::new().await;
+    let mut fixture = Fixture::new(&server);
+    let quote = fixture.call(sfx(), "quote-call", None).await.unwrap();
+    fixture.reserve(&quote, "r-one", "create-call");
+    let held = Authority::read(&fixture.ctx.paths().state_dir).unwrap();
+    assert_eq!(no_unsettled_overrun(&fixture.ctx, &held).unwrap_err().code(), "ledger_unavailable");
+    let reservation = Reservation { id: "r-one".into(), amount: 15, call: "create-call".into() };
+    let id = quote["quote_id"].as_str().unwrap();
+    assert_eq!(missing_quote(&fixture.ctx, id, &reservation).await.unwrap_err().code(), "ledger_unavailable");
+    // Remembering one unrelated live receipt still does not prove a full historical scan.
+    let mut receipt = generate_output::receipt(&quote, 15, None, "not_submitted", None).unwrap();
+    receipt["quote_id"] = json!("q-00000000000000000000000000000001");
+    remember(&fixture.ctx, "j1-1", &receipt).unwrap();
+    assert_eq!(no_unsettled_overrun(&fixture.ctx, &held).unwrap_err().code(), "ledger_unavailable");
+    assert_eq!(missing_quote(&fixture.ctx, id, &reservation).await.unwrap_err().code(), "ledger_unavailable");
+    assert_eq!(server.creates(), 0);
+}
+
+#[tokio::test]
 async fn restart_proves_an_owned_unsent_quote_but_never_releases_a_lost_post() {
     tokio::task::LocalSet::new()
         .run_until(async {
@@ -235,6 +326,19 @@ async fn manual_release_and_job_pruning_cannot_remove_get_only_recovery() {
             assert_eq!(recovered["result"]["credits"]["actual"], 12);
             let artifact = fixture.ctx.artifacts().resolve(&fixture.ctx, recovered["result"]["artifact_id"].as_str().unwrap()).unwrap();
             assert_eq!(std::fs::read(artifact).unwrap(), wav());
+            assert_eq!(server.creates(), 1);
+            // No host reconciliation has booked this late charge yet. The released row holds
+            // zero, so even 12 actual against its original 15 approval must block another POST.
+            assert_eq!(fixture.ledger["reservations"]["r-one"]["reserved_credits"], 15);
+            assert_eq!(fixture.ledger["reservations"]["r-one"]["actual_credits"], Value::Null);
+            let next = fixture.call(sfx(), "quote-next", None).await.unwrap();
+            fixture.reserve(&next, "r-next", "create-next");
+            let denied = fixture
+                .call(json!({"action":"create", "quote_id":next["quote_id"]}), "create-next", Some(("r-next", 15)))
+                .await
+                .unwrap_err();
+            assert_eq!(denied.code(), "not_submitted");
+            assert!(denied.reason().contains("ledger_frozen"));
             assert_eq!(server.creates(), 1);
         })
         .await;

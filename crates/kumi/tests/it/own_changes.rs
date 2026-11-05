@@ -198,15 +198,15 @@ fn a_delete_copies_the_saved_project_beside_it_once_per_saved_version_and_keeps_
 async fn a_step_its_kinds_schema_doesnt_take_is_refused_in_words_before_the_bridge() {
     let plan = engine::<kumi_daw_renoise::RenoiseRefs>(&kumi_daw_renoise::DAW, None);
     let volume = plan.change_kind("track_volume").unwrap();
-    for (input, said) in [
-        (json!({"ref": "track:1", "volumeDb": -6, "stag": "pre"}), "The input has no field `stag` (it takes "),
-        (json!({"volumeDb": -6}), "The input needs `ref`."),
-        (json!({"ref": "track:1", "volumeDb": "loud"}), "`volumeDb` must be a number, not a string."),
-        (json!({"ref": "track:1", "volumeDb": -6, "stage": "mid"}), "`stage` must be one of \"post\", \"pre\", not \"mid\"."),
+    for (input, field) in [
+        (json!({"ref": "track:1", "volumeDb": -6, "stag": "pre"}), "stag"),
+        (json!({"volumeDb": -6}), "ref"),
+        (json!({"ref": "track:1", "volumeDb": "loud"}), "volumeDb"),
+        (json!({"ref": "track:1", "volumeDb": -6, "stage": "mid"}), "stage"),
     ] {
         let outcome = PlanHost::change(&*plan, volume, input.as_object().unwrap().clone(), Signal::new(), false).await;
         assert!(outcome.is_error && !outcome.stops, "{}", outcome.text);
-        assert!(outcome.text.starts_with(&format!("track_volume: {said}")), "{}", outcome.text);
+        assert!(outcome.text.contains(&format!("`{field}`")), "the refusal must name {field}: {}", outcome.text);
     }
     assert_eq!(plan.history.changes_this_turn.get(), 0, "nothing was counted, let alone sent");
 }

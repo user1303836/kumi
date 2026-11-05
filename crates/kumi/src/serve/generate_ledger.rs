@@ -67,6 +67,16 @@ pub struct Recovery {
     pub actual_credits: Option<u64>,
 }
 
+/// Borrowed active routing evidence; the original approval is not necessarily held credit.
+#[derive(Debug, PartialEq, Eq)]
+pub struct Unsettled<'a> {
+    pub quote_id: &'a str,
+    pub kind: &'a str,
+    pub job_id: Option<&'a str>,
+    pub reserved_credits: u64,
+    pub settlement: &'a str,
+}
+
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Ledger {
@@ -233,7 +243,7 @@ impl Authority {
         let check = || {
             let policy = self.policy(claim.kind)?;
             if self.ledger.frozen {
-                return Err(refusal("ledger_frozen", "New generations are paused because a charge exceeded its estimate."));
+                return Err(refusal("ledger_frozen", "New generations are paused because a charge exceeded its held credits."));
             }
             if policy.cap == 0 || self.committed > policy.cap {
                 return Err(refusal("cap_exceeded", "The credit cap does not permit this generation."));
@@ -343,12 +353,16 @@ impl Authority {
     }
 
     /// Active evidence only; callers inspect retained native checkpoints without scanning history.
-    pub fn unsettled(&self) -> impl Iterator<Item = Recovery> + '_ {
-        self.ledger
-            .reservations
-            .values()
-            .filter(|reservation| matches!(reservation.settlement.as_str(), "pending" | "manual_release"))
-            .map(Reservation::recovery)
+    pub fn unsettled(&self) -> impl Iterator<Item = Unsettled<'_>> + '_ {
+        self.ledger.reservations.values().filter(|reservation| matches!(reservation.settlement.as_str(), "pending" | "manual_release")).map(
+            |reservation| Unsettled {
+                quote_id: &reservation.quote_id,
+                kind: &reservation.kind,
+                job_id: reservation.job_id.as_deref(),
+                reserved_credits: reservation.reserved_credits,
+                settlement: &reservation.settlement,
+            },
+        )
     }
 
     fn history(&self, category: &str, id: &str) -> Result<Option<HistoryReceipt>, OpError> {
@@ -484,7 +498,7 @@ impl Reservation {
             "pending" if self.actual_credits.is_none() => Ok(self.reserved_credits),
             "charged" if self.submission == "submitted" => self.actual_credits.ok_or_else(unavailable),
             "not_submitted" if self.submission == "not_submitted" && self.actual_credits.is_none() => Ok(0),
-            "manual_release" if self.actual_credits.is_none() && self.submission == "unknown" => Ok(0),
+            "manual_release" if self.actual_credits.is_none() && matches!(self.submission.as_str(), "unknown" | "submitted") => Ok(0),
             _ => Err(unavailable()),
         }
     }
@@ -1133,11 +1147,41 @@ def reserve(name, amount):
     store.record_quote(quote, "quote-"+name)
     reservation = store.reserve(name, "a"*64, amount, host_call_id="create-"+name)
     return quote, reservation["reservation_id"]
-def settle(quote, reservation, job, actual):
-    store.reconcile(reservation, {"job_id":job, "kind":"generate", "state":"done", "result":{
+def receipt(quote, job, actual=None, state="running"):
+    return {"job_id":job, "kind":"generate", "state":state, "result":{
         "quote_id":quote["quote_id"], "kind":"sfx", "provider":"mirelo", "provider_job_id":"vendor-"+job,
         "submission":"submitted", "credit_unit":"mirelo_credits",
-        "credits":{"estimate":quote["estimate"]["credits"], "reserved":quote["estimate"]["max_credits"], "actual":actual}}})
+        "credits":{"estimate":quote["estimate"]["credits"], "reserved":quote["estimate"]["max_credits"], "actual":actual}}}
+def settle(quote, reservation, job, actual):
+    return store.reconcile(reservation, receipt(quote, job, actual, "done"))
+if sys.argv[3] == "released":
+    quote, rid = reserve("q1", 15)
+    store.release(rid)
+    rows = store.reservations()
+    assert len(rows) == 1 and rows[0]["settlement"] == "manual_release" and rows[0]["job_id"] is None
+    wrong = receipt(quote, "j-released")
+    wrong["result"]["credits"]["reserved"] = 14
+    try:
+        store.bind(rid, "j-released", receipt=wrong)
+        raise AssertionError("mismatched receipt accepted")
+    except ledger.LedgerError as error:
+        assert error.code == "stale"
+    assert store.reservations() == rows
+    bound = store.bind(rid, "j-released", receipt=receipt(quote, "j-released"))
+    assert bound["reserved"] == 0 and bound["spent"] == 0 and not bound["frozen"]
+    assert store.reconcile(rid, receipt(quote, "j-released")) == bound
+    print(json.dumps({"reservation":rid}), flush=True)
+    sys.exit(0)
+if sys.argv[3] in {"late-charge", "cleared"}:
+    row = store.find_job("j-released")
+    quote, rid = store.quote(row["quote_id"]), row["reservation_id"]
+    if sys.argv[3] == "cleared":
+        store.unfreeze()
+    first = settle(quote, rid, "j-released", 12)
+    assert settle(quote, rid, "j-released", 12) == first
+    assert store.bind(rid, "j-released", receipt=receipt(quote, "j-released", 12, "done")) == first
+    print(json.dumps(first), flush=True)
+    sys.exit(0)
 charged, charged_id = reserve("q-charged", 15)
 settle(charged, charged_id, "j-charged", 12)
 pending, pending_id = reserve("q1", 15)
@@ -1146,6 +1190,8 @@ store.release(manual_id)
 late, late_id = reserve("q-late", 1)
 store.release(late_id)
 settle(late, late_id, "j-late", 1)
+assert store.snapshot()["frozen"]
+store.unfreeze()  # Keep the pending-approval fixture independent of late-charge freeze.
 print(json.dumps({"charged":charged_id, "pending":pending_id, "manual":manual_id, "late":late_id,
                   "pending_quote":pending, "charged_quote":charged}), flush=True)
 "#;
@@ -1203,6 +1249,74 @@ print(json.dumps({"charged":charged_id, "pending":pending_id, "manual":manual_id
         own.reservation_id = ids["pending"].as_str().unwrap();
         own.host_call_id = "create-q1";
         assert_eq!(code(fixture.authority().approve(&own)), "not_submitted");
+    }
+
+    #[test]
+    fn python_released_binding_holds_zero_then_books_late_charge_once() {
+        let fixture = Fixture::new();
+        let run = |mode| {
+            let output = python(&fixture, mode).output().expect("isolated stdlib Python is required");
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()
+        };
+        let ids = run("released");
+        let authority = fixture.authority();
+        assert_eq!(authority.committed, 0);
+        let released = authority.for_job("j-released").unwrap().unwrap();
+        assert_eq!(released.reservation_id, ids["reservation"].as_str().unwrap());
+        assert_eq!(released.submission, "submitted");
+        assert_eq!(released.settlement, "manual_release");
+        assert_eq!(released.provider_job_id.as_deref(), Some("vendor-j-released"));
+        assert_eq!(released.reserved_credits, 15);
+        assert_eq!(released.actual_credits, None);
+        assert_eq!(
+            authority.unsettled().collect::<Vec<_>>(),
+            vec![Unsettled { quote_id: "q1", kind: "sfx", job_id: Some("j-released"), reserved_credits: 15, settlement: "manual_release" }]
+        );
+        let mut own = claim();
+        own.reservation_id = &released.reservation_id;
+        own.host_call_id = "create-q1";
+        own.expected_job_id = Some("j-released");
+        assert_eq!(code(authority.approve(&own)), "not_approved");
+        let charged = run("late-charge");
+        assert_eq!(charged["frozen"], true);
+        for (mode, frozen) in [(None, true), (Some("cleared"), false)] {
+            if let Some(mode) = mode {
+                assert_eq!(run(mode)["frozen"], false);
+            }
+            let authority = fixture.authority();
+            assert_eq!(authority.committed, 12);
+            assert_eq!(authority.ledger.archived_count, 1);
+            assert_eq!(authority.ledger.archived_spent, 12);
+            assert_eq!(authority.ledger.frozen, frozen);
+            assert_eq!(authority.unsettled().count(), 0);
+            let row = authority.for_job("j-released").unwrap().unwrap();
+            assert_eq!(row.actual_credits, Some(12));
+            assert_eq!(row.reserved_credits, 15);
+            assert_eq!(row.settlement, "charged");
+            assert_eq!(authority.history("receipt", &row.reservation_id).unwrap().unwrap().reservation.manually_released, Some(true));
+        }
+    }
+
+    #[test]
+    fn released_submitted_rows_require_consistent_identity_and_unknown_actual() {
+        let fixture = Fixture::new();
+        let mut value = record();
+        let row = &mut value["reservations"]["r1"];
+        row["settlement"] = json!("manual_release");
+        row["submission"] = json!("submitted");
+        row["job_id"] = json!("j-one");
+        row["provider_job_id"] = json!("vendor-one");
+        fixture.put(&value);
+        assert_eq!(fixture.authority().committed, 0);
+        for (field, bad) in
+            [("job_id", Value::Null), ("provider_job_id", Value::Null), ("submission", json!("unknown")), ("actual_credits", json!(0))]
+        {
+            let mut invalid = value.clone();
+            invalid["reservations"]["r1"][field] = bad;
+            fixture.put(&invalid);
+            assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+        }
     }
 
     #[test]

@@ -74,7 +74,7 @@ fn effect(args: &JsonObject) -> Effect {
 #[derive(Default)]
 pub struct Generation {
     pending: RefCell<Pending>,
-    records: RefCell<Option<records::Records>>,
+    records: RefCell<records::Index>,
 }
 #[derive(Default)]
 struct Pending {
@@ -106,7 +106,6 @@ impl Generation {
 fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(async move {
         ctx.generation().prune();
-        ensure_records(ctx).await?;
         check(&call.signal)?;
         match call.args.get("action").and_then(Value::as_str) {
             Some("quote") => quote(ctx, call).await,
@@ -118,37 +117,37 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
 }
 
 async fn ensure_records(ctx: &Ctx) -> Result<(), OpError> {
-    if ctx.generation().records.borrow().is_some() {
+    if ctx.generation().records.borrow().loaded()? {
         return Ok(());
     }
     let state = ctx.paths().state_dir.clone();
     let loaded = tokio::task::spawn_blocking(move || records::load(&state))
         .await
         .map_err(|_| refused("ledger_unavailable", "The retained generation receipts could not be inspected."))??;
-    // Another call may have finished loading and started a job while this read ran.
-    ctx.generation().records.borrow_mut().get_or_insert(loaded);
-    Ok(())
+    // GET-only recovery may have learned a charge while this read ran. A second scan may also
+    // finish after another create; neither may erase live evidence or hide a conflicting receipt.
+    ctx.generation().records.borrow_mut().merge(loaded)
 }
 
 fn remember(ctx: &Ctx, id: &str, receipt: &Value) -> Result<(), OpError> {
-    let mut records = ctx.generation().records.borrow_mut();
-    records::remember(records.as_mut().ok_or_else(stale)?, id, receipt)
+    ctx.generation().records.borrow_mut().remember(id, receipt)
 }
 
 fn no_unsettled_overrun(ctx: &Ctx, authority: &Authority) -> Result<(), OpError> {
     let held = ctx.generation().records.borrow();
-    let records = held.as_ref().ok_or_else(stale)?;
+    let records = held.complete()?;
     for reservation in authority.unsettled() {
-        let Some(record) = records.get(&reservation.quote_id) else { continue };
+        let Some(record) = records.get(reservation.quote_id) else { continue };
         if record.kind != reservation.kind
             || record.reserved != reservation.reserved_credits
-            || reservation.job_id.as_deref().is_some_and(|id| id != record.job_id)
+            || reservation.job_id.is_some_and(|id| id != record.job_id)
         {
             return Err(stale());
         }
-        if record.actual.is_some_and(|actual| actual > record.reserved) {
+        let held_credits = if reservation.settlement == "manual_release" { 0 } else { reservation.reserved_credits };
+        if record.actual.is_some_and(|actual| actual > held_credits) {
             return Err(refused("ledger_frozen", &format!(
-                "ledger_frozen: job {} exceeded its reserved credits. Inspect that job to settle its charge before the producer clears the freeze.",
+                "ledger_frozen: job {} exceeded its held credits. Inspect that job to settle its charge before the producer clears the freeze.",
                 record.job_id
             )));
         }
@@ -304,13 +303,13 @@ async fn approve(ctx: &Ctx, quote: &Value, reservation: &Reservation, job_id: Op
 }
 
 async fn missing_quote(ctx: &Ctx, id: &str, reservation: &Reservation) -> Result<Value, OpError> {
-    if ctx.generation().records.borrow().as_ref().is_none_or(|records| records.contains_key(id)) {
+    if ctx.generation().records.borrow().complete()?.contains_key(id) {
         return Err(refused("quote_consumed", "A job already owns this quote; recover that job instead of resubmitting it."));
     }
     let authority = authority(ctx).await?;
     // Look only at active reservations: a previously settled/archived quote never authorizes
     // another create. Its absence in pending memory is not by itself release evidence.
-    if !authority.unsettled().any(|held| held.reservation_id == reservation.id && held.quote_id == id) {
+    if !authority.unsettled().any(|held| held.quote_id == id && held.settlement == "pending") {
         return Err(refused("quote_consumed", "This quote is unavailable or already used; never resubmit it."));
     }
     let quote = authority.quote(id)?.ok_or_else(stale)?;
@@ -325,7 +324,7 @@ async fn missing_quote(ctx: &Ctx, id: &str, reservation: &Reservation) -> Result
         expected_job_id: None,
     })?;
     // The authority read yielded; do not turn a concurrently started job into release proof.
-    if ctx.generation().records.borrow().as_ref().is_none_or(|records| records.contains_key(id)) {
+    if ctx.generation().records.borrow().complete()?.contains_key(id) {
         return Err(refused("quote_consumed", "A job already owns this quote; recover that job instead of resubmitting it."));
     }
     // Every POST requires a durable quote_id checkpoint. Retention never prunes an unsettled
@@ -344,6 +343,8 @@ async fn create(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         amount: private["reserved_credits"].as_u64().ok_or_else(|| refused("not_approved", "A bounded credit reservation is required."))?,
         call: host.call,
     };
+    // Historical corruption blocks paid creates, not upload previews or GET-only job recovery.
+    ensure_records(ctx).await?;
     let id = call.args.get("quote_id").and_then(Value::as_str).unwrap_or("");
     let public = ctx.generation().pending.borrow().quotes.get(id).map(|quote| quote.public.clone());
     let Some(public) = public else { return missing_quote(ctx, id, &reservation).await };
@@ -494,6 +495,9 @@ async fn follow(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         .get(id, &ctx.paths().state_dir)
         .filter(|view| view["job_id"] == id && view["kind"] == "generate")
         .ok_or_else(|| refused("unknown_job", "No retained generation job has that ID."))?;
+    if let Some(saved) = view.get("result").filter(|saved| !saved.is_null()) {
+        remember(ctx, id, saved)?;
+    }
     if view["state"] == "running" {
         return Ok(view);
     }
