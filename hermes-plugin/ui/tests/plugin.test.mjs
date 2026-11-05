@@ -224,8 +224,9 @@ test('a generate.updated event has the pane follow its generation, never one nam
   event({ payload: { profile: 'work', session_id: SESSION, tool_call_id: 'call-8', tool: 'kumi_generate', card: { ...card, job_id: 'work-job' } } })
   // CC-13's event always names its profile: one naming none is for no one here.
   event({ payload: { session_id: SESSION, tool_call_id: 'call-7', tool: 'kumi_generate', card: { ...card, job_id: 'unnamed-job' } } })
-  // Over 256 KiB it comes without its card: nothing to follow.
+  // Over 256 KiB it comes without its card: nothing to follow. Nor is there anything in an upload preview (no job).
   event({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-10', tool: 'kumi_job' } })
+  event({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-11', tool: 'kumi_generate', card: { state: 'preview', upload: { file: 'Bass Loop 03.wav', bytes: 1048576, identity_sha256: 'a'.repeat(64) } } } })
   event({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-9', tool: 'kumi_generate', card } })
   await settle()
   assert.deepEqual(h.calls.rest.filter(path => path.startsWith('/job')), ['/job?id=native-job-id'])
