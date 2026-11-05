@@ -4,7 +4,7 @@
 //! ([`crate::provider::DawProvider::plugin_steps`]); a step that isn't on it is refused, so a step a DAW adds stays
 //! refused until its list says otherwise.
 
-use serde_json::Value;
+use serde_json::{Map, Value};
 
 /// A change step a plugin's plan may use on a DAW.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -166,6 +166,46 @@ fn walk(step: &PluginStep, field: &str, value: &Value) -> Result<(), String> {
     Ok(())
 }
 
+/// A step's input schema as a plugin's plan fills it: its file field takes `source` (an object naming where the file
+/// comes from) in place of a path, and the fields no step may hold are left out wherever they are (and out of
+/// `required`).
+pub fn plugin_schema(step: &PluginStep, schema: &Map<String, Value>, source: &Value) -> Map<String, Value> {
+    let mut schema = schema.clone();
+    prune(step, &mut schema, true);
+    if let (Some(field), Some(Value::Object(properties))) = (step.file_field, schema.get_mut("properties")) {
+        if properties.contains_key(field) {
+            properties.insert(field.to_string(), source.clone());
+        }
+    }
+    schema
+}
+
+/// `schema` without the fields no step may hold, at every depth (`top`: the step's own fields, where its file and
+/// browser fields are its own to keep).
+fn prune(step: &PluginStep, schema: &mut Map<String, Value>, top: bool) {
+    let mut gone = Vec::new();
+    if let Some(Value::Object(properties)) = schema.get_mut("properties") {
+        properties.retain(|field, _| {
+            let plain = field.to_ascii_lowercase().replace(['_', '-'], "");
+            let own = top && (step.file_field == Some(field.as_str()) || step.browser_field == Some(field.as_str()));
+            let kept = own || !NEVER.contains(&plain.as_str());
+            if !kept {
+                gone.push(field.clone());
+            }
+            kept
+        });
+        for inner in properties.values_mut().filter_map(Value::as_object_mut) {
+            prune(step, inner, false);
+        }
+    }
+    if let Some(Value::Object(items)) = schema.get_mut("items") {
+        prune(step, items, false);
+    }
+    if let Some(Value::Array(required)) = schema.get_mut("required") {
+        required.retain(|field| !field.as_str().is_some_and(|field| gone.iter().any(|left| left == field)));
+    }
+}
+
 /// A file or folder by its path or URL: absolute, home-relative, a drive's, a share's, or a `file:` or `library:` one.
 fn path_like(text: &str) -> bool {
     let bytes = text.as_bytes();
@@ -238,6 +278,25 @@ mod tests {
         assert!(check(&OTHERS, "device_add", &json!({"ref": "t1", "options": {"file": "x"}})).is_err(), "only that field");
         assert!(check(&OTHERS, "notes_write", &json!({"ref": "p1", "clear": false})).is_ok());
         assert!(check(&OTHERS, "notes_write", &json!({"ref": "p1", "clear": true})).is_err());
+    }
+
+    #[test]
+    fn a_plugins_schema_takes_a_source_in_the_file_field_and_holds_no_path() {
+        let schema = json!({"type": "object", "required": ["deviceRef", "sample"], "properties": {
+            "deviceRef": {"type": "string"}, "sample": {"type": "string"}, "path": {"type": "string"}
+        }});
+        let source = json!({"type": "object", "description": "a source"});
+        let shown = plugin_schema(&STEPS[2], schema.as_object().unwrap(), &source);
+        assert_eq!(shown["properties"], json!({"deviceRef": {"type": "string"}, "sample": {"type": "object", "description": "a source"}}));
+        assert_eq!(shown["required"], json!(["deviceRef", "sample"]));
+        let required = json!({"type": "object", "required": ["ref", "path"], "properties": {"ref": {}, "path": {}}});
+        assert_eq!(plugin_schema(&STEPS[0], required.as_object().unwrap(), &source)["required"], json!(["ref"]));
+        let nested = json!({"type": "object", "properties": {"options": {"type": "object", "required": ["presetData"], "properties": {
+            "presetData": {"type": "string"}, "amount": {"type": "number"}
+        }}, "rows": {"type": "array", "items": {"type": "object", "properties": {"path": {}, "name": {}}}}}});
+        let shown = plugin_schema(&STEPS[0], nested.as_object().unwrap(), &source);
+        assert_eq!(shown["properties"]["options"], json!({"type": "object", "required": [], "properties": {"amount": {"type": "number"}}}));
+        assert_eq!(shown["properties"]["rows"]["items"]["properties"], json!({"name": {}}));
     }
 
     #[test]

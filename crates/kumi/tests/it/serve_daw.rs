@@ -576,3 +576,69 @@ case!(serve_says_a_change_reaper_didnt_confirm_is_unsure_until_the_next_look, as
     assert_eq!(lab.state("status.json")["unsure"], Value::Null);
     wire.end().await;
 });
+
+case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins_plan_fills_it, async {
+    let script = ReaperScript::new(3, 0);
+    let tab = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER")))).await;
+    let Err(OpError::NotConnected { .. }) = lab.call("read", json!({"action": "schema"})).await else { panic!("read unconnected") };
+    let mut wire = Wire::start(lab.ctx.clone()).await;
+    let (key, epoch, _, label) = looked(&mut wire).await;
+
+    // What a change may use (the allowlist's steps the plan offers), with their families, and the readers. A step that
+    // places a file isn't one until the import step is in the runtime.
+    let (offered, _) = wire.call("read", json!({"action": "schema", "max_chars": 20000}), None).await;
+    let names = |list: &str| -> Vec<String> {
+        offered[list].as_array().unwrap().iter().map(|entry| entry["tool"].as_str().unwrap().to_string()).collect()
+    };
+    let (steps, readers) = (names("steps"), names("readers"));
+    assert!(steps.iter().any(|step| step == "track_volume"), "{steps:?}");
+    for unlisted in ["run_lua", "take_add", "wait", "track_delete", "save_project", "item_import"] {
+        assert!(!steps.iter().any(|step| step == unlisted), "{unlisted}: {steps:?}");
+    }
+    assert_eq!(readers, ["reaper_read"]);
+    let volume = offered["steps"].as_array().unwrap().iter().find(|entry| entry["tool"] == "track_volume").unwrap().clone();
+    assert_eq!(volume["family"], "mixer");
+    let (whole, _) = wire.call("read", json!({"action": "schema", "tool": "track_volume"}), None).await;
+    assert_eq!((whole["kind"].clone(), whole["input_schema"]["required"].clone()), (json!("step"), json!(["ref", "volumeDb"])));
+    let (import, error) = wire.call("read", json!({"action": "schema", "tool": "item_import"}), None).await;
+    assert!(error && import["error"]["reason"].as_str().unwrap().contains("import step"), "{import}");
+    let (lua, error) = wire.call("read", json!({"action": "schema", "tool": "run_lua"}), None).await;
+    assert!(error && lua["error"]["code"] == "invalid", "{lua}");
+
+    // The reader's rows, as REAPER gives them, names and not folders; never an API function by name, a query its
+    // schema doesn't take, nor a tool that isn't a reader.
+    let (tracks, _) = wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": {"kind": "track"}}), None).await;
+    assert!(tracks["text"].as_str().unwrap().contains(&label), "{tracks}");
+    assert_eq!((tracks["project_key"].clone(), tracks["epoch"].clone()), (key.clone(), json!(epoch)));
+    let (project, _) = wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": {"kind": "project"}}), None).await;
+    assert!(!project["text"].as_str().unwrap().contains("/lab/"), "{project}");
+    for query in [json!({"kind": "call", "fn": "GetTrackName", "args": []}), json!({"kind": "track", "fn": "GetTrackName"})] {
+        let (refused, _) = wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": query}), None).await;
+        assert_eq!(refused["error"]["code"], "not_allowed", "{refused}");
+    }
+    let (odd, error) =
+        wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": {"kind": "track", "bogus": 1}}), None).await;
+    assert!(error && odd["error"]["code"] == "invalid", "{odd}");
+    let (plan, error) = wire.call("read", json!({"action": "data", "tool": "make_changes", "query": {}}), None).await;
+    assert!(error && plan["error"]["code"] == "invalid", "{plan}");
+    let reads = ["digest", "focus", "focus_body", "read", "snapshot", "status"];
+    let sent = lab.methods_sent();
+    assert!(sent.iter().all(|method| reads.contains(&method.as_str())), "{sent:?}");
+
+    // A look whose epoch Kumi couldn't pin (REAPER busy as it read, say): a read isn't taken on trust.
+    lab.ctx.link().saw_page_epoch(None);
+    let (unpinned, error) = wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": {"kind": "track"}}), None).await;
+    assert!(error && unpinned["error"]["code"] == "stale", "{unpinned}");
+    wire.call("observe", json!({"scope": "focus"}), None).await;
+
+    // REAPER switches tabs after the look: its rows aren't the looked project's, so a read is stale, not stamped with it.
+    tab.switch_tab();
+    let (stale, error) = wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": {"kind": "track"}}), None).await;
+    assert!(error && stale["error"]["code"] == "stale", "{stale}");
+    // The next look is the new tab's, and reads hold again.
+    wire.call("observe", json!({"scope": "focus"}), None).await;
+    let (again, error) = wire.call("read", json!({"action": "data", "tool": "reaper_read", "query": {"kind": "track"}}), None).await;
+    assert!(!error && again["project_key"] != key, "{again}");
+    wire.end().await;
+});

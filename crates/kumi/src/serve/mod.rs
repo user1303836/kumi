@@ -15,6 +15,7 @@ pub mod inflight;
 pub mod jobs;
 pub mod lease;
 pub mod mcp;
+pub mod read;
 pub mod registry;
 pub mod snapshots;
 
