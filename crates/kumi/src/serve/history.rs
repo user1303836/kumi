@@ -290,10 +290,12 @@ impl History {
         let rows = self.rows.borrow();
         let mut made: Vec<&Row> = rows
             .iter()
+            // A row from before rows kept the call's profile and session matches whichever: a retry right after an
+            // update isn't run again.
             .filter(|row| {
                 row.tool_call_id.as_deref() == Some(tool_call_id)
-                    && row.profile_id.as_deref() == call.profile_id
-                    && row.session_id.as_deref() == call.session_id
+                    && (row.profile_id.is_none() || row.profile_id.as_deref() == call.profile_id)
+                    && (row.session_id.is_none() || row.session_id.as_deref() == call.session_id)
             })
             .collect();
         if made.is_empty() {

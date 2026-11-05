@@ -161,7 +161,7 @@ async fn placed(
     ctx: &Ctx,
     steps: &mut [Value],
     files: &[(usize, &'static str)],
-    dispatch: Option<Option<Vec<Value>>>,
+    dispatch: Option<Vec<Value>>,
     signal: &kumi_common::abort::Signal,
 ) -> Result<(Vec<Value>, Vec<Value>), Value> {
     let at = |n: usize, error: OpError| refused(error.code(), format!("Step {}: {}", n + 1, error.reason()));
@@ -179,7 +179,7 @@ async fn placed(
         }
         return Ok((Vec::new(), named));
     };
-    if pinned.is_some_and(|pinned| pinned != named) {
+    if pinned != named {
         return Err(refused("stale", "A file this plan places changed since it was approved: preview it again."));
     }
     let mut sources = Vec::new();
@@ -189,6 +189,7 @@ async fn placed(
         let tool = steps[n].get("tool").and_then(Value::as_str).unwrap_or_default().to_string();
         step_takes(ctx, n, &tool, &steps[n]["input"])?;
         record["field"] = json!(field);
+        record["step"] = json!(n + 1);
         sources.push(record);
     }
     Ok((sources, named))
@@ -216,21 +217,37 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         Ok(checked) => checked,
         Err(refusal) => return Ok(refusal),
     };
-    // The plan as the host's approval saw it, whatever `preview` says: its files must be the same at its dispatch.
+    // The plan as the host's approval saw it, whatever `preview` says, read as the host's own digest reads it: its
+    // hook previews the model's arguments as written, its handler dispatches them coerced ("4" then 4). A dispatch
+    // with files must be that plan, by the same host call, placing the same files (11b).
     let approved = {
         let mut asked = args.clone();
         asked.remove("preview");
-        super::mcp::digest(CHANGE.name, &asked)
+        super::mcp::digest(CHANGE.name, &loose(&asked))
     };
-    let dispatch = (!previewing(args)).then(|| ctx.link().pinned_files(&approved));
-    let previewed = dispatch.is_none();
+    let pin = pin_key(&call.host, &approved);
+    let previewed = previewing(args);
+    let dispatch = if previewed || checked.files.is_empty() {
+        None
+    } else {
+        match ctx.link().take_pin(&pin) {
+            Some((plan, files)) if plan == approved => Some(files),
+            Some(_) => return Ok(refused("stale", "This plan isn't the one approved: preview it again.")),
+            None => {
+                return Ok(refused(
+                    "stale",
+                    "Kumi has no approval of this plan's files to hold it to (the runtime restarted, say): preview it again.",
+                ))
+            }
+        }
+    };
     let (sources, named) = match placed(ctx, &mut steps, &checked.files, dispatch, &call.signal).await {
         Ok(placed) => placed,
         Err(refusal) => return Ok(refusal),
     };
     if previewed {
         if !named.is_empty() {
-            ctx.link().pin_files(&approved, named);
+            ctx.link().pin_files(&pin, &approved, named);
         }
         let names = ctx.link().ref_names();
         let described: Vec<Value> = steps
@@ -255,15 +272,35 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     history.begin_call();
     let ran = plan.execute(input, call.signal.clone()).await;
     let rows = history.end_call(identity, ctx.snapshots());
-    history.placed(&rows.iter().map(|row| row.id.clone()).collect::<Vec<_>>(), &sources, ctx.snapshots());
-    let outcome = outcome(ran, &rows);
+    let mut outcome = outcome(ran, &rows);
+    // What the DAW said of a step can name the file it was given: its name only, as everywhere else.
+    connection::names_only(&mut outcome.steps);
+    outcome.reason = outcome.reason.map(|reason| connection::names_only_text(&reason));
+    // Each row keeps the files its own step placed (by the step the plan says made it); a row it doesn't place keeps
+    // them all.
+    let steps_of: HashMap<String, u64> = outcome.steps["done"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|done| Some((done.get("change")?.as_str()?.to_string(), done.get("step")?.as_u64()?)))
+        .collect();
+    for row in &rows {
+        let own: Vec<Value> = match steps_of.get(&row.label) {
+            Some(step) => sources.iter().filter(|source| source["step"].as_u64() == Some(*step)).cloned().collect(),
+            None => sources.clone(),
+        };
+        history.placed(std::slice::from_ref(&row.id), &own, ctx.snapshots());
+    }
     let mut ids: Vec<String> = rows.iter().map(|row| row.id.clone()).collect();
     if outcome.state == "unsure" {
         let reason = outcome
             .reason
             .clone()
             .unwrap_or_else(|| "The DAW didn't confirm every step: look at the project before another change.".into());
-        ids.push(history.audit(&title, &project.key, &reason, identity, ctx.snapshots()).id);
+        let audit = history.audit(&title, &project.key, &reason, identity, ctx.snapshots()).id;
+        // Which steps ran is what's unsure: the audit row keeps every file the plan was given.
+        history.placed(std::slice::from_ref(&audit), &sources, ctx.snapshots());
+        ids.push(audit);
         ctx.link().note_unsure("change", &reason, "unsure");
     }
     history.call_came_to(&ids, outcome.state, ctx.snapshots());
@@ -277,7 +314,7 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         "state": outcome.state,
         "history_ids": ids,
         "steps": outcome.steps,
-        "summary": outcome.summary,
+        "summary": connection::names_only_text(&outcome.summary),
         "undo_available": rows.iter().any(|row| row.undo_available),
         "project_key": project_now.key,
         "epoch": project_now.epoch,
@@ -595,6 +632,64 @@ pub static HISTORY: Operation = Operation {
     run: run_history,
 };
 
+/// A HISTORY row as `history` gives it: without the host call it came from or the identity of each file it placed,
+/// which `history.json` keeps for the runtime and the plugin.
+fn shown_row(mut row: Value) -> Value {
+    if let Value::Object(fields) = &mut row {
+        for kept in ["profile_id", "session_id", "tool_call_id", "digest"] {
+            fields.remove(kept);
+        }
+        if let Some(Value::Array(sources)) = fields.get_mut("sources") {
+            for source in sources.iter_mut().filter_map(Value::as_object_mut) {
+                source.remove("identity");
+            }
+        }
+    }
+    row
+}
+
+/// `args` as the host's digest reads them (CC-5's W2 note): every number in its plain form and every truth value as
+/// lower-case text, so `"4"`, `4` and `4.0` are the same, and `"true"` and `true`.
+fn loose(args: &Map<String, Value>) -> Map<String, Value> {
+    fn plain(value: &Value) -> Value {
+        match value {
+            Value::Number(number) => Value::String(plain_number(number.as_f64().unwrap_or_default(), &number.to_string())),
+            Value::Bool(flag) => Value::String(flag.to_string()),
+            Value::String(text) => match text.parse::<f64>() {
+                Ok(number) if number.is_finite() && !text.trim().is_empty() => Value::String(plain_number(number, text)),
+                _ if text.eq_ignore_ascii_case("true") || text.eq_ignore_ascii_case("false") => Value::String(text.to_ascii_lowercase()),
+                _ => value.clone(),
+            },
+            Value::Array(items) => Value::Array(items.iter().map(plain).collect()),
+            Value::Object(fields) => Value::Object(fields.iter().map(|(key, field)| (key.clone(), plain(field))).collect()),
+            Value::Null => Value::Null,
+        }
+    }
+    fn plain_number(number: f64, written: &str) -> String {
+        if number.fract() == 0.0 && number.abs() < 9_007_199_254_740_992.0 {
+            format!("{}", number as i64)
+        } else if written.parse::<f64>().is_ok() {
+            format!("{number}")
+        } else {
+            written.to_string()
+        }
+    }
+    args.iter().map(|(key, value)| (key.clone(), plain(value))).collect()
+}
+
+/// The call a preview's approval is for: the host call (its profile, session and id), as the hook's preview and the
+/// handler's dispatch both carry it; a call without an id by its plan alone.
+fn pin_key(host: &super::ctx::Host, approved: &str) -> String {
+    match &host.tool_call_id {
+        Some(id) => format!(
+            "call\u{1f}{}\u{1f}{}\u{1f}{id}",
+            host.profile_id.as_deref().unwrap_or_default(),
+            host.session_id.as_deref().unwrap_or_default()
+        ),
+        None => format!("plan\u{1f}{approved}"),
+    }
+}
+
 fn history_schema() -> Value {
     json!({"type": "object", "additionalProperties": false, "properties": {
         "limit": {"type": "integer", "minimum": 1, "maximum": super::history::KEPT}
@@ -604,7 +699,7 @@ fn history_schema() -> Value {
 fn run_history(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(async move {
         let limit = call.args.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
-        let items: Vec<Value> = ctx.history().rows(limit).iter().filter_map(|row| serde_json::to_value(row).ok()).collect();
+        let items: Vec<Value> = ctx.history().rows(limit).iter().filter_map(|row| serde_json::to_value(row).ok()).map(shown_row).collect();
         Ok(json!({"items": items}))
     })
 }

@@ -45,10 +45,8 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     ),
     PluginStep::new("import_audio", "clip").file(
         "sample",
-        "Put an audio file into the Set as a clip: into an empty Session slot (trackRef, an audio track, and sceneIndex) \
-         or into an Arrangement take lane (takeLaneRef, position in beats, past the lane's last clip: Live would cut a \
-         take the file lands on, and its API can't put one back). sample is where the file comes from: a sound from the \
-         map, a file Kumi made, or an approved file, never a path.",
+        "Put an audio file into the Set as a clip, in an empty Session slot: trackRef (an audio track) and sceneIndex. \
+         sample is where the file comes from: a sound from the map, a file Kumi made, or an approved file, never a path.",
     ),
     PluginStep::new("set_warp_markers", "clip").refusing(&[("action", &["delete"])]),
     PluginStep::new("write_arrangement_clip", "clip"),
