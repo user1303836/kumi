@@ -1,6 +1,6 @@
 //! Approved media becomes a stable private copy before it is measured. Only validated copies enter C3's manifest.
 
-use super::ctx::{make_private_dir, Ctx, OpError, Scratch};
+use super::ctx::{Ctx, OpError, Scratch};
 use kumi_common::{abort::Signal, time::now_ms};
 use kumi_library::sources::canonical_local_path;
 use serde::{Deserialize, Serialize};
@@ -20,6 +20,111 @@ use tokio::sync::Mutex;
 pub const MAX_BYTES: u64 = 50 * 1024 * 1024;
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 
+/// Approval pins and map selections use the same open-handle identity, including the containing device.
+/// Nanoseconds are a decimal string so a JSON round trip cannot round the timestamp.
+pub fn file_identity(file: &File) -> io::Result<Value> {
+    Ok(FileIdentity::of(file)?.value())
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct FileIdentity {
+    dev: u64,
+    ino: u64,
+    size: u64,
+    mtime_ns: i128,
+}
+
+impl FileIdentity {
+    fn of(file: &File) -> io::Result<Self> {
+        #[cfg(unix)]
+        {
+            Ok(Self::from_metadata(&file.metadata()?))
+        }
+        #[cfg(windows)]
+        {
+            Ok(Self::from_windows_info(handle_info(file)?))
+        }
+    }
+
+    pub(crate) fn at(path: &Path) -> io::Result<Self> {
+        #[cfg(unix)]
+        {
+            let metadata = std::fs::symlink_metadata(path)?;
+            if !metadata.is_file() {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a regular file"));
+            }
+            Ok(Self::from_metadata(&metadata))
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::OpenOptionsExt;
+            use windows_sys::Win32::Storage::FileSystem::{
+                FILE_ATTRIBUTE_DIRECTORY, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_READ_ATTRIBUTES,
+                FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+            };
+            // Attribute-only access can validate a NamedTempFile whose existing handle also has write access.
+            let file = OpenOptions::new()
+                .access_mode(FILE_READ_ATTRIBUTES)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+                .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(path)?;
+            let info = handle_info(&file)?;
+            if info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT) != 0 {
+                return Err(io::Error::new(io::ErrorKind::InvalidInput, "not a regular local file"));
+            }
+            Ok(Self::from_windows_info(info))
+        }
+    }
+
+    #[cfg(unix)]
+    fn from_metadata(metadata: &std::fs::Metadata) -> Self {
+        use std::os::unix::fs::MetadataExt;
+        Self {
+            dev: metadata.dev(),
+            ino: metadata.ino(),
+            size: metadata.len(),
+            mtime_ns: i128::from(metadata.mtime()) * 1_000_000_000 + i128::from(metadata.mtime_nsec()),
+        }
+    }
+
+    #[cfg(windows)]
+    fn from_windows_info(info: windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION) -> Self {
+        let ticks = (u64::from(info.ftLastWriteTime.dwHighDateTime) << 32) | u64::from(info.ftLastWriteTime.dwLowDateTime);
+        Self {
+            dev: u64::from(info.dwVolumeSerialNumber),
+            ino: (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+            size: (u64::from(info.nFileSizeHigh) << 32) | u64::from(info.nFileSizeLow),
+            mtime_ns: (i128::from(ticks) - 116_444_736_000_000_000) * 100,
+        }
+    }
+
+    pub(crate) fn value(&self) -> Value {
+        serde_json::json!({"dev":self.dev,"ino":self.ino,"size":self.size,"mtime_ns":self.mtime_ns.to_string()})
+    }
+
+    fn matches(&self, value: &Value) -> bool {
+        value.as_object().is_some_and(|object| {
+            object.len() == 4
+                && value.get("dev").and_then(Value::as_u64) == Some(self.dev)
+                && value.get("ino").and_then(Value::as_u64) == Some(self.ino)
+                && value.get("size").and_then(Value::as_u64) == Some(self.size)
+                && value.get("mtime_ns").and_then(Value::as_str).and_then(|value| value.parse::<i128>().ok()) == Some(self.mtime_ns)
+        })
+    }
+}
+
+#[cfg(windows)]
+fn handle_info(file: &File) -> io::Result<windows_sys::Win32::Storage::FileSystem::BY_HANDLE_FILE_INFORMATION> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::GetFileInformationByHandle;
+    let mut info = std::mem::MaybeUninit::uninit();
+    // SAFETY: File owns a live handle and the API initializes the output structure on success.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle() as _, info.as_mut_ptr()) } == 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(unsafe { info.assume_init() })
+}
+
 #[derive(Clone, Serialize, Deserialize)]
 struct Record {
     path: PathBuf,
@@ -35,14 +140,40 @@ pub struct SavedArtifact {
     pub path: PathBuf,
 }
 
-/// No manifest entry exists yet. Dropping this removes the owned copy, never its user-owned source.
+/// An unpublished private copy, or a read handle for an already registered immutable artifact. Only the former
+/// is removed on drop; replaying a retained artifact neither duplicates it nor changes its provenance.
 pub struct StagedArtifact {
-    file: NamedTempFile,
+    file: StagedFile,
     id: String,
+    identity: FileIdentity,
 }
+
+enum StagedFile {
+    Owned(NamedTempFile),
+    Registered { path: PathBuf, handle: File },
+}
+
 impl StagedArtifact {
     pub fn path(&self) -> &Path {
-        self.file.path()
+        match &self.file {
+            StagedFile::Owned(file) => file.path(),
+            StagedFile::Registered { path, .. } => path,
+        }
+    }
+
+    pub(crate) fn verify(&self) -> Result<(), OpError> {
+        let path = local(self.path())?;
+        let opened = match &self.file {
+            StagedFile::Owned(file) => file.as_file(),
+            StagedFile::Registered { handle, .. } => handle,
+        };
+        if path != self.path()
+            || FileIdentity::at(&path).map_err(failed)? != self.identity
+            || FileIdentity::of(opened).map_err(failed)? != self.identity
+        {
+            return Err(refused("stale", "The retained audio changed; choose the source again."));
+        }
+        Ok(())
     }
 }
 
@@ -55,7 +186,19 @@ impl Artifacts {
     pub fn new(state_dir: &Path) -> Result<Self, OpError> {
         let state_dir = std::fs::canonicalize(state_dir).map_err(failed)?;
         let root = state_dir.join("artifacts");
-        make_private_dir(&root).map_err(failed)?;
+        // Creating a missing directory is safe; repairing an existing one before validation could chmod a
+        // symlink's outside target. The enclosing state folder is already owner-only.
+        let mut builder = std::fs::DirBuilder::new();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::DirBuilderExt;
+            builder.mode(0o700);
+        }
+        match builder.create(&root) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(failed(error)),
+        }
         let checked = local(&root)?;
         if checked != root || !checked.is_dir() {
             return Err(refused("outside_root", "The artifact folder must stay inside this profile's state folder."));
@@ -93,10 +236,27 @@ impl Artifacts {
     }
 
     /// Copy through an opened regular file, bounded by its initial length. A growing/changing file is not a snapshot.
-    pub async fn stage(&self, ctx: &Ctx, source: &Path, signal: &Signal) -> Result<StagedArtifact, OpError> {
+    pub(crate) async fn stage(
+        &self,
+        ctx: &Ctx,
+        source: &Path,
+        expected: Option<&Value>,
+        signal: &Signal,
+    ) -> Result<StagedArtifact, OpError> {
         check(signal)?;
         let source = ctx.approved(source)?;
-        self.copy(source, signal).await
+        self.copy(source, expected.cloned(), signal).await
+    }
+
+    pub(crate) fn stage_registered(&self, ctx: &Ctx, id: &str, signal: &Signal) -> Result<StagedArtifact, OpError> {
+        check(signal)?;
+        let path = self.resolve(ctx, id)?;
+        let handle = open_regular(&path).map_err(failed)?;
+        let identity = FileIdentity::of(&handle).map_err(failed)?;
+        if identity.size > MAX_BYTES {
+            return Err(refused("too_large", "This artifact exceeds the 50 MiB media limit."));
+        }
+        Ok(StagedArtifact { file: StagedFile::Registered { path, handle }, id: id.to_owned(), identity })
     }
 
     /// Native-only promotion of one call's owned scratch. A model's `file` source cannot use this grant.
@@ -107,17 +267,20 @@ impl Artifacts {
         if root != scratch.path() || !root.starts_with(ctx.paths().state_dir.join("scratch")) || !source.starts_with(&root) {
             return Err(refused("outside_root", "This file does not belong to this call's native scratch."));
         }
-        self.copy(source, signal).await
+        self.copy(source, None, signal).await
     }
 
-    async fn copy(&self, source: PathBuf, signal: &Signal) -> Result<StagedArtifact, OpError> {
+    async fn copy(&self, source: PathBuf, expected: Option<Value>, signal: &Signal) -> Result<StagedArtifact, OpError> {
         let root = self.checked_root()?;
         let signal = signal.clone();
         tokio::task::spawn_blocking(move || {
             check(&signal)?;
             let mut input = open_regular(&source).map_err(failed)?;
-            let before = input.metadata().map_err(failed)?;
-            if before.len() > MAX_BYTES {
+            let source_identity = FileIdentity::of(&input).map_err(failed)?;
+            if expected.as_ref().is_some_and(|expected| !source_identity.matches(expected)) {
+                return Err(refused("stale", "The selected file changed before it could be copied; choose it again."));
+            }
+            if source_identity.size > MAX_BYTES {
                 return Err(refused("too_large", "This file exceeds the 50 MiB media limit; choose a shorter excerpt."));
             }
             let extension = source.extension().and_then(|part| part.to_str()).filter(|extension| {
@@ -125,7 +288,7 @@ impl Artifacts {
             });
             let suffix = format!(".{}", extension.unwrap_or("bin"));
             let mut file = tempfile::Builder::new().prefix("a-").rand_bytes(24).suffix(&suffix).tempfile_in(root).map_err(failed)?;
-            let mut left = before.len();
+            let mut left = source_identity.size;
             let mut buffer = [0u8; 64 * 1024];
             while left != 0 {
                 check(&signal)?;
@@ -137,14 +300,14 @@ impl Artifacts {
                 file.write_all(&buffer[..got]).map_err(failed)?;
                 left -= got as u64;
             }
-            let after = input.metadata().map_err(failed)?;
-            if before.len() != after.len() || before.modified().ok() != after.modified().ok() {
+            if source_identity != FileIdentity::of(&input).map_err(failed)? {
                 return Err(refused("changed", "The source file changed while Kumi copied it; export it again first."));
             }
             check(&signal)?;
             file.as_file().sync_all().map_err(failed)?;
             let id = file.path().file_stem().and_then(|name| name.to_str()).ok_or_else(|| failed("invalid artifact name"))?.to_owned();
-            Ok(StagedArtifact { file, id })
+            let identity = FileIdentity::of(file.as_file()).map_err(failed)?;
+            Ok(StagedArtifact { file: StagedFile::Owned(file), id, identity })
         })
         .await
         .map_err(failed)?
@@ -154,12 +317,13 @@ impl Artifacts {
         &self,
         ctx: &Ctx,
         source: &Path,
+        expected: Option<&Value>,
         kind: &str,
         mime: &str,
         tool: &str,
         signal: &Signal,
     ) -> Result<SavedArtifact, OpError> {
-        self.publish(ctx, self.stage(ctx, source, signal).await?, kind, mime, tool, signal).await
+        self.publish(ctx, self.stage(ctx, source, expected, signal).await?, kind, mime, tool, signal).await
     }
 
     pub async fn publish(
@@ -208,19 +372,34 @@ impl Artifacts {
         };
         check(signal)?;
         let root = self.checked_root()?;
-        for (file, _, _) in &files {
-            if file.path().parent() != Some(root.as_path()) || local(file.path())? != file.path() {
+        let at = now_ms();
+        let mut added = Vec::with_capacity(N);
+        for (file, kind, mime) in &files {
+            if file.path().parent() != Some(root.as_path()) {
                 return Err(refused("outside_root", "This staged file does not belong to this artifact store."));
             }
-            if self.records.borrow().contains_key(&file.id) {
-                return Err(refused("artifact_exists", "An artifact already has this id."));
+            file.verify()?;
+            match &file.file {
+                StagedFile::Owned(_) => {
+                    if self.records.borrow().contains_key(&file.id) {
+                        return Err(refused("artifact_exists", "An artifact already has this id."));
+                    }
+                    added.push((
+                        file.id.clone(),
+                        Record { path: file.path().to_path_buf(), kind: (*kind).into(), mime: (*mime).into(), tool: tool.into(), at },
+                    ));
+                }
+                StagedFile::Registered { .. } => {
+                    if self.resolve(ctx, &file.id)? != file.path() {
+                        return Err(refused("stale", "The retained audio is no longer the registered artifact."));
+                    }
+                }
             }
         }
-        let at = now_ms();
-        let added: [(String, Record); N] = std::array::from_fn(|i| {
-            let (file, kind, mime) = &files[i];
-            (file.id.clone(), Record { path: file.path().to_path_buf(), kind: (*kind).into(), mime: (*mime).into(), tool: tool.into(), at })
-        });
+        let saved = std::array::from_fn(|i| SavedArtifact { id: files[i].0.id.clone(), path: files[i].0.path().to_path_buf() });
+        if added.is_empty() {
+            return Ok(saved);
+        }
         let existing = self.records.borrow().clone();
         let (document, added) = tokio::task::spawn_blocking(move || -> Result<_, OpError> {
             let mut document = serde_json::to_value(existing.as_ref()).map_err(failed)?;
@@ -236,15 +415,17 @@ impl Artifacts {
         // `keep` happens before the manifest can refer to a file. A failed commit drops only these owned copies.
         let mut retained = Vec::with_capacity(N);
         for (file, _, _) in files {
-            let (handle, path) = file.file.keep().map_err(|error| failed(error.error))?;
-            retained.push(PendingFile { handle: Some(handle), path, committed: false });
+            if let StagedFile::Owned(file) = file.file {
+                let (handle, path) = file.keep().map_err(|error| failed(error.error))?;
+                retained.push(PendingFile { handle: Some(handle), path, committed: false });
+            }
         }
         // Once queued, a forcibly dropped caller cannot know whether the writer committed. Keep those copies rather
         // than deleting files a manifest may now name; a known write failure can still roll the whole group back.
         for file in &mut retained {
             file.committed = true;
         }
-        if let Err(error) = ctx.snapshots().write_durably("artifacts", document).await {
+        if let Err(error) = ctx.snapshots().write_durably_bounded("artifacts", document, MAX_MANIFEST_BYTES as usize).await {
             for file in &mut retained {
                 file.committed = false;
             }
@@ -252,11 +433,9 @@ impl Artifacts {
         }
         let mut records = self.records.borrow_mut();
         let records = Arc::make_mut(&mut records);
-        let saved = added.map(|(id, record)| {
-            let saved = SavedArtifact { id: id.clone(), path: record.path.clone() };
+        for (id, record) in added {
             records.insert(id, record);
-            saved
-        });
+        }
         Ok(saved)
     }
 
@@ -308,9 +487,16 @@ impl Drop for PendingFile {
 }
 
 /// Ctx borrows its roots for this check; a file resolution does not allocate a copy of the root list.
-pub fn approved(path: &Path, library: &[PathBuf], media: &[PathBuf], artifacts: &Artifacts) -> Result<PathBuf, OpError> {
+pub fn approved<'a>(
+    path: &Path,
+    library: &[PathBuf],
+    mut media: impl Iterator<Item = &'a PathBuf>,
+    artifacts: &Artifacts,
+) -> Result<PathBuf, OpError> {
     let path = local(path)?;
-    if !path.is_file() || !(library.iter().chain(media).any(|root| path.starts_with(root)) || artifacts.registered(&path)) {
+    if !path.is_file()
+        || !(library.iter().any(|root| path.starts_with(root)) || media.any(|root| path.starts_with(root)) || artifacts.registered(&path))
+    {
         return Err(refused("outside_root", "Use a regular file inside an approved library/media folder, or a registered artifact."));
     }
     Ok(path)
@@ -422,8 +608,8 @@ mod tests {
         std::fs::write(&source, b"current audio").unwrap();
         std::fs::write(&reference, b"reference audio").unwrap();
         let signal = Signal::new();
-        let current = ctx.artifacts().stage(ctx, &source, &signal).await.unwrap();
-        let other = ctx.artifacts().stage(ctx, &reference, &signal).await.unwrap();
+        let current = ctx.artifacts().stage(ctx, &source, None, &signal).await.unwrap();
+        let other = ctx.artifacts().stage(ctx, &reference, None, &signal).await.unwrap();
         let paths = [current.path().to_path_buf(), other.path().to_path_buf()];
         // A directory cannot be replaced by the manifest's regular file, on any supported platform.
         std::fs::create_dir(ctx.paths().state_dir.join("artifacts.json")).unwrap();
@@ -460,7 +646,7 @@ mod tests {
         let fixture = Fixture::new();
         let source = fixture.root.join("too-large.wav");
         File::create(&source).unwrap().set_len(MAX_BYTES + 1).unwrap();
-        let result = fixture.ctx.artifacts().stage(&fixture.ctx, &source, &Signal::new()).await;
+        let result = fixture.ctx.artifacts().stage(&fixture.ctx, &source, None, &Signal::new()).await;
         assert!(matches!(result, Err(OpError::Refused { code: "too_large", .. })));
         assert_eq!(std::fs::read_dir(&fixture.ctx.artifacts().root).unwrap().count(), 0);
         assert_eq!(std::fs::metadata(source).unwrap().len(), MAX_BYTES + 1);
@@ -479,5 +665,53 @@ mod tests {
         let store = Artifacts::new(&fixture.ctx.paths().state_dir).unwrap();
         assert_eq!(store.resolve(&fixture.ctx, "a-untrusted").unwrap_err().code(), "outside_root");
         assert_eq!(std::fs::read(source).unwrap(), b"user-owned");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_planted_artifact_directory_link_never_repairs_its_outside_targets_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let fixture = Fixture::new();
+        let outside = fixture.root.join("outside");
+        std::fs::create_dir(&outside).unwrap();
+        std::fs::set_permissions(&outside, std::fs::Permissions::from_mode(0o751)).unwrap();
+        std::fs::write(outside.join("keep.wav"), b"outside data").unwrap();
+        let root = fixture.ctx.paths().state_dir.join("artifacts");
+        std::fs::remove_dir(&root).unwrap();
+        std::os::unix::fs::symlink(&outside, &root).unwrap();
+        assert!(matches!(Artifacts::new(&fixture.ctx.paths().state_dir), Err(OpError::Refused { code: "outside_root", .. })));
+        assert_eq!(std::fs::metadata(&outside).unwrap().permissions().mode() & 0o777, 0o751);
+        assert_eq!(std::fs::read(outside.join("keep.wav")).unwrap(), b"outside data");
+    }
+
+    #[tokio::test]
+    async fn opened_source_identity_must_match_the_selected_sound() {
+        let fixture = Fixture::new();
+        let source = fixture.root.join("selected.wav");
+        std::fs::write(&source, b"selected audio").unwrap();
+        let approved = File::open(&source).unwrap();
+        let modified = approved.metadata().unwrap().modified().unwrap();
+        let expected = file_identity(&approved).unwrap();
+        drop(approved);
+        let selected = fixture.ctx.artifacts().stage(&fixture.ctx, &source, Some(&expected), &Signal::new()).await.unwrap();
+        assert_eq!(std::fs::read(selected.path()).unwrap(), b"selected audio");
+        drop(selected);
+        let mut other_device = expected.clone();
+        other_device["dev"] = Value::from(expected["dev"].as_u64().unwrap() ^ 1);
+        assert!(matches!(
+            fixture.ctx.artifacts().stage(&fixture.ctx, &source, Some(&other_device), &Signal::new()).await,
+            Err(OpError::Refused { code: "stale", .. })
+        ));
+        std::fs::rename(&source, fixture.root.join("old.wav")).unwrap();
+        std::fs::write(&source, b"replaced audio").unwrap();
+        let replacement = OpenOptions::new().write(true).open(&source).unwrap();
+        replacement.set_times(std::fs::FileTimes::new().set_modified(modified)).unwrap();
+        drop(replacement);
+        let result =
+            fixture.ctx.artifacts().add(&fixture.ctx, &source, Some(&expected), "audio", "audio/wav", "change", &Signal::new()).await;
+        assert!(matches!(result, Err(OpError::Refused { code: "stale", .. })));
+        assert!(fixture.ctx.artifacts().records.borrow().is_empty());
+        assert_eq!(std::fs::read(source).unwrap(), b"replaced audio");
+        assert_eq!(std::fs::read_dir(&fixture.ctx.artifacts().root).unwrap().count(), 0);
     }
 }

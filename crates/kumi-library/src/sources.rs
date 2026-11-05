@@ -517,7 +517,7 @@ pub fn place(path: Option<&str>, label: &str, kind: SourceKind) -> Option<Source
 }
 
 /// Reject network/device namespaces before touching the filesystem, on every host (not just Windows).
-fn local_absolute_path(path: &str) -> bool {
+pub fn local_absolute_path(path: &str) -> bool {
     if path.chars().any(char::is_control) {
         return false;
     }

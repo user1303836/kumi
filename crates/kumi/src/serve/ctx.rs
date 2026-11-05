@@ -356,6 +356,7 @@ pub struct Ctx {
     env: Env,
     library_roots: RefCell<Vec<PathBuf>>,
     media_roots: Vec<PathBuf>,
+    private_roots: Vec<PathBuf>,
     media: Media,
     artifacts: super::artifacts::Artifacts,
     maps: super::map::MapStore,
@@ -417,6 +418,9 @@ impl Ctx {
         let lease = super::lease::Lease::new(&args.kumi_home, args.daw.as_str());
         let artifacts = super::artifacts::Artifacts::new(&state_dir).map_err(|error| error.reason().to_owned())?;
         let maps = super::map::MapStore::new(&state_dir).map_err(|error| error.reason().to_owned())?;
+        let private_roots = protected_roots();
+        let library_roots = granted("library", args.library_roots, &state_dir, &private_roots);
+        let media_roots = media_granted(args.media_roots, &state_dir, &private_roots);
         let ctx = Rc::new_cyclic(|me| Ctx {
             me: me.clone(),
             daw: args.daw,
@@ -427,8 +431,9 @@ impl Ctx {
             library: super::library::LibraryState::default(),
             paths: Paths { state_dir, kumi_home: args.kumi_home },
             env,
-            library_roots: RefCell::new(granted("library", args.library_roots)),
-            media_roots: granted("media", args.media_roots),
+            library_roots: RefCell::new(library_roots),
+            media_roots,
+            private_roots,
             media: Media { tools: args.tools },
             shutdown: Signal::new(),
             offered: Cell::new(super::registry::OPERATIONS),
@@ -499,13 +504,15 @@ impl Ctx {
         self.library_roots.borrow().clone()
     }
 
-    /// A folder the producer just approved joins the library's roots for this run (the host keeps it in its settings
-    /// for the next): the root as granted. `library-roots.json` shows the roots now: for the UI, never read back as
-    /// permission.
-    pub fn add_library_root(&self, root: &Path) -> std::io::Result<PathBuf> {
-        let root = std::fs::canonicalize(root)?;
-        if !root.is_dir() {
-            return Err(std::io::Error::new(std::io::ErrorKind::NotADirectory, format!("{} isn't a folder", root.display())));
+    /// Add an already checked canonical folder. The library operation validates it off the runtime thread;
+    /// re-resolving it here could follow a link substituted after that validation. Saved projections grant nothing.
+    pub(crate) fn add_checked_library_root(&self, root: PathBuf) -> Result<PathBuf, OpError> {
+        if !safe_grant(&root, &self.paths.state_dir, &self.private_roots) {
+            return Err(OpError::Refused {
+                code: "unsafe_folder",
+                reason: "Choose a dedicated sample folder, not a filesystem root, home, Hermes profile or runtime state folder.".into(),
+                owner: None,
+            });
         }
         let added = {
             let mut roots = self.library_roots.borrow_mut();
@@ -521,9 +528,16 @@ impl Ctx {
         Ok(root)
     }
 
-    /// The host's own media folders, only for placing one of its files in the DAW: as granted, like the library's.
-    pub fn media_roots(&self) -> &[PathBuf] {
-        &self.media_roots
+    /// Currently existing media roots. Missing roots retain their frozen ancestor and lexical suffix, not permission
+    /// to follow a later symlink or junction. The host may create its generated-media folder after this runtime starts.
+    pub fn media_roots(&self) -> Vec<PathBuf> {
+        self.media_roots
+            .iter()
+            .filter_map(|root| {
+                let found = root.to_str().and_then(kumi_library::sources::canonical_local_path)?;
+                (found == *root && found.is_dir() && safe_grant(&found, &self.paths.state_dir, &self.private_roots)).then_some(found)
+            })
+            .collect()
     }
 
     pub fn media(&self) -> &Media {
@@ -543,7 +557,8 @@ impl Ctx {
     }
 
     pub fn approved(&self, path: &Path) -> Result<PathBuf, OpError> {
-        super::artifacts::approved(path, &self.library_roots.borrow(), &self.media_roots, &self.artifacts)
+        let media = self.media_roots.iter().filter(|root| safe_grant(root, &self.paths.state_dir, &self.private_roots));
+        super::artifacts::approved(path, &self.library_roots.borrow(), media, &self.artifacts)
     }
 
     pub fn snapshots(&self) -> &Snapshots {
@@ -684,20 +699,145 @@ impl Ctx {
 }
 
 /// The folders granted at start, each resolved on disk now. One that isn't a folder there now grants nothing this run.
-fn granted(kind: &str, roots: Vec<PathBuf>) -> Vec<PathBuf> {
+fn granted(kind: &str, roots: Vec<PathBuf>, state: &Path, private: &[PathBuf]) -> Vec<PathBuf> {
     let mut granted: Vec<PathBuf> = Vec::with_capacity(roots.len());
     for root in roots {
-        match std::fs::canonicalize(&root) {
-            Ok(found) if found.is_dir() => {
-                if !granted.contains(&found) {
-                    granted.push(found);
-                }
-            }
-            Ok(_) => super::say(&format!("kumi serve: {kind} root {} isn't a folder; left out", root.display())),
-            Err(error) => super::say(&format!("kumi serve: {kind} root {} isn't there ({error}); left out", root.display())),
+        let found = pending_media_root(&root).filter(|root| root.is_dir() && safe_grant(root, state, private));
+        match found {
+            Some(found) if !granted.contains(&found) => granted.push(found),
+            Some(_) => {}
+            None => super::say(&format!("kumi serve: a {kind} root is not a safe local folder; left out")),
         }
     }
     granted
+}
+
+fn media_granted(roots: Vec<PathBuf>, state: &Path, private: &[PathBuf]) -> Vec<PathBuf> {
+    let mut granted = Vec::with_capacity(roots.len());
+    for root in roots {
+        match pending_media_root(&root).filter(|root| safe_grant(root, state, private)) {
+            Some(found) if !granted.contains(&found) => granted.push(found),
+            Some(_) => {}
+            None => super::say("kumi serve: a media root is not a safe local or pending folder; left out"),
+        }
+    }
+    granted
+}
+
+fn safe_grant(root: &Path, state: &Path, private: &[PathBuf]) -> bool {
+    let Some(parent) = root.parent() else { return false };
+    if state.starts_with(root) || private.iter().any(|excluded| excluded.starts_with(root)) {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = match std::fs::symlink_metadata(root) {
+            Ok(metadata) if metadata.is_dir() => metadata,
+            Ok(_) => return false,
+            Err(error) => return error.kind() == std::io::ErrorKind::NotFound,
+        };
+        let Ok(parent_metadata) = std::fs::metadata(parent) else { return false };
+        if metadata.dev() != parent_metadata.dev() {
+            return false; // A mounted disk/volume's root is too broad, even if it holds no home.
+        }
+        // macOS firmlinks need not change canonical path spelling. Compare filesystem identities with protected
+        // ancestors too: /System/Volumes/Data/Users is the same directory as /Users, not a new sample folder.
+        for protected in private.iter().map(PathBuf::as_path).chain(std::iter::once(state)) {
+            for ancestor in protected.ancestors() {
+                match std::fs::metadata(ancestor) {
+                    Ok(found) if found.dev() == metadata.dev() && found.ino() == metadata.ino() => return false,
+                    Ok(found) => {
+                        // Data's root need not differ in device from /System/Volumes. Check whether this root
+                        // exposes a protected tree at the same root-relative path, as APFS firmlinks do.
+                        if ancestor == protected {
+                            if let Ok(relative) = protected.strip_prefix("/") {
+                                let below = root.join(relative);
+                                if let Some(below) = below.to_str().and_then(kumi_library::sources::canonical_local_path) {
+                                    if std::fs::metadata(below).is_ok_and(|alias| alias.dev() == found.dev() && alias.ino() == found.ino())
+                                    {
+                                        return false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(_) => return false,
+                }
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = parent;
+    true
+}
+
+fn protected_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    for name in ["HOME", "USERPROFILE"] {
+        if let Some(home) = std::env::var_os(name).and_then(|home| pending_media_root(Path::new(&home))) {
+            if !roots.contains(&home) {
+                roots.push(home);
+            }
+        }
+    }
+    let hermes = std::env::var_os("HERMES_HOME").map(PathBuf::from).or_else(|| roots.first().map(|home| home.join(".hermes")));
+    if let Some(hermes) = hermes.and_then(|path| pending_media_root(&path)) {
+        if let Some(parent) = hermes.parent() {
+            if !roots.iter().any(|root| root == parent) {
+                roots.push(parent.to_path_buf());
+            }
+        }
+        if !roots.contains(&hermes) {
+            roots.push(hermes);
+        }
+    }
+    roots
+}
+
+/// Resolve the deepest existing ancestor once, then retain the missing suffix literally. A later resolution of a
+/// source checks every component without following links, so creating a folder works but retargeting it cannot grant
+/// its new destination. Explicit startup aliases such as macOS /var are frozen to their canonical local ancestor.
+fn pending_media_root(root: &Path) -> Option<PathBuf> {
+    use kumi_library::sources::{canonical_local_path, local_absolute_path};
+    if !root.to_str().is_some_and(local_absolute_path) {
+        return None;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        // Reject redirection before even looking below an existing component: an apparent local drive path can
+        // otherwise cause network authentication through a junction.
+        let mut prefix = PathBuf::new();
+        for component in root.components() {
+            prefix.push(component);
+            if matches!(component, std::path::Component::Prefix(_)) {
+                continue;
+            }
+            match std::fs::symlink_metadata(&prefix) {
+                Ok(meta) if meta.is_dir() && !meta.file_type().is_symlink() && meta.file_attributes() & 0x400 == 0 => {}
+                Ok(_) => return None,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(_) => return None,
+            }
+        }
+    }
+    for ancestor in root.ancestors() {
+        match std::fs::symlink_metadata(ancestor) {
+            Ok(_) => {
+                let frozen = std::fs::canonicalize(ancestor).ok()?;
+                if !frozen.is_dir() || canonical_local_path(frozen.to_str()?)? != frozen {
+                    return None;
+                }
+                let suffix = root.strip_prefix(ancestor).ok()?;
+                return Some(if suffix.as_os_str().is_empty() { frozen } else { frozen.join(suffix) });
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return None,
+        }
+    }
+    None
 }
 
 /// A folder only its owner can open: made with its parents when it isn't there, and made the owner's alone when it is.
@@ -822,14 +962,129 @@ mod tests {
         let resolved = |name: &str| std::fs::canonicalize(dir.path().join(name)).unwrap();
         assert_eq!(ctx.library_roots(), [resolved("Samples")], "a root not there grants nothing; one root named twice is one");
         assert_eq!(ctx.media_roots(), [resolved("media")], "a file is no root");
-        assert_eq!(ctx.add_library_root(&dir.path().join("Drums")).unwrap(), resolved("Drums"));
-        ctx.add_library_root(&dir.path().join("Drums")).unwrap();
-        assert!(ctx.add_library_root(&dir.path().join("Gone")).is_err());
-        assert!(ctx.add_library_root(&dir.path().join("kick.wav")).is_err());
+        assert_eq!(ctx.add_checked_library_root(resolved("Drums")).unwrap(), resolved("Drums"));
+        ctx.add_checked_library_root(resolved("Drums")).unwrap();
         assert_eq!(ctx.library_roots(), [resolved("Samples"), resolved("Drums")]);
         ctx.snapshots().flush();
         let shown: Value = serde_json::from_slice(&std::fs::read(dir.path().join("state/library-roots.json")).unwrap()).unwrap();
         assert_eq!(shown["roots"].as_array().map(Vec::len), Some(2));
         assert!(ctx.media().installed_only() && ctx.media().tool("ffmpeg").is_none());
+    }
+
+    fn media_context(dir: &Path, roots: Vec<PathBuf>) -> Rc<Ctx> {
+        Ctx::new(
+            Args {
+                state_dir: dir.join("state"),
+                kumi_home: dir.join("home"),
+                daw: DawId::Reaper,
+                library_roots: Vec::new(),
+                media_roots: roots,
+                tools: BTreeMap::new(),
+            },
+            Env::new(),
+            Default::default(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn pending_media_folders_can_appear_but_traversal_and_wide_roots_grant_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let root = base.join("media/generated/audio");
+        let ctx = media_context(&base, vec![root.clone(), base.clone(), base.join("bad/../outside")]);
+        assert!(ctx.media_roots().is_empty());
+        std::fs::create_dir_all(&root).unwrap();
+        let file = root.join("generated.wav");
+        std::fs::write(&file, b"generated audio").unwrap();
+        assert_eq!(ctx.approved(&file).unwrap(), file.canonicalize().unwrap());
+        assert_eq!(ctx.media_roots(), [root.canonicalize().unwrap()]);
+        let outside = base.join("outside.wav");
+        std::fs::write(&outside, b"not approved").unwrap();
+        assert_eq!(ctx.approved(&outside).unwrap_err().code(), "outside_root");
+        assert_eq!(ctx.add_checked_library_root(dir.path().canonicalize().unwrap()).unwrap_err().code(), "unsafe_folder");
+        assert_eq!(ctx.add_checked_library_root(ctx.paths().state_dir.clone()).unwrap_err().code(), "unsafe_folder");
+        ctx.snapshots().flush();
+    }
+
+    #[cfg(any(unix, windows))]
+    fn directory_link(target: &Path, link: &Path) {
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(target, link).unwrap();
+        #[cfg(windows)]
+        {
+            let cmd = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
+            let output = std::process::Command::new(cmd).args(["/d", "/c", "mklink", "/J"]).arg(link).arg(target).output().unwrap();
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+        }
+    }
+
+    #[cfg(any(unix, windows))]
+    #[test]
+    fn a_pending_media_descendant_cannot_become_a_link_or_junction_to_another_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap().join("media");
+        std::fs::create_dir(&base).unwrap();
+        let ctx = media_context(dir.path(), vec![base.join("generated/audio")]);
+        let outside = dir.path().canonicalize().unwrap().join("outside");
+        std::fs::create_dir_all(outside.join("audio")).unwrap();
+        let escaped = outside.join("audio/private.wav");
+        std::fs::write(&escaped, b"outside").unwrap();
+        directory_link(&outside, &base.join("generated"));
+        assert_eq!(ctx.approved(&base.join("generated/audio/private.wav")).unwrap_err().code(), "outside_root");
+        assert_eq!(ctx.approved(&escaped).unwrap_err().code(), "outside_root");
+        assert!(ctx.media_roots().is_empty());
+        assert_eq!(std::fs::read(escaped).unwrap(), b"outside");
+        ctx.snapshots().flush();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pending_grant_freezes_the_existing_ancestor_not_its_retargetable_alias() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let original = base.join("original");
+        let outside = base.join("outside");
+        std::fs::create_dir(&original).unwrap();
+        std::fs::create_dir(&outside).unwrap();
+        let alias = base.join("alias");
+        directory_link(&original, &alias);
+        let ctx = media_context(&base, vec![alias.join("generated")]);
+        std::fs::remove_file(&alias).unwrap();
+        directory_link(&outside, &alias);
+        for root in [&original, &outside] {
+            std::fs::create_dir(root.join("generated")).unwrap();
+            std::fs::write(root.join("generated/take.wav"), b"audio").unwrap();
+        }
+        let approved = original.join("generated/take.wav");
+        assert_eq!(ctx.approved(&approved).unwrap(), approved.canonicalize().unwrap());
+        assert_eq!(ctx.approved(&outside.join("generated/take.wav")).unwrap_err().code(), "outside_root");
+        assert_eq!(ctx.approved(&alias.join("generated/take.wav")).unwrap_err().code(), "outside_root");
+        ctx.snapshots().flush();
+    }
+
+    #[test]
+    fn startup_grants_refuse_canonical_homes_profiles_and_state_ancestors() {
+        let dir = tempfile::tempdir().unwrap();
+        let base = dir.path().canonicalize().unwrap();
+        let home = base.join("people/producer");
+        let hermes = base.join("profile-parent/hermes");
+        let state = hermes.join("plugin/state");
+        let samples = base.join("Samples");
+        for folder in [&home, &state, &samples] {
+            std::fs::create_dir_all(folder).unwrap();
+        }
+        let private = vec![home.clone(), hermes.clone(), hermes.parent().unwrap().to_path_buf()];
+        let roots = vec![
+            base.ancestors().last().unwrap().to_path_buf(),
+            home.parent().unwrap().to_path_buf(),
+            home,
+            hermes,
+            state.clone(),
+            state.parent().unwrap().to_path_buf(),
+            samples.clone(),
+        ];
+        assert_eq!(granted("library", roots.clone(), &state, &private), [samples.clone()]);
+        assert_eq!(media_granted(roots, &state, &private), [samples]);
     }
 }

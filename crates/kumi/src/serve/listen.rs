@@ -70,11 +70,25 @@ impl<'a> Source<'a> {
         // Neither a saved artifact nor a map snapshot is itself a permission grant.
         ctx.approved(&path)
     }
+
+    async fn stage(&self, ctx: &Ctx, signal: &Signal) -> Result<StagedArtifact, OpError> {
+        match self {
+            Self::File(file) => ctx.artifacts().stage(ctx, Path::new(file), None, signal).await,
+            Self::Sound { id, revision } => ctx.maps().stage(ctx, id, revision, signal).await,
+            Self::Artifact(id) => ctx.artifacts().stage_registered(ctx, id, signal),
+        }
+    }
 }
 
 /// Authorize a file, current map sound or registered artifact without staging it or running DSP.
 pub async fn resolve_source(ctx: &Ctx, value: &Value, signal: &Signal) -> Result<PathBuf, OpError> {
     Source::parse(value)?.resolve(ctx, signal).await
+}
+
+/// Stage a structured source, retaining map identity checks and reusing registered files.
+/// Guarded capture uses this for its authorized comparison before touching the DAW.
+pub async fn stage_source(ctx: &Ctx, value: &Value, signal: &Signal) -> Result<StagedArtifact, OpError> {
+    Source::parse(value)?.stage(ctx, signal).await
 }
 
 fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
@@ -88,18 +102,18 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         )?;
         let reference = call.args.get("compare_to").map(Source::parse).transpose()?;
         // Resolve both before making any copy or starting any DSP.
-        let source = source.resolve(ctx, &call.signal).await?;
-        let reference = match reference {
+        let source_path = source.resolve(ctx, &call.signal).await?;
+        let reference_path = match &reference {
             Some(reference) => Some(reference.resolve(ctx, &call.signal).await?),
             None => None,
         };
-        let staged = ctx.artifacts().stage(ctx, &source, &call.signal).await?;
+        let staged = source.stage(ctx, &call.signal).await?;
         let staged_reference = match &reference {
-            Some(path) => Some(ctx.artifacts().stage(ctx, path, &call.signal).await?),
+            Some(reference) => Some(reference.stage(ctx, &call.signal).await?),
             None => None,
         };
-        let source = measure(ctx, staged, &source, &call.signal).await?;
-        let reference = match (staged_reference, reference) {
+        let source = measure(ctx, staged, &source_path, &call.signal).await?;
+        let reference = match (staged_reference, reference_path) {
             (Some(staged), Some(path)) => Some(measure(ctx, staged, &path, &call.signal).await?),
             _ => None,
         };
@@ -127,6 +141,7 @@ pub struct MeasuredAudio {
 /// `original_name` contributes only its basename to the canonical Analysis, never an absolute input path.
 pub async fn measure(ctx: &Ctx, file: StagedArtifact, original_name: &Path, signal: &Signal) -> Result<MeasuredAudio, OpError> {
     check(signal)?;
+    file.verify()?;
     let path = file.path().to_str().ok_or_else(|| OpError::Invalid { reason: "The staged audio path is not valid UTF-8.".into() })?;
     let measured = audio::hear(
         path,
@@ -138,6 +153,7 @@ pub async fn measure(ctx: &Ctx, file: StagedArtifact, original_name: &Path, sign
     )
     .await;
     check(signal)?;
+    file.verify()?;
     let mut metrics = measured.map_err(|error| OpError::Failed { reason: error.to_string() })?;
     metrics.file = original_name
         .file_name()
@@ -331,6 +347,7 @@ mod tests {
         // Artifacts remain usable when the user's original disappears, and compare_to uses the same union.
         std::fs::remove_file(&source).unwrap();
         std::fs::remove_file(&reference).unwrap();
+        let before_replay = fixture.artifact_files();
         let replay = fixture
             .listen(json!({
                 "source": {"artifact_id": result["compare"]["artifact_id"]},
@@ -340,6 +357,9 @@ mod tests {
             .unwrap();
         assert!(replay["compare"]["differences"]["loudness"]["differenceLu"].as_f64().unwrap() < -5.8);
         assert_eq!(std::fs::read(fixture.retained(&replay)).unwrap(), reference_bytes);
+        assert_eq!(replay["artifact_id"], result["compare"]["artifact_id"]);
+        assert_eq!(replay["compare"]["artifact_id"], result["artifact_id"]);
+        assert_eq!(fixture.artifact_files(), before_replay, "artifact replay must not create more retained copies");
     }
 
     #[tokio::test]
@@ -362,7 +382,7 @@ mod tests {
         let fixture = Fixture::new();
         let (path, original) = fixture.tone("immutable.wav", 750.0, 0.2);
         let signal = Signal::new();
-        let staged = fixture.ctx.artifacts().stage(&fixture.ctx, &path, &signal).await.unwrap();
+        let staged = fixture.ctx.artifacts().stage(&fixture.ctx, &path, None, &signal).await.unwrap();
         let replacement = pcm(3000.0, 0.8);
         std::fs::write(&path, &replacement).unwrap();
         let measured = measure(&fixture.ctx, staged, &path, &signal).await.unwrap();
@@ -450,7 +470,7 @@ mod tests {
         signal.cancel();
         assert_eq!(fixture.call(json!({"source": {"file": path}}), signal).await.unwrap_err().code(), "cancelled");
         let signal = Signal::new();
-        let staged = fixture.ctx.artifacts().stage(&fixture.ctx, &path, &signal).await.unwrap();
+        let staged = fixture.ctx.artifacts().stage(&fixture.ctx, &path, None, &signal).await.unwrap();
         let staged_path = staged.path().to_owned();
         signal.cancel();
         let error = match measure(&fixture.ctx, staged, &path, &signal).await {
@@ -460,7 +480,7 @@ mod tests {
         assert_eq!(error.code(), "cancelled");
         assert!(!staged_path.exists());
         let signal = Signal::new();
-        let staged = fixture.ctx.artifacts().stage(&fixture.ctx, &path, &signal).await.unwrap();
+        let staged = fixture.ctx.artifacts().stage(&fixture.ctx, &path, None, &signal).await.unwrap();
         let staged_path = staged.path().to_owned();
         let measured = measure(&fixture.ctx, staged, &path, &signal).await.unwrap();
         signal.cancel();
@@ -482,5 +502,45 @@ mod tests {
         assert!(error.reason().contains("approved ffmpeg dependency"), "{}", error.reason());
         assert_eq!(fixture.artifact_files(), before);
         assert_eq!(std::fs::read(path).unwrap(), original);
+    }
+
+    #[tokio::test]
+    async fn a_host_media_folder_created_after_startup_can_be_listened_to() {
+        let dir = tempfile::tempdir().unwrap();
+        let media = dir.path().canonicalize().unwrap().join("generated/audio");
+        let ctx = Ctx::new(
+            Args {
+                state_dir: dir.path().join("state"),
+                kumi_home: dir.path().join("home"),
+                daw: DawId::Reaper,
+                library_roots: Vec::new(),
+                media_roots: vec![media.clone()],
+                tools: BTreeMap::new(),
+            },
+            Env::new(),
+            Default::default(),
+        )
+        .unwrap();
+        std::fs::create_dir_all(&media).unwrap();
+        let source = media.join("host-generated.wav");
+        let bytes = pcm(750.0, 0.2);
+        std::fs::write(&source, &bytes).unwrap();
+        let result = (LISTEN.run)(
+            &ctx,
+            Call {
+                args: json!({"source":{"file":source}}).as_object().unwrap().clone(),
+                host: Host::default(),
+                signal: Signal::new(),
+                progress: Progress::none(),
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(result["metrics"]["seconds"], 2.0);
+        assert_eq!(result["metrics"]["sampleRate"], 48_000.0);
+        let retained = ctx.artifacts().resolve(&ctx, result["artifact_id"].as_str().unwrap()).unwrap();
+        assert_eq!(std::fs::read(retained).unwrap(), bytes);
+        assert_eq!(std::fs::read(source).unwrap(), bytes);
+        ctx.snapshots().flush();
     }
 }

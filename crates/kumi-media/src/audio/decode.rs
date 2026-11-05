@@ -31,7 +31,11 @@ impl DecodeOptions {
 /// Restricted decoding accepts self-contained audio containers, never playlists or secondary-file demuxers.
 pub(crate) const LOCAL_AUDIO_INPUT: [&str; 4] =
     ["-protocol_whitelist", "file,pipe", "-format_whitelist", "wav,aiff,mp3,flac,aac,mov,ogg,caf"];
-const MAX_DECODED_BYTES: u64 = 64 * 1024 * 1024;
+// Keep floating-point peaks (including >0 dBFS) and stereo comparisons intact. At
+// <=48 kHz and <=2 channels, twelve minutes plus the analyzer's one-second read
+// margin fit below this cap, with room for the WAV header and muxer buffering.
+const MAX_DECODED_BYTES: u64 = 272 * 1024 * 1024;
+const MAX_RESTRICTED_SECONDS: f64 = 721.;
 
 pub const AUDIO_EXTENSIONS: &[&str] =
     &[".wav", ".wave", ".aif", ".aiff", ".aifc", ".mp3", ".m4a", ".aac", ".mp4", ".flac", ".ogg", ".oga", ".opus", ".caf"];
@@ -187,6 +191,9 @@ async fn prepare(
             folder: None,
         });
     }
+    // Restricted conversion is always an excerpt, even when the caller requests
+    // an unbounded file. Its measured end is the decoded EOF, not the probed length.
+    let until = if options.installed_only { Some(until.unwrap_or(MAX_RESTRICTED_SECONDS).min(MAX_RESTRICTED_SECONDS)) } else { until };
     let folder = std::env::temp_dir().join(format!("kumi-audio-{}", uuid::Uuid::new_v4()));
     kumi_types::private::create_dir_all(&folder)?;
     let mut prepared = PreparedAudio {
@@ -435,7 +442,7 @@ async fn convert(
             && result.is_ok()
             && tokio::fs::metadata(output).await.is_ok_and(|metadata| metadata.len() >= MAX_DECODED_BYTES)
         {
-            return Err(AudioError("Decoded audio exceeds the 64 MiB limit; choose a shorter excerpt.".into()));
+            return Err(AudioError("Decoded audio exceeds the 272 MiB limit; choose a shorter excerpt.".into()));
         }
         match result {
             Ok(_) if command == "afconvert" => return Ok((None, 0., true)),
@@ -535,6 +542,9 @@ fn attempts<'a>(
     }
     args.extend(["-acodec", "pcm_f32le", "-f", "wav"]);
     if let Some(limit) = restricted_output_limit {
+        // Negotiate only bounded layouts/rates, retaining mono and common native
+        // sample rates rather than upmixing everything or quantizing to integer PCM.
+        args.extend(["-af", "aformat=sample_rates=48000|44100|32000|24000|22050|16000|12000|11025|8000:channel_layouts=mono|stereo"]);
         args.extend(["-fs", limit]);
     }
     args.push(output);

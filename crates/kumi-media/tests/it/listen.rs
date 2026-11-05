@@ -211,14 +211,14 @@ async fn installed_only_oversized_decoder_output_is_refused_and_removed() {
 
     let root = tempfile::tempdir().unwrap();
     let oversized = root.path().join("oversized.wav");
-    std::fs::File::create(&oversized).unwrap().set_len(64 * 1024 * 1024 + 1).unwrap();
+    std::fs::File::create(&oversized).unwrap().set_len(272 * 1024 * 1024 + 1).unwrap();
     let made = root.path().join("made");
     let decoder = root.path().join("ffmpeg");
     // Model a decoder that returns success after disregarding its file-size cap.
     std::fs::write(
         &decoder,
         format!(
-            "#!/bin/sh\nfor last; do :; done\nprintf '%s' \"$last\" > '{}'\n/bin/cp '{}' \"$last\"\n",
+            "#!/bin/sh\nfor last; do :; done\nprintf '%s' \"$last\" > '{}'\n/bin/ln '{}' \"$last\"\n",
             made.display(),
             oversized.display()
         ),
@@ -233,5 +233,288 @@ async fn installed_only_oversized_decoder_output_is_refused_and_removed() {
     let converted = std::path::PathBuf::from(std::fs::read_to_string(made).unwrap());
     assert!(!converted.parent().unwrap().exists(), "the entire owned decoder scratch is removed");
     assert_eq!(std::fs::read(source).unwrap(), b"ID3");
-    assert_eq!(std::fs::metadata(oversized).unwrap().len(), 64 * 1024 * 1024 + 1);
+    assert_eq!(std::fs::metadata(oversized).unwrap().len(), 272 * 1024 * 1024 + 1);
+}
+
+#[cfg(unix)]
+fn decoder_script(path: &Path, body: &str) {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::write(path, format!("#!/bin/sh\nset -eu\n{body}\n")).unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700)).unwrap();
+}
+
+/// Inspect individual security boundaries, not an argv snapshot or its ordering
+/// beyond ffmpeg's requirement that input options precede the input.
+#[cfg(unix)]
+fn decoder_input_fence(args: &[&str], source: &Path) {
+    let input = args.iter().position(|arg| *arg == "-i").expect("an input");
+    assert_eq!(args[input + 1], format!("file:{}", source.canonicalize().unwrap().display()));
+    for (key, allowed) in [
+        ("-protocol_whitelist", &["file", "pipe"][..]),
+        ("-format_whitelist", &["wav", "aiff", "mp3", "flac", "aac", "mov", "ogg", "caf"][..]),
+    ] {
+        let at = args.iter().position(|arg| *arg == key).expect("an explicit input fence");
+        assert!(at + 1 < input, "{key} must constrain this input");
+        let selected: Vec<_> = args[at + 1].split(',').collect();
+        assert!(!selected.is_empty());
+        assert!(selected.iter().all(|value| allowed.contains(value)), "unexpected {key}: {selected:?}");
+        assert!(selected.contains(&if key == "-protocol_whitelist" { "file" } else { "mp3" }));
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn installed_only_disguised_playlists_reach_only_a_fenced_decoder() {
+    use kumi_media::audio::{hear, AnalyzeOptions, DecodeOptions};
+
+    let root = tempfile::tempdir().unwrap();
+    let decoder = root.path().join("approved");
+    let log = root.path().join("args");
+    decoder_script(&decoder, &format!("printf '%s\\n' \"$@\" > '{}'\nexit 1", log.display()));
+    for contents in [
+        "#EXTM3U\n#EXT-X-TARGETDURATION:1\n#EXTINF:1,\nhttp://127.0.0.1:9/segment.ts\n#EXT-X-ENDLIST\n",
+        "ffconcat version 1.0\nfile 'http://127.0.0.1:9/segment.wav'\n",
+    ] {
+        let source = root.path().join("disguised.mp3");
+        std::fs::write(&source, contents).unwrap();
+        let error = hear(
+            source.to_str().unwrap(),
+            AnalyzeOptions { decode: DecodeOptions { installed_only: true, ffmpeg: Some(decoder.clone()) }, ..Default::default() },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.0.starts_with("The approved ffmpeg dependency couldn't decode"), "{error}");
+        let recorded = std::fs::read_to_string(&log).unwrap();
+        let args: Vec<_> = recorded.lines().collect();
+        decoder_input_fence(&args, &source);
+        // The fixture does not emulate ffmpeg demuxers. The real-ffmpeg smoke
+        // verifies rejection/no HTTP requests; here the actual spawn must carry
+        // a whitelist excluding both hls and concat even behind an audio extension.
+        assert!(!Path::new(args.last().unwrap()).parent().unwrap().exists());
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn installed_only_twelve_minute_float_output_fits_and_reports_only_measured_audio() {
+    use kumi_media::audio::{analyze_file, AnalyzeOptions, DecodeOptions};
+    use std::io::{Seek, SeekFrom, Write};
+
+    let root = tempfile::tempdir().unwrap();
+    let decoded = root.path().join("decoded.wav");
+    // Sparse f32 stereo at 48 kHz: the usual twelve minutes plus read margin.
+    // This exceeds the former 64 MiB cap without allocating a song in the test.
+    let bytes = 721u32 * 48_000 * 8;
+    let mut fixture = std::fs::File::create(&decoded).unwrap();
+    fixture.write_all(b"RIFF").unwrap();
+    fixture.write_all(&(bytes + 36).to_le_bytes()).unwrap();
+    fixture.write_all(b"WAVEfmt ").unwrap();
+    fixture.write_all(&16u32.to_le_bytes()).unwrap();
+    fixture.write_all(&3u16.to_le_bytes()).unwrap();
+    fixture.write_all(&2u16.to_le_bytes()).unwrap();
+    fixture.write_all(&48_000u32.to_le_bytes()).unwrap();
+    fixture.write_all(&(48_000u32 * 8).to_le_bytes()).unwrap();
+    fixture.write_all(&8u16.to_le_bytes()).unwrap();
+    fixture.write_all(&32u16.to_le_bytes()).unwrap();
+    fixture.write_all(b"data").unwrap();
+    fixture.write_all(&bytes.to_le_bytes()).unwrap();
+    fixture.set_len(44 + bytes as u64).unwrap();
+    fixture.seek(SeekFrom::End(-8)).unwrap();
+    fixture.write_all(&1.25f32.to_le_bytes()).unwrap();
+    fixture.write_all(&(-0.5f32).to_le_bytes()).unwrap();
+    drop(fixture);
+    let decoder = root.path().join("approved");
+    let calls = root.path().join("calls");
+    decoder_script(
+        &decoder,
+        &format!(
+            "printf '%s\\n' BEGIN \"$@\" >> '{}'\nfor last; do :; done\n[ \"$last\" = - ] || /bin/ln '{}' \"$last\"\nprintf '  Duration: 00:15:00.00, start: 0.0, bitrate: 128 kb/s\\n' >&2",
+            calls.display(),
+            decoded.display()
+        ),
+    );
+    let source = root.path().join("long.mp3");
+    std::fs::write(&source, b"ID3").unwrap();
+    let analysis = analyze_file(
+        source.to_str().unwrap(),
+        AnalyzeOptions {
+            start: Some(720.),
+            seconds: Some(1300.),
+            focus: Some("mix".into()),
+            decode: DecodeOptions { installed_only: true, ffmpeg: Some(decoder) },
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(analysis.seconds, 900., "file duration is distinct from the measured excerpt");
+    assert_eq!((analysis.analyzed.from.as_str(), analysis.analyzed.to.as_str()), ("12:00", "12:01"));
+    assert_eq!((analysis.sample_rate, analysis.channels), (48_000., 2));
+    assert!(analysis.loudness.sample_peak_dbfs > 1., "floating-point peaks must not be clipped to integer PCM");
+    let recorded = std::fs::read_to_string(calls).unwrap();
+    let invocations: Vec<_> = recorded.split("BEGIN\n").filter(|call| !call.is_empty()).collect();
+    assert_eq!(invocations.len(), 2, "conversion and duration use only the approved decoder");
+    for invocation in invocations {
+        let args: Vec<_> = invocation.lines().collect();
+        decoder_input_fence(&args, &source);
+        if args.last() == Some(&"-") {
+            continue;
+        }
+        let value = |flag| args[args.iter().position(|arg| *arg == flag).unwrap() + 1];
+        let seconds: f64 = value("-t").parse().unwrap();
+        let cap: u64 = value("-fs").parse().unwrap();
+        assert!((720.0..=721.0).contains(&seconds));
+        assert!(44 + u64::from(bytes) < cap && cap <= 272 * 1024 * 1024);
+        assert_eq!(value("-acodec"), "pcm_f32le");
+        let filter = value("-af");
+        let rates = filter.split("sample_rates=").nth(1).unwrap().split(':').next().unwrap();
+        assert!(rates.split('|').all(|rate| rate.parse::<u32>().unwrap() <= 48_000));
+        let layouts = filter.split("channel_layouts=").nth(1).unwrap().split(':').next().unwrap();
+        assert!(layouts.split('|').all(|layout| ["mono", "stereo"].contains(&layout)));
+        assert!(!Path::new(args.last().unwrap()).parent().unwrap().exists(), "successful analysis releases scratch");
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn installed_only_cancellation_timeout_and_dropped_future_remove_scratch() {
+    use kumi_media::audio::{decode::prepare_audio_to_with_options, DecodeOptions};
+
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("sample.mp3");
+    std::fs::write(&source, b"ID3").unwrap();
+    let decoder = root.path().join("approved");
+    let made = root.path().join("made");
+    decoder_script(
+        &decoder,
+        &format!("for last; do :; done\n: > \"$last\"\nprintf '%s' \"$last\" > '{}'\nexec /bin/sleep 300", made.display()),
+    );
+    for stop in ["cancel", "timeout", "drop"] {
+        let signal = Signal::new();
+        let options = DecodeOptions { installed_only: true, ffmpeg: Some(decoder.clone()) };
+        let task = {
+            let source = source.clone();
+            let signal = signal.clone();
+            tokio::spawn(async move { prepare_audio_to_with_options(source, Some(signal), Some(1.), &options).await })
+        };
+        tokio::time::timeout(Duration::from_secs(10), async {
+            while !std::fs::read_to_string(&made).is_ok_and(|path| !path.is_empty()) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("decoder starts");
+        let converted = std::path::PathBuf::from(std::fs::read_to_string(&made).unwrap());
+        match stop {
+            "cancel" => signal.cancel(),
+            "timeout" => {
+                tokio::time::pause();
+                tokio::time::advance(Duration::from_secs(121)).await;
+            }
+            _ => task.abort(),
+        }
+        let result = task.await;
+        if stop == "timeout" {
+            tokio::time::resume();
+            assert!(result.unwrap().err().unwrap().is_timed_out());
+        } else if stop == "cancel" {
+            assert!(result.unwrap().is_err());
+        } else {
+            assert!(matches!(result, Err(error) if error.is_cancelled()));
+        }
+        assert!(!converted.parent().unwrap().exists(), "{stop} must remove the entire owned scratch");
+        assert_eq!(std::fs::read(&source).unwrap(), b"ID3");
+        std::fs::remove_file(&made).unwrap();
+    }
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn installed_only_ignores_discovery_environment_and_scrubs_approved_processes() {
+    use kumi_media::audio::{hear, AnalyzeOptions, DecodeOptions};
+
+    const CHILD_ROOT: &str = "KUMI_RESTRICTED_DECODE_TEST_ROOT";
+    let Some(root) = std::env::var_os(CHILD_ROOT) else {
+        // Confine hostile discovery settings to a child test process: no global
+        // environment races with other tests, and no reliance on host decoders.
+        let root = tempfile::tempdir().unwrap();
+        let marker = root.path().join("unapproved-ran");
+        for name in ["ffmpeg", "ffprobe", "afconvert", "whisper-cli", "whisper"] {
+            decoder_script(&root.path().join(name), &format!(": > '{}'\nexit 1", marker.display()));
+        }
+        let output = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["--exact", "listen::installed_only_ignores_discovery_environment_and_scrubs_approved_processes", "--nocapture"])
+            .env(CHILD_ROOT, root.path())
+            .env("PATH", root.path())
+            .env("KUMI_FFMPEG", root.path().join("ffmpeg"))
+            .env("KUMI_WHISPER", root.path().join("whisper-cli"))
+            .env("KUMI_PRIVATE_DECODER_TEST_SECRET", "not-a-real-secret")
+            .env("http_proxy", "http://127.0.0.1:9")
+            .env("FFREPORT", "file=must-not-be-written")
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{}\n{}", String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+        assert!(!marker.exists(), "PATH, sibling, environment, and whisper candidates must never run");
+        return;
+    };
+    let root = std::path::PathBuf::from(root);
+    let source = root.join("source.mp3");
+    std::fs::write(&source, b"ID3").unwrap();
+    let approved = root.join("approved");
+    decoder_script(&approved, "exit 1");
+    for ffmpeg in [None, Some(approved.clone())] {
+        let error = hear(
+            source.to_str().unwrap(),
+            AnalyzeOptions { transcribe: true, decode: DecodeOptions { installed_only: true, ffmpeg }, ..Default::default() },
+        )
+        .await
+        .unwrap_err();
+        assert!(error.0.starts_with("The approved ffmpeg dependency"), "{error}");
+    }
+    let copy = root.join("copy.wav");
+    wav(&copy, &tone(0.1, 440., 0.25));
+    let calls = root.join("calls");
+    let cwd = root.join("cwd");
+    decoder_script(
+        &approved,
+        &format!(
+            "printf '%s\\n' BEGIN \"$@\" >> '{}'\n\
+             [ \"${{KUMI_RESTRICTED_DECODE_TEST_ROOT-unset}}\" = unset ]\n\
+             [ \"${{KUMI_PRIVATE_DECODER_TEST_SECRET-unset}}\" = unset ]\n\
+             [ \"${{KUMI_FFMPEG-unset}}\" = unset ]\n\
+             [ \"${{KUMI_WHISPER-unset}}\" = unset ]\n\
+             [ \"${{http_proxy-unset}}\" = unset ]\n\
+             [ \"${{FFREPORT-unset}}\" = unset ]\n\
+             [ \"$LC_ALL\" = C ]\n\
+             [ \"$HOME\" = \"$TMPDIR\" ] && [ \"$HOME\" = \"$USERPROFILE\" ]\n\
+             [ \"$HOME\" = \"$TMP\" ] && [ \"$HOME\" = \"$TEMP\" ]\n\
+             [ \"$HOME\" -ef . ]\n\
+             pwd -P >> '{}'\n\
+             for last; do :; done\n\
+             [ \"$last\" = - ] || /bin/ln '{}' \"$last\"",
+            calls.display(),
+            cwd.display(),
+            copy.display()
+        ),
+    );
+    let measured = hear(
+        source.to_str().unwrap(),
+        AnalyzeOptions { transcribe: true, decode: DecodeOptions { installed_only: true, ffmpeg: Some(approved) }, ..Default::default() },
+    )
+    .await
+    .unwrap();
+    assert_eq!(measured.seconds, 0.1);
+    let recorded = std::fs::read_to_string(calls).unwrap();
+    let invocations: Vec<_> = recorded.split("BEGIN\n").filter(|call| !call.is_empty()).collect();
+    assert_eq!(invocations.len(), 2, "both conversion and duration probe use the isolated approved process");
+    for invocation in invocations {
+        decoder_input_fence(&invocation.lines().collect::<Vec<_>>(), &source);
+    }
+    let recorded = std::fs::read_to_string(cwd).unwrap();
+    let directories: Vec<_> = recorded.lines().collect();
+    assert_eq!(directories.len(), 2);
+    assert_eq!(directories[0], directories[1]);
+    assert_ne!(Path::new(directories[0]), root.canonicalize().unwrap());
+    assert!(!Path::new(directories[0]).exists(), "private cwd/home/temp disappears after analysis");
+    assert!(!root.join("unapproved-ran").exists());
 }
