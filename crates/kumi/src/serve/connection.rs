@@ -229,6 +229,11 @@ impl Link {
         matches!((self.native_epoch.borrow().as_deref(), epoch), (Some(looked), Some(now)) if looked == now)
     }
 
+    /// The epoch the refs of the last look are of, moved on since by any write's unsure outcome.
+    pub fn epoch(&self) -> u64 {
+        self.epoch.get()
+    }
+
     /// Moves the epoch on (a write's outcome is unsure): refs from earlier looks no longer hold.
     pub fn advance(&self) {
         self.epoch.set(self.epoch.get() + 1);
