@@ -110,6 +110,23 @@ test('a HISTORY row Kumi is unsure of says why, what it put back, and offers no 
   assert.ok(!html.includes('Undo'))
 })
 
+test("a device load only Live's own undo can take back (#1101) says how, by its key or by hand, and offers no Undo", async () => {
+  const { HistoryView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
+  const note = "Live's own undo (Cmd+Z) takes this back; Kumi can't yet (#1101)"
+  const shown = note.replaceAll("'", '&#x27;')
+  const row = how => ({ id: 'h-1', title: 'Operator added to Bass', family: 'device', state: 'applied', undo_available: false, note, daw_undo: how })
+  const draw = how => renderToStaticMarkup(createElement(HistoryView, { history: { items: [row(how)] }, daw: 'ableton', live: true, action: () => createElement('button', null, 'Undo') }))
+  const next = draw('next')
+  assert.ok(next.includes(shown), next)
+  assert.ok(/Undo in Live \((Cmd|Ctrl)\+Z\)/.test(next), next)
+  assert.ok(!next.includes('<button'), 'words, never a request Kumi would refuse')
+  // Something changed since: Live's undo would take the producer's later work back first, so no key is offered.
+  const buried = draw('buried')
+  assert.ok(buried.includes(english('history.byHand', 'Live')) && !/\+Z/.test(buried.replace(shown, '')), buried)
+  // An undone row, or one without daw_undo, keeps the surface's own action.
+  assert.ok(renderToStaticMarkup(createElement(HistoryView, { history: { items: [{ ...row(undefined), undo_available: true }] }, action: () => createElement('button', null, 'Undo') })).includes('<button'))
+})
+
 test("the pane warns while Kumi isn't sure of the project and offers no Undo, until a completed observe clears it", async () => {
   const { KumiPane } = await load('src/desktop/pane.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
