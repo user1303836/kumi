@@ -5,7 +5,8 @@
 -- for at most `timeoutMs` (500 by default, 800 at most: Renoise's watchdog speaks up after about 10 s, and a callback should
 -- stay well under a second). A chunk that runs past it is stopped where it is: what it changed so far stays. The limit is a
 -- count hook that stops only the chunk's own code (the tool's notifiers run whole: see `guard` in bridge.lua), and the JIT is
--- off while the chunk runs, so code it loads itself is counted too. A long call into C (a string pattern that backtracks) is not.
+-- off while the chunk runs, so code it loads itself is counted too; the chunk can't take the hook off or turn the JIT back
+-- on (debug.sethook and jit.on raise while it runs). A long call into C (a string pattern that backtracks) is not stopped.
 
 local import = ...
 local refs = import("refs")
@@ -277,6 +278,13 @@ local function apply(song, env, input, fence, desc)
   -- (past the deadline where a stop can't land, inside a notifier, the hook looks again at every instruction: a loop whose
   -- turns all take the same count would otherwise meet the 1000-count hook in the same notifier every time, and never stop)
   local late, every = false, false
+  -- (the chunk can't take its time limit off: while it runs, debug.sethook and jit.on raise, as REAPER's wrapper does, so
+  -- it can neither clear the hook nor turn the JIT back on, whose compiled loops the hook never sees; the tool's own hook
+  -- uses the real ones, and both are put back after it, however it ended)
+  local sethook, jit_on = debug.sethook, jit and jit.on
+  local function refused(name)
+    return function() error(name .. " would take off Kumi's time limit while the chunk runs: Kumi refuses it", 2) end
+  end
   local function hook()
     if not late then
       if env.now_ms() <= deadline then return end
@@ -287,12 +295,16 @@ local function apply(song, env, input, fence, desc)
     end
     if not every then
       every = true
-      debug.sethook(hook, "", 1)
+      sethook(hook, "", 1)
     end
   end
-  debug.sethook(hook, "", 1000)
+  sethook(hook, "", 1000)
+  debug.sethook = refused("debug.sethook")
+  if jit_on then jit.on = refused("jit.on") end
   local ok, result = pcall(run)
-  debug.sethook()
+  debug.sethook = sethook
+  if jit_on then jit.on = jit_on end
+  sethook()
   if jitted then jit.on() end
   local told = (env.changes and env.changes() or 0) ~= before
   -- (what its text can't write didn't change; what the tool was told of did; the rest may have)

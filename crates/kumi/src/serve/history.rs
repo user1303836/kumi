@@ -30,7 +30,7 @@ pub struct Row {
     pub title: String,
     pub family: String,
     pub at: i64,
-    /// `applied`, `undone`, `kept`, `unsure`, `expired`.
+    /// `applied`, `undone`, `kept`, `unsure`, `expired`; a script's (CC-19) also `failed`.
     pub state: String,
     pub undo_available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -63,6 +63,22 @@ pub struct Row {
     /// file the DAW got.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sources: Option<Vec<Value>>,
+    /// A script's row (CC-19): which code ran, by its SHA-256 (the runtime keeps the code beside HISTORY), and its
+    /// language. Never Kumi's to undo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub script: Option<ScriptRun>,
+}
+
+/// A script's family (CC-19).
+pub const SCRIPT_FAMILY: &str = "script";
+
+/// The code a script's row ran (CC-19).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScriptRun {
+    /// The SHA-256 of the code's UTF-8 bytes, in lowercase hex.
+    pub sha256: String,
+    /// `python` or `lua`.
+    pub language: String,
 }
 
 pub struct History {
@@ -72,6 +88,8 @@ pub struct History {
     collecting: RefCell<Option<Vec<String>>>,
     /// What the running `change` call's rows say when it holds a step only the DAW's own Undo takes back.
     collecting_daw_undo: RefCell<Option<String>>,
+    /// While a `script` call runs: its row's title and code, which the row the DAW's executor makes for it takes.
+    scripting: RefCell<Option<(String, ScriptRun)>>,
     /// Audit rows made so far: each one's id is this runtime's generation and its number.
     audits: Cell<u64>,
     /// `change` calls that recorded rows so far: each one's [`Row::change_id`] is this runtime's generation and its
@@ -83,6 +101,8 @@ pub struct History {
     last_write: RefCell<HashMap<String, u64>>,
     /// This runtime's rows of changes only the DAW's own Undo takes back, each with the write that made it.
     daw_undo_writes: RefCell<HashMap<String, u64>>,
+    /// Script rows made by the runtime itself (no executor row for them) so far: numbered as audit rows are.
+    scripts: Cell<u64>,
 }
 
 /// The host call a row came from (CC-5): its profile, session and `tool_call_id` (a host's call ids are only unique
@@ -128,6 +148,8 @@ impl History {
             writes: Cell::new(0),
             last_write: RefCell::new(HashMap::new()),
             daw_undo_writes: RefCell::new(HashMap::new()),
+            scripting: RefCell::new(None),
+            scripts: Cell::new(0),
         }
     }
 
@@ -178,6 +200,7 @@ impl History {
             call_outcome: None,
             change_id: None,
             sources: None,
+            script: None,
         };
         let row = {
             let mut rows = self.rows.borrow_mut();
@@ -197,7 +220,14 @@ impl History {
                         row.at,
                     );
                     let daw_undo = (row.reason.as_deref() == Some(DAW_UNDO)).then(|| (row.reason.clone(), row.note.clone()));
+                    // A script's row stays the script's (CC-19): its title, family and code, never Kumi's to undo, and
+                    // its note when the executor's word on it brings none.
+                    let script = row.script.clone().map(|script| (row.title.clone(), row.family.clone(), row.note.clone(), script));
                     *row = Row { project_key, profile_id, session_id, tool_call_id, digest, call_outcome, change_id, sources, at, ..fresh };
+                    if let Some((title, family, note, script)) = script {
+                        (row.title, row.family, row.script, row.undo_available) = (title, family, Some(script), false);
+                        row.note = row.note.take().or(note);
+                    }
                     // A change only the DAW's own Undo takes back stays one, with its words, whatever its state since.
                     if let Some((reason, note)) = daw_undo {
                         (row.reason, row.note, row.undo_available) = (reason, note, false);
@@ -205,6 +235,15 @@ impl History {
                     row.clone()
                 }
                 None => {
+                    let mut fresh = fresh;
+                    // The row the DAW's executor makes for a running script (REAPER's and Renoise's run_lua) is the
+                    // script's own: Kumi can't undo it, so it's never offered.
+                    if let Some((title, script)) = self.scripting.borrow().as_ref() {
+                        fresh.title = title.clone();
+                        fresh.family = SCRIPT_FAMILY.into();
+                        fresh.undo_available = false;
+                        fresh.script = Some(script.clone());
+                    }
                     rows.insert(0, fresh.clone());
                     rows.truncate(KEPT);
                     // A row first made while a `change` call runs is that call's; a row only updated isn't.
@@ -233,8 +272,9 @@ impl History {
 
     /// The `change` call ends: the rows it made (oldest first), marked with its host call (CC-5's C5-3), and as ones
     /// only the DAW's own Undo takes back when the call held such a step. A row that already carries a call's identity
-    /// keeps it.
+    /// keeps it. A script call that ended this way (it broke part way) is over too.
     pub fn end_call(&self, identity: CallIdentity, snapshots: &Snapshots) -> Vec<Row> {
+        *self.scripting.borrow_mut() = None;
         let made = self.collecting.borrow_mut().take().unwrap_or_default();
         let daw_undo = self.collecting_daw_undo.borrow_mut().take();
         let write = made.first().and_then(|id| self.row(id)).map(|row| self.wrote(&row.project_key));
@@ -289,6 +329,74 @@ impl History {
             value["daw_undo"] = json!(place);
         }
         Some(value)
+    }
+
+    /// A `script` call starts (CC-19): the row the DAW's executor makes from here is its own, titled `title`, until
+    /// [`History::end_script`].
+    pub fn begin_script(&self, title: &str, script: &ScriptRun) {
+        *self.collecting.borrow_mut() = Some(Vec::new());
+        *self.scripting.borrow_mut() = Some((title.to_string(), script.clone()));
+    }
+
+    /// The `script` call ends: its one row, in `state` (`applied`, `failed` or `unsure`) with `note` (every script row
+    /// has one: why Kumi can't undo it), marked with its host call. That's the row the DAW's executor made for it
+    /// (REAPER's and Renoise's run_lua), or, when it made none (Live's run_python never does, and nothing may have run),
+    /// a row of the runtime's own. A run is Kumi's write in its project: a change only the DAW's own Undo takes back made
+    /// there before it is no longer the DAW's latest step (CC-20).
+    pub fn end_script(&self, identity: CallIdentity, project_key: &str, state: &str, note: String, snapshots: &Snapshots) -> Row {
+        let made = self.collecting.borrow_mut().take().unwrap_or_default();
+        let (title, script) = self.scripting.borrow_mut().take().unwrap_or_default();
+        self.wrote(project_key);
+        let mark = |row: &mut Row| {
+            row.state = state.to_string();
+            row.undo_available = false;
+            row.note = Some(note.clone());
+            row.profile_id = identity.profile_id.map(str::to_string);
+            row.session_id = identity.session_id.map(str::to_string);
+            row.tool_call_id = identity.tool_call_id.map(str::to_string);
+            row.digest = Some(identity.digest.to_string());
+        };
+        let row = {
+            let mut rows = self.rows.borrow_mut();
+            match rows.iter_mut().find(|row| made.first() == Some(&row.id)) {
+                Some(row) => {
+                    mark(row);
+                    row.clone()
+                }
+                None => {
+                    let n = self.scripts.get() + 1;
+                    self.scripts.set(n);
+                    let mut row = Row {
+                        id: format!("h-{}-s{n}", self.generation),
+                        label: String::new(),
+                        project_key: project_key.to_string(),
+                        runtime_generation: self.generation.clone(),
+                        title,
+                        family: SCRIPT_FAMILY.into(),
+                        at: kumi_common::time::now_ms(),
+                        state: String::new(),
+                        undo_available: false,
+                        track: None,
+                        note: None,
+                        reason: None,
+                        profile_id: None,
+                        session_id: None,
+                        tool_call_id: None,
+                        digest: None,
+                        call_outcome: None,
+                        change_id: None,
+                        sources: None,
+                        script: Some(script),
+                    };
+                    mark(&mut row);
+                    rows.insert(0, row.clone());
+                    rows.truncate(KEPT);
+                    row
+                }
+            }
+        };
+        self.publish(snapshots);
+        row
     }
 
     /// The files the call whose rows are `ids` placed (CC-11), kept with them.
@@ -376,6 +484,7 @@ impl History {
             call_outcome: None,
             change_id: None,
             sources: None,
+            script: None,
         };
         {
             let mut rows = self.rows.borrow_mut();
@@ -587,6 +696,24 @@ mod tests {
         let after = History::new(dir.path(), "g2".into());
         let old = after.row("h-g1-c1").unwrap();
         assert_eq!((old.reason.as_deref(), after.daw_undo_place(&old)), (Some(DAW_UNDO), None));
+    }
+
+    #[test]
+    fn a_script_run_buries_a_change_only_the_daws_undo_takes_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let history = History::new(dir.path(), "g1".into());
+        history.begin_call();
+        history.daw_undo_call("Live's own Undo takes it back.".into());
+        history.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
+        history.end_call(call("tc-1", "d1"), &snapshots);
+        let place = || history.daw_undo_place(&history.row("h-g1-c1").unwrap());
+        assert_eq!(place(), Some("next"));
+        let run = ScriptRun { sha256: "a".repeat(64), language: "python".into() };
+        history.begin_script("Script: Name the drums", &run);
+        let row = history.end_script(call("tc-2", "d2"), "p-1", "applied", "Kumi can't undo a script.".into(), &snapshots);
+        assert_eq!((row.family.as_str(), row.reason.as_deref(), history.daw_undo_place(&row)), ("script", None, None));
+        assert_eq!(place(), Some("buried"), "the script's step is the DAW's latest now");
     }
 
     #[test]

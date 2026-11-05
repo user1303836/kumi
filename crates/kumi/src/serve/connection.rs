@@ -617,6 +617,19 @@ pub(super) fn inside(path: &Path, folder: &Path) -> bool {
     matches!((std::fs::canonicalize(path), std::fs::canonicalize(folder)), (Ok(path), Ok(folder)) if path.starts_with(&folder))
 }
 
+/// A connection to `integration` that answers, with `observation` seen on it: as a `connect` and an `observe` leave the
+/// link, for an operation's tests.
+#[cfg(test)]
+impl Link {
+    pub(super) fn connected_for_test(&self, integration: Rc<dyn Integration>, observation: &Observation) -> Project {
+        let reported = Rc::new(Reported::default());
+        reported.connected.set(true);
+        reported.answered.set(true);
+        *self.connection.borrow_mut() = Some(Rc::new(Connection { integration, reported }));
+        self.saw(observation)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

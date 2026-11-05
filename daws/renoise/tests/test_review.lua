@@ -2019,6 +2019,37 @@ test("run-lua: code a chunk loads itself is under the time limit too: the JIT is
   ok(not jit or jit.status(), "the JIT is on again")
 end)
 
+test("run-lua: a chunk can't take its time limit off: debug.sethook and jit.on raise while it runs, and are the tool's again after (CC-19 r9)", function()
+  local env, peer = setup()
+  local sethook, jit_on = debug.sethook, jit and jit.on
+  -- (a chunk that tries, and carries on looping: stopped at its deadline all the same)
+  for i, code in ipairs({
+    "pcall(debug.sethook) pcall(jit and jit.on) local n = 0 while true do n = n + 1 end",
+    "pcall(debug.sethook, nil) pcall(jit and jit.on) local n = 0 for i = 1, 2e9 do n = n + i % 7 end",
+  }) do
+    mock.clock_step_ms = 1
+    local done = run_lua(peer, code, string.format("Kumi: Ran Lua (kr%02d)", i), { timeoutMs = 50 })
+    mock.clock_step_ms = nil
+    ok(done.result, json.encode(done.error or {}))
+    ok(done.result.applied.failed and done.result.applied.failed.message:find("ran longer than 50 ms", 1, true), json.encode(done.result.applied))
+  end
+  local cleared = run_lua(peer, "debug.sethook()", "Kumi: Ran Lua (kr03)")
+  ok(cleared.result, json.encode(cleared.error or {}))
+  ok(cleared.result.applied.failed and cleared.result.applied.failed.message:find("debug.sethook would take off Kumi's time limit", 1, true), json.encode(cleared.result.applied))
+  if jit_on then
+    local jitted = run_lua(peer, "jit.on()", "Kumi: Ran Lua (kr04)")
+    ok(jitted.result.applied.failed and jitted.result.applied.failed.message:find("jit.on would take off Kumi's time limit", 1, true), json.encode(jitted.result.applied))
+  end
+  -- (the tool's own again, with no hook left, the JIT on, and the bridge answering: a normal chunk runs)
+  ok(debug.sethook == sethook, "debug.sethook is put back")
+  ok(not jit_on or jit.on == jit_on, "jit.on is put back")
+  ok(debug.gethook() == nil, "no hook is left")
+  ok(not jit or jit.status(), "the JIT is on again")
+  local after = run_lua(peer, "return 1 + 1", "Kumi: Ran Lua (kr05)")
+  ok(after.result, json.encode(after.error or {}))
+  eq(after.result.applied.result, 2)
+end)
+
 test("run-lua: a chunk that sets a parameter changed the song; one that only mutes makes no Renoise step; one that reads changed nothing (#361 N8)", function()
   local env, peer = setup()
   local done = run_lua(peer, "song:track(1).postfx_volume.value = 0.5", "Kumi: Ran Lua (kl12)")

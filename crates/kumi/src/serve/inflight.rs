@@ -59,7 +59,8 @@ pub fn begin(ctx: &Ctx, op: &str, title: Option<&str>, identity: CallIdentity) -
     Ok(InFlight { scratch: Some(scratch) })
 }
 
-fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+/// `bytes` as a new file at `path`, the owner's alone, on disk before this returns.
+pub(super) fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let mut options = std::fs::OpenOptions::new();
     options.write(true).create_new(true);
     #[cfg(unix)]
