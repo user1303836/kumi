@@ -72,6 +72,8 @@ pub struct OwnKind {
     pub skipped_by_daw_undo: bool,
     /// A confirmed change only the producer can take back in the DAW; HISTORY keeps this guidance permanently.
     pub manual_undo: Option<&'static str>,
+    /// A DAW-specific decision from a confirmed apply reply; no other DAW's opaque material is interpreted.
+    pub manual_undo_when: Option<fn(&Value) -> Option<&'static str>>,
 }
 
 /// What HISTORY draws of a change: a value moved within its span (a fader, a pan), a colour's swatches, or one picture
@@ -123,6 +125,7 @@ impl OwnKind {
             picture: Picture::None,
             skipped_by_daw_undo: false,
             manual_undo: None,
+            manual_undo_when: None,
         }
     }
     pub const fn skipped_by_daw_undo(mut self) -> Self {
@@ -131,6 +134,10 @@ impl OwnKind {
     }
     pub const fn manual_undo(mut self, note: &'static str) -> Self {
         self.manual_undo = Some(note);
+        self
+    }
+    pub const fn manual_undo_when(mut self, decide: fn(&Value) -> Option<&'static str>) -> Self {
+        self.manual_undo_when = Some(decide);
         self
     }
     pub const fn meter(mut self, field: &'static str, min: f64, max: f64) -> Self {
@@ -407,7 +414,14 @@ pub(crate) fn undo_target<S: RefScheme + 'static>(history: &History<OwnChanges<S
             let entry = entry.borrow();
             if entry.permanent == Some(true)
                 && entry.tool.as_deref().is_some_and(|tool| {
-                    history.host.link.daw.changes.kinds.iter().any(|kind| kind.tool == tool && kind.manual_undo.is_some())
+                    history
+                        .host
+                        .link
+                        .daw
+                        .changes
+                        .kinds
+                        .iter()
+                        .any(|kind| kind.tool == tool && (kind.manual_undo.is_some() || kind.manual_undo_when.is_some()))
                 })
             {
                 return entry.record.id.clone();
@@ -1121,7 +1135,8 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
         let skipped = kind.skipped_by_daw_undo
             || applied.pointer("/undo/entry") == Some(&Value::Bool(false))
             || applied.pointer("/undo/covered") == Some(&Value::Bool(false));
-        let note = kind.manual_undo.map(str::to_owned).or_else(|| {
+        let manual_undo = kind.manual_undo.or_else(|| kind.manual_undo_when.and_then(|decide| decide(&applied)));
+        let note = manual_undo.map(str::to_owned).or_else(|| {
             applied
                 .pointer("/display/note")
                 .and_then(Value::as_str)
@@ -1149,7 +1164,7 @@ impl<S: RefScheme + 'static> OwnPlan<S> {
             self.link().outside_daw_undo.borrow_mut().insert(transaction.clone());
         }
         let summary = kind.summary(&title, Some(&preview), Some(&applied));
-        let state = if kind.manual_undo.is_some() { ChangeState::Kept } else { ChangeState::Applied };
+        let state = if manual_undo.is_some() { ChangeState::Kept } else { ChangeState::Applied };
         let id = self.remember(kind, summary, &transaction, state, note.clone());
         // What the listening tools read back: the part a note edit changed (groove takes back its own part's edits), and a
         // track's rename (a judged run follows its track by it).

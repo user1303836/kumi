@@ -160,7 +160,7 @@ M3 lets Kumi change the project and undo. The wire is the REAPER extension's: th
 one macOS channel and reads the value back: `applied` only when Logic shows the new value, else
 `uncertain`. A preview writes nothing and fences the ref's epoch and the target's value as read
 now; an apply re-checks the fence and refuses `changed` before it writes; a restore puts the value
-back when the value can be set; deleted tracks and markers require manual Logic undo. A dialog up is `busy`, a missing
+back when the value can be set; added tracks, deleted tracks and deleted markers require manual Logic Undo History. Marker additions and moves require complete captured row/list identity, including visible Text, for value restore. A dialog up is `busy`, a missing
 Accessibility grant `failed` in words (never busy). What was measured is the Scratch project in
 Logic Pro 12.3.1; the host's simulated Logic (`simulator/logic.rs`) answers the same shapes.
 
@@ -202,7 +202,7 @@ each change in the plan stays its own step of Logic's undo.
 ### The fences and the outcomes
 
 - A header prop fences the value now; a rename the name; a track delete `{name, index, regions}`; a
-  track add `{tracks, names}` (the count and every name); a marker its whole state or the count; the
+  track add `{tracks, names}` (the count and every name); a marker the complete raw row/list identity, including raw name, length (finite or known infinite), Text availability, column shape, AX identity and other visible cell state; the
   tempo the BPM; notes the region's note count and a hash of their values.
 - `applied` carries the value Logic shows after the write. A write Logic doesn't show back is
   `uncertain` ("Logic Pro shows … after Kumi asked for …"), and leaves the step unnamed. The apply's
@@ -210,14 +210,10 @@ each change in the plan stays its own step of Logic's undo.
   when Logic's history took a step, `entry: false` when it didn't. `track-add` answers the new epoch
   and `created: {ref: "<new epoch>:track:<n>"}`; `track-delete` answers `material` holding
   `{name, kind, index, volumeDb, pan, mute, solo, arm, step}` (`step` is the apply's `desc`).
-- Restore is by value for header properties, tempo, marker additions and moves, notes and bypass.
-  `track-delete` and `marker-delete` cannot be restored automatically: an Undo title is not a
-  unique step identity, and recreating a marker cannot recover its original name faithfully.
-  Their native restore returns `failed` with manual Logic undo guidance before any helper call.
-  A confirmed deletion stays recorded as `Kept` in Kumi's HISTORY with a permanent manual-undo
-  note; `/undo` and `undo_change` send no RPC for it. An unconfirmed apply stays `Unsure` and is
-  never promoted to a permanent confirmed deletion. Direct host clients retain an applied
-  transaction after an explicitly refused restore; the host does not claim it was undone.
+- Restore is by value for header properties, tempo, notes and bypass, and for marker additions/moves only when every required original and applied identity field was exposed. Added tracks, deleted tracks and deleted markers are always manual-only: Logic cannot expose all automation, closed plug-in parameters or hidden track metadata, an Undo title is not a unique step identity, and recreating a marker cannot recover its original name faithfully. Native restore returns `failed` before any helper operation, including with `discard`.
+- Marker material keeps full `prior` and `applied` lists, a unique full `marker`, and `priorMarker` for moves. `material.undo` is `{mode:"value"}` only for complete known snapshots; otherwise it is `{mode:"manual",reason,guidance}`. An unexposed Text field is `null`, never an invented empty string. Revealing Text later cannot recover an unknown original value. Identity/list mismatches and unknown original fields cannot be overridden by `discard`; an already-restored answer requires the exact complete prior list and unique target.
+- The Logic host validates the private snapshots and exposes only `undo.restore` with the manual/value capability in its public apply reply. Other DAWs do not interpret this opaque material. Missing, legacy or malformed marker hints are manual-only.
+- A confirmed manual-only change stays `Kept` in HISTORY with permanent guidance to review the appropriate step in Logic's Undo History manually. Both explicit Undo and default `/undo` send no RPC for it; default Undo does not skip it to an earlier change. Unconfirmed applies stay `Unsure`, never promoted to confirmed permanent changes. Direct host clients retain an applied transaction after explicit restore refusal.
 - A restore's refs are from the change's own epoch, carried to where the track or region stands now:
   the bridge watches each epoch move (a header added, deleted, renamed or moved; the M2 observers'
   rule) and keeps, per move, where each place went, so undoing a fader or a rename after a track was
@@ -241,7 +237,7 @@ write; reading never presses the Edit menu merely to validate its title.
 steps where Logic records them, and seven value kinds have no native undo step at all.
 
 The historical M3 gate and original transcript are preserved with source hashes. Their old
-automatic deletion restore is not current native parity. The current host fixture refuses the
+automatic structural/unknown-Text marker restores are not current native parity. The current host fixture refuses the
 same restore without changing the project or pressing any native Undo step.
 
 ### Where Logic forces a difference from REAPER

@@ -30,6 +30,72 @@ pub mod simulator {
     pub use crate::simulator::logic::*;
 }
 
+pub(crate) const MANUAL_TRACK_ADD: &str =
+    "Kumi can't safely remove a track it added because Logic Pro doesn't expose all of its contents. Use Logic Pro's own undo manually.";
+pub(crate) const MANUAL_MARKER: &str = "Kumi can't verify the marker's complete original contents because Logic Pro didn't expose every required field. Use Logic Pro's own undo manually; showing a field now can't recover its earlier value.";
+
+fn manual_hint(reason: &'static str) -> Value {
+    json!({"mode":"manual", "reason":reason, "guidance":"Use Logic Pro's own undo manually."})
+}
+
+/// The opaque material stays in the host journal. A positive restore capability requires both the native hint
+/// and complete captured original/applied identity; display text or title equality never grants permission.
+pub(crate) fn restore_hint(kind: &str, reply: &Value) -> Option<Value> {
+    if kind == "track-add" {
+        return Some(manual_hint(MANUAL_TRACK_ADD));
+    }
+    if !["marker-add", "marker-move"].contains(&kind) {
+        return None;
+    }
+    let material = &reply["material"];
+
+    let prior = material["prior"].as_array();
+    let applied = material["applied"].as_array();
+    let marker = &material["marker"];
+    let known = material["undo"] == json!({"mode":"value"})
+        && complete_marker_identity(marker)
+        && prior.is_some_and(|rows| rows.iter().all(complete_marker_identity))
+        && applied.is_some_and(|rows| rows.iter().all(complete_marker_identity) && rows.iter().filter(|row| *row == marker).count() == 1)
+        && (kind != "marker-move"
+            || (complete_marker_identity(&material["priorMarker"])
+                && prior.is_some_and(|rows| rows.iter().filter(|row| **row == material["priorMarker"]).count() == 1)));
+    Some(if known { json!({"mode":"value"}) } else { manual_hint(MANUAL_MARKER) })
+}
+
+pub(crate) fn complete_marker_identity(row: &Value) -> bool {
+    let Some(columns) = row["columns"].as_array() else { return false };
+    let names: Vec<&str> = columns.iter().filter_map(Value::as_str).collect();
+    let Some(other) = row["other"].as_object() else { return false };
+    let extras: Vec<&str> = names.iter().copied().filter(|column| !["Position", "Name", "Length", "Text"].contains(column)).collect();
+    ["bar", "beat", "division", "tick"].iter().all(|field| row["position"][*field].as_u64().is_some_and(|n| n > 0))
+        && row["name"].is_string()
+        && row["text"].is_string()
+        && (row["length"].as_f64().is_some_and(|n| n.is_finite() && n >= 0.0) || row["length"] == "infinite")
+        && columns.len() == names.len()
+        && ["Position", "Name", "Length", "Text"].iter().all(|column| names.contains(column))
+        && names.iter().enumerate().all(|(i, column)| !names[..i].contains(column))
+        && row["ax"]["role"] == "AXRow"
+        && ["id", "subrole"].iter().all(|field| row["ax"].get(*field).is_none_or(Value::is_string))
+        && other.len() == extras.len()
+        && extras.iter().all(|column| other.get(*column).is_some_and(complete_cell))
+}
+
+fn complete_cell(cell: &Value) -> bool {
+    cell["role"].as_str().is_some_and(|role| !role.is_empty())
+        && cell["children"].as_array().is_some_and(|children| children.iter().all(complete_cell))
+        && cell.get("more").is_none_or(|more| more.as_u64() == Some(0))
+        && known_cell_value(cell)
+}
+
+fn known_cell_value(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Array(values) => values.iter().all(known_cell_value),
+        Value::Object(fields) => fields.values().all(known_cell_value),
+        _ => true,
+    }
+}
+
 fn picked(pick: &Value, more: Value) -> Value {
     let mut properties = pick.as_object().cloned().unwrap_or_default();
     properties.extend(more.as_object().into_iter().flat_map(|fields| fields.iter()).map(|(name, value)| (name.clone(), value.clone())));
@@ -58,7 +124,7 @@ pub(crate) fn change_tools(pick: &Value) -> Vec<Value> {
         }),
         json!({
             "name":"change_undo", "title":"Undo a Logic Pro change",
-            "description":"Restores exactly what a change set, after checking those values still match. A producer edit is refused unless discard is true. A deleted track can return only while its native undo step is still on top; an uncertain write is never undone blindly.",
+            "description":"Restores reversible values after checking their identity. Added tracks, deleted tracks and deleted markers require manual Logic Undo History. Marker additions and moves also require manual undo when any original identity field was unavailable; showing it later cannot recover its earlier value. Discard never bypasses unknown or changed marker identity. An uncertain write is never undone blindly.",
             "inputSchema":{"type":"object","properties":{
                 "transactionId":{"type":"string"},"confirmation":{"const":"undo"},"idempotencyKey":{"type":"string"},"discard":{"type":"boolean"}
             },"required":["transactionId","confirmation","idempotencyKey"],"additionalProperties":false},
@@ -95,4 +161,41 @@ pub(crate) fn change_tools(pick: &Value) -> Vec<Value> {
             "annotations":{"readOnlyHint":false,"destructiveHint":false,"idempotentHint":true,"openWorldHint":false}
         }),
     ]
+}
+
+#[cfg(test)]
+mod restore_tests {
+    use super::*;
+
+    #[test]
+    fn incomplete_or_unrecognized_native_evidence_never_grants_marker_restore() {
+        let row = json!({"position":{"bar":9,"beat":1,"division":1,"tick":1},"name":"Marker 1","length":32.0,"text":"",
+            "columns":["Lock","Position","Name","Length","Text"],"ax":{"role":"AXRow","subrole":"AXTableRow"},
+            "other":{"Lock":{"role":"AXCell","children":[]}}});
+        let complete = json!({"material":{"marker":row,"priorMarker":row,"prior":[row],"applied":[row],"undo":{"mode":"value"}}});
+        for kind in ["marker-add", "marker-move"] {
+            assert_eq!(restore_hint(kind, &complete), Some(json!({"mode":"value"})));
+            for path in [
+                "/material/undo",
+                "/material/marker/text",
+                "/material/prior/0/text",
+                "/material/applied/0/name",
+                "/material/marker/length",
+                "/material/marker/columns",
+                "/material/marker/ax/role",
+                "/material/marker/other/Lock/children",
+            ] {
+                let mut reply = complete.clone();
+                *reply.pointer_mut(path).unwrap() = Value::Null;
+                assert_eq!(restore_hint(kind, &reply).unwrap()["mode"], "manual", "{kind}: {path}");
+            }
+            let mut missing = complete.clone();
+            missing["material"].as_object_mut().unwrap().remove("undo");
+            assert_eq!(restore_hint(kind, &missing).unwrap()["mode"], "manual");
+            missing["material"]["undo"] = json!({"mode":"value", "unknown":true});
+            assert_eq!(restore_hint(kind, &missing).unwrap()["mode"], "manual");
+        }
+        assert_eq!(restore_hint("track-add", &complete).unwrap()["mode"], "manual");
+        assert!(restore_hint("track-volume", &complete).is_none(), "other kinds do not interpret material.undo");
+    }
 }

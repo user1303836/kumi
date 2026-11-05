@@ -143,6 +143,8 @@ pub struct Journal {
     inner: Mutex<Inner>,
     /// The change kinds the DAW's own undo never takes back.
     outside_undo: &'static [&'static str],
+    /// A DAW may publish a validated restore hint without exposing its private undo material.
+    restore_hint: Option<fn(&str, &Value) -> Option<Value>>,
 }
 
 /// Four base-36 characters from a counter and the clock, unique among the records kept.
@@ -165,7 +167,11 @@ fn now_ms() -> u64 {
 impl Journal {
     /// The journal for a DAW: it knows which kinds the DAW's own undo never takes back.
     pub fn for_daw(daw: daw_bridge::Daw) -> Self {
-        Journal { outside_undo: crate::tools::kinds(daw).outside_undo, ..Journal::default() }
+        Journal {
+            outside_undo: crate::tools::kinds(daw).outside_undo,
+            restore_hint: (daw == daw_bridge::Daw::Logic).then_some(crate::logic::restore_hint),
+            ..Journal::default()
+        }
     }
 
     /// Keeps a previewed change (the bridge's `change_preview` answer): its id and confirmation.
@@ -334,6 +340,13 @@ impl Journal {
                     if let Some(value) = applied.get(field).filter(|value| !value.is_null()) {
                         reply.insert(field.into(), value.clone());
                     }
+                }
+                if let Some(hint) = self.restore_hint.and_then(|derive| derive(&record.kind, applied)) {
+                    let undo = reply.entry("undo".to_owned()).or_insert_with(|| json!({}));
+                    if !undo.is_object() {
+                        *undo = json!({});
+                    }
+                    undo["restore"] = hint;
                 }
                 (Value::Object(reply), false)
             }

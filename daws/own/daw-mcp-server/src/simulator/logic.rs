@@ -15,14 +15,17 @@
 //! ("Create Marker"), moved ("Value Change") or deleted ("Delete") are steps of Logic's undo, named by the Edit menu's
 //! title and by the `desc` the host sent. A track added goes below the selected one (or the one `index` names) and
 //! moves the epoch, as the M2 replay moves it; a restore's ref from before is carried to where its track is now. A
-//! deleted track or marker requires the producer's manual Logic undo: identical Undo titles cannot prove which
-//! edit is Kumi's, and a deleted marker's original name cannot be recreated faithfully. The reads replay the vectors with the changed
+//! added track, deleted track or deleted marker requires the producer's manual Logic Undo History: identical Undo titles cannot prove which
+//! edit is Kumi's, track contents are not fully observable, and a deleted marker's original name cannot be recreated faithfully.
+//! A marker addition or move with an unavailable original Text field is manual-only too; only complete captured
+//! row/list identity permits a value restore. The reads replay the vectors with the changed
 //! values in them. A dialog (`busy_once`) refuses the next preview before anything is written; a write Logic doesn't
 //! answer after (`uncertain_once`) is made and answered `uncertain`. The kinds the bridge can't make are refused saying
 //! why, as it refuses them; of the kinds it makes, the simulator makes those whose state is a value here (the strip's
 //! controls and its name, tracks added and deleted, markers and the tempo), and says so for the rest (notes, bypass).
 use super::replay::{epoch_of, find, load_cases, normal, retag, Case, RECORDED_EPOCH};
 use super::{Respond, SimulatorConfig};
+use crate::logic::{MANUAL_MARKER, MANUAL_TRACK_ADD};
 use daw_bridge::auth::Secret;
 use daw_bridge::wire::Project;
 use serde_json::{json, Value};
@@ -207,17 +210,30 @@ fn pan_text(steps: i64) -> String {
 struct Marker {
     name: String,
     position_beats: f64,
-    length: f64,
+    length: Value,
+    text: Value,
+    columns: Value,
+    ax: Value,
+    other: Value,
 }
 
 impl Marker {
     /// What a marker is, as the Marker List shows it (the bridge's state).
     fn state(&self) -> Value {
-        json!({"position": position_of(self.position_beats), "name": self.name, "length": self.length, "text": ""})
+        json!({"position": position_of(self.position_beats), "name": self.name, "length": self.length.as_f64().unwrap_or(0.0), "text": self.text.as_str().unwrap_or_default()})
+    }
+    /// The complete observable row, including unavailable Text and the visible column shape.
+    fn identity(&self) -> Result<Value, Fault> {
+        if !self.position_beats.is_finite() || self.position_beats < 0.0 {
+            return Err(failed("the marker position is unavailable"));
+        }
+        let identity = json!({"position": position_of(self.position_beats), "name": self.name, "length": self.length,
+            "text": self.text, "columns": self.columns, "ax": self.ax, "other": self.other});
+        valid_marker_identity(&identity).then_some(identity).ok_or_else(|| failed("the Marker List row is incomplete or unreadable"))
     }
     /// The row as the Marker List reads it, at `place` (from 1).
     fn row(&self, place: usize) -> Value {
-        json!({"length": self.length, "name": self.name, "position": position_of(self.position_beats), "ref": format!("{RECORDED_EPOCH}:marker:{place}"), "text": ""})
+        json!({"length": self.length.as_f64().unwrap_or(0.0), "name": self.name, "position": position_of(self.position_beats), "ref": format!("{RECORDED_EPOCH}:marker:{place}"), "text": self.text.as_str().unwrap_or_default()})
     }
     /// The marker as a title says it: `marker “Marker 1”`.
     fn label(&self) -> String {
@@ -227,6 +243,61 @@ impl Marker {
             format!("marker {}", quoted(&self.name))
         }
     }
+}
+
+/// Native M3 identity is stricter than the legacy M2 read row. No missing field is an empty value.
+fn valid_marker_identity(row: &Value) -> bool {
+    let position = &row["position"];
+    let valid_position = ["bar", "beat", "division", "tick"].iter().all(|field| position[*field].as_u64().is_some_and(|n| n >= 1));
+    let Some(columns) = row["columns"].as_array() else { return false };
+    let names: Vec<&str> = columns.iter().filter_map(Value::as_str).collect();
+    let visible_text = names.contains(&"Text");
+    let text_known = if visible_text { row["text"].is_string() } else { row.get("text").is_some_and(Value::is_null) };
+    let Some(other) = row["other"].as_object() else { return false };
+    let non_core: Vec<&str> = names.iter().copied().filter(|name| !["Position", "Name", "Length", "Text"].contains(name)).collect();
+    let other_known = other.len() == non_core.len()
+        && non_core.iter().all(|column| other.get(*column).is_some_and(|cell| cell["role"].is_string() && cell["children"].is_array()));
+    valid_position
+        && row["name"].is_string()
+        && (row["length"].as_f64().is_some_and(|n| n.is_finite() && n >= 0.0) || row["length"] == "infinite")
+        && columns.len() == names.len()
+        && ["Position", "Name", "Length"].iter().all(|name| names.contains(name))
+        && names.iter().enumerate().all(|(i, name)| !names[..i].contains(name))
+        && text_known
+        && other_known
+        && row["ax"]["role"] == "AXRow"
+        && ["subrole", "id"].iter().all(|field| row["ax"].get(*field).is_none_or(Value::is_string))
+}
+
+fn marker_rows(material: &Value, field: &str) -> Result<Vec<Value>, Fault> {
+    material[field]
+        .as_array()
+        .filter(|rows| rows.iter().all(valid_marker_identity))
+        .cloned()
+        .ok_or_else(|| failed("the marker undo identity material is missing or incomplete"))
+}
+
+fn complete_marker_identity(row: &Value) -> bool {
+    valid_marker_identity(row) && crate::logic::complete_marker_identity(row)
+}
+
+fn marker_undo_hint(material: &Value) -> Value {
+    let complete =
+        ["prior", "applied"].iter().all(|field| material[*field].as_array().is_some_and(|rows| rows.iter().all(complete_marker_identity)))
+            && complete_marker_identity(&material["marker"])
+            && material.get("priorMarker").is_none_or(complete_marker_identity);
+    if complete {
+        json!({"mode":"value"})
+    } else {
+        json!({"mode":"manual", "reason":MANUAL_MARKER, "guidance":"Use Logic Pro's own undo manually."})
+    }
+}
+
+fn require_marker_undo(material: &Value) -> Result<(), Fault> {
+    if material["undo"] != json!({"mode":"value"}) || marker_undo_hint(material) != json!({"mode":"value"}) {
+        return Err(failed(MANUAL_MARKER));
+    }
+    Ok(())
 }
 
 /// A track attribute Kumi changes through its header or the Inspector: the input's field, its noun for the words, and
@@ -570,7 +641,11 @@ impl State {
             .map(|row| Marker {
                 name: row["name"].as_str().unwrap_or_default().to_string(),
                 position_beats: beats_of(&row["position"]),
-                length: row["length"].as_f64().unwrap_or(0.0),
+                length: json!(row["length"].as_f64().unwrap_or(0.0)),
+                text: Value::Null,
+                columns: json!(["Lock", "Position", "Name", "Length"]),
+                ax: json!({"role": "AXRow", "subrole": "AXTableRow"}),
+                other: json!({"Lock":{"role":"AXCell", "children":[]}}),
             })
             .collect();
         let tempo = rows("tempo").first().and_then(|row| row["bpm"].as_f64()).unwrap_or(120.0);
@@ -609,11 +684,13 @@ impl State {
 
     /// The regions a track holds, as the recorded Tracks area has them (a track Kumi added holds none).
     fn regions_of(&self, track: &Track) -> usize {
-        find(&self.cases, "focus_body", &json!({"kind": "timeline"}))
-            .and_then(|case| case.response.as_ref().ok())
-            .and_then(|whole| whole["lanes"].get(track.id as usize - 1))
-            .and_then(|lane| lane["regions"].as_array())
-            .map_or(0, Vec::len)
+        let extra = track.row.get("regions").and_then(Value::as_array).map_or(0, Vec::len);
+        extra
+            + find(&self.cases, "focus_body", &json!({"kind": "timeline"}))
+                .and_then(|case| case.response.as_ref().ok())
+                .and_then(|whole| whole["lanes"].get(track.id as usize - 1))
+                .and_then(|lane| lane["regions"].as_array())
+                .map_or(0, Vec::len)
     }
 
     /// The track a ref names, by its place now: a ref of the epoch now, or (a restore's) one of an earlier epoch,
@@ -666,6 +743,14 @@ impl State {
 
     fn sort_markers(&mut self) {
         self.markers.sort_by(|a, b| a.position_beats.total_cmp(&b.position_beats));
+    }
+
+    fn marker_identities(&self) -> Result<Vec<Value>, Fault> {
+        let rows: Vec<Value> = self.markers.iter().map(Marker::identity).collect::<Result<_, _>>()?;
+        if rows.windows(2).any(|pair| pair[0]["columns"] != pair[1]["columns"]) {
+            return Err(failed("the Marker List column shape is incomplete or inconsistent"));
+        }
+        Ok(rows)
     }
 
     /// What the Edit menu's Undo title says now.
@@ -808,32 +893,12 @@ impl State {
     }
 
     /// `track-add {kind?, index?, name?}`: a track below the one `index` names (the last by default), as Logic's Track
-    /// menu makes one, which moves the epoch; its ref in `created`. Its restore deletes it by value, unless it's gone
-    /// or holds regions since.
+    /// menu makes one, which moves the epoch; its ref in `created`. Removal is always manual: the UI cannot
+    /// expose all automation, closed plug-in state or hidden track contents.
     fn track_add(&mut self, method: &str, params: &Value) -> Answer {
         if method == "change_restore" {
-            let created = params["created"]["ref"].as_str();
-            let at = self.track_at(created, true)?;
-            let name = params["applied"]["name"].as_str().unwrap_or_default().to_string();
-            if self.tracks[at].name != name {
-                return Err(gone(format!("the track Kumi added ({}) isn't at place {} any more", quoted(&name), at + 1)));
-            }
-            if params["discard"] != true {
-                let held = self.regions_of(&self.tracks[at]);
-                if held > 0 {
-                    return Err(changed(format!("the track Kumi added ({}) holds {held} region(s) now", quoted(&name))));
-                }
-            }
-            let desc = Self::desc(params)?;
-            self.tracks.remove(at);
-            self.bump_epoch();
-            let undo = self.restored(Some("Delete Tracks"), &desc)?;
-            return Ok(json!({
-                "epoch": self.epoch_text(),
-                "restored": {"deleted": created},
-                "display": {"title": format!("{} taken away again", quoted(&name))},
-                "undo": undo,
-            }));
+            // Even an unchanged visible strip cannot prove absent automation or closed plug-in state.
+            return Err(failed(MANUAL_TRACK_ADD));
         }
         let input = &params["input"];
         let count = self.tracks.len();
@@ -912,12 +977,15 @@ impl State {
                 self.tracks.insert(after, made);
                 self.bump_epoch();
                 let place = after + 1;
+                let material =
+                    json!({"undo":{"mode":"manual", "reason":MANUAL_TRACK_ADD, "guidance":"Use Logic Pro's own undo manually."}});
                 let undo = self.applied(Some("Create Track"), &desc)?;
                 Ok(json!({
                     "epoch": self.epoch_text(),
                     "applied": {"index": place, "name": named, "kind": kind},
                     "created": {"ref": format!("{}:track:{place}", self.epoch), "kind": "track"},
-                    "display": {"title": format!("Added {kind} track {}", quoted(&named))},
+                    "material": material,
+                    "display": {"title": format!("Added {kind} track {}", quoted(&named)), "note": MANUAL_TRACK_ADD},
                     "undo": undo,
                 }))
             }
@@ -989,23 +1057,33 @@ impl State {
     /// position.
     fn marker_add(&mut self, method: &str, params: &Value) -> Answer {
         if method == "change_restore" {
-            let created = params["created"]["ref"].as_str();
-            let place = self.marker_place(created)?;
-            let desc = Self::desc(params)?;
-            let Some(marker) = self.markers.get(place - 1).cloned() else {
-                return Err(gone("the marker Kumi added isn't in the Marker List any more"));
-            };
-            if params["discard"] != true && marker.state()["position"] != params["applied"]["position"] {
-                return Err(changed(format!("{} has been moved in Logic Pro since Kumi added it", marker.label())));
+            let material = &params["material"];
+            require_marker_undo(material)?;
+            let prior = marker_rows(material, "prior")?;
+            let applied = marker_rows(material, "applied")?;
+            let marker = &material["marker"];
+            if !valid_marker_identity(marker) {
+                return Err(failed("the marker undo identity material is missing or incomplete"));
             }
-            self.markers.remove(place - 1);
+            let current = self.marker_identities()?;
+            if current != applied || current.iter().filter(|row| *row == marker).count() != 1 {
+                return Err(changed("the Marker List changed since Kumi added the marker; nothing was deleted"));
+            }
+            let at = current.iter().position(|row| row == marker).unwrap();
+            let mut after = current;
+            after.remove(at);
+            if after != prior {
+                return Err(changed("the marker undo cannot recover the prior Marker List"));
+            }
+            let desc = Self::desc(params)?;
+            let label = self.markers[at].label();
+            self.markers.remove(at);
+            if self.marker_identities().map_err(|(_, why)| uncertain(why))? != prior {
+                return Err(uncertain("the Marker List does not match its prior identity after the undo"));
+            }
             let undo = self.restored(Some("Delete"), &desc)?;
-            return Ok(json!({
-                "epoch": self.epoch_text(),
-                "restored": {"deleted": created},
-                "display": {"title": format!("{} taken away again", marker.label())},
-                "undo": undo,
-            }));
+            return Ok(json!({"epoch": self.epoch_text(), "restored": {"deleted": params["created"]["ref"]},
+                "display": {"title": format!("{label} taken away again")}, "undo": undo}));
         }
         let input = &params["input"];
         if input.get("name").is_some_and(|v| !v.is_null()) {
@@ -1016,6 +1094,7 @@ impl State {
         let asked = Self::position_input(input)?;
         let beats = on_the_beat(asked);
         let count = self.markers.len();
+        let identity = self.marker_identities()?;
         match method {
             "change_preview" => {
                 let mut display = json!({"title": format!("Marker at {}", bar_text(beats))});
@@ -1026,26 +1105,62 @@ impl State {
                     "epoch": self.epoch_text(),
                     "target": {"ref": null, "kind": "marker"},
                     "prior": {"markers": count},
-                    "fence": {"markers": count},
+                    "fence": {"markers": count, "identity": identity},
                     "display": display,
                 }))
             }
             _ => {
-                if params["fence"] != json!({"markers": count}) {
+                if params["fence"] != json!({"markers": count, "identity": identity}) {
                     return Err(changed("the markers changed since the preview"));
                 }
                 let desc = Self::desc(params)?;
-                let marker = Marker { name: format!("Marker {}", self.next_marker), position_beats: beats, length: MARKER_LENGTH };
+                let marker = Marker {
+                    name: format!("Marker {}", self.next_marker),
+                    position_beats: beats,
+                    length: json!(MARKER_LENGTH),
+                    text: if self
+                        .markers
+                        .first()
+                        .is_some_and(|marker| marker.columns.as_array().is_some_and(|cols| cols.iter().any(|col| col == "Text")))
+                    {
+                        json!("")
+                    } else {
+                        Value::Null
+                    },
+                    columns: self
+                        .markers
+                        .first()
+                        .map(|marker| marker.columns.clone())
+                        .unwrap_or_else(|| json!(["Lock", "Position", "Name", "Length"])),
+                    ax: json!({"role":"AXRow", "subrole":"AXTableRow"}),
+                    other: self
+                        .markers
+                        .first()
+                        .map(|marker| marker.other.clone())
+                        .unwrap_or_else(|| json!({"Lock":{"role":"AXCell", "children":[]}})),
+                };
                 self.next_marker += 1;
                 self.markers.push(marker.clone());
                 self.sort_markers();
-                let place = self.marker_at(beats).map_or(0, |at| at + 1);
+                let marker_identity = marker.identity().map_err(|(_, why)| uncertain(why))?;
+                let applied_identity = self.marker_identities().map_err(|(_, why)| uncertain(why))?;
+                if applied_identity.iter().filter(|row| **row == marker_identity).count() != 1 {
+                    return Err(uncertain("the added marker is not uniquely observable"));
+                }
+                let place = applied_identity.iter().position(|row| *row == marker_identity).unwrap() + 1;
                 let undo = self.applied(Some("Create Marker"), &desc)?;
+                let mut material = json!({"marker": marker_identity, "prior": identity, "applied": applied_identity});
+                material["undo"] = marker_undo_hint(&material);
+                let mut display = json!({"title": format!("Marker {} at {}", quoted(&marker.name), bar_text(beats))});
+                if material["undo"]["mode"] == "manual" {
+                    display["note"] = MANUAL_MARKER.into();
+                }
                 Ok(json!({
                     "epoch": self.epoch_text(),
                     "applied": marker.state(),
                     "created": {"ref": self.marker_ref(place), "kind": "marker"},
-                    "display": {"title": format!("Marker {} at {}", quoted(&marker.name), bar_text(beats))},
+                    "material": material,
+                    "display": display,
                     "undo": undo,
                 }))
             }
@@ -1056,33 +1171,40 @@ impl State {
     /// order of position. Its restore moves the marker back from where Kumi left it.
     fn marker_move(&mut self, method: &str, params: &Value) -> Answer {
         if method == "change_restore" {
-            let (prior, applied) = (beats_of(&params["prior"]["position"]), beats_of(&params["applied"]["position"]));
-            let desc = Self::desc(params)?;
-            if self.marker_at(prior).is_some() && self.marker_at(applied).is_none() {
-                return Ok(json!({
-                    "epoch": self.epoch_text(),
-                    "restored": {"position": position_of(prior)},
-                    "display": {"title": "The marker is where it was"},
-                    "undo": {"desc": desc, "entry": false},
-                }));
+            let material = &params["material"];
+            require_marker_undo(material)?;
+            let prior = marker_rows(material, "prior")?;
+            let applied = marker_rows(material, "applied")?;
+            let (marker, prior_marker) = (&material["marker"], &material["priorMarker"]);
+            if !valid_marker_identity(marker) || !valid_marker_identity(prior_marker) {
+                return Err(failed("the marker undo identity material is missing or incomplete"));
             }
-            let Some(at) = self.marker_at(applied) else {
-                return Err(if params["discard"] == true {
-                    gone("the marker Kumi moved isn't where it left it, nor where it was")
-                } else {
-                    changed("the marker has been moved in Logic Pro since Kumi moved it")
-                });
-            };
+            let current = self.marker_identities()?;
+            let desc = Self::desc(params)?;
+            if current == prior && current.iter().filter(|row| *row == prior_marker).count() == 1 {
+                return Ok(json!({"epoch": self.epoch_text(), "restored": {"position": params["prior"]["position"]},
+                    "display": {"title": "The marker is where it was"}, "undo": {"desc": desc, "entry": false}}));
+            }
+            if current != applied || current.iter().filter(|row| *row == marker).count() != 1 {
+                return Err(changed("the Marker List changed since Kumi moved the marker; nothing was moved"));
+            }
+            let at = current.iter().position(|row| row == marker).unwrap();
+            let prior_beats = beats_of(&prior_marker["position"]);
+            let mut expected = current;
+            expected[at] = prior_marker.clone();
+            expected.sort_by(|a, b| beats_of(&a["position"]).total_cmp(&beats_of(&b["position"])));
+            if expected != prior {
+                return Err(changed("the marker undo cannot recover the prior Marker List"));
+            }
             let label = self.markers[at].label();
-            self.markers[at].position_beats = prior;
+            self.markers[at].position_beats = prior_beats;
             self.sort_markers();
+            if self.marker_identities().map_err(|(_, why)| uncertain(why))? != prior {
+                return Err(uncertain("the Marker List does not match its prior identity after the undo"));
+            }
             let undo = self.restored(Some("Value Change"), &desc)?;
-            return Ok(json!({
-                "epoch": self.epoch_text(),
-                "restored": {"position": position_of(prior)},
-                "display": {"title": format!("{label} back at {}", bar_text(prior))},
-                "undo": undo,
-            }));
+            return Ok(json!({"epoch": self.epoch_text(), "restored": {"position": position_of(prior_beats)},
+                "display": {"title": format!("{label} back at {}", bar_text(prior_beats))}, "undo": undo}));
         }
         let input = &params["input"];
         let place = self.marker_place(input["ref"].as_str())?;
@@ -1095,7 +1217,10 @@ impl State {
                 _ => changed("the marker went since the preview"),
             });
         };
+        let identity = self.marker_identities()?;
+        let prior_marker = marker.identity()?;
         let now = json!({"position": position_of(marker.position_beats)});
+        let fence = json!({"position": position_of(marker.position_beats), "identity": identity});
         let title = format!("Moved {} to {}", marker.label(), bar_text(to));
         match method {
             "change_preview" => {
@@ -1104,21 +1229,34 @@ impl State {
                     display["unchanged"] = true.into();
                 }
                 Ok(
-                    json!({"epoch": self.epoch_text(), "target": {"ref": input["ref"], "kind": "marker"}, "prior": now, "fence": now, "display": display}),
+                    json!({"epoch": self.epoch_text(), "target": {"ref": input["ref"], "kind": "marker"}, "prior": fence, "fence": fence, "display": display}),
                 )
             }
             _ => {
-                if params["fence"] != now {
+                if params["fence"] != fence {
                     return Err(changed(format!("{} moved since the preview", marker.label())));
                 }
                 let desc = Self::desc(params)?;
                 self.markers[place - 1].position_beats = to;
+                let moved_marker = self.markers[place - 1].identity().map_err(|(_, why)| uncertain(why))?;
                 self.sort_markers();
+                let applied_identity = self.marker_identities().map_err(|(_, why)| uncertain(why))?;
+                if applied_identity.iter().filter(|row| **row == moved_marker).count() != 1 {
+                    return Err(uncertain("the moved marker is not uniquely observable"));
+                }
                 let undo = self.applied(Some("Value Change"), &desc)?;
+                let mut material =
+                    json!({"marker": moved_marker, "priorMarker": prior_marker, "prior": identity, "applied": applied_identity});
+                material["undo"] = marker_undo_hint(&material);
+                let mut display = json!({"title": title, "before": now, "after": {"position": position_of(to)}});
+                if material["undo"]["mode"] == "manual" {
+                    display["note"] = MANUAL_MARKER.into();
+                }
                 Ok(json!({
                     "epoch": self.epoch_text(),
                     "applied": {"position": position_of(to)},
-                    "display": {"title": title, "before": now, "after": {"position": position_of(to)}},
+                    "material": material,
+                    "display": display,
                     "undo": undo,
                 }))
             }
@@ -1141,17 +1279,19 @@ impl State {
                 _ => changed("the marker went since the preview"),
             });
         };
+        let mut fence = marker.state();
+        fence["identity"] = json!(self.marker_identities()?);
         let title = format!("Deleted {}", marker.label());
         match method {
             "change_preview" => Ok(json!({
                 "epoch": self.epoch_text(),
                 "target": {"ref": input["ref"], "kind": "marker"},
-                "prior": marker.state(),
-                "fence": marker.state(),
+                "prior": fence,
+                "fence": fence,
                 "display": {"title": title},
             })),
             _ => {
-                if params["fence"] != marker.state() {
+                if params["fence"] != fence {
                     return Err(changed(format!("{} changed since the preview", marker.label())));
                 }
                 let desc = Self::desc(params)?;
@@ -1465,7 +1605,9 @@ impl LogicScript {
             "solo" => track.solo = value == true,
             "arm" => track.armed = value == true,
             "name" => track.name = value.as_str().unwrap_or_default().to_string(),
-            _ => track.volume_db = value.as_f64().unwrap_or(track.volume_db),
+            "kind" => track.kind = value.as_str().unwrap_or_default().to_string(),
+            "volumeDb" => track.volume_db = value.as_f64().unwrap_or(track.volume_db),
+            _ => track.row[field] = value,
         }
     }
 
@@ -1476,6 +1618,37 @@ impl LogicScript {
     /// The markers, in the Marker List's order: each name and its position in beats.
     pub fn markers(&self) -> Vec<(String, f64)> {
         self.state.lock().unwrap().markers.iter().map(|m| (m.name.clone(), m.position_beats)).collect()
+    }
+
+    /// A producer edit or replacement of a Marker List row, for identity-fence regressions (`index` is from 1).
+    pub fn set_marker(&self, index: usize, field: &str, value: Value) {
+        let mut state = self.state.lock().unwrap();
+        if field == "columns" {
+            let shows_text = value.as_array().is_some_and(|columns| columns.iter().any(|column| column == "Text"));
+            for marker in &mut state.markers {
+                marker.columns = value.clone();
+                if !shows_text {
+                    marker.text = Value::Null;
+                }
+            }
+            return;
+        }
+        let marker = &mut state.markers[index - 1];
+        match field {
+            "name" => marker.name = value.as_str().unwrap_or_default().into(),
+            "positionBeats" => marker.position_beats = value.as_f64().unwrap_or(f64::NAN),
+            "length" => marker.length = value,
+            "text" => marker.text = value,
+            "columns" => marker.columns = value,
+            "ax" => marker.ax = value,
+            "other" => marker.other = value,
+            _ => panic!("unknown marker fixture field {field}"),
+        }
+        state.sort_markers();
+    }
+
+    pub fn marker_identity(&self, index: usize) -> Result<Value, String> {
+        self.state.lock().unwrap().markers[index - 1].identity().map_err(|(_, why)| why)
     }
 
     pub fn playing(&self) -> bool {
@@ -1709,16 +1882,14 @@ mod tests {
             (Some("2"), json!({"volumeDb": 0.0}), json!(false))
         );
         assert_eq!(script.volume(1), 0.0);
-        // The added track taken away again: the epoch moves once more, and the pages are as recorded.
-        let gone = answer(
-            "change_restore",
-            json!({"kind": "track-add", "target": {"ref": null, "kind": "track", "index": 1}, "prior": {"tracks": 2}, "applied": added["applied"], "created": added["created"], "desc": "Kumi: undo Added audio track “Pad” (k0004)", "epoch": "2"}),
-        )
-        .unwrap();
-        assert_eq!((gone["epoch"].as_str(), script.track_count()), (Some("3"), 2));
-        assert_eq!(answer("read", json!({"kind": "track"})).unwrap()["items"][1]["name"], "Keys");
-        assert_eq!(script.undo_titles(), ["Undo Create Track", "Undo Delete Tracks"]);
-        assert_eq!(script.undo_history(), ["Kumi: Added audio track “Pad” (k0002)", ""], "a restore's step the bridge doesn't name");
+        // Automatic removal is refused even with the exact apply answer and discard permission.
+        let gone =
+            answer("change_restore", json!({"kind":"track-add", "created":added["created"], "material":added["material"], "discard":true}))
+                .unwrap_err();
+        assert_eq!(gone, failed(MANUAL_TRACK_ADD));
+        assert_eq!((script.epoch(), script.track_count()), (2, 3));
+        assert_eq!(answer("read", json!({"kind":"track"})).unwrap()["items"][1]["name"], "Pad");
+        assert_eq!(script.undo_titles(), ["Undo Create Track"]);
     }
 
     #[test]

@@ -285,38 +285,41 @@ async fn a_track_added_below_a_track_moves_the_epoch_and_changes_before_it_are_s
     assert!(is_error && refused["error"] == "kind must be audio, instrument or external", "{refused}");
 
     // Each undone, the ones from before the add by the place their track had then: the rename by value (a fresh
-    // step of Logic's undo), the added track by its deletion, the fader by value.
+    // step of Logic's undo), the added track left for manual Undo, the fader by value.
     let (undone, is_error) = lab.undo(&rename, "u1", false).await;
     assert!(!is_error && undone["state"] == "undone" && undone["epoch"] == "4", "{undone}");
     assert_eq!(lab.script.track(3)["name"], json!("Keys"));
-    let (undone, is_error) = lab.undo(&add, "u2", false).await;
-    assert!(!is_error && undone["restored"] == json!({"deleted": "3:track:2"}) && undone["epoch"] == "5", "{undone}");
-    assert_eq!(lab.script.track_count(), 2);
+    let (refused, is_error) = lab.undo(&add, "u2", false).await;
+    assert!(
+        is_error && refused["code"] == "failed" && refused["error"].as_str().unwrap().contains("doesn't expose all of its contents"),
+        "{refused}"
+    );
+    assert_eq!((lab.script.epoch(), lab.script.track_count()), (4, 3));
     let (undone, is_error) = lab.undo(&volume, "u3", false).await;
     assert!(!is_error && undone["state"] == "undone", "{undone}");
     assert_eq!(lab.script.volume(1), 0.0);
-    assert_eq!(lab.script.undo_titles(), ["Undo Renaming", "Undo Create Track", "Undo Renaming", "Undo Delete Tracks"]);
+    assert_eq!(lab.script.undo_titles(), ["Undo Renaming", "Undo Create Track", "Undo Renaming"]);
 
     // Deletion cannot be restored automatically: even a matching top title proves no step identity.
-    let (delete, deleted) = lab.make("track-delete", json!({"ref": "5:track:2"}), "a5").await;
-    assert_eq!(deleted["epoch"], "6");
+    let (delete, deleted) = lab.make("track-delete", json!({"ref": "4:track:2"}), "a5").await;
+    assert_eq!(deleted["epoch"], "5");
     let titles = lab.script.undo_titles();
     let before = lab.script.asked().len();
     let (refused, is_error) = lab.undo(&delete, "u4", false).await;
     assert!(is_error && refused["code"] == "failed", "{refused}");
     assert!(refused["error"].as_str().unwrap().contains("Undo title cannot identify Kumi's specific step"), "{refused}");
-    assert_eq!(lab.script.track_count(), 1);
-    assert_eq!(lab.script.epoch(), 6);
+    assert_eq!(lab.script.track_count(), 2);
+    assert_eq!(lab.script.epoch(), 5);
     assert_eq!(lab.script.undo_titles(), titles, "no Undo was pressed");
     assert_eq!(lab.script.asked()[before..].iter().filter(|(method, _)| method == "change_restore").count(), 1, "no automatic resend");
     // The journal still knows the delete applied; asking for its apply answer never deletes again.
     let applies = lab.script.asked().iter().filter(|(method, _)| method == "change_apply").count();
     assert_eq!(lab.apply(&delete, "a5").await, (deleted, false));
     assert_eq!(lab.script.asked().iter().filter(|(method, _)| method == "change_apply").count(), applies);
-    lab.make("track-rename", json!({"ref": "6:track:1", "name": "Vox"}), "a6").await;
+    lab.make("track-rename", json!({"ref": "5:track:1", "name": "Vox"}), "a6").await;
     let (again, is_error) = lab.undo(&delete, "u5", true).await;
     assert!(is_error && again["code"] == "failed", "discard cannot establish undo identity: {again}");
-    assert_eq!(lab.script.track_count(), 1);
+    assert_eq!(lab.script.track_count(), 2);
     lab.simulator.stop();
 }
 
@@ -370,7 +373,7 @@ async fn a_write_logic_doesnt_answer_after_is_uncertain_and_is_never_sent_twice(
 }
 
 /// Markers by their place in the Marker List, numbered by Logic, each a step of its undo; a deleted one back through
-/// Logic's own undo while on top, else made again; the tempo in whole BPM, no step; and the kinds the bridge can't
+/// manual Logic Undo; the tempo in whole BPM, no step; and the kinds the bridge can't
 /// make, refused saying why.
 #[tokio::test]
 async fn markers_and_the_tempo_change_and_come_back_in_logics_words() {
@@ -395,6 +398,8 @@ async fn markers_and_the_tempo_change_and_come_back_in_logics_words() {
     );
     let (refused, is_error) = lab.try_preview("marker-add", json!({"position": 6})).await;
     assert!(is_error && refused["error"].as_str().unwrap().contains("not seconds"), "{refused}");
+    // Positive value-restore fixture explicitly exposes Text before the first preview; it is not the original recording.
+    expose_marker_text(&lab.script);
     // One added before the recorded one is first in the list; a move re-sorts it; a delete and the undos, each a step.
     let (add, added) = lab.make("marker-add", json!({"positionBeats": 16}), "a2").await;
     assert_eq!((add["prior"].clone(), add["display"]["title"].clone()), (json!({"markers": 1}), json!("Marker at bar 5")));
@@ -411,8 +416,8 @@ async fn markers_and_the_tempo_change_and_come_back_in_logics_words() {
     assert_eq!(page["items"][0]["position"], position(5, 1));
     let (moved, applied) = lab.make("marker-move", json!({"ref": "1:marker:1", "positionBeats": 40}), "a3").await;
     assert_eq!(
-        (moved["prior"].clone(), applied["display"]["title"].clone()),
-        (json!({"position": position(5, 1)}), json!("Moved marker “Marker 2” to bar 11"))
+        (moved["prior"]["position"].clone(), applied["display"]["title"].clone()),
+        (position(5, 1), json!("Moved marker “Marker 2” to bar 11"))
     );
     assert_eq!(applied["undo"]["title"], "Undo Value Change");
     assert_eq!(lab.script.markers(), [("Marker 1".to_string(), 32.0), ("Marker 2".to_string(), 40.0)]);
@@ -544,12 +549,12 @@ async fn the_change_methods_on_the_wire() {
     lab.make("track-rename", json!({"ref": "1:track:2", "name": "Lead"}), "a4").await;
     lab.tool("undo_step_end", json!({"stepId": "s1", "label": "Keys muted and 1 more"})).await;
     let (add, _) = lab.make("track-add", json!({"name": "Pad", "kind": "instrument"}), "a5").await;
-    // (the added track's rename is put back before the track is taken away: its undo wants it as the apply left it)
+    // Rename restore is value-backed; the subsequent track removal request is refused manually.
     let (pads, _) = lab.make("track-rename", json!({"ref": "3:track:3", "name": "Pads"}), "a6").await;
     lab.undo(&pads, "u2", false).await;
     lab.undo(&add, "u3", false).await;
     let (marker, _) = lab.make("marker-add", json!({"positionBeats": 16}), "a7").await;
-    let (moved, _) = lab.make("marker-move", json!({"ref": "6:marker:1", "positionBeats": 20}), "a8").await;
+    let (moved, _) = lab.make("marker-move", json!({"ref": "5:marker:1", "positionBeats": 20}), "a8").await;
     lab.undo(&moved, "u4", false).await;
     lab.undo(&marker, "u5", false).await;
     let (tempo, _) = lab.make("tempo-set", json!({"bpm": 128}), "a9").await;
@@ -557,9 +562,13 @@ async fn the_change_methods_on_the_wire() {
     lab.tool("transport_play", json!({})).await;
     lab.tool("cursor_set", json!({"positionBeats": 8})).await;
     lab.tool("transport_stop", json!({})).await;
-    let (delete, _) = lab.make("track-delete", json!({"ref": "6:track:2"}), "a10").await;
+    let (delete, _) = lab.make("track-delete", json!({"ref": "5:track:2"}), "a10").await;
     lab.undo(&delete, "u7", false).await;
-    assert_eq!((lab.script.epoch(), lab.script.track_count()), (7, 1), "value undos went through; deleted track needs manual Logic undo");
+    assert_eq!(
+        (lab.script.epoch(), lab.script.track_count()),
+        (6, 2),
+        "value undos went through; structural and unknown-Text marker restores require manual Logic undo"
+    );
     let asked: Vec<String> = lab.script.asked().into_iter().map(|(method, _)| method).collect();
     for method in [
         "change_preview",
@@ -575,4 +584,226 @@ async fn the_change_methods_on_the_wire() {
     }
     golden("logic-changes-bridge.ndjson", &without_nonces(&normalized(&lab.simulator.transcript())));
     lab.simulator.stop();
+}
+
+fn marker_identity_edits() -> Vec<(&'static str, Value)> {
+    vec![
+        ("name", json!(format!("{}producer replacement", "A".repeat(300)))),
+        ("length", json!(24.0)),
+        ("length", json!("infinite")),
+        ("text", json!("producer's visible marker note")),
+        ("columns", json!(["Lock", "Position", "Length", "Name", "Text"])),
+        ("ax", json!({"role":"AXRow", "subrole":"AXTableRow", "id":"replacement-row"})),
+        ("other", json!({"Lock":{"role":"AXCell", "children":[], "value":"producer locked marker"}})),
+    ]
+}
+
+fn expose_marker_text(script: &LogicScript) {
+    script.set_marker(1, "columns", json!(["Lock", "Position", "Name", "Length", "Text"]));
+    script.set_marker(1, "text", json!("original visible text"));
+}
+
+#[tokio::test]
+async fn an_added_marker_is_never_deleted_after_a_same_position_identity_or_list_change() {
+    for (field, value) in marker_identity_edits() {
+        let mut lab = Lab::start().await;
+        expose_marker_text(&lab.script);
+        let (add, applied) = lab.make("marker-add", json!({"positionBeats":16}), "add").await;
+        assert_eq!(applied["undo"]["restore"]["mode"], "value");
+        assert!(applied.get("material").is_none(), "private identities stay in the host journal");
+        lab.script.set_marker(1, field, value);
+        let identity = lab.script.marker_identity(1);
+        let titles = lab.script.undo_titles();
+        for (key, discard) in [("undo", false), ("discard", true)] {
+            let (refused, error) = lab.undo(&add, key, discard).await;
+            assert!(error && refused["code"] == "changed", "{field}, discard={discard}: {refused}");
+            assert_eq!(lab.script.marker_identity(1), identity);
+            assert_eq!(lab.script.markers().len(), 2);
+            assert_eq!(lab.script.undo_titles(), titles, "refusal made no native undo step");
+        }
+        lab.simulator.stop();
+    }
+    // An unrelated row changing also invalidates the captured surrounding list.
+    let mut lab = Lab::start().await;
+    expose_marker_text(&lab.script);
+    let (add, _) = lab.make("marker-add", json!({"positionBeats":16}), "add").await;
+    lab.script.set_marker(2, "name", json!("a producer's unrelated marker"));
+    let (refused, error) = lab.undo(&add, "undo", true).await;
+    assert!(error && refused["code"] == "changed", "{refused}");
+    assert_eq!(lab.script.markers().len(), 2);
+    lab.simulator.stop();
+}
+
+#[tokio::test]
+async fn marker_move_fences_and_restores_bind_raw_row_and_complete_list_identity() {
+    for (field, value) in marker_identity_edits() {
+        let mut lab = Lab::start().await;
+        expose_marker_text(&lab.script);
+        let preview = lab.preview("marker-move", json!({"ref":"1:marker:1", "positionBeats":40})).await;
+        let before = lab.script.marker_identity(1);
+        lab.script.set_marker(1, field, value.clone());
+        let changed = lab.script.marker_identity(1);
+        let (refused, error) = lab.apply(&preview, "apply").await;
+        assert!(error && refused["code"] == "changed", "{field}: {refused}");
+        assert_eq!(lab.script.marker_identity(1), changed);
+        assert!(lab.script.undo_titles().is_empty());
+        lab.simulator.stop();
+
+        let mut lab = Lab::start().await;
+        expose_marker_text(&lab.script);
+        let (moved, applied) = lab.make("marker-move", json!({"ref":"1:marker:1", "positionBeats":40}), "move").await;
+        assert_eq!(moved["prior"]["identity"][0], before.unwrap());
+        assert_eq!(applied["undo"]["restore"]["mode"], "value");
+        lab.script.set_marker(1, field, value);
+        let identity = lab.script.marker_identity(1);
+        let titles = lab.script.undo_titles();
+        for (key, discard) in [("undo", false), ("discard", true)] {
+            let (refused, error) = lab.undo(&moved, key, discard).await;
+            assert!(error && refused["code"] == "changed", "{field}, discard={discard}: {refused}");
+            assert_eq!(lab.script.marker_identity(1), identity);
+            assert_eq!(lab.script.markers()[0].1, 40.0);
+            assert_eq!(lab.script.undo_titles(), titles);
+        }
+        lab.simulator.stop();
+    }
+}
+
+#[tokio::test]
+async fn marker_already_restored_requires_the_full_prior_state_and_unknown_values_never_become_empty() {
+    let mut lab = Lab::start().await;
+    expose_marker_text(&lab.script);
+    lab.script.set_marker(1, "length", json!("infinite"));
+    let (moved, _) = lab.make("marker-move", json!({"ref":"1:marker:1", "positionBeats":40}), "move").await;
+    lab.script.set_marker(1, "positionBeats", json!(32));
+    let titles = lab.script.undo_titles();
+    let (back, error) = lab.undo(&moved, "already", false).await;
+    assert!(!error && back["display"]["title"] == "The marker is where it was", "{back}");
+    assert_eq!(lab.script.undo_titles(), titles, "the exact prior state needs no write");
+    lab.simulator.stop();
+
+    let mut lab = Lab::start().await;
+    expose_marker_text(&lab.script);
+    let (moved, _) = lab.make("marker-move", json!({"ref":"1:marker:1", "positionBeats":40}), "move").await;
+    lab.script.set_marker(1, "positionBeats", json!(32));
+    lab.script.set_marker(1, "name", json!("different marker at the old position"));
+    let titles = lab.script.undo_titles();
+    let (refused, error) = lab.undo(&moved, "not-already", true).await;
+    assert!(error && refused["code"] == "changed", "{refused}");
+    assert_eq!(lab.script.undo_titles(), titles);
+    assert_eq!(lab.script.markers()[0].0, "different marker at the old position");
+    lab.simulator.stop();
+
+    // Unavailable Text (null) is not visible empty Text, even though M2's old read row says "" for both.
+    let mut lab = Lab::start().await;
+    let (moved, applied) = lab.make("marker-move", json!({"ref":"1:marker:1", "positionBeats":40}), "move").await;
+    assert_eq!(applied["undo"]["restore"]["mode"], "manual");
+    assert!(lab.script.marker_identity(1).unwrap()["text"].is_null());
+    expose_marker_text(&lab.script);
+    lab.script.set_marker(1, "text", json!(""));
+    let (refused, error) = lab.undo(&moved, "text-visibility", true).await;
+    assert!(error && refused["code"] == "failed", "historically unknown Text cannot become known: {refused}");
+    lab.script.set_marker(1, "length", Value::Null);
+    let (refused, error) = lab.undo(&moved, "unreadable-length", true).await;
+    assert!(error && refused["code"] == "failed", "{refused}");
+    assert_eq!(lab.script.markers()[0].1, 40.0);
+    lab.simulator.stop();
+}
+
+#[tokio::test]
+async fn a_created_track_is_never_deleted_even_when_every_visible_field_appears_unchanged() {
+    for (field, value) in [
+        ("kind", json!("audio")),
+        ("name", json!("producer's new name")),
+        ("volumeDb", json!(-3.0)),
+        ("color", json!("#123456")),
+        ("monitoring", json!(true)),
+        ("inputs", json!(["Input 2"])),
+        ("output", json!("Bus 7")),
+        ("plugins", json!([{"name":"a producer's instrument", "state":"changed"}])),
+        ("sends", json!([{"destination":"Bus 4", "level":-6.0}])),
+        ("regions", json!([{"name":"producer's recording"}])),
+        ("monitoring", Value::Null),
+        ("automation", json!([{"hidden":true, "value":0.5}])),
+    ] {
+        let mut lab = Lab::start().await;
+        let (add, applied) = lab.make("track-add", json!({"name":"Pad", "kind":"instrument"}), "add").await;
+        assert_eq!(applied["undo"]["restore"]["mode"], "manual");
+        lab.script.set_track(3, field, value);
+        let material = lab.script.track(3);
+        let titles = lab.script.undo_titles();
+        for (key, discard) in [("undo", false), ("discard", true)] {
+            let (refused, error) = lab.undo(&add, key, discard).await;
+            assert!(error && matches!(refused["code"].as_str(), Some("changed" | "failed")), "{field}, discard={discard}: {refused}");
+            assert_eq!(lab.script.track_count(), 3);
+            assert_eq!(lab.script.track(3), material);
+            assert_eq!(lab.script.undo_titles(), titles);
+        }
+        lab.simulator.stop();
+    }
+}
+
+#[tokio::test]
+async fn an_unchanged_created_track_still_requires_manual_undo_including_discard() {
+    for kind in ["audio", "instrument", "external"] {
+        let mut lab = Lab::start().await;
+        let (add, applied) = lab.make("track-add", json!({"name":"Pad", "kind":kind}), "add").await;
+        assert_eq!(applied["undo"]["restore"]["mode"], "manual");
+        for field in ["selected", "focused", "enabled"] {
+            lab.script.set_track(3, field, json!(true));
+        }
+        assert_eq!(applied["undo"]["restore"]["mode"], "manual");
+        let (undone, error) = lab.undo(&add, "undo", true).await;
+        assert!(error && undone["code"] == "failed", "{kind}: {undone}");
+        assert_eq!((lab.script.epoch(), lab.script.track_count()), (2, 3));
+        lab.simulator.stop();
+    }
+}
+
+#[tokio::test]
+async fn a_created_tracks_missing_or_incomplete_undo_material_never_becomes_permission_to_delete() {
+    let mut lab = Lab::start().await;
+    let (add, applied) = lab.make("track-add", json!({"name":"Pad", "kind":"instrument"}), "add").await;
+    let before = lab.script.track(3);
+    let titles = lab.script.undo_titles();
+    for material in [Value::Null, json!({"track": {"name":"Pad", "kind":"instrument", "header":{}, "regions":[]}})] {
+        let response = (lab.script.respond())(
+            "change_restore",
+            &json!({
+                "kind":"track-add", "target":add["target"], "prior":add["prior"], "applied":applied["applied"],
+                "created":applied["created"], "material":material, "desc":"an explicit direct-client undo", "discard":true
+            }),
+        )
+        .unwrap();
+        assert!(matches!(response, Err((code, _)) if code == "failed"));
+        assert_eq!(lab.script.track_count(), 3);
+        assert_eq!(lab.script.track(3), before);
+        assert_eq!(lab.script.undo_titles(), titles);
+    }
+    lab.simulator.stop();
+}
+
+#[tokio::test]
+async fn showing_text_later_never_recovers_unknown_original_marker_contents_even_when_the_position_is_back() {
+    for kind in ["marker-add", "marker-move"] {
+        let mut lab = Lab::start().await;
+        let asked = if kind == "marker-add" { json!({"positionBeats":16}) } else { json!({"ref":"1:marker:1","positionBeats":40}) };
+        let (preview, applied) = lab.make(kind, asked, "apply").await;
+        assert_eq!(applied["undo"]["restore"]["mode"], "manual");
+        expose_marker_text(&lab.script);
+        for index in 1..=lab.script.markers().len() {
+            lab.script.set_marker(index, "text", json!(""));
+        }
+        if kind == "marker-move" {
+            lab.script.set_marker(1, "positionBeats", json!(32));
+        }
+        let markers = lab.script.markers();
+        let titles = lab.script.undo_titles();
+        for (key, discard) in [("normal", false), ("discard", true)] {
+            let (refused, error) = lab.undo(&preview, key, discard).await;
+            assert!(error && refused["code"] == "failed", "{kind}: {refused}");
+            assert_eq!(lab.script.markers(), markers);
+            assert_eq!(lab.script.undo_titles(), titles);
+        }
+        lab.simulator.stop();
+    }
 }

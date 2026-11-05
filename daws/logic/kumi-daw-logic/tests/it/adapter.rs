@@ -33,9 +33,21 @@ fn the_change_tools_match_the_native_bridge_and_name_its_undo_limits() {
     );
     assert_eq!(
         kinds.kinds.iter().filter(|kind| kind.manual_undo.is_some()).map(|kind| kind.kind).collect::<BTreeSet<_>>(),
-        BTreeSet::from(["track-delete", "marker-delete"])
+        BTreeSet::from(["track-add", "track-delete", "marker-delete"])
     );
     assert!(!kinds.plan_steps, "Logic has no atomic undo block for a plan");
+    for kind in kinds.kinds.iter().filter(|kind| ["marker-add", "marker-move"].contains(&kind.kind)) {
+        let decide = kind.manual_undo_when.expect("marker undo depends on validated original contents");
+        for reply in [
+            json!({}),
+            json!({"undo":{"restore":null}}),
+            json!({"undo":{"restore":{"mode":"unknown"}}}),
+            json!({"undo":{"restore":{"mode":"value", "unexpected":true}}}),
+        ] {
+            assert!(decide(&reply).is_some(), "missing or malformed evidence is manual: {reply}");
+        }
+        assert!(decide(&json!({"undo":{"restore":{"mode":"value"}}})).is_none());
+    }
     assert!(kinds.plan_description.contains("no undo block"));
     assert!(kinds.undo_description.contains("as a new write"));
 }

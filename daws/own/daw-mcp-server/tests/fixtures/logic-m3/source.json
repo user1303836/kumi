@@ -2,5 +2,5 @@
   "commit": "8d609d6a051e4a6f040431bf64c4b9712214094e",
   "path": "crates/daw-mcp-server/tests/golden/logic-changes-bridge.ndjson",
   "sha256": "e443804b394da96e9caee12c32de4735465ff2df7116ae1b46c45e2655609508",
-  "currentDifference": "The final track-delete restore refuses with failed and no state change; automatic native undo cannot prove step ownership."
+  "currentDifference": "Current derived transcript preserves all original requests in order but models conservative native restore refusal for added tracks, deleted tracks, and marker additions/moves whose original Text was not exposed. Add/move replies and restore requests carry stronger opaque marker row/list identities and explicit manual/value restore hints; added tracks carry a manual-only hint. Track removal is never inferred safe from visible strip state. Consequent later epochs remain one lower because the added track is not deleted. Model marker length16 is synthetic, not the raw native infinity cell. The original historical transcript remains byte-exact and is not current native acceptance."
 }

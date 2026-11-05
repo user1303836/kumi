@@ -9,4 +9,4 @@
 
 Native acceptance on a disposable project requires `accept_logic --changes --scratch-confirmed`; failed undo may leave edits. Recorded source evidence is not a current native acceptance result.
 
-Deleted tracks and markers require manual Logic undo; Kumi never presses a native Undo step identified only by its title. Confirmed deletions stay in HISTORY with this limitation; uncertain deletions remain uncertain. Native marker, note and structural undo attribution is not inferred from titles alone.
+Added tracks, deleted tracks and deleted markers require manual Logic Undo History; Kumi never presses a native Undo step identified only by its title. Marker additions/moves also require manual undo if any captured original identity field (including Text) was unavailable; showing the field later cannot recover its old value. Complete known marker row/list identity permits value restores, and discard never overrides unknown identity. Confirmed manual-only changes stay Kept in HISTORY and block default Undo from skipping to an earlier change; uncertain deletions remain uncertain. Native marker, note and structural undo attribution is not inferred from titles alone.

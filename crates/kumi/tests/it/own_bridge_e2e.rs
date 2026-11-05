@@ -386,7 +386,14 @@ async fn reapers_changes_go_through_kumis_host_into_history_and_back_out_as_new_
             let again = reaper.observe(Signal::new(), None).await.unwrap();
             let latest = serde_json::from_str::<Value>(&again.context).unwrap()["kumiChanges"].clone();
             assert_eq!(latest.as_array().map(Vec::len), Some(4), "{latest}");
-            assert!(latest.as_array().unwrap().iter().all(|row| row["state"] == "applied"), "{latest}");
+            assert!(
+                latest
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["state"] == if row["title"] == "Added audio track “Pad”" { "kept" } else { "applied" }),
+                "{latest}"
+            );
 
             // Undo the last: the mute goes, as a new step of REAPER's undo.
             let undo = tool(&again, "undo_change");
@@ -1557,12 +1564,19 @@ async fn logics_changes_go_through_kumis_host_into_history_and_back_out_as_new_s
             );
             assert_eq!(script.undo_titles(), ["Undo Create Track", "Undo Renaming"], "the Edit menu's titles, as the bridge keeps them");
 
-            // The next look lists them for the model, each applied; the add moved the epoch, so the refs are new ones.
+            // The next look lists them for the model, with the addition kept/manual-only; the add moved the epoch, so the refs are new ones.
             let again = logic.observe(Signal::new(), None).await.unwrap();
             let context: Value = serde_json::from_str(&again.context).unwrap();
             let latest = context["kumiChanges"].clone();
             assert_eq!(latest.as_array().map(Vec::len), Some(4), "{latest}");
-            assert!(latest.as_array().unwrap().iter().all(|row| row["state"] == "applied"), "{latest}");
+            assert!(
+                latest
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .all(|row| row["state"] == if row["title"] == "Added audio track “Pad”" { "kept" } else { "applied" }),
+                "{latest}"
+            );
             assert_eq!(context["tracks"].as_array().map(Vec::len), Some(3));
             assert_ne!(context["tracks"][0]["ref"], vocal, "the tracks get names never used before: {context}");
 
@@ -1584,18 +1598,15 @@ async fn logics_changes_go_through_kumis_host_into_history_and_back_out_as_new_s
                 (row.state, row.note.as_deref()),
                 (ChangeState::Undone, Some("Undone with Logic Pro's own undo (Cmd-Z in Logic Pro)."))
             );
-            assert_eq!(state_of("Added audio track “Pad”"), Some(ChangeState::Applied), "the steps before it stand");
+            assert_eq!(state_of("Added audio track “Pad”"), Some(ChangeState::Kept), "the confirmed addition is manual-only");
 
-            // Undo the last still standing: the track Kumi added goes by its deletion (a step of Logic's undo the bridge
-            // doesn't name, and the epoch moves).
+            // A confirmed addition blocks default undo; visible emptiness cannot prove absent automation or plug-in state.
             let undo = tool(&again, "undo_change");
-            let undone = undo.execute(input(json!({"change": "last", "final": true})), Signal::new()).await.unwrap();
-            assert!(!undone.is_error, "{}", undone.text);
-            assert_eq!(undone.reply.as_deref(), Some("Undone: Added audio track “Pad”."));
-            assert_eq!(
-                (script.track_count(), script.undo_titles()),
-                (2, vec!["Undo Create Track".to_string(), "Undo Delete Tracks".to_string()])
-            );
+            let before = script.asked().len();
+            let refused = undo.execute(input(json!({"change": "last", "final": true})), Signal::new()).await.unwrap();
+            assert!(refused.is_error && refused.text.contains("manually"), "{}", refused.text);
+            assert_eq!(script.asked().len(), before, "no automatic deletion request");
+            assert_eq!((script.track_count(), script.undo_titles()), (3, vec!["Undo Create Track".to_string()]));
 
             // The producer moved the fader since: Kumi leaves it, says why, and HISTORY keeps the change.
             script.set_volume(1, -3.0);
@@ -1743,12 +1754,20 @@ async fn logics_changes_go_through_kumis_host_into_history_and_back_out_as_new_s
 
 /// Deletions whose native Undo step has no identity are recorded truthfully and never sent as automatic restores.
 #[tokio::test(flavor = "current_thread")]
-async fn logics_deleted_tracks_and_markers_require_manual_undo_and_uncertain_deletes_stay_uncertain() {
+async fn logics_structural_and_unknown_marker_changes_require_manual_undo_and_uncertain_applies_stay_uncertain() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            for (tool_name, read_kind, index, uncertain) in
-                [("track_delete", "track", 1, false), ("marker_delete", "marker", 0, false), ("track_delete", "track", 1, true)]
-            {
+            for (tool_name, read_kind, index, uncertain) in [
+                ("track_add", "track", 1, false),
+                ("track_delete", "track", 1, false),
+                ("marker_delete", "marker", 0, false),
+                ("marker_add", "marker", 0, false),
+                ("marker_move", "marker", 0, false),
+                ("track_add", "track", 1, true),
+                ("track_delete", "track", 1, true),
+                ("marker_add", "marker", 0, true),
+                ("marker_move", "marker", 0, true),
+            ] {
                 let home = tempfile::tempdir().unwrap();
                 let paths = BridgePaths::new(home.path(), Daw::Logic);
                 let script = LogicScript::new();
@@ -1788,11 +1807,17 @@ async fn logics_deleted_tracks_and_markers_require_manual_undo_and_uncertain_del
                 if uncertain {
                     script.uncertain_once();
                 }
+                let asked = match tool_name {
+                    "track_add" => json!({"name":"Manual Pad"}),
+                    "marker_add" => json!({"positionBeats":16}),
+                    "marker_move" => json!({"ref":reference, "positionBeats":40}),
+                    _ => json!({"ref":reference}),
+                };
                 let steps = if uncertain {
-                    json!([{ "tool": tool_name, "input": {"ref": reference} }])
+                    json!([{ "tool": tool_name, "input": asked }])
                 } else {
                     // Logic has no atomic plan group: the latest manual child must block default undo of its earlier steps.
-                    json!([{ "tool": "tempo_set", "input": {"bpm": 140} }, { "tool": tool_name, "input": {"ref": reference} }])
+                    json!([{ "tool": "tempo_set", "input": {"bpm": 140} }, { "tool": tool_name, "input": asked }])
                 };
                 let changed = tool(&observation, "make_changes").execute(input(json!({"steps": steps})), Signal::new()).await.unwrap();
                 assert_eq!(changed.is_error, uncertain, "{}", changed.text);
@@ -1802,12 +1827,18 @@ async fn logics_deleted_tracks_and_markers_require_manual_undo_and_uncertain_del
                 } else {
                     assert_eq!(record.state, ChangeState::Kept);
                     assert!(
-                        record
-                            .note
-                            .as_deref()
-                            .is_some_and(|note| note.contains("cannot automatically restore") && note.contains("manually")),
+                        record.note.as_deref().is_some_and(|note| note.contains("cannot automatically")
+                            && note.contains("Undo History")
+                            && note.contains("manually")),
                         "{record:?}"
                     );
+                }
+                if !uncertain && ["marker_add", "marker_move"].contains(&tool_name) {
+                    // Showing Text after the confirmed write cannot recover what was hidden at that write.
+                    script.set_marker(1, "columns", json!(["Lock", "Position", "Name", "Length", "Text"]));
+                    for index in 1..=script.markers().len() {
+                        script.set_marker(index, "text", json!("visible only after Kumi's change"));
+                    }
                 }
                 let before = script.asked().iter().filter(|(method, _)| method == "change_restore").count();
                 let before_rpc = counted.id.get();
@@ -1827,8 +1858,9 @@ async fn logics_deleted_tracks_and_markers_require_manual_undo_and_uncertain_del
                 if !uncertain {
                     let refused = tool(&observation, "undo_change").execute(input(json!({"change": "last"})), Signal::new()).await.unwrap();
                     assert!(refused.is_error && refused.text.contains("manually"), "{}", refused.text);
-                    let error = logic.undo(None, Signal::new()).await.expect_err("/undo cannot report an automatic success");
-                    assert!(error.message().contains("manually"), "{}", error.message());
+                    let refused = logic.undo(None, Signal::new()).await.unwrap();
+                    assert_eq!(refused.state, ChangeState::Kept);
+                    assert!(refused.note.as_deref().is_some_and(|note| note.contains("manually")), "{refused:?}");
                     assert_eq!(counted.id.get(), before_rpc, "manual-only undo makes zero MCP calls");
                     assert_eq!(script.volume(1), -6.0, "default undo must not silently take an earlier outside change");
                     assert_eq!(script.tempo(), 140.0, "default undo cannot silently take an earlier child of the compound plan");
@@ -1844,6 +1876,62 @@ async fn logics_deleted_tracks_and_markers_require_manual_undo_and_uncertain_del
                 }
                 let current = told.borrow().iter().rev().find(|row| row.id == record.id).cloned().unwrap();
                 assert_eq!(current.state, record.state, "refusal cannot say the deletion was undone");
+                logic.close().await.unwrap();
+                simulator.stop();
+            }
+        })
+        .await;
+}
+
+/// An explicit complete visible-Text capture remains reversible; manual-only defaults do not disable known markers.
+#[tokio::test(flavor = "current_thread")]
+async fn logics_complete_known_marker_additions_and_moves_remain_reversible() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for kind in ["marker_add", "marker_move"] {
+                let home = tempfile::tempdir().unwrap();
+                let paths = BridgePaths::new(home.path(), Daw::Logic);
+                let script = LogicScript::new();
+                script.set_marker(1, "columns", json!(["Lock", "Position", "Name", "Length", "Text"]));
+                script.set_marker(1, "text", json!("known before Kumi's preview"));
+                let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "com.apple.logic10");
+                config.discovery_dir = Some(paths.discovery());
+                let simulator = Simulator::start(config).await.unwrap();
+                let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Logic, home.path())), id: Cell::new(0) });
+                let connect: Connect = Rc::new(move |_| {
+                    let endpoint = endpoint.clone();
+                    async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+                });
+                let told: Rc<RefCell<Vec<ChangeRecord>>> = Rc::default();
+                let into = told.clone();
+                let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
+                context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
+                let logic = create_logic_integration(OwnOptions {
+                    context,
+                    kumi_home: home.path().into(),
+                    connect: Some(connect),
+                    open_file: None,
+                });
+                logic.start(Signal::new()).await.unwrap();
+                let look = logic.observe(Signal::new(), None).await.unwrap();
+                let read = tool(&look, "logic_read").execute(input(json!({"kind":"marker"})), Signal::new()).await.unwrap();
+                let read: Value = serde_json::from_str(&read.text).unwrap();
+                let asked = if kind == "marker_add" {
+                    json!({"positionBeats":16})
+                } else {
+                    json!({"ref":read["items"][0]["ref"],"positionBeats":40})
+                };
+                let before = script.marker_identity(1).unwrap();
+                let done = tool(&look, "make_changes")
+                    .execute(input(json!({"steps":[{"tool":kind,"input":asked}]})), Signal::new())
+                    .await
+                    .unwrap();
+                assert!(!done.is_error, "{}", done.text);
+                assert_eq!(told.borrow().last().unwrap().state, ChangeState::Applied);
+                let restored = logic.undo(None, Signal::new()).await.unwrap();
+                assert_eq!(restored.state, ChangeState::Undone);
+                assert_eq!(script.marker_identity(1).unwrap(), before);
+                assert_eq!(script.markers().len(), 1);
                 logic.close().await.unwrap();
                 simulator.stop();
             }

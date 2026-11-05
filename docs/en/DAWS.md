@@ -29,9 +29,8 @@ is read back and listed in HISTORY with Kumi's undo. Logic has no undo block:
 renames, structural changes, markers and notes make native undo steps, while
 volume, pan, mute, solo, arm, tempo and bypass do not. Kumi restores values as
 new writes and refuses a restore if someone changed the same value afterwards.
-Deleted tracks and markers require the producer to use Logic's own undo manually;
-Kumi cannot prove ownership from an Undo title and does not press it. These two
-confirmed deletions remain in HISTORY with a permanent manual-undo note. Native
+Added tracks, deleted tracks and deleted markers require the producer to review the appropriate step in Logic's Undo History and undo manually;
+Kumi cannot prove ownership from an Undo title and does not press it. Confirmed changes of these kinds remain in HISTORY with a permanent manual-undo note. Marker additions and moves also need manual undo if any required captured identity field was unavailable, including an unexposed Text column. Showing that field later cannot recover its earlier value. Complete visible identity permits fenced marker value restores; discard never bypasses missing identity. A manual-only latest change blocks default Undo instead of undoing an earlier change. Native
 marker, note and structural undo attribution is not inferred from titles alone. An uncertain write is kept uncertain and never resent
 blindly. Listening, goals, scripts, catch-up and library discovery remain disabled.
 Note reads still require only the requested region selected; normal launch
@@ -42,7 +41,7 @@ The [wire contract](LOGIC_CONTRACT.md) describes the recorded shapes and
 limits. Replay tests do not establish native acceptance on the current Logic
 version. Developers can build and explicitly run the `accept_logic` example on
 a scratch project to collect a current acceptance report. Automatic change checks
-require `--changes --scratch-confirmed`; failed undo can leave edits behind.
+require `--changes --scratch-confirmed`; the added test track deliberately remains for manual Logic Undo History, and failed restores can leave other edits behind.
 
 ## At a glance
 

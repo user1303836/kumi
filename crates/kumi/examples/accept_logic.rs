@@ -4,10 +4,10 @@
 //! every kind read through logic_read, the four bodies, and, with an operator at Logic, the selection following, a
 //! dialog counting as busy, a project switched and refs held across a track moved. M3: a plan of several changes (a
 //! fader, a rename, a track added, the new track muted) through Kumi's plan tool, each in HISTORY, then each undone
-//! through Kumi (the fader and the mute put back by value, the rename as a fresh step of Logic's undo, the added track
-//! by its deletion); and, with the operator, a rename made through Kumi and a Cmd-Z in Logic named back by the bridge.
+//! through Kumi where reversible (the fader and mute by value, the rename as a fresh step); the added track remains
+//! for the operator to review in Logic's own Undo History manually; and, with the operator, a rename made through Kumi and a Cmd-Z in Logic named back by the bridge.
 //! Automated changes require both --changes and --scratch-confirmed, confirming a disposable project. It attempts
-//! to undo its edits, but failures can leave changes behind; never run this mode on a producer's project. Without
+//! to undo reversible edits, but the added test track remains manual-only and failures can leave other changes behind; never run this mode on a producer's project. Without
 //! these flags the runner reads only, while the optional operator steps ask you to change selection or tracks.
 //! It prints a Markdown summary for docs/evidence/ at the end (and writes it to --report, when given). The
 //! bridge must be set up in the home (`kumi --daw logic bridge`) and Accessibility allowed; build the host first:
@@ -664,10 +664,8 @@ impl Accept {
         self.changes.borrow().iter().rev().find(|record| record.id == id).cloned()
     }
 
-    /// M3: a plan of several changes through Kumi's own plan tool (the first track's fader, the second track renamed,
-    /// a track added below it, that track muted), each in HISTORY with undo; then each undone through Kumi, last first:
-    /// the mute and the fader put back by value, the added track by its deletion, the rename by value as a fresh step
-    /// of Logic's undo. The project reads as before when it's done.
+    /// M3: four authorized scratch changes. Value changes are restored automatically; the confirmed new track
+    /// remains manual-only because Logic cannot expose all its contents. Report that boundary explicitly.
     async fn plan_and_undo(&self) -> Result<(), RuntimeError> {
         let observation = self.observe().await?;
         let context: Value = serde_json::from_str(&observation.context).unwrap_or(Value::Null);
@@ -705,15 +703,29 @@ impl Accept {
         }
         let rows: Vec<ChangeRecord> = ids.iter().filter_map(|id| self.change(id)).collect();
         let applied = rows.iter().filter(|row| row.state == ChangeState::Applied).count();
+        let manual = rows
+            .iter()
+            .filter(|row| row.state == ChangeState::Kept && row.note.as_deref().is_some_and(|note| note.contains("manually")))
+            .count();
         let listed: Vec<String> = rows.iter().map(|row| format!("“{}” {}", row.title, state_word(row.state))).collect();
         let stopped = if done.is_error { format!("; the plan stopped: {}", short(&done.text, 1500)) } else { String::new() };
         self.say(
-            !done.is_error && applied == 4,
+            !done.is_error && applied == 3 && manual == 1,
             Some(ms),
             &format!("a plan of 4 changes: {} in HISTORY ({}){stopped}", rows.len(), listed.join("; ")),
         );
-        // Each undone through Kumi, last first: the mute and the fader put back by value, the added track by its deletion,
-        // the rename by value as a fresh step of Logic's undo.
+        for row in rows.iter().filter(|row| row.state == ChangeState::Kept) {
+            self.say(
+                true,
+                None,
+                &format!(
+                    "manual-only confirmed change “{}”: {}",
+                    row.title,
+                    row.note.as_deref().unwrap_or("review Logic's Undo History manually")
+                ),
+            );
+        }
+        // Restore only reversible values. The added track remains for the operator's appropriate manual Undo step.
         for row in rows.iter().rev().filter(|row| matches!(row.state, ChangeState::Applied | ChangeState::Unsure)) {
             let t0 = perf_now();
             let result = undo.execute(json!({"change": row.id}).as_object().cloned().unwrap_or_default(), signal()).await?;
@@ -737,12 +749,15 @@ impl Accept {
         let now = context["tracks"].as_array().cloned().unwrap_or_default();
         let volume_now = now.first().and_then(|track| track["volumeDb"].as_f64());
         let second_now = now.get(1).and_then(|track| track["name"].as_str()).unwrap_or("?").to_owned();
-        let back = now.len() == tracks.len() && volume_now.is_some_and(|db| (db - volume).abs() < 0.05) && second_now == second_name;
+        let back = now.len() == tracks.len() + 1
+            && volume_now.is_some_and(|db| (db - volume).abs() < 0.05)
+            && second_now == second_name
+            && now.last().is_some_and(|track| track["name"] == "Kumi Pad" && track["mute"] == false);
         self.say(
             back,
             Some(waited),
             &format!(
-                "the project reads as before the plan: {} tracks, “{first_name}” at {} dB, “{second_now}”",
+                "reversible values read as before; added Kumi Pad remains for manual Logic Undo History: {} tracks, “{first_name}” at {} dB, “{second_now}”",
                 now.len(),
                 volume_now.map(|db| db.to_string()).unwrap_or_else(|| "?".into())
             ),
