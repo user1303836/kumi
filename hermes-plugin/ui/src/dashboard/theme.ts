@@ -10,7 +10,8 @@ export const T = {
   accent: 'var(--color-primary)',
   good: 'var(--color-success)',
   warn: 'var(--color-warning)',
-  bad: 'var(--color-destructive)'
+  bad: 'var(--color-destructive)',
+  focus: 'var(--color-ring, var(--color-primary))'
 } as const
 
 export const CANVAS = {

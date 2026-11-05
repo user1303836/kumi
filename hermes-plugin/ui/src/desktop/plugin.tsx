@@ -23,7 +23,7 @@ import { Audition } from '../shared/hooks.ts'
 import { english, MESSAGES, type Translate } from '../shared/i18n.ts'
 import { parseListen } from '../shared/listen.ts'
 import { foundSounds, jobOf, KumiStore } from '../shared/store.ts'
-import { I18n } from '../shared/ui.tsx'
+import { FocusStyle, I18n } from '../shared/ui.tsx'
 import { ask, wordsOf } from './actions.ts'
 import { ListenCard } from './card.tsx'
 import { GenerateCard } from './generate.tsx'
@@ -51,7 +51,12 @@ const usePluginWords: ((pluginId: string) => Translate) | null = typeof sdk.useP
 /** Every Desktop root draws inside this: its components' `useT()` gets Desktop's words for the app's language. */
 function WithT({ children }: { children: ReactNode }) {
   const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english
-  return <I18n.Provider value={t}>{children}</I18n.Provider>
+  return (
+    <I18n.Provider value={t}>
+      <FocusStyle />
+      {children}
+    </I18n.Provider>
+  )
 }
 
 const plugin: HermesPlugin = {

@@ -11,7 +11,9 @@ export const T = {
   accent: 'var(--ui-accent)',
   good: 'var(--ui-green)',
   warn: 'var(--ui-yellow)',
-  bad: 'var(--ui-red)'
+  bad: 'var(--ui-red)',
+  // Desktop draws no focus rings of its own (styles.css), but its few that do use the theme's primary colour.
+  focus: 'var(--ui-accent)'
 } as const
 
 /** The same colours as CSS variable names, for a canvas to resolve with getComputedStyle. */

@@ -35,6 +35,10 @@ export function JobsView({ jobs, onRequest }: { jobs: Record<string, TrackedJob>
             {job.ended_at === null && (
               <span
                 aria-label={words.fraction === null ? t('job.underWay', words.title) : t('job.percent', words.title, Math.round(words.fraction * 100))}
+                // No value while the job can't say how far along it is: an indeterminate bar.
+                aria-valuemax={100}
+                aria-valuemin={0}
+                aria-valuenow={words.fraction === null ? undefined : Math.round(words.fraction * 100)}
                 role="progressbar"
                 style={{ display: 'block', height: 3, borderRadius: 2, background: T.border, overflow: 'hidden' }}
               >

@@ -11,7 +11,7 @@ import { translator } from '../shared/i18n.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
 import { dawPartWorks, KumiStore } from '../shared/store.ts'
 import type { AudioReply } from '../shared/types.ts'
-import { Dot, I18n, S, Section, TextButton, useT } from '../shared/ui.tsx'
+import { Dot, FocusStyle, I18n, S, Section, TextButton, useT } from '../shared/ui.tsx'
 import { SDK } from './react.ts'
 
 const BASE = '/api/plugins/kumi'
@@ -50,6 +50,7 @@ function KumiDashboard() {
   const t = useMemo(() => translator(locale), [locale])
   return (
     <I18n.Provider value={t}>
+      <FocusStyle />
       <Dashboard />
     </I18n.Provider>
   )
@@ -144,6 +145,7 @@ function Dashboard() {
               setSelected(id)
               void audition.play(id).catch(() => undefined)
             }}
+            onSelect={setSelected}
             playing={playing}
             selected={selected}
           />

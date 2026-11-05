@@ -13,7 +13,8 @@
     accent: "var(--color-primary)",
     good: "var(--color-success)",
     warn: "var(--color-warning)",
-    bad: "var(--color-destructive)"
+    bad: "var(--color-destructive)",
+    focus: "var(--color-ring, var(--color-primary))"
   };
   var CANVAS = {
     text: "--color-card-foreground",
@@ -82,6 +83,7 @@
       undoable: (n) => `· ${n} can be undone`,
       undo: "Undo",
       undoTitle: "Ask Kumi to undo this change",
+      undoLabel: (change) => `Undo ${change}`,
       openMap: "Open the sound map",
       undoNeedsConnection: "Undo needs a connected Kumi."
     },
@@ -140,6 +142,8 @@
     map: {
       tab: "Sound map",
       canvas: "Sound map",
+      roledescription: "sound map",
+      keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
       agentOff: "Kumi's agent half is off in this profile, so there's no map to show.",
       reading: "Reading the sound map…",
       empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there.",
@@ -172,6 +176,8 @@
       measuredTitle: "Measured on this computer by Kumi, from the audio file itself",
       captureTitle: "Kumi played this window and measured it; it isn't a change, so there's nothing to undo",
       waveform: (label) => `Waveform of ${label}`,
+      play: (label) => `Play ${label}`,
+      stop: (label) => `Stop ${label}`,
       audioGone: "The audio isn't available any more.",
       this: "This",
       reference: "Reference",
@@ -326,6 +332,7 @@
       undoable: (n) => `· ${n} 件取り消せます`,
       undo: "取り消す",
       undoTitle: "この変更の取り消しを Kumi に頼む",
+      undoLabel: (change) => `${change} を取り消す`,
       openMap: "サンプルマップを開く",
       undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
     },
@@ -384,6 +391,8 @@
     map: {
       tab: "サンプルマップ",
       canvas: "サンプルマップ",
+      roledescription: "サンプルマップ",
+      keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
       agentOff: "このプロファイルでは Kumi のエージェント側がオフのため、表示できるマップがありません。",
       reading: "サンプルマップを読み込み中…",
       empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Kumi にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
@@ -416,6 +425,8 @@
       measuredTitle: "Kumi がこのコンピュータ上で、オーディオファイルそのものから測定しました",
       captureTitle: "Kumi はこの区間を再生して測定しました。変更ではないので、取り消すものはありません",
       waveform: (label) => `${label} の波形`,
+      play: (label) => `${label} を再生`,
+      stop: (label) => `${label} を停止`,
       audioGone: "このオーディオはもう利用できません。",
       this: "これ",
       reference: "リファレンス",
@@ -570,6 +581,7 @@
       undoable: (n) => `· ${n} 项可撤销`,
       undo: "撤销",
       undoTitle: "让 Kumi 撤销这次改动",
+      undoLabel: (change) => `撤销 ${change}`,
       openMap: "打开采样地图",
       undoNeedsConnection: "撤销需要 Kumi 已连接。"
     },
@@ -628,6 +640,8 @@
     map: {
       tab: "采样地图",
       canvas: "采样地图",
+      roledescription: "采样地图",
+      keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
       agentOff: "此配置中 Kumi 的 Agent 部分已关闭，没有可显示的地图。",
       reading: "正在读取采样地图…",
       empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Kumi 扫描；地图会根据找到的声音生成。",
@@ -660,6 +674,8 @@
       measuredTitle: "由 Kumi 在这台电脑上根据音频文件本身测量",
       captureTitle: "Kumi 播放并测量了这个片段；这不是改动，所以没有需要撤销的内容",
       waveform: (label) => `${label} 的波形`,
+      play: (label) => `播放 ${label}`,
+      stop: (label) => `停止 ${label}`,
       audioGone: "这段音频已不可用。",
       this: "当前",
       reference: "参考",
@@ -1034,8 +1050,14 @@
     text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: "anywhere" },
     muted: { fontSize: 12, color: T.muted, lineHeight: 1.45, overflowWrap: "anywhere" },
     faint: { fontSize: 11.5, color: T.faint },
-    ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }
+    ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
+    // Read by a screen reader, not drawn: hints and live announcements.
+    hidden: { position: "absolute", width: 1, height: 1, margin: -1, padding: 0, border: 0, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }
   };
+  var FOCUSABLE = "kumi-focusable";
+  function FocusStyle() {
+    return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}` });
+  }
   function Chip({ children, title, tone }) {
     const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
     return /* @__PURE__ */ jsx("span", { title, style: { fontSize: 11, lineHeight: "16px", padding: "0 6px", borderRadius: 3, background: T.chip, color, whiteSpace: "nowrap" }, children });
@@ -1047,12 +1069,17 @@
     children,
     onClick,
     title,
+    label,
+    pressed,
     disabled,
     strong
   }) {
     return /* @__PURE__ */ jsx(
       "button",
       {
+        "aria-label": label,
+        "aria-pressed": pressed,
+        className: FOCUSABLE,
         disabled,
         onClick,
         title,
@@ -1077,7 +1104,7 @@
   function Section({ title, right, children }) {
     return /* @__PURE__ */ jsxs("section", { style: S.section, children: [
       /* @__PURE__ */ jsxs("div", { style: { ...S.heading, justifyContent: "space-between" }, children: [
-        /* @__PURE__ */ jsx("span", { style: { ...S.row, gap: 6 }, children: title }),
+        /* @__PURE__ */ jsx("h3", { style: { ...S.row, gap: 6, margin: 0, fontSize: "inherit", fontWeight: "inherit" }, children: title }),
         right
       ] }),
       children
@@ -1231,6 +1258,59 @@
     }
     return best;
   }
+  function mapKey(event) {
+    if (event.altKey || event.ctrlKey || event.metaKey) return null;
+    const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+    if (direction) {
+      if (!event.shiftKey) return { move: direction };
+      return direction[0] ? { order: direction[0] } : { zoom: direction[1] < 0 ? 1.5 : 1 / 1.5 };
+    }
+    return event.key === "Home" && !event.shiftKey ? { fit: true } : null;
+  }
+  function moveWith(model, view, size, from, key, middle, visible) {
+    return "move" in key ? step(model, view, size, from, key.move, middle, visible) : stepOrder(model, from, key.order, visible);
+  }
+  function stepOrder(model, from, delta, visible) {
+    const count = model.points.length;
+    let index = from ?? (delta > 0 ? -1 : count);
+    for (let tried = 0; tried < count; tried++) {
+      index = ((index + delta) % count + count) % count;
+      if (index !== from && (!visible || visible(index))) return index;
+    }
+    return -1;
+  }
+  function step(model, view, size, from, direction, middle, visible) {
+    const origin = from === void 0 ? middle : toScreen(view, size, model.points[from].x, model.points[from].y);
+    const best = [-1, -1];
+    const bestScore = [Infinity, Infinity];
+    model.points.forEach((point, index) => {
+      if (index === from || visible && !visible(index)) return;
+      const [x, y] = toScreen(view, size, point.x, point.y);
+      const ox = x - origin[0];
+      const oy = y - origin[1];
+      let score;
+      let side = 0;
+      if (from === void 0) {
+        score = ox * ox + oy * oy;
+      } else {
+        const along = ox * direction[0] + oy * direction[1];
+        if (along <= 0.5) return;
+        const across = Math.abs(ox * direction[1] - oy * direction[0]);
+        score = along + 2 * across;
+        side = across <= along ? 0 : 1;
+      }
+      if (score < bestScore[side]) {
+        best[side] = index;
+        bestScore[side] = score;
+      }
+    });
+    return best[0] >= 0 ? best[0] : best[1];
+  }
+  function keepInView(view, px, py, width, height, margin = 24) {
+    const shiftX = px < margin ? margin - px : px > width - margin ? width - margin - px : 0;
+    const shiftY = py < margin ? margin - py : py > height - margin ? height - margin - py : 0;
+    return shiftX || shiftY ? { ...view, dx: view.dx + shiftX, dy: view.dy + shiftY } : view;
+  }
   function mapLabel(name) {
     return clean(name, 28);
   }
@@ -1272,7 +1352,8 @@
       strong: read(CANVAS.strong, "#ddd")
     };
   }
-  function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
+  var maps = 0;
+  function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }) {
     const t = useT();
     const model = useMemo(() => buildModel(map), [map]);
     const canvasRef = useRef(null);
@@ -1283,6 +1364,8 @@
     const [hidden, setHidden] = useState(() => /* @__PURE__ */ new Set());
     const [hover, setHover] = useState(null);
     const drag = useRef(null);
+    const [said, setSaid] = useState("");
+    const [hintId] = useState(() => `kumi-map-keys-${maps += 1}`);
     const mapSize = Math.max(1, Math.min(size.width, size.height) - 32);
     const hasPoints = model.points.length > 0;
     const searched = useMemo(() => searchSounds(model, query), [model, query]);
@@ -1303,6 +1386,16 @@
       const ids = searched ?? foundIds;
       return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
     }, [searched, foundIds, indexOf, visible]);
+    const [painted, setPainted] = useState("");
+    useEffect(() => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const timer = setInterval(() => {
+        const now = Object.values(resolve(canvas)).join();
+        setPainted((current) => current === now ? current : now);
+      }, 1e3);
+      return () => clearInterval(timer);
+    }, [hasPoints]);
     useEffect(() => {
       const box = boxRef.current;
       if (!box) return;
@@ -1392,10 +1485,33 @@
       foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
       if (playing) ring(playing, colors.accent, 6, 2);
       if (selected) ring(selected, colors.strong, 4, 2);
-    }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize]);
+    }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize, painted]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
+    };
+    const onKey = (event) => {
+      const key = mapKey(event);
+      if (!view || !key) return;
+      event.preventDefault();
+      const from = selected === null ? void 0 : indexOf.get(selected);
+      const picked = from !== void 0 && visible(from) ? from : void 0;
+      const middle = [size.width / 2, size.height / 2];
+      if ("fit" in key) {
+        setView(fitView(size.width, size.height));
+      } else if ("zoom" in key) {
+        const [x, y] = picked === void 0 ? middle : toScreen(view, mapSize, model.points[picked].x, model.points[picked].y);
+        setView(zoomAt(view, key.zoom, x, y));
+      } else {
+        const next = moveWith(model, view, mapSize, picked, key, middle, visible);
+        if (next < 0) return;
+        const point = model.points[next];
+        const [x, y] = toScreen(view, mapSize, point.x, point.y);
+        setView(keepInView(view, x, y, size.width, size.height));
+        onSelect(point.id);
+        const sound = model.sounds[point.id];
+        setSaid([clean(sound?.name ?? point.id, 80), clean(sound?.class, 16), clean(sound?.folder, 60)].filter(Boolean).join(", "));
+      }
     };
     if (!model.points.length) {
       return /* @__PURE__ */ jsx("div", { style: { ...S.muted, padding: 16 }, children: empty });
@@ -1410,6 +1526,7 @@
           "input",
           {
             "aria-label": t("map.search"),
+            className: FOCUSABLE,
             onChange: (event) => setQuery(event.target.value),
             placeholder: t("map.searchHint"),
             style: { flex: "1 1 180px", minWidth: 140, font: "inherit", fontSize: 12, padding: "3px 8px", borderRadius: 3, border: `1px solid ${T.border}`, background: "transparent", color: T.text },
@@ -1423,6 +1540,8 @@
         return /* @__PURE__ */ jsxs(
           "button",
           {
+            "aria-pressed": !off,
+            className: FOCUSABLE,
             onClick: () => setHidden((current) => {
               const next = new Set(current);
               if (next.has(group.key)) next.delete(group.key);
@@ -1449,6 +1568,7 @@
             "button",
             {
               "aria-pressed": selected === id,
+              className: FOCUSABLE,
               onClick: () => onPick(id),
               type: "button",
               style: { ...S.row, gap: 6, font: "inherit", fontSize: 11.5, padding: "1px 6px", borderRadius: 3, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
@@ -1467,7 +1587,11 @@
           "canvas",
           {
             ref: canvasRef,
+            "aria-describedby": hintId,
             "aria-label": t("map.canvas"),
+            "aria-roledescription": t("map.roledescription"),
+            className: FOCUSABLE,
+            onKeyDown: onKey,
             onPointerDown: (event) => {
               if (!view) return;
               event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -1496,9 +1620,13 @@
             },
             onPointerLeave: () => setHover(null),
             onDoubleClick: () => setView(fitView(size.width, size.height)),
-            style: { position: "absolute", inset: 0, width: "100%", height: "100%", cursor: hover ? "pointer" : drag.current?.moved ? "grabbing" : "grab", touchAction: "none" }
+            role: "application",
+            tabIndex: 0,
+            style: { position: "absolute", inset: 0, width: "100%", height: "100%", outlineOffset: -3, cursor: hover ? "pointer" : drag.current?.moved ? "grabbing" : "grab", touchAction: "none" }
           }
         ),
+        /* @__PURE__ */ jsx("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
+        /* @__PURE__ */ jsx("span", { "aria-live": "polite", style: S.hidden, children: said }),
         hovered && hoveredSound && hover && /* @__PURE__ */ jsxs(
           "div",
           {
@@ -1773,7 +1901,10 @@
   function KumiDashboard() {
     const locale = SDK.useI18n?.()?.locale;
     const t = useMemo(() => translator(locale), [locale]);
-    return /* @__PURE__ */ jsx(I18n.Provider, { value: t, children: /* @__PURE__ */ jsx(Dashboard, {}) });
+    return /* @__PURE__ */ jsxs(I18n.Provider, { value: t, children: [
+      /* @__PURE__ */ jsx(FocusStyle, {}),
+      /* @__PURE__ */ jsx(Dashboard, {})
+    ] });
   }
   function Dashboard() {
     const t = useT();
@@ -1850,6 +1981,7 @@
               setSelected(id);
               void audition.play(id).catch(() => void 0);
             },
+            onSelect: setSelected,
             playing,
             selected
           }

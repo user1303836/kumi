@@ -10,7 +10,7 @@ import { useState } from 'react'
 import { chipWords, clean, dawName, knownDaw } from '../shared/format.ts'
 import { useKumi, useWant } from '../shared/hooks.ts'
 import type { KumiStore } from '../shared/store.ts'
-import { Chip, S, TextButton, useT } from '../shared/ui.tsx'
+import { Chip, FOCUSABLE, S, TextButton, useT } from '../shared/ui.tsx'
 import { ask } from './actions.ts'
 import { nextStep, ownerSession } from './pane.tsx'
 
@@ -19,6 +19,8 @@ export const OPEN_MAP_ON_FIND = 'openMapOnFind'
 // Setup states and DAW-part states the catalogs word (`settings.states.*`, `settings.componentStates.*`).
 const STATES = new Set(['ready', 'needs_runtime', 'outdated_runtime', 'damaged_runtime', 'needs_daw_component', 'no_pin', 'unsupported_platform', 'unknown'])
 const COMPONENT_STATES = new Set(['not_installed', 'installed', 'outdated', 'unknown'])
+// A group's title: a heading for a screen reader, drawn as the small caps line.
+const HEADING = { ...S.heading, display: 'block', margin: '0 0 4px', fontWeight: 'inherit' } as const
 
 function Line({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -56,7 +58,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
       ) : (
         <>
           <div>
-            <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>{t('settings.setup')}</span>
+            <h3 style={HEADING}>{t('settings.setup')}</h3>
             <Line label={t('settings.state')}>{STATES.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40)}</Line>
             {setup?.message && <Line label={t('settings.next')}>{clean(setup.message, 300)}</Line>}
             {runtime && (
@@ -95,7 +97,7 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
             )}
           </div>
           <div>
-            <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>{t('settings.connection')}</span>
+            <h3 style={HEADING}>{t('settings.connection')}</h3>
             <Line label={t('settings.now')}>
               {(() => {
                 const words = chipWords(state.status, state.focus?.transport?.tempo, t)
@@ -119,10 +121,11 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
         </>
       )}
       <div>
-        <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>{t('settings.thisWindow')}</span>
+        <h3 style={HEADING}>{t('settings.thisWindow')}</h3>
         <label style={{ ...S.row, gap: 8, padding: '5px 0', borderTop: `1px solid ${T.border}`, cursor: 'pointer' }}>
           <input
             checked={openOnFind}
+            className={FOCUSABLE}
             onChange={event => {
               setOpenOnFind(event.target.checked)
               ctx.storage.set(OPEN_MAP_ON_FIND, event.target.checked)

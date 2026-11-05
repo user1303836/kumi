@@ -44,6 +44,7 @@ var en = {
     undoable: (n) => `· ${n} can be undone`,
     undo: "Undo",
     undoTitle: "Ask Kumi to undo this change",
+    undoLabel: (change) => `Undo ${change}`,
     openMap: "Open the sound map",
     undoNeedsConnection: "Undo needs a connected Kumi."
   },
@@ -102,6 +103,8 @@ var en = {
   map: {
     tab: "Sound map",
     canvas: "Sound map",
+    roledescription: "sound map",
+    keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
     agentOff: "Kumi's agent half is off in this profile, so there's no map to show.",
     reading: "Reading the sound map…",
     empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there.",
@@ -134,6 +137,8 @@ var en = {
     measuredTitle: "Measured on this computer by Kumi, from the audio file itself",
     captureTitle: "Kumi played this window and measured it; it isn't a change, so there's nothing to undo",
     waveform: (label) => `Waveform of ${label}`,
+    play: (label) => `Play ${label}`,
+    stop: (label) => `Stop ${label}`,
     audioGone: "The audio isn't available any more.",
     this: "This",
     reference: "Reference",
@@ -288,6 +293,7 @@ var ja = {
     undoable: (n) => `· ${n} 件取り消せます`,
     undo: "取り消す",
     undoTitle: "この変更の取り消しを Kumi に頼む",
+    undoLabel: (change) => `${change} を取り消す`,
     openMap: "サンプルマップを開く",
     undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
   },
@@ -346,6 +352,8 @@ var ja = {
   map: {
     tab: "サンプルマップ",
     canvas: "サンプルマップ",
+    roledescription: "サンプルマップ",
+    keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
     agentOff: "このプロファイルでは Kumi のエージェント側がオフのため、表示できるマップがありません。",
     reading: "サンプルマップを読み込み中…",
     empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Kumi にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
@@ -378,6 +386,8 @@ var ja = {
     measuredTitle: "Kumi がこのコンピュータ上で、オーディオファイルそのものから測定しました",
     captureTitle: "Kumi はこの区間を再生して測定しました。変更ではないので、取り消すものはありません",
     waveform: (label) => `${label} の波形`,
+    play: (label) => `${label} を再生`,
+    stop: (label) => `${label} を停止`,
     audioGone: "このオーディオはもう利用できません。",
     this: "これ",
     reference: "リファレンス",
@@ -532,6 +542,7 @@ var zh = {
     undoable: (n) => `· ${n} 项可撤销`,
     undo: "撤销",
     undoTitle: "让 Kumi 撤销这次改动",
+    undoLabel: (change) => `撤销 ${change}`,
     openMap: "打开采样地图",
     undoNeedsConnection: "撤销需要 Kumi 已连接。"
   },
@@ -590,6 +601,8 @@ var zh = {
   map: {
     tab: "采样地图",
     canvas: "采样地图",
+    roledescription: "采样地图",
+    keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
     agentOff: "此配置中 Kumi 的 Agent 部分已关闭，没有可显示的地图。",
     reading: "正在读取采样地图…",
     empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Kumi 扫描；地图会根据找到的声音生成。",
@@ -622,6 +635,8 @@ var zh = {
     measuredTitle: "由 Kumi 在这台电脑上根据音频文件本身测量",
     captureTitle: "Kumi 播放并测量了这个片段；这不是改动，所以没有需要撤销的内容",
     waveform: (label) => `${label} 的波形`,
+    play: (label) => `播放 ${label}`,
+    stop: (label) => `停止 ${label}`,
     audioGone: "这段音频已不可用。",
     this: "当前",
     reference: "参考",
@@ -1375,7 +1390,9 @@ var T = {
   accent: "var(--ui-accent)",
   good: "var(--ui-green)",
   warn: "var(--ui-yellow)",
-  bad: "var(--ui-red)"
+  bad: "var(--ui-red)",
+  // Desktop draws no focus rings of its own (styles.css), but its few that do use the theme's primary colour.
+  focus: "var(--ui-accent)"
 };
 var CANVAS = {
   text: "--ui-text-secondary",
@@ -1400,8 +1417,14 @@ var S = {
   text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: "anywhere" },
   muted: { fontSize: 12, color: T.muted, lineHeight: 1.45, overflowWrap: "anywhere" },
   faint: { fontSize: 11.5, color: T.faint },
-  ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }
+  ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 },
+  // Read by a screen reader, not drawn: hints and live announcements.
+  hidden: { position: "absolute", width: 1, height: 1, margin: -1, padding: 0, border: 0, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }
 };
+var FOCUSABLE = "kumi-focusable";
+function FocusStyle() {
+  return /* @__PURE__ */ jsx("style", { children: `.${FOCUSABLE}:focus-visible{outline:2px solid ${T.focus};outline-offset:2px;border-radius:3px}` });
+}
 function Chip({ children, title, tone }) {
   const color = tone === "accent" ? T.accent : tone === "good" ? T.good : tone === "warn" ? T.warn : tone === "bad" ? T.bad : T.secondary;
   return /* @__PURE__ */ jsx("span", { title, style: { fontSize: 11, lineHeight: "16px", padding: "0 6px", borderRadius: 3, background: T.chip, color, whiteSpace: "nowrap" }, children });
@@ -1413,12 +1436,17 @@ function TextButton({
   children,
   onClick,
   title,
+  label,
+  pressed,
   disabled,
   strong
 }) {
   return /* @__PURE__ */ jsx(
     "button",
     {
+      "aria-label": label,
+      "aria-pressed": pressed,
+      className: FOCUSABLE,
       disabled,
       onClick,
       title,
@@ -1443,7 +1471,7 @@ function TextButton({
 function Section({ title, right, children }) {
   return /* @__PURE__ */ jsxs("section", { style: S.section, children: [
     /* @__PURE__ */ jsxs("div", { style: { ...S.heading, justifyContent: "space-between" }, children: [
-      /* @__PURE__ */ jsx("span", { style: { ...S.row, gap: 6 }, children: title }),
+      /* @__PURE__ */ jsx("h3", { style: { ...S.row, gap: 6, margin: 0, fontSize: "inherit", fontWeight: "inherit" }, children: title }),
       right
     ] }),
     children
@@ -1506,11 +1534,11 @@ async function peaksOf(dataUrl, buckets = 96) {
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   const decoded = await new OfflineAudioContext(1, 1, 44100).decodeAudioData(bytes.buffer);
   const samples = decoded.getChannelData(0);
-  const step = Math.max(1, Math.floor(samples.length / buckets));
+  const step2 = Math.max(1, Math.floor(samples.length / buckets));
   const peaks = [];
-  for (let start = 0; start < samples.length && peaks.length < buckets; start += step) {
+  for (let start = 0; start < samples.length && peaks.length < buckets; start += step2) {
     let peak = 0;
-    for (let i = start; i < Math.min(samples.length, start + step); i++) peak = Math.max(peak, Math.abs(samples[i]));
+    for (let i = start; i < Math.min(samples.length, start + step2); i++) peak = Math.max(peak, Math.abs(samples[i]));
     peaks.push(peak);
   }
   const top = Math.max(...peaks, 1e-6);
@@ -1531,7 +1559,15 @@ function Wave({ audition, id, label, caption = label }) {
   return /* @__PURE__ */ jsxs2("div", { style: { display: "flex", flexDirection: "column", gap: 3, flex: "1 1 160px", minWidth: 140 }, children: [
     /* @__PURE__ */ jsxs2("div", { style: { ...S.row, justifyContent: "space-between" }, children: [
       /* @__PURE__ */ jsx2("span", { style: { ...S.faint, ...S.ellipsis }, children: caption }),
-      /* @__PURE__ */ jsx2(TextButton, { onClick: () => playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)), children: playing ? "■" : "▶" })
+      /* @__PURE__ */ jsx2(
+        TextButton,
+        {
+          label: playing ? t("listen.stop", label) : t("listen.play", label),
+          onClick: () => playing ? audition.stop() : void audition.play(id).catch(() => setFailed(true)),
+          pressed: playing,
+          children: playing ? "■" : "▶"
+        }
+      )
     ] }),
     /* @__PURE__ */ jsxs2("svg", { "aria-label": t("listen.waveform", label), height: 36, preserveAspectRatio: "none", role: "img", viewBox: "0 0 96 36", width: "100%", children: [
       (peaks ?? []).map((peak, index) => /* @__PURE__ */ jsx2("rect", { fill: playing ? T.accent : T.secondary, height: Math.max(1, peak * 34), opacity: 0.85, width: 0.7, x: index + 0.15, y: 18 - Math.max(0.5, peak * 17) }, index)),
@@ -1846,6 +1882,9 @@ function JobsView({ jobs, onRequest }) {
         "span",
         {
           "aria-label": words.fraction === null ? t("job.underWay", words.title) : t("job.percent", words.title, Math.round(words.fraction * 100)),
+          "aria-valuemax": 100,
+          "aria-valuemin": 0,
+          "aria-valuenow": words.fraction === null ? void 0 : Math.round(words.fraction * 100),
           role: "progressbar",
           style: { display: "block", height: 3, borderRadius: 2, background: T.border, overflow: "hidden" },
           children: /* @__PURE__ */ jsx4(
@@ -1906,7 +1945,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
     return /* @__PURE__ */ jsx5("div", { style: { ...S.muted, padding: 14 }, children: t("pane.reading") });
   }
   const words = chipWords(state.status, state.focus?.transport?.tempo, t);
-  const step = nextStep(state, t);
+  const step2 = nextStep(state, t);
   const session = ownerSession(state);
   const connected = Boolean(state.status?.connected);
   const setupState = state.setup?.state;
@@ -1932,7 +1971,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
         ].filter(Boolean).join(" ") }),
         /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, LOOK_AGAIN_REQUEST, { send: true, session }), children: t("pane.lookAgain") }) })
       ] }),
-      step && /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, step.request, { send: true, session: connected ? session : null }), strong: true, children: step.label }) })
+      step2 && /* @__PURE__ */ jsx5("div", { style: S.row, children: /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, step2.request, { send: true, session: connected ? session : null }), strong: true, children: step2.label }) })
     ] }),
     /* @__PURE__ */ jsx5(Section, { title: t("pane.focus"), children: /* @__PURE__ */ jsx5(FocusView, { focus: state.focus, now }) }),
     Object.keys(state.jobs).length > 0 && /* @__PURE__ */ jsx5(Section, { title: t("pane.jobs"), children: /* @__PURE__ */ jsx5(JobsView, { jobs: state.jobs, onRequest: (request) => void ask(ctx, request, { send: false, session }) }) }),
@@ -1949,7 +1988,15 @@ function KumiPane({ ctx, store, onOpenMap }) {
           {
             history: state.history,
             now,
-            action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(TextButton, { onClick: () => void ask(ctx, undoRequest(item), { send: true, session }), title: t("pane.undoTitle"), children: t("pane.undo") }) : null
+            action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx5(
+              TextButton,
+              {
+                label: t("pane.undoLabel", clean(item.title ?? item.label ?? item.id, 120)),
+                onClick: () => void ask(ctx, undoRequest(item), { send: true, session }),
+                title: t("pane.undoTitle"),
+                children: t("pane.undo")
+              }
+            ) : null
           }
         )
       }
@@ -2066,13 +2113,14 @@ function StatusChip({
   const state = useKumi(store);
   if (state.available !== true) return null;
   const words = chipWords(state.status, state.focus?.transport?.tempo, t);
-  const step = nextStep(state, t);
+  const step2 = nextStep(state, t);
   const connected = Boolean(state.status?.connected);
   return /* @__PURE__ */ jsxs8(DropdownMenu, { children: [
     /* @__PURE__ */ jsx8(DropdownMenuTrigger, { asChild: true, children: /* @__PURE__ */ jsxs8(
       "button",
       {
         "aria-label": t("chip.label", words.text),
+        className: FOCUSABLE,
         title: "Kumi",
         type: "button",
         style: {
@@ -2098,7 +2146,7 @@ function StatusChip({
     ) }),
     /* @__PURE__ */ jsxs8(DropdownMenuContent, { align: "end", side: "top", children: [
       /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: onOpenMap, children: t("chip.openMap") }),
-      step && /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: () => void ask(ctx, step.request, { send: true, session: connected ? ownerSession(state) : null }), children: step.label }),
+      step2 && /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: () => void ask(ctx, step2.request, { send: true, session: connected ? ownerSession(state) : null }), children: step2.label }),
       /* @__PURE__ */ jsx8(DropdownMenuSeparator, {}),
       /* @__PURE__ */ jsx8(DropdownMenuItem, { onSelect: onOpenSettings, children: t("chip.settings") })
     ] })
@@ -2224,6 +2272,59 @@ function pick(model, view, size, px, py, radius = 8, visible) {
   }
   return best;
 }
+function mapKey(event) {
+  if (event.altKey || event.ctrlKey || event.metaKey) return null;
+  const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+  if (direction) {
+    if (!event.shiftKey) return { move: direction };
+    return direction[0] ? { order: direction[0] } : { zoom: direction[1] < 0 ? 1.5 : 1 / 1.5 };
+  }
+  return event.key === "Home" && !event.shiftKey ? { fit: true } : null;
+}
+function moveWith(model, view, size, from, key, middle, visible) {
+  return "move" in key ? step(model, view, size, from, key.move, middle, visible) : stepOrder(model, from, key.order, visible);
+}
+function stepOrder(model, from, delta, visible) {
+  const count2 = model.points.length;
+  let index = from ?? (delta > 0 ? -1 : count2);
+  for (let tried = 0; tried < count2; tried++) {
+    index = ((index + delta) % count2 + count2) % count2;
+    if (index !== from && (!visible || visible(index))) return index;
+  }
+  return -1;
+}
+function step(model, view, size, from, direction, middle, visible) {
+  const origin = from === void 0 ? middle : toScreen(view, size, model.points[from].x, model.points[from].y);
+  const best = [-1, -1];
+  const bestScore = [Infinity, Infinity];
+  model.points.forEach((point, index) => {
+    if (index === from || visible && !visible(index)) return;
+    const [x, y] = toScreen(view, size, point.x, point.y);
+    const ox = x - origin[0];
+    const oy = y - origin[1];
+    let score;
+    let side = 0;
+    if (from === void 0) {
+      score = ox * ox + oy * oy;
+    } else {
+      const along = ox * direction[0] + oy * direction[1];
+      if (along <= 0.5) return;
+      const across = Math.abs(ox * direction[1] - oy * direction[0]);
+      score = along + 2 * across;
+      side = across <= along ? 0 : 1;
+    }
+    if (score < bestScore[side]) {
+      best[side] = index;
+      bestScore[side] = score;
+    }
+  });
+  return best[0] >= 0 ? best[0] : best[1];
+}
+function keepInView(view, px, py, width, height, margin = 24) {
+  const shiftX = px < margin ? margin - px : px > width - margin ? width - margin - px : 0;
+  const shiftY = py < margin ? margin - py : py > height - margin ? height - margin - py : 0;
+  return shiftX || shiftY ? { ...view, dx: view.dx + shiftX, dy: view.dy + shiftY } : view;
+}
 function mapLabel(name) {
   return clean(name, 28);
 }
@@ -2266,7 +2367,8 @@ function resolve(canvas) {
     strong: read(CANVAS.strong, "#ddd")
   };
 }
-function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
+var maps = 0;
+function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }) {
   const t = useT();
   const model = useMemo(() => buildModel(map), [map]);
   const canvasRef = useRef(null);
@@ -2277,6 +2379,8 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
   const [hidden, setHidden] = useState3(() => /* @__PURE__ */ new Set());
   const [hover, setHover] = useState3(null);
   const drag = useRef(null);
+  const [said, setSaid] = useState3("");
+  const [hintId] = useState3(() => `kumi-map-keys-${maps += 1}`);
   const mapSize = Math.max(1, Math.min(size.width, size.height) - 32);
   const hasPoints = model.points.length > 0;
   const searched = useMemo(() => searchSounds(model, query), [model, query]);
@@ -2297,6 +2401,16 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
     const ids = searched ?? foundIds;
     return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
   }, [searched, foundIds, indexOf, visible]);
+  const [painted, setPainted] = useState3("");
+  useEffect4(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const timer = setInterval(() => {
+      const now = Object.values(resolve(canvas)).join();
+      setPainted((current) => current === now ? current : now);
+    }, 1e3);
+    return () => clearInterval(timer);
+  }, [hasPoints]);
   useEffect4(() => {
     const box = boxRef.current;
     if (!box) return;
@@ -2386,10 +2500,33 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
     foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
     if (playing) ring(playing, colors.accent, 6, 2);
     if (selected) ring(selected, colors.strong, 4, 2);
-  }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize]);
+  }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize, painted]);
   const at = (event) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
+  };
+  const onKey = (event) => {
+    const key = mapKey(event);
+    if (!view || !key) return;
+    event.preventDefault();
+    const from = selected === null ? void 0 : indexOf.get(selected);
+    const picked = from !== void 0 && visible(from) ? from : void 0;
+    const middle = [size.width / 2, size.height / 2];
+    if ("fit" in key) {
+      setView(fitView(size.width, size.height));
+    } else if ("zoom" in key) {
+      const [x, y] = picked === void 0 ? middle : toScreen(view, mapSize, model.points[picked].x, model.points[picked].y);
+      setView(zoomAt(view, key.zoom, x, y));
+    } else {
+      const next = moveWith(model, view, mapSize, picked, key, middle, visible);
+      if (next < 0) return;
+      const point = model.points[next];
+      const [x, y] = toScreen(view, mapSize, point.x, point.y);
+      setView(keepInView(view, x, y, size.width, size.height));
+      onSelect(point.id);
+      const sound = model.sounds[point.id];
+      setSaid([clean(sound?.name ?? point.id, 80), clean(sound?.class, 16), clean(sound?.folder, 60)].filter(Boolean).join(", "));
+    }
   };
   if (!model.points.length) {
     return /* @__PURE__ */ jsx9("div", { style: { ...S.muted, padding: 16 }, children: empty });
@@ -2404,6 +2541,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
         "input",
         {
           "aria-label": t("map.search"),
+          className: FOCUSABLE,
           onChange: (event) => setQuery(event.target.value),
           placeholder: t("map.searchHint"),
           style: { flex: "1 1 180px", minWidth: 140, font: "inherit", fontSize: 12, padding: "3px 8px", borderRadius: 3, border: `1px solid ${T.border}`, background: "transparent", color: T.text },
@@ -2417,6 +2555,8 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
       return /* @__PURE__ */ jsxs9(
         "button",
         {
+          "aria-pressed": !off,
+          className: FOCUSABLE,
           onClick: () => setHidden((current) => {
             const next = new Set(current);
             if (next.has(group.key)) next.delete(group.key);
@@ -2443,6 +2583,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           "button",
           {
             "aria-pressed": selected === id,
+            className: FOCUSABLE,
             onClick: () => onPick(id),
             type: "button",
             style: { ...S.row, gap: 6, font: "inherit", fontSize: 11.5, padding: "1px 6px", borderRadius: 3, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
@@ -2461,7 +2602,11 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
         "canvas",
         {
           ref: canvasRef,
+          "aria-describedby": hintId,
           "aria-label": t("map.canvas"),
+          "aria-roledescription": t("map.roledescription"),
+          className: FOCUSABLE,
+          onKeyDown: onKey,
           onPointerDown: (event) => {
             if (!view) return;
             event.currentTarget.setPointerCapture?.(event.pointerId);
@@ -2490,9 +2635,13 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           },
           onPointerLeave: () => setHover(null),
           onDoubleClick: () => setView(fitView(size.width, size.height)),
-          style: { position: "absolute", inset: 0, width: "100%", height: "100%", cursor: hover ? "pointer" : drag.current?.moved ? "grabbing" : "grab", touchAction: "none" }
+          role: "application",
+          tabIndex: 0,
+          style: { position: "absolute", inset: 0, width: "100%", height: "100%", outlineOffset: -3, cursor: hover ? "pointer" : drag.current?.moved ? "grabbing" : "grab", touchAction: "none" }
         }
       ),
+      /* @__PURE__ */ jsx9("span", { id: hintId, style: S.hidden, children: t("map.keys") }),
+      /* @__PURE__ */ jsx9("span", { "aria-live": "polite", style: S.hidden, children: said }),
       hovered && hoveredSound && hover && /* @__PURE__ */ jsxs9(
         "div",
         {
@@ -2573,6 +2722,7 @@ function MapWorkspace({ ctx, store, audition }) {
         setSelected(id);
         play(id);
       },
+      onSelect: setSelected,
       playing,
       selected
     }
@@ -2598,6 +2748,7 @@ import { Fragment as Fragment4, jsx as jsx12, jsxs as jsxs12 } from "react/jsx-r
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATES2 = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
 var COMPONENT_STATES = /* @__PURE__ */ new Set(["not_installed", "installed", "outdated", "unknown"]);
+var HEADING = { ...S.heading, display: "block", margin: "0 0 4px", fontWeight: "inherit" };
 function Line({ label, children }) {
   return /* @__PURE__ */ jsxs12("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
     /* @__PURE__ */ jsx12("span", { style: S.muted, children: label }),
@@ -2613,7 +2764,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const state = useKumi(store);
   const [openOnFind, setOpenOnFind] = useState5(() => ctx.storage.get(OPEN_MAP_ON_FIND, true));
   const setup = state.setup;
-  const step = nextStep(state, t);
+  const step2 = nextStep(state, t);
   const daw = state.status?.daw ?? setup?.daw;
   const runtime = setup?.runtime;
   const component = setup?.daw_component;
@@ -2626,7 +2777,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
     ] }),
     state.available === false ? /* @__PURE__ */ jsx12("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs12(Fragment4, { children: [
       /* @__PURE__ */ jsxs12("div", { children: [
-        /* @__PURE__ */ jsx12("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.setup") }),
+        /* @__PURE__ */ jsx12("h3", { style: HEADING, children: t("settings.setup") }),
         /* @__PURE__ */ jsx12(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
         setup?.message && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
         runtime && /* @__PURE__ */ jsxs12(Line, { label: t("settings.runtime"), children: [
@@ -2665,7 +2816,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
         setup?.compressed_audio?.message && /* @__PURE__ */ jsx12(Line, { label: t("settings.audioFormats"), children: /* @__PURE__ */ jsx12("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
       ] }),
       /* @__PURE__ */ jsxs12("div", { children: [
-        /* @__PURE__ */ jsx12("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.connection") }),
+        /* @__PURE__ */ jsx12("h3", { style: HEADING, children: t("settings.connection") }),
         /* @__PURE__ */ jsx12(Line, { label: t("settings.now"), children: (() => {
           const words = chipWords(state.status, state.focus?.transport?.tempo, t);
           return /* @__PURE__ */ jsx12(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
@@ -2673,12 +2824,12 @@ function SettingsPage({ ctx, store, onOpenMap }) {
         state.status?.owner?.session_id && /* @__PURE__ */ jsx12(Line, { label: t("settings.chat"), children: clean(state.status.owner.session_id, 80) })
       ] }),
       /* @__PURE__ */ jsxs12("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-        step && /* @__PURE__ */ jsx12(
+        step2 && /* @__PURE__ */ jsx12(
           TextButton,
           {
-            onClick: () => void ask(ctx, step.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
+            onClick: () => void ask(ctx, step2.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
             strong: true,
-            children: step.label
+            children: step2.label
           }
         ),
         /* @__PURE__ */ jsx12(TextButton, { onClick: onOpenMap, children: t("settings.openMap") }),
@@ -2686,12 +2837,13 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       ] })
     ] }),
     /* @__PURE__ */ jsxs12("div", { children: [
-      /* @__PURE__ */ jsx12("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: t("settings.thisWindow") }),
+      /* @__PURE__ */ jsx12("h3", { style: HEADING, children: t("settings.thisWindow") }),
       /* @__PURE__ */ jsxs12("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
         /* @__PURE__ */ jsx12(
           "input",
           {
             checked: openOnFind,
+            className: FOCUSABLE,
             onChange: (event) => {
               setOpenOnFind(event.target.checked);
               ctx.storage.set(OPEN_MAP_ON_FIND, event.target.checked);
@@ -2706,7 +2858,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
 }
 
 // src/desktop/plugin.tsx
-import { jsx as jsx13 } from "react/jsx-runtime";
+import { jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
 var PLUGIN_ID = "kumi";
 var MAP_WORKSPACE = "kumi-sound-map";
 var MEASUREMENTS_WORKSPACE = "kumi-measurements";
@@ -2716,7 +2868,10 @@ var JOB_POLL_MS = 2e3;
 var usePluginWords = typeof sdk.usePluginI18n === "function" ? sdk.usePluginI18n : null;
 function WithT({ children }) {
   const t = usePluginWords ? usePluginWords(PLUGIN_ID) : english;
-  return /* @__PURE__ */ jsx13(I18n.Provider, { value: t, children });
+  return /* @__PURE__ */ jsxs13(I18n.Provider, { value: t, children: [
+    /* @__PURE__ */ jsx13(FocusStyle, {}),
+    children
+  ] });
 }
 var plugin = {
   id: PLUGIN_ID,
