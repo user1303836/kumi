@@ -175,12 +175,12 @@ When the producer names a video tutorial ("make the bass from this video"):
 - **When Kumi's runtime doesn't run in this Hermes process, and always in a scheduled job,** `kumi_history` answers with HISTORY as Kumi last published it (`from: last_published`, `as_of`, and a note on why). Nothing in it can be undone from there, and the project may have changed since: say when it's from, and never act on it without connecting and observing first.
 
 ## Playing
-- **`kumi_transport` starts and stops playback.** `play` asks the producer first (once, or for this chat). `stop` never asks, and always works.
+- **`kumi_transport` starts and stops playback.** `play` asks the producer first (once, or for this chat). `stop` never asks; if the DAW didn't stop, Kumi's answer says so, and you tell the producer.
   - **Live:** launch a Session clip (`clip_ref`) or a scene (`scene_index`), which is how a new clip is heard. The Arrangement plays from Live's own start marker for now.
   - **REAPER:** play from a bar (`from_bar`, as REAPER shows it) or a beat (`from_beat`).
-  - **Renoise:** play from a sequence slot (`from_slot`) and line (`from_line`).
+  - **Renoise:** play from a sequence slot (`from_slot`, 1 the first) and line (`from_line`, 0 the first).
   - Give `play` the project key from your latest look.
-- **`play` is refused while Kumi listens or captures,** since a listen plays the project itself, and while the DAW records or record is armed.
+- **`play` is refused while Kumi listens to, captures or changes the project,** since a listen plays the project itself, and while the DAW records or record is armed. Play it once that's done.
 - **It changes nothing in the project but where play starts,** and writes no HISTORY, so there's nothing to undo. "Play from bar 9" and "stop" are one call each.
 
 ## Hearing

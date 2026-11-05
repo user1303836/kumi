@@ -28,7 +28,7 @@ class Transport(unittest.TestCase):
     def test_play_is_asked_in_the_runtimes_words_and_stop_never_is(self):
         launch = {"action": "play", "clip_ref": "t1/s0", **KEY}
         self.assertEqual(self.hook(launch), {"action": "approve", "rule_key": "kumi:playback:transport:s1",
-                                             "message": f"Kumi: Play Night Drive from clip ref t1/s0\n{policy.CHAT_ONLY}"})
+                                             "message": f"Kumi: Launch a Session clip in Night Drive\n{policy.CHAT_ONLY}"})
         self.assertEqual(self.sent(), [], "only the runtime's preview so far")
         self.assertEqual(support.call(self.host, "kumi_transport", launch, session_id="s1")["state"], "playing")
         self.assertIsNone(self.hook({"action": "stop"}), "stopping is never asked")

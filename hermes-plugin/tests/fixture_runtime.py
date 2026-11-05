@@ -769,22 +769,38 @@ def generation_job(fixture: Fixture, job_id: object) -> dict:
 
 
 def transport(fixture: Fixture, args: dict, host: dict) -> dict:
-    """Playback as serve's `transport` (CC-17): a pure preview in words; play refused while the DAW records (the
-    fixture's --recording) or the project changed; stop always. No HISTORY row either way."""
+    """Playback as serve's `transport` (CC-17, #1143): a pure preview in serve's words; play refused while the DAW
+    records (the fixture's --recording) or the project changed; stop always. No HISTORY row either way."""
+    project = fixture.set["name"]
     if args.get("action") == "stop":
         if args.get("preview"):
-            return {"state": "preview", "text": f"Stop {fixture.set['name']}"}
+            return {"state": "preview", "text": f"Stop {project}"}
         fixture.playing = False
         return {"state": "stopped", "position_beats": 0}
+    if args.get("from_slot", 1) < 1:
+        return error("invalid", "from_slot counts from 1.")
     if fixture.options.recording:
         return error("recording", f"{DAW_NAMES[fixture.daw]} is recording, or record is armed: Kumi never starts "
                                   "playback that would record.")
     if args.get("expected_project_key") != fixture.set["key"]:
         return error("stale", "That isn't the project open now: observe it again.")
-    where = next((f" from {name.replace('_', ' ')} {args[name]}" for name in
-                  ("from_bar", "from_beat", "from_slot", "clip_ref", "scene_index") if name in args), "")
+    if "from_bar" in args:
+        text = f"Play {project} from bar {args['from_bar']}"
+    elif "from_beat" in args:
+        text = f"Play {project} from beat {args['from_beat']:g}"
+    elif "from_slot" in args:
+        line = f", line {args['from_line']}" if "from_line" in args else ""
+        text = f"Play {project} from sequence slot {args['from_slot']}{line}"
+    elif "from_line" in args:
+        text = f"Play {project} from line {args['from_line']} of the pattern being edited"
+    elif "clip_ref" in args:
+        text = f"Launch a Session clip in {project}"
+    elif "scene_index" in args:
+        text = f"Fire scene {args['scene_index'] + 1} in {project}"
+    else:
+        text = f"Play {project}"
     if args.get("preview"):
-        return {"state": "preview", "text": f"Play {fixture.set['name']}{where}"}
+        return {"state": "preview", "text": text}
     fixture.playing = True
     return {"state": "playing", "position_beats": 0}
 

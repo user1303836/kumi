@@ -219,16 +219,21 @@ KUMI_TRANSPORT = _tool(
     "and line (from_slot, from_line); in Live by launching a Session clip (clip_ref) or scene (scene_index), since "
     "Live plays the Arrangement from its own start marker. stop stops playback, and the clips playing; it's never "
     "asked. It changes nothing in the project but where play starts, and writes no HISTORY. play is refused while "
-    "Kumi listens or captures, while the DAW records or record is armed, and in a turn with nobody in it. For play, "
-    "pass kumi_observe's project_key.",
+    "Kumi listens to, captures or changes the project, while the DAW records or record is armed, and in a turn with "
+    "nobody in it. For play, pass kumi_observe's project_key.",
     {"action": {"type": "string", "enum": ["play", "stop"]},
-     "from_bar": {"type": "integer", "minimum": 1, "description": "play, REAPER: the bar to start at, as shown."},
-     "from_beat": {"type": "number", "minimum": 0, "description": "play, REAPER: beats from the song's start."},
-     "from_slot": {"type": "integer", "minimum": 0, "description": "play, Renoise: the sequence slot (0 is the first)."},
-     "from_line": {"type": "integer", "minimum": 0, "description": "play, Renoise: the line in that slot's pattern."},
-     "clip_ref": {"type": "string", "description": "play, Live: a Session clip to launch, by its ref."},
-     "scene_index": {"type": "integer", "minimum": 0, "description": "play, Live: a scene to launch (0 is the first)."},
-     "expected_project_key": {"type": "string", "description": "play: kumi_observe's project_key."}},
+     "from_bar": {"type": "integer", "minimum": 1, "maximum": 100000,
+                  "description": "play, REAPER: the bar to start at, as shown."},
+     "from_beat": {"type": "number", "minimum": 0, "maximum": 1000000,
+                   "description": "play, REAPER: beats from the song's start."},
+     "from_slot": {"type": "integer", "minimum": 1, "maximum": 1000,
+                   "description": "play, Renoise: the sequence slot (1 is the first)."},
+     "from_line": {"type": "integer", "minimum": 0, "maximum": 512,
+                   "description": "play, Renoise: the line in that slot's pattern (0 is the first)."},
+     "clip_ref": {"type": "string", "maxLength": 256, "description": "play, Live: a Session clip to launch, by its ref."},
+     "scene_index": {"type": "integer", "minimum": 0, "maximum": 1000,
+                     "description": "play, Live: a scene to launch (0 is the first)."},
+     "expected_project_key": {"type": "string", "maxLength": 64, "description": "play: kumi_observe's project_key."}},
     ("action",))
 
 KUMI_GENERATE = _tool(
