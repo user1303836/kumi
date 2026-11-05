@@ -466,16 +466,17 @@ def undo_whole(fixture: Fixture, args: dict, row: dict) -> dict:
     the first row it can't undo."""
     rows = [each for each in reversed(fixture.history)
             if each is row or (row.get("change_id") and each.get("change_id") == row["change_id"])]
-    digest = hashlib.sha256("".join(f"{each['id']}:{each['state']};" for each in rows).encode()).hexdigest()
+    # A2 (3): lower-case hex SHA-256 of the lines "<history_id>:<state>", newest first, joined by \n, none trailing.
+    digest = hashlib.sha256("\n".join(f"{each['id']}:{each['state']}" for each in rows).encode()).hexdigest()
     if args.get("preview"):
-        listed = [{"history_id": each["id"], "title": each["title"], "family": each["family"],
+        listed = [{"history_id": each["id"], "title": each["title"], "family": each["family"], "state": each["state"],
                    "text": f"Undo {each['title']} ({each['family']}) on {each['track']}",
-                   "undo_available": each["state"] == "undone" or why_not(fixture, each) is None,
-                   **({"state": "undone"} if each["state"] == "undone" else {})} for each in rows]
-        pending = [each for each in listed if each.get("state") != "undone"]
+                   "undo_available": each["state"] == "undone" or why_not(fixture, each) is None} for each in rows]
+        text = listed[0]["text"] if len(listed) == 1 else \
+            f"Undo {len(listed)} steps: " + "; ".join(each["text"] for each in listed)
+        pending = [each for each in listed if each["state"] != "undone"]
         return {"state": "preview", "rows": listed, "rows_digest": digest,
-                "undo_available": bool(pending) and all(each["undo_available"] for each in pending),
-                "text": f"Undo {len(pending)} steps: " + "; ".join(each["text"] for each in pending)}
+                "undo_available": bool(pending) and all(each["undo_available"] for each in pending), "text": text[:600]}
     if args.get("expect_rows") != digest:
         return error("stale", "That change's steps aren't the ones approved: preview it again.")
     answered, stopped = [], None
