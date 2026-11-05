@@ -181,6 +181,10 @@ fn schema(ctx: &Ctx, tools: &[Rc<dyn KernelTool>], named: Option<&str>, most: us
         if let Some(tool) = tools.iter().find(|tool| tool.name() == name && reader(tool.as_ref())) {
             return Ok(json!({"tool": name, "kind": "reader", "description": tool.description(), "input_schema": tool.input_schema()}));
         }
+        let refused = crate::daw::provider(ctx.daw()).and_then(|provider| provider.plugin_refused().iter().find(|(step, _)| *step == name));
+        if let Some((_, why)) = refused {
+            return Err(OpError::Invalid { reason: format!("Kumi for Hermes doesn't make {name} here. {why}") });
+        }
         return Err(OpError::Invalid {
             reason: format!(
                 "{name} isn't a step a change may use here, nor one of this DAW's readers: read with action schema lists them."

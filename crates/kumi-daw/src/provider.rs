@@ -176,6 +176,11 @@ pub trait DawProvider {
     fn plugin_steps(&self) -> &'static [crate::plugin::PluginStep] {
         &[]
     }
+    /// The DAW's other change steps, each with why a plugin's plan may not use it, said when a plan or a look at the
+    /// steps names one. None by default.
+    fn plugin_refused(&self) -> &'static [(&'static str, &'static str)] {
+        &[]
+    }
     /// Why this input to an allowed step can't run in a plugin's plan all the same: the DAW keeps no undo Kumi can use
     /// for it (a permanent change). None by default.
     fn plugin_refuses(&self, tool: &str, input: &serde_json::Value) -> Option<String> {

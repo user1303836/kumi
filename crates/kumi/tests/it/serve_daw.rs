@@ -579,6 +579,9 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         let (refused, _) = wire.call("change", plan(&key, epoch, steps), Some(&format!("tc-refused-{n}"))).await;
         assert_eq!((refused["state"].clone(), refused["code"].clone()), (json!("refused"), json!("not_allowed")), "{refused}");
     }
+    // A step REAPER's list keeps out says why, at the plan and at a look at its input.
+    let (lua, _) = wire.call("change", plan(&key, epoch, json!([{"tool": "run_lua", "input": {"code": "x = 1"}}])), Some("tc-why")).await;
+    assert!(lua["reason"].as_str().is_some_and(|reason| reason.ends_with("It runs Lua code in REAPER.")), "{lua}");
 
     // A sound from a map this runtime hasn't made: stale at its preview, and nothing runs.
     let sound = json!([{"tool": "item_import", "input": {"ref": reference, "path": {"sound_id": "s-r1-1", "map_revision": "r1"}}}]);
@@ -763,6 +766,7 @@ case!(serve_reads_reaper_through_its_reader_and_gives_a_steps_input_as_a_plugins
     assert!(import["input_schema"]["properties"]["path"]["anyOf"].is_array(), "{import}");
     let (lua, error) = wire.call("read", json!({"action": "schema", "tool": "run_lua"}), None).await;
     assert!(error && lua["error"]["code"] == "invalid", "{lua}");
+    assert!(lua["error"]["reason"].as_str().is_some_and(|reason| reason.ends_with("It runs Lua code in REAPER.")), "{lua}");
 
     // The reader's rows, as REAPER gives them, names and not folders; never an API function by name, a query its
     // schema doesn't take, nor a tool that isn't a reader.
