@@ -19,8 +19,8 @@ pub static SETUP_DAW: Operation = Operation {
     name: "setup_daw",
     description: "Kumi's part in this runtime's DAW (Live's Remote Script with Kumi Ears, REAPER's extension, Renoise's tool), as \
                   the host's setup puts it there: with dry_run, what's there and what putting it in would write, every path \
-                  named, and the plan's digest; without, that plan carried out (refused when it isn't the expected digest's \
-                  any more). It never asks, waits for, starts or quits the DAW, and leaves another Kumi's part, a newer one \
+                  named, and the plan's digest; without, the plan whose digest is `expected` carried out (refused when it \
+                  isn't that plan any more). It never asks, waits for, starts or quits the DAW, and leaves another Kumi's part, a newer one \
                   and an adopted installation as they are.",
     schema,
     effect,
@@ -75,6 +75,11 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             let plan = provider.component_plan(&io, &home).map_err(failed)?;
             return Ok(reply(ctx, app, &plan, adopted, None));
         }
+        // A real install carries out the plan the producer approved, named by its digest: never one nobody saw.
+        let Some(expected) = call.args.get("expected").and_then(Value::as_str).map(str::to_string) else {
+            let reason = "A real install names the plan it carries out: expected, the digest of the dry run that was approved.";
+            return Err(OpError::Invalid { reason: reason.into() });
+        };
         if adopted {
             let reason = format!(
                 "Kumi for Hermes uses the Kumi installation at {} as it is, and never changes its part in {app}: run {} there.",
@@ -85,7 +90,7 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         }
         let _held = ctx.lease().take(&call.host).await?;
         let plan = provider.component_plan(&io, &home).map_err(failed)?;
-        if call.args.get("expected").and_then(Value::as_str).is_some_and(|expected| expected != digest(&plan)) {
+        if expected != digest(&plan) {
             let reason = format!(
                 "What's in {app} changed since this step was approved, so nothing was installed: plan it again and approve what it shows now."
             );

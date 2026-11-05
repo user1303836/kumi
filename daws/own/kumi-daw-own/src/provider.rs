@@ -814,7 +814,8 @@ struct Look {
 }
 
 /// Whether the DAW holds the file at `path` (or one in the folder there) open so that it can't be replaced: Windows
-/// refuses a file another program has open without sharing (a loaded DLL). Elsewhere a file can always be replaced.
+/// refuses a file another program has open without sharing (a loaded DLL), and that refusal (a sharing violation) is
+/// all this sees; any other failure comes from the install itself. Elsewhere a file can always be replaced.
 #[cfg(windows)]
 fn held(path: &Path) -> bool {
     use std::os::windows::fs::OpenOptionsExt;

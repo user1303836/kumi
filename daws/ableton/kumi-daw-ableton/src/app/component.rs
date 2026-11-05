@@ -38,6 +38,8 @@ struct Look {
     /// The state folder, secret and Remote Scripts folder this home's installed bridge's receipt names (`owner_paths`):
     /// an update writes there, wherever that is (an earlier install's own folder, say).
     owned: Option<(String, String, String)>,
+    /// The Remote Scripts folder Live uses now (its preferences', or the env's).
+    live_scripts: String,
     /// The bridge's configuration, when Live has Kumi's Remote Script with a reference to one.
     config: Option<String>,
     /// The version of the bridge it starts, when it says one.
@@ -70,6 +72,7 @@ impl Look {
         let owned = (config.as_deref().zip(package.as_deref()))
             .filter(|_| ours)
             .and_then(|(config, package)| owner_paths(config, package, &home.display().to_string()));
+        let live_scripts = scripts.clone();
         let scripts = owned.as_ref().map(|(_, _, scripts)| scripts.clone()).unwrap_or(scripts);
         let script = match (&config, &installed) {
             // A Remote Script with no reference to a bridge says nothing of whose it is: it stays.
@@ -104,6 +107,7 @@ impl Look {
             home: home.display().to_string(),
             scripts,
             owned,
+            live_scripts,
             config,
             installed,
             owner,
@@ -197,6 +201,12 @@ impl Look {
             PartState::Same => {}
         }
         if self.script_writes() {
+            if self.scripts != self.live_scripts {
+                effects.push(format!(
+                    "The bridge's receipt names {} as Live's Remote Scripts folder, not the one Live uses now ({}): the update goes there",
+                    self.scripts, self.live_scripts
+                ));
+            }
             // The bridge's lifecycle writes its configuration, secret, receipt and journal in the state folder, and the
             // configuration where it is: named too when that isn't in this home's bridge folder (an earlier install's).
             let mut others: Vec<String> = vec![self.state_dir()];

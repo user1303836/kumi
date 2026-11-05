@@ -382,9 +382,15 @@ impl Lab {
     }
 }
 
-/// The runtime's `setup_daw` for its own DAW.
+/// The runtime's `setup_daw` for its own DAW: a dry run, or a real install of what a dry run plans just before (the
+/// plan named by its digest, as setup names the one approved).
 async fn setup_on(ctx: &Ctx, dry_run: bool) -> Result<Value, OpError> {
-    call(ctx, json!({"daw": ctx.daw().as_str(), "dry_run": dry_run})).await
+    let daw = ctx.daw().as_str();
+    let plan = call(ctx, json!({"daw": daw, "dry_run": true})).await;
+    if dry_run {
+        return plan;
+    }
+    call(ctx, json!({"daw": daw, "dry_run": false, "expected": plan?["digest"]})).await
 }
 
 async fn call(ctx: &Ctx, args: Value) -> Result<Value, OpError> {
@@ -519,6 +525,10 @@ case!(setup_daw_sets_up_only_its_own_daw_and_one_runtime_at_a_time, async {
     let Value::Object(args) = json!({"daw": "renoise", "dry_run": true}) else { unreachable!() };
     let call = Call { args, host: HostCall::default(), signal: Signal::new(), progress: Progress::none() };
     assert_eq!(refused((operation.run)(&lab.ctx, call).await).0, "other_daw");
+    match self::call(&lab.ctx, json!({"daw": "ableton", "dry_run": false})).await {
+        Err(OpError::Invalid { .. }) => {}
+        other => panic!("a real install that names no approved plan ran: {other:?}"),
+    }
     let other = Lease::new(&lab.home, "ableton");
     let held = other.take(&HostCall::default()).await.unwrap();
     assert_eq!(lab.setup(true).await.unwrap()["state"], "missing", "a dry run takes no lease");

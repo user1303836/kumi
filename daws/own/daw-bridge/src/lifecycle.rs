@@ -672,11 +672,19 @@ impl Lifecycle {
         Ok(copies)
     }
 
-    /// Whether the copy at `at` is this home's: the reference beside it names this home's secret. Another Kumi home's
-    /// copy (its reference names that home's), or one whose reference is gone, is never followed, replaced or removed,
-    /// whatever its files: an equal payload isn't ownership.
+    /// Whether the copy at `at` is this home's: the reference beside it names this home's secret (its folder compared
+    /// on disk, links resolved, so another spelling of the same folder is the same). Another Kumi home's copy (its
+    /// reference names that home's), or one whose reference is gone, is never followed, replaced or removed, whatever
+    /// its files: an equal payload isn't ownership.
     fn owned_here(&self, at: &Target) -> bool {
-        Reference::read(&at.reference).is_ok_and(|reference| Path::new(&reference.secret_file) == self.paths.secret())
+        let canonical = |secret: &Path| {
+            let folder = secret.parent().and_then(|folder| std::fs::canonicalize(folder).ok());
+            folder.zip(secret.file_name()).map(|(folder, name)| folder.join(name))
+        };
+        Reference::read(&at.reference).is_ok_and(|reference| {
+            let (named, ours) = (Path::new(&reference.secret_file), self.paths.secret());
+            named == ours || canonical(named).is_some_and(|named| Some(named) == canonical(&ours))
+        })
     }
 
     /// What [`recover`](Self::recover) removes before an action, found without removing anything: an interrupted
@@ -1198,6 +1206,36 @@ mod tests {
             assert_eq!(std::fs::read_dir(&gone.target.dir).unwrap().count(), 0, "nothing aside left");
         }
         assert_eq!(read(changed.target.path().join("main.lua")), "-- the producer's\n");
+    }
+
+    // Standalone `kumi bridge` too: uninstalling leaves another Kumi home's copy in another Renoise folder (its reference
+    // names that home), and a copy whose reference is gone, as they are; an equal payload isn't this home's.
+    #[test]
+    fn uninstall_leaves_another_homes_copy_and_one_that_names_no_home() {
+        let root = tempfile::tempdir().unwrap();
+        let folder = |name: &str| {
+            let tools = root.path().join("prefs").join(name).join("Scripts").join("Tools");
+            std::fs::create_dir_all(&tools).unwrap();
+            Target {
+                dir: tools.clone(),
+                reference: tools.join("com.kumi.Bridge.xrnx").join("bridge-reference.json"),
+                ..renoise(root.path()).target
+            }
+        };
+        let (mine, theirs, bare) = (folder("V3.5.4"), folder("V3.5.5"), folder("V3.5.6"));
+        let source = bridge_folder(root.path(), "1.0");
+        Lifecycle::new(&root.path().join("other-kumi"), theirs.clone()).install(&source, "1.0").unwrap();
+        let life = Lifecycle::new(&root.path().join("kumi"), mine.clone()).with_elsewhere(vec![theirs.clone(), bare.clone()]);
+        life.install(&source, "1.0").unwrap();
+        assert!(life.receipt().unwrap().unwrap().copies.is_empty(), "the other home's copy wasn't taken over");
+        copy_tree(&mine.path(), &bare.path(), false, false).unwrap();
+        std::fs::remove_file(&bare.reference).unwrap();
+        let their_reference = read(theirs.reference.clone());
+        life.uninstall(false).unwrap();
+        assert!(!mine.path().exists());
+        assert_eq!(read(theirs.reference.clone()), their_reference, "the other home's copy still names it");
+        assert!(theirs.path().join("main.lua").is_file());
+        assert!(bare.path().join("main.lua").is_file(), "a copy that names no home stays");
     }
 
     // Review H13: a link in the tool folder once stopped an upgrade that would keep it.
