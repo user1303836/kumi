@@ -177,8 +177,9 @@ export function undoRequest(item: Pick<HistoryItem, 'id'>): string {
 
 // Double quote marks, and the marks that pass for them, which a name could use to close the quotes a drafted request
 // puts around it and go on in the producer's voice (W5's LOW 15): straight, curly, low-9, reversed, primes,
-// fullwidth, angle and CJK quotes. A name keeps its apostrophes: they can't close “…”.
-const QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟]/g
+// fullwidth, angle and CJK quotes, halfwidth and vertical corner brackets included. A name keeps its apostrophes:
+// they can't close “…”.
+const QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟｢｣﹁﹂﹃﹄]/g
 
 /** A name as a drafted request quotes it: `clean()`, then with no quote mark of its own, so everything from the DAW
  *  or a sample pack stays inside the request's quotes. */
@@ -187,11 +188,12 @@ export function quotable(name: unknown, max = 80): string {
 }
 
 /** Left unsent in the input, like `soundRequest`: generated audio, by its artifact id, so the model can hand CC-11's
- *  `{artifact_id}` source to the DAW's file step. The producer says where before sending. Audio only (CC-13). */
+ *  `{artifact_id}` source to the DAW's file step. The producer says where before sending. Audio only (CC-13). The
+ *  words it was made from are quoted like a sound's name: they can't close the quotes either. */
 export function placeRequest(artifactId: string, name?: string): string | null {
   const id = plainId(artifactId)
   if (!id) return null
-  const said = clean(name ?? '', 80)
+  const said = quotable(name)
   return said ? `Place “${said}” (artifact ${id}) in my project` : `Place artifact ${id} in my project`
 }
 

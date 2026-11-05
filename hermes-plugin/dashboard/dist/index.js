@@ -874,7 +874,7 @@
   function undoRequest(item) {
     return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
   }
-  var QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟]/g;
+  var QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟｢｣﹁﹂﹃﹄]/g;
   function quotable(name, max = 80) {
     return clean(typeof name === "string" ? name.replace(QUOTE_MARKS, " ") : name, max).replace(QUOTE_MARKS, " ").replace(/\s+/g, " ").trim();
   }
