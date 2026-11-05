@@ -450,18 +450,21 @@ def _real_file(path: Any, roots: list[Path]) -> str | None:
 
 
 def read_media(state: Path, media_id: str, library_folders: list[str] | None = None) -> tuple[dict, bytes] | None:
-    """`media()`'s file and its bytes. The resolved path is opened without following a link (a file swapped for one
-    after the check is refused) and checked again on the open file: regular, within the size cap."""
+    """`media()`'s file and its bytes. The resolved path must still be a regular file, not a link, and the file opened
+    must be that same file (device and inode, which Windows reports too): a file swapped for a link or for another
+    file after the check is refused, on systems without `O_NOFOLLOW` as well (#1000). Within the size cap."""
     found = media(state, media_id, library_folders)
     if found is None:
         return None
     try:
+        checked = os.lstat(found["path"])
         handle = os.open(found["path"], os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0))
     except OSError:
         return None
     with os.fdopen(handle, "rb") as file:
         info = os.fstat(file.fileno())
-        if not stat.S_ISREG(info.st_mode) or info.st_size > MEDIA_MAX_BYTES:
+        same = (info.st_dev, info.st_ino) == (checked.st_dev, checked.st_ino)
+        if not stat.S_ISREG(checked.st_mode) or not stat.S_ISREG(info.st_mode) or not same or info.st_size > MEDIA_MAX_BYTES:
             return None
         data = file.read(MEDIA_MAX_BYTES + 1)
     if len(data) > MEDIA_MAX_BYTES:

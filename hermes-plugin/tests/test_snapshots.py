@@ -198,10 +198,12 @@ class Media(StateTest):
         self.assertIsNone(snapshots.media(self.state, "nothing-like-it"))
 
     def test_a_file_swapped_for_a_link_after_the_check_is_not_followed(self) -> None:
-        if not hasattr(os, "O_NOFOLLOW"):
-            self.skipTest("this system has no O_NOFOLLOW")
         outside = Path(self.tmp.name) / "elsewhere.wav"
         outside.write_bytes(b"RIFF-private")
+        try:
+            (Path(self.tmp.name) / "probe-link").symlink_to(outside)
+        except (OSError, NotImplementedError):
+            self.skipTest("this account can't make symlinks here")
         target = self.state / "artifacts" / "a-7f32-dusty.wav"
         real_media = snapshots.media
 
@@ -216,6 +218,23 @@ class Media(StateTest):
             self.assertIsNone(snapshots.read_media(self.state, "a-7f32"))
         finally:
             snapshots.media = real_media
+
+    def test_a_file_replaced_by_another_between_the_check_and_the_open_is_not_served(self) -> None:
+        # Where O_NOFOLLOW doesn't exist (Windows), the open file's identity must still be the one checked (#1000).
+        other = Path(self.tmp.name) / "other.wav"
+        other.write_bytes(b"RIFF-other")
+        target = self.state / "artifacts" / "a-7f32-dusty.wav"
+        real_open = snapshots.os.open
+
+        def replacing_open(path, *args, **kwargs):
+            os.replace(other, target)
+            return real_open(path, *args, **kwargs)
+
+        snapshots.os.open = replacing_open
+        try:
+            self.assertIsNone(snapshots.read_media(self.state, "a-7f32"))
+        finally:
+            snapshots.os.open = real_open
 
     def test_a_file_over_fifty_mib_is_not_served(self) -> None:
         big = self.state / "artifacts" / "big.wav"
