@@ -43,11 +43,9 @@ impl McpEndpoint for Browser {
         Some(serde_json::from_value(json!({"name":"fixture","version":"1.0.89"})).unwrap())
     }
     async fn list(&self, _: Option<&str>, _: Signal) -> Result<ListToolsResult, RuntimeError> {
-        Ok(serde_json::from_value(
-            json!({"tools": ["live_status", "live_browser_inspect", "live_browser_load_preview", "live_browser_load_apply"]
-            .map(|name| json!({"name":name, "inputSchema":{"type":"object"}}))}),
-        )
-        .unwrap())
+        let tools = ["live_status", "live_browser_inspect", "live_browser_load_preview", "live_browser_load_apply"]
+            .map(|name| json!({"name":name, "inputSchema":{"type":"object"}}));
+        Ok(serde_json::from_value(json!({"tools":tools})).unwrap())
     }
     async fn call(&self, name: &str, args: JsonObject, _: Signal) -> Result<CallToolResult, RuntimeError> {
         if name != "live_status" {
