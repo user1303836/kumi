@@ -235,7 +235,7 @@ class Tools(unittest.TestCase):
         started = json.loads((data / "state" / "fixture-start.json").read_text(encoding="utf-8"))["argv"]
         self.assertEqual([started[i + 1] for i, arg in enumerate(started) if arg == "--media-root"], [generated])
 
-    def test_hermess_generated_audio_folder_is_this_profiles_and_is_made_for_the_runtime(self):
+    def test_hermess_generated_audio_folder_is_this_profiles_and_kumi_never_makes_it(self):
         try:
             import hermes_constants  # noqa: F401  (only where Hermes is importable: CI's Hermes job)
         except ImportError:
@@ -247,7 +247,7 @@ class Tools(unittest.TestCase):
         with mock.patch.dict("os.environ", {"HERMES_HOME": home.name}):
             [root] = host.media_roots()
         self.assertEqual(Path(root), Path(home.name) / "cache" / "generated" / "audio")
-        self.assertTrue(Path(root).is_dir(), "made, so a file generated after the runtime starts is in reach")
+        self.assertFalse((Path(home.name) / "cache").exists(), "Kumi writes nothing outside its plugin data")
 
     def test_sounds_reach_the_model_by_id_never_by_path(self):
         support.call(self.host, "kumi_connect", {}, session_id="s1")

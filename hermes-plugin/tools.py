@@ -161,18 +161,16 @@ class Host:
     def media_roots(self) -> list[str]:
         """Folders of finished media the runtime may import or measure from (`--media-root`): this profile's
         `<HERMES_HOME>/cache/generated/audio`, where other plugins' results land (ElevenLabs Music and Sound Effects).
-        It's made when it isn't there yet, as those plugins would make it, so a file they write after Kumi's runtime
-        starts is still in reach (the runtime leaves out a root it can't find when it starts)."""
+        Passed as is, even before it exists: the runtime keeps an absolute root and checks a file against it when it
+        resolves the file (CC-11). Kumi never makes the folder; it writes only in its plugin data."""
         if self._media_roots is not None:
             return self._media_roots()
         try:
             from hermes_constants import get_hermes_home  # Hermes's
-            folder = Path(get_hermes_home()) / "cache" / "generated" / "audio"
-            folder.mkdir(parents=True, exist_ok=True)
+            return [str(Path(get_hermes_home()) / "cache" / "generated" / "audio")]
         except Exception:
             log.exception("Kumi couldn't find Hermes's generated audio folder")
             return []
-        return [str(folder)]
 
     def set_library_folders(self, folders: list[str]) -> None:
         self._ctx.set_config("library_folders", folders)

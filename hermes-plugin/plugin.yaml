@@ -5,6 +5,7 @@ description: >-
   Kumi for Hermes: read and make supported typed changes in Ableton Live, REAPER and Renoise.
   Changes use Hermes approvals and Kumi's HISTORY, with undo when the recorded handle remains valid.
   Measure audio locally and map approved sample folders to find, audition and place sounds.
+  It also reads finished audio other Hermes plugins saved in this profile's generated audio folder, to place or measure it.
 author: Kumi
 homepage: https://github.com/user1303836/kumi/tree/main/hermes-plugin
 license: MIT
