@@ -329,6 +329,21 @@ class SetupTest(unittest.TestCase):
         self.assertIn("runtime stopped", result["error"]["message"])
         self.assertEqual(self.status()["daw_component"]["state"], "not_installed")
 
+    def test_reaper_and_renoise_steps_say_what_their_component_writes_into_a_project(self) -> None:
+        self.install_runtime()
+        tagging = {"reaper": "keeps an id for each saved project in the project (ext state), saved with it",
+                   "renoise": "keeps an id for each song in the song's tool data, saved with it"}
+        for daw, words in tagging.items():
+            with self.subTest(daw):
+                setup.plan(daw, setup_daw=Runtime(), data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
+                self.assertIn(words, setup.approval(daw, data_dir=self.data)["message"], "it's in what's approved")
+                owner = str(self.data.parent / f"standalone-{daw}")
+                setup.plan(daw, setup_daw=Runtime("other_owner", owner=owner), data_dir=self.data,
+                           plugin_dir=self.plugin, target=TARGET)
+                self.assertIn(words, setup.approval(daw, action="adopt", data_dir=self.data)["message"])
+        self.plan(setup_daw=Runtime())
+        self.assertNotIn("keeps an id", setup.approval("ableton", data_dir=self.data)["message"], "Live's doesn't")
+
     def test_a_component_this_kumi_installed_before_is_recorded_when_planning(self) -> None:
         self.install_runtime()
         self.assertEqual(self.status()["state"], "needs_daw_component")

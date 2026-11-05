@@ -309,10 +309,20 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
     if dry["state"] in ("same", "newer"):
         plan.update(step="none", paths=[], effects=[], component=dry)
     elif dry["state"] == "other_owner":
-        plan.update(step="owned_elsewhere", paths=dry["paths"], effects=dry["effects"], component=dry)
+        plan.update(step="owned_elsewhere", paths=dry["paths"], effects=[*dry["effects"], *_TAGGING.get(daw, ())],
+                    component=dry)
     else:
-        plan.update(step="daw_component", paths=dry["paths"], effects=dry["effects"], component=dry)
+        plan.update(step="daw_component", paths=dry["paths"], effects=[*dry["effects"], *_TAGGING.get(daw, ())],
+                    component=dry)
     return plan
+
+
+# CC-8: what REAPER's and Renoise's components write into a project by themselves, said in every DAW step until a
+# component that stops it is released (agent-s names its versions then).
+_TAGGING = {
+    "reaper": ("REAPER: Kumi's extension keeps an id for each saved project in the project (ext state), saved with it.",),
+    "renoise": ("Renoise: Kumi's tool keeps an id for each song in the song's tool data, saved with it.",),
+}
 
 
 def plan(daw: str, *, setup_daw: Callable[[dict], Any] | None = None, data_dir: Path | None = None,
@@ -381,7 +391,7 @@ def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str]
         return [f"Kumi: use the existing Kumi installation at {home} for {DAWS[daw]}",
                 "Kumi's runtime will read that installation's DAW connection files and write its own connection state "
                 "there (never its sign-in, settings or account)",
-                f"The {component} it installed stays as it is"]
+                f"The {component} it installed stays as it is", *_TAGGING.get(daw, ())]
     if action != "install" or plan.get("step") not in ("runtime", "daw_component"):
         return None
     title = (f"Kumi: set up Kumi {plan['version']}'s runtime" if plan["step"] == "runtime"
