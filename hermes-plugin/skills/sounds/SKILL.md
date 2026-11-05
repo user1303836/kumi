@@ -36,7 +36,7 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 ## Placing a sound
 - **Placing is a change:** `kumi_change` with the DAW's own file step (skill `kumi:daw`), with the sound as its source in the file field: `{"sound_id", "map_revision"}`, never the sound's path.
   - **Live, from a sound:**
-    - `load_sample_to_pad` puts it on a Drum Rack pad that's empty (`deviceRef`: the Drum Rack; `note`: the pad), in a new Simpler. **Kumi can't undo a pad load:** Cmd+Z twice in Live, right away, takes it back, as Kumi's words in the approval say. Live's Redo won't bring the sample back: to have it again, ask Kumi to load it again. So load one pad a change, with nothing else in it.
+    - `load_sample_to_pad` puts it on a Drum Rack pad that's empty (`deviceRef`: the Drum Rack; `note`: the pad), in a new Simpler. **Kumi can't undo a pad load:** Live's own Undo (Cmd+Z) takes it back, usually in two steps: press it one step at a time, right away, and stop as soon as the pad is empty. Live's Redo won't bring the sample back: to have it again, ask Kumi to load it again. So load one pad a change, with nothing else in it.
     - `replace_sample` swaps the audio of a pad, or a track, that already has a Simpler (`deviceRef`: that Simpler).
     - `load_sample` puts it in a new Simpler on an empty MIDI track, and Kumi can undo it. Once Kumi has undone one, to have it back ask Kumi to place it again: Cmd+Z in Live would bring back a Simpler whose sample is offline.
     - `import_audio` puts it in an empty Session slot of an audio track.
@@ -53,8 +53,8 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
      - for a pad holding a Simpler, `replace_sample` on that Simpler, which Kumi can undo.
      - If the pad holds anything else (another instrument, or several devices), say so and ask. Never clear a pad to make room.
 
-     Then report the pad, the sound and the HISTORY id, and for a pad load, that Cmd+Z twice in Live, right away, takes it back.
-- **The producer approves the exact placement.** HISTORY lets them undo a replaced sample; a pad load is taken back with Cmd+Z twice in Live, right away.
+     Then report the pad, the sound and the HISTORY id, and for a pad load, Kumi's words on taking it back with Live's Undo: one step at a time, right away, until the pad is empty.
+- **The producer approves the exact placement.** HISTORY lets them undo a replaced sample; a pad load is taken back with Live's own Undo, one step at a time, right away, until the pad is empty.
 - **When a producer picks a sound on the map,** Desktop puts a request in the chat ("Use sound s-… on the selected track"). Treat it like any other request: observe, then make an approved change.
 - **"Put “<name>” (sound <id> from map <rev>) on the Drum Rack pad C1 (note 36) on the selected track"** is Desktop's request from the map's "Use on pad…". Its sound and map revision are the source, and its note is the pad.
   - **Live:** look (`kumi_observe` with `scope: focus`) for the selected track's Drum Rack, and the pad with that note. Then:
