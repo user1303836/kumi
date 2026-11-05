@@ -75,6 +75,10 @@ function seconds(value) {
   return value < 10 ? `${num(value, 2)} s` : value < 60 ? `${num(value, 1)} s` : `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
 }
 var JOB_KINDS = { scan: { running: "Scanning", noun: "Scan" } };
+function count(value) {
+  if (Array.isArray(value)) return value.length;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
 function jobWords(job) {
   const kind = typeof job.kind === "string" && job.kind ? job.kind : "";
   const named = JOB_KINDS[kind] ?? { running: `${clean(kind || "Job", 24)} running`, noun: clean(kind || "Job", 24) };
@@ -83,13 +87,15 @@ function jobWords(job) {
   const total = typeof progress.total === "number" && Number.isFinite(progress.total) && progress.total > 0 ? progress.total : null;
   const message = typeof progress.message === "string" ? clean(progress.message, 60) : "";
   if (job.state === "running" || job.state === void 0) {
-    const count = done === null ? "" : total === null ? num(done, 0) : `${num(done, 0)} of ${num(total, 0)}`;
-    return { title: named.running, detail: [message, count].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
+    const count2 = done === null ? "" : total === null ? num(done, 0) : `${num(done, 0)} of ${num(total, 0)}`;
+    return { title: named.running, detail: [message, count2].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
   }
   if (job.state === "done") {
     const result = job.result && typeof job.result === "object" ? job.result : {};
-    const sounds = typeof result.sounds === "number" ? `${num(result.sounds, 0)} sound${result.sounds === 1 ? "" : "s"}` : "";
-    return { title: `${named.noun} done`, detail: sounds, fraction: 1, tone: "good" };
+    const sounds = count(result.sounds);
+    const failed = count(result.failed);
+    const detail = [sounds === null ? "" : `${num(sounds, 0)} sound${sounds === 1 ? "" : "s"}`, failed ? `${num(failed, 0)} couldn't be read` : ""];
+    return { title: `${named.noun} done`, detail: detail.filter(Boolean).join(" · "), fraction: 1, tone: failed ? "warn" : "good" };
   }
   if (job.state === "failed") return { title: `${named.noun} failed`, detail: clean(job.error?.reason ?? "", 120), fraction: null, tone: "bad" };
   if (job.state === "cancelled") return { title: `${named.noun} stopped`, detail: "", fraction: null, tone: "muted" };
@@ -106,11 +112,13 @@ function canUndo(status, item) {
 function undoRequest(item) {
   return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
 }
-function soundRequest(soundId, name) {
+function soundRequest(soundId, name, revision) {
   const id = plainId(soundId);
   if (!id) return null;
+  const from = revision ? plainId(revision) : null;
   const said = clean(name ?? "", 80);
-  return said ? `Use sound ${id} (“${said}”) on the selected track` : `Use sound ${id} on the selected track`;
+  const which = `sound ${id}${from ? ` from map ${from}` : ""}`;
+  return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`;
 }
 function setupRequest(daw) {
   return `Set up Kumi for ${dawName(daw)}`;
@@ -1263,6 +1271,7 @@ function frame(model, ids, width, height, margin = 48) {
 
 // src/shared/MapCanvas.tsx
 import { jsx as jsx8, jsxs as jsxs8 } from "react/jsx-runtime";
+var MATCHES_LISTED = 6;
 function resolve(canvas) {
   const style = getComputedStyle(canvas);
   const read = (name, fallback) => style.getPropertyValue(name).trim() || fallback;
@@ -1300,6 +1309,10 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
       return !searched || searched.has(point.id);
     };
   }, [model, hidden, searched]);
+  const matches = useMemo(() => {
+    const ids = searched ?? foundIds;
+    return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
+  }, [searched, foundIds, indexOf, visible]);
   useEffect4(() => {
     const box = boxRef.current;
     if (!box) return;
@@ -1381,7 +1394,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
   const chosen = selected ? model.sounds[selected] : void 0;
   const hovered = hover ? model.points[hover.index] : void 0;
   const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
-  const shown = model.points.reduce((count, _, index) => count + (visible(index) ? 1 : 0), 0);
+  const shown = model.points.reduce((count2, _, index) => count2 + (visible(index) ? 1 : 0), 0);
   return /* @__PURE__ */ jsxs8("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
     /* @__PURE__ */ jsxs8("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
       /* @__PURE__ */ jsx8(
@@ -1423,6 +1436,30 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
         group.key
       );
     }) }),
+    matches.length > 0 && /* @__PURE__ */ jsxs8("div", { "aria-label": searched ? "Sounds that match" : "Sounds Kumi found", role: "group", style: { display: "flex", flexDirection: "column", gap: 1, padding: "0 10px 6px" }, children: [
+      matches.slice(0, MATCHES_LISTED).map((id) => {
+        const sound = model.sounds[id];
+        return /* @__PURE__ */ jsxs8(
+          "button",
+          {
+            "aria-pressed": selected === id,
+            onClick: () => onPick(id),
+            type: "button",
+            style: { ...S.row, gap: 6, font: "inherit", fontSize: 11.5, padding: "1px 6px", borderRadius: 3, border: "none", textAlign: "left", cursor: "pointer", color: T.text, background: selected === id ? T.card : "transparent" },
+            children: [
+              /* @__PURE__ */ jsx8("span", { style: { ...S.ellipsis, flex: 1 }, children: clean(sound?.name ?? id, 80) }),
+              sound?.class && /* @__PURE__ */ jsx8("span", { style: { color: T.faint }, children: clean(sound.class, 16) })
+            ]
+          },
+          id
+        );
+      }),
+      matches.length > MATCHES_LISTED && /* @__PURE__ */ jsxs8("span", { style: { ...S.faint, padding: "0 6px" }, children: [
+        "and ",
+        matches.length - MATCHES_LISTED,
+        " more on the map"
+      ] })
+    ] }),
     /* @__PURE__ */ jsxs8("div", { ref: boxRef, style: { position: "relative", flex: 1, minHeight: 160, overflow: "hidden" }, children: [
       /* @__PURE__ */ jsx8(
         "canvas",
@@ -1518,7 +1555,7 @@ function MapWorkspace({ ctx, store, audition }) {
     MapCanvas,
     {
       actions: (id, sound) => {
-        const request = soundRequest(id, sound.name);
+        const request = soundRequest(id, sound.name, map?.revision);
         return /* @__PURE__ */ jsxs9(Fragment2, { children: [
           /* @__PURE__ */ jsx9(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: "Play it here (nothing changes in your DAW)", children: playing === id ? "■ Stop" : "▶ Play" }),
           request && /* @__PURE__ */ jsx9(
@@ -1631,7 +1668,8 @@ function SettingsPage({ ctx, store, onOpenMap }) {
         setup?.existing_kumi?.path && /* @__PURE__ */ jsxs11(Line, { label: "Standalone Kumi", children: [
           clean(setup.existing_kumi.path, 120),
           /* @__PURE__ */ jsx11("span", { style: S.faint, children: setup.existing_kumi.adopted ? " · adopted" : " · left as it is" })
-        ] })
+        ] }),
+        setup?.compressed_audio?.message && /* @__PURE__ */ jsx11(Line, { label: "Audio formats", children: /* @__PURE__ */ jsx11("span", { style: setup.compressed_audio.state === "available" ? void 0 : S.muted, children: clean(setup.compressed_audio.message, 400) }) })
       ] }),
       /* @__PURE__ */ jsxs11("div", { children: [
         /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Connection" }),
