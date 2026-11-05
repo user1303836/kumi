@@ -99,7 +99,7 @@ can't tell it from a chat.
 | Setting | Default | What it does |
 |---|---|---|
 | DAW | Live | Which DAW Kumi connects to. The first DAW you set up becomes it; switch with `hermes kumi setup --daw <daw> --use` (`ableton`, `reaper` or `renoise`) |
-| Sample folders | none | The folders Kumi may read for your sound map. Nothing else is scanned. A folder can't be a whole drive or volume, your home folder or a folder above it, or a folder inside or above Hermes's own (`HERMES_HOME`); `~/` works. Links and junctions never lead Kumi outside the folders you list, and on Windows it skips cloud placeholder files (OneDrive's, for example) |
+| Sample folders | none | The folders Kumi may read for your sound map: a scan reads only the audio files in them, and nothing else is scanned. A folder can't be a whole drive or volume, your home folder or a folder above it, or a folder inside or above Hermes's own (`HERMES_HOME`); `~/` works. Links and junctions never lead Kumi outside the folders you list, and on Windows it skips cloud placeholder files (OneDrive's, for example) |
 | Tell the agent what you're looking at | on | Adds a short FOCUS and catch-up note to the chat connected to Kumi when what you're looking at changes |
 | Interpret measurements with a model | off | Also sends measurements and a small band-energy image for a plain-words reading to the model set for Kumi's listening task in Hermes (Vision's, unless you change it), which must accept images |
 
@@ -127,9 +127,9 @@ can't tell it from a chat.
 - Live works on macOS and Windows; REAPER and Renoise on macOS, Windows and Linux.
 - Kumi for Hermes doesn't listen to a track or the mix yet, in any DAW: it refuses and plays nothing. It measures audio
   files, library sounds and Kumi's own results.
-- Kumi reads only the open project, the sample folders you list, and finished audio other Hermes plugins saved in
-  Hermes's generated-audio folder (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates), to place or
-  measure it.
+- Kumi reads only the open project, the audio files in the sample folders you list, and finished audio other Hermes
+  plugins saved in Hermes's generated-audio folder (`<HERMES_HOME>/cache/generated/audio`, which Kumi never creates),
+  to place or measure it.
 - Kumi reads WAV and AIFF itself. For MP3, FLAC and other compressed audio it uses an ffmpeg already on your
   computer, if you allow it at setup; it never downloads one. Before each start Kumi checks that it's still the ffmpeg
   file you allowed (not the libraries it loads, which an upgrade can change). ffmpeg gets only the one file Kumi is

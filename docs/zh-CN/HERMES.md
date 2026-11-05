@@ -64,7 +64,7 @@ Hermes 会在每次修改前征求同意，因为它的确认功能是开启的�
 | 设置 | 默认 | 作用 |
 |---|---|---|
 | DAW | Live | Kumi 连接哪个 DAW。你最先设置的 DAW 会成为它；用 `hermes kumi setup --daw <daw> --use` 切换（`ableton`、`reaper` 或 `renoise`） |
-| 采样文件夹 | 无 | 为声音地图允许 Kumi 读取的文件夹，其他地方一概不扫描。不能是整个磁盘或卷、你的主文件夹或它上面的文件夹，也不能在 Hermes 自己的文件夹（`HERMES_HOME`）之内或之上；可以用 `~/`。链接和联接点绝不会把 Kumi 带出你列出的文件夹；在 Windows 上，Kumi 会跳过云端占位文件（例如 OneDrive 的） |
+| 采样文件夹 | 无 | 为声音地图允许 Kumi 读取的文件夹：扫描只读取其中的音频文件，其他内容一概不扫描。不能是整个磁盘或卷、你的主文件夹或它上面的文件夹，也不能在 Hermes 自己的文件夹（`HERMES_HOME`）之内或之上；可以用 `~/`。链接和联接点绝不会把 Kumi 带出你列出的文件夹；在 Windows 上，Kumi 会跳过云端占位文件（例如 OneDrive 的） |
 | 告诉智能体我在看什么 | 开 | 当你查看的内容变化时，在连接 Kumi 的对话中加入一段简短的 FOCUS 和变化摘要 |
 | 用模型解读测量结果 | 关 | 把测量数值和一张小的频段能量图也发给你在 Hermes 中为 Kumi 聆听任务设置的模型（未更改时为 Vision 的模型），用文字解读；该模型必须能接受图片 |
 
@@ -83,7 +83,7 @@ Hermes 会在每次修改前征求同意，因为它的确认功能是开启的�
 - 你的 DAW 必须运行在运行 Hermes 的那台电脑上。连接到远程 Hermes 的 Hermes Desktop 控制的是那台电脑上的 DAW，而不是你本机的。
 - Live 支持 macOS 和 Windows；REAPER 和 Renoise 支持 macOS、Windows 和 Linux。
 - Kumi for Hermes 目前在任何 DAW 中都还不会聆听音轨或混音：它会拒绝，并且不播放任何内容。它能测量音频文件、音色库中的声音和 Kumi 自己的结果。
-- Kumi 只读取打开的工程、你列出的采样文件夹，以及其他 Hermes 插件保存在 Hermes 生成音频文件夹（`<HERMES_HOME>/cache/generated/audio`，Kumi 从不创建这个文件夹）中的已完成音频，用于放置或测量。
+- Kumi 只读取打开的工程、你列出的采样文件夹中的音频文件，以及其他 Hermes 插件保存在 Hermes 生成音频文件夹（`<HERMES_HOME>/cache/generated/audio`，Kumi 从不创建这个文件夹）中的已完成音频，用于放置或测量。
 - Kumi 能直接读取 WAV 和 AIFF。对于 MP3、FLAC 等压缩音频，如果你在设置时允许，它会使用电脑上已有的 ffmpeg（绝不下载）。每次启动前，Kumi 都会确认它仍是你允许的那个 ffmpeg 文件（不检查它加载的库，这些库可能随升级而变化）。ffmpeg 只会拿到 Kumi 正在读取的那一个文件：绝不是 URL 或播放列表，也不从网络读取任何内容。Kumi 可读取的文件最大 50 MiB，最多测量其中 12 分钟。
 - Kumi 的 REAPER 扩展会把每个已保存工程的 ID 存在工程里（ext state），Renoise 工具会把每首歌的 ID 存在歌曲的工具数据中，并随之一起保存。
 - 在 Windows 上，网络文件夹（`\\server\share`，或通过链接访问的共享文件夹）中的采样无法在 Hermes Desktop 或仪表盘中播放：它们只播放这台电脑本地磁盘上的文件。

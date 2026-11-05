@@ -97,7 +97,7 @@ settings:
 | Setting | Default | What it does |
 |---|---|---|
 | `daw` | Live (`ableton`) | Which DAW Kumi connects to: `ableton`, `reaper` or `renoise`. The first DAW you set up becomes it; `hermes kumi setup --daw <daw> --use` switches |
-| `library_folders` | none | The folders Kumi may read to build your sound map. Nothing else is scanned |
+| `library_folders` | none | The folders Kumi may read to build your sound map: a scan reads only the audio files in them, and nothing else is scanned |
 | `inject_focus` | on | Adds the short FOCUS and catch-up note to the chat connected to Kumi when what you're looking at changes |
 | `listen_interpretation` | off | Also asks the model set for Kumi's listening task in Hermes (Vision's, unless you change it; it must accept images) to interpret measurements (see below) |
 
@@ -155,9 +155,9 @@ project as…** with **Copy all media into project directory**), or they'll miss
   loopback only. They stop when the chat ends, when the plugin unloads or Hermes exits, or after 15 minutes idle (2
   hours while connected to your DAW for a chat); a job still running, such as a scan or a Mirelo generation, keeps
   them up for at most 6 hours. Your DAW keeps running.
-- **Reads:** the open project; the sample folders you list (never a whole drive or volume, your home folder or above,
-  or inside or above HERMES_HOME; links never lead it outside them); and finished audio other Hermes plugins saved in
-  `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it.
+- **Reads:** the open project; the audio files in the sample folders you list (never a whole drive or volume, your
+  home folder or above, or inside or above HERMES_HOME; links never lead it outside them); and finished audio other
+  Hermes plugins saved in `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it.
 - **Approvals:** changes to your project go through Hermes's approval. Allowing a Kumi call for the session or always
   covers that kind of call (changes, undos, sample-folder adds and scans) in this chat only, including a one-shot run
   that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a scheduled job asks again or is
