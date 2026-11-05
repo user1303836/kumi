@@ -1062,7 +1062,7 @@ case!(setup_daw_never_replaces_a_copy_whose_version_cant_be_ordered, async {
     let released = runtime(lab.root.path(), "plugin/state-3", &lab.home, DawId::Reaper, env("REAPER-2"), carrying(&lab, "runtime"));
     let plan = setup_on(&released, true).await.unwrap();
     assert_eq!((plan["state"].as_str(), plan["version"].as_str(), &plan["paths"]), (Some("newer"), Some("dev"), &json!([])), "{plan}");
-    assert!(plan["effects"].to_string().contains("can't be ordered"), "{}", plan["effects"]);
+    assert!(plan["effects"].to_string().contains("can't be compared"), "{}", plan["effects"]);
     let before = lab.tree();
     assert_eq!(refused(setup_on(&released, false).await).0, "newer_installed");
     within(&differ(&before, &lab.tree()), &json!({"paths": []}), &lab.lease());
