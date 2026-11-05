@@ -61,7 +61,7 @@ fn main() {
                 .find(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("kumi-logic-hands-")))
         })
         .expect("the helper: build it with python3 scripts/build-logic-hands.py, or name it with --helper");
-    let mut launcher = ChildLauncher { path: helper_path };
+    let mut launcher = ChildLauncher { path: helper_path, stop: None };
     let scene = Arc::new(Mutex::new(Scene::new(&name)));
     let mut helper: Box<dyn Helper> = Box::new(Recorder::new(launcher.launch().expect("the helper"), scene.clone()));
 
