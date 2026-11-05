@@ -304,20 +304,30 @@ test("a pending script (CC-19) shows Hermes's claim as one, its facts, the appro
   assert.ok(unreadable.includes(english('script.unreadable').replaceAll("'", '&#x27;')) && !unreadable.includes('<pre'))
 })
 
-test('a pending device (CC-22) shows its controls, each with its range and default, beside its GenExpr code', async () => {
+test('a pending device (CC-22) shows its file and its controls, each with its range and default as the approval writes them, beside its GenExpr code', async () => {
   const { PendingScriptView } = await load('src/desktop/script.tsx', { react: 'real' })
+  const { pendingScriptOf } = await load('src/shared/store.ts', { react: 'real' })
   const spec = {
     name: 'Soft Clip',
     about: 'Gentle saturation',
-    controls: [{ name: 'Drive', type: 'number', min: 0, max: 1, default: 0.3 }, { name: 'Shape', type: 'choice', options: ['soft', 'hard'], default: 'soft' }, { name: 'Bypass', type: 'switch', default: false }],
+    controls: [
+      { name: 'Tone', type: 'number', min: 200, max: 8000, default: 1000, unit: 'Hz' },
+      { name: 'Shape', type: 'choice', options: ['Soft', 'Hard'], default: 'Soft' },
+      { name: 'Bypass', type: 'switch', default: false }
+    ],
     code: 'out1 = tanh(in1 * (1 + Drive * 4));\nout2 = tanh(in2 * (1 + Drive * 4));\n'
   }
   const sha = 'd'.repeat(64)
-  const pending = { tool_call_id: 'call-9', language: 'device', sha256: sha, purpose: 'Gentle saturation', warning: 'Writes a new Max for Live device into your User Library (Kumi folder)' }
+  const file = 'User Library/Kumi/Audio Effects/Soft Clip.amxd'
+  // The event as the plugin sends it: the pane keeps the file the approval names.
+  const pending = pendingScriptOf({ tool_call_id: 'call-9', language: 'device', sha256: sha, purpose: 'Gentle saturation', warning: 'Writes a new Max for Live device into your User Library (Kumi folder)', file })
   const html = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'ableton', script: { pending, code: { sha256: sha, language: 'device', code: JSON.stringify(spec), lines: 2 } } }))
-  for (const text of ['Soft Clip', english('script.device'), 'Drive', '0–1', '0.3', 'soft / hard', 'off / on', 'out1 = tanh(in1 * (1 + Drive * 4));', '>2<', 'User Library (Kumi folder)']) {
+  const switched = `${english('script.on')}/${english('script.off')}`
+  for (const text of ['Soft Clip', english('script.device'), english('script.file', file), '200–8000 Hz', '>1000 Hz<', '>Soft/Hard<', '>Soft<', `>${switched}<`, `>${english('script.off')}<`, 'out1 = tanh(in1 * (1 + Drive * 4));', '>2<', 'User Library (Kumi folder)']) {
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
+  // A file with a hidden character (here a right-to-left override) isn't shown.
+  assert.equal(pendingScriptOf({ tool_call_id: 'call-9', language: 'device', sha256: sha, file: 'Soft\u202eClip.amxd' }).file, undefined)
   // A file that isn't a device's spec (no code) shows no code, only that it can't be read.
   const broken = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'ableton', script: { pending, code: { sha256: sha, language: 'device', code: '{"name":"x"}', lines: 0 } } }))
   assert.ok(broken.includes(english('script.unreadable').replaceAll("'", '&#x27;')) && !broken.includes('<pre'))

@@ -62,7 +62,9 @@ export function pendingScriptOf(payload: unknown): PendingScript | null {
   if (!id || !language || typeof value.sha256 !== 'string' || !SHA256.test(value.sha256)) return null
   const text = (key: string) => (typeof value[key] === 'string' ? (value[key] as string) : undefined)
   const lines = typeof value.lines === 'number' && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : undefined
-  return { tool_call_id: id, language, sha256: value.sha256, purpose: text('purpose'), daw: text('daw'), lines, warning: text('warning') }
+  // A device's file is a path the approval names; one printable line, or nothing.
+  const file = language === 'device' && typeof value.file === 'string' && /^[^\p{C}]{1,300}$/u.test(value.file) ? value.file : undefined
+  return { tool_call_id: id, language, sha256: value.sha256, purpose: text('purpose'), daw: text('daw'), lines, warning: text('warning'), file }
 }
 
 function finished(job: Job): boolean {

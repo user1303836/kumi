@@ -193,6 +193,9 @@
       control: "Control",
       range: "Range",
       default: "Default",
+      on: "on",
+      off: "off",
+      file: (file) => `New file: ${file}`,
       in: (language, daw) => `${language} in ${daw}`,
       lines: (count) => count === 1 ? "1 line" : `${count} lines`,
       sha: (short) => `SHA-256 ${short}…`,
@@ -513,6 +516,9 @@
       control: "コントロール",
       range: "範囲",
       default: "初期値",
+      on: "オン",
+      off: "オフ",
+      file: (file) => `新しいファイル: ${file}`,
       in: (language, daw) => `${daw} の ${language}`,
       lines: (count) => `${count} 行`,
       sha: (short) => `SHA-256 ${short}…`,
@@ -832,6 +838,9 @@
       control: "控件",
       range: "范围",
       default: "默认值",
+      on: "开",
+      off: "关",
+      file: (file) => `新文件：${file}`,
       in: (language, daw) => `${daw} 中的 ${language}`,
       lines: (count) => `${count} 行`,
       sha: (short) => `SHA-256 ${short}…`,
@@ -2024,7 +2033,8 @@
     if (!id || !language || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
     const text = (key) => typeof value[key] === "string" ? value[key] : void 0;
     const lines = typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : void 0;
-    return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning") };
+    const file = language === "device" && typeof value.file === "string" && /^[^\p{C}]{1,300}$/u.test(value.file) ? value.file : void 0;
+    return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning"), file };
   }
   function finished(job) {
     return typeof job.state === "string" && job.state !== "running";

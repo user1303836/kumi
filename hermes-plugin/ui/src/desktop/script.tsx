@@ -8,6 +8,7 @@ import { useEffect, useState } from 'react'
 
 import { CodeBlock } from '../shared/Code.tsx'
 import { clean, dawName } from '../shared/format.ts'
+import type { Translate } from '../shared/i18n.ts'
 import type { KumiStore } from '../shared/store.ts'
 import type { DeviceSpec, HistoryItem, PendingScript, ScriptCode, ScriptLanguage } from '../shared/types.ts'
 import { S, TextButton, useT } from '../shared/ui.tsx'
@@ -26,11 +27,24 @@ export function deviceSpecOf(text: string): DeviceSpec | null {
   }
 }
 
-function range(control: NonNullable<DeviceSpec['controls']>[number]): string {
-  const unit = typeof control.unit === 'string' && control.unit ? ` ${clean(control.unit, 12)}` : ''
-  if (control.type === 'switch') return 'off / on'
-  if (control.type === 'choice' && Array.isArray(control.options)) return control.options.map(option => clean(String(option), 20)).join(' / ')
-  return typeof control.min === 'number' && typeof control.max === 'number' ? `${control.min}–${control.max}${unit}` : '—'
+type Control = NonNullable<DeviceSpec['controls']>[number]
+
+function unitOf(control: Control): string {
+  return typeof control.unit === 'string' && control.unit ? ` ${clean(control.unit, 12)}` : ''
+}
+
+/** A control's range as the approval writes it (`0–1 Hz`, `Soft/Hard`, `on/off`), Kumi's own words translated. */
+function range(control: Control, t: Translate): string {
+  if (control.type === 'switch') return `${t('script.on')}/${t('script.off')}`
+  if (control.type === 'choice' && Array.isArray(control.options)) return control.options.map(option => clean(String(option), 20)).join('/')
+  return typeof control.min === 'number' && typeof control.max === 'number' ? `${control.min}–${control.max}${unitOf(control)}` : '—'
+}
+
+/** A control's default as the approval writes it: a switch's on or off, a choice as written, a number with its unit. */
+function defaultOf(control: Control, t: Translate): string {
+  if (control.default === undefined) return '—'
+  if (control.type === 'switch' && typeof control.default === 'boolean') return t(control.default ? 'script.on' : 'script.off')
+  return `${clean(String(control.default), 20)}${control.type === 'choice' || control.type === 'switch' ? '' : unitOf(control)}`
 }
 
 /** The device's controls, each with its range and default, as the approval named them. */
@@ -52,8 +66,8 @@ function Controls({ spec }: { spec: DeviceSpec }) {
         {controls.map((control, index) => (
           <tr key={index} style={{ borderTop: `1px solid ${T.border}` }}>
             <td style={cell}>{clean(String(control.name ?? ''), 32)}</td>
-            <td style={{ ...cell, color: T.muted }}>{range(control)}</td>
-            <td style={{ ...cell, color: T.muted }}>{control.default === undefined ? '—' : clean(String(control.default), 20)}</td>
+            <td style={{ ...cell, color: T.muted }}>{range(control, t)}</td>
+            <td style={{ ...cell, color: T.muted }}>{defaultOf(control, t)}</td>
           </tr>
         ))}
       </tbody>
@@ -75,6 +89,7 @@ export function PendingScriptView({ script, daw }: { script: { pending: PendingS
     <section aria-label={heading} style={{ ...S.section, borderLeft: `2px solid ${T.warn}` }}>
       <span style={S.heading}>{heading}</span>
       {pending.purpose && <span style={S.text}>{t('script.says', clean(pending.purpose, 200))}</span>}
+      {pending.file && <span style={S.muted}>{t('script.file', clean(pending.file, 200))}</span>}
       <span style={S.faint} title={t('script.shaTitle', pending.sha256)}>
         {facts.join(' · ')}
       </span>

@@ -154,6 +154,9 @@ var en = {
     control: "Control",
     range: "Range",
     default: "Default",
+    on: "on",
+    off: "off",
+    file: (file) => `New file: ${file}`,
     in: (language, daw) => `${language} in ${daw}`,
     lines: (count2) => count2 === 1 ? "1 line" : `${count2} lines`,
     sha: (short) => `SHA-256 ${short}…`,
@@ -474,6 +477,9 @@ var ja = {
     control: "コントロール",
     range: "範囲",
     default: "初期値",
+    on: "オン",
+    off: "オフ",
+    file: (file) => `新しいファイル: ${file}`,
     in: (language, daw) => `${daw} の ${language}`,
     lines: (count2) => `${count2} 行`,
     sha: (short) => `SHA-256 ${short}…`,
@@ -793,6 +799,9 @@ var zh = {
     control: "控件",
     range: "范围",
     default: "默认值",
+    on: "开",
+    off: "关",
+    file: (file) => `新文件：${file}`,
     in: (language, daw) => `${daw} 中的 ${language}`,
     lines: (count2) => `${count2} 行`,
     sha: (short) => `SHA-256 ${short}…`,
@@ -1457,7 +1466,8 @@ function pendingScriptOf(payload) {
   if (!id || !language || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
   const text = (key) => typeof value[key] === "string" ? value[key] : void 0;
   const lines = typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : void 0;
-  return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning") };
+  const file = language === "device" && typeof value.file === "string" && /^[^\p{C}]{1,300}$/u.test(value.file) ? value.file : void 0;
+  return { tool_call_id: id, language, sha256: value.sha256, purpose: text("purpose"), daw: text("daw"), lines, warning: text("warning"), file };
 }
 function finished(job) {
   return typeof job.state === "string" && job.state !== "running";
@@ -2447,11 +2457,18 @@ function deviceSpecOf(text) {
     return null;
   }
 }
-function range(control) {
-  const unit = typeof control.unit === "string" && control.unit ? ` ${clean(control.unit, 12)}` : "";
-  if (control.type === "switch") return "off / on";
-  if (control.type === "choice" && Array.isArray(control.options)) return control.options.map((option) => clean(String(option), 20)).join(" / ");
-  return typeof control.min === "number" && typeof control.max === "number" ? `${control.min}–${control.max}${unit}` : "—";
+function unitOf(control) {
+  return typeof control.unit === "string" && control.unit ? ` ${clean(control.unit, 12)}` : "";
+}
+function range(control, t) {
+  if (control.type === "switch") return `${t("script.on")}/${t("script.off")}`;
+  if (control.type === "choice" && Array.isArray(control.options)) return control.options.map((option) => clean(String(option), 20)).join("/");
+  return typeof control.min === "number" && typeof control.max === "number" ? `${control.min}–${control.max}${unitOf(control)}` : "—";
+}
+function defaultOf(control, t) {
+  if (control.default === void 0) return "—";
+  if (control.type === "switch" && typeof control.default === "boolean") return t(control.default ? "script.on" : "script.off");
+  return `${clean(String(control.default), 20)}${control.type === "choice" || control.type === "switch" ? "" : unitOf(control)}`;
 }
 function Controls({ spec }) {
   const t = useT();
@@ -2466,8 +2483,8 @@ function Controls({ spec }) {
     ] }) }),
     /* @__PURE__ */ jsx6("tbody", { children: controls.map((control, index) => /* @__PURE__ */ jsxs6("tr", { style: { borderTop: `1px solid ${T.border}` }, children: [
       /* @__PURE__ */ jsx6("td", { style: cell, children: clean(String(control.name ?? ""), 32) }),
-      /* @__PURE__ */ jsx6("td", { style: { ...cell, color: T.muted }, children: range(control) }),
-      /* @__PURE__ */ jsx6("td", { style: { ...cell, color: T.muted }, children: control.default === void 0 ? "—" : clean(String(control.default), 20) })
+      /* @__PURE__ */ jsx6("td", { style: { ...cell, color: T.muted }, children: range(control, t) }),
+      /* @__PURE__ */ jsx6("td", { style: { ...cell, color: T.muted }, children: defaultOf(control, t) })
     ] }, index)) })
   ] });
 }
@@ -2484,6 +2501,7 @@ function PendingScriptView({ script, daw }) {
   return /* @__PURE__ */ jsxs6("section", { "aria-label": heading, style: { ...S.section, borderLeft: `2px solid ${T.warn}` }, children: [
     /* @__PURE__ */ jsx6("span", { style: S.heading, children: heading }),
     pending.purpose && /* @__PURE__ */ jsx6("span", { style: S.text, children: t("script.says", clean(pending.purpose, 200)) }),
+    pending.file && /* @__PURE__ */ jsx6("span", { style: S.muted, children: t("script.file", clean(pending.file, 200)) }),
     /* @__PURE__ */ jsx6("span", { style: S.faint, title: t("script.shaTitle", pending.sha256), children: facts.join(" · ") }),
     pending.warning && /* @__PURE__ */ jsx6("span", { style: { ...S.muted, color: T.warn }, children: clean(pending.warning, 300) }),
     code ? pending.language === "device" ? (() => {

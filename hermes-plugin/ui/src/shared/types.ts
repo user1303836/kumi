@@ -143,6 +143,8 @@ export interface PendingScript {
   lines?: number
   /** The approval's own warning, word for word. */
   warning?: string
+  /** A device's new file in the User Library, as the approval names it (CC-22). */
+  file?: string
 }
 
 /** `/script`'s answer: the saved code, re-hashed against its name before it was sent. */
