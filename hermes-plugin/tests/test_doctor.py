@@ -98,7 +98,6 @@ class Doctor(unittest.TestCase):
         cases = (("approvals.mode: off", {"approvals": {"mode": "off"}}, doctor.FIX, "approvals.mode: manual"),
                  ("one-shot runs approved", {"approvals": {"mode": "manual", "single_query_mode": "approve"}},
                   doctor.FIX, "single_query_mode: deny"),
-                 ("smart (Hermes's default)", {"approvals": {"mode": "smart"}}, doctor.CHECK, "approvals.mode: manual"),
                  ("plugin host", {**ASKS, "plugins": {"isolation": "host"}}, doctor.FIX, "plugins.isolation: in_process"))
         for name, hermes, state, fix in cases:
             with self.subTest(name):
@@ -109,6 +108,14 @@ class Doctor(unittest.TestCase):
         with self.subTest("--yolo"), mock.patch.dict("os.environ", {"HERMES_YOLO_MODE": "1"}):
             host, _, _ = self.ready()
             self.assertEqual(self.item(doctor.checks(host), "Approvals")["state"], doctor.FIX)
+
+    def test_smart_approvals_still_ask_before_each_kumi_change(self):
+        """Hermes's default guardian (approvals.mode: smart) reviews terminal commands and code, never a plugin's
+        approval, so smart is no reason to look: the first-hour baseline saw every Kumi change asked under it."""
+        host, _, _ = self.ready({"approvals": {"mode": "smart"}})
+        approvals = self.item(doctor.checks(host), "Approvals")
+        self.assertEqual(approvals["state"], doctor.OK, approvals)
+        self.assertIn("approvals.mode: smart", approvals["detail"])
 
     def test_a_chats_yolo_counts_in_the_chat_and_a_terminal_says_it_cant_see_it(self):
         approval = SimpleNamespace(is_current_session_yolo_enabled=lambda: True)
