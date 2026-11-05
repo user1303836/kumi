@@ -23,3 +23,16 @@ pub fn legacy_kinds(kinds: &Value) -> Value {
     }
     kinds
 }
+
+/// set_mixer's tool definition as the source had it: its description, and its schema without the levels as Live shows
+/// them.
+pub fn legacy(description: &str, schema: &Value) -> (String, Value) {
+    let description = if description == SINCE.0 { SINCE.1 } else { description };
+    let mut schema = schema.clone();
+    if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+        for shown in ["volumeDb", "panDisplay", "sendsDb"] {
+            properties.remove(shown);
+        }
+    }
+    (description.to_owned(), schema)
+}
