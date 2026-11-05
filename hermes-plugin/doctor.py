@@ -40,10 +40,7 @@ def checks(host: tools.Host, **chat: Any) -> list[dict]:
     status = snapshots.status(state)
     items += [_runtime(report, shown), _part(report, shown, status, daw, app), _connection(status, report, daw),
               _project(status), _library(host, state, live=not status.get("stale")), _audio(shown)]
-    mirelo = getattr(host, "mirelo_status", None)  # Mirelo's readiness, where this version of Kumi has it
-    if callable(mirelo):
-        items.append(_mirelo(mirelo()))
-    items.append(_desktop())
+    items += [_mirelo(host.mirelo_status()), _desktop()]
     return items
 
 
