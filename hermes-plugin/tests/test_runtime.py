@@ -114,6 +114,24 @@ class Runtimes(unittest.TestCase):
         self.assertLessEqual(passed, taken, f"kumi serve {pin['kumi']} doesn't take {sorted(passed - taken)}: "
                                             "pin a release that does (scripts/hermes_pin.py)")
 
+    def test_every_operation_the_plugin_calls_is_one_the_pinned_runtime_serves(self):
+        """kumi_release.json records the pinned release's operations (its tools/list, read by scripts/hermes_pin.py).
+        Runtime.call sends only runtime.OPERATIONS, so each must be among them, or that tool fails for every producer:
+        the plugin's `generate` needs a runtime with #1048's generation."""
+        pin = json.loads((Path(runtime.__file__).parent / "kumi_release.json").read_text(encoding="utf-8"))
+        served = set(pin["serve_operations"])
+        self.assertLessEqual(runtime.OPERATIONS, served, f"kumi serve {pin['kumi']} doesn't serve "
+                                                         f"{sorted(runtime.OPERATIONS - served)}: pin a release that "
+                                                         "does (scripts/hermes_pin.py)")
+
+    def test_an_operation_the_plugin_doesnt_declare_is_never_sent(self):
+        """So the pin test above covers every call: one the plugin would add without declaring it fails here first."""
+        live = self.start()
+        with self.assertRaises(ValueError):
+            live.call("jobs", {}, self.host(), timeout=10)
+        sent = [message.get("params", {}).get("name") for message in support.requests(self.data / "state")]
+        self.assertNotIn("jobs", sent)
+
     @unittest.skipIf(os.name == "nt", "a session of its own is POSIX's; Windows gives it no console")
     def test_the_runtime_runs_in_a_session_of_its_own_so_hermess_ctrl_c_never_reaches_it(self):
         live = self.start()
