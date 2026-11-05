@@ -807,7 +807,31 @@ async fn a_generations_trials_are_heard_together_and_each_slot_is_told_from_its_
         .run_until(async {
             let home = tempfile::tempdir().unwrap();
             let script = ReaperScript::new(3, 0);
-            let simulator = reaper_lab(&script, home.path(), |_| {}).await;
+            // Two distinct ids can share their last four characters. Make that old clock-dependent collision certain,
+            // while translating every later set/drop back into the same simulated native namespace.
+            let ids = Arc::new(std::sync::Mutex::new(Vec::<(String, String)>::new()));
+            let native_ids = ids.clone();
+            let simulator = reaper_lab(&script, home.path(), |config| {
+                let respond = config.respond.take().unwrap();
+                config.respond = Some(Arc::new(move |method, params| {
+                    if method == "scratch" {
+                        let mut mapped = params.clone();
+                        let id = params["scratchId"].as_str().unwrap_or_default();
+                        let mut ids = native_ids.lock().unwrap();
+                        if params["action"] == "make" {
+                            let n = ids.len() + 1;
+                            ids.push((id.to_owned(), format!("s{n}en5y")));
+                        }
+                        if let Some((_, native)) = ids.iter().find(|(host, _)| host == id) {
+                            mapped["scratchId"] = native.clone().into();
+                        }
+                        drop(ids);
+                        return respond(method, &mapped);
+                    }
+                    respond(method, params)
+                }));
+            })
+            .await;
             let (reaper, rig, slots) = two_slot_goal(home.path(), &script).await;
             assert_eq!(slots.len(), 2, "{slots:?}");
             let (sounding, silent) = (&slots[0], &slots[1]);
@@ -822,9 +846,13 @@ async fn a_generations_trials_are_heard_together_and_each_slot_is_told_from_its_
                 assert_eq!(generation.silent, [silent.name.clone()], "{n}: {generation:?}");
                 assert_eq!(generation.scores.keys().collect::<Vec<_>>(), [&sounding.name], "{n}: {generation:?}");
             }
-            let together =
-                script.listening().renders().iter().filter(|render| render["sources"].as_array().is_some_and(|s| s.len() == 2)).count();
-            assert_eq!(together, 2, "both copies in each generation's one render");
+            let renders = script.listening().renders();
+            let together: Vec<_> = renders.iter().filter(|render| render["sources"].as_array().is_some_and(|s| s.len() == 2)).collect();
+            assert_eq!(together.len(), 2, "both copies in each generation's one render");
+            for render in together {
+                assert_ne!(render["sources"][0]["ref"], render["sources"][1]["ref"], "each slot keeps its own copy: {render}");
+            }
+            assert_eq!(ids.lock().unwrap().iter().map(|(_, native)| native.clone()).collect::<Vec<_>>(), ["s1en5y", "s2en5y"]);
             rig.close().await.unwrap();
             reaper.close().await.unwrap();
             simulator.stop();

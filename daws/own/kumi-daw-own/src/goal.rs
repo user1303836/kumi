@@ -252,7 +252,10 @@ impl<S: RefScheme + 'static> OwnGoalRig<S> {
         let (Some(copy_ref), Some(copy_name)) = (text(&copy, "ref"), text(&copy, "name")) else {
             return Ok(Err(format!("{} made no copy of “{name}”", r.app())));
         };
-        r.keep_copy(copy_name.clone(), &copy_ref);
+        if let Err(why) = r.keep_copy(copy_name.clone(), &copy_ref) {
+            r.drop_make(&scratch, made.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0)).await;
+            return Ok(Err(why));
+        }
         r.tell_scratch_steps(made.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0));
         for note in crate::listening::notes_of(&made) {
             r.tell_app(&note);

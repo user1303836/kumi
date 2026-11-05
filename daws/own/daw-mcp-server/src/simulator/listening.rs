@@ -816,7 +816,7 @@ impl SimListening {
                     return Err(("failed".into(), why.clone()));
                 }
                 let count = params["count"].as_u64().unwrap_or(1);
-                let tag: String = id.chars().rev().take(4).collect();
+                let tag = &id;
                 let mut copies = vec![];
                 for n in 1..=count {
                     state.next_copy += 1;

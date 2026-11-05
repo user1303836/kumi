@@ -114,10 +114,9 @@ end
 
 -- The copies, found
 
+-- Preserve the complete validated id: two different sets can share their last four characters.
 local function tag_of(id)
-  local tag = id:sub(2)
-  if #tag > 4 then tag = tag:sub(-4) end
-  return tag
+  return id
 end
 
 -- A sequencer track named `name` and in no group: where the copy is. `hint` (a place carried through the shifts since the copy

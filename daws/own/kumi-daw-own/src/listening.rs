@@ -549,10 +549,18 @@ impl<S: RefScheme + 'static> OwnRenderer<S> {
 
     /// Keeps a scratch copy by its name, its ref registered in the book so it follows what moves the tracks (Renoise's
     /// refs are places); its ref as the book names it.
-    pub fn keep_copy(&self, name: String, long: &str) -> String {
-        let short = self.link.book.borrow_mut().short_ref(long);
-        self.copies.borrow_mut().insert(name, short.clone());
-        short
+    pub fn keep_copy(&self, name: String, long: &str) -> Result<String, String> {
+        self.keep_copies(&[(name.clone(), long.to_owned())])?;
+        Ok(self.copies.borrow()[&name].clone())
+    }
+
+    /// Validate the entire answer before registering any name: an ambiguous make cannot replace another set's refs.
+    fn keep_copies(&self, copies: &[(String, String)]) -> Result<(), String> {
+        let registrations: Vec<(String, String)> = {
+            let mut book = self.link.book.borrow_mut();
+            copies.iter().map(|(name, long)| (name.clone(), book.short_ref(long))).collect()
+        };
+        keep_named_copies(&mut self.copies.borrow_mut(), &registrations)
     }
 
     /// A scratch copy's ref now, by its name.
@@ -1763,13 +1771,18 @@ impl<S: RefScheme + 'static> Renderer for OwnRenderer<S> {
             self.drop_make(&id, made.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0)).await;
             return Err(RuntimeError::Aborted);
         }
-        let mut names = vec![];
-        for copy in made.get("copies").and_then(Value::as_array).into_iter().flatten() {
-            if let (Some(reference), Some(name)) = (text(copy, "ref"), text(copy, "name")) {
-                self.keep_copy(name.clone(), &reference);
-                names.push(name);
-            }
+        let copies: Vec<(String, String)> = made
+            .get("copies")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+            .filter_map(|copy| Some((text(copy, "name")?, text(copy, "ref")?)))
+            .collect();
+        if let Err(why) = self.keep_copies(&copies) {
+            self.drop_make(&id, made.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0)).await;
+            return Ok(Err(why));
         }
+        let names = copies.into_iter().map(|(name, _)| name).collect();
         self.tell_scratch_steps(made.pointer("/undo/steps").and_then(Value::as_u64).unwrap_or(0));
         for note in notes_of(&made) {
             self.tell_app(&note);
@@ -2567,6 +2580,25 @@ where
     }
 }
 
+/// Scratch names are lookup keys, never permission to replace a different copy. Check a whole make atomically.
+fn keep_named_copies(kept: &mut IndexMap<String, String>, copies: &[(String, String)]) -> Result<(), String> {
+    let mut fresh: IndexMap<&str, &str> = IndexMap::new();
+    for (name, reference) in copies {
+        if kept.contains_key(name)
+            || kept.values().any(|old_ref| old_ref == reference)
+            || fresh.contains_key(name.as_str())
+            || fresh.values().any(|old_ref| *old_ref == reference.as_str())
+        {
+            return Err("Kumi couldn't tell the scratch copies apart: their names or refs overlap.".into());
+        }
+        fresh.insert(name, reference);
+    }
+    for (name, reference) in copies {
+        kept.insert(name.clone(), reference.clone());
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
@@ -2810,6 +2842,28 @@ mod tests {
         let bands = eq_bands(&eq, true);
         assert_eq!(bands.iter().map(|band| band.label.as_str()).collect::<Vec<_>>(), ["1", "2"]);
         assert!(bands[0].octaves && bands[1].width.is_none());
+    }
+
+    #[test]
+    fn scratch_name_registration_never_overwrites_or_partially_registers_an_ambiguous_make() {
+        let original = IndexMap::from([("Kumi · try first 1".into(), "copy1".into())]);
+        for incoming in [
+            vec![("Kumi · try new 1".into(), "copy2".into()), ("Kumi · try first 1".into(), "copy3".into())],
+            vec![("Kumi · try new 1".into(), "copy2".into()), ("Kumi · try new 1".into(), "copy3".into())],
+            vec![("Kumi · try first 1".into(), "copy1".into())],
+            vec![("Kumi · try alias 1".into(), "copy1".into())],
+            vec![("Kumi · try new 1".into(), "copy2".into()), ("Kumi · try new 1".into(), "copy2".into())],
+            vec![("Kumi · try new 1".into(), "copy2".into()), ("Kumi · try alias 1".into(), "copy2".into())],
+        ] {
+            let mut kept = original.clone();
+            assert!(keep_named_copies(&mut kept, &incoming).is_err());
+            assert_eq!(kept, original, "the earlier copy and every other registration stay intact");
+        }
+        let mut kept = original.clone();
+        keep_named_copies(&mut kept, &[("Kumi · try new 1".into(), "copy2".into()), ("Kumi · try new 2".into(), "copy3".into())]).unwrap();
+        assert_eq!(kept.len(), 3);
+        assert_eq!(kept["Kumi · try first 1"], "copy1");
+        assert_eq!(kept["Kumi · try new 1"], "copy2");
     }
 
     #[test]
