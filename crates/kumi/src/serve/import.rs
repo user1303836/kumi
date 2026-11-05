@@ -38,33 +38,39 @@ pub struct Found {
     pub named: Value,
 }
 
-impl Found {
-    /// Where the file is: for an operation that stages the file itself (a generation's upload, through
-    /// `Artifacts::stage` with [`Found::named`]), never for a path given to anyone.
-    pub fn path(&self) -> &Path {
-        &self.path
-    }
+/// Resolve the existing structured source under current grants, without deciding its media type.
+/// Audio imports still call `find`; generation alone may validate an approved video separately.
+pub async fn resolve_path(ctx: &Ctx, source: &Value, signal: &Signal) -> Result<PathBuf, OpError> {
+    let text = |name: &str| source.get(name).and_then(Value::as_str);
+    let found = if let (Some(id), Some(revision)) = (text("sound_id"), text("map_revision")) {
+        ctx.maps().resolve(ctx, id, revision, signal).await?
+    } else if let Some(id) = text("artifact_id") {
+        ctx.artifacts().resolve(ctx, id)?
+    } else if let Some(file) = text("file") {
+        ctx.approved(Path::new(file))?
+    } else {
+        return Err(OpError::Invalid { reason: "A source is {sound_id, map_revision}, {artifact_id} or {file, provenance}.".into() });
+    };
+    // Neither a map nor an artifact is itself a grant: recheck the current roots.
+    ctx.approved(&found)
 }
 
 /// `source` resolved to the one checked audio file it names, changing nothing.
 pub async fn find(ctx: &Ctx, source: &Value, signal: &Signal) -> Result<Found, OpError> {
+    let path = resolve_path(ctx, source, signal).await?;
     let text = |name: &str| source.get(name).and_then(Value::as_str);
-    let (found, record) = if let (Some(id), Some(revision)) = (text("sound_id"), text("map_revision")) {
-        (ctx.maps().resolve(ctx, id, revision, signal).await?, json!({"sound_id": id, "map_revision": revision}))
+    let record = if let (Some(id), Some(revision)) = (text("sound_id"), text("map_revision")) {
+        json!({"sound_id": id, "map_revision": revision})
     } else if let Some(id) = text("artifact_id") {
-        (ctx.artifacts().resolve(ctx, id)?, json!({"artifact_id": id}))
-    } else if let Some(file) = text("file") {
+        json!({"artifact_id": id})
+    } else {
         let host_tool = source.pointer("/provenance/host_tool").and_then(Value::as_str).unwrap_or_default();
         let mut record = json!({"host_tool": host_tool});
         if let Some(call) = source.pointer("/provenance/tool_call_id").and_then(Value::as_str) {
             record["host_tool_call_id"] = json!(call);
         }
-        (ctx.approved(Path::new(file))?, record)
-    } else {
-        return Err(OpError::Invalid { reason: "A source is {sound_id, map_revision}, {artifact_id} or {file, provenance}.".into() });
+        record
     };
-    // Neither a map nor an artifact is itself a grant: the file must be inside an approved root now.
-    let path = ctx.approved(&found)?;
     let name = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
     let extension = path.extension().map(|extension| extension.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
     let Some((_, mime)) = AUDIO.iter().find(|(known, _)| *known == extension) else {

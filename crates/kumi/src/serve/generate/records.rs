@@ -150,7 +150,7 @@ pub(super) fn load(state: &Path) -> Result<Records, OpError> {
         let Saved::Generate { job_id: saved_id, result: Some(receipt) } = saved else { continue };
         if saved_id != id
             || receipt.provider != "mirelo"
-            || !matches!(receipt.kind.as_str(), "sfx" | "audio_to_midi")
+            || !super::super::generate_ledger::POLICY_KEYS.contains(&receipt.kind.as_str())
             || !matches!(receipt.submission.as_str(), "unknown" | "submitted" | "not_submitted")
             || (receipt.credits.actual.is_some() && receipt.submission != "submitted")
         {

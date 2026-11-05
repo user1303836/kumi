@@ -31,12 +31,15 @@ from typing import Iterator
 
 _MAX_INTEGER = (1 << 53) - 1
 _MAX_BYTES = 4 * 1024 * 1024
-_KINDS = {"sfx", "audio_to_midi"}
+_LEGACY_KINDS = {"sfx", "audio_to_midi"}
+_KINDS = _LEGACY_KINDS | {"video_to_sfx", "extend", "inpaint"}
 _TERMINAL = {"done", "failed", "cancelled", "interrupted"}
 _SUBMISSIONS = {"unknown", "submitted", "not_submitted"}
 _SETTLEMENTS = {"pending", "charged", "not_submitted", "manual_release"}
 _QUOTE_FIELDS = {"state", "quote_id", "kind", "prompt", "file", "seconds", "estimate",
                  "credit_unit", "upload", "expires_at", "request_sha256", "summary"}
+_TIMING_FIELDS = {"source_seconds", "append_seconds", "region_start_seconds", "region_end_seconds"}
+_OPTIONAL_QUOTE_FIELDS = _TIMING_FIELDS | {"model"}
 _RESERVATION_FIELDS = {"reservation_id", "quote_id", "request_sha256", "host_call_id", "kind",
                        "reserved_credits", "expires_at", "created_at", "job_id", "provider_job_id",
                        "submission", "settlement", "actual_credits"}
@@ -52,6 +55,7 @@ _MESSAGES = {
     "cap_exceeded": "The current lifetime credit cap does not allow this reservation.",
     "ledger_frozen": "New generations are paused because an actual charge exceeded its held credits.",
     "ledger_unavailable": "The generation ledger is unavailable; no new generation was authorized.",
+    "ledger_newer_policy": "This generation ledger uses a newer Kumi for Hermes policy. Update the plugin to use it.",
 }
 
 
@@ -99,6 +103,19 @@ def _seconds(value: object) -> bool:
     return type(value) in (int, float) and 0 < value <= _MAX_INTEGER and math.isfinite(value)
 
 
+def _milliseconds(value: object) -> int | None:
+    if type(value) not in (int, float) or not 0 <= value <= _MAX_INTEGER / 1000 or not math.isfinite(value):
+        return None
+    millis = round(value * 1000)
+    return millis if millis <= _MAX_INTEGER and millis / 1000 == value else None
+
+
+def _validate_enabled(value: object) -> None:
+    _require(type(value) is dict and all(type(flag) is bool for flag in value.values()))
+    _require(not set(value) - _KINDS, "ledger_newer_policy")
+    _require(set(value) in (_LEGACY_KINDS, _KINDS))
+
+
 def _now() -> int:
     return time.time_ns() // 1_000_000
 
@@ -120,6 +137,8 @@ def _history_name(category: str, identity: str) -> str:
 def _quote_projection(value: object) -> dict:
     _require(type(value) is dict and _QUOTE_FIELDS <= value.keys())
     quote = {key: value[key] for key in _QUOTE_FIELDS}
+    quote.update((key, value[key]) for key in _OPTIONAL_QUOTE_FIELDS if key in value)
+    _require("model" not in quote or _text(quote["model"], 128))
     _require(quote["state"] == "quoted" and _identity(quote["quote_id"]))
     _require(isinstance(quote["kind"], str) and quote["kind"] in _KINDS and _digest(quote["request_sha256"]))
     _require(_seconds(quote["seconds"]) and _integer(quote["expires_at"]))
@@ -129,10 +148,31 @@ def _quote_projection(value: object) -> dict:
     _require(_integer(estimate["credits"]) and _integer(estimate["max_credits"]))
     _require(estimate["credits"] <= estimate["max_credits"])
     quote["estimate"] = dict(estimate)
-    if quote["kind"] == "sfx":
+    kind = quote["kind"]
+    timing = {"source_seconds"} if kind not in _LEGACY_KINDS else set()
+    if kind == "extend":
+        timing.add("append_seconds")
+    elif kind == "inpaint":
+        timing.update({"region_start_seconds", "region_end_seconds"})
+    _require(quote.keys() & _TIMING_FIELDS == timing)
+    if kind == "sfx":
         _require(_text(quote["prompt"], 4096) and quote["file"] is None and quote["upload"] is False)
-    else:
+    elif kind == "audio_to_midi":
         _require(quote["prompt"] is None and _basename(quote["file"]) and quote["upload"] is True)
+    else:
+        _require((quote["prompt"] is None or _text(quote["prompt"], 4096))
+                 and _basename(quote["file"]) and quote["upload"] is True)
+        times = {key: _milliseconds(quote[key]) for key in timing | {"seconds"}}
+        _require(all(value is not None for value in times.values()))
+        span, source = times["seconds"], times["source_seconds"]
+        _require(span > 0 and source > 0)
+        if kind == "video_to_sfx":
+            _require(span <= source)
+        elif kind == "extend":
+            _require(times["append_seconds"] == span)
+        else:
+            start, end = times["region_start_seconds"], times["region_end_seconds"]
+            _require(start < end <= source and end - start == span)
     return quote
 
 
@@ -149,18 +189,17 @@ def _validate_storage(data: object) -> dict:
     _require(type(data["schema"]) is int and data["schema"] == 2)
     _require(_integer(data.get("archived_count")) and _integer(data.get("archived_spent")))
     _require(set(data) in (fields, fields - {"policy"}))
-    if data.get("policy") is None:
+    if "policy" not in data:
         data["policy"] = _policy()
     policy = data["policy"]
     _require(type(policy) is dict and set(policy) == {"acknowledged", "enabled", "cap"})
     _require(type(policy["acknowledged"]) is bool and _integer(policy["cap"]))
-    _require(type(policy["enabled"]) is dict and set(policy["enabled"]) == _KINDS)
-    _require(all(type(v) is bool for v in policy["enabled"].values()))
+    _validate_enabled(policy["enabled"])
     _require(type(data["frozen"]) is bool)
     _require(data["freeze_reason"] == ("actual_exceeded_estimate" if data["frozen"] else None))
     _require(type(data["quotes"]) is dict and type(data["reservations"]) is dict)
     for key, quote in data["quotes"].items():
-        _require(type(quote) is dict and set(quote) == _QUOTE_FIELDS | {"host_call_id", "consumed"})
+        _require(type(quote) is dict and set(quote) - _OPTIONAL_QUOTE_FIELDS == _QUOTE_FIELDS | {"host_call_id", "consumed"})
         _quote_projection(quote)
         _require(key == quote["quote_id"] and _identity(quote["host_call_id"]) and type(quote["consumed"]) is bool)
     used_quotes, used_calls, used_jobs, used_providers = set(), set(), set(), set()
@@ -410,7 +449,11 @@ class Ledger:
             return data
         try:
             data = _validate_storage(data)
-        except (LedgerError, ValueError, TypeError, KeyError, RecursionError):
+        except LedgerError as error:
+            if error.code == "ledger_newer_policy":
+                raise
+            raise LedgerError("ledger_unavailable") from None
+        except (ValueError, TypeError, KeyError, RecursionError):
             raise LedgerError("ledger_unavailable") from None
         return data
 
@@ -565,8 +608,9 @@ class Ledger:
 
     def configure(self, *, acknowledged: bool, enabled: dict[str, bool]) -> None:
         with self._locked() as (data, directory):
-            _require(type(acknowledged) is bool and type(enabled) is dict and set(enabled) == _KINDS)
-            _require(all(type(value) is bool for value in enabled.values()))
+            _require(type(acknowledged) is bool)
+            _validate_enabled(enabled)
+            _require(set(data["policy"]["enabled"]) <= set(enabled), "ledger_newer_policy")
             policy = {"acknowledged": acknowledged, "enabled": dict(enabled), "cap": self._cap}
             if data["policy"] != policy:
                 data["policy"] = policy
@@ -579,7 +623,7 @@ class Ledger:
             quote.update(host_call_id=host_call_id, consumed=False)
             old = self._quote(data, directory, quote["quote_id"])
             if old is not None:
-                _require(all(old[key] == value for key, value in quote.items() if key != "consumed"), "stale")
+                _require(dict(old, consumed=False) == quote, "stale")
                 return old
             data["quotes"][quote["quote_id"]] = quote
             self._save(data, directory)
@@ -603,7 +647,7 @@ class Ledger:
             _require(not quote["consumed"] and not any(r["host_call_id"] == host_call_id for r in data["reservations"].values()), "quote_consumed")
             _require(self._history(data, directory, "host", host_call_id) is None, "quote_consumed")
             _require(data["policy"]["acknowledged"], "not_configured")
-            _require(data["policy"]["enabled"][quote["kind"]], "not_enabled")
+            _require(data["policy"]["enabled"].get(quote["kind"], False), "not_enabled")
             _require(not data["frozen"], "ledger_frozen")
             spent, reserved = _totals(data)
             cap = min(self._cap, data["policy"]["cap"])

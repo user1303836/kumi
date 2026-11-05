@@ -28,6 +28,9 @@ struct Server {
     lose_create: Arc<AtomicBool>,
     actual_credits: Arc<AtomicU64>,
     midi_file: Arc<AtomicBool>,
+    unknown_credits: Arc<AtomicBool>,
+    hold_upload: Arc<AtomicBool>,
+    upload_held: Arc<tokio::sync::Notify>,
     task: tokio::task::JoinHandle<()>,
 }
 impl Drop for Server {
@@ -50,6 +53,12 @@ impl Server {
         let charged = actual_credits.clone();
         let midi_file = Arc::new(AtomicBool::new(false));
         let has_midi = midi_file.clone();
+        let unknown_credits = Arc::new(AtomicBool::new(false));
+        let unknown = unknown_credits.clone();
+        let hold_upload = Arc::new(AtomicBool::new(false));
+        let holding = hold_upload.clone();
+        let upload_held = Arc::new(tokio::sync::Notify::new());
+        let held = upload_held.clone();
         let task = tokio::spawn(async move {
             loop {
                 let (mut stream, _) = listener.accept().await.unwrap();
@@ -89,12 +98,29 @@ impl Server {
                 if method == "POST" && path.ends_with("?wait=25") && lost.load(Ordering::SeqCst) {
                     continue;
                 }
+                if path == "/put" && holding.load(Ordering::SeqCst) {
+                    held.notify_one();
+                    std::future::pending::<()>().await;
+                }
                 let mut status = 200;
                 let mut mime = "application/json";
                 let value = match path.as_str() {
-                    "/v3/models" => json!({"data": [{"id": "sfx-2.0", "max_prompt_chars": 500, "formats": ["wav"],
-                        "operations": {"text-to-sfx": {"duration_ms": {"min": 100, "max": 30000}}}}]}),
-                    "/v3/text-to-sfx/generations/preflight" => json!({"credits": 15}),
+                    "/v3/models" => json!({"data": [
+                        {"id": "sfx-2.0", "max_prompt_chars": 500, "formats": ["wav"], "operations": {
+                            "text-to-sfx": {"duration_ms": {"min": 100, "max": 30000}},
+                            "video-to-sfx": {"duration_ms": {"min": 100, "max": 30000}}
+                        }},
+                        {"id": "sfx-1.6", "max_prompt_chars": 500, "formats": ["wav"], "operations": {
+                            "extend": {"append_duration_ms": {"min": 100, "max": 30000}},
+                            "inpaint": {"region_width_ms": {"min": 100, "max": 30000}}
+                        }}
+                    ]}),
+                    "/v3/text-to-sfx/generations/preflight"
+                    | "/v3/video-to-sfx/generations/preflight"
+                    | "/v3/extend/edits/preflight"
+                    | "/v3/inpaint/edits/preflight" => json!({"credits": 15}),
+                    "/v3/assets" => json!({"id": "approved-source", "upload_url": format!("{base}/put"),
+                        "max_bytes": 2_000_000, "fields": {"key": "fixture-source"}}),
                     "/v2/audio-to-midi/v1.0/preflight?duration_ms=1000" => json!({"credits": 3, "billing_mode": "unmetered"}),
                     "/v2/assets" => json!({"asset_id": "approved-audio", "upload_url": format!("{base}/put")}),
                     "/put" => json!({}),
@@ -104,7 +130,9 @@ impl Server {
                             "notes": [{"pitch": 60, "velocity": 101, "start": 0.0, "end": 0.5, "instrument": "acoustic_piano"}]}
                     }),
                     "/download" | "/midi" => Value::Null,
-                    _ => json!({"id": "sfx-job", "status": "succeeded", "credits": charged.load(Ordering::SeqCst), "result": {"output": {
+                    _ => json!({"id": "sfx-job", "status": "succeeded",
+                        "credits": if unknown.load(Ordering::SeqCst) { Value::Null } else { json!(charged.load(Ordering::SeqCst)) },
+                        "result": {"output": {
                         "status": "succeeded", "variants": [{"status": "succeeded", "files": {
                             "audio": {"url": format!("{base}/download"), "format": "wav", "sample_rate": 8000}
                         }}]
@@ -133,7 +161,7 @@ impl Server {
                 }
             }
         });
-        Self { url, requests, download_fails, lose_create, actual_credits, midi_file, task }
+        Self { url, requests, download_fails, lose_create, actual_credits, midi_file, unknown_credits, hold_upload, upload_held, task }
     }
     fn creates(&self) -> usize {
         self.requests
@@ -191,6 +219,9 @@ impl Fixture {
         fixture
     }
     fn context(data: &Path, source: &Path, server: &Server) -> Rc<Ctx> {
+        Self::context_with_tools(data, source, server, BTreeMap::new())
+    }
+    fn context_with_tools(data: &Path, source: &Path, server: &Server, tools: BTreeMap<String, PathBuf>) -> Rc<Ctx> {
         let args = Args {
             state_dir: data.join("kumi/state"),
             kumi_home: data.join("kumi/home"),
@@ -199,7 +230,7 @@ impl Fixture {
             daw: DawId::Reaper,
             library_roots: vec![source.to_owned()],
             media_roots: vec![],
-            tools: BTreeMap::new(),
+            tools,
         };
         let answers = kumi_daw::io::Answers::default().with(FixtureEndpoint(server.url.clone()));
         Ctx::new(args, Env::new(), answers).unwrap()
@@ -579,3 +610,6 @@ async fn pcm_duration_uses_the_entire_source_and_enforces_mirelos_thirty_minute_
 
 #[path = "review_tests.rs"]
 mod review;
+
+#[path = "edits_tests.rs"]
+mod edits;

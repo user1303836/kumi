@@ -50,15 +50,27 @@ try:
 except ledger.LedgerError as error:
     print(json.dumps({'code': error.code}), flush=True)
 """
+KINDS = ("audio_to_midi", "extend", "inpaint", "sfx", "video_to_sfx")
+NEW_KINDS = ("video_to_sfx", "extend", "inpaint")
+
 
 
 def quoted(quote_id="q-one", *, amount=15, kind="sfx", expires_at=None):
-    return {"state": "quoted", "quote_id": quote_id, "kind": kind,
-            "prompt": "a short metallic impact" if kind == "sfx" else None,
-            "file": None if kind == "sfx" else "source.wav", "seconds": 5,
-            "estimate": {"credits": amount, "max_credits": amount}, "credit_unit": "mirelo_credits",
-            "upload": kind == "audio_to_midi", "expires_at": expires_at if expires_at is not None else time.time_ns() // 1_000_000 + 300_000,
-            "request_sha256": "a" * 64, "summary": "One 5-second generation"}
+    quote = {"state": "quoted", "quote_id": quote_id, "kind": kind,
+             "prompt": "a short metallic impact" if kind == "sfx" else None,
+             "file": None if kind == "sfx" else "source.wav", "seconds": 5,
+             "estimate": {"credits": amount, "max_credits": amount}, "credit_unit": "mirelo_credits",
+             "upload": kind != "sfx", "expires_at": expires_at if expires_at is not None else time.time_ns() // 1_000_000 + 300_000,
+             "request_sha256": "a" * 64, "summary": "One 5-second generation"}
+    if kind in NEW_KINDS:
+        quote.update(source_seconds=12.345, seconds=1.001, model="sfx-2.0" if kind == "video_to_sfx" else "sfx-1.6")
+        if kind == "video_to_sfx":
+            quote["file"] = "source.mp4"
+        elif kind == "extend":
+            quote["append_seconds"] = quote["seconds"]
+        else:
+            quote.update(region_start_seconds=1.001, region_end_seconds=2.002)
+    return quote
 
 
 def envelope(quote, *, job_id="j-one", state="running", submission="submitted", actual=None, provider="vendor-one", output=False):
@@ -68,8 +80,11 @@ def envelope(quote, *, job_id="j-one", state="running", submission="submitted", 
               "outputs": [], "media_tag": None,
               "credits": {"estimate": quote["estimate"]["credits"], "reserved": quote["estimate"]["max_credits"], "actual": actual},
               "credit_unit": "mirelo_credits"}
+    for field in ("model", "source_seconds", "append_seconds", "region_start_seconds", "region_end_seconds"):
+        if field in quote:
+            result[field] = quote[field]
     if output:
-        kind = "audio" if quote["kind"] == "sfx" else "midi"
+        kind = "midi" if quote["kind"] == "audio_to_midi" else "audio"
         name = "output.wav" if kind == "audio" else "output.mid"
         result.update(artifact_id="a-primary", file=name, output_type=kind,
                       outputs=[{"artifact_id": "a-primary", "file": name, "type": kind,
@@ -151,6 +166,90 @@ class LedgerTest(unittest.TestCase):
             self.assert_code("invalid_request", self.store.configure, acknowledged=True, enabled=flags)
         self.assert_code("invalid_request", self.store.configure, acknowledged=1, enabled={"sfx": True, "audio_to_midi": True})
 
+    def test_legacy_policy_stays_two_keys_and_new_kinds_stay_off(self):
+        expected = {"sfx": True, "audio_to_midi": True}
+        self.assertEqual(self.stored()["policy"]["enabled"], expected)
+        self.store.configure(acknowledged=True, enabled=expected)
+        restarted = ledger.Ledger(self.data, credit_cap=100)
+        for kind in NEW_KINDS:
+            quote = quoted("q-" + kind, kind=kind)
+            quote["_mirelo"] = {"enabled": True, "acknowledged": True, "api_key": "SENTINEL_SECRET"}
+            restarted.record_quote(quote, "quote-" + kind)
+            self.assert_code("not_enabled", restarted.reserve, quote["quote_id"], "a" * 64, 15, host_call_id="create-" + kind)
+        self.assertEqual(self.stored()["policy"]["enabled"], expected)
+        self.assertEqual(self.store.snapshot()["reserved"], 0)
+        fresh = ledger.Ledger(self.data / "fresh", credit_cap=100)
+        fresh.snapshot()
+        self.assertEqual(json.loads((self.data / "fresh" / "ledger.json").read_text())["policy"]["enabled"],
+                         {"sfx": False, "audio_to_midi": False})
+
+    def test_five_key_policy_enables_only_the_selected_task(self):
+        for selected in KINDS:
+            flags = {kind: kind == selected for kind in KINDS}
+            self.store.configure(acknowledged=True, enabled=flags)
+            self.assertEqual(self.stored()["policy"]["enabled"], flags)
+            for kind in KINDS:
+                quote = quoted(f"q-{selected}-{kind}", kind=kind, amount=1)
+                self.store.record_quote(quote, "quote-" + quote["quote_id"])
+                args = (quote["quote_id"], "a" * 64, 1)
+                if kind == selected:
+                    self.assertEqual(self.store.reserve(*args, host_call_id="create-" + quote["quote_id"])["kind"], kind)
+                else:
+                    self.assert_code("not_enabled", self.store.reserve, *args, host_call_id="create-" + quote["quote_id"])
+        self.assertEqual(self.store.snapshot()["reserved"], len(KINDS))
+        self.store.configure(acknowledged=False, enabled={kind: True for kind in KINDS})
+        for kind in KINDS:
+            quote = quoted("q-unacknowledged-" + kind, kind=kind)
+            self.store.record_quote(quote, "quote-" + quote["quote_id"])
+            self.assert_code("not_configured", self.store.reserve, quote["quote_id"], "a" * 64, 15, host_call_id="create-" + kind)
+
+    def test_five_to_two_rollback_refuses_without_resetting_any_evidence(self):
+        charged, reservation = self.reserve()
+        self.reserve(quoted("q-pending"), call="create-pending")
+        self.store.reconcile(reservation, envelope(charged, state="done", actual=16))
+        self.store.configure(acknowledged=True, enabled={kind: True for kind in KINDS})
+        snapshot = self.store.snapshot()
+        self.assertTrue(snapshot["frozen"])
+        before = {path.name: path.read_bytes() for path in self.data.iterdir()}
+        child = self.child(IMPORT, MODULE)
+        _, stderr = child.communicate(timeout=10)
+        self.assertEqual(child.returncode, 0, stderr)
+        rollback = ledger.Ledger(self.data, credit_cap=0)
+        self.assert_code("ledger_newer_policy", rollback.configure, acknowledged=False, enabled={"sfx": False, "audio_to_midi": False})
+        self.assertEqual({path.name: path.read_bytes() for path in self.data.iterdir()}, before)
+        self.assertEqual(self.store.snapshot(), snapshot)
+        self.assertEqual(self.store.find_job("j-one")["actual_credits"], 16)
+        self.assertEqual(len(self.store.reservations()), 1)
+        self.assertIn("Update the plugin", ledger.LedgerError("ledger_newer_policy").message)
+
+    def test_policy_shapes_and_newer_policy_errors_preserve_storage(self):
+        legacy = {"sfx": True, "audio_to_midi": False}
+        five = {kind: False for kind in KINDS}
+        malformed = [None, [], {}, {"sfx": True}, dict(legacy, extend=False),
+                     dict(legacy, extend=False, inpaint=False), dict(five, extend=None),
+                     dict(five, video_to_sfx=0), dict(legacy, sfx="true")]
+        original = self.stored()
+        before = (self.data / "ledger.json").read_bytes()
+        for flags in malformed:
+            self.assert_code("invalid_request", self.store.configure, acknowledged=True, enabled=flags)
+            self.assertEqual((self.data / "ledger.json").read_bytes(), before)
+        newer = dict(five, future_task=True)
+        self.assert_code("ledger_newer_policy", self.store.configure, acknowledged=True, enabled=newer)
+        self.assertEqual((self.data / "ledger.json").read_bytes(), before)
+        for flags in malformed + [newer]:
+            raw = copy.deepcopy(original)
+            raw["policy"]["enabled"] = flags
+            encoded = json.dumps(raw)
+            (self.data / "ledger.json").write_text(encoded)
+            code = "ledger_newer_policy" if flags == newer else "ledger_unavailable"
+            self.assert_code(code, self.store.snapshot)
+            self.assert_code(code, self.store.configure, acknowledged=True, enabled=legacy)
+            self.assertEqual((self.data / "ledger.json").read_text(), encoded)
+        for policy in (None, [], dict(original["policy"], unexpected=True)):
+            raw = dict(original, policy=policy)
+            (self.data / "ledger.json").write_text(json.dumps(raw))
+            self.assert_code("ledger_unavailable", self.store.snapshot)
+
     def test_current_cap_and_zero_cap_apply_even_to_free_estimate(self):
         self.store.record_quote(quoted(amount=0), "quote-call")
         zero = ledger.Ledger(self.data, credit_cap=0)
@@ -210,6 +309,128 @@ class LedgerTest(unittest.TestCase):
             quote["file"] = name
             self.assert_code("invalid_request", self.store.record_quote, quote, "quote-call")
         self.assertEqual((self.data / "ledger.json").read_bytes(), before)
+
+    def test_new_quote_timing_and_optional_metadata_are_strict(self):
+        before = (self.data / "ledger.json").read_bytes()
+        for kind in NEW_KINDS:
+            quote = quoted(kind=kind)
+            fields = {"seconds", "source_seconds"}
+            fields.update({"extend": {"append_seconds"}, "inpaint": {"region_start_seconds", "region_end_seconds"}}.get(kind, set()))
+            for field in fields:
+                for value in (None, True, "1", -0.001, 1.0001, float("inf"), float("nan"), 1 << 53):
+                    with self.subTest(kind=kind, field=field, value=value):
+                        self.assert_code("invalid_request", self.store.record_quote, dict(quote, **{field: value}), "quote-call")
+                if field != "seconds":
+                    missing = dict(quote)
+                    del missing[field]
+                    self.assert_code("invalid_request", self.store.record_quote, missing, "quote-call")
+            for field, value in (("upload", False), ("file", None), ("file", "../source.wav"),
+                                 ("prompt", False), ("prompt", ""), ("prompt", "x" * 4097),
+                                 ("model", None), ("model", ""), ("model", "x" * 129),
+                                 ("model", "é" * 65), ("model", "sfx\n2.0"),
+                                 ("seconds", 0), ("source_seconds", 0)):
+                self.assert_code("invalid_request", self.store.record_quote, dict(quote, **{field: value}), "quote-call")
+        windows = [
+            dict(quoted(kind="video_to_sfx"), seconds=12.346),
+            dict(quoted(kind="extend"), append_seconds=1.002),
+            dict(quoted(kind="inpaint"), region_start_seconds=2.002),
+            dict(quoted(kind="inpaint"), region_start_seconds=2.003),
+            dict(quoted(kind="inpaint"), region_end_seconds=12.346),
+            dict(quoted(kind="inpaint"), region_end_seconds=2.003),
+        ]
+        for quote in windows:
+            self.assert_code("invalid_request", self.store.record_quote, quote, "quote-call")
+        for kind in KINDS:
+            quote = quoted(kind=kind)
+            for field in {"source_seconds", "append_seconds", "region_start_seconds", "region_end_seconds"} - quote.keys():
+                for value in (None, 1.001):
+                    self.assert_code("invalid_request", self.store.record_quote, dict(quote, **{field: value}), "quote-call")
+        self.assertEqual((self.data / "ledger.json").read_bytes(), before)
+
+    def test_legacy_quotes_and_valid_boundary_windows_are_not_rewritten(self):
+        for kind in ("sfx", "audio_to_midi"):
+            quote = dict(quoted("q-" + kind, kind=kind), seconds=1.0001)
+            expected = dict(quote, host_call_id="quote-" + kind, consumed=False)
+            self.assertEqual(self.store.record_quote(quote, "quote-" + kind), expected)
+            self.assertEqual(self.store.quote(quote["quote_id"]), expected)
+            self.assertNotIn("model", expected)
+        boundaries = [
+            dict(quoted("q-video", kind="video_to_sfx"), source_seconds=1.001),
+            dict(quoted("q-region", kind="inpaint"), source_seconds=1.001,
+                 region_start_seconds=0, region_end_seconds=1.001),
+            dict(quoted("q-append", kind="extend"), source_seconds=1800.0, append_seconds=57.0, seconds=57.0),
+        ]
+        for quote in boundaries:
+            quote["model"] = "é" * 64
+            expected = dict(quote, host_call_id="quote-" + quote["quote_id"], consumed=False)
+            self.assertEqual(self.store.record_quote(quote, expected["host_call_id"]), expected)
+            self.assertEqual(self.store.quote(quote["quote_id"]), expected)
+
+    def test_typed_quotes_survive_restart_off_recovery_and_immutable_archival(self):
+        for kind in NEW_KINDS:
+            for with_model in (False, True):
+                with self.subTest(kind=kind, with_model=with_model):
+                    data = self.data / f"{kind}-{with_model}"
+                    store = ledger.Ledger(data, credit_cap=100)
+                    flags = {key: key == kind for key in KINDS}
+                    store.configure(acknowledged=True, enabled=flags)
+                    quote = quoted(kind=kind)
+                    if not with_model:
+                        del quote["model"]
+                    else:
+                        quote["prompt"] = "keep the texture"
+                    self.reserve(quote, store=store)
+                    row = store.reservations()[0]
+                    reservation = row["reservation_id"]
+                    expected = dict(quote, host_call_id="quote-q-one", consumed=True)
+                    self.assertEqual(store.quote("q-one"), expected)
+                    store.bind(reservation, "j-one")
+                    store.reconcile(reservation, envelope(quote, state="interrupted", submission="unknown"))
+                    store.configure(acknowledged=False, enabled={key: False for key in KINDS})
+                    restarted = ledger.Ledger(data, credit_cap=1)
+                    self.assertEqual(restarted.snapshot()["reserved"], 15)
+                    self.assertEqual(restarted.find_job("j-one")["settlement"], "pending")
+                    self.assertEqual(restarted.quote("q-one"), expected)
+                    final = envelope(quote, state="done", actual=12, output=True)
+                    settled = restarted.reconcile(reservation, final)
+                    self.assertEqual((settled["spent"], settled["reserved"]), (12, 0))
+                    self.assertEqual(restarted.reconcile(reservation, final), settled)
+                    self.assertEqual(restarted.quote("q-one"), expected)
+                    manifest = json.loads((data / "ledger.json").read_text())
+                    self.assertEqual((manifest["archived_count"], manifest["archived_spent"]), (1, 12))
+                    self.assertEqual(manifest["quotes"], {})
+                    receipt = data / ".ledger-history-0000000000000000.json"
+                    immutable = receipt.read_bytes()
+                    self.assertEqual(json.loads(immutable)["quote"], expected)
+                    self.assertEqual(restarted.record_quote(quote, "quote-q-one"), expected)
+                    changed = dict(quote)
+                    if with_model:
+                        del changed["model"]
+                    else:
+                        changed["model"] = "sfx-1.6"
+                    self.assert_code("stale", restarted.record_quote, changed, "quote-q-one")
+                    self.assertEqual(receipt.read_bytes(), immutable)
+                    corrupt = json.loads(immutable)
+                    del corrupt["quote"]["source_seconds"]
+                    receipt.write_text(json.dumps(corrupt))
+                    self.assert_code("ledger_unavailable", restarted.quote, "q-one")
+
+    def test_new_kind_manual_release_and_late_overrun_keep_lifetime_accounting(self):
+        for kind in NEW_KINDS:
+            store = ledger.Ledger(self.data / kind, credit_cap=15)
+            store.configure(acknowledged=True, enabled={key: key == kind for key in KINDS})
+            quote, reservation = self.reserve(quoted(kind=kind), store=store)
+            second = quoted("q-second", kind=kind, amount=1)
+            store.record_quote(second, "quote-second")
+            self.assert_code("cap_exceeded", store.reserve, "q-second", "a" * 64, 1, host_call_id="create-second")
+            self.assertEqual(store.release(reservation)["reserved"], 0)
+            released = store.bind(reservation, "j-one", receipt=envelope(quote))
+            self.assertEqual((released["spent"], released["reserved"]), (0, 0))
+            final = envelope(quote, state="failed", actual=16)
+            settled = store.reconcile(reservation, final)
+            self.assertEqual((settled["spent"], settled["reserved"], settled["frozen"]), (16, 0, True))
+            self.assertEqual(store.reconcile(reservation, final), settled)
+            self.assert_code("ledger_frozen", store.reserve, "q-second", "a" * 64, 1, host_call_id="create-second")
 
     def test_unknown_survives_restart_expiry_cap_change_and_lost_transport(self):
         quote, reservation = self.reserve()

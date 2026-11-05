@@ -20,7 +20,7 @@ pub fn receipt(
     actual: Option<u64>,
 ) -> Result<Value, OpError> {
     let id = quote["quote_id"].as_str().filter(|id| safe_id(id)).ok_or_else(invalid_receipt)?;
-    let kind = quote["kind"].as_str().filter(|kind| matches!(*kind, "sfx" | "audio_to_midi")).ok_or_else(invalid_receipt)?;
+    let kind = quote["kind"].as_str().filter(|kind| super::generate_ledger::POLICY_KEYS.contains(kind)).ok_or_else(invalid_receipt)?;
     let seconds = quote["seconds"].as_f64().filter(|seconds| seconds.is_finite() && *seconds > 0.0).ok_or_else(invalid_receipt)?;
     let estimate = quote["estimate"]["credits"].as_u64().filter(|credits| *credits <= MAX_CREDITS).ok_or_else(invalid_receipt)?;
     if reserved > MAX_CREDITS
@@ -30,12 +30,10 @@ pub fn receipt(
     {
         return Err(invalid_receipt());
     }
-    let prompt = if kind == "sfx" {
-        let prompt =
-            quote["prompt"].as_str().filter(|prompt| !prompt.is_empty() && prompt.len() <= 16 * 1024).ok_or_else(invalid_receipt)?;
-        Value::String(prompt.into())
-    } else {
-        Value::Null
+    let prompt = match quote.get("prompt") {
+        Some(Value::String(prompt)) if kind != "audio_to_midi" && !prompt.is_empty() && prompt.len() <= 16 * 1024 => json!(prompt),
+        Some(Value::Null) | None if kind != "sfx" => Value::Null,
+        _ => return Err(invalid_receipt()),
     };
     let mut result = json!({
         "quote_id": id, "kind": kind, "prompt": prompt, "seconds": seconds,
@@ -44,12 +42,66 @@ pub fn receipt(
         "credits": {"estimate": estimate, "reserved": reserved, "actual": actual},
         "credit_unit": "mirelo_credits"
     });
+    request_metadata(quote, &mut result)?;
     if kind == "audio_to_midi" {
         result["notes"] = Value::Null;
         result["note_count"] = Value::Null;
         result["timing"] = json!("seconds");
     }
     Ok(result)
+}
+/// Carry only typed request metadata into a create answer or retained receipt. In particular,
+/// neither the source basename nor its path becomes the generated output's `file`.
+pub fn request_metadata(quote: &Value, result: &mut Value) -> Result<(), OpError> {
+    let kind = quote["kind"].as_str().ok_or_else(invalid_receipt)?;
+    let fields: &[&str] = match kind {
+        "sfx" | "audio_to_midi" => &[],
+        "video_to_sfx" => &["source_seconds"],
+        "extend" => &["source_seconds", "append_seconds"],
+        "inpaint" => &["source_seconds", "region_start_seconds", "region_end_seconds"],
+        _ => return Err(invalid_receipt()),
+    };
+    for key in ["source_seconds", "append_seconds", "region_start_seconds", "region_end_seconds"] {
+        if fields.contains(&key) {
+            millis(&quote[key]).ok_or_else(invalid_receipt)?;
+        } else if quote.get(key).is_some() {
+            return Err(invalid_receipt());
+        }
+    }
+    if !fields.is_empty() {
+        let span = millis(&quote["seconds"]).filter(|value| *value > 0).ok_or_else(invalid_receipt)?;
+        let source = millis(&quote["source_seconds"]).filter(|value| *value > 0).ok_or_else(invalid_receipt)?;
+        let valid = match kind {
+            "video_to_sfx" => span <= source,
+            "extend" => millis(&quote["append_seconds"]) == Some(span),
+            "inpaint" => {
+                let start = millis(&quote["region_start_seconds"]).ok_or_else(invalid_receipt)?;
+                let end = millis(&quote["region_end_seconds"]).ok_or_else(invalid_receipt)?;
+                start < end && end <= source && end - start == span
+            }
+            _ => false,
+        };
+        if !valid {
+            return Err(invalid_receipt());
+        }
+    }
+    if let Some(value) = quote.get("model") {
+        let model = value
+            .as_str()
+            .filter(|model| !model.trim().is_empty() && model.len() <= 128 && !model.chars().any(char::is_control))
+            .ok_or_else(invalid_receipt)?;
+        result["model"] = json!(model);
+    }
+    for key in fields {
+        result[*key] = quote[*key].clone();
+    }
+    Ok(())
+}
+
+fn millis(value: &Value) -> Option<u64> {
+    let seconds = value.as_f64().filter(|value| value.is_finite() && (0.0..=MAX_CREDITS as f64 / 1000.0).contains(value))?;
+    let millis = (seconds * 1000.0).round_ties_even() as u64;
+    (millis <= MAX_CREDITS && millis as f64 / 1000.0 == seconds).then_some(millis)
 }
 
 /// Validate immutable staged copies, then register each before advertising it. A failed later output
@@ -58,7 +110,7 @@ pub fn receipt(
 pub async fn retain(ctx: &Ctx, scratch: &Scratch, delivery: Delivery, receipt: &mut Value, signal: &Signal) -> Result<(), OpError> {
     check(signal)?;
     let midi = match receipt["kind"].as_str() {
-        Some("sfx") => false,
+        Some("sfx" | "video_to_sfx" | "extend" | "inpaint") => false,
         Some("audio_to_midi") => true,
         _ => return Err(invalid_receipt()),
     };
@@ -415,6 +467,38 @@ mod tests {
         }
         assert!(receipt(&quote("sfx"), MAX_CREDITS + 1, None, "unknown", None).is_err());
         assert!(receipt(&quote("sfx"), 15, None, "unknown", Some(MAX_CREDITS + 1)).is_err());
+    }
+
+    #[test]
+    fn receipts_refuse_invalid_or_cross_kind_windows_instead_of_labeling_the_wrong_span() {
+        for kind in ["video_to_sfx", "extend", "inpaint"] {
+            let mut quoted = quote(kind);
+            quoted["seconds"] = json!(1.001);
+            quoted["source_seconds"] = json!(4.0);
+            match kind {
+                "extend" => quoted["append_seconds"] = json!(1.001),
+                "inpaint" => {
+                    quoted["region_start_seconds"] = json!(0.001);
+                    quoted["region_end_seconds"] = json!(1.002);
+                }
+                _ => {}
+            }
+            assert!(receipt(&quoted, 15, None, "unknown", None).is_ok());
+            for (key, value) in
+                [("source_seconds", Value::Null), ("source_seconds", json!(0)), ("seconds", json!(1.0014)), ("seconds", json!(5.0))]
+            {
+                let mut invalid = quoted.clone();
+                invalid[key] = value;
+                assert!(receipt(&invalid, 15, None, "unknown", None).is_err(), "{kind}: {key}");
+            }
+            let mut invalid = quoted;
+            match kind {
+                "extend" => invalid["region_start_seconds"] = Value::Null,
+                "inpaint" => invalid["region_end_seconds"] = json!(0.001),
+                _ => invalid["append_seconds"] = json!(1.001),
+            }
+            assert!(receipt(&invalid, 15, None, "unknown", None).is_err());
+        }
     }
 
     #[tokio::test]

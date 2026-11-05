@@ -21,7 +21,7 @@ const MAX_BYTES: u64 = 4 * 1024 * 1024;
 const LOCK_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// The task switches this ledger accepts. The release pin reads these through MCP discovery.
-pub const POLICY_KEYS: &[&str] = &["audio_to_midi", "sfx"];
+pub const POLICY_KEYS: &[&str] = &["audio_to_midi", "extend", "inpaint", "sfx", "video_to_sfx"];
 
 pub struct Authority {
     ledger: Ledger,
@@ -84,7 +84,7 @@ pub struct Unsettled<'a> {
 #[serde(deny_unknown_fields)]
 struct Ledger {
     schema: u64,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "present")]
     policy: Option<StoredPolicy>,
     frozen: bool,
     #[serde(deserialize_with = "required_nullable")]
@@ -110,6 +110,29 @@ struct StoredPolicy {
 struct Enabled {
     sfx: bool,
     audio_to_midi: bool,
+    #[serde(default, deserialize_with = "present")]
+    video_to_sfx: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    extend: Option<bool>,
+    #[serde(default, deserialize_with = "present")]
+    inpaint: Option<bool>,
+}
+
+impl Enabled {
+    fn valid(&self) -> bool {
+        self.video_to_sfx.is_some() == self.extend.is_some() && self.extend.is_some() == self.inpaint.is_some()
+    }
+
+    fn allows(&self, kind: &str) -> bool {
+        match kind {
+            "sfx" => self.sfx,
+            "audio_to_midi" => self.audio_to_midi,
+            "video_to_sfx" => self.video_to_sfx.unwrap_or(false),
+            "extend" => self.extend.unwrap_or(false),
+            "inpaint" => self.inpaint.unwrap_or(false),
+            _ => false,
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -130,6 +153,16 @@ struct Quote {
     #[serde(deserialize_with = "required_nullable")]
     file: Option<String>,
     seconds: f64,
+    #[serde(default, deserialize_with = "present")]
+    model: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    source_seconds: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    append_seconds: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    region_start_seconds: Option<f64>,
+    #[serde(default, deserialize_with = "present")]
+    region_end_seconds: Option<f64>,
     estimate: Estimate,
     credit_unit: String,
     upload: bool,
@@ -234,8 +267,7 @@ impl Authority {
         if !policy.acknowledged {
             return Err(refusal("not_approved", "Mirelo's disclosure has not been acknowledged."));
         }
-        let enabled = if kind == "sfx" { policy.enabled.sfx } else { policy.enabled.audio_to_midi };
-        if !enabled {
+        if !policy.enabled.allows(kind) {
             return Err(refusal("not_enabled", "This Mirelo generation kind is not enabled."));
         }
         Ok(Policy { cap: policy.cap })
@@ -328,13 +360,27 @@ impl Authority {
             let Some(receipt) = archived.as_ref() else { return Ok(None) };
             &receipt.quote
         };
-        Ok(Some(serde_json::json!({
+        let mut public = serde_json::json!({
             "state": quote.state, "quote_id": quote.quote_id, "kind": quote.kind,
             "prompt": quote.prompt, "file": quote.file, "seconds": quote.seconds,
             "estimate": {"credits": quote.estimate.credits, "max_credits": quote.estimate.max_credits},
             "credit_unit": quote.credit_unit, "upload": quote.upload, "expires_at": quote.expires_at,
             "request_sha256": quote.request_sha256, "summary": quote.summary
-        })))
+        });
+        if let Some(model) = &quote.model {
+            public["model"] = serde_json::json!(model);
+        }
+        for (key, value) in [
+            ("source_seconds", quote.source_seconds),
+            ("append_seconds", quote.append_seconds),
+            ("region_start_seconds", quote.region_start_seconds),
+            ("region_end_seconds", quote.region_end_seconds),
+        ] {
+            if let Some(value) = value {
+                public[key] = serde_json::json!(value);
+            }
+        }
+        Ok(Some(public))
     }
 
     /// A job must already be bound by the host before GET-only recovery. An unbound lost reply is
@@ -418,7 +464,7 @@ impl Ledger {
         if self.schema != 2
             || self.archived_count > MAX_INTEGER
             || self.archived_spent > MAX_INTEGER
-            || self.policy.as_ref().is_some_and(|policy| policy.cap > MAX_INTEGER)
+            || self.policy.as_ref().is_some_and(|policy| policy.cap > MAX_INTEGER || !policy.enabled.valid())
             || (self.frozen && self.freeze_reason.as_deref() != Some("actual_exceeded_estimate"))
             || (!self.frozen && self.freeze_reason.is_some())
         {
@@ -458,12 +504,19 @@ impl Quote {
         let source_valid = match self.kind.as_str() {
             "sfx" => self.prompt.as_deref().is_some_and(|prompt| display_text(prompt, 4096)) && self.file.is_none() && !self.upload,
             "audio_to_midi" => self.prompt.is_none() && self.file.as_deref().is_some_and(basename) && self.upload,
+            "video_to_sfx" | "extend" | "inpaint" => {
+                self.prompt.as_deref().is_none_or(|prompt| display_text(prompt, 4096))
+                    && self.file.as_deref().is_some_and(basename)
+                    && self.upload
+            }
             _ => false,
         };
         valid_id(&self.quote_id)
             && valid_id(&self.host_call_id)
             && self.state == "quoted"
             && source_valid
+            && self.model.as_deref().is_none_or(|model| display_text(model, 128))
+            && self.valid_timing()
             && self.seconds.is_finite()
             && self.seconds > 0.0
             && self.seconds <= MAX_INTEGER as f64
@@ -473,6 +526,33 @@ impl Quote {
             && self.expires_at <= MAX_INTEGER
             && valid_digest(&self.request_sha256)
             && display_text(&self.summary, 1024)
+    }
+
+    fn valid_timing(&self) -> bool {
+        if matches!(self.kind.as_str(), "sfx" | "audio_to_midi") {
+            return self.source_seconds.is_none()
+                && self.append_seconds.is_none()
+                && self.region_start_seconds.is_none()
+                && self.region_end_seconds.is_none();
+        }
+        let Some(span) = milliseconds(self.seconds).filter(|value| *value > 0) else { return false };
+        let Some(source) = self.source_seconds.and_then(milliseconds).filter(|value| *value > 0) else { return false };
+        match self.kind.as_str() {
+            "video_to_sfx" => {
+                span <= source && self.append_seconds.is_none() && self.region_start_seconds.is_none() && self.region_end_seconds.is_none()
+            }
+            "extend" => {
+                self.append_seconds.and_then(milliseconds) == Some(span)
+                    && self.region_start_seconds.is_none()
+                    && self.region_end_seconds.is_none()
+            }
+            "inpaint" => {
+                let Some(start) = self.region_start_seconds.and_then(milliseconds) else { return false };
+                let Some(end) = self.region_end_seconds.and_then(milliseconds) else { return false };
+                self.append_seconds.is_none() && start < end && end <= source && end - start == span
+            }
+            _ => false,
+        }
     }
 }
 
@@ -536,6 +616,14 @@ fn decode_file<T: serde::de::DeserializeOwned>(file: File) -> Result<T, OpError>
 
 fn valid_kind(kind: &str) -> bool {
     POLICY_KEYS.contains(&kind)
+}
+
+fn milliseconds(seconds: f64) -> Option<u64> {
+    if !seconds.is_finite() || !(0.0..=MAX_INTEGER as f64 / 1000.0).contains(&seconds) {
+        return None;
+    }
+    let millis = (seconds * 1000.0).round_ties_even() as u64;
+    (millis <= MAX_INTEGER && millis as f64 / 1000.0 == seconds).then_some(millis)
 }
 
 fn valid_id(id: &str) -> bool {
@@ -801,6 +889,29 @@ mod tests {
         })
     }
 
+    fn upload_record(kind: &str) -> Value {
+        let mut value = record();
+        value["policy"]["enabled"] = Value::Object(POLICY_KEYS.iter().map(|&key| (key.to_owned(), json!(key == kind))).collect());
+        value["reservations"]["r1"]["kind"] = json!(kind);
+        let quote = &mut value["quotes"]["q1"];
+        quote["kind"] = json!(kind);
+        quote["prompt"] = Value::Null;
+        quote["file"] = json!(if kind == "video_to_sfx" { "source.mp4" } else { "source.wav" });
+        quote["upload"] = json!(true);
+        quote["seconds"] = json!(1.001);
+        quote["source_seconds"] = json!(12.345);
+        quote["model"] = json!(if kind == "video_to_sfx" { "sfx-2.0" } else { "sfx-1.6" });
+        match kind {
+            "extend" => quote["append_seconds"] = json!(1.001),
+            "inpaint" => {
+                quote["region_start_seconds"] = json!(1.001);
+                quote["region_end_seconds"] = json!(2.002);
+            }
+            _ => {}
+        }
+        value
+    }
+
     fn claim() -> CreateClaim<'static> {
         CreateClaim {
             quote_id: "q1",
@@ -888,6 +999,9 @@ mod tests {
         fixture.put(&value);
         assert_eq!(code(fixture.authority().policy("audio_to_midi")), "not_enabled");
         assert!(fixture.authority().policy("sfx").is_ok());
+        for kind in ["video_to_sfx", "extend", "inpaint"] {
+            assert_eq!(code(fixture.authority().policy(kind)), "not_enabled");
+        }
         value.as_object_mut().unwrap().remove("policy");
         fixture.put(&value);
         assert_eq!(code(fixture.authority().approve(&claim())), "not_submitted");
@@ -898,6 +1012,7 @@ mod tests {
         let descriptor = super::super::mcp::tool_descriptor(&super::super::generate::GENERATE);
         let keys: Vec<&str> =
             descriptor["_meta"]["kumi/ledger_policy_keys"].as_array().unwrap().iter().map(|key| key.as_str().unwrap()).collect();
+        assert_eq!(keys.as_slice(), &["audio_to_midi", "extend", "inpaint", "sfx", "video_to_sfx"]);
         let fixture = Fixture::new();
         let mut value = record();
         value["policy"]["enabled"] = Value::Object(keys.iter().map(|&kind| (kind.to_owned(), Value::Bool(false))).collect());
@@ -923,6 +1038,131 @@ mod tests {
         value["policy"]["enabled"]["not_a_generation_kind"] = json!(true);
         fixture.put(&value);
         assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+    }
+
+    #[test]
+    fn partial_policy_maps_nulls_and_non_boolean_flags_are_refused() {
+        let fixture = Fixture::new();
+        let full = upload_record("extend");
+        for bits in 1..7 {
+            let mut value = full.clone();
+            for (bit, key) in ["video_to_sfx", "extend", "inpaint"].iter().enumerate() {
+                if bits & (1 << bit) == 0 {
+                    value["policy"]["enabled"].as_object_mut().unwrap().remove(*key);
+                }
+            }
+            fixture.put(&value);
+            assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+        }
+        for &key in POLICY_KEYS {
+            for bad in [Value::Null, json!(1), json!("true"), json!({})] {
+                let mut value = full.clone();
+                value["policy"]["enabled"][key] = bad;
+                fixture.put(&value);
+                assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+            }
+        }
+        for key in ["sfx", "audio_to_midi"] {
+            let mut value = full.clone();
+            value["policy"]["enabled"].as_object_mut().unwrap().remove(key);
+            fixture.put(&value);
+            assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+        }
+        for pointer in ["/policy", "/policy/enabled"] {
+            let mut value = full.clone();
+            *value.pointer_mut(pointer).unwrap() = Value::Null;
+            fixture.put(&value);
+            assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+        }
+    }
+
+    #[test]
+    fn upload_quotes_bind_exact_optional_metadata_and_millisecond_windows() {
+        let fixture = Fixture::new();
+        for kind in ["video_to_sfx", "extend", "inpaint"] {
+            let original = upload_record(kind);
+            for with_model in [true, false] {
+                let mut value = original.clone();
+                if !with_model {
+                    value["quotes"]["q1"].as_object_mut().unwrap().remove("model");
+                }
+                fixture.put(&value);
+                let authority = fixture.authority();
+                let mut own = claim();
+                own.kind = kind;
+                assert!(authority.approve(&own).is_ok());
+                let mut expected = value["quotes"]["q1"].clone();
+                expected.as_object_mut().unwrap().remove("host_call_id");
+                expected.as_object_mut().unwrap().remove("consumed");
+                assert_eq!(authority.quote("q1").unwrap().unwrap(), expected);
+            }
+            for field in ["seconds", "source_seconds", "append_seconds", "region_start_seconds", "region_end_seconds"] {
+                if original["quotes"]["q1"].get(field).is_none() {
+                    for bad in [Value::Null, json!(1.001)] {
+                        let mut value = original.clone();
+                        value["quotes"]["q1"][field] = bad;
+                        fixture.put(&value);
+                        assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+                    }
+                    continue;
+                }
+                let mut missing = original.clone();
+                missing["quotes"]["q1"].as_object_mut().unwrap().remove(field);
+                fixture.put(&missing);
+                assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+                for bad in [Value::Null, json!(true), json!("1"), json!(-0.001), json!(1.0001), json!(MAX_INTEGER)] {
+                    let mut value = original.clone();
+                    value["quotes"]["q1"][field] = bad;
+                    fixture.put(&value);
+                    assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+                }
+            }
+            for (field, bad) in [
+                ("model", Value::Null),
+                ("model", json!("")),
+                ("model", json!("é".repeat(65))),
+                ("model", json!("sfx\n2.0")),
+                ("upload", json!(false)),
+                ("file", json!("../source.wav")),
+                ("prompt", json!(false)),
+                ("prompt", json!("x".repeat(4097))),
+                ("source_seconds", json!(0)),
+                ("seconds", json!(0)),
+            ] {
+                let mut value = original.clone();
+                value["quotes"]["q1"][field] = bad;
+                fixture.put(&value);
+                assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+            }
+        }
+        for (kind, field, bad) in [
+            ("video_to_sfx", "seconds", 12.346),
+            ("extend", "append_seconds", 1.002),
+            ("inpaint", "region_start_seconds", 2.002),
+            ("inpaint", "region_start_seconds", 2.003),
+            ("inpaint", "region_end_seconds", 12.346),
+            ("inpaint", "region_end_seconds", 2.003),
+        ] {
+            let mut value = upload_record(kind);
+            value["quotes"]["q1"][field] = json!(bad);
+            fixture.put(&value);
+            assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+        }
+        for kind in ["sfx", "audio_to_midi"] {
+            for field in ["source_seconds", "append_seconds", "region_start_seconds", "region_end_seconds"] {
+                let mut value = record();
+                value["quotes"]["q1"]["kind"] = json!(kind);
+                value["reservations"]["r1"]["kind"] = json!(kind);
+                if kind == "audio_to_midi" {
+                    value["quotes"]["q1"]["prompt"] = Value::Null;
+                    value["quotes"]["q1"]["file"] = json!("source.wav");
+                    value["quotes"]["q1"]["upload"] = json!(true);
+                }
+                value["quotes"]["q1"][field] = json!(1.001);
+                fixture.put(&value);
+                assert_eq!(code(Authority::read(&fixture.state)), "ledger_unavailable");
+            }
+        }
     }
 
     #[test]
@@ -1173,22 +1413,51 @@ if sys.argv[3] == "hold":
         print("locked", flush=True)
         sys.stdin.readline()
     sys.exit(0)
-store.configure(acknowledged=True, enabled={"sfx":True, "audio_to_midi":False})
-def reserve(name, amount):
+mode = sys.argv[3]
+if mode == "cc15-off":
+    store.configure(acknowledged=False, enabled={kind:False for kind in ("sfx", "audio_to_midi", "video_to_sfx", "extend", "inpaint")})
+    print(json.dumps(store.snapshot()), flush=True)
+    sys.exit(0)
+selected = mode.removeprefix("cc15-") if mode.startswith("cc15-") else None
+flags = ({"sfx":True, "audio_to_midi":False} if selected is None else
+         {kind:kind == selected for kind in ("sfx", "audio_to_midi", "video_to_sfx", "extend", "inpaint")})
+store.configure(acknowledged=True, enabled=flags)
+def reserve(name, amount, kind="sfx", model=True):
     quote = {"state":"quoted", "quote_id":name, "kind":"sfx", "prompt":"metal impact",
              "file":None, "seconds":0.1, "estimate":{"credits":amount, "max_credits":amount},
              "credit_unit":"mirelo_credits", "upload":False, "expires_at":300000,
              "request_sha256":"a"*64, "summary":"One sound effect"}
+    if kind != "sfx":
+        quote.update(kind=kind, prompt=None, file="source.mp4" if kind == "video_to_sfx" else "source.wav",
+                     upload=True, seconds=1.001, source_seconds=12.345)
+        if model:
+            quote["model"] = "sfx-2.0" if kind == "video_to_sfx" else "sfx-1.6"
+        if kind == "extend":
+            quote["append_seconds"] = 1.001
+        elif kind == "inpaint":
+            quote.update(region_start_seconds=1.001, region_end_seconds=2.002)
     store.record_quote(quote, "quote-"+name)
     reservation = store.reserve(name, "a"*64, amount, host_call_id="create-"+name)
     return quote, reservation["reservation_id"]
 def receipt(quote, job, actual=None, state="running"):
     return {"job_id":job, "kind":"generate", "state":state, "result":{
-        "quote_id":quote["quote_id"], "kind":"sfx", "provider":"mirelo", "provider_job_id":"vendor-"+job,
+        "quote_id":quote["quote_id"], "kind":quote["kind"], "provider":"mirelo", "provider_job_id":"vendor-"+job,
         "submission":"submitted", "credit_unit":"mirelo_credits",
         "credits":{"estimate":quote["estimate"]["credits"], "reserved":quote["estimate"]["max_credits"], "actual":actual}}}
 def settle(quote, reservation, job, actual):
     return store.reconcile(reservation, receipt(quote, job, actual, "done"))
+if selected is not None:
+    charged, charged_id = reserve("q-charged", 8, selected)
+    settle(charged, charged_id, "j-charged", 7)
+    pending, pending_id = reserve("q1", 15, selected, model=False)
+    store.bind(pending_id, "j-pending")
+    manual, manual_id = reserve("q-manual", 1, selected)
+    store.release(manual_id)
+    store.bind(manual_id, "j-manual", receipt=receipt(manual, "j-manual"))
+    assert store.snapshot()["reserved"] == 15
+    print(json.dumps({"charged":charged_id, "pending":pending_id, "manual":manual_id,
+                      "charged_quote":charged, "pending_quote":pending, "manual_quote":manual}), flush=True)
+    sys.exit(0)
 if sys.argv[3] == "released":
     quote, rid = reserve("q1", 15)
     store.release(rid)
@@ -1264,6 +1533,11 @@ print(json.dumps({"charged":charged_id, "pending":pending_id, "manual":manual_id
         assert!(authority.approve(&own).is_ok());
         assert_eq!(authority.quote("q1").unwrap().unwrap(), ids["pending_quote"]);
         assert_eq!(authority.quote("q-charged").unwrap().unwrap(), ids["charged_quote"]);
+        for kind in ["audio_to_midi", "video_to_sfx", "extend", "inpaint"] {
+            assert_eq!(code(authority.policy(kind)), "not_enabled");
+        }
+        let saved: Value = serde_json::from_slice(&std::fs::read(fixture.data.join("ledger.json")).unwrap()).unwrap();
+        assert_eq!(saved["policy"]["enabled"].as_object().unwrap().len(), 2);
         let charged = authority.for_job("j-charged").unwrap().unwrap();
         assert_eq!(charged.reservation_id, ids["charged"].as_str().unwrap());
         assert_eq!(charged.actual_credits, Some(12));
@@ -1284,6 +1558,60 @@ print(json.dumps({"charged":charged_id, "pending":pending_id, "manual":manual_id
         own.reservation_id = ids["pending"].as_str().unwrap();
         own.host_call_id = "create-q1";
         assert_eq!(code(fixture.authority().approve(&own)), "not_submitted");
+    }
+
+    #[test]
+    fn python_five_key_quotes_and_archives_survive_off_without_granting_create() {
+        for kind in ["video_to_sfx", "extend", "inpaint"] {
+            let fixture = Fixture::new();
+            let output = python(&fixture, &format!("cc15-{kind}")).output().expect("isolated stdlib Python is required");
+            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let ids: Value = serde_json::from_slice(&output.stdout).unwrap();
+            let authority = fixture.authority();
+            assert_eq!(authority.committed, 22);
+            assert_eq!(authority.ledger.archived_count, 1);
+            assert_eq!(authority.ledger.archived_spent, 7);
+            for &key in POLICY_KEYS {
+                if key == kind {
+                    assert!(authority.policy(key).is_ok());
+                } else {
+                    assert_eq!(code(authority.policy(key)), "not_enabled");
+                }
+            }
+            let mut own = claim();
+            own.kind = kind;
+            own.reservation_id = ids["pending"].as_str().unwrap();
+            own.host_call_id = "create-q1";
+            own.expected_job_id = Some("j-pending");
+            assert!(authority.approve(&own).is_ok());
+            for (quote_id, field) in [("q1", "pending_quote"), ("q-charged", "charged_quote"), ("q-manual", "manual_quote")] {
+                assert_eq!(authority.quote(quote_id).unwrap().unwrap(), ids[field]);
+            }
+            assert!(authority.quote("q1").unwrap().unwrap().get("model").is_none());
+            let pending = authority.for_job("j-pending").unwrap().unwrap();
+            assert_eq!(pending.kind, kind);
+            assert_eq!(pending.settlement, "pending");
+            assert_eq!(authority.for_job("j-charged").unwrap().unwrap().actual_credits, Some(7));
+            assert_eq!(authority.for_job("j-manual").unwrap().unwrap().settlement, "manual_release");
+            let immutable = std::fs::read(fixture.data.join(".ledger-history-0000000000000000.json")).unwrap();
+            let off = python(&fixture, "cc15-off").output().expect("isolated stdlib Python is required");
+            assert!(off.status.success(), "{}", String::from_utf8_lossy(&off.stderr));
+            let restarted = fixture.authority();
+            for &key in POLICY_KEYS {
+                assert_eq!(code(restarted.policy(key)), "not_approved");
+            }
+            assert_eq!(code(restarted.approve(&own)), "not_submitted");
+            assert_eq!(restarted.committed, 22);
+            assert_eq!(restarted.for_job("j-pending").unwrap().unwrap(), pending);
+            assert_eq!(restarted.quote("q1").unwrap().unwrap(), ids["pending_quote"]);
+            assert_eq!(restarted.quote("q-charged").unwrap().unwrap(), ids["charged_quote"]);
+            assert_eq!(std::fs::read(fixture.data.join(".ledger-history-0000000000000000.json")).unwrap(), immutable);
+            // History is validated too, rather than trusting immutable storage as a schema bypass.
+            let mut corrupt: Value = serde_json::from_slice(&immutable).unwrap();
+            corrupt["quote"]["source_seconds"] = Value::Null;
+            std::fs::write(fixture.data.join(".ledger-history-0000000000000000.json"), serde_json::to_vec(&corrupt).unwrap()).unwrap();
+            assert_eq!(code(restarted.quote("q-charged")), "ledger_unavailable");
+        }
     }
 
     #[test]

@@ -5,6 +5,7 @@
 pub mod audio;
 pub mod captions;
 pub mod frames;
+pub mod local_video;
 pub mod programs;
 pub mod speech;
 pub mod voice;

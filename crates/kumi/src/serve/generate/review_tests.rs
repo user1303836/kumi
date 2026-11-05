@@ -361,7 +361,7 @@ async fn missing_expired_different_source_and_wrong_call_previews_are_stale_with
                     fixture.call(preview, "quote-call", None).await.unwrap();
                 }
                 if scenario == "expired" {
-                    for (expires, _) in fixture.ctx.generation().pending.borrow_mut().previews.values_mut() {
+                    for (expires, _, _) in fixture.ctx.generation().pending.borrow_mut().previews.values_mut() {
                         *expires = 0;
                     }
                 } else if scenario == "different" {

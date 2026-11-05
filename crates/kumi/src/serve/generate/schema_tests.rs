@@ -201,3 +201,66 @@ fn generate_hints_choose_matching_discriminators_and_do_not_echo_private_metadat
     assert!(!why.contains(secret));
     assert!(!why.contains("api_key"));
 }
+
+#[test]
+fn edit_schema_accepts_task_specific_windows_and_refuses_every_wrong_kind_field() {
+    let schema = schema();
+    let source = json!({"file":"source.wav", "provenance":{"host_tool":"picker"}});
+    let valid = [
+        json!({"action":"quote", "kind":"video_to_sfx", "source":source}),
+        json!({"action":"quote", "kind":"video_to_sfx", "source":{"artifact_id":"a1"}, "seconds":1.2346, "prompt":"wind"}),
+        json!({"action":"quote", "kind":"extend", "source":source, "append_seconds":1.2346}),
+        json!({"action":"quote", "kind":"inpaint", "source":source, "region_start_seconds":0, "region_end_seconds":1.2346}),
+    ];
+    for input in &valid {
+        assert!(problem(&schema, input).is_none(), "{input}");
+    }
+    for kind in ["video_to_sfx", "extend", "inpaint"] {
+        let preview = json!({"action":"quote", "kind":kind, "source":source, "preview":true});
+        assert!(problem(&schema, &preview).is_none(), "{preview}");
+    }
+    let fields =
+        [("seconds", json!(1)), ("append_seconds", json!(1)), ("region_start_seconds", json!(0)), ("region_end_seconds", json!(1))];
+    for (input, allowed) in [
+        (&valid[0], &["seconds"][..]),
+        (&valid[2], &["append_seconds"][..]),
+        (&valid[3], &["region_start_seconds", "region_end_seconds"][..]),
+    ] {
+        for (field, value) in &fields {
+            if !allowed.contains(field) {
+                let mut wrong = input.clone();
+                wrong[*field] = value.clone();
+                assert!(problem(&schema, &wrong).is_some(), "accepted wrong-kind field: {wrong}");
+            }
+        }
+    }
+    for mut input in [
+        json!({"action":"create", "quote_id":format!("q-{}", "a".repeat(32))}),
+        json!({"action":"job", "job_id":"j1-1"}),
+        json!({"action":"quote", "kind":"sfx", "prompt":"hit"}),
+        json!({"action":"quote", "kind":"audio_to_midi", "source":source}),
+    ] {
+        for (field, value) in &fields[1..] {
+            input[*field] = value.clone();
+            assert!(problem(&schema, &input).is_some(), "accepted wrong-action field: {input}");
+            input.as_object_mut().unwrap().remove(*field);
+        }
+    }
+    rejects(
+        &schema,
+        [
+            json!({"action":"quote", "kind":"extend", "source":source}),
+            json!({"action":"quote", "kind":"extend", "source":source, "preview":false}),
+            json!({"action":"quote", "kind":"inpaint", "source":source, "region_start_seconds":0}),
+            json!({"action":"quote", "kind":"inpaint", "source":source, "region_end_seconds":1}),
+            json!({"action":"quote", "kind":"video_to_sfx", "source":{"sound_id":"s1", "map_revision":"r1"}}),
+        ],
+    );
+    for (input, field) in [(&valid[1], "seconds"), (&valid[2], "append_seconds"), (&valid[3], "region_end_seconds")] {
+        for value in [json!(0), json!(-1), json!("1"), Value::Null] {
+            let mut wrong = input.clone();
+            wrong[field] = value;
+            assert!(problem(&schema, &wrong).is_some(), "{wrong}");
+        }
+    }
+}

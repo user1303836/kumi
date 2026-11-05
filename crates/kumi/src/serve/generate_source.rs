@@ -17,6 +17,7 @@ pub struct Pin {
     source: Value,
     path: PathBuf,
     identity: Value,
+    video: bool,
     pub digest: String,
     pub bytes: u64,
     pub name: String,
@@ -33,11 +34,11 @@ impl Pin {
 
     /// Recheck permission, revision, identity and content. Never upload a newly substituted file.
     pub async fn current(&self, ctx: &Ctx, signal: &Signal) -> Result<(), OpError> {
-        let found = super::import::find(ctx, &self.source, signal).await.map_err(safe_error)?;
-        if found.path() != self.path || found.named != self.identity {
+        let path = resolve(ctx, &self.source, self.video, signal).await?;
+        if path != self.path {
             return Err(stale());
         }
-        let (digest, bytes) = hash(self.path.clone(), Some(self.identity.clone()), signal.clone()).await?;
+        let (digest, bytes, _) = hash(path, Some(self.identity.clone()), signal.clone()).await?;
         if digest != self.digest || bytes != self.bytes {
             return Err(stale());
         }
@@ -48,11 +49,11 @@ impl Pin {
     /// All source kinds are copied for upload, including registered artifacts. The SDK sees only
     /// this still-unpublished, call-owned stage; the producer's original is never moved or changed.
     pub async fn stage(&self, ctx: &Ctx, signal: &Signal) -> Result<StagedArtifact, OpError> {
-        let found = super::import::find(ctx, &self.source, signal).await.map_err(safe_error)?;
-        if found.path() != self.path || found.named != self.identity {
+        let path = resolve(ctx, &self.source, self.video, signal).await?;
+        if path != self.path {
             return Err(stale());
         }
-        let stage = ctx.artifacts().stage(ctx, &self.path, Some(&self.identity), signal).await.map_err(safe_error)?;
+        let stage = ctx.artifacts().stage(ctx, &path, Some(&self.identity), signal).await.map_err(safe_error)?;
         let (stage, digest, bytes) = hash_staged(stage, signal.clone()).await?;
         if digest != self.digest || bytes != self.bytes {
             return Err(stale());
@@ -65,30 +66,48 @@ impl Pin {
 
 /// Five seconds including resolution/hash, inside the host hook's total fifteen-second budget.
 /// Timeout also signals a blocking reader to stop at its next bounded chunk; it never starts a copy.
-pub async fn preview(ctx: &Ctx, source: &Value, signal: &Signal) -> Result<Pin, OpError> {
+pub async fn preview(ctx: &Ctx, source: &Value, video: bool, signal: &Signal) -> Result<Pin, OpError> {
     let deadline = Signal::new();
     let combined = abort::any([signal.clone(), deadline.clone()]);
     let result = tokio::time::timeout(PREVIEW_LIMIT, async {
         check(&combined)?;
-        let found = super::import::find(ctx, source, &combined).await.map_err(safe_error)?;
-        let (digest, bytes) = hash(found.path().to_path_buf(), Some(found.named.clone()), combined.clone()).await?;
-        ctx.approved(found.path()).map_err(safe_error)?;
+        let path = resolve(ctx, source, video, &combined).await?;
+        let (digest, bytes, identity) = hash(path.clone(), None, combined.clone()).await?;
+        ctx.approved(&path).map_err(safe_error)?;
         // Display only. Authorization is the original structured source, open-file identity and hash.
-        let name = super::change::one_line(&found.name, 120).replace(['/', '\\', ':'], "_");
+        let name = path.file_name().and_then(|name| name.to_str()).unwrap_or("");
+        let name = super::change::one_line(name, 120).replace(['/', '\\', ':'], "_");
         if name.is_empty() {
-            return Err(invalid("The selected audio has no displayable file name."));
+            return Err(invalid("The selected file has no displayable file name."));
         }
-        Ok(Pin { source: source.clone(), path: found.path().to_path_buf(), identity: found.named, digest, bytes, name })
+        Ok(Pin { source: source.clone(), path, identity, video, digest, bytes, name })
     })
     .await;
     deadline.cancel();
-    result.map_err(|_| invalid("Reading the selected audio exceeded the upload-preview time limit."))?
+    result.map_err(|_| invalid("Reading the selected file exceeded the upload-preview time limit."))?
 }
 
-async fn hash(path: PathBuf, expected: Option<Value>, signal: Signal) -> Result<(String, u64), OpError> {
+async fn resolve(ctx: &Ctx, source: &Value, video: bool, signal: &Signal) -> Result<PathBuf, OpError> {
+    if video && (source.get("sound_id").is_some() || source.get("map_revision").is_some()) {
+        return Err(invalid("Choose a video file or registered artifact, not a sound-map entry."));
+    }
+    let path = super::import::resolve_path(ctx, source, signal).await.map_err(safe_error)?;
+    let extension = path.extension().and_then(|extension| extension.to_str()).unwrap_or("");
+    let allowed: &[&str] = if video { &["mp4", "m4v", "mov", "webm"] } else { &["wav", "wave", "flac", "mp3", "ogg"] };
+    if !allowed.iter().any(|known| extension.eq_ignore_ascii_case(known)) {
+        return Err(invalid(if video {
+            "Choose an MP4, M4V, MOV or WebM video for this upload."
+        } else {
+            "Choose WAV, FLAC, MP3 or OGG audio for this Mirelo upload."
+        }));
+    }
+    Ok(path)
+}
+
+async fn hash(path: PathBuf, expected: Option<Value>, signal: Signal) -> Result<(String, u64, Value), OpError> {
     tokio::task::spawn_blocking(move || {
         check(&signal)?;
-        let file = open_regular(&path).map_err(|_| invalid("The selected audio could not be opened safely."))?;
+        let file = open_regular(&path).map_err(|_| invalid("The selected file could not be opened safely."))?;
         hash_file(&file, expected.as_ref(), &signal)
     })
     .await
@@ -100,30 +119,30 @@ async fn hash_staged(stage: StagedArtifact, signal: Signal) -> Result<(StagedArt
         // The writable NamedTempFile is still alive. A path reopen denying write-sharing fails
         // on Windows; moving the stage here lets us read its exact owned handle without relaxing
         // the producer-source open guard, duplicating a handle, or sharing a seek cursor.
-        let (digest, bytes) = hash_file(stage.opened(), None, &signal)?;
+        let (digest, bytes, _) = hash_file(stage.opened(), None, &signal)?;
         Ok((stage, digest, bytes))
     })
     .await
     .map_err(|_| invalid("The staged upload reader failed."))?
 }
 
-fn hash_file(mut file: &File, expected: Option<&Value>, signal: &Signal) -> Result<(String, u64), OpError> {
+fn hash_file(mut file: &File, expected: Option<&Value>, signal: &Signal) -> Result<(String, u64, Value), OpError> {
     check(signal)?;
-    let before = file_identity(file).map_err(|_| invalid("The selected audio identity could not be read."))?;
+    let before = file_identity(file).map_err(|_| invalid("The selected file identity could not be read."))?;
     if expected.is_some_and(|expected| expected != &before) {
         return Err(stale());
     }
-    let size = file.metadata().map_err(|_| invalid("The selected audio size could not be read."))?.len();
+    let size = file.metadata().map_err(|_| invalid("The selected file size could not be read."))?.len();
     if size == 0 || size > MAX_BYTES {
-        return Err(invalid("Choose a nonempty audio file no larger than 50 MiB."));
+        return Err(invalid("Choose a nonempty file no larger than 50 MiB."));
     }
-    file.seek(SeekFrom::Start(0)).map_err(|_| invalid("The selected audio could not be read."))?;
+    file.seek(SeekFrom::Start(0)).map_err(|_| invalid("The selected file could not be read."))?;
     let mut digest = Sha256::new();
     let mut total = 0_u64;
     let mut buffer = [0_u8; 64 * 1024];
     loop {
         check(signal)?;
-        let count = file.read(&mut buffer).map_err(|_| invalid("The selected audio could not be read."))?;
+        let count = file.read(&mut buffer).map_err(|_| invalid("The selected file could not be read."))?;
         if count == 0 {
             break;
         }
@@ -136,7 +155,7 @@ fn hash_file(mut file: &File, expected: Option<&Value>, signal: &Signal) -> Resu
     if total != size || file_identity(file).map_err(|_| stale())? != before {
         return Err(stale());
     }
-    Ok((format!("{:x}", digest.finalize()), total))
+    Ok((format!("{:x}", digest.finalize()), total, before))
 }
 
 /// Read duration from the approved bytes, not a model argument. No FFT or model is needed. The
@@ -163,14 +182,33 @@ pub async fn seconds(ctx: &Ctx, source: &StagedArtifact, signal: &Signal) -> Res
         invalid("The approved decoder could not measure the entire file; export a WAV or a shorter clip before uploading.")
     })?;
     if !seconds.is_finite() || seconds <= 0.0 || seconds > 1800.0 {
-        return Err(invalid("Mirelo audio-to-MIDI accepts audio up to thirty minutes; choose a supported clip."));
+        return Err(invalid("Kumi uploads audio up to thirty minutes; choose a supported clip."));
     }
+    Ok(seconds)
+}
+
+pub async fn video_seconds(ctx: &Ctx, source: &StagedArtifact, signal: &Signal) -> Result<f64, OpError> {
+    check(signal)?;
+    source.verify().map_err(safe_error)?;
+    let ffmpeg = ctx
+        .media()
+        .tool("ffmpeg")
+        .ok_or_else(|| invalid("Video-to-SFX needs the local ffmpeg approved at setup; run hermes kumi setup and approve that tool."))?;
+    let seconds = kumi_media::local_video::seconds(ffmpeg, source.path(), source.opened(), signal).await.map_err(|error| {
+        if error.is_aborted() {
+            OpError::Refused { code: "cancelled", reason: "Video upload preparation was cancelled.".into(), owner: None }
+        } else {
+            invalid("The approved video probe could not safely measure this complete video; choose a self-contained MP4, MOV or WebM.")
+        }
+    })?;
+    source.verify().map_err(safe_error)?;
+    check(signal)?;
     Ok(seconds)
 }
 
 fn check(signal: &Signal) -> Result<(), OpError> {
     if signal.is_cancelled() {
-        Err(OpError::Refused { code: "cancelled", reason: "Audio upload preparation was cancelled.".into(), owner: None })
+        Err(OpError::Refused { code: "cancelled", reason: "Media upload preparation was cancelled.".into(), owner: None })
     } else {
         Ok(())
     }
@@ -178,7 +216,7 @@ fn check(signal: &Signal) -> Result<(), OpError> {
 fn stale() -> OpError {
     OpError::Refused {
         code: "stale",
-        reason: "The selected audio changed or its approval no longer applies; approve a new quote.".into(),
+        reason: "The selected file changed or its approval no longer applies; approve a new quote.".into(),
         owner: None,
     }
 }
@@ -188,12 +226,12 @@ fn invalid(reason: &str) -> OpError {
 fn safe_error(error: OpError) -> OpError {
     match error.code() {
         "stale" => stale(),
-        "cancelled" => OpError::Refused { code: "cancelled", reason: "Audio upload preparation was cancelled.".into(), owner: None },
+        "cancelled" => OpError::Refused { code: "cancelled", reason: "Media upload preparation was cancelled.".into(), owner: None },
         "outside_root" => OpError::Refused {
             code: "outside_root",
-            reason: "Choose audio in a currently approved folder or a registered artifact.".into(),
+            reason: "Choose a file in a currently approved folder or a registered artifact.".into(),
             owner: None,
         },
-        _ => invalid("The selected audio is not an available approved CC-11 source."),
+        _ => invalid("The selected file is not an available approved source."),
     }
 }

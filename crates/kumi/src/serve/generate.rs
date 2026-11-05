@@ -8,22 +8,25 @@ use super::generate_output;
 use super::generate_source::{self, Pin};
 use super::jobs::JobHandle;
 use kumi_ai::audio::{mirelo, Task};
-use kumi_common::abort::Signal;
+use kumi_common::abort::{self, Signal};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::time::Duration;
 
+mod input;
 mod records;
 
 const QUOTE_MS: u64 = 5 * 60 * 1000;
+const UPLOAD_QUOTE_LIMIT: Duration = Duration::from_secs(180);
 const PENDING: usize = 8;
 const OUTPUT_BYTES: u64 = 50 * 1024 * 1024;
 
 pub const GENERATE: Operation = Operation {
     name: "generate",
-    description: "Quote one Mirelo sound effect or approved audio-to-MIDI transcription, then create only that quote. Each create spends credits. Estimates are not bill ceilings; obtain the producer's quote-specific approval before create and show each job's actual or unknown credits. Files are retained artifacts, never inserted into a DAW here. Job recovery only GETs an existing identified job.",
+    description: "Quote one Mirelo sound effect, audio-to-MIDI transcription, video sound effect, audio extension or inpaint, then create only that quote. Each create spends credits. Estimates are not bill ceilings; obtain the producer's quote-specific approval before create and show each job's actual or unknown credits. Uploads send the whole approved source. seconds is the billed span; source_seconds is the measured source, not the returned edit's length. Files are retained artifacts, never inserted into a DAW here. Job recovery only GETs an existing identified job.",
     schema,
     effect,
     run,
@@ -36,7 +39,12 @@ pub fn schema() -> Value {
             "action": {"enum": ["quote", "create", "job"]},
             "kind": {"type": "string", "enum": super::generate_ledger::POLICY_KEYS},
             "prompt": {"type": "string", "minLength": 1, "maxLength": 500},
-            "seconds": {"type": "number", "exclusiveMinimum": 0, "default": 5},
+            "seconds": {"type": "number", "exclusiveMinimum": 0,
+                "description": "Billed generation span: text-to-SFX defaults to 5 seconds; video defaults to its measured whole duration. Never the whole returned edit's length."},
+            "append_seconds": {"type": "number", "exclusiveMinimum": 0,
+                "description": "New seconds appended to the complete audio source; extend only."},
+            "region_start_seconds": {"type": "number", "minimum": 0},
+            "region_end_seconds": {"type": "number", "exclusiveMinimum": 0},
             "source": super::change::source_schema(),
             "preview": {"type": "boolean"},
             "quote_id": {"type": "string", "pattern": "^q-[a-f0-9]{32}$"},
@@ -45,16 +53,37 @@ pub fn schema() -> Value {
         "oneOf": [
             {"properties": {"action": {"const": "quote"}, "kind": {"const": "sfx"}},
              "required": ["kind", "prompt"], "not": {"anyOf": [
-                {"required": ["source"]}, {"required": ["preview"]}, {"required": ["quote_id"]}, {"required": ["job_id"]}]}},
+                {"required": ["source"]}, {"required": ["preview"]}, {"required": ["quote_id"]}, {"required": ["job_id"]},
+                {"required": ["append_seconds"]}, {"required": ["region_start_seconds"]}, {"required": ["region_end_seconds"]}]}},
             {"properties": {"action": {"const": "quote"}, "kind": {"const": "audio_to_midi"}},
              "required": ["kind", "source"], "not": {"anyOf": [
-                {"required": ["prompt"]}, {"required": ["seconds"]}, {"required": ["quote_id"]}, {"required": ["job_id"]}]}},
+                {"required": ["prompt"]}, {"required": ["seconds"]}, {"required": ["quote_id"]}, {"required": ["job_id"]},
+                {"required": ["append_seconds"]}, {"required": ["region_start_seconds"]}, {"required": ["region_end_seconds"]}]}},
+            {"properties": {"action": {"const": "quote"}, "kind": {"const": "video_to_sfx"},
+                 "source": {"not": {"anyOf": [{"required": ["sound_id"]}, {"required": ["map_revision"]}]}}},
+             "required": ["kind", "source"], "not": {"anyOf": [
+                {"required": ["quote_id"]}, {"required": ["job_id"]}, {"required": ["append_seconds"]},
+                {"required": ["region_start_seconds"]}, {"required": ["region_end_seconds"]}]}},
+            {"properties": {"action": {"const": "quote"}, "kind": {"const": "extend"}},
+             "required": ["kind", "source"],
+             "anyOf": [{"required": ["preview"], "properties": {"preview": {"const": true}}}, {"required": ["append_seconds"]}],
+             "not": {"anyOf": [
+                {"required": ["seconds"]}, {"required": ["quote_id"]}, {"required": ["job_id"]},
+                {"required": ["region_start_seconds"]}, {"required": ["region_end_seconds"]}]}},
+            {"properties": {"action": {"const": "quote"}, "kind": {"const": "inpaint"}},
+             "required": ["kind", "source"],
+             "anyOf": [{"required": ["preview"], "properties": {"preview": {"const": true}}},
+                 {"required": ["region_start_seconds", "region_end_seconds"]}],
+             "not": {"anyOf": [
+                {"required": ["seconds"]}, {"required": ["append_seconds"]}, {"required": ["quote_id"]}, {"required": ["job_id"]}]}},
             {"properties": {"action": {"const": "create"}}, "required": ["quote_id"], "not": {"anyOf": [
                 {"required": ["kind"]}, {"required": ["prompt"]}, {"required": ["seconds"]}, {"required": ["source"]},
-                {"required": ["preview"]}, {"required": ["job_id"]}]}},
+                {"required": ["preview"]}, {"required": ["job_id"]}, {"required": ["append_seconds"]},
+                {"required": ["region_start_seconds"]}, {"required": ["region_end_seconds"]}]}},
             {"properties": {"action": {"const": "job"}}, "required": ["job_id"], "not": {"anyOf": [
                 {"required": ["kind"]}, {"required": ["prompt"]}, {"required": ["seconds"]}, {"required": ["source"]},
-                {"required": ["preview"]}, {"required": ["quote_id"]}]}}
+                {"required": ["preview"]}, {"required": ["quote_id"]}, {"required": ["append_seconds"]},
+                {"required": ["region_start_seconds"]}, {"required": ["region_end_seconds"]}]}}
         ]
     })
 }
@@ -62,11 +91,7 @@ pub fn schema() -> Value {
 fn effect(args: &JsonObject) -> Effect {
     match args.get("action").and_then(Value::as_str) {
         Some("create") => Effect::Paid,
-        Some("quote")
-            if args.get("kind").and_then(Value::as_str) == Some("audio_to_midi") && args.get("preview") != Some(&Value::Bool(true)) =>
-        {
-            Effect::Upload
-        }
+        Some("quote") if args.contains_key("source") && args.get("preview") != Some(&Value::Bool(true)) => Effect::Upload,
         _ => Effect::Read,
     }
 }
@@ -78,7 +103,7 @@ pub struct Generation {
 }
 #[derive(Default)]
 struct Pending {
-    previews: HashMap<CallKey, (u64, Rc<Pin>)>,
+    previews: HashMap<CallKey, (u64, Task, Rc<Pin>)>,
     quotes: HashMap<String, Quote>,
 }
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -98,7 +123,7 @@ impl Generation {
     fn prune(&self) {
         let now = now();
         let mut pending = self.pending.borrow_mut();
-        pending.previews.retain(|_, (expires, _)| *expires > now);
+        pending.previews.retain(|_, (expires, _, _)| *expires > now);
         pending.quotes.retain(|_, quote| quote.public["expires_at"].as_u64().is_some_and(|expires| expires > now));
     }
 }
@@ -190,19 +215,38 @@ fn call_key(host: &Host) -> Result<CallKey, OpError> {
     Ok(CallKey { profile: host.profile_id.clone(), session: host.session_id.clone(), call: call.to_owned() })
 }
 
-async fn quote(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
+async fn quote(ctx: &Ctx, mut call: Call) -> Result<Value, OpError> {
+    if !call.args.contains_key("source") || call.args.get("preview") == Some(&Value::Bool(true)) {
+        return quote_inner(ctx, call).await;
+    }
+    let deadline = Signal::new();
+    call.signal = abort::any([call.signal.clone(), deadline.clone()]);
+    let result = tokio::time::timeout(UPLOAD_QUOTE_LIMIT, quote_inner(ctx, call)).await;
+    deadline.cancel();
+    result.map_err(|_| {
+        refused(
+        "quote_timeout",
+        "Preparing the approved upload exceeded 180 seconds. The upload may have reached Mirelo, but no quote or generation was created.",
+    )
+    })?
+}
+
+async fn quote_inner(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let kind = call.args.get("kind").and_then(Value::as_str).unwrap_or("");
     let task = task(kind)?;
     let key = private_key(&call, true)?;
     let host = call_key(&call.host)?;
     authority(ctx).await?.policy(kind)?;
     let client = client(ctx, key)?;
-    let source = if kind == "audio_to_midi" {
-        let source = call.args.get("source").ok_or_else(|| refused("invalid_request", "Audio-to-MIDI requires one approved source."))?;
+    if call.args.get("preview") != Some(&Value::Bool(true)) && ctx.generation().pending.borrow().quotes.len() >= PENDING {
+        return Err(refused("busy", "Finish an existing generation quote or wait for it to expire."));
+    }
+    let source = if task != Task::TextToSfx {
+        let source = call.args.get("source").ok_or_else(|| refused("invalid_request", "This generation requires one approved source."))?;
         if call.args.get("preview") == Some(&Value::Bool(true)) {
-            let previous = ctx.generation().pending.borrow().previews.get(&host).map(|(_, pin)| pin.clone());
-            if let Some(pin) = previous {
-                if pin.source() != source {
+            let previous = ctx.generation().pending.borrow().previews.get(&host).map(|(_, kind, pin)| (*kind, pin.clone()));
+            if let Some((saved_task, pin)) = previous {
+                if saved_task != task || pin.source() != source {
                     return Err(stale());
                 }
                 return Ok(pin.preview());
@@ -210,74 +254,59 @@ async fn quote(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             if ctx.generation().pending.borrow().previews.len() >= PENDING {
                 return Err(refused("busy", "Finish an existing source approval or wait for it to expire."));
             }
-            let pin = Rc::new(generate_source::preview(ctx, source, &call.signal).await?);
+            let pin = Rc::new(generate_source::preview(ctx, source, task == Task::VideoToSfx, &call.signal).await?);
             let result = pin.preview();
-            ctx.generation().pending.borrow_mut().previews.insert(host, (now() + QUOTE_MS, pin));
+            ctx.generation().pending.borrow_mut().previews.insert(host, (now() + QUOTE_MS, task, pin));
             return Ok(result);
         }
         let saved = ctx.generation().pending.borrow_mut().previews.remove(&host);
         let pin = saved
-            .filter(|(expires, pin)| *expires > now() && pin.source() == source)
-            .map(|(_, pin)| pin)
-            .ok_or_else(|| refused("stale", "The source no longer matches an unexpired upload preview for this host call."))?;
+            .filter(|(expires, saved_task, pin)| *expires > now() && *saved_task == task && pin.source() == source)
+            .map(|(_, _, pin)| pin)
+            .ok_or_else(|| refused("stale", "The source or task no longer matches an unexpired upload preview for this host call."))?;
         let stage = pin.stage(ctx, &call.signal).await?;
         Some((pin, stage))
     } else {
         None
     };
-    if ctx.generation().pending.borrow().quotes.len() >= PENDING {
-        return Err(refused("busy", "Finish an existing generation quote or wait for it to expire."));
-    }
-    let (input, prompt, file, seconds) = if let Some((pin, stage)) = &source {
-        let seconds = generate_source::seconds(ctx, stage, &call.signal).await?;
-        // The copy still has exactly the bytes approved by the preview. Policy is checked again
-        // before the preparation method can upload it; a key or private true flag is not consent.
+    let input::Input { request, mut details } = input::prepare(ctx, &call, task, source.as_ref()).await?;
+    if let Some((pin, stage)) = &source {
+        // Recheck after measurement and immediately before the SDK's preparation can upload.
+        // A private true flag or an environment key is never stored producer consent.
         authority(ctx).await?.policy(kind)?;
         stage.verify()?;
         pin.current(ctx, &call.signal).await?;
-        (json!({"audio": stage.path(), "duration_ms": (seconds * 1000.0).ceil() as u64}), Value::Null, json!(pin.name), seconds)
-    } else {
-        let prompt = call.args.get("prompt").and_then(Value::as_str).unwrap_or("");
-        let prompt = super::change::one_line(prompt, 500);
-        let seconds = call.args.get("seconds").and_then(Value::as_f64).unwrap_or(5.0);
-        let millis = (seconds * 1000.0).round();
-        if prompt.trim().is_empty() || !millis.is_finite() || !(1.0..=9_007_199_254_740_991.0).contains(&millis) {
-            return Err(refused("invalid_request", "Use a nonempty sound description and a positive supported duration."));
-        }
-        let seconds = millis / 1000.0;
-        (json!({"prompt": prompt, "duration_ms": millis as u64}), json!(prompt), Value::Null, seconds)
-    };
+    }
     call.progress.report(
         0.0,
         None,
         Some(if source.is_some() { "Preparing the approved Mirelo upload and estimate" } else { "Reading Mirelo's estimate" }),
     );
-    let uploads = mirelo::Uploads {
-        audio: source
-            .as_ref()
-            .map(|(_, stage)| {
-                Ok::<_, OpError>(mirelo::Upload {
-                    file: stage
-                        .opened()
-                        .try_clone()
-                        .map_err(|_| refused("invalid_source", "The approved copy could not be opened for upload."))?,
-                    extension: stage.path().extension().and_then(|extension| extension.to_str()).unwrap_or(""),
-                })
-            })
-            .transpose()?,
-        video: None,
-    };
-    let prepared = client.prepare(task, &input, uploads, &call.signal).await.map_err(provider)?;
+    let mut uploads = mirelo::Uploads::default();
+    if let Some((_, stage)) = &source {
+        let upload = mirelo::Upload {
+            file: stage.opened().try_clone().map_err(|_| refused("invalid_source", "The approved copy could not be opened for upload."))?,
+            extension: stage.path().extension().and_then(|extension| extension.to_str()).unwrap_or(""),
+        };
+        if task == Task::VideoToSfx {
+            uploads.video = Some(upload);
+        } else {
+            uploads.audio = Some(upload);
+        }
+    }
+    let prepared = client.prepare(task, &request, uploads, &call.signal).await.map_err(provider)?;
     check(&call.signal)?;
-    let public = json!({
-        "state": "quoted", "quote_id": format!("q-{:032x}", rand::random::<u128>()), "kind": kind,
-        "prompt": prompt, "file": file, "seconds": seconds,
-        "estimate": {"credits": prepared.credits(), "max_credits": prepared.credits()},
-        "credit_unit": "mirelo_credits", "upload": source.is_some(), "expires_at": now() + QUOTE_MS,
-        "request_sha256": prepared.request_sha256(),
-        "summary": if source.is_some() { format!("One audio-to-MIDI transcription ({seconds:.3} seconds)") }
-            else { format!("One {seconds}-second sound effect") }
-    });
+    let public = details.as_object_mut().ok_or_else(stale)?;
+    public.extend([
+        ("state".into(), json!("quoted")),
+        ("quote_id".into(), json!(format!("q-{:032x}", rand::random::<u128>()))),
+        ("estimate".into(), json!({"credits": prepared.credits(), "max_credits": prepared.credits()})),
+        ("credit_unit".into(), json!("mirelo_credits")),
+        ("upload".into(), json!(source.is_some())),
+        ("expires_at".into(), json!(now() + QUOTE_MS)),
+        ("request_sha256".into(), json!(prepared.request_sha256())),
+    ]);
+    let public = details;
     if ctx.generation().pending.borrow().quotes.len() >= PENDING {
         return Err(refused("busy", "Other quotes filled this profile's pending slots; no billed generation was submitted."));
     }
@@ -431,8 +460,10 @@ async fn create(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         &native,
         &generate_output::receipt(&public, private["reserved_credits"].as_u64().unwrap(), None, "not_submitted", None)?,
     )?;
-    Ok(json!({"state": "running", "job_id": native, "quote_id": public["quote_id"], "kind": public["kind"],
-        "prompt": public["prompt"], "seconds": public["seconds"], "estimate": public["estimate"], "credit_unit": "mirelo_credits"}))
+    let mut response = json!({"state": "running", "job_id": native, "quote_id": public["quote_id"], "kind": public["kind"],
+        "prompt": public["prompt"], "seconds": public["seconds"], "estimate": public["estimate"], "credit_unit": "mirelo_credits"});
+    generate_output::request_metadata(&public, &mut response)?;
+    Ok(response)
 }
 
 async fn finish(
@@ -614,6 +645,9 @@ fn task(kind: &str) -> Result<Task, OpError> {
     match kind {
         "sfx" => Ok(Task::TextToSfx),
         "audio_to_midi" => Ok(Task::AudioToMidi),
+        "video_to_sfx" => Ok(Task::VideoToSfx),
+        "extend" => Ok(Task::Extend),
+        "inpaint" => Ok(Task::Inpaint),
         _ => Err(refused("invalid_request", "This generation kind is not supported.")),
     }
 }

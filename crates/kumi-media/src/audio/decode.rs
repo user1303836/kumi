@@ -282,7 +282,7 @@ pub async fn open_audio_to_with_options(
 }
 /// An explicitly approved program may be canonicalized to a local verbatim disk
 /// path on Windows. No UNC, generic device or NT namespace is an approved local disk.
-fn local_decoder_path(path: &Path, named: &str) -> bool {
+pub(crate) fn local_decoder_path(path: &Path, named: &str) -> bool {
     if !path.is_absolute() || named.chars().any(char::is_control) {
         return false;
     }
