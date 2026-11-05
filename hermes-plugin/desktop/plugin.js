@@ -83,7 +83,11 @@ var en = {
     lookFirst: "Ask Hermes to look again before another change.",
     restored: "Kumi put back what it changed meanwhile.",
     restoreUnsure: "Kumi isn’t sure it put everything back.",
-    restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`
+    restartedSince: (daw) => `Kumi restarted since this change, so it can't undo it safely: undo it in ${daw} if it's still the latest step there, or ask Hermes to set it back.`,
+    dawUndo: (daw, keys) => `Undo in ${daw} (${keys}), if nothing has changed there since`,
+    dawUndoTitle: (daw, keys) => `Press ${keys} in ${daw} once, right away, if nothing has changed there since: it takes back that whole change.`,
+    byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
+    byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
   },
   job: {
     scanning: "Scanning",
@@ -372,7 +376,11 @@ var ja = {
     lookFirst: "次の変更の前に、Hermes にもう一度確認してもらってください。",
     restored: "その間に変えたものは Kumi が元に戻しました。",
     restartedSince: (daw) => `この変更のあと Kumi が再起動したため、安全に取り消せません。${daw} でまだ最後の操作なら ${daw} で取り消すか、Hermes に元に戻すよう頼んでください。`,
-    restoreUnsure: "すべて元に戻せたか Kumi は確信できません。"
+    restoreUnsure: "すべて元に戻せたか Kumi は確信できません。",
+    dawUndo: (daw, keys) => `${daw} で取り消す（${keys}）。その後 ${daw} で何も変えていなければ`,
+    dawUndoTitle: (daw, keys) => `その後 ${daw} で何も変えていなければ、すぐに ${keys} を一度押してください。その変更全体が取り消されます。`,
+    byHand: (daw) => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
+    byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
   },
   job: {
     scanning: "スキャン中",
@@ -660,7 +668,11 @@ var zh = {
     lookFirst: "下一次改动之前，请让 Hermes 重新查看。",
     restored: "Kumi 已还原期间做出的改动。",
     restartedSince: (daw) => `此改动之后 Kumi 已重启，无法安全撤销：如果它仍是 ${daw} 中的最后一步，请在 ${daw} 中撤销，或让 Hermes 把它改回去。`,
-    restoreUnsure: "Kumi 不确定是否已全部还原。"
+    restoreUnsure: "Kumi 不确定是否已全部还原。",
+    dawUndo: (daw, keys) => `在 ${daw} 中撤销（${keys}），前提是之后那里没有任何改动`,
+    dawUndoTitle: (daw, keys) => `如果之后在 ${daw} 中没有任何改动，请立即按一次 ${keys}：它会撤回这整个改动。`,
+    byHand: (daw) => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
+    byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
   },
   job: {
     scanning: "正在扫描",
@@ -2158,12 +2170,23 @@ function FocusView({ focus, now }) {
     focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx3("span", { style: S.faint, children: t("focus.lastHeard", ago(focus.heard_at, now, t)) })
   ] });
 }
+function undoKeys(target) {
+  const on = typeof target === "string" && target ? target : globalThis.navigator?.userAgent ?? "";
+  return /apple-darwin|Mac/.test(on) ? "Cmd+Z" : "Ctrl+Z";
+}
+function DawUndo({ daw, how, keys }) {
+  const t = useT();
+  const app = dawName(daw, t);
+  if (how === "buried") return /* @__PURE__ */ jsx3(Chip, { title: t("history.byHandTitle", app), children: t("history.byHand", app) });
+  return /* @__PURE__ */ jsx3(Chip, { title: t("history.dawUndoTitle", app, keys), children: t("history.dawUndo", app, keys) });
+}
 function HistoryView({
   history,
   now,
   action,
   live = false,
-  daw
+  daw,
+  target
 }) {
   const t = useT();
   const items = history?.items ?? [];
@@ -2186,7 +2209,7 @@ function HistoryView({
           item.note ? /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 200) }) : restartedSince(item, live) && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
         )
       ] }),
-      action?.(item)
+      item.state === "applied" && (item.daw_undo === "next" || item.daw_undo === "buried") ? /* @__PURE__ */ jsx3(DawUndo, { daw, how: item.daw_undo, keys: undoKeys(target) }) : action?.(item)
     ] }, item.id);
   }) });
 }
@@ -2335,6 +2358,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
               history: state.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,
               now,
+              target: state.setup?.target,
               action: (item) => {
                 const rows = changeOf.get(item);
                 if (!rows || undoRowOf(rows) !== item || !canUndoChange(state.status, rows)) return null;

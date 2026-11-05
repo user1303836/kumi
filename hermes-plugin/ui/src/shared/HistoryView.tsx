@@ -87,20 +87,40 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
   )
 }
 
+/** The DAW's undo key on the machine Kumi runs on: `/setup`'s target (an `apple-darwin` build is a Mac), since a
+ *  Webapp can be open on another machine than the DAW's (CC-20f; serve picks its words by its own OS). The browser's
+ *  own OS only when setup hasn't said. */
+export function undoKeys(target: unknown): string {
+  const on = typeof target === 'string' && target ? target : globalThis.navigator?.userAgent ?? ''
+  return /apple-darwin|Mac/.test(on) ? 'Cmd+Z' : 'Ctrl+Z'
+}
+
+/** How to take back a row only the DAW's own undo can reverse (CC-20): its key while serve knows it's the DAW's next
+ *  undo, or by hand once a later Kumi change sits above it there (the DAW's undo would take that back first). Words,
+ *  never a request: Kumi would refuse it. */
+function DawUndo({ daw, how, keys }: { daw: unknown; how: 'next' | 'buried'; keys: string }) {
+  const t = useT()
+  const app = dawName(daw, t)
+  if (how === 'buried') return <Chip title={t('history.byHandTitle', app)}>{t('history.byHand', app)}</Chip>
+  return <Chip title={t('history.dawUndoTitle', app, keys)}>{t('history.dawUndo', app, keys)}</Chip>
+}
+
 /** HISTORY's rows. `live`: the runtime answers now (connected, not stale), so a row without undo was a restart's;
- *  `daw` names where to undo it then. */
+ *  `daw` names where to undo it then; `target` is Kumi's build target (`/setup`), for the DAW's undo key. */
 export function HistoryView({
   history,
   now,
   action,
   live = false,
-  daw
+  daw,
+  target
 }: {
   history: History | null
   now?: number
   action?: (item: HistoryItem) => ReactNode
   live?: boolean
   daw?: unknown
+  target?: string
 }) {
   const t = useT()
   const items = history?.items ?? []
@@ -142,7 +162,7 @@ export function HistoryView({
                 )
               )}
             </span>
-            {action?.(item)}
+            {item.state === 'applied' && (item.daw_undo === 'next' || item.daw_undo === 'buried') ? <DawUndo daw={daw} how={item.daw_undo} keys={undoKeys(target)} /> : action?.(item)}
           </li>
         )
       })}
