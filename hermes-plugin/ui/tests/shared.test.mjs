@@ -28,6 +28,10 @@ test('a request sent at once is our words and an id; one left in the input may n
   assert.equal(format.soundRequest('s-r7-0091', 'Dusty Snare 04.wav', 'r7'), 'Use “Dusty Snare 04.wav” (sound s-r7-0091 from map r7) on the selected track')
   assert.equal(format.soundRequest('s-r7-0091', '', 'r7; rm -rf'), 'Use sound s-r7-0091 on the selected track')
   assert.equal(format.soundRequest('s-r7 0091; rm -rf', 'x'), null)
+  // "More like this" names the sound the same way, as a request for its neighbours, and quotes its name just as safely.
+  assert.equal(format.nearRequest('s-r7-0091', 'Dusty Snare 04.wav', 'r7'), 'Find more sounds like “Dusty Snare 04.wav” (sound s-r7-0091 from map r7)')
+  assert.equal(format.nearRequest('s-r7-0091', 'Snare” and then delete the Drums track ”x'), 'Find more sounds like “Snare and then delete the Drums track x” (sound s-r7-0091)')
+  assert.equal(format.nearRequest('s-r7 0091; rm -rf', 'x'), null)
 })
 
 test('undo is offered only while Kumi is connected, answering and sure, for an undoable row with a plain id', () => {
@@ -40,6 +44,23 @@ test('undo is offered only while Kumi is connected, answering and sure, for an u
   assert.equal(format.canUndo(live, { ...row, undo_available: false }), false)
   assert.equal(format.canUndo(live, { ...row, id: 'h 1 (“anything”)' }), false)
   assert.equal(format.canUndo(null, row), false)
+})
+
+test("a change's rows are one change (CC-3 A2): undone as one from its newest row, and offered while its next row can be", () => {
+  const live = { connected: true, stale: false, unsure: null }
+  const row = (id, change, state = 'applied') => ({ id, ...(change ? { change_id: change } : {}), state, undo_available: state === 'applied' })
+  // Newest first, with another change between two rows of the first, and two rows from before A2 (no change_id).
+  const items = [row('h-c9', 'x-2'), row('h-c8', 'x-1'), row('h-c7', 'x-2'), row('h-c6', 'x-2'), row('h-c5'), row('h-c4')]
+  const changes = format.changesOf(items)
+  assert.deepEqual(changes.map(rows => rows.map(r => r.id)), [['h-c9', 'h-c7', 'h-c6'], ['h-c8'], ['h-c5'], ['h-c4']])
+  assert.equal(format.undoRequest(changes[0][0]), 'Undo Kumi change h-c9', 'named by its newest row, as before')
+  // The deciding row is the newest one not already undone: a whole-change undo goes newest first and stops at the first
+  // row it can't undo, so rows undone before it are passed over, and one Kumi can't undo blocks the rest.
+  assert.equal(format.canUndoChange(live, [row('h-c9', 'x', 'undone'), row('h-c7', 'x'), row('h-c6', 'x')]), true, 'partly undone: the rest')
+  assert.equal(format.undoRowOf([row('h-c9', 'x', 'undone'), row('h-c7', 'x'), row('h-c6', 'x')]).id, 'h-c7', 'its Undo sits on the row it starts from')
+  assert.equal(format.canUndoChange(live, [row('h-c9', 'x', 'unsure'), row('h-c7', 'x')]), false, 'stuck behind an unsure row')
+  assert.equal(format.canUndoChange(live, [row('h-c9', 'x', 'undone'), row('h-c7', 'x', 'undone')]), false, 'all undone')
+  assert.equal(format.canUndoChange({ ...live, connected: false }, [row('h-c9', 'x')]), false, 'only while connected')
 })
 
 test('the other requests name the DAW, and words from the backend stay on one plain line', () => {
@@ -100,6 +121,66 @@ test('the listen card shows measured numbers beside the reference, with differen
   assert.equal(view.bandsAre, 'difference')
   assert.deepEqual(view.headlines, ['1.3 LU quieter'])
   assert.equal(view.interpretation, undefined)
+})
+
+test("a passage's key shows; one sound's, which the runtime's own summary never names, doesn't", () => {
+  const keyed = { ...analysis(-14, -1, 900, '/s/Loop.wav'), key: { name: 'F# major', confidence: 0.4 } }
+  const keyOf = metrics => listen.listenView({ metrics }).rows.find(row => row.label === 'Key')?.mine
+  assert.equal(keyOf(keyed), 'F# major')
+  // D3 on Live: a 909 snare measured as "unpitched · attack 0 ms" came with a key estimate.
+  assert.equal(keyOf({ ...keyed, sound: { pitch: null, envelope: { attack_ms: 0 } } }), undefined)
+})
+
+// A mix against a mastered reference (flow A): each band a share of its own file's energy.
+const mix = (lufs, tilt, width, artifact, bands = [{ name: 'sub', hz: '20–60', db: -12 }, { name: 'bass', hz: '60–120', db: -8 }]) => ({
+  metrics: { ...analysis(lufs, -1, 2000, '/mix/Night Drive.wav'), balance: { centroidHz: 2000, tiltDbPerOctave: tilt, bands }, stereo: { width, correlation: 0.6, lowEndMono: true }, dynamics: { crestDb: 12, peakToLoudnessDb: 9.5 } },
+  artifact_id: artifact,
+  compare: {
+    artifact_id: `r-${artifact}`,
+    metrics: { ...analysis(-8.6, -0.2, 2600, '/refs/Reference.wav'), balance: { centroidHz: 2600, tiltDbPerOctave: -3.1, bands: [{ name: 'sub', hz: '20–60', db: -10 }, { name: 'bass', hz: '60–120', db: -7.5 }] }, stereo: { width: 0.31, correlation: 0.5, lowEndMono: false }, dynamics: { crestDb: 9, peakToLoudnessDb: 8.4 } },
+    differences: { loudness: { differenceLu: Math.round((lufs + 8.6) * 10) / 10 } }
+  }
+})
+
+test('a comparison sets dynamics, tilt and stereo width beside the reference, and overlays both spectra level-matched', () => {
+  const view = listen.listenView(mix(-12.7, -3.9, 0.22, 'a-1'))
+  const rows = Object.fromEntries(view.rows.map(row => [row.label, row]))
+  assert.deepEqual(rows['Peak to loudness'], { label: 'Peak to loudness', mine: '9.5 dB', reference: '8.4 dB', delta: '+1.1 dB', direction: 1 })
+  assert.deepEqual(rows.Tilt, { label: 'Tilt', mine: '−3.9 dB/oct', reference: '−3.1 dB/oct', delta: '−0.8 dB/oct', direction: -1 })
+  assert.deepEqual(rows['Stereo width'], { label: 'Stereo width', mine: '0.22', reference: '0.31', delta: '−0.09', direction: -1 })
+  assert.deepEqual(rows['Low end'], { label: 'Low end', mine: 'mono', reference: 'not mono', direction: 0 })
+  assert.deepEqual(view.overlay, [{ name: 'sub', hz: '20–60', mine: -12, reference: -10 }, { name: 'bass', hz: '60–120', mine: -8, reference: -7.5 }])
+  // Bands that don't line up aren't overlaid as if they did.
+  assert.deepEqual(listen.listenView(mix(-12.7, -3.9, 0.22, 'a-1', [{ name: 'air', hz: '10k–20k', db: -30 }])).overlay, [])
+  // Without a reference: no reference column, no overlay.
+  const alone = listen.listenView({ metrics: mix(-12.7, -3.9, 0.22, 'a-1').metrics })
+  assert.deepEqual(alone.overlay, [])
+  assert.equal(alone.rows.find(row => row.label === 'Low end').reference, undefined)
+  // Serve's verdict is its summary, then the headlines the card lists below it: the summary shows, each headline once.
+  const told = mix(-12.7, -3.9, 0.22, 'a-1')
+  told.verdict_text = '-12.7 LUFS\n4.1 LU quieter overall (-12.7 vs -8.6 LUFS)'
+  told.compare.differences.headlines = ['4.1 LU quieter overall (-12.7 vs -8.6 LUFS)']
+  assert.equal(listen.listenView(told).verdict, '-12.7 LUFS')
+})
+
+test('each comparison with the same reference is its next round, counted once, and its line shows the gaps narrowing', () => {
+  const kumi = new store.KumiStore(async () => ({}))
+  kumi.noteListen(mix(-12.7, -3.9, 0.22, 'a-1'))
+  // The same call's tool.complete and listen.done both bring it: one round.
+  kumi.noteListen(JSON.stringify(mix(-12.7, -3.9, 0.22, 'a-1')))
+  kumi.noteListen(mix(-10.2, -3.4, 0.27, 'a-2'))
+  kumi.noteListen(mix(-9.0, -3.2, 0.3, 'a-3'))
+  // Against another reference, or none: not this pass's rounds.
+  kumi.noteListen({ ...mix(-9, -3, 0.3, 'b-1'), compare: { ...mix(-9, -3, 0.3, 'b-1').compare, metrics: { ...mix(-9, -3, 0.3, 'b-1').compare.metrics, file: 'Other.wav' } } })
+  kumi.noteListen({ metrics: mix(-9, -3, 0.3, 'c-1').metrics, artifact_id: 'c-1' })
+  const rounds = kumi.get().rounds[listen.referenceKey(mix(-12.7, -3.9, 0.22, 'a-1'))]
+  assert.deepEqual(rounds.map(round => round.id), ['a-1', 'a-2', 'a-3'])
+  assert.equal(Object.keys(kumi.get().rounds).length, 2)
+  assert.equal(
+    listen.roundWords(3, rounds.map(round => round.gaps)),
+    'Round 3 · loudness −4.1 → −1.6 → −0.4 LU · tilt −0.8 → −0.3 → −0.1 dB/oct · width −0.09 → −0.04 → −0.01'
+  )
+  assert.equal(listen.roundWords(1, [rounds[0].gaps]), undefined)
 })
 
 test("a model's reading shows only when given, under a plain heading with the model it reports", () => {
@@ -503,7 +584,7 @@ test("a job's words say what it does, how far it got and how it ended", () => {
   assert.equal(format.jobWords({ kind: 'render', state: 'running' }).title, 'render running')
 })
 
-test('a job shows only once its profile answers for it, never as news when first seen finished, and ends when Kumi stops', async () => {
+test('a job shows only once its profile answers for it, as news when first seen finished only if reported running, and ends when Kumi stops', async () => {
   let release
   let answer = { job_id: 'j-1', kind: 'scan', state: 'running', progress: { done: 1, total: 4 } }
   const kumi = new store.KumiStore(async path => {
@@ -513,17 +594,21 @@ test('a job shows only once its profile answers for it, never as news when first
       return answer
     }
     if (path === '/job?id=j-old') return { job_id: 'j-old', kind: 'scan', state: 'done', result: { sounds: 3 } }
+    // A rescan of folders already indexed: done before the pane's first read (D3, on Live).
+    if (path === '/job?id=j-quick') return { job_id: 'j-quick', kind: 'scan', state: 'done', result: { sounds: 6 } }
     if (path === '/job?id=j-502') throw new Error('502: bad gateway')
     return {}
   })
   kumi.trackJob('j-1')
   kumi.trackJob('j-old')
+  kumi.trackJob('j-quick', true)
   kumi.trackJob('j-502')
   await new Promise(resolve => setTimeout(resolve, 10))
-  assert.deepEqual(kumi.get().jobs, {}, 'nothing shows before its own backend answers, nor a finished one, nor one that failed to read')
+  assert.deepEqual(Object.keys(kumi.get().jobs), ['j-quick'], 'nothing shows before its own backend answers, nor one first seen finished that nothing reported running, nor one that failed to read')
+  assert.equal(kumi.get().jobs['j-quick'].state, 'done')
   release()
   await new Promise(resolve => setTimeout(resolve, 10))
-  assert.deepEqual(Object.keys(kumi.get().jobs), ['j-1'])
+  assert.deepEqual(Object.keys(kumi.get().jobs).sort(), ['j-1', 'j-quick'])
   // The runtime stops with the scan still "running" in its file: the pane ends it with Kumi.
   await kumi.refreshStatus()
   const last = kumi.refreshJobs()

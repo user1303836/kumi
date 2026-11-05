@@ -260,6 +260,9 @@ pub static REFERENCE_FIELDS: LazyLock<Vec<String>> = LazyLock::new(|| serde_json
 pub static UNDO_DESCRIPTION: LazyLock<String> = LazyLock::new(|| DATA["undoDescription"].as_str().unwrap().into());
 pub const UNDO_TOOL: &str = "undo_change";
 pub const EMERGENCY_STOP: &str = "live_session_emergency_stop";
+/// The changes whose undo takes out a device the change made: a device or preset loaded, a device duplicated, a sample
+/// loaded into a new Simpler or onto a pad. Kumi's undo of one runs inside one Live undo step (#1101).
+pub const MAKES_A_DEVICE: [&str; 5] = ["load_device", "duplicate_device", "load_sample", "load_sample_to_pad", "load_samples_to_pads"];
 pub use kumi_types::picture::format_number;
 pub fn note_name(note: f64) -> String {
     let index = note % 12.0;
@@ -801,6 +804,10 @@ impl ChangeKind {
         }
         schema.as_object().unwrap().clone()
     }
+    /// Whether Kumi's undo of this change takes out a device the change made ([`MAKES_A_DEVICE`]).
+    pub fn makes_a_device(&self) -> bool {
+        MAKES_A_DEVICE.contains(&self.tool.as_str())
+    }
     pub fn produces(&self, applied: &JsonObject) -> Option<Produced> {
         let (reference, kind) = match self.tool.as_str() {
             "add_tracks_and_scenes" | "group_tracks" => (
@@ -835,8 +842,11 @@ impl ChangeKind {
     pub fn permanent(&self, input: &JsonObject) -> Option<String> {
         let action = input.get("action").and_then(Value::as_str);
         let why = match self.tool.as_str() {
+            // The step says add-chain for the bridge's insert-chain: either spelling, before or after it's prepared.
             "edit_rack" => match action {
-                Some("insert-chain") => "Live gives Kumi no way to take a chain away again; delete it in Live if you don't want it.",
+                Some("insert-chain" | "add-chain") => {
+                    "Live gives Kumi no way to take a chain away again; delete it in Live if you don't want it."
+                }
                 Some("delete-variation") => "Live gives Kumi no way to bring a deleted variation back.",
                 _ => return None,
             },

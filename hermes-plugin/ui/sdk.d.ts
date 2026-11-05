@@ -134,7 +134,18 @@ declare module '@hermes/plugin-sdk' {
     navigate: (path: string) => void
     onEvent: (type: string, fn: (event: GatewayEvent) => void) => () => void
     composer?: HostComposer
-    openWorkspace?: (id: string, options: { title?: string; minWidth?: string; render: () => ReactNode; onClose?: () => void }) => () => void
+    /** `dock` places a new tab: `{pane: 'workspace', pos: 'center'}` (the default) is a tab over the chat; `right`
+     *  splits the main area so the chat stays in view. Re-opening an open id fronts it where it is. */
+    openWorkspace?: (
+      id: string,
+      options: {
+        title?: string
+        minWidth?: string
+        render: () => ReactNode
+        onClose?: () => void
+        dock?: { pane: string; pos: 'bottom' | 'center' | 'left' | 'right' | 'top'; before?: string | null }
+      }
+    ) => () => void
     openSession?: (id: string, options?: { intent?: 'in-place' | 'stack' | 'tab' | 'window'; profile?: string }) => unknown
     paneVisibility?: (paneId: string) => ReadableAtom<boolean>
     state: {

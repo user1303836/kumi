@@ -8,7 +8,10 @@ import io
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
+import textwrap
 import time
 from types import SimpleNamespace
 import unittest
@@ -98,7 +101,6 @@ class Doctor(unittest.TestCase):
         cases = (("approvals.mode: off", {"approvals": {"mode": "off"}}, doctor.FIX, "approvals.mode: manual"),
                  ("one-shot runs approved", {"approvals": {"mode": "manual", "single_query_mode": "approve"}},
                   doctor.FIX, "single_query_mode: deny"),
-                 ("smart (Hermes's default)", {"approvals": {"mode": "smart"}}, doctor.CHECK, "approvals.mode: manual"),
                  ("plugin host", {**ASKS, "plugins": {"isolation": "host"}}, doctor.FIX, "plugins.isolation: in_process"))
         for name, hermes, state, fix in cases:
             with self.subTest(name):
@@ -109,6 +111,42 @@ class Doctor(unittest.TestCase):
         with self.subTest("--yolo"), mock.patch.dict("os.environ", {"HERMES_YOLO_MODE": "1"}):
             host, _, _ = self.ready()
             self.assertEqual(self.item(doctor.checks(host), "Approvals")["state"], doctor.FIX)
+
+    def test_smart_approvals_still_ask_before_each_kumi_change(self):
+        """Hermes's default guardian (approvals.mode: smart) reviews terminal commands and code, never a plugin's
+        approval, so smart is no reason to look: the first-hour baseline saw every Kumi change asked under it."""
+        host, _, _ = self.ready({"approvals": {"mode": "smart"}})
+        approvals = self.item(doctor.checks(host), "Approvals")
+        self.assertEqual(approvals["state"], doctor.OK, approvals)
+        self.assertIn("approvals.mode: smart", approvals["detail"])
+
+    def test_hermes_asks_the_person_not_its_guardian_for_a_kumi_approval(self):
+        """The premise of the smart row (rgzm, #1093), on Hermes's own approval engine where it's installed (CI's run of
+        these tests on Hermes's Python; elsewhere this skips). A clean interpreter turns approvals.mode to smart and
+        gives the guardian a verdict that would approve. A Kumi approval still goes to the person, who says no. A
+        Hermes whose guardian answered a plugin's approval would say "guardian" here, and the doctor's OK would be
+        wrong."""
+        script = textwrap.dedent("""
+            import json
+            from tools import approval, approval_context
+            asked = []
+            approval_context._get_approval_mode = lambda: "smart"
+            approval._smart_verdict = lambda *args, **kwargs: (asked.append("guardian"), "approve")[1]
+            result = approval.request_tool_approval(
+                "kumi_change", "Kumi: Bass volume -3 dB", rule_key="kumi:premise",
+                approval_callback=lambda *args, **kwargs: (asked.append("person"), "deny")[1])
+            print(json.dumps({"asked": asked, "approved": bool(result.get("approved"))}))
+        """)
+        with tempfile.TemporaryDirectory() as home:
+            env = {name: value for name, value in os.environ.items()
+                   if name not in ("HERMES_EXEC_ASK", "HERMES_GATEWAY_SESSION", "HERMES_YOLO_MODE", "HERMES_CRON_SESSION")}
+            env.update(HERMES_HOME=home, HERMES_INTERACTIVE="1", PYTHONDONTWRITEBYTECODE="1")
+            done = subprocess.run([sys.executable, "-B", "-c", script], capture_output=True, text=True, env=env,
+                                  cwd=home, timeout=120)
+        if "No module named 'tools'" in done.stderr:
+            self.skipTest("Hermes isn't installed for this Python: CI runs this on Hermes's own")
+        self.assertEqual(done.returncode, 0, done.stderr[-2000:])
+        self.assertEqual(json.loads(done.stdout.strip().splitlines()[-1]), {"asked": ["person"], "approved": False})
 
     def test_a_chats_yolo_counts_in_the_chat_and_a_terminal_says_it_cant_see_it(self):
         approval = SimpleNamespace(is_current_session_yolo_enabled=lambda: True)

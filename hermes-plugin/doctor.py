@@ -89,15 +89,18 @@ def _approvals(host: tools.Host, config: dict, *, chat: bool) -> dict:
     if gaps:
         return _item(name, FIX, " ".join(gaps),
                      "Set approvals.single_query_mode: deny and delegation.subagent_auto_approve: false in config.yaml.")
-    mode = _section(config, "approvals").get("mode", "manual")
-    if isinstance(mode, str) and mode.strip().lower() == "smart":
-        return _item(name, CHECK, "Hermes's approvals are smart (its default): Hermes's guardian approves some calls "
-                                  "itself, so a Kumi change may run without asking you.",
-                     "For Hermes to ask you before each Kumi change, set approvals.mode: manual in config.yaml.")
     if bypassed is None:
         return _item(name, CHECK, tools.UNKNOWN_APPROVALS, "Check that /yolo is off in this chat.")
     seen = "" if chat else " A terminal can't see a chat's /yolo: check that it's off where you use Kumi."
-    return _item(name, OK, f"Hermes asks before each Kumi change (approvals.mode: manual).{seen}")
+    # Hermes's default, approvals.mode: smart, puts a guardian model in front of terminal commands and code only: a
+    # plugin's approval goes through Hermes's action gate, which never asks it (0.22.7's tools/approval.py calls
+    # _human_decision(_ACTION_GATE, …) without smart). So Hermes still asks before each Kumi change; research-1's
+    # first-hour baseline saw every change asked under smart.
+    mode = _section(config, "approvals").get("mode", "manual")
+    smart = isinstance(mode, str) and mode.strip().lower() == "smart"
+    how = ("approvals.mode: smart, whose guardian reviews commands and code, never Kumi's changes" if smart
+           else "approvals.mode: manual")
+    return _item(name, OK, f"Hermes asks before each Kumi change ({how}).{seen}")
 
 
 def _isolation(config: dict) -> dict:

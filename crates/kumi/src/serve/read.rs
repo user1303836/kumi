@@ -193,7 +193,7 @@ fn schema(ctx: &Ctx, tools: &[Rc<dyn KernelTool>], named: Option<&str>, most: us
             .map(|step| {
                 let mut row = json!({"tool": step.tool, "family": step.family});
                 if let Some(tool) = tool_of(step.tool).filter(|_| with_what) {
-                    row["what"] = json!(first_clause(step.description(tool.description())));
+                    row["what"] = json!(first_clause(&step.description(tool.description())));
                 }
                 row
             })

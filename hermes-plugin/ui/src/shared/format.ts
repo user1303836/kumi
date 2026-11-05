@@ -170,9 +170,36 @@ export function canUndo(status: Status | null | undefined, item: HistoryItem | n
   return Boolean(item && status?.connected && !status.stale && !status.unsure && item.undo_available === true && plainId(item.id))
 }
 
-/** Sent as is: the id alone. Only for a row `canUndo` allows. */
+/** Sent as is: the id alone. Only for a row `canUndo` allows, or a change's newest row when `canUndoChange` does: from
+ *  the Nov 6 runtime on, Kumi's skill takes the request as the whole change (CC-3 A2's `whole_change`). */
 export function undoRequest(item: Pick<HistoryItem, 'id'>): string {
   return `Undo Kumi change ${plainId(item.id) ?? ''}`.trim()
+}
+
+/** HISTORY's changes, newest first, each with its rows newest first (CC-3 A2). Rows a `change` call made share its
+ *  `change_id`, even with a newer change listed between them. A row without one is a change of its own: recorded
+ *  before A2, or not by a `change`. */
+export function changesOf(items: readonly HistoryItem[]): HistoryItem[][] {
+  const byChange = new Map<string, HistoryItem[]>()
+  for (const item of items) {
+    const key = typeof item.change_id === 'string' && item.change_id ? `change:${item.change_id}` : `row:${item.id}`
+    const rows = byChange.get(key)
+    if (rows) rows.push(item)
+    else byChange.set(key, [item])
+  }
+  return [...byChange.values()]
+}
+
+/** The row a change's undo starts from: its newest not already undone. A whole-change undo goes newest first and stops
+ *  at the first row it can't undo (A2), so rows undone before it are passed over. Its Undo sits on this row, and the
+ *  request names it (A2 takes any row of the change). */
+export function undoRowOf(rows: readonly HistoryItem[]): HistoryItem | undefined {
+  return rows.find(row => row.state !== 'undone')
+}
+
+/** Whether the UI offers to undo a change now: its next row to undo can be undone. One Kumi can't undo blocks the rest. */
+export function canUndoChange(status: Status | null | undefined, rows: readonly HistoryItem[]): boolean {
+  return canUndo(status, undoRowOf(rows))
 }
 
 // Double quote marks, and the marks that pass for them, which a name could use to close the quotes a drafted request
@@ -217,6 +244,17 @@ export function soundRequest(soundId: string, name?: string, revision?: string |
   const said = quotable(name)
   const which = `sound ${id}${from ? ` from map ${from}` : ''}`
   return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`
+}
+
+/** Left unsent, like Use…: the map's "More like this" asks the model for the sounds nearest this one (a `near`
+ *  search), naming it and its map revision the same way; null for an id the runtime doesn't write. */
+export function nearRequest(soundId: string, name?: string, revision?: string | null): string | null {
+  const id = plainId(soundId)
+  if (!id) return null
+  const from = revision ? plainId(revision) : null
+  const said = quotable(name)
+  const which = `sound ${id}${from ? ` from map ${from}` : ''}`
+  return said ? `Find more sounds like “${said}” (${which})` : `Find more sounds like ${which}`
 }
 
 export function setupRequest(daw: unknown): string {

@@ -664,7 +664,8 @@ impl ObservationHost for Ableton {
         if self.mutations.supported(Some(PYTHON_BRIDGE)) && tools.has("live_run_python") {
             offered.push(self.static_tool("run_python"));
         }
-        if !matches!(self.options.hands, Some(HandsSetup::Disabled))
+        if self.options.policy.menus
+            && !matches!(self.options.hands, Some(HandsSetup::Disabled))
             && (self.options.hands.is_some() || cfg!(any(target_os = "macos", target_os = "windows")))
             && tools.has("live_selection_preview")
         {
