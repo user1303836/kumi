@@ -206,7 +206,8 @@ var en = {
       installed: "installed",
       outdated: "outdated",
       unknown: "unknown"
-    }
+    },
+    partInUse: "in use (Kumi is connected through it)"
   },
   generate: {
     generated: "generated",
@@ -455,7 +456,8 @@ var ja = {
       installed: "インストール済み",
       outdated: "古い版",
       unknown: "不明"
-    }
+    },
+    partInUse: "使用中（Kumi はこれを通じて接続しています）"
   },
   generate: {
     generated: "生成",
@@ -704,7 +706,8 @@ var zh = {
       installed: "已安装",
       outdated: "版本过旧",
       unknown: "未知"
-    }
+    },
+    partInUse: "使用中（Kumi 正通过它连接）"
   },
   generate: {
     generated: "生成",
@@ -2773,7 +2776,8 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const daw = state.status?.daw ?? setup?.daw;
   const runtime = setup?.runtime;
   const component = setup?.daw_component;
-  const setupState = setup?.state ?? "unknown";
+  const partWorks = dawPartWorks(state);
+  const setupState = partWorks ? "ready" : setup?.state ?? "unknown";
   const componentState = component?.state ?? "unknown";
   return /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
     /* @__PURE__ */ jsxs12("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
@@ -2784,7 +2788,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       /* @__PURE__ */ jsxs12("div", { children: [
         /* @__PURE__ */ jsx12("h3", { style: HEADING, children: t("settings.setup") }),
         /* @__PURE__ */ jsx12(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
-        setup?.message && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
+        setup?.message && !partWorks && /* @__PURE__ */ jsx12(Line, { label: t("settings.next"), children: clean(setup.message, 300) }),
         runtime && /* @__PURE__ */ jsxs12(Line, { label: t("settings.runtime"), children: [
           runtime.installed ? t("settings.installed", clean(runtime.version ?? "", 20)) : t("settings.notInstalled"),
           setup?.pinned_version && /* @__PURE__ */ jsxs12("span", { style: S.faint, children: [
@@ -2807,7 +2811,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
           t(
             "settings.componentLine",
             clean(component.name ?? t("settings.dawComponent"), 40),
-            COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ")
+            partWorks ? t("settings.partInUse") : COMPONENT_STATES.has(componentState) ? t(`settings.componentStates.${componentState}`) : clean(componentState, 20).replace("_", " ")
           ),
           component.path && /* @__PURE__ */ jsx12("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
