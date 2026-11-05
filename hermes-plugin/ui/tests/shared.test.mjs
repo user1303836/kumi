@@ -359,7 +359,10 @@ test("a job's words say what it does, how far it got and how it ended", () => {
     fraction: 412 / 1200,
     tone: 'muted'
   })
-  assert.equal(format.jobWords({ kind: 'scan', state: 'done', result: { sounds: 640 } }).detail, '640 sounds')
+  assert.deepEqual(format.jobWords({ kind: 'scan', state: 'done', result: { sounds: 640, measured: 640, failed: 0 } }), { title: 'Scan done', detail: '640 sounds', fraction: 1, tone: 'good' })
+  // Files a scan couldn't read are said, in amber: the producer can look for them.
+  const partly = format.jobWords({ kind: 'scan', state: 'done', result: { sounds: 1, failed: 3, map_revision: 'r8' } })
+  assert.deepEqual([partly.detail, partly.tone], ["1 sound · 3 couldn't be read", 'warn'])
   assert.deepEqual(format.jobWords({ kind: 'scan', state: 'failed', error: { reason: 'the folder went away' } }).title, 'Scan failed')
   assert.equal(format.jobWords({ kind: 'scan', state: 'interrupted' }).tone, 'warn')
   assert.equal(format.jobWords({ kind: 'render', state: 'running' }).title, 'render running')

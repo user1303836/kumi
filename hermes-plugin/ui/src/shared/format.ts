@@ -103,6 +103,12 @@ export function seconds(value: unknown): string {
 // A job's kind as a producer says it: running, and once it ended.
 const JOB_KINDS: Record<string, { running: string; noun: string }> = { scan: { running: 'Scanning', noun: 'Scan' } }
 
+/** A count a job's result gives as a number or as a list of what it counted; null when it gives neither. */
+function count(value: unknown): number | null {
+  if (Array.isArray(value)) return value.length
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
 /** A background job in words: `Scanning` · `Drums · 412 of 1,200`, how much of it is done (0–1, when it's known),
  *  and a tone for its state. */
 export function jobWords(job: Job): { title: string; detail: string; fraction: number | null; tone: 'bad' | 'good' | 'muted' | 'warn' } {
@@ -118,8 +124,11 @@ export function jobWords(job: Job): { title: string; detail: string; fraction: n
   }
   if (job.state === 'done') {
     const result = job.result && typeof job.result === 'object' ? (job.result as Record<string, unknown>) : {}
-    const sounds = typeof result.sounds === 'number' ? `${num(result.sounds, 0)} sound${result.sounds === 1 ? '' : 's'}` : ''
-    return { title: `${named.noun} done`, detail: sounds, fraction: 1, tone: 'good' }
+    // A scan's result (W3): `sounds` indexed, `failed` files it couldn't read, as counts.
+    const sounds = count(result.sounds)
+    const failed = count(result.failed)
+    const detail = [sounds === null ? '' : `${num(sounds, 0)} sound${sounds === 1 ? '' : 's'}`, failed ? `${num(failed, 0)} couldn't be read` : '']
+    return { title: `${named.noun} done`, detail: detail.filter(Boolean).join(' · '), fraction: 1, tone: failed ? 'warn' : 'good' }
   }
   if (job.state === 'failed') return { title: `${named.noun} failed`, detail: clean(job.error?.reason ?? '', 120), fraction: null, tone: 'bad' }
   if (job.state === 'cancelled') return { title: `${named.noun} stopped`, detail: '', fraction: null, tone: 'muted' }
