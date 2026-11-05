@@ -106,11 +106,15 @@ jobs:
           cache-dependency-path: crates/kumi-agent/tests/support/package-lock.json
       - name: Install the official MCP and model SDKs the interoperability tests run beside Kumi's
         run: npm ci --prefix crates/kumi-agent/tests/support --ignore-scripts
+      # The script exits non-zero when it can't fetch and unpack it, which fails this step (bash -e stops at the
+      # assignment), rather than exporting an empty KUMI_LEGACY_APP that later shows as an unrelated test failure
+      # (#1074's ERR_MODULE_NOT_FOUND).
       - name: The published Kumi 1.7.5, fetched once for the migration tests
         shell: bash
         run: |
           python="$(command -v python3 || command -v python)"
-          echo "KUMI_LEGACY_APP=$("$python" scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")" >> "$GITHUB_ENV"
+          app="$("$python" scripts/fetch-legacy-release.py "$RUNNER_TEMP/kumi-1.7.5")"
+          echo "KUMI_LEGACY_APP=$app" >> "$GITHUB_ENV"
       # The video tests skip without ffmpeg. This is the build Kumi itself fetches on Linux (BtbN's newest
       # numbered LGPL one), at 8.1 or later, which asks for a stream in pieces (-request_size) as YouTube wants.
       # It's read from the release tagged latest, not releases/latest: each day's dated build (about 13:07Z) is
