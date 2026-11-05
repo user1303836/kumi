@@ -33,11 +33,12 @@ a DAW to work in.
 | `kumi_listen` | Measures an audio file, a library sound, a result Kumi made, or a REAPER or Renoise track or the mix (in Live it says it can't yet, and plays nothing) | for a track or the mix |
 | `kumi_sounds` | Searches your sound library | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |
-| `kumi_job` | Reports a long job (a library scan) | no |
+| `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
+| `kumi_generate` | Mirelo sound effects from a prompt and MIDI notes from an audio file, if you've set Mirelo up | yes: each quote, and each file sent |
 
-Three skills teach Hermes how to use them well: `kumi:daw`, `kumi:sounds` and `kumi:listening`. In any message, write
-`@kumi:focus`, `@kumi:history` or `@kumi:status` to attach what Kumi last saw: what you're on in the DAW, its recent
-changes, or its connection. They only read what Kumi has already published, so nothing asks first.
+Four skills teach Hermes how to use them well: `kumi:daw`, `kumi:sounds`, `kumi:listening` and `kumi:generate`. In any
+message, write `@kumi:focus`, `@kumi:history` or `@kumi:status` to attach what Kumi last saw: what you're on in the DAW,
+its recent changes, or its connection. They only read what Kumi has already published, so nothing asks first.
 
 ## Install
 
@@ -85,6 +86,10 @@ settings:
 | `library_folders` | none | The folders Kumi may read to build your sound map. Nothing else is scanned |
 | `inject_focus` | on | Adds the short FOCUS and catch-up note to the chat connected to Kumi when what you're looking at changes |
 | `listen_interpretation` | off | Also asks the model set for Kumi's listening task in Hermes to interpret measurements (see below) |
+| `mirelo_api_key` | none | Your Mirelo API key, a Hermes secret (`MIRELO_API_KEY`). Kumi sends it only to Mirelo, with a generation you approved |
+| `mirelo_acknowledged` | off | Lets Hermes ask for paid Mirelo generations, each approved with its estimate in Mirelo API credits |
+| `mirelo_sfx_enabled`, `mirelo_midi_enabled` | off | Allow each kind: sound effects from a prompt, MIDI notes from an audio file |
+| `mirelo_credit_cap` | 0 | The most Mirelo API credits Kumi may reserve, over its whole life. 0 refuses every paid generation |
 
 ## Hermes Desktop and the dashboard
 
@@ -110,8 +115,13 @@ everything.
 - **Writes outside its data:** setup may install Live's Remote Script with its Kumi Ears device, a REAPER extension or
   a Renoise tool, only at the locations you approve.
 - **Processes:** Kumi's runtime, its DAW bridge and its library workers run on the machine that runs Hermes, on
-  loopback only. They stop when the chat ends, when the plugin unloads, or after 15 minutes idle; your DAW keeps
-  running.
+  loopback only. They stop when the chat ends, when the plugin unloads, or after 15 minutes idle (2 hours while
+  connected to your DAW); your DAW keeps running.
+- **Mirelo** (off until you add a key, acknowledge it, turn a kind on and set a cap): your prompt, and for MIDI the
+  audio file you approve, go to Mirelo's API with your key. Each generation is approved with Mirelo's estimate in API
+  credits, against a lifetime cap; sending a file is approved on its own. What Mirelo makes is saved in this profile's
+  plugin data, and placing it in your project is a separate approved change. Switching a kind off stops new jobs (one
+  already running is still fetched while the key is set); removing the key stops Kumi contacting Mirelo.
 - **Reads:** the open project; the sample folders you list (never a whole drive or volume, your home folder or above,
   or inside or above HERMES_HOME; links never lead it outside them); and finished audio other Hermes plugins saved in
   `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it.

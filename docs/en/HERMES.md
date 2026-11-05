@@ -63,6 +63,10 @@ Setup never starts or quits your DAW, chooses a Control Surface, or saves your p
 - "Put it on pad 2." Hermes shows exactly what will change and asks; Kumi makes the change and adds it to HISTORY.
 - "Is it actually darker?" Kumi measures both files: loudness, true peak, spectrum.
 - "Undo the snare change." Kumi undoes that entry while it can still be undone.
+- "Make a riser with ElevenLabs and put it on the FX track." When another Hermes plugin has made a sound, Kumi can
+  place or measure that finished file; placing it is a change Hermes asks about.
+- "Make a vinyl crackle with Mirelo" or "Turn this bassline into MIDI." With Mirelo set up (below), Kumi asks Mirelo
+  for a sound effect or for MIDI notes, after you approve its estimate.
 
 Hermes asks before each change because its approvals are on. Kumi's approvals apply to one chat, including a one-shot
 run that resumes it (`hermes chat -q --resume`); a scheduled job, a new one-shot run or another chat always asks or is
@@ -76,12 +80,31 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
 
 ## Where things are
 
-- **Every surface:** Kumi's tools, its skills (`kumi:daw`, `kumi:sounds`, `kumi:listening`), `/kumi` for status, and
-  `@kumi:focus`, `@kumi:history` or `@kumi:status` in a message to attach what Kumi last saw.
+- **Every surface:** Kumi's tools, its skills (`kumi:daw`, `kumi:sounds`, `kumi:listening`, `kumi:generate`), `/kumi`
+  for status, and `@kumi:focus`, `@kumi:history` or `@kumi:status` in a message to attach what Kumi last saw.
 - **Hermes Desktop:** a status chip, a side pane with FOCUS and HISTORY, the sound map in its own tab, cards for
   measured audio, and palette commands. Buttons put a request into the chat; they never change your project by
   themselves.
 - **Web dashboard:** a Kumi tab with HISTORY, status and the map.
+
+## Mirelo (optional, paid)
+
+With a [Mirelo](https://mirelo.ai) account, Kumi can ask Mirelo for sound effects from a prompt and for MIDI notes from
+an audio file. Both are off until you turn them on, and each generation costs Mirelo API credits.
+
+- **Turning it on:** in Kumi's plugin settings, add your Mirelo API key (kept as a Hermes secret), turn on **Use Mirelo
+  for paid generation** and **Mirelo sound effects**, **Mirelo audio to MIDI** or both, and set a **Mirelo credit cap**
+  above 0. A key alone never makes Kumi use Mirelo.
+- **Each generation asks first,** with Mirelo's estimate in API credits (never a price). Sending an audio file for MIDI
+  is approved on its own, before the estimate.
+- **The credit cap** is the most Kumi may reserve, over its whole life. A charge Mirelo hasn't confirmed stays reserved,
+  and Kumi starts no new paid generation until it knows what the last one cost.
+- **What comes back** goes to Kumi's own data (`state/artifacts`). Putting a sound or the notes in your project is a
+  separate change Hermes asks about; MIDI notes come timed in seconds, and placing them is a notes change.
+- **An audio file for MIDI** is measured whole first: WAV within Mirelo's limits (30 minutes, 50 MiB); MP3 and other
+  compressed audio need the ffmpeg allowed at setup.
+- **Switching a kind off** stops new generations of it; one already running is still fetched while your key is set.
+  Removing the key stops Kumi contacting Mirelo.
 
 ## Settings
 
@@ -91,6 +114,10 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
 | Sample folders | none | The folders Kumi may read for your sound map. Nothing else is scanned. A folder can't be a whole drive or volume, your home folder or a folder above it, or a folder inside or above Hermes's own (`HERMES_HOME`); `~/` works. Links and junctions never lead Kumi outside the folders you list, and on Windows it skips cloud placeholder files (OneDrive's, for example) |
 | Tell the agent what you're looking at | on | Adds a short FOCUS and catch-up note to the chat connected to Kumi when what you're looking at changes |
 | Interpret measurements with a model | off | Also sends measurements and a small band-energy image to your Hermes model for a plain-words reading |
+| Mirelo API key | none | Your Mirelo key, kept as a Hermes secret (`MIRELO_API_KEY`). Kumi sends it only to Mirelo, with a generation you approved |
+| Use Mirelo for paid generation | off | Lets Hermes ask for Mirelo generations, each approved with its estimate |
+| Mirelo sound effects / Mirelo audio to MIDI | off | Each kind is allowed only when it's on |
+| Mirelo credit cap | 0 | The most Mirelo API credits Kumi may reserve, over its whole life. 0 refuses every paid generation |
 
 ## What leaves your computer
 
@@ -103,6 +130,8 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
   the fallback providers Hermes is set to try for that task. Retries and fallbacks can add time and token cost.
 - **Audio stays here:** Kumi measures audio on your computer and sends none of it to a model. In a messaging app
   (Telegram, Discord…), a sound you ask Hermes to send you arrives there as an attachment, through that app.
+- **Mirelo** (only if you turn it on): your prompt, and for MIDI the audio file you approve, go to Mirelo's API with
+  your key; what Mirelo makes comes back to Kumi's data.
 - **Listening to a REAPER or Renoise track or the mix** asks first, and plays only the beat window you approve (60
   seconds at most), only while the DAW is stopped. Routing and transport may change briefly and are put back after.
   The DAW renders it into the listening folder of the Kumi installation that owns its part, and Kumi copies that one
@@ -141,8 +170,8 @@ turn is yolo too: Kumi's changes run without asking there, and Kumi can't tell i
   track listen still running. Kumi can't then tell whether it finished, so check HISTORY before asking again. In the
   classic `hermes chat` CLI, Stop doesn't reach Kumi: the call runs until it finishes or reaches its time limit.
 - Kumi can undo a change only while the Kumi runtime that made it is still running. The runtime stops when its chat
-  ends, when Hermes unloads the plugin, or after 15 minutes with nothing to do; after that the change stays in HISTORY,
-  and your DAW's own Undo is the way back.
+  ends, when Hermes unloads the plugin, or after 15 minutes with nothing to do (2 hours while it's connected to your
+  DAW); after that the change stays in HISTORY, and your DAW's own Undo is the way back.
 - In Live, Kumi won't undo a change to a track's mixer, the tempo or a device's parameters if you've changed that
   value by hand since: the undo says so and changes nothing. Before it asks, an undo shows each value as it is now and
   as the undo would put it back.
