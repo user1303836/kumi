@@ -24,8 +24,6 @@ export interface MapModel {
   sounds: Record<string, MapSound>
   /** Point indexes by grid cell (`GRID` × `GRID` over [0, 1]²). */
   cells: Map<number, number[]>
-  /** Each point's search text, lowercased once per map: its name, class, kind and folder (`searchSounds`). */
-  haystack: string[]
 }
 
 /** Where the map sits in its canvas: map x in [0, 1] → `x * size * scale + dx` pixels. */
@@ -71,12 +69,7 @@ export function buildModel(map: SoundMap | null): MapModel {
     }))
     .filter(group => Number.isInteger(group.key))
     .sort((a, b) => a.key - b.key)
-  const sounds = map?.sounds ?? {}
-  const haystack = points.map(point => {
-    const sound = sounds[point.id]
-    return [sound?.name, sound?.class, sound?.kind, sound?.folder].filter(value => typeof value === 'string').join(' ').toLowerCase()
-  })
-  return { revision: map?.revision ?? null, points, groups, sounds, cells, haystack }
+  return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells }
 }
 
 /** The view that shows the whole map in a `width` × `height` canvas, with a margin. */
@@ -224,15 +217,30 @@ export function mapLabel(name: unknown): string {
   return clean(name, 28)
 }
 
-/** The sounds a search names: every word must appear in the name, class, kind or folder. Null for no search. The
- *  text is the model's `haystack`, built once per map, so a keystroke over 25,000 sounds is one pass of `includes`. */
+// Each map's search text per point (its name, class, kind and folder, lowercased), built on the map's first search
+// and kept with it: opening a 25,000-sound map doesn't pay for it, and every later keystroke is one pass of `includes`.
+const haystacks = new WeakMap<MapModel, string[]>()
+
+function haystackOf(model: MapModel): string[] {
+  let text = haystacks.get(model)
+  if (!text) {
+    text = model.points.map(point => {
+      const sound = model.sounds[point.id]
+      return [sound?.name, sound?.class, sound?.kind, sound?.folder].filter(value => typeof value === 'string').join(' ').toLowerCase()
+    })
+    haystacks.set(model, text)
+  }
+  return text
+}
+
+/** The sounds a search names: every word must appear in the name, class, kind or folder. Null for no search. */
 export function searchSounds(model: MapModel, query: string): Set<string> | null {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return null
+  const text = haystackOf(model)
   const found = new Set<string>()
   model.points.forEach((point, index) => {
-    const text = model.haystack[index]
-    if (words.every(word => text.includes(word))) found.add(point.id)
+    if (words.every(word => text[index].includes(word))) found.add(point.id)
   })
   return found
 }

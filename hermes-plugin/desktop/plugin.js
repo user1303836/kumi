@@ -2299,12 +2299,7 @@ function buildModel(map) {
     color: groupColor(group?.color, Number(key)),
     count: typeof group?.count === "number" ? group.count : points.filter((point) => point.group === Number(key)).length
   })).filter((group) => Number.isInteger(group.key)).sort((a, b) => a.key - b.key);
-  const sounds = map?.sounds ?? {};
-  const haystack = points.map((point) => {
-    const sound = sounds[point.id];
-    return [sound?.name, sound?.class, sound?.kind, sound?.folder].filter((value) => typeof value === "string").join(" ").toLowerCase();
-  });
-  return { revision: map?.revision ?? null, points, groups, sounds, cells, haystack };
+  return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells };
 }
 function fitView(width, height, margin = 16) {
   const size = Math.max(1, Math.min(width, height) - 2 * margin);
@@ -2399,13 +2394,25 @@ function keepInView(view, px, py, width, height, margin = 24) {
 function mapLabel(name) {
   return clean(name, 28);
 }
+var haystacks = /* @__PURE__ */ new WeakMap();
+function haystackOf(model) {
+  let text = haystacks.get(model);
+  if (!text) {
+    text = model.points.map((point) => {
+      const sound = model.sounds[point.id];
+      return [sound?.name, sound?.class, sound?.kind, sound?.folder].filter((value) => typeof value === "string").join(" ").toLowerCase();
+    });
+    haystacks.set(model, text);
+  }
+  return text;
+}
 function searchSounds(model, query) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return null;
+  const text = haystackOf(model);
   const found = /* @__PURE__ */ new Set();
   model.points.forEach((point, index) => {
-    const text = model.haystack[index];
-    if (words.every((word) => text.includes(word))) found.add(point.id);
+    if (words.every((word) => text[index].includes(word))) found.add(point.id);
   });
   return found;
 }
