@@ -23,3 +23,4 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **Name what was measured, the numbers and what they suggest:** "The replacement measures 410 Hz lower in spectral centroid and 1.2 LU quieter, which fits a darker snare."
 - **Never say a file "sounds" a way** unless the producer said it.
 - **Measuring a file changes nothing in the project.** Changes go through `kumi_change` (skill `kumi:daw`).
+- **To share the measured file,** put the result's `MEDIA:` line in your reply, on a line of its own. In a messaging chat (Telegram, Discord…) only a `MEDIA:` line in your answer reaches the producer; one inside a tool result doesn't.

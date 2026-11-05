@@ -22,6 +22,7 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 ## Auditioning
 - **`kumi_listen`** with `source: {"sound_id", "map_revision"}` measures a sound (skill `kumi:listening`), and with `compare_to` compares two.
 - **In Hermes Desktop the producer can click sounds on the map** to hear them locally. That plays nothing in the DAW.
+- **To let the producer hear a sound in a messaging chat** (Telegram, Discord…), put the `MEDIA:` line `kumi_listen` returned for it in your reply, on a line of its own. A `MEDIA:` line inside a tool result isn't delivered there.
 
 ## Placing a sound
 - **Placing is a change:** `kumi_change` with an `import_audio` step.
