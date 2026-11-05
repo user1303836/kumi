@@ -635,7 +635,8 @@ def _other_kumi(daw: str, component: Mapping[str, Any]) -> list[str]:
     owner = _owner_home({"component": component})
     paths = [path for path in component.get("paths") or [] if isinstance(path, str)]
     whose = f"the standalone Kumi at {owner}" if owner else "a standalone Kumi on this computer"
-    program = str(Path(owner) / "bin" / ("kumi.exe" if os.name == "nt" else "kumi")) if owner else "kumi"
+    # The standalone installer's launcher: bin/kumi, or bin\kumi.cmd on Windows (install.ps1); quoted, for a space.
+    program = f'"{Path(owner) / "bin" / ("kumi.cmd" if os.name == "nt" else "kumi")}"' if owner else "kumi"
     return [f"{_STANDALONE_PART[daw]}{f' ({paths[0]})' if paths else ''} belongs to {whose}, and Kumi for Hermes "
             "can't share it, so setup can't go on while it's there",
             f"To take it out, quit {DAWS[daw]}, then run {program} uninstall in a terminal: it removes that Kumi and "
