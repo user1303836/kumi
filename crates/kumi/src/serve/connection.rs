@@ -120,7 +120,21 @@ pub struct Link {
     /// switched since) isn't the looked project's. Never read again after the look, so a switch between the two can't
     /// pair the looked project's key with another's epoch.
     native_epoch: RefCell<Option<String>>,
+    /// What each previewed plan with files approved (CC-11's 11b), by its host call (or, a call without one, by its
+    /// plan): its dispatch must be the same plan, placing the same files. The newest [`PINNED`].
+    pinned: RefCell<std::collections::VecDeque<Pin>>,
 }
+
+/// A preview's approval of a plan with files: the call it's for, the plan as approved (digested as the host's digest
+/// reads it) and each file's identity.
+struct Pin {
+    key: String,
+    approved: String,
+    files: Vec<Value>,
+}
+
+/// The most previewed plans whose files are kept for their dispatch.
+const PINNED: usize = 64;
 
 impl Link {
     /// No connection yet. Epochs count up from `base` (the runtime's start, ms), so no plan made in an earlier
@@ -136,6 +150,7 @@ impl Link {
             ref_names: RefCell::new(HashMap::new()),
             unsure: RefCell::new(None),
             native_epoch: RefCell::new(None),
+            pinned: RefCell::new(std::collections::VecDeque::new()),
         }
     }
 
@@ -186,6 +201,24 @@ impl Link {
 
     pub fn unsure(&self) -> Option<Value> {
         self.unsure.borrow().clone()
+    }
+
+    /// A preview of the call `key` names approved the plan `approved` digests, which places these files: its dispatch
+    /// must be that plan, with the same files.
+    pub fn pin_files(&self, key: &str, approved: &str, files: Vec<Value>) {
+        let mut pinned = self.pinned.borrow_mut();
+        pinned.retain(|pin| pin.key != key);
+        pinned.push_back(Pin { key: key.to_string(), approved: approved.to_string(), files });
+        while pinned.len() > PINNED {
+            pinned.pop_front();
+        }
+    }
+
+    /// What the preview of the call `key` names approved, taken: a dispatch holds to it once.
+    pub fn take_pin(&self, key: &str) -> Option<(String, Vec<Value>)> {
+        let mut pinned = self.pinned.borrow_mut();
+        let at = pinned.iter().position(|pin| pin.key == key)?;
+        pinned.remove(at).map(|pin| (pin.approved, pin.files))
     }
 
     /// An `observe` completed: the model sees the project as it is now, so nothing is unsure any more (R6).

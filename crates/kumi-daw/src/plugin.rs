@@ -16,6 +16,9 @@ pub struct PluginStep {
     /// The field that takes an audio file, when it takes one: the import step puts there the file a source names, so a
     /// plan gives a source (an object) in it, never a path.
     pub file_field: Option<&'static str>,
+    /// What a file step does as the plugin offers it: the DAW's own description says its field takes a path, which a
+    /// plugin's plan never gives.
+    pub described: Option<&'static str>,
     /// The field that names something in the DAW's own browser by a path of names ("Audio/Effects/Native/Delay"), when
     /// it has one: allowed though it's called `path`, its value still never a file's path.
     pub browser_field: Option<&'static str>,
@@ -27,12 +30,18 @@ pub struct PluginStep {
 
 impl PluginStep {
     pub const fn new(tool: &'static str, family: &'static str) -> PluginStep {
-        PluginStep { tool, family, file_field: None, browser_field: None, refused: &[] }
+        PluginStep { tool, family, file_field: None, described: None, browser_field: None, refused: &[] }
     }
 
-    /// It takes an audio file in `field`, which the import step fills from a source.
-    pub const fn file(self, field: &'static str) -> PluginStep {
-        PluginStep { file_field: Some(field), ..self }
+    /// It takes an audio file in `field`, which the import step fills from a source; `described` is what it does as the
+    /// plugin offers it, with `field` taking a source.
+    pub const fn file(self, field: &'static str, described: &'static str) -> PluginStep {
+        PluginStep { file_field: Some(field), described: Some(described), ..self }
+    }
+
+    /// Its description as the plugin gives it: its own for a file step, the DAW's (`native`) otherwise.
+    pub fn description<'a>(&self, native: &'a str) -> &'a str {
+        self.described.unwrap_or(native)
     }
 
     /// It names something in the DAW's browser in `field`, by a path of names.
@@ -228,7 +237,7 @@ mod tests {
     const STEPS: [PluginStep; 3] = [
         PluginStep::new("track_volume", "mixer"),
         PluginStep::new("change_structure", "structure").refusing(&[("action", &["delete-return"])]),
-        PluginStep::new("replace_sample", "device").file("sample"),
+        PluginStep::new("replace_sample", "device").file("sample", "Swap the sample in a Simpler: sample, a source."),
     ];
 
     #[test]

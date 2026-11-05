@@ -141,13 +141,12 @@ fn page(text: &str, most: usize, project: &super::connection::Project) -> Value 
     answer
 }
 
-/// The steps a plugin's plan may use here: the plan tool offers them, and the DAW's allowlist has them. A step that
-/// places a file isn't one until the import step (CC-11) is in the runtime: `change` refuses it.
+/// The steps a plugin's plan may use here: the plan tool offers them, and the DAW's allowlist has them.
 fn allowed_steps(ctx: &Ctx, tools: &[Rc<dyn KernelTool>]) -> Vec<&'static PluginStep> {
     let listed = crate::daw::provider(ctx.daw()).map_or(&[][..], |provider| provider.plugin_steps());
     let offered =
         tools.iter().find(|tool| tool.role() == Some(ToolRole::Plan)).map(|plan| offered_steps(&plan.input_schema())).unwrap_or_default();
-    listed.iter().filter(|step| step.file_field.is_none() && offered.iter().any(|name| name == step.tool)).collect()
+    listed.iter().filter(|step| offered.iter().any(|name| name == step.tool)).collect()
 }
 
 /// A step's or reader's whole input; or, with none named, the steps a change may use and the readers, each with what
@@ -164,9 +163,15 @@ fn schema(ctx: &Ctx, tools: &[Rc<dyn KernelTool>], named: Option<&str>, most: us
                 "tool": name,
                 "kind": "step",
                 "family": step.family,
-                "description": tool.description(),
+                "description": step.description(tool.description()),
                 "input_schema": plugin_schema(step, &tool.input_schema(), &source_schema()),
             });
+            if let Some(field) = step.file_field {
+                answer["file_field"] = json!({
+                    "field": field,
+                    "takes": "a source, never a path: {sound_id, map_revision} (a map sound), {artifact_id} (a file Kumi made), or {file, provenance: {host_tool, tool_call_id?}} (an approved file, copied into Kumi's artifacts first)",
+                });
+            }
             if !step.refused.is_empty() {
                 let refused: Map<String, Value> = step.refused.iter().map(|(field, values)| (field.to_string(), json!(values))).collect();
                 answer["refused_values"] = Value::Object(refused);
@@ -175,12 +180,6 @@ fn schema(ctx: &Ctx, tools: &[Rc<dyn KernelTool>], named: Option<&str>, most: us
         }
         if let Some(tool) = tools.iter().find(|tool| tool.name() == name && reader(tool.as_ref())) {
             return Ok(json!({"tool": name, "kind": "reader", "description": tool.description(), "input_schema": tool.input_schema()}));
-        }
-        let listed = crate::daw::provider(ctx.daw()).map_or(&[][..], |provider| provider.plugin_steps());
-        if listed.iter().any(|step| step.tool == name && step.file_field.is_some()) {
-            return Err(OpError::Invalid {
-                reason: format!("{name} places a file, which needs the import step: not in this runtime yet."),
-            });
         }
         return Err(OpError::Invalid {
             reason: format!(
@@ -194,7 +193,7 @@ fn schema(ctx: &Ctx, tools: &[Rc<dyn KernelTool>], named: Option<&str>, most: us
             .map(|step| {
                 let mut row = json!({"tool": step.tool, "family": step.family});
                 if let Some(tool) = tool_of(step.tool).filter(|_| with_what) {
-                    row["what"] = json!(first_clause(tool.description()));
+                    row["what"] = json!(first_clause(step.description(tool.description())));
                 }
                 row
             })

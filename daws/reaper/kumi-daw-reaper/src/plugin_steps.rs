@@ -61,7 +61,12 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     step("track_automation_mode", "mixer"),
     step("send_automation_mode", "mixer"),
     step("item_add", "clip"),
-    step("item_import", "clip").file("path"),
+    step("item_import", "clip").file(
+        "path",
+        "Put an audio file on a track (ref) at positionBeats or position: it plays whole unless lengthBeats or length is \
+         given. path is where the file comes from: a sound from the map, a file Kumi made, or an approved file, never a \
+         path.",
+    ),
     step("item_move", "clip"),
     step("item_split", "clip"),
     step("item_trim", "clip"),

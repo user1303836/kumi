@@ -464,6 +464,8 @@ impl Ctx {
             let op = record["op"].as_str().unwrap_or("a call");
             let title = record["title"].as_str().map_or_else(|| format!("{op} (interrupted)"), str::to_string);
             let identity = super::history::CallIdentity {
+                profile_id: record["profile_id"].as_str(),
+                session_id: record["session_id"].as_str(),
                 tool_call_id: record["tool_call_id"].as_str(),
                 digest: record["digest"].as_str().unwrap_or_default(),
             };
