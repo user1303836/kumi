@@ -11,6 +11,7 @@ use super::ctx::{Call, Ctx, Effect, JsonObject, OpError, OpFuture, Operation};
 use kumi_daw::component::{ApplyError, ComponentPlan, PartState};
 use kumi_daw::io::DawIo;
 use kumi_daw::process::Run;
+use kumi_types::daw::DawId;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::path::Path;
@@ -55,12 +56,14 @@ fn dry(args: &JsonObject) -> bool {
 fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     Box::pin(async move {
         let Some(provider) = crate::daw::provider(ctx.daw()) else {
-            let reason = format!("Kumi doesn't work with {} here.", ctx.daw().as_str());
+            let reason = format!("Kumi doesn't work with {} here.", ctx.daw().profile().words.app);
             return Err(OpError::Refused { code: "unsupported", reason, owner: None });
         };
         let app = provider.profile().words.app;
-        if call.args.get("daw").and_then(Value::as_str) != Some(ctx.daw().as_str()) {
-            let reason = format!("This runtime serves {app} only: setting up another DAW takes the runtime for it.");
+        if let Some(daw) = call.args.get("daw").and_then(Value::as_str).filter(|daw| *daw != ctx.daw().as_str()) {
+            let asked = DawId::parse(daw).map_or(daw, |asked| asked.profile().words.app);
+            let reason =
+                format!("Kumi's runtime in this profile works in {app}: set Kumi up for {asked} once the chat that started it ends.");
             return Err(OpError::Refused { code: "other_daw", reason, owner: None });
         }
         let mut io = DawIo::new(ctx.env().clone());
@@ -98,14 +101,12 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         }
         match plan.state {
             PartState::OtherOwner => {
-                let reason = format!(
-                    "Kumi's part in {app} belongs to another Kumi on this computer: set {app} up for Hermes, or adopt that installation, first."
-                );
+                let reason = super::connection::owned_elsewhere(ctx.daw());
                 return Err(OpError::Refused { code: "owned_elsewhere", reason, owner: Some(json!({"kumi_home": plan.owner})) });
             }
             PartState::Newer => {
                 let reason = format!(
-                    "Kumi's part in {app} ({}) is newer than this runtime's, or says a version Kumi can't order against it: update Kumi for Hermes to match it. Kumi never puts in one that might be older.",
+                    "Kumi's part in {app} ({}) is newer than this runtime's, or its version can't be compared with this Kumi's, so nothing was installed: the plan says what to do. Kumi never puts in one that might be older.",
                     plan.version.as_deref().unwrap_or("a version it doesn't say")
                 );
                 return Err(OpError::Refused { code: "newer_installed", reason, owner: None });

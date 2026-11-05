@@ -426,8 +426,12 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         return Ok(answer("refused", "There's no change by that id in HISTORY."));
     };
     // Why it can't be undone from here, before the DAW is asked: CC-3's reason, C1's state and the words.
+    let restarted = format!(
+        "Kumi restarted since this change, so it can't undo it safely: undo it in {} if it's still the latest step there, or ask Hermes to set it back.",
+        ctx.daw().profile().words.app
+    );
     let why_not = if row.runtime_generation != ctx.history().generation() {
-        Some(("restarted", "expired", "It was made before Kumi's runtime restarted, so it can't be undone from here."))
+        Some(("restarted", "expired", restarted.as_str()))
     } else if row.state == "expired" {
         Some(("expired", "expired", "It can't be undone any more."))
     } else if !row.undo_available {

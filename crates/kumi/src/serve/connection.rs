@@ -294,6 +294,18 @@ fn project_key(key: &str, open: Option<&str>) -> String {
     format!("p-{}", digest.finalize()[..8].iter().map(|byte| format!("{byte:02x}")).collect::<String>())
 }
 
+/// Why Kumi's part in the DAW, another Kumi's, isn't used, and what the producer does: for Live, set up again and
+/// approve using that installation (setup adopts it).
+pub fn owned_elsewhere(daw: kumi_types::daw::DawId) -> String {
+    let app = daw.profile().words.app;
+    match daw {
+        kumi_types::daw::DawId::Ableton => format!(
+            "Kumi's part in {app} belongs to another Kumi on this computer. Ask Hermes to set Kumi up again, and approve using that installation."
+        ),
+        _ => format!("Kumi's part in {app} belongs to another Kumi on this computer: set {app} up for Hermes, or adopt that installation, first."),
+    }
+}
+
 /// Connects to the DAW: its integration made with the plugin's host policy and started. One start at a time: a second
 /// `connect` waits for the first and takes its connection. Refused when Kumi's part isn't in the DAW, when the part in
 /// the DAW is another Kumi's (its home isn't `--kumi-home`), and, for REAPER and Renoise, when `--kumi-home` is a home
@@ -306,7 +318,7 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
     let Some(provider) = crate::daw::provider(ctx.daw()) else {
         return Err(OpError::Refused {
             code: "unsupported",
-            reason: format!("Kumi doesn't work with {} here.", ctx.daw().as_str()),
+            reason: format!("Kumi doesn't work with {} here.", ctx.daw().profile().words.app),
             owner: None,
         });
     };
@@ -318,9 +330,7 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
     let home = &ctx.paths().kumi_home;
     let owner = provider.bridge_owner(&bridge_config, ctx.env());
     if !owner.as_deref().is_some_and(|owner| same_folder(Path::new(owner), home)) {
-        let reason = format!(
-            "Kumi's part in {app} belongs to another Kumi on this computer: set {app} up for Hermes, or adopt that installation, first."
-        );
+        let reason = owned_elsewhere(ctx.daw());
         return Err(OpError::Refused { code: "owned_elsewhere", reason, owner: Some(json!({"kumi_home": owner})) });
     }
     let plugins = ctx.paths().state_dir.parent().map(Path::to_path_buf).unwrap_or_default();
