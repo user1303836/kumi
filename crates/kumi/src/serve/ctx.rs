@@ -100,6 +100,41 @@ pub struct Host {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// What the host gives the call privately, after its approval: never written or said anywhere.
+    #[serde(skip)]
+    pub private: Private,
+}
+
+/// The arguments the host adds to a call after its approval, for the call alone (CC-13's `_mirelo`: a service's key,
+/// the producer's acknowledgment and the credits reserved), each an object.
+pub const PRIVATE_ARGS: [&str; 1] = ["_mirelo"];
+
+/// The most bytes one of [`PRIVATE_ARGS`] takes, as JSON.
+pub const PRIVATE_MOST: usize = 4096;
+
+/// What the host passes a call privately ([`PRIVATE_ARGS`], by name), taken out of its arguments before anything
+/// reads them: so never in what the call asked (its digest and deduplication), its in-flight record, HISTORY, a
+/// snapshot, a log or an error. Its `Debug` shows only how many there are.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Private(Map<String, Value>);
+
+impl From<Map<String, Value>> for Private {
+    fn from(arguments: Map<String, Value>) -> Private {
+        Private(arguments)
+    }
+}
+
+impl Private {
+    /// The private argument `name` (`"_mirelo"`), if the host gave it.
+    pub fn get(&self, name: &str) -> Option<&Value> {
+        self.0.get(name)
+    }
+}
+
+impl std::fmt::Debug for Private {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Private({} argument(s))", self.0.len())
+    }
 }
 
 impl Host {

@@ -57,6 +57,8 @@ struct Job {
     /// `{done, total?, message?}`.
     progress: RefCell<Value>,
     outcome: RefCell<Option<Result<Value, OpError>>>,
+    /// What the job has come to so far ([`JobHandle::checkpoint`]), while it runs and beside an error.
+    checkpoint: RefCell<Option<Value>>,
     signal: Signal,
     written: Cell<Option<Instant>>,
 }
@@ -69,6 +71,12 @@ impl Job {
             Some(Ok(result)) => view["result"] = result.clone(),
             Some(Err(error)) => view["error"] = error.to_value()["error"].clone(),
             None => {}
+        }
+        // What it came to before it failed, was cancelled or interrupted, or so far while it runs.
+        if view.get("result").is_none() {
+            if let Some(kept) = &*self.checkpoint.borrow() {
+                view["result"] = kept.clone();
+            }
         }
         view
     }
@@ -121,6 +129,7 @@ impl Jobs {
             state: Cell::new(State::Running),
             progress: RefCell::new(json!({"done": 0})),
             outcome: RefCell::new(None),
+            checkpoint: RefCell::new(None),
             signal: own.clone(),
             written: Cell::new(None),
         });
@@ -244,6 +253,19 @@ impl JobHandle {
             write(self.ctx.snapshots(), &self.id, &self.job);
         }
     }
+
+    /// What the job has come to so far (a paid job's reservation, whether it was submitted, the vendor's id): `job`
+    /// gives it while the job runs, and beside its error when it fails, is cancelled or is interrupted. It's on disk
+    /// before this returns, so a runtime that dies after it leaves it for the next start (CC-13's recovery).
+    pub async fn checkpoint(&self, result: Value) -> Result<(), OpError> {
+        *self.job.checkpoint.borrow_mut() = Some(result);
+        self.job.written.set(Some(Instant::now()));
+        let view = self.job.view(&self.id);
+        match self.ctx.snapshots().write_durably(&format!("jobs/{}", self.id), view).await {
+            Ok(_) => Ok(()),
+            Err(error) => Err(OpError::Failed { reason: format!("Kumi couldn't keep the job's state on disk: {error}") }),
+        }
+    }
 }
 
 fn write(snapshots: &Snapshots, id: &str, job: &Job) {
@@ -340,6 +362,50 @@ mod tests {
                 (written["state"].clone(), written["result"].clone(), written["schema"].clone()),
                 (json!("done"), json!({"sounds": 4}), json!(1))
             );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn what_a_job_came_to_is_on_disk_at_once_and_outlasts_its_error_and_its_runtime() {
+        local(async {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = runtime(dir.path());
+            let (go, gone) = tokio::sync::oneshot::channel::<()>();
+            let failing = ctx
+                .start_job("generate", |_ctx, job| async move {
+                    job.checkpoint(json!({"submission": "unknown", "reservation_id": "r-1"})).await?;
+                    let _ = gone.await;
+                    Err(OpError::Failed { reason: "the download failed".into() })
+                })
+                .unwrap();
+            tokio::task::yield_now().await;
+            // On disk before the work goes on, and given while it runs.
+            assert_eq!(file(&ctx, &failing)["result"]["submission"], "unknown");
+            assert_eq!(ctx.jobs().get(&failing, dir.path()).unwrap()["result"]["reservation_id"], "r-1");
+            go.send(()).unwrap();
+            ctx.jobs().all_settled().await;
+            let failed = ctx.jobs().get(&failing, dir.path()).unwrap();
+            assert_eq!(
+                (failed["state"].clone(), failed["result"]["reservation_id"].clone()),
+                (json!("failed"), json!("r-1")),
+                "beside its error"
+            );
+            assert_eq!(failed["error"]["reason"], "the download failed");
+            // A runtime that dies with a job running leaves what it came to for the next.
+            let left = ctx
+                .start_job("generate", |_ctx, job| async move {
+                    job.checkpoint(json!({"submission": "submitted", "provider_job_id": "v-9"})).await?;
+                    std::future::pending::<()>().await;
+                    Ok(json!({}))
+                })
+                .unwrap();
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+            ctx.snapshots().flush();
+            let later = runtime(dir.path());
+            let found = later.jobs().get(&left, dir.path()).unwrap();
+            assert_eq!((found["state"].clone(), found["result"]["provider_job_id"].clone()), (json!("interrupted"), json!("v-9")));
         })
         .await;
     }

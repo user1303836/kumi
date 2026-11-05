@@ -9,7 +9,7 @@
 //! to settle, `status.json` says the runtime stopped, and it returns.
 
 use super::core;
-use super::ctx::{Call, Ctx, Effect, Host, OpError, Operation, Out, Outbox, Progress};
+use super::ctx::{Call, Ctx, Effect, Host, OpError, Operation, Out, Outbox, Private, Progress, PRIVATE_ARGS, PRIVATE_MOST};
 use super::history::CallIdentity;
 use super::{registry, say, MCP_PROTOCOL};
 use futures::FutureExt;
@@ -481,10 +481,22 @@ impl Server {
             Some(Value::Object(args)) => args.clone(),
             Some(_) => return Err(Refusal::Request(INVALID_PARAMS, "arguments is an object".into())),
         };
-        let host = match args.remove("_host") {
+        let mut host = match args.remove("_host") {
             None => Host::default(),
             Some(host) => Host::from_value(&host).map_err(|reason| Refusal::Call(OpError::Invalid { reason }))?,
         };
+        // The host's private arguments leave the call's own before anything reads them (13-R3). A refusal names the
+        // argument, never what it held.
+        let mut private = Map::new();
+        for name in PRIVATE_ARGS {
+            let Some(value) = args.remove(name) else { continue };
+            if !value.is_object() || value.to_string().len() > PRIVATE_MOST {
+                let reason = format!("{name} is an object of at most {PRIVATE_MOST} bytes");
+                return Err(Refusal::Call(OpError::Invalid { reason }));
+            }
+            private.insert(name.to_string(), value);
+        }
+        host.private = Private::from(private);
         let args = Value::Object(args);
         if let Some(reason) = kumi_agent::kernel::schema::problem(&(operation.schema)(), &args) {
             return Err(Refusal::Call(OpError::Invalid { reason }));
@@ -779,7 +791,24 @@ mod tests {
         Effect::Playback
     }
 
-    static OPERATIONS: &[&Operation] = &[&WAIT, &ECHO, &BOOM, &SCAN, &PLACE, &SMASH, &HOLD, &RESTORE, &PLAY];
+    /// Spends the producer's credits with the key the host gives it privately: says whether it had one, never the key.
+    /// With `hold`, it then writes until cancelled; with the word "smash", it fails unexpectedly.
+    static PAY: Operation = Operation { name: "pay", description: "Pays.", schema: object, effect: writes, run: pay };
+    fn pay(_ctx: &Ctx, call: Call) -> OpFuture<'_> {
+        Box::pin(async move {
+            RUNS.with(|runs| runs.set(runs.get() + 1));
+            let keyed = call.host.private.get("_mirelo").and_then(|given| given["api_key"].as_str()).is_some();
+            if call.args.get("word").and_then(Value::as_str) == Some("smash") {
+                panic!("a payment went wrong for {:?}", call.host);
+            }
+            if call.args.get("hold").and_then(Value::as_bool) == Some(true) {
+                call.signal.cancelled().await;
+            }
+            Ok(json!({"state": "applied", "keyed": keyed}))
+        })
+    }
+
+    static OPERATIONS: &[&Operation] = &[&WAIT, &ECHO, &BOOM, &SCAN, &PLACE, &SMASH, &HOLD, &RESTORE, &PLAY, &PAY];
 
     struct Session {
         to: Option<DuplexStream>,
@@ -892,7 +921,7 @@ mod tests {
             session.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
             let listed = session.next().await.unwrap();
             let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().filter_map(|tool| tool["name"].as_str()).collect();
-            assert_eq!(names, ["wait", "echo", "boom", "scan", "place", "smash", "hold", "restore", "play"]);
+            assert_eq!(names, ["wait", "echo", "boom", "scan", "place", "smash", "hold", "restore", "play", "pay"]);
             assert_eq!(listed["result"]["tools"][1]["inputSchema"], object());
             let mut asked = call(json!("c3"), "echo", json!({"word": "hi", "_host": {"profile_id": "default", "tool_call_id": "t9"}}));
             asked["params"]["_meta"] = json!({"progressToken": "p3"});
@@ -1188,6 +1217,71 @@ mod tests {
             session.send(call(json!(3), "place", json!({"word": "snare", "_host": {"tool_call_id": "tc-8"}}))).await;
             assert_eq!(session.next().await.unwrap()["result"]["structuredContent"]["state"], "applied", "another call runs");
             session.end().await;
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_key_the_host_gives_privately_reaches_the_call_and_nothing_else() {
+        const SENTINEL: &str = "sk-sentinel-5f2c9e";
+        let mirelo = |key: &str| json!({"api_key": key, "acknowledged": true, "enabled": true, "reservation_id": "r-1"});
+        local(async {
+            let mut session = Session::start().initialized().await;
+            let mut said = vec![];
+            // The call has it; its answer, its digest and its deduplication don't.
+            let paying = json!({"word": "kick", "_host": {"tool_call_id": "tc-1"}, "_mirelo": mirelo(SENTINEL)});
+            session.send(call(json!(1), "pay", paying)).await;
+            let paid = session.next().await.unwrap();
+            assert_eq!(paid["result"]["structuredContent"]["keyed"], true, "{paid}");
+            said.push(paid);
+            // The same call with another key is the same call: answered as before, not run again.
+            let rekeyed = json!({"word": "kick", "_host": {"tool_call_id": "tc-1"}, "_mirelo": mirelo("sk-another")});
+            session.send(call(json!(2), "pay", rekeyed)).await;
+            let again = session.next().await.unwrap();
+            assert_eq!(again["result"]["structuredContent"]["keyed"], true, "{again}");
+            assert_eq!(RUNS.with(Cell::get), 1);
+            said.push(again);
+            // Not an object, or too big: refused by its name alone.
+            for given in [json!(SENTINEL), json!({"api_key": SENTINEL.repeat(400)})] {
+                session.send(call(json!(3), "pay", json!({"word": "kick", "_mirelo": given}))).await;
+                let refused = session.next().await.unwrap();
+                assert_eq!(refused["result"]["structuredContent"]["error"]["code"], "invalid", "{refused}");
+                said.push(refused);
+            }
+            // A payment that fails unexpectedly: its audit row and its answer.
+            let smashing = json!({"word": "smash", "_host": {"tool_call_id": "tc-2"}, "_mirelo": mirelo(SENTINEL)});
+            session.send(call(json!(4), "pay", smashing)).await;
+            said.push(session.next().await.unwrap());
+            // One the runtime stops in the middle of: its in-flight record, then the next start's audit row.
+            let holding = json!({"word": "snare", "hold": true, "_host": {"tool_call_id": "tc-3"}, "_mirelo": mirelo(SENTINEL)});
+            session.send(call(json!(5), "pay", holding)).await;
+            tokio::task::yield_now().await;
+            said.extend(session.end().await);
+            let state = session._state;
+            let next = Session::at(state).initialized().await;
+            let history = next.state("history.json");
+            assert!(history["items"].as_array().is_some_and(|items| !items.is_empty()), "{history}");
+            let state = next.stopped().await;
+            for message in &said {
+                assert!(!message.to_string().contains(SENTINEL), "said: {message}");
+            }
+            let mut folders = vec![state.path().to_path_buf()];
+            let mut files = 0;
+            while let Some(folder) = folders.pop() {
+                for entry in std::fs::read_dir(&folder).unwrap().filter_map(Result::ok) {
+                    let path = entry.path();
+                    if path.is_dir() {
+                        folders.push(path);
+                    } else {
+                        files += 1;
+                        let bytes = std::fs::read(&path).unwrap();
+                        assert!(!String::from_utf8_lossy(&bytes).contains(SENTINEL), "{} keeps the key", path.display());
+                    }
+                }
+            }
+            assert!(files > 3, "the state folder was looked through ({files} files)");
+            let host = Host { private: Private::from(mirelo(SENTINEL).as_object().unwrap().clone()), ..Host::default() };
+            assert!(!format!("{host:?}").contains(SENTINEL));
         })
         .await;
     }
