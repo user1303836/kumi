@@ -241,10 +241,10 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
     assert_eq!(code, "other_daw");
     // REAPER goes away: status and focus say so at once, and no plan holds.
     lab.simulator.as_ref().unwrap().stop();
-    let mut gone = Value::Null;
+    let (mut gone, mut status) = (Value::Null, Value::Null);
     for _ in 0..1000 {
-        gone = lab.state("focus.json");
-        if gone["connected"] == false {
+        (gone, status) = (lab.state("focus.json"), lab.state("status.json"));
+        if gone["connected"] == false && status["connected"] == false {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
@@ -254,7 +254,7 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
         (json!(false), Value::Null, Value::Null),
         "{gone}"
     );
-    assert_eq!(lab.state("status.json")["connected"], false);
+    assert_eq!(status["connected"], false, "{status}");
     let Err(OpError::NotConnected { .. }) = lab.ctx.link().expect(other["project_key"].as_str().unwrap(), epoch + 1) else {
         panic!("a plan while REAPER is away")
     };
