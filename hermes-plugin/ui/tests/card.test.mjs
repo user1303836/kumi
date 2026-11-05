@@ -198,10 +198,11 @@ test('the pane shows a running scan with how far it got, and how a finished one 
   const { JobsView } = await load('src/desktop/jobs.tsx', { react: 'real' })
   const jobs = {
     'j-1': { job_id: 'j-1', kind: 'scan', state: 'running', progress: { done: 412, total: 1200, message: 'Drums' }, ended_at: null },
-    'j-2': { job_id: 'j-2', kind: 'scan', state: 'failed', error: { reason: 'the folder went away' }, ended_at: 1 }
+    'j-2': { job_id: 'j-2', kind: 'scan', state: 'failed', error: { reason: 'the folder went away' }, ended_at: 1 },
+    'j-3': { job_id: 'j-3', kind: 'scan', state: 'done', result: { sounds: 637, measured: 637, failed: 3, map_revision: 'r8' }, ended_at: 1 }
   }
   const html = renderToStaticMarkup(createElement(JobsView, { jobs }))
-  for (const text of ['Scanning', 'Drums · 412 of 1,200', 'aria-label="Scanning: 34%"', 'width:34%', 'Scan failed', 'the folder went away']) {
+  for (const text of ['Scanning', 'Drums · 412 of 1,200', 'aria-label="Scanning: 34%"', 'width:34%', 'Scan failed', 'the folder went away', 'Scan done', "637 sounds · 3 couldn&#x27;t be read"]) {
     assert.ok(html.includes(text), `${text} in ${html}`)
   }
   assert.equal(renderToStaticMarkup(createElement(JobsView, { jobs: {} })), '')

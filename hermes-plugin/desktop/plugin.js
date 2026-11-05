@@ -75,6 +75,10 @@ function seconds(value) {
   return value < 10 ? `${num(value, 2)} s` : value < 60 ? `${num(value, 1)} s` : `${Math.floor(value / 60)}:${String(Math.round(value % 60)).padStart(2, "0")}`;
 }
 var JOB_KINDS = { scan: { running: "Scanning", noun: "Scan" } };
+function count(value) {
+  if (Array.isArray(value)) return value.length;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+}
 function jobWords(job) {
   const kind = typeof job.kind === "string" && job.kind ? job.kind : "";
   const named = JOB_KINDS[kind] ?? { running: `${clean(kind || "Job", 24)} running`, noun: clean(kind || "Job", 24) };
@@ -83,13 +87,15 @@ function jobWords(job) {
   const total = typeof progress.total === "number" && Number.isFinite(progress.total) && progress.total > 0 ? progress.total : null;
   const message = typeof progress.message === "string" ? clean(progress.message, 60) : "";
   if (job.state === "running" || job.state === void 0) {
-    const count = done === null ? "" : total === null ? num(done, 0) : `${num(done, 0)} of ${num(total, 0)}`;
-    return { title: named.running, detail: [message, count].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
+    const count2 = done === null ? "" : total === null ? num(done, 0) : `${num(done, 0)} of ${num(total, 0)}`;
+    return { title: named.running, detail: [message, count2].filter(Boolean).join(" · "), fraction: done !== null && total !== null ? Math.min(1, done / total) : null, tone: "muted" };
   }
   if (job.state === "done") {
     const result = job.result && typeof job.result === "object" ? job.result : {};
-    const sounds = typeof result.sounds === "number" ? `${num(result.sounds, 0)} sound${result.sounds === 1 ? "" : "s"}` : "";
-    return { title: `${named.noun} done`, detail: sounds, fraction: 1, tone: "good" };
+    const sounds = count(result.sounds);
+    const failed = count(result.failed);
+    const detail = [sounds === null ? "" : `${num(sounds, 0)} sound${sounds === 1 ? "" : "s"}`, failed ? `${num(failed, 0)} couldn't be read` : ""];
+    return { title: `${named.noun} done`, detail: detail.filter(Boolean).join(" · "), fraction: 1, tone: failed ? "warn" : "good" };
   }
   if (job.state === "failed") return { title: `${named.noun} failed`, detail: clean(job.error?.reason ?? "", 120), fraction: null, tone: "bad" };
   if (job.state === "cancelled") return { title: `${named.noun} stopped`, detail: "", fraction: null, tone: "muted" };
@@ -1331,7 +1337,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
   const chosen = selected ? model.sounds[selected] : void 0;
   const hovered = hover ? model.points[hover.index] : void 0;
   const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
-  const shown = model.points.reduce((count, _, index) => count + (visible(index) ? 1 : 0), 0);
+  const shown = model.points.reduce((count2, _, index) => count2 + (visible(index) ? 1 : 0), 0);
   return /* @__PURE__ */ jsxs8("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
     /* @__PURE__ */ jsxs8("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
       /* @__PURE__ */ jsx8(
