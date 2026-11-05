@@ -45,7 +45,7 @@ LANGUAGE_NAMES = {"python": "Python", "lua": "Lua"}
 DAW_LANGUAGE = {"ableton": "python", "reaper": "lua", "renoise": "lua"}
 
 # 19e, word for word: the approval, Desktop's pane (through `script.pending`) and the docs all say it this way.
-WARNING = "Runs with the DAW's access to your computer. Kumi can't undo it; the DAW's own undo may."
+WARNING = "Runs with the DAW's access to your computer. Kumi can't undo it; the DAW's own Undo may."
 
 # Hermes's tools whose results bring nothing from outside this computer (r2): its local file tools, its to-do list,
 # the producer's own answers (`clarify`) and the skills installed here (Kumi's included). Every other tool taints, its
@@ -59,6 +59,7 @@ LOCAL_SURFACES = frozenset({"cli", "tui", "desktop", "acp"})
 
 CLEAN, TAINTED, SUBAGENT = "clean", "tainted", "subagent"
 NO_RECORD = "Kumi didn't see this chat start"
+UNNAMED = "Hermes didn't name this chat"
 MESSAGING = "it's a messaging chat"
 KEPT = 4000  # sessions remembered; the oldest go first, and a forgotten chat counts as tainted (fail-closed)
 # In the plugin's data: the record of which chats read outside content (outside `state/`, whose top-level JSON files are
@@ -71,14 +72,14 @@ def asked_because(why: str) -> str:
     """The approval's line saying why every script in this chat is asked (r5)."""
     if why == MESSAGING:
         return "This is a messaging chat, so each script is asked."
-    if why == NO_RECORD:
-        return f"{NO_RECORD}, so each script is asked."
+    if why in (NO_RECORD, UNNAMED):
+        return f"{why}, so each script is asked."
     return f"This chat read outside content ({why}), so each script is asked."
 
 
 def refused_because(why: str) -> str:
     """Why a chat's scripts are asked each time, inside a refusal's parentheses."""
-    return why if why in (MESSAGING, NO_RECORD) else f"it read outside content: {why}"
+    return why if why in (MESSAGING, NO_RECORD, UNNAMED) else f"it read outside content: {why}"
 
 
 def sha256(code: str) -> str:
@@ -183,7 +184,7 @@ class Trust:
     def state(self, session: Any) -> tuple[str, str]:
         """(clean, tainted or subagent; why). A chat Kumi has no record of counts as tainted (r1)."""
         if not isinstance(session, str) or not session:
-            return TAINTED, "Hermes didn't name this chat"
+            return TAINTED, UNNAMED
         with self._lock:
             known = self._load().get(session)
         if known is None:

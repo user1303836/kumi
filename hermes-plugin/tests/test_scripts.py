@@ -85,6 +85,9 @@ class Scripts(unittest.TestCase):
 
     def test_a_chat_first_met_after_its_first_turn_is_tainted_and_a_restart_keeps_every_chats_record(self):
         self.assertEqual(self.hook(script(), session="resumed")["rule_key"], f"kumi:script:{scripts.sha256(CODE)}")
+        unnamed = self.hook(script(), session="")
+        self.assertEqual(unnamed["rule_key"], f"kumi:script:{scripts.sha256(CODE)}")
+        self.assertIn("Hermes didn't name this chat, so each script is asked.", unnamed["message"])
         self.start("clean")
         self.start("read-the-web")
         self.finished("web_extract", {}, "read-the-web")
@@ -132,6 +135,10 @@ class Scripts(unittest.TestCase):
                 self.assertIn(scripts.WARNING, asked["message"])
                 self.assertTrue(policy.shows_whole(asked["message"], surface), len(asked["message"]))
                 self.assertLessEqual(len(asked["message"]), budget)
+        self.ctx.surface = "unknown"  # no form shows whole there, so the script isn't asked
+        self.start("chat-unknown")
+        self.assertEqual(self.hook(script(), session="chat-unknown"),
+                         {"action": "block", "message": policy.SCRIPT_TOO_LONG})
 
     def test_a_delegated_subagents_chat_never_runs_a_script(self):
         policy.subagent_started(self.host, parent_session_id="s1", child_session_id="child")

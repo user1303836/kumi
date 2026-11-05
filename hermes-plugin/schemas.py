@@ -238,7 +238,7 @@ KUMI_SCRIPT = _tool(
     "kumi_script",
     "Run a script in the DAW, for what no typed step can do: Python in Live, Lua in REAPER and Renoise. Prefer "
     "kumi_change's typed steps whenever one fits (skill kumi:daw, Scripts). A script runs with the DAW's access to the "
-    "computer, and Kumi can't undo it (the DAW's own undo may). The producer approves it first, reading its purpose and "
+    "computer, and Kumi can't undo it (the DAW's own Undo may). The producer approves it first, reading its purpose and "
     "code; in a chat that has read outside content (web pages, transcripts, other tools' results), every script is "
     "asked and none runs while Hermes's approvals are off. At most 400 lines and 32 KB, with no hidden characters; "
     "code that runs processes or reaches the network (os.execute, io.popen, subprocess, os.system, socket, urllib, "

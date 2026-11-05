@@ -623,6 +623,8 @@ SCRIPT_UNREVIEWED = ("Kumi asks before each script in this chat ({why}), and Her
                      "approvals.mode: off): nobody would review it, so it didn't run. Turn approvals back on to run it.")
 SCRIPT_UNKNOWN_APPROVALS = ("Kumi asks before each script in this chat ({why}), and Kumi can't tell whether Hermes's "
                             "approvals are on here, so it didn't run.")
+SCRIPT_TOO_LONG = ("Kumi didn't run the script: its approval can't be shown whole here, and Kumi asks only when all of "
+                   "it is in view. Ask for it in Hermes Desktop, which shows it whole.")
 # The approval's richest form first, then smaller ones, until one shows whole on the producer's surface: the purpose's
 # length, how many of the code's first lines, how wide, where the code is (its full path, which Desktop and the
 # terminal can open; a short name; or nothing, in a messaging app), and the facts' length.
@@ -681,7 +683,7 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
              "deadline": f"{deadline:g}"}
     message = _script_message(code, facts, surface, chat_line=not tainted)
     if message is None:
-        return block(TOO_LONG), {}
+        return block(SCRIPT_TOO_LONG), {}
     decision = {"action": "approve", "message": message,
                 "rule_key": f"kumi:script:{digest}" if tainted else "kumi:script"}
     decision[_SCRIPT_EVENT] = {"profile": host.profile(), "session_id": session,
