@@ -1635,6 +1635,37 @@ async fn a_live_parameter_given_in_a_patch_is_left_out_and_controls_is_named_as_
     )
     .await;
     assert!(refused(&fresh), "a new device is told the same: {fresh}");
+
+    // A parameter typed into an older device stays as a kept box, rather than notation which would be refused if sent
+    // again. Re-sending the open answer's patch preserves it; replacing it explicitly removes the old parameter first.
+    let mut legacy = downloaded_echo();
+    let legacy_dial = json!({ "box": { "id": "obj-legacy", "maxclass": "newobj", "varname": "mix_dial",
+        "text": "live.dial @parameter_longname Mix", "numinlets": 1, "numoutlets": 2, "patching_rect": [500., 300., 100., 22.] } });
+    legacy["patcher"]["boxes"].as_array_mut().unwrap().push(legacy_dial.clone());
+    let legacy_file = downloads.path().join("Legacy.amxd");
+    std::fs::write(&legacy_file, encode_amxd(DeviceType::MidiEffect, &legacy)).unwrap();
+    let opened = call(&tool, json!({ "from": legacy_file.to_string_lossy() })).await;
+    assert!(
+        opened["kept"].as_array().unwrap().iter().any(|kept| kept.as_str().is_some_and(|kept| {
+            kept.starts_with("mix_dial: a Live parameter") && kept.contains("remove this box by name") && kept.contains("controls")
+        })),
+        "{opened}"
+    );
+    assert!(!opened["patch"].as_str().unwrap().contains("live.dial"), "the legacy parameter isn't offered as notation: {opened}");
+    let repeated = call(&tool, json!({ "from": legacy_file.to_string_lossy(), "name": "Legacy Again", "patch": opened["patch"] })).await;
+    assert!(repeated.get("wrong").is_none(), "re-sending the patch is valid: {repeated}");
+    let again = boxes_by_id(&library.path().join("Kumi/MIDI Effects/Legacy Again.amxd"));
+    assert_eq!(again["obj-legacy"], legacy_dial["box"], "the old parameter stays exactly as it was");
+    let replaced = call(
+        &tool,
+        json!({ "from": legacy_file.to_string_lossy(), "name": "Legacy Fixed", "remove": ["mix_dial"],
+        "controls": [{ "name": "Mix", "type": "number", "min": 0, "max": 100, "default": 50 }], "patch": "\"Mix\" -> [print mix]" }),
+    )
+    .await;
+    assert!(replaced.get("wrong").is_none(), "{replaced}");
+    let fixed = boxes_by_id(&library.path().join("Kumi/MIDI Effects/Legacy Fixed.amxd"));
+    assert!(!fixed.contains_key("obj-legacy"));
+    assert_eq!(fixed.values().filter(|item| item["saved_attribute_attributes"]["valueof"]["parameter_longname"] == "Mix").count(), 1);
 }
 
 #[tokio::test(flavor = "current_thread")]

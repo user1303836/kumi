@@ -16,7 +16,7 @@ use sha2::{Digest, Sha256};
 use super::amxd::{encrypted, with_patcher_chunk, DeviceType};
 use super::findings::Findings;
 use super::look;
-use super::patch::check::{check_with, UNKNOWN_OBJECT};
+use super::patch::check::{check_with, is_parameter, UNKNOWN_OBJECT};
 use super::patch::frozen::{read_device, Frozen, Unread, MOST_PATCHER_BYTES};
 use super::patch::geometry::Rect;
 use super::patch::layout::{arrange, text_width};
@@ -437,6 +437,9 @@ fn written(item: &MaxBox) -> Result<String, String> {
     };
     match item.maxclass() {
         "message" if !item.text().contains('\n') => Ok(format!("({})", item.text())),
+        "newobj" if is_parameter(item) => {
+            Err("a Live parameter: to replace it, remove this box by name and give its replacement in controls".into())
+        }
         "newobj" => {
             let text = item.text();
             if text.trim().is_empty() || text.contains([']', '\n']) {

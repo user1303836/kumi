@@ -78,6 +78,16 @@ pub struct DecodedAmxd {
     pub patcher: Value,
 }
 
+/// A device container's type, without decoding its patcher: the same header is used by JSON, frozen and encrypted
+/// devices. None when the header is incomplete or its type isn't one of Max for Live's three device types.
+pub fn device_type(bytes: &[u8]) -> Option<DeviceType> {
+    let header = bytes.get(..12)?;
+    if &header[..4] != b"ampf" || header[4..8] != 4u32.to_le_bytes() {
+        return None;
+    }
+    DeviceType::from_code(&header[8..12])
+}
+
 /// A device file's type and patcher; None when it isn't one.
 pub fn decode_amxd(bytes: &[u8]) -> Option<DecodedAmxd> {
     let (code, chunk) = patcher_chunk(bytes)?;
@@ -177,7 +187,21 @@ mod tests {
         lfo.extend_from_slice(&4u32.to_le_bytes());
         lfo.extend_from_slice(b"\x01\x02\x03\x04");
         assert!(encrypted(&lfo));
+        assert_eq!(device_type(&lfo), Some(DeviceType::AudioEffect), "the kind doesn't need the encrypted patcher");
         assert_eq!(patcher_chunk(&lfo), None);
         assert!(!encrypted(b"ampf"));
+        for kind in DeviceType::ALL {
+            let plain = encode_amxd(kind, &json!({ "patcher": { "boxes": [], "lines": [] } }));
+            let frozen = with_patcher_chunk(&plain, b"mx@c frozen files, not JSON").unwrap();
+            assert_eq!(device_type(&plain), Some(kind));
+            assert_eq!(device_type(&frozen), Some(kind), "a frozen device's kind comes from its container");
+            assert_eq!(decode_amxd(&frozen), None, "the patcher still needs its frozen-file reader");
+            for length in 0..12 {
+                assert_eq!(device_type(&plain[..length]), None, "an incomplete header isn't a kind");
+            }
+        }
+        for header in [b"nope\x04\0\0\0aaaa", b"ampf\x05\0\0\0aaaa", b"ampf\x04\0\0\0xxxx"] {
+            assert_eq!(device_type(header), None);
+        }
     }
 }

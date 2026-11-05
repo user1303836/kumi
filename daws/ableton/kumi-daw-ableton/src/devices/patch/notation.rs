@@ -20,7 +20,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde_json::{json, Value};
 
-use super::check::LIVE_PARAMETERS;
+use super::check::parameter_in_text;
 use super::code::{declared_ports, syntax_problem};
 use super::reference::{atoms, Reference, MOST_PORTS};
 use crate::devices::findings::Findings;
@@ -959,7 +959,7 @@ fn expand_within(notation: &Notation, outside: &Outside, top: bool) -> Expanded 
             }
             // A Live parameter typed into an object box is none of the face's controls, which Kumi places and names: in real
             // Live one was named for its scripting name, not its @parameter_longname (#772's live test).
-            What::Object(_) if LIVE_PARAMETERS.contains(&class.as_str()) => {
+            What::Object(text) if parameter_in_text(text) => {
                 found.wrong.push(format!(
                     "line {}: {label} is a Live parameter, which a patch can't put on the device's face or name in Live, so Kumi left it and its cords out: give it in controls (its name, range and default), which places it on the face and names it, then wire it by its name in quotes (\"Name\" -> …).",
                     item.line
@@ -1686,5 +1686,28 @@ mod tests {
         let cords: Vec<Value> =
             made.lines.iter().map(|(line, _)| json!([line["patchline"]["source"], line["patchline"]["destination"]])).collect();
         assert_eq!(cords, [json!([["obj-2", 0], ["obj-out", 0]])], "the cord from the dial goes with it");
+        for object in ["mc.live.gain~", "live.drop", "dial @parameter_enable 1", "umenu @parameter_enable 1"] {
+            let notation = parse(&format!("param = [{object}]\nparam -> out\ninside = [p display] {{\n  [{object}] -> [outlet]\n}}\n")).0;
+            let made = expand(&notation, &outside);
+            assert_eq!(made.found.wrong.len(), 2, "the top-level and nested parameters are refused: {object}");
+            assert_eq!(texts(&made.boxes), ["p display"]);
+            assert!(made.lines.is_empty(), "the top-level parameter's cord goes with it: {object}");
+            let inner = &made.boxes[0]["box"]["patcher"];
+            assert_eq!(inner["boxes"].as_array().unwrap().len(), 1, "only the nested outlet stays: {object}");
+            assert!(inner["lines"].as_array().unwrap().is_empty(), "the nested parameter's cord goes with it: {object}");
+        }
+        // The same Live objects are useful as displays when their parameter mode is off, inside a [p] too.
+        for object in ["live.dial", "live.drop", "mc.live.gain~", "dial"] {
+            let disabled = format!("{object} @parameter_enable 0");
+            let notation =
+                parse(&format!("display = [{disabled}]\ndisplay -> out\ninside = [p display] {{\n  [{disabled}] -> [outlet]\n}}\n")).0;
+            let made = expand(&notation, &outside);
+            assert!(made.found.wrong.is_empty(), "{object}: {:?}", made.found.wrong);
+            assert_eq!(texts(&made.boxes), [disabled.as_str(), "p display"]);
+            assert_eq!(made.lines.len(), 1, "the display remains wired: {object}");
+            let inner = &made.boxes[1]["box"]["patcher"];
+            assert_eq!(inner["boxes"].as_array().unwrap().len(), 2);
+            assert_eq!(inner["lines"].as_array().unwrap().len(), 1, "the nested display remains wired: {object}");
+        }
     }
 }

@@ -90,8 +90,37 @@ static REVERSED_DOMAIN: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^[a-z]{2
 /// Boxes Max draws behind others on purpose: a cord or a box over one is fine.
 const BACKDROPS: [&str; 3] = ["panel", "fpic", "live.line"];
 /// Max's Live objects that are parameters unless turned off: on a device's face, Kumi makes them only from controls.
-pub(super) const LIVE_PARAMETERS: [&str; 9] =
-    ["live.button", "live.dial", "live.gain~", "live.menu", "live.numbox", "live.slider", "live.tab", "live.text", "live.toggle"];
+const LIVE_PARAMETERS: [&str; 11] = [
+    "live.button",
+    "live.dial",
+    "live.drop",
+    "live.gain~",
+    "mc.live.gain~",
+    "live.menu",
+    "live.numbox",
+    "live.slider",
+    "live.tab",
+    "live.text",
+    "live.toggle",
+];
+
+/// A Live parameter typed as an object, including a Max UI object whose parameter mode is explicitly enabled.
+/// An explicit zero leaves a Live UI object as a display, including one inside a subpatcher.
+pub(crate) fn parameter_in_text(text: &str) -> bool {
+    let words = atoms(text);
+    let enabled = words.windows(2).rev().find(|pair| pair[0] == "@parameter_enable").and_then(|pair| pair[1].parse::<f64>().ok());
+    enabled.map_or_else(|| words.first().is_some_and(|class| LIVE_PARAMETERS.contains(&class.as_str())), |enabled| enabled != 0.0)
+}
+
+/// Whether a saved box is a Live parameter. Max saves a UI object's parameter mode in its fields; older devices Kumi
+/// made can instead hold the object and its attributes as newobj text.
+pub(crate) fn is_parameter(item: &MaxBox) -> bool {
+    match item.fields.get("parameter_enable").and_then(Value::as_f64) {
+        Some(enabled) => enabled != 0.0,
+        None if item.maxclass() == "newobj" => parameter_in_text(item.text()),
+        None => LIVE_PARAMETERS.contains(&item.maxclass()),
+    }
+}
 
 /// A broken rule.
 #[derive(Debug, Clone, PartialEq)]
@@ -956,11 +985,7 @@ struct Parameter {
 fn parameters(device: &Patcher, patcher: &Patcher, path: &str, at: &str, found: &mut Vec<Parameter>) {
     for item in &patcher.boxes {
         let id_path = if path.is_empty() { item.id().to_string() } else { format!("{path}::{}", item.id()) };
-        let enabled = match item.fields.get("parameter_enable").and_then(Value::as_f64) {
-            Some(enable) => enable == 1.0,
-            None => LIVE_PARAMETERS.contains(&item.maxclass()),
-        };
-        if enabled {
+        if is_parameter(item) {
             let valueof = item.valueof();
             let text = |key: &str| valueof.and_then(|valueof| valueof.get(key)).and_then(Value::as_str).filter(|text| !text.is_empty());
             // The device's own list holds each parameter's name as Max last saved it. An override renames a parameter
@@ -1002,7 +1027,7 @@ fn default_name(name: &str, maxclass: &str) -> bool {
         Some((stem, number)) if number.ends_with(']') && number[..number.len() - 1].chars().all(|c| c.is_ascii_digit()) => stem,
         _ => name,
     };
-    bare == maxclass || (bare.starts_with("live.") && LIVE_PARAMETERS.contains(&bare))
+    bare == maxclass || LIVE_PARAMETERS.contains(&bare)
 }
 
 /// A Push bank: its name and its eight slots ("-" for an empty one).

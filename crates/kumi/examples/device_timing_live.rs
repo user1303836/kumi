@@ -28,7 +28,7 @@ use kumi_daw_ableton::app::folders::find_bridge_config;
 use kumi_daw_ableton::{
     connection::Connect,
     create_ableton_integration,
-    devices::{amxd::decode_amxd, tool::kind_folder},
+    devices::{amxd::device_type, tool::kind_folder},
     samples::user_library,
     AbletonOptions, BRIDGE_TOOLS,
 };
@@ -304,7 +304,7 @@ impl Run {
     /// A copy of a device file in its kind's folder, as `name`: its Browser item.
     fn copy(&self, file: &Path, name: &str) -> Result<String, String> {
         let bytes = std::fs::read(file).map_err(|error| error.to_string())?;
-        let kind = decode_amxd(&bytes).ok_or("not a Max for Live device file")?.kind;
+        let kind = device_type(&bytes).ok_or("not a Max for Live device file")?;
         let folder = PathBuf::from(user_library(None, None)).join("Kumi").join(kind_folder(kind));
         std::fs::create_dir_all(&folder).map_err(|error| error.to_string())?;
         let copy = folder.join(format!("{name}.amxd"));
