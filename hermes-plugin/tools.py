@@ -309,9 +309,12 @@ def approvals_bypassed(host: Host, *, chat: bool = True) -> bool | None:
 
 
 def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
+    """Where Kumi stands, for the model: setup as `setup.for_model` gives it (no path on this computer, LOW 11), the
+    approvals note, and the runtime's own status."""
     daw = host.daw()
     data_dir = host.data_dir()
-    report: dict[str, Any] = {"setup": setup.status(daw=daw, data_dir=data_dir, plugin_dir=host.plugin_dir),
+    report: dict[str, Any] = {"setup": setup.for_model(setup.status(daw=daw, data_dir=data_dir,
+                                                                    plugin_dir=host.plugin_dir)),
                               "runtime": None, "connected": False, "daw": daw, "project": None, "owner": None,
                               "capabilities": []}
     bypassed = approvals_bypassed(host)
@@ -321,7 +324,7 @@ def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
     try:
         host.install(data_dir)
     except runtime.Unavailable as failure:
-        report["message"] = report["setup"].get("message") or failure.reason
+        report["message"] = report["setup"].get("message") or setup.reason_for_model(failure.code, failure.reason)
         return report
     if host.unattended() == "scheduled":  # never the runtime: a call makes its caller the runtime's holder
         published = snapshots.status(Path(data_dir) / "state")
@@ -370,7 +373,9 @@ def setup_daw_caller(host: Host, daw: str, kwargs: dict) -> Callable[[dict], dic
 def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
     """C8 through C1's kumi_setup. `plan` records the next step. `install` and `adopt` carry out exactly the plan the
     producer approved: the approval hook bound its digest to this call's record (CC-5), and only that plan runs. A
-    digest in the model's own arguments is never used."""
+    digest in the model's own arguments is never used. What the model gets names no path or URL (LOW 11): the plan,
+    the setup state and a failure's reason go through setup's model projections; the approval and `hermes kumi
+    setup` show the producer every path."""
     action, daw = args.get("action"), args.get("daw") or host.daw()
     if action not in ("plan", "install", "adopt"):
         return {"error": {"code": "invalid", "reason": "action is plan, install or adopt."}}
@@ -382,10 +387,10 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
         try:
             planned = setup.plan(daw, setup_daw=setup_daw, data_dir=data_dir, plugin_dir=host.plugin_dir)
         except setup.SetupError as error:
-            return {"error": {"code": error.code, "reason": error.message}}
+            return {"error": {"code": error.code, "reason": setup.reason_for_model(error.code, error.message)}}
         next_action = {"runtime": "install", "daw_component": "install", "owned_elsewhere": "adopt",
                        "ffmpeg": "install (optional: ask the producer; setup is done either way)"}.get(planned["step"])
-        return {**planned, "next": f"kumi_setup {next_action}" if next_action else None}
+        return {**setup.plan_for_model(planned), "next": f"kumi_setup {next_action}" if next_action else None}
     call = kwargs.get("kumi_call")
     digest = call.extra.get("digest") if isinstance(call, calls.Entry) else None
     if not isinstance(digest, str) or not digest:
@@ -399,10 +404,11 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
                              plugin_dir=host.plugin_dir)
     if not result.get("ok"):
         error = result.get("error") or {}
-        return {"error": {"code": error.get("code") or "failed", "reason": error.get("message") or "Setup failed."}}
+        code = error.get("code") or "failed"
+        return {"error": {"code": code, "reason": setup.reason_for_model(code, error.get("message"))}}
     if action == "adopt" or result.get("step") in ("runtime", "ffmpeg"):
         host.runtimes.stop(data_dir)  # the next start uses the new runtime, the adopted --kumi-home or the ffmpeg
-    return result
+    return {**result, "status": setup.for_model(result.get("status") or {})}
 
 
 def kumi_connect(host: Host, args: dict, **kwargs: Any) -> dict:
