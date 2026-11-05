@@ -273,8 +273,7 @@ impl Listening {
         }
         let parent = folder.parent().ok_or("the listening directory has no parent")?;
         let open = |path: &Path, access, share| {
-            std::fs::OpenOptions::new().access_mode(access).share_mode(share)
-                .custom_flags(0x0220_0000).open(path)
+            std::fs::OpenOptions::new().access_mode(access).share_mode(share).custom_flags(0x0220_0000).open(path)
         };
         // Pin the owning bridge directory, then this exact existing cache; the native
         // helper verifies current-account ownership and type before changing its handle.
@@ -300,7 +299,9 @@ impl Listening {
             // Upgrade only the component's dedicated directory at startup, never an
             // adopted runtime path during a capture or a replacement after startup.
             if Self::prepare_owned_folder(&folder).is_err() {
-                crate::log::line("The component's existing listening directory could not be verified and protected; guarded rendering will refuse it.");
+                crate::log::line(
+                    "The component's existing listening directory could not be verified and protected; guarded rendering will refuse it.",
+                );
             }
         }
         *self.folder.borrow_mut() = Some(folder);

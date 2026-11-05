@@ -121,10 +121,15 @@ impl State {
             "device" => {
                 let parent = text(&args["parent"]);
                 let at = places(parent)[0];
-                tracks[at].devices.iter().enumerate().map(|(index, device)| {
-                    json!({"ref":format!("7:device:{at}:d{index}"),"parentRef":parent,"name":device.name,
+                tracks[at]
+                    .devices
+                    .iter()
+                    .enumerate()
+                    .map(|(index, device)| {
+                        json!({"ref":format!("7:device:{at}:d{index}"),"parentRef":parent,"name":device.name,
                         "className":device.class,"classDisplayName":device.class,"enabled":true,"objectIdentity":device.identity})
-                }).collect()
+                    })
+                    .collect()
             }
             _ => return None,
         };
@@ -342,12 +347,16 @@ fn capture_trims_the_approved_window_and_verifies_restoration() {
             assert_ne!(name, "live_run_python", "no script fallback");
             assert_ne!(name, "live_session_emergency_stop", "no unfenced stop");
             if name.ends_with("_apply") {
-                assert!(matches!(name, "live_browser_load_apply" | "live_transport_apply" | "live_transport_action_apply"),
-                    "forbidden mutation: {call}");
+                assert!(
+                    matches!(name, "live_browser_load_apply" | "live_transport_apply" | "live_transport_action_apply"),
+                    "forbidden mutation: {call}"
+                );
             }
             if name == "live_transport_preview" {
-                assert!(call["args"].as_object().unwrap().keys().all(|key| matches!(key.as_str(), "position" | "loopEnabled")),
-                    "no loop range, punch, tempo or recording-mode mutation: {call}");
+                assert!(
+                    call["args"].as_object().unwrap().keys().all(|key| matches!(key.as_str(), "position" | "loopEnabled")),
+                    "no loop range, punch, tempo or recording-mode mutation: {call}"
+                );
             }
         }
     });
@@ -473,10 +482,13 @@ fn incompatible_or_silent_ears_never_starts_playback_or_installs_a_replacement()
             let (live, state, request) = bounded(true).await;
             state.tap_available.set(version.is_some());
             state.tap_version.set(version.unwrap_or(EARS_VERSION as f64));
-            assert!(matches!(
-                live.rendering.hear_in_set(&request, Signal::new()).await,
-                Err(RuntimeError::Hear(HearFailure::Refused { code: "ears_missing", .. }))
-            ), "{version:?}");
+            assert!(
+                matches!(
+                    live.rendering.hear_in_set(&request, Signal::new()).await,
+                    Err(RuntimeError::Hear(HearFailure::Refused { code: "ears_missing", .. }))
+                ),
+                "{version:?}"
+            );
             assert_eq!(state.starts.get(), 0);
             assert!(state.arms.borrow().is_empty());
             assert_eq!(state.closed.get(), 1);
@@ -686,8 +698,10 @@ fn missing_preinstalled_ears_is_typed_and_never_loads_or_writes_a_device() {
         assert_eq!(live.set.next.get(), 0);
         for call in live.set.asked.borrow().iter() {
             let name = call["name"].as_str().unwrap();
-            assert!(!name.starts_with("live_browser_load") && !name.ends_with("_apply") && name != "live_run_python",
-                "no device load, setup or write: {call}");
+            assert!(
+                !name.starts_with("live_browser_load") && !name.ends_with("_apply") && name != "live_run_python",
+                "no device load, setup or write: {call}"
+            );
         }
         restored(&live, &state);
         assert!(std::fs::read_dir(request.scratch_dir.unwrap()).unwrap().next().is_none());
@@ -729,10 +743,7 @@ fn an_acknowledged_stop_that_leaves_live_playing_is_unsure_and_discards_audio() 
     on_a_paused_clock(async {
         let (live, state, request) = bounded(true).await;
         state.ignore_stop.set(true);
-        assert!(matches!(
-            live.rendering.hear_in_set(&request, Signal::new()).await,
-            Err(RuntimeError::Hear(HearFailure::Unsure { .. }))
-        ));
+        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
         assert!(state.stops.get() > 0, "the bridge acknowledged a stop");
         assert!(live.set.playing.get(), "the independent transport read still sees playback");
         assert_eq!(state.written.get(), 1, "discard even audio already written before the restoration read");
@@ -753,10 +764,7 @@ fn a_changed_selected_device_after_cleanup_is_unsure_and_discards_audio() {
             }
             Ok(())
         }));
-        assert!(matches!(
-            live.rendering.hear_in_set(&request, Signal::new()).await,
-            Err(RuntimeError::Hear(HearFailure::Unsure { .. }))
-        ));
+        assert!(matches!(live.rendering.hear_in_set(&request, Signal::new()).await, Err(RuntimeError::Hear(HearFailure::Unsure { .. }))));
         assert_eq!(state.selected_device.get(), "7:device:1:d0", "do not overwrite the producer's selection");
         assert_eq!(state.written.get(), 1);
         assert_eq!(state.closed.get(), 1);
@@ -769,18 +777,34 @@ fn a_changed_selected_device_after_cleanup_is_unsure_and_discards_audio() {
 fn every_required_state_field_must_be_read_before_and_after_capture() {
     on_a_paused_clock(async {
         for missing in [
-            ("set", "/objectIdentity"), ("set", "/tempo"),
-            ("selection", "/selectedTrackRef"), ("selection", "/selectedDeviceRef"),
-            ("track", "/objectIdentity"), ("track", "/armed"), ("track", "/monitoringState"),
-            ("main-track", "/objectIdentity"), ("main-track", "/armed"), ("main-track", "/monitoringState"),
+            ("set", "/objectIdentity"),
+            ("set", "/tempo"),
+            ("selection", "/selectedTrackRef"),
+            ("selection", "/selectedDeviceRef"),
+            ("track", "/objectIdentity"),
+            ("track", "/armed"),
+            ("track", "/monitoringState"),
+            ("main-track", "/objectIdentity"),
+            ("main-track", "/armed"),
+            ("main-track", "/monitoringState"),
             ("device", "/objectIdentity"),
-            ("session-playback", "/transport/playing"), ("session-playback", "/transport/arrangementRecord"),
-            ("session-playback", "/transport/sessionRecord"), ("session-playback", "/transport/position"),
-            ("session-playback", "/transport/loop/enabled"), ("session-playback", "/transport/loop/start"),
-            ("session-playback", "/transport/loop/length"), ("session-playback", "/transport/punchIn"),
-            ("session-playback", "/transport/punchOut"), ("session-playback", "/firedTargets"), ("session-playback", "/playingTargets"),
-            ("song", "/backToArranger"), ("song", "/sessionRecord"), ("song", "/sessionAutomationRecord"),
-            ("song", "/overdub"), ("song", "/arrangementOverdub"), ("song", "/reEnableAutomationEnabled"),
+            ("session-playback", "/transport/playing"),
+            ("session-playback", "/transport/arrangementRecord"),
+            ("session-playback", "/transport/sessionRecord"),
+            ("session-playback", "/transport/position"),
+            ("session-playback", "/transport/loop/enabled"),
+            ("session-playback", "/transport/loop/start"),
+            ("session-playback", "/transport/loop/length"),
+            ("session-playback", "/transport/punchIn"),
+            ("session-playback", "/transport/punchOut"),
+            ("session-playback", "/firedTargets"),
+            ("session-playback", "/playingTargets"),
+            ("song", "/backToArranger"),
+            ("song", "/sessionRecord"),
+            ("song", "/sessionAutomationRecord"),
+            ("song", "/overdub"),
+            ("song", "/arrangementOverdub"),
+            ("song", "/reEnableAutomationEnabled"),
         ] {
             for before in [true, false] {
                 let (live, state, request) = bounded(true).await;

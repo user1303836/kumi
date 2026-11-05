@@ -419,10 +419,17 @@ async fn a_host_tops_a_bridge_up_to_its_receive_buffer_then_gives_back_what_it_r
 #[cfg(windows)]
 mod restricted_renoise_staging {
     use super::*;
-    use daw_bridge::{lifecycle::native_acl::{self, shapes}, paths::BridgePaths, Daw};
+    use daw_bridge::{
+        lifecycle::native_acl::{self, shapes},
+        paths::BridgePaths,
+        Daw,
+    };
     use daw_mcp_server::host::{Host, ListeningMode};
-    use std::{path::Path, sync::{Arc, Mutex}};
     use std::os::windows::fs::OpenOptionsExt;
+    use std::{
+        path::Path,
+        sync::{Arc, Mutex},
+    };
 
     fn private_home() -> tempfile::TempDir {
         let home = tempfile::tempdir().unwrap();
@@ -501,10 +508,14 @@ mod restricted_renoise_staging {
     fn restricted_windows_renoise_never_repairs_an_untrusted_root() {
         let home = private_home();
         let root = BridgePaths::new(home.path(), Daw::Renoise).root;
-        shapes::write(&root, Some(&[
-            own_full(shapes::INHERITABLE),
-            shapes::Ace { allow: true, flags: shapes::INHERITABLE, mask: 0x0012_0089, whose: shapes::Whose::Sid("S-1-1-0") },
-        ]), true);
+        shapes::write(
+            &root,
+            Some(&[
+                own_full(shapes::INHERITABLE),
+                shapes::Ace { allow: true, flags: shapes::INHERITABLE, mask: 0x0012_0089, whose: shapes::Whose::Sid("S-1-1-0") },
+            ]),
+            true,
+        );
         let before = shapes::descriptor(&root);
         let runs = daw_bridge::owner::acl_runs_on_this_thread();
         let _host = Host::new(Daw::Renoise, home.path(), ListeningMode::Restricted);
@@ -520,11 +531,15 @@ mod restricted_renoise_staging {
         let folder = root.join("listening");
         std::fs::create_dir(&folder).unwrap();
         shapes::own_mine(&folder);
-        shapes::write(&folder, Some(&[
-            own_full(shapes::INHERITABLE),
-            shapes::Ace { allow: true, flags: shapes::INHERITABLE, mask: shapes::FULL, whose: shapes::Whose::Sid("S-1-5-18") },
-            shapes::Ace { allow: true, flags: shapes::INHERITABLE, mask: shapes::FULL, whose: shapes::Whose::Sid("S-1-5-32-544") },
-        ]), false);
+        shapes::write(
+            &folder,
+            Some(&[
+                own_full(shapes::INHERITABLE),
+                shapes::Ace { allow: true, flags: shapes::INHERITABLE, mask: shapes::FULL, whose: shapes::Whose::Sid("S-1-5-18") },
+                shapes::Ace { allow: true, flags: shapes::INHERITABLE, mask: shapes::FULL, whose: shapes::Whose::Sid("S-1-5-32-544") },
+            ]),
+            false,
+        );
         let old = folder.join("previous.wav");
         std::fs::write(&old, b"previous audio").unwrap();
         let neighbor = root.join("other-cache");
@@ -533,8 +548,11 @@ mod restricted_renoise_staging {
         let runs = daw_bridge::owner::acl_runs_on_this_thread();
         let host = Host::new(Daw::Renoise, home.path(), ListeningMode::Restricted);
         assert!(native_acl::is_kumis_shape(&folder));
-        assert_eq!([&root, &old, &neighbor].map(|path| shapes::descriptor(path)), before,
-            "startup changes only the exact cache directory, not old children, neighbors or its root");
+        assert_eq!(
+            [&root, &old, &neighbor].map(|path| shapes::descriptor(path)),
+            before,
+            "startup changes only the exact cache directory, not old children, neighbors or its root"
+        );
         assert_eq!(std::fs::read(&old).unwrap(), b"previous audio");
         assert!(std::fs::rename(&folder, root.join("replaced")).is_err(), "the host pins its approved folder identity");
         assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
@@ -552,7 +570,9 @@ mod restricted_renoise_staging {
             native_acl::create_kumis_folder(&target).unwrap();
             if foreign {
                 native_acl::create_kumis_folder(&folder).unwrap();
-                if !shapes::own(&folder, "S-1-5-32-544") { continue; }
+                if !shapes::own(&folder, "S-1-5-32-544") {
+                    continue;
+                }
             } else if let Err(error) = std::os::windows::fs::symlink_dir(&target, &folder) {
                 assert_eq!(error.raw_os_error(), Some(1314), "unexpected symlink fixture failure: {error}");
                 continue; // This case needs Windows' symbolic-link privilege.
@@ -566,7 +586,9 @@ mod restricted_renoise_staging {
             assert!(lab.reply.lock().unwrap().is_null(), "unsafe startup must refuse before native render dispatch");
             assert_eq!(shapes::descriptor(observed), before);
             assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
-            if foreign { shapes::own_mine(&folder); }
+            if foreign {
+                shapes::own_mine(&folder);
+            }
         }
     }
 
@@ -577,8 +599,11 @@ mod restricted_renoise_staging {
             let runs = daw_bridge::owner::acl_runs_on_this_thread();
             let (started, error) = lab.host.render(&request()).await;
             assert!(!error && started["state"] == "running", "{started}");
-            assert_eq!(started.get("files").is_none(), mode == ListeningMode::Restricted,
-                "only the restricted host hides planned, unprotected paths");
+            assert_eq!(
+                started.get("files").is_none(),
+                mode == ListeningMode::Restricted,
+                "only the restricted host hides planned, unprotected paths"
+            );
             let file = lab.file();
             assert!(!native_acl::is_kumis_shape(&file), "the renderer initially inherits, not protects, its owner rule");
             let before = shapes::descriptor(&file);
@@ -590,8 +615,12 @@ mod restricted_renoise_staging {
                 assert_eq!(std::fs::read(&file).unwrap(), b"owned render boundary fixture");
                 assert_eq!(native_acl::is_kumis_shape(&file), mode == ListeningMode::Restricted);
             }
-            if mode == ListeningMode::Standalone { assert_eq!(shapes::descriptor(&file), before); }
-            if mode == ListeningMode::Restricted { assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs); }
+            if mode == ListeningMode::Standalone {
+                assert_eq!(shapes::descriptor(&file), before);
+            }
+            if mode == ListeningMode::Restricted {
+                assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
+            }
         }
     }
 
@@ -599,11 +628,8 @@ mod restricted_renoise_staging {
     async fn restricted_windows_renoise_protects_immediately_completed_start() {
         for pattern in [false, true] {
             let lab = Lab::start_with_state(private_home(), ListeningMode::Restricted, true).await;
-            let (done, error) = if pattern {
-                lab.host.audio_file(&json!({"ref": "1:pattern:1"})).await
-            } else {
-                lab.host.render(&request()).await
-            };
+            let (done, error) =
+                if pattern { lab.host.audio_file(&json!({"ref": "1:pattern:1"})).await } else { lab.host.render(&request()).await };
             assert!(!error && done["state"] == "done", "{done}");
             let path = Path::new(done["files"][0]["file"].as_str().unwrap());
             assert_eq!(path, lab.file().as_path());
@@ -622,12 +648,17 @@ mod restricted_renoise_staging {
             std::fs::write(&outside, b"not this render").unwrap();
             shapes::own_mine(&outside);
             match hazard {
-                "broad" => shapes::write(&file, Some(&[
-                    own_full(0),
-                    shapes::Ace { allow: true, flags: 0, mask: 0x0012_0089, whose: shapes::Whose::Sid("S-1-1-0") },
-                ]), true),
+                "broad" => shapes::write(
+                    &file,
+                    Some(&[own_full(0), shapes::Ace { allow: true, flags: 0, mask: 0x0012_0089, whose: shapes::Whose::Sid("S-1-1-0") }]),
+                    true,
+                ),
                 "hardlink" => std::fs::hard_link(&file, file.with_file_name("second-link.wav")).unwrap(),
-                "foreign" => if !shapes::own(&file, "S-1-5-32-544") { continue; },
+                "foreign" => {
+                    if !shapes::own(&file, "S-1-5-32-544") {
+                        continue;
+                    }
+                }
                 "reparse" => {
                     std::fs::remove_file(&file).unwrap();
                     if let Err(error) = std::os::windows::fs::symlink_file(&outside, &file) {
@@ -648,7 +679,9 @@ mod restricted_renoise_staging {
             assert_eq!(shapes::descriptor(observed), before, "{hazard}: a refusal must not change the ACL or owner");
             assert_eq!(std::fs::read(&outside).unwrap(), b"not this render");
             assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
-            if hazard == "foreign" { shapes::own_mine(&file); }
+            if hazard == "foreign" {
+                shapes::own_mine(&file);
+            }
         }
     }
 
@@ -691,8 +724,7 @@ mod restricted_renoise_staging {
         let file = folder.join("owned.wav");
         std::fs::write(&file, b"owned").unwrap();
         shapes::own_mine(&file);
-        let pinned = std::fs::OpenOptions::new().access_mode(0x0006_0080).share_mode(1)
-            .custom_flags(0x0020_0000).open(&file).unwrap();
+        let pinned = std::fs::OpenOptions::new().access_mode(0x0006_0080).share_mode(1).custom_flags(0x0020_0000).open(&file).unwrap();
         let other = folder.join("swapped.wav");
         assert!(std::fs::rename(&file, &other).is_err());
         assert!(std::fs::write(&file, b"replacement").is_err());

@@ -199,7 +199,11 @@ impl Snapshots {
         #[cfg(test)]
         let gate = {
             let mut next = self.next_gate.borrow_mut();
-            if next.as_ref().is_some_and(|(target, _)| target == name) { next.take().map(|(_, gate)| gate) } else { None }
+            if next.as_ref().is_some_and(|(target, _)| target == name) {
+                next.take().map(|(_, gate)| gate)
+            } else {
+                None
+            }
         };
         Ok((seq, Write::File(FileWrite {
             name: name.to_owned(), path, snapshot: Value::Object(snapshot), max_bytes, done,

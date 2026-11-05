@@ -186,7 +186,7 @@ pub struct Artifacts {
     records: RefCell<Arc<Records>>,
     publishing: Mutex<()>,
     #[cfg(test)]
-    before_enqueue: RefCell<Option<Box<dyn FnOnce()>>>,
+    before_enqueue: RefCell<Option<futures::future::LocalBoxFuture<'static, ()>>>,
 }
 impl Artifacts {
     pub fn new(state_dir: &Path) -> Result<Self, OpError> {
@@ -241,7 +241,9 @@ impl Artifacts {
             Err(error) => return Err(failed(error)),
         };
         Ok(Self {
-            root, records: RefCell::new(Arc::new(records)), publishing: Mutex::new(()),
+            root,
+            records: RefCell::new(Arc::new(records)),
+            publishing: Mutex::new(()),
             #[cfg(test)]
             before_enqueue: RefCell::new(None),
         })
@@ -363,9 +365,9 @@ impl Artifacts {
     ) -> Result<(SavedArtifact, Option<SavedArtifact>), OpError> {
         match reference {
             Some((reference, reference_mime)) => {
-                let [source, reference] = self.publish_files(
-                    ctx, [(source, "audio", source_mime), (reference, "audio", reference_mime)], "listen", signal, deadline,
-                ).await?;
+                let [source, reference] = self
+                    .publish_files(ctx, [(source, "audio", source_mime), (reference, "audio", reference_mime)], "listen", signal, deadline)
+                    .await?;
                 Ok((source, Some(reference)))
             }
             None => {
@@ -426,7 +428,9 @@ impl Artifacts {
                     fields.insert(id.clone(), serde_json::to_value(record).map_err(failed)?);
                 }
                 Ok((document, added))
-            }).await.map_err(failed)??;
+            })
+            .await
+            .map_err(failed)??;
             Ok((publishing, saved, Some((document, added))))
         };
         let expired = || refused("retention_timeout", "The capture deadline expired before retaining its audio.");
@@ -448,8 +452,11 @@ impl Artifacts {
             }
         }
         #[cfg(test)]
-        if let Some(before) = self.before_enqueue.borrow_mut().take() {
-            before();
+        {
+            let before = self.before_enqueue.borrow_mut().take();
+            if let Some(before) = before {
+                before.await;
+            }
         }
         // This is the commit boundary: no await from these checks through enqueue.
         check(signal)?;
@@ -660,7 +667,7 @@ mod tests {
         assert_eq!(std::fs::read(reference).unwrap(), b"reference audio");
     }
 
-    #[tokio::test(start_paused = true)]
+    #[tokio::test]
     async fn expiry_at_the_commit_boundary_removes_every_unpublished_copy() {
         let fixture = Fixture::new();
         let ctx = &fixture.ctx;
@@ -669,18 +676,20 @@ mod tests {
         let signal = Signal::new();
         let staged = ctx.artifacts().stage(ctx, &source, None, &signal).await.unwrap();
         let copy = staged.path().to_path_buf();
-        // Keep paused time explicit while the manifest is prepared on a worker.
-        let clock = tokio::spawn(async { loop { tokio::task::yield_now().await; } });
-        let reached = Rc::new(std::cell::Cell::new(false));
-        let marked = reached.clone();
-        *ctx.artifacts().before_enqueue.borrow_mut() = Some(Box::new(move || {
-            marked.set(true);
-            futures::executor::block_on(tokio::time::advance(std::time::Duration::from_secs(2)));
+        let (entered, at_boundary) = tokio::sync::oneshot::channel();
+        let (release, proceed) = tokio::sync::oneshot::channel();
+        *ctx.artifacts().before_enqueue.borrow_mut() = Some(Box::pin(async move {
+            entered.send(()).unwrap();
+            proceed.await.unwrap();
         }));
-        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(1);
-        let result = ctx.artifacts().publish_pair(ctx, staged, "audio/wav", None, &signal, Some(deadline)).await;
-        clock.abort();
-        assert!(reached.get(), "expiry must occur after preparation, at the final enqueue gate");
+        let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+        let (result, ()) = tokio::join!(ctx.artifacts().publish_pair(ctx, staged, "audio/wav", None, &signal, Some(deadline)), async {
+            at_boundary.await.unwrap();
+            tokio::time::pause();
+            tokio::time::advance(std::time::Duration::from_secs(61)).await;
+            release.send(()).unwrap();
+        });
+        tokio::time::resume();
         assert!(matches!(result, Err(OpError::Refused { code: "retention_timeout", .. })));
         ctx.snapshots().flush();
         assert!(!copy.exists());
@@ -699,16 +708,13 @@ mod tests {
         let staged = ctx.artifacts().stage(ctx, &source, None, &signal).await.unwrap();
         let (entered, release) = ctx.snapshots().pause_next_commit("artifacts");
         let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
-        let (result, ()) = tokio::join!(
-            ctx.artifacts().publish_pair(ctx, staged, "audio/wav", None, &signal, Some(deadline)),
-            async {
-                entered.await.unwrap();
-                signal.cancel();
-                tokio::task::yield_now().await;
-                assert!(!ctx.paths().state_dir.join("artifacts.json").exists());
-                release.send(()).unwrap();
-            }
-        );
+        let (result, ()) = tokio::join!(ctx.artifacts().publish_pair(ctx, staged, "audio/wav", None, &signal, Some(deadline)), async {
+            entered.await.unwrap();
+            signal.cancel();
+            tokio::task::yield_now().await;
+            assert!(!ctx.paths().state_dir.join("artifacts.json").exists());
+            release.send(()).unwrap();
+        });
         let (saved, reference) = result.unwrap();
         assert!(reference.is_none());
         assert_eq!(ctx.artifacts().resolve(ctx, &saved.id).unwrap(), saved.path);

@@ -286,17 +286,22 @@ case!(a_slower_renoise_tempo_after_approval_refuses_without_rendering, async {
     wire.end().await;
 });
 
-case!(a_busy_render_refusal_is_rechecked_without_replaying_a_completed_capture, async {
-    let (lab, listening) = listening_lab(Daw::Reaper).await;
+case!(a_running_transport_refusal_is_rechecked_without_replaying_a_completed_capture, async {
+    let script = ReaperScript::new(3, 0);
+    let listening = script.listening().clone();
+    listening.set_render_preflight(true);
+    let configure = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| configure.config(secret, "/lab/REAPER")))).await;
+    listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Reaper).root.join("listening"));
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (key, epoch, _, _) = looked(&mut wire).await;
     let args = approved_args(&mut wire, window(&key, epoch, json!({"mix":true}))).await;
-    listening.set_playing(true);
+    script.set_playing(true);
     let (busy, error) = wire.call("listen", args.clone(), Some("wait-for-idle")).await;
-    assert!(!error && busy["state"] == "refused" && busy["code"] == "render_busy", "{busy}");
+    assert!(!error && busy["state"] == "refused" && busy["code"] == "transport_running", "{busy}");
     no_audio(&busy);
     assert!(listening.renders().is_empty());
-    listening.set_playing(false);
+    script.set_playing(false);
     let (heard, error) = wire.call("listen", args.clone(), Some("wait-for-idle")).await;
     assert!(!error && heard["state"] == "done", "{heard}");
     let (again, error) = wire.call("listen", args, Some("wait-for-idle")).await;
@@ -384,14 +389,16 @@ case!(compressed_reference_preparation_never_holds_the_native_settle_guard, asyn
     listening.set_steps(10);
     let media_root = root.clone();
     let lab = Lab::configured(
-        DawId::Reaper, Daw::Reaper,
+        DawId::Reaper,
+        Daw::Reaper,
         Some(Box::new(move |secret| script.config(secret, "/lab/REAPER"))),
         false,
         move |args| {
             args.media_roots.push(media_root);
             args.tools.insert("ffmpeg".into(), converter);
         },
-    ).await;
+    )
+    .await;
     listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Reaper).root.join("listening"));
     let mut wire = Wire::start(lab.ctx.clone()).await;
     let (key, epoch, _, _) = looked(&mut wire).await;
@@ -399,12 +406,15 @@ case!(compressed_reference_preparation_never_holds_the_native_settle_guard, asyn
     args["compare_to"] = json!({"file": root.join("reference.mp3")});
     let args = approved_args(&mut wire, args).await;
     let native_seconds = args["_listen"]["deadline_seconds"].as_u64().unwrap();
+    wire.response_wait = Duration::from_secs(args["_listen"]["prepare_seconds"].as_u64().unwrap() + native_seconds + 30);
     let (result, ()) = tokio::join!(wire.call("listen", args, Some("slow-reference")), async {
         tokio::time::timeout(Duration::from_secs(5), async {
             while !root.join("entered").exists() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         assert_eq!(lab.ctx.settle_bound(), None);
         assert!(listening.renders().is_empty());
         // Spend most of the separate 120-second preparation allowance, without
@@ -418,7 +428,9 @@ case!(compressed_reference_preparation_never_holds_the_native_settle_guard, asyn
             while listening.renders().is_empty() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         assert_eq!(lab.ctx.settle_bound(), Some(Duration::from_secs(native_seconds)));
     });
     let (heard, error) = result;
@@ -445,17 +457,16 @@ case!(shutdown_cancels_capture_but_not_its_restoration_or_settle_guard, async {
     approve(&mut args, &preview);
     let bounds = args.as_object_mut().unwrap().remove("_listen").unwrap();
     let host = HostCall { private: [("_listen".into(), bounds)].into_iter().collect::<JsonObject>().into(), ..HostCall::default() };
-    let call = Call {
-        args: args.as_object().unwrap().clone(), host,
-        signal: lab.ctx.shutdown().clone(), progress: Progress::none(),
-    };
+    let call = Call { args: args.as_object().unwrap().clone(), host, signal: lab.ctx.shutdown().clone(), progress: Progress::none() };
     let operation = registry::OPERATIONS.iter().find(|operation| operation.name == "listen").unwrap();
     let (heard, ()) = tokio::join!((operation.run)(&lab.ctx, call), async {
         tokio::time::timeout(Duration::from_secs(5), async {
             while listening.renders().is_empty() {
                 tokio::time::sleep(Duration::from_millis(5)).await;
             }
-        }).await.unwrap();
+        })
+        .await
+        .unwrap();
         assert_eq!(lab.ctx.settle_bound(), Some(Duration::from_secs(preview["deadline_seconds"].as_u64().unwrap())));
         lab.ctx.shutdown().cancel();
     });
@@ -466,7 +477,7 @@ case!(shutdown_cancels_capture_but_not_its_restoration_or_settle_guard, async {
     assert_eq!(listening.restored(), 1);
     assert_eq!(lab.ctx.settle_bound(), None);
     assert!(!lab.ctx.paths().state_dir.join("artifacts.json").exists());
-    assert!(std::fs::read_dir(listening.folder()).unwrap().next().is_none());
+    assert!(!listening.folder().exists() || std::fs::read_dir(listening.folder()).unwrap().next().is_none());
     lab.ctx.link().close().await;
 });
 
@@ -476,28 +487,33 @@ case!(a_queued_refusal_never_claims_restoration_from_missing_or_changed_render_s
         let listening = script.listening().clone();
         listening.set_render_preflight(true);
         let bridge = script.clone();
-        let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| {
-            let mut config = bridge.config(secret, "/lab/REAPER");
-            let inner = config.respond.take().unwrap();
-            let terminal = std::sync::atomic::AtomicBool::new(false);
-            config.respond = Some(Arc::new(move |method, args| {
-                if method == "listen_status" {
-                    terminal.store(true, Ordering::SeqCst);
-                }
-                let mut answer = inner(method, args);
-                if terminal.load(Ordering::SeqCst) && method == "read" && args["kind"] == "render_preflight" {
-                    if let Some(Ok(value)) = &mut answer {
-                        if missing {
-                            value.as_object_mut().unwrap().remove("render_state");
-                        } else {
-                            value["render_state"]["numbers"]["RENDER_SRATE"] = json!(96_000.);
+        let lab = Lab::new(
+            DawId::Reaper,
+            Daw::Reaper,
+            Some(Box::new(move |secret| {
+                let mut config = bridge.config(secret, "/lab/REAPER");
+                let inner = config.respond.take().unwrap();
+                let terminal = std::sync::atomic::AtomicBool::new(false);
+                config.respond = Some(Arc::new(move |method, args| {
+                    if method == "listen_status" {
+                        terminal.store(true, Ordering::SeqCst);
+                    }
+                    let mut answer = inner(method, args);
+                    if terminal.load(Ordering::SeqCst) && method == "read" && args["kind"] == "render_preflight" {
+                        if let Some(Ok(value)) = &mut answer {
+                            if missing {
+                                value.as_object_mut().unwrap().remove("render_state");
+                            } else {
+                                value["render_state"]["numbers"]["RENDER_SRATE"] = json!(96_000.);
+                            }
                         }
                     }
-                }
-                answer
-            }));
-            config
-        }))).await;
+                    answer
+                }));
+                config
+            })),
+        )
+        .await;
         listening.set_folder(&BridgePaths::new(&lab.ctx.paths().kumi_home, Daw::Reaper).root.join("listening"));
         let mut wire = Wire::start(lab.ctx.clone()).await;
         let (key, epoch, _, _) = looked(&mut wire).await;

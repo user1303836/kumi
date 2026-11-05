@@ -2509,41 +2509,47 @@ async fn restricted_renoise_restores_near_end_bpm_and_lpb_without_replaying() {
 
 #[cfg(unix)]
 #[tokio::test(flavor = "current_thread")]
-async fn restricted_renoise_cancellation_waits_for_terminal_state_and_independent_restoration_reads() {
+async fn restricted_renoise_cancellation_reads_restoration_without_overwriting_changed_timing() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let home = tempfile::tempdir().unwrap();
-            let script = RenoiseScript::new();
-            script.listening().set_render_preflight(true);
-            script.listening().set_steps(1000);
-            script.listening().set_slow_stop(true);
-            script.set_render_bpm(Some(173.));
-            script.set_render_lpb(Some(8));
-            let simulator = renoise_lab(&script, home.path()).await;
-            let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
-            fixture.integration.start(Signal::new()).await.unwrap();
-            let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
-            let request = fixture.request(&observed).await;
-            let signal = Signal::new();
-            let (heard, ()) = tokio::join!(fixture.integration.hear(&request, signal.clone()), async {
-                wait_for_render(|| !script.listening().renders().is_empty()).await;
-                signal.cancel();
-            },);
-            assert!(matches!(heard, Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Cancelled { .. }))), "{heard:?}");
-            assert_eq!(script.listening().restored(), 1);
-            let calls: Vec<Value> = simulator
-                .transcript()
-                .into_iter()
-                .filter(|line| line.from_host)
-                .map(|line| serde_json::from_str(&line.text).unwrap())
-                .collect();
-            let cancelled = calls.iter().position(|call| call["method"] == "listen_cancel").unwrap();
-            assert!(calls[cancelled + 1..].iter().any(|call| call["method"] == "read" && call["params"]["kind"] == "render_preflight"));
-            assert!(calls[cancelled + 1..].iter().any(|call| call["method"] == "focus"));
-            assert!(script.listening().previews().is_empty());
-            assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
-            fixture.integration.close().await.unwrap();
-            simulator.stop();
+            for changed_timing in [false, true] {
+                let home = tempfile::tempdir().unwrap();
+                let script = RenoiseScript::new();
+                script.listening().set_render_preflight(true);
+                script.listening().set_steps(1000);
+                script.listening().set_slow_stop(true);
+                if changed_timing {
+                    script.set_render_bpm(Some(173.));
+                    script.set_render_lpb(Some(8));
+                }
+                let simulator = renoise_lab(&script, home.path()).await;
+                let fixture = RestrictedFixture::new(Daw::Renoise, home.path(), create_renoise_integration);
+                fixture.integration.start(Signal::new()).await.unwrap();
+                let observed = fixture.integration.observe(Signal::new(), None).await.unwrap();
+                let request = fixture.request(&observed).await;
+                let before = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
+                let signal = Signal::new();
+                let (heard, ()) = tokio::join!(fixture.integration.hear(&request, signal.clone()), async {
+                    wait_for_render(|| !script.listening().renders().is_empty()).await;
+                    signal.cancel();
+                });
+                let after = fixture.integration.preview_hear(&request, Signal::new()).await.unwrap();
+                if changed_timing {
+                    assert!(
+                        matches!(heard, Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Unsure { restored: false, .. }))),
+                        "{heard:?}"
+                    );
+                    assert!((after.seconds - request.beats.unwrap() * 60. / 173.).abs() < 1e-9);
+                } else {
+                    assert!(matches!(heard, Err(RuntimeError::Hear(kumi_types::errors::HearFailure::Cancelled { .. }))), "{heard:?}");
+                    assert_eq!(after.seconds, before.seconds);
+                }
+                assert_eq!(script.listening().restored(), 1, "the native job settled before the call returned");
+                assert!(script.listening().previews().is_empty());
+                assert!(std::fs::read_dir(fixture.scratch.path()).unwrap().next().is_none());
+                fixture.integration.close().await.unwrap();
+                simulator.stop();
+            }
         })
         .await;
 }

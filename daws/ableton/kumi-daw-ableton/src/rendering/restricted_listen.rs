@@ -164,7 +164,10 @@ impl LiveRenderer {
             if !self.connection().has("live_browser_inspect") {
                 return Err(unreadable());
             }
-            let found = self.connection().call("live_browser_inspect", object(json!({"itemId":EARS_ITEM})), signal).await
+            let found = self
+                .connection()
+                .call("live_browser_inspect", object(json!({"itemId":EARS_ITEM})), signal)
+                .await
                 .map_err(|error| if matches!(error, RuntimeError::Aborted) { error } else { unreadable() })?;
             if found.is_error == Some(true) {
                 return Err(refused(
@@ -315,7 +318,9 @@ impl LiveRenderer {
             "sessionRecord":transport["sessionRecord"],"position":transport["position"],"loop":looped,
             "punchIn":transport["punchIn"],"punchOut":transport["punchOut"],
             "firedTargets":playback["firedTargets"],"playingTargets":playback["playingTargets"]});
-        for key in ["backToArranger", "sessionRecord", "sessionAutomationRecord", "overdub", "arrangementOverdub", "reEnableAutomationEnabled"] {
+        for key in
+            ["backToArranger", "sessionRecord", "sessionAutomationRecord", "overdub", "arrangementOverdub", "reEnableAutomationEnabled"]
+        {
             flag(&song, key)?;
         }
         let song = json!({"backToArranger":song["backToArranger"],"sessionRecord":song["sessionRecord"],
@@ -565,8 +570,9 @@ impl LiveRenderer {
             let anchors = Anchors { first: Some(written.beats), after_jump: Some(window.from) };
             // Live needs verified beat coverage, so a short capture is refused rather
             // than published with A3's optional short-capture success notice.
-            let covered = cover(&runs(&capture, anchors), window.from, window.beats, capture.sample_rate)
-                .map_err(|_| refused("capture_incomplete", "Kumi Ears did not capture the complete approved beat window. No audio was published."))?;
+            let covered = cover(&runs(&capture, anchors), window.from, window.beats, capture.sample_rate).map_err(|_| {
+                refused("capture_incomplete", "Kumi Ears did not capture the complete approved beat window. No audio was published.")
+            })?;
             let first = frame_at(&covered, window.from).ok_or_else(unreadable)?;
             let last = (first as f64 + (window.beats * covered.samples_per_beat).round()) as usize;
             if last > covered.to

@@ -595,7 +595,6 @@ pub fn transport_value(transport: &Transport) -> Value {
     })
 }
 
-
 /// Whether `path` is inside `folder` on disk (links resolved); false when either isn't there.
 pub(super) fn inside(path: &Path, folder: &Path) -> bool {
     matches!((std::fs::canonicalize(path), std::fs::canonicalize(folder)), (Ok(path), Ok(folder)) if path.starts_with(&folder))

@@ -69,8 +69,14 @@ unsafe extern "system" {
     ) -> u32;
     fn SetNamedSecurityInfoW(name: *const u16, kind: u32, information: u32, owner: Sid, group: Sid, dacl: Acl, sacl: Acl) -> u32;
     fn GetSecurityInfo(
-        handle: Handle, kind: u32, information: u32, owner: *mut Sid, group: *mut Sid,
-        dacl: *mut Acl, sacl: *mut Acl, descriptor: *mut *mut c_void,
+        handle: Handle,
+        kind: u32,
+        information: u32,
+        owner: *mut Sid,
+        group: *mut Sid,
+        dacl: *mut Acl,
+        sacl: *mut Acl,
+        descriptor: *mut *mut c_void,
     ) -> u32;
     fn SetSecurityInfo(handle: Handle, kind: u32, information: u32, owner: Sid, group: Sid, dacl: Acl, sacl: Acl) -> u32;
     fn SetSecurityDescriptorOwner(descriptor: *mut c_void, owner: Sid, defaulted: i32) -> i32;
@@ -84,7 +90,11 @@ unsafe extern "system" {
     fn AddAccessDeniedAceEx(acl: Acl, revision: u32, flags: u32, mask: u32, sid: Sid) -> i32;
     fn ConvertStringSidToSidW(text: *const u16, sid: *mut Sid) -> i32;
     fn ConvertSecurityDescriptorToStringSecurityDescriptorW(
-        descriptor: *mut c_void, revision: u32, information: u32, text: *mut *mut u16, length: *mut u32,
+        descriptor: *mut c_void,
+        revision: u32,
+        information: u32,
+        text: *mut *mut u16,
+        length: *mut u32,
     ) -> i32;
     fn InitializeSecurityDescriptor(descriptor: *mut c_void, revision: u32) -> i32;
     fn SetSecurityDescriptorDacl(descriptor: *mut c_void, present: i32, dacl: Acl, defaulted: i32) -> i32;
@@ -381,8 +391,16 @@ pub fn is_kumis_shape_handle(file: &std::fs::File, directory: bool) -> bool {
     // SAFETY: Windows' descriptor and internal pointers remain live until LocalFree.
     unsafe {
         let (mut owner, mut dacl, mut descriptor) = (null_mut(), null_mut(), null_mut());
-        if GetSecurityInfo(file.as_raw_handle(), SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-            &mut owner, null_mut(), &mut dacl, null_mut(), &mut descriptor) != 0
+        if GetSecurityInfo(
+            file.as_raw_handle(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            &mut dacl,
+            null_mut(),
+            &mut descriptor,
+        ) != 0
         {
             return false;
         }
@@ -432,15 +450,14 @@ fn protect_pinned(original: &std::fs::File, file: &std::fs::File, protection: Pr
     unsafe {
         let (mut owner, mut dacl, mut descriptor) = (null_mut(), null_mut(), null_mut());
         let information = OWNER_SECURITY_INFORMATION | if inherited { DACL_SECURITY_INFORMATION } else { 0 };
-        if GetSecurityInfo(handle, SE_FILE_OBJECT, information,
-            &mut owner, null_mut(), &mut dacl, null_mut(), &mut descriptor) != 0
-        {
+        if GetSecurityInfo(handle, SE_FILE_OBJECT, information, &mut owner, null_mut(), &mut dacl, null_mut(), &mut descriptor) != 0 {
             return Err("the pinned staging entry's owner could not be read".into());
         }
         let owned = !owner.is_null() && EqualSid(owner, account.sid()) != 0;
         let private = inherited && shaped(account.sid(), owner, dacl, descriptor, FILE_FLAGS);
         let (mut control, mut revision) = (0u16, 0u32);
-        let accepted = !inherited || private
+        let accepted = !inherited
+            || private
             || (GetSecurityDescriptorControl(descriptor, &mut control, &mut revision) != 0
                 && control & SE_DACL_PROTECTED == 0
                 && owner_rule(account.sid(), owner, dacl, 0x10)); // INHERITED_ACE only
@@ -460,8 +477,16 @@ fn protect_pinned(original: &std::fs::File, file: &std::fs::File, protection: Pr
             return Err("the pinned staging entry could not be protected".into());
         }
         let (mut owner, mut dacl, mut descriptor) = (null_mut(), null_mut(), null_mut());
-        if GetSecurityInfo(handle, SE_FILE_OBJECT, OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-            &mut owner, null_mut(), &mut dacl, null_mut(), &mut descriptor) != 0
+        if GetSecurityInfo(
+            handle,
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut owner,
+            null_mut(),
+            &mut dacl,
+            null_mut(),
+            &mut descriptor,
+        ) != 0
         {
             return Err("the pinned staging entry's protection could not be read back".into());
         }
@@ -576,8 +601,19 @@ pub mod shapes {
         // live while read and are then freed exactly once.
         unsafe {
             let mut descriptor = null_mut();
-            assert_eq!(GetNamedSecurityInfoW(name.as_ptr(), SE_FILE_OBJECT, information,
-                null_mut(), null_mut(), null_mut(), null_mut(), &mut descriptor), 0);
+            assert_eq!(
+                GetNamedSecurityInfoW(
+                    name.as_ptr(),
+                    SE_FILE_OBJECT,
+                    information,
+                    null_mut(),
+                    null_mut(),
+                    null_mut(),
+                    null_mut(),
+                    &mut descriptor
+                ),
+                0
+            );
             let (mut text, mut length) = (null_mut(), 0u32);
             let converted = ConvertSecurityDescriptorToStringSecurityDescriptorW(descriptor, 1, information, &mut text, &mut length);
             LocalFree(descriptor);

@@ -87,8 +87,10 @@ fn native_hear_refused(code: Option<&str>, fallback: &'static str, daw: Option<D
     if code == Some("uncertain") {
         return HearFailure::Unsure {
             reason: "The native renderer could not confirm its result. Observe again before another action.".into(),
-            restored: false, marked_modified: false,
-        }.into();
+            restored: false,
+            marked_modified: false,
+        }
+        .into();
     }
     let (code, reason) = match code {
         Some("stale" | "changed") => ("stale", "The project or approved window changed; observe and preview again."),
@@ -284,8 +286,10 @@ fn restored_state(daw: Option<DawId>, before: &Value, after: &Value) -> Result<b
     if !render_state_complete(daw, before) || !render_state_complete(daw, after) {
         return Err(HearFailure::Unsure {
             reason: "The render's touched state could not be read completely after cleanup.".into(),
-            restored: false, marked_modified: false,
-        }.into());
+            restored: false,
+            marked_modified: false,
+        }
+        .into());
     }
     let expected = before.as_object().expect("validated render state");
     let observed = after.as_object().expect("validated render state");
@@ -295,7 +299,8 @@ fn restored_state(daw: Option<DawId>, before: &Value, after: &Value) -> Result<b
     {
         return Err(HearFailure::Unsure {
             reason: "The state read after rendering did not match the state before it. Observe again before another action.".into(),
-            restored: false, marked_modified: false,
+            restored: false,
+            marked_modified: false,
         }
         .into());
     }
@@ -2525,12 +2530,12 @@ impl<S: RefScheme + 'static> OwnListening<S> {
 
     async fn restricted_wait(&self, started: &Value, seconds: f64, original: &Signal) -> Result<(Value, bool), RuntimeError> {
         let Some(id) = started.get("jobId").and_then(Value::as_str).filter(|id| !id.is_empty()) else {
-            return Err(
-                HearFailure::Unsure {
-                    reason: "The render may have started, but the bridge returned no job identity.".into(),
-                    restored: false, marked_modified: false,
-                }.into()
-            );
+            return Err(HearFailure::Unsure {
+                reason: "The render may have started, but the bridge returned no job identity.".into(),
+                restored: false,
+                marked_modified: false,
+            }
+            .into());
         };
         let deadline = tokio::time::Instant::now() + Duration::from_secs_f64((seconds * 4.).max(120.).min(240.));
         let mut cancelled = false;
@@ -2559,7 +2564,8 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                         self.restricted_cancel(id).await;
                         return Err(HearFailure::Unsure {
                             reason: "The bridge returned an unknown render state; restoration is unverified.".into(),
-                            restored: false, marked_modified: false,
+                            restored: false,
+                            marked_modified: false,
                         }
                         .into());
                     }
@@ -2568,7 +2574,8 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                     self.restricted_cancel(id).await;
                     return Err(HearFailure::Unsure {
                         reason: "The render could not be observed through completion; restoration is unverified. Observe again.".into(),
-                        restored: false, marked_modified: false,
+                        restored: false,
+                        marked_modified: false,
                     }
                     .into());
                 }
@@ -2696,7 +2703,10 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             return Err(hear_refused("stale", "The capture is not bound to this observed project epoch; observe again before listening."));
         }
         let (label, source) = if let Some(reference) = request.tracks.first() {
-            let long = renderer.plan.lengthen(reference).map_err(|_| hear_refused("stale_ref", "The track reference is not current; observe again."))?;
+            let long = renderer
+                .plan
+                .lengthen(reference)
+                .map_err(|_| hear_refused("stale_ref", "The track reference is not current; observe again."))?;
             if renderer.link.book.borrow().scheme.kind_of(&long) != Some("track") {
                 return Err(hear_refused("invalid_source", "Restricted listening accepts a fresh track ref, never a track name."));
             }
@@ -2768,7 +2778,8 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             if status["busy"] != false {
                 return Err(HearFailure::Unsure {
                     reason: "The DAW still reports busy after the render; restoration is unverified.".into(),
-                    restored: false, marked_modified: false,
+                    restored: false,
+                    marked_modified: false,
                 }
                 .into());
             }
@@ -2781,7 +2792,8 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             if focus_state(focus)? != before.focus {
                 return Err(HearFailure::Unsure {
                     reason: "Transport or selection differs from the before-render snapshot. Observe again.".into(),
-                    restored: false, marked_modified: false,
+                    restored: false,
+                    marked_modified: false,
                 }
                 .into());
             }
@@ -2791,7 +2803,8 @@ impl<S: RefScheme + 'static> OwnListening<S> {
             Ok(Ok(marked)) => Ok(marked),
             _ => Err(HearFailure::Unsure {
                 reason: "The render ended, but complete restoration could not be verified. Observe again before another action.".into(),
-                restored: false, marked_modified: false,
+                restored: false,
+                marked_modified: false,
             }
             .into()),
         }
@@ -2882,7 +2895,11 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                     tokio::time::timeout(
                         Duration::from_secs(5),
                         self.renderer.link.call("listen_job", json!({"jobId": id, "waitMs": 1000}), abort::timeout(5_000)),
-                    ).await.ok().and_then(Result::ok).and_then(Result::ok)
+                    )
+                    .await
+                    .ok()
+                    .and_then(Result::ok)
+                    .and_then(Result::ok)
                 } else {
                     None
                 };
@@ -2891,13 +2908,17 @@ impl<S: RefScheme + 'static> OwnListening<S> {
                     if let Ok(marked_modified) = self.restricted_restore(&before).await {
                         return Err(HearFailure::Unsure {
                             reason: "The render could not be observed normally; a later read-back confirmed restoration.".into(),
-                            restored: true, marked_modified,
-                        }.into());
+                            restored: true,
+                            marked_modified,
+                        }
+                        .into());
                     }
                 } else {
                     self.renderer.tell_app("The render's terminal state remains unknown. Its per-call staging file may remain in the owning Kumi listening cache; no cache sweep was performed.");
                     if let RuntimeError::Hear(HearFailure::Unsure { reason, .. }) = &mut error {
-                        reason.push_str(" This call's staging file may remain in the owning Kumi listening cache; no cache sweep was performed.");
+                        reason.push_str(
+                            " This call's staging file may remain in the owning Kumi listening cache; no cache sweep was performed.",
+                        );
                     }
                 }
                 return Err(error);
@@ -2909,14 +2930,20 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         if self.renderer.profile().id == Some(DawId::Reaper) && done["state"] == "failed" && done["code"] == "stale" {
             // This refusal precedes native mutation, but only a fresh touched-state read can
             // establish cleanup. Do not compare or restore the producer's newer tempo/focus.
-            let after = self.render_preflight_read(Window { from: 0., beats: 1. / 256. }, &before.epoch, abort::timeout(15_000)).await
-                .map_err(|_| RuntimeError::from(HearFailure::Unsure {
-                    reason: "The queued render was refused, but its touched state could not be read back. Observe again.".into(),
-                    restored: false, marked_modified: false,
-                }))?;
+            let after = self
+                .render_preflight_read(Window { from: 0., beats: 1. / 256. }, &before.epoch, abort::timeout(15_000))
+                .await
+                .map_err(|_| {
+                    RuntimeError::from(HearFailure::Unsure {
+                        reason: "The queued render was refused, but its touched state could not be read back. Observe again.".into(),
+                        restored: false,
+                        marked_modified: false,
+                    })
+                })?;
             let marked_modified = restored_state(self.renderer.profile().id, &before.state, &after["render_state"])?;
             return Err(after_restoration(
-                hear_refused("stale", "The queued render's window or project changed before it started; preview again."), marked_modified,
+                hear_refused("stale", "The queued render's window or project changed before it started; preview again."),
+                marked_modified,
             ));
         }
         let restoration = self.restricted_restore(&before).await;
@@ -2929,18 +2956,26 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         if done["state"] != "done" {
             self.restricted_discard(&done, &scratch, quarantine_root).await;
             return Err(after_restoration(
-                native_hear_refused(done["code"].as_str(), "render_failed", self.renderer.profile().id), marked_modified,
+                native_hear_refused(done["code"].as_str(), "render_failed", self.renderer.profile().id),
+                marked_modified,
             ));
         }
-        let files = done["files"]
-            .as_array()
-            .filter(|files| files.len() == 1)
-            .ok_or_else(|| after_restoration(hear_refused("invalid_render_result", "The completed render did not return exactly this call's one source."), marked_modified))?;
+        let files = done["files"].as_array().filter(|files| files.len() == 1).ok_or_else(|| {
+            after_restoration(
+                hear_refused("invalid_render_result", "The completed render did not return exactly this call's one source."),
+                marked_modified,
+            )
+        })?;
         let file = &files[0];
         if file["id"] != "bounded" || file.get("start").is_some_and(|start| start.as_f64() != Some(0.)) {
-            return Err(after_restoration(hear_refused("invalid_render_result", "The render returned a different source or an unapproved leading interval."), marked_modified));
+            return Err(after_restoration(
+                hear_refused("invalid_render_result", "The render returned a different source or an unapproved leading interval."),
+                marked_modified,
+            ));
         }
-        let returned = file["file"].as_str().ok_or_else(|| after_restoration(hear_refused("invalid_render_result", "The render returned no file."), marked_modified))?;
+        let returned = file["file"]
+            .as_str()
+            .ok_or_else(|| after_restoration(hear_refused("invalid_render_result", "The render returned no file."), marked_modified))?;
         #[cfg(windows)]
         let staged = {
             let (cache, scratch, quarantine, returned, signal) =
@@ -3328,9 +3363,9 @@ mod tests {
                 after_restoration(hear_refused("render_failed", "The render failed."), marked_modified),
                 RuntimeError::Hear(HearFailure::Refused { marked_modified: marked, .. }) if marked == marked_modified
             ));
-            let overrun = HearFailure::Unsure {
-                reason: "The rendered audio exceeded its cap.".into(), restored: false, marked_modified: false,
-            }.into();
+            let overrun =
+                HearFailure::Unsure { reason: "The rendered audio exceeded its cap.".into(), restored: false, marked_modified: false }
+                    .into();
             assert!(matches!(
                 after_restoration(overrun, marked_modified),
                 RuntimeError::Hear(HearFailure::Unsure { restored: true, marked_modified: marked, .. }) if marked == marked_modified
@@ -3342,13 +3377,20 @@ mod tests {
     fn restricted_native_failures_keep_typed_codes_without_native_text() {
         use super::{native_hear_refused, start_refused_before_mutation, DawId, HearFailure, RuntimeError};
         for (native, expected) in [
-            ("stale", "stale"), ("changed", "stale"), ("gone", "stale_ref"),
-            ("busy", "render_busy"), ("bad-params", "invalid_window"), ("failed", "render_failed"),
+            ("stale", "stale"),
+            ("changed", "stale"),
+            ("gone", "stale_ref"),
+            ("busy", "render_busy"),
+            ("bad-params", "invalid_window"),
+            ("failed", "render_failed"),
             ("/private/producer/cache.wav", "render_failed"),
         ] {
             for daw in [DawId::Reaper, DawId::Renoise] {
                 let RuntimeError::Hear(HearFailure::Refused { code, reason, .. }) =
-                    native_hear_refused(Some(native), "render_failed", Some(daw)) else { panic!("typed refusal") };
+                    native_hear_refused(Some(native), "render_failed", Some(daw))
+                else {
+                    panic!("typed refusal")
+                };
                 assert_eq!(code, expected);
                 assert!(!reason.contains("/private/"));
             }
@@ -3363,7 +3405,10 @@ mod tests {
         }
         assert!(!start_refused_before_mutation(Some(DawId::Renoise), Some("failed")));
         let RuntimeError::Hear(HearFailure::Refused { reason, .. }) =
-            native_hear_refused(Some("busy"), "unsupported", Some(DawId::Renoise)) else { panic!("typed refusal") };
+            native_hear_refused(Some("busy"), "unsupported", Some(DawId::Renoise))
+        else {
+            panic!("typed refusal")
+        };
         assert!(reason.contains("Edit Mode"));
     }
 
@@ -3906,6 +3951,7 @@ mod restricted_staging {
         signal: &Signal,
         after_open: impl FnOnce(),
     ) -> Result<Staged, RuntimeError> {
+        signal.check()?;
         let (cache_handle, leaf, mut source, before) = verified_source(cache, returned)?;
         let scratch_handle = directory(scratch)?;
         let scratch_named = std::fs::symlink_metadata(scratch).map_err(|_| unsafe_file("The scratch directory disappeared."))?;
@@ -3970,7 +4016,8 @@ mod restricted_staging {
             if !seconds.is_finite() || seconds > 65. {
                 return Err(HearFailure::Unsure {
                     reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into(),
-                    restored: false, marked_modified: false,
+                    restored: false,
+                    marked_modified: false,
                 }
                 .into());
             }
@@ -4177,16 +4224,15 @@ mod restricted_staging {
             let quarantine = home.path().join("quarantine");
             let call = quarantine.join("call-id");
             let moved = quarantine.join("moved");
-            let warning = remove_exact(
-                &directory(&cache).unwrap(), c"this-call.wav", &before, &quarantine, c"call-id",
-                |from, old, to, new| {
+            let warning =
+                remove_exact(&directory(&cache).unwrap(), c"this-call.wav", &before, &quarantine, c"call-id", |from, old, to, new| {
                     rename_new(from, old, to, new)?;
                     std::fs::rename(&call, &moved)?;
                     std::fs::DirBuilder::new().mode(0o700).create(&call)?;
                     wav(&call.join("source"), 2);
                     Ok(())
-                },
-            ).unwrap();
+                })
+                .unwrap();
             assert!(warning.is_some(), "the substituted quarantine directory is left untouched");
             assert!(!source.exists());
             assert!(!moved.join("source").exists(), "the verified source is deleted through its descriptor");
@@ -4535,6 +4581,7 @@ mod restricted_staging {
         signal: &Signal,
         after_open: impl FnOnce(),
     ) -> Result<Staged, RuntimeError> {
+        signal.check()?;
         let (_cache, mut source, before) = verified_source(cache, returned)?;
         let _scratch = open(scratch, true)?;
         let length = (u64::from(before.nFileSizeHigh) << 32) | u64::from(before.nFileSizeLow);
@@ -4579,7 +4626,8 @@ mod restricted_staging {
             if !seconds.is_finite() || seconds > 65. {
                 return Err(HearFailure::Unsure {
                     reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into(),
-                    restored: false, marked_modified: false,
+                    restored: false,
+                    marked_modified: false,
                 }
                 .into());
             }
@@ -4608,19 +4656,27 @@ mod restricted_staging {
     mod tests {
         use super::*;
 
+        fn private_file(path: &Path, bytes: &[u8]) {
+            let mut file = OpenOptions::new().write(true).create_new(true).share_mode(0).open(path).unwrap();
+            // Known-new, pinned fixture; an elevated runner may otherwise make Administrators
+            // the owner. Returned native files never get an ownership repair.
+            daw_bridge::lifecycle::native_acl::make_kumis_shape(path).unwrap();
+            file.write_all(bytes).unwrap();
+        }
+
         #[test]
         fn deletion_uses_the_verified_handle_and_preserves_neighbors() {
             let home = tempfile::tempdir().unwrap();
             let cache = home.path().join("cache");
             let scratch = home.path().join("scratch");
             for path in [&cache, &scratch] {
-                daw_bridge::owner::create_owner_only_dir(path).unwrap();
+                daw_bridge::lifecycle::native_acl::create_kumis_folder(path).unwrap();
             }
             let source = cache.join("this-call.wav");
             let neighbor = cache.join("neighbor.wav");
             let wav = kumi_media::audio::decode::float_wav(&[vec![0.; 10]], 10);
-            daw_bridge::owner::write_owner_only(&source, &wav).unwrap();
-            daw_bridge::owner::write_owner_only(&neighbor, &wav).unwrap();
+            private_file(&source, &wav);
+            private_file(&neighbor, &wav);
             let staged = copy(&cache, &scratch, &home.path().join("quarantine"), &source, &Signal::new()).unwrap();
             assert_eq!(staged.seconds, 1.);
             assert!(staged.warning.is_none());
@@ -4630,31 +4686,36 @@ mod restricted_staging {
         }
 
         #[test]
-        fn cancellation_after_open_discards_by_handle_without_removing_a_neighbor() {
-            let home = tempfile::tempdir().unwrap();
-            let cache = home.path().join("cache");
-            let scratch = home.path().join("scratch");
-            for path in [&cache, &scratch] {
-                daw_bridge::owner::create_owner_only_dir(path).unwrap();
+        fn cancellation_before_open_preserves_the_source_and_after_open_discards_only_its_handle() {
+            for after_open in [false, true] {
+                let home = tempfile::tempdir().unwrap();
+                let cache = home.path().join("cache");
+                let scratch = home.path().join("scratch");
+                for path in [&cache, &scratch] {
+                    daw_bridge::lifecycle::native_acl::create_kumis_folder(path).unwrap();
+                }
+                let source = cache.join("this-call.wav");
+                let neighbor = cache.join("neighbor.wav");
+                let wav = kumi_media::audio::decode::float_wav(&[vec![0.; 10]], 10);
+                private_file(&source, &wav);
+                private_file(&neighbor, b"leave this alone");
+                let signal = Signal::new();
+                if !after_open {
+                    signal.cancel();
+                }
+                let result = copy_after_open(&cache, &scratch, &source, &signal, || signal.cancel());
+                assert!(matches!(result, Err(RuntimeError::Aborted)));
+                assert_eq!(source.exists(), !after_open);
+                assert_eq!(std::fs::read(&neighbor).unwrap(), b"leave this alone");
+                assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
             }
-            let source = cache.join("this-call.wav");
-            let neighbor = cache.join("neighbor.wav");
-            let wav = kumi_media::audio::decode::float_wav(&[vec![0.; 10]], 10);
-            daw_bridge::owner::write_owner_only(&source, &wav).unwrap();
-            daw_bridge::owner::write_owner_only(&neighbor, b"leave this alone").unwrap();
-            let signal = Signal::new();
-            let result = copy_after_open(&cache, &scratch, &source, &signal, || signal.cancel());
-            assert!(matches!(result, Err(RuntimeError::Aborted)));
-            assert!(!source.exists());
-            assert_eq!(std::fs::read(&neighbor).unwrap(), b"leave this alone");
-            assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
         }
 
         #[test]
         fn an_open_verified_source_cannot_be_substituted_before_handle_deletion() {
             let home = tempfile::tempdir().unwrap();
             let source = home.path().join("source.wav");
-            daw_bridge::owner::write_owner_only(&source, b"owned").unwrap();
+            private_file(&source, b"owned");
             let opened = open(&source, false).unwrap();
             let before = information(&opened).unwrap();
             assert!(std::fs::rename(&source, home.path().join("moved.wav")).is_err());

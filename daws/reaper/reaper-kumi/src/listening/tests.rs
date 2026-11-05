@@ -97,7 +97,9 @@ impl Rig {
         fake::with(|s| {
             s.on_action = Some(fake::render_action);
             #[cfg(windows)]
-            { s.on_action = Some(owned_render_action); }
+            {
+                s.on_action = Some(owned_render_action);
+            }
             s.listening.sources_from_files = true;
         });
         setup();
@@ -634,8 +636,7 @@ fn component_directory_upgrade_refuses_replaced_and_foreign_owned_handles() {
     let folder = bridge.join("listening");
     std::fs::create_dir(&folder).unwrap();
     let open = |path: &std::path::Path, share| {
-        std::fs::OpenOptions::new().access_mode(0x0006_0080).share_mode(share)
-            .custom_flags(0x0220_0000).open(path).unwrap()
+        std::fs::OpenOptions::new().access_mode(0x0006_0080).share_mode(share).custom_flags(0x0220_0000).open(path).unwrap()
     };
     let original = open(&folder, 7);
     std::fs::rename(&folder, bridge.join("old-listening")).unwrap();
@@ -665,10 +666,14 @@ fn component_directory_upgrade_refuses_replaced_and_foreign_owned_handles() {
 fn guarded_windows_render_creates_private_staging_without_main_thread_powershell() {
     let rig = Rig::new();
     let runs = daw_bridge::owner::acl_runs_on_this_thread();
-    rig.ask("render_start", json!({
-        "jobId": "private-output", "sources": [{"id": "mix", "what": "master"}],
-        "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
-    })).unwrap();
+    rig.ask(
+        "render_start",
+        json!({
+            "jobId": "private-output", "sources": [{"id": "mix", "what": "master"}],
+            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
+        }),
+    )
+    .unwrap();
     let done = rig.until_ended("private-output");
     assert_eq!(done["state"], "done");
     assert!(daw_bridge::lifecycle::native_acl::is_kumis_shape(&rig.folder()));
@@ -688,8 +693,8 @@ fn guarded_windows_render_creates_private_staging_without_main_thread_powershell
 #[cfg(windows)]
 #[test]
 fn guarded_windows_acl_protection_rejects_substituted_and_hardlinked_outputs() {
-    use std::os::windows::fs::OpenOptionsExt;
     use daw_bridge::lifecycle::native_acl;
+    use std::os::windows::fs::OpenOptionsExt;
     let root = tempfile::tempdir().unwrap();
     let folder = root.path().join("private");
     native_acl::create_kumis_folder(&folder).unwrap();

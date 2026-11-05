@@ -920,16 +920,16 @@ pub fn run(reaper: &Reaper, reads: &Reads, plan: &Plan, hooks: &dyn Hooks) -> En
             let original = if plan.guarded_range.is_some() {
                 use std::os::windows::fs::OpenOptionsExt;
                 // Keep the produced working file across its rename, but exclude writers.
-                match std::fs::OpenOptions::new().access_mode(0x0002_0080).share_mode(5)
-                    .custom_flags(0x0020_0000).open(file)
-                {
+                match std::fs::OpenOptions::new().access_mode(0x0002_0080).share_mode(5).custom_flags(0x0020_0000).open(file) {
                     Ok(file) => Some(file),
                     Err(_) => {
                         outcome = Err(("failed".into(), "The rendered output could not be pinned.".into()));
                         break;
                     }
                 }
-            } else { None };
+            } else {
+                None
+            };
             let target = plan.file(&plan.sources[*at]);
             if let Err(error) = std::fs::rename(file, &target) {
                 outcome = Err(("failed".into(), format!("Kumi couldn't name its render file ({error})")));
@@ -941,8 +941,11 @@ pub fn run(reaper: &Reaper, reads: &Reads, plan: &Plan, hooks: &dyn Hooks) -> En
                 use std::os::windows::fs::OpenOptionsExt;
                 // Reopen the new name without delete sharing, then compare the two live
                 // identities before changing the exact handle's ACL, never the path's.
-                let protected = std::fs::OpenOptions::new().access_mode(0x0006_0080).share_mode(1)
-                    .custom_flags(0x0020_0000).open(made.last().expect("just named render"))
+                let protected = std::fs::OpenOptions::new()
+                    .access_mode(0x0006_0080)
+                    .share_mode(1)
+                    .custom_flags(0x0020_0000)
+                    .open(made.last().expect("just named render"))
                     .map_err(|_| "The rendered output could not be pinned.".to_string())
                     .and_then(|opened| daw_bridge::lifecycle::native_acl::protect_created_file(&original, &opened));
                 if protected.is_err() {

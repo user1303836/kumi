@@ -180,7 +180,11 @@ pub async fn measure(ctx: &Ctx, file: StagedArtifact, original_name: &Path, sign
 /// Retain measured audio and its optional reference together, then produce the C1 result.
 /// Differences always mean current minus reference; MEDIA always names the retained current audio.
 pub async fn retain(
-    ctx: &Ctx, source: MeasuredAudio, reference: Option<MeasuredAudio>, signal: &Signal, deadline: Option<tokio::time::Instant>,
+    ctx: &Ctx,
+    source: MeasuredAudio,
+    reference: Option<MeasuredAudio>,
+    signal: &Signal,
+    deadline: Option<tokio::time::Instant>,
 ) -> Result<Value, OpError> {
     check(signal)?;
     let differences = reference.as_ref().map(|reference| audio::compare(&source.metrics, &reference.metrics));
@@ -393,7 +397,7 @@ mod tests {
         let replacement = pcm(3000.0, 0.8);
         std::fs::write(&path, &replacement).unwrap();
         let measured = measure(&fixture.ctx, staged, &path, &signal).await.unwrap();
-        let result = retain(&fixture.ctx, measured, None, &signal).await.unwrap();
+        let result = retain(&fixture.ctx, measured, None, &signal, None).await.unwrap();
         assert!((result["metrics"]["loudness"]["samplePeakDbfs"].as_f64().unwrap() + 14.0).abs() < 0.2);
         assert_eq!(result["metrics"]["file"], "immutable.wav");
         assert!(result.get("compare").is_none());
@@ -491,7 +495,7 @@ mod tests {
         let staged_path = staged.path().to_owned();
         let measured = measure(&fixture.ctx, staged, &path, &signal).await.unwrap();
         signal.cancel();
-        assert_eq!(retain(&fixture.ctx, measured, None, &signal).await.unwrap_err().code(), "cancelled");
+        assert_eq!(retain(&fixture.ctx, measured, None, &signal, None).await.unwrap_err().code(), "cancelled");
         assert!(!staged_path.exists());
         assert_eq!(fixture.artifact_files(), before);
         assert_eq!(std::fs::read(path).unwrap(), original);

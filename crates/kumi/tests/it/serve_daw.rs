@@ -495,6 +495,7 @@ struct Wire {
     from: BufReader<tokio::io::DuplexStream>,
     served: tokio::task::JoinHandle<std::io::Result<()>>,
     asked: u64,
+    response_wait: std::time::Duration,
 }
 
 impl Wire {
@@ -508,7 +509,8 @@ impl Wire {
             runtime_out,
             std::future::pending(),
         ));
-        let mut wire = Wire { to: Some(to), from: BufReader::new(from), served, asked: 0 };
+        let mut wire =
+            Wire { to: Some(to), from: BufReader::new(from), served, asked: 0, response_wait: std::time::Duration::from_secs(30) };
         wire.request("initialize", json!({"protocolVersion": "2025-06-18"})).await;
         wire.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await;
         wire
@@ -527,8 +529,7 @@ impl Wire {
         self.send(json!({"jsonrpc": "2.0", "id": id, "method": method, "params": params})).await;
         loop {
             let mut line = String::new();
-            let read =
-                tokio::time::timeout(std::time::Duration::from_secs(30), self.from.read_line(&mut line)).await.expect("an answer in time");
+            let read = tokio::time::timeout(self.response_wait, self.from.read_line(&mut line)).await.expect("an answer in time");
             assert!(read.unwrap() > 0, "the runtime stopped before answering {method}");
             let message: Value = serde_json::from_str(&line).unwrap();
             if message["id"] == id {

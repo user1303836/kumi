@@ -173,7 +173,9 @@ pub fn write_noise(path: &Path, seconds: f64, level: f64, seed: u32) -> std::io:
         options.access_mode(0xC006_0000).share_mode(0).create_new(true);
         let mut output = match options.open(path) {
             Ok(output) => {
-                daw_bridge::lifecycle::native_acl::protect_created_file(&output, &output).map_err(std::io::Error::other)?;
+                // This simulator just created and pins the file. Set the creator explicitly
+                // too: an elevated Windows test runner otherwise defaults to Administrators.
+                daw_bridge::lifecycle::native_acl::make_kumis_shape(path).map_err(std::io::Error::other)?;
                 output
             }
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => options.create_new(false).open(path)?,

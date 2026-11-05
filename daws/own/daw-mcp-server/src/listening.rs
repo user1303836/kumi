@@ -375,10 +375,18 @@ impl WindowsStaging {
     fn open(path: &Path, directory: bool, write_acl: bool) -> Result<std::fs::File, String> {
         use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
         let access = 0x0002_0080 | if write_acl { 0x0004_0000 } else { 0 }; // READ_CONTROL, READ_ATTRIBUTES, WRITE_DAC
-        let file = std::fs::OpenOptions::new().access_mode(access)
+        let file = std::fs::OpenOptions::new()
+            .access_mode(access)
             // Exclusive directory protection suppresses propagation to existing children.
-            .share_mode(if directory && write_acl { 0 } else if directory { 3 } else { 1 })
-            .custom_flags(0x0020_0000 | if directory { 0x0200_0000 } else { 0 }).open(path)
+            .share_mode(if directory && write_acl {
+                0
+            } else if directory {
+                3
+            } else {
+                1
+            })
+            .custom_flags(0x0020_0000 | if directory { 0x0200_0000 } else { 0 })
+            .open(path)
             .map_err(|_| "The staging entry could not be pinned safely.")?;
         let meta = file.metadata().map_err(|_| "The staging entry could not be inspected.")?;
         if (if directory { !meta.is_dir() } else { !meta.is_file() }) || meta.file_attributes() & 0x400 != 0 {
@@ -425,9 +433,7 @@ impl WindowsStaging {
     }
 
     fn protect(&self, returned: &Path) -> Result<(), String> {
-        if !self.ready() || !returned.is_absolute()
-            || returned.file_name().is_none_or(|name| name.to_string_lossy().contains(':'))
-        {
+        if !self.ready() || !returned.is_absolute() || returned.file_name().is_none_or(|name| name.to_string_lossy().contains(':')) {
             return Err("The completed render's cache or filename is unsafe.".into());
         }
         let file = Self::open(returned, false, true)?;
@@ -532,7 +538,9 @@ impl Host {
     fn protect_job_answer(&self, mut answer: Value, job: &Job) -> Value {
         let Some(staging) = &self.renoise_staging else { return answer };
         if answer["state"] != "done" || job.kind != "render" {
-            if let Some(object) = answer.as_object_mut() { object.remove("files"); }
+            if let Some(object) = answer.as_object_mut() {
+                object.remove("files");
+            }
             return answer;
         }
         let safe = (|| {
@@ -540,9 +548,7 @@ impl Host {
             let files = answer["files"].as_array().filter(|files| !files.is_empty() && files.len() == job.files.len()).ok_or(())?;
             for (index, file) in files.iter().enumerate() {
                 let path = file["file"].as_str().map(Path::new).ok_or(())?;
-                if !job.files.iter().any(|expected| expected == path)
-                    || files[..index].iter().any(|prior| prior["file"] == file["file"])
-                {
+                if !job.files.iter().any(|expected| expected == path) || files[..index].iter().any(|prior| prior["file"] == file["file"]) {
                     return Err(());
                 }
                 staging.protect(path).map_err(|_| ())?;
@@ -550,7 +556,9 @@ impl Host {
             Ok::<(), ()>(())
         })();
         if safe.is_err() {
-            if let Some(object) = answer.as_object_mut() { object.remove("files"); }
+            if let Some(object) = answer.as_object_mut() {
+                object.remove("files");
+            }
             answer["state"] = "failed".into();
             answer["code"] = "failed".into();
             answer["error"] = "The completed render's staging could not be verified and protected; no files were exposed.".into();
@@ -594,7 +602,10 @@ impl Host {
         #[cfg(windows)]
         if let Some(staging) = &self.renoise_staging {
             if !staging.as_ref().is_ok_and(WindowsStaging::ready) {
-                return (json!({"error": "The owning bridge's listening cache could not be verified and protected; no render was started.", "code": "failed", "connected": true}), true);
+                return (
+                    json!({"error": "The owning bridge's listening cache could not be verified and protected; no render was started.", "code": "failed", "connected": true}),
+                    true,
+                );
             }
         }
         // (jobs nobody followed to their end: their ends are learnt before they count against this one or its room)

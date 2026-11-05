@@ -152,7 +152,10 @@ fn hearing_error(ctx: &Ctx, error: RuntimeError, dispatched: bool) -> Result<Val
                 } else {
                     "Run kumi bridge in the Kumi installation that owns this DAW bridge to add or update its capture device."
                 };
-                (format!("Kumi Ears needs a compatible preinstalled device and Max for Live. {instruction}"), Some(if owned { "setup" } else { "owning_kumi" }))
+                (
+                    format!("Kumi Ears needs a compatible preinstalled device and Max for Live. {instruction}"),
+                    Some(if owned { "setup" } else { "owning_kumi" }),
+                )
             } else {
                 (reason, None)
             };
@@ -168,7 +171,9 @@ fn hearing_error(ctx: &Ctx, error: RuntimeError, dispatched: bool) -> Result<Val
         RuntimeError::Hear(HearFailure::Cancelled { marked_modified }) => {
             Ok(outcome("cancelled", "cancelled", "Listening was cancelled; temporary DAW state is restored.", true, marked_modified))
         }
-        RuntimeError::Aborted => Ok(outcome("cancelled", "cancelled", "Listening was cancelled; temporary DAW state is restored.", true, false)),
+        RuntimeError::Aborted => {
+            Ok(outcome("cancelled", "cancelled", "Listening was cancelled; temporary DAW state is restored.", true, false))
+        }
         _ if dispatched => Ok(outcome(
             "unsure",
             "capture_failed",
@@ -394,12 +399,11 @@ mod tests {
                 },
                 Env::new(),
                 Default::default(),
-            ).unwrap();
-            let error = HearFailure::Refused {
-                code: "ears_missing",
-                reason: "/private/producer/device.amxd".into(),
-                marked_modified: false,
-            }.into();
+            )
+            .unwrap();
+            let error =
+                HearFailure::Refused { code: "ears_missing", reason: "/private/producer/device.amxd".into(), marked_modified: false }
+                    .into();
             let result = hearing_error(&ctx, error, false).unwrap();
             assert_eq!(result["state"], "refused");
             assert_eq!(result["code"], "ears_missing");
