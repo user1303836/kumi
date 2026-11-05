@@ -32,6 +32,40 @@ use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
 use serde_json::{json, Value};
 
+#[test]
+fn a_bests_playback_state_isnt_an_edit_but_its_device_settings_still_are() {
+    use std::{
+        io::Write,
+        process::{Command, Stdio},
+    };
+    let body = include_str!("../../src/assets/best-print.py");
+    let source = format!("BODY = {}\n", serde_json::to_string(body).unwrap())
+        + r#"
+import json
+from types import SimpleNamespace
+song = SimpleNamespace(tracks=[])
+ARGS = {"track": "Best"}
+exec(BODY)
+device = SimpleNamespace(class_name="Looper", state=0, playing_position_enabled=False, parameters=[], feedback=0.5)
+fingerprint = lambda: digest(device_row(device, []))
+before = fingerprint()
+device.state = 1
+device.playing_position_enabled = True
+assert fingerprint() == before, "playback alone doesn't preserve an otherwise unchanged best"
+device.feedback = 0.75
+assert fingerprint() != before, "a producer's device edit still preserves their best"
+device.class_name = "Wavetable"
+before = fingerprint()
+device.state = 2
+assert fingerprint() != before, "only Looper's state is known to follow playback"
+assert plain(SimpleNamespace(state=3))["state"] == 3
+"#;
+    let mut child = Command::new("python3").arg("-").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+    child.stdin.take().unwrap().write_all(source.as_bytes()).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+}
+
 /// The tools a goal can reach, as the oracle's bridge lists them.
 const TOOLS: [&str; 38] = [
     "live_run_python",
