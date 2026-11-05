@@ -522,6 +522,7 @@ def script(fixture: Fixture, args: dict, host: dict) -> dict:
     if args.get("preview"):
         return {"state": "preview", "daw": fixture.daw, "language": args["language"], "purpose": args.get("purpose"),
                 "sha256": digest, "lines": len(code.rstrip("\n").split("\n")), "bytes": len(code.encode("utf-8")),
+                "deadline_seconds": 0.8 if fixture.daw == "renoise" else 10,
                 "project": {"key": fixture.set["key"], "epoch": fixture.epoch}}
     if args.get("expected_sha256") != digest:
         return {"state": "refused", "code": "stale", "reason": "The script changed since it was approved."}

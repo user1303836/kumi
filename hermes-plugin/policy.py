@@ -660,6 +660,10 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
     digest = scripts.sha256(code)
     if answer.get("sha256") != digest:
         return block("Kumi didn't run the script: its runtime read different code than this."), {}
+    deadline = answer.get("deadline_seconds")
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not 0 < deadline <= 60:
+        return block("Kumi didn't run the script: its runtime didn't say when it would stop one that runs too "
+                     "long."), {}
     tainted = state != scripts.CLEAN
     if tainted:
         bypassed = tools.approvals_bypassed(host)
@@ -673,7 +677,8 @@ def _script(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
         return block("Kumi didn't run the script: it couldn't keep a copy of the code to show you."), {}
     daw = setup.DAWS.get(host.daw(), "the DAW")
     facts = {"daw": daw, "language": language, "purpose": purpose, "why": why if tainted else "", "digest": digest,
-             "lines": scripts.lines_of(code), "bytes": len(code.encode("utf-8")), "path": _home_short(path)}
+             "lines": scripts.lines_of(code), "bytes": len(code.encode("utf-8")), "path": _home_short(path),
+             "deadline": f"{deadline:g}"}
     message = _script_message(code, facts, surface, chat_line=not tainted)
     if message is None:
         return block(TOO_LONG), {}
@@ -697,7 +702,7 @@ def _script_message(code: str, facts: dict, surface: str, *, chat_line: bool) ->
         if facts["why"]:
             lines.append(scripts.asked_because(one_line(facts["why"], 60)))
         count = f"{facts['lines']} line{'s' if facts['lines'] != 1 else ''}"
-        stop = f"stopped after {scripts.DEADLINE_SECONDS} s"
+        stop = f"stopped after {facts['deadline']} s"
         lines.append(f"{count} · {facts['bytes']:,} bytes · SHA-256 {facts['digest'][:16]}… · {stop}"
                      if facts_form == "long" else f"{count} · SHA-256 {facts['digest'][:8]}… · {stop}")
         shown = code_lines[:head]
