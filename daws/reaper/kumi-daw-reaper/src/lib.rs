@@ -498,11 +498,15 @@ mod tests {
 
     #[test]
     fn a_focused_parameter_reads_as_the_plug_in_prints_it() {
-        let focus = |param: Value| fill_focus(&json!({"view": "fx", "selection": {"fxName": "ReaLimit", "fxRef": "r:fx:{A}", "param": param}}));
+        let focus =
+            |param: Value| fill_focus(&json!({"view": "fx", "selection": {"fxName": "ReaLimit", "fxRef": "r:fx:{A}", "param": param}}));
         // P14 on REAPER: the extension sends the normalized value and the plug-in's own text; FOCUS shows the text.
         let printed = focus(json!({"name": "Ceiling", "value": 0.9583333730697632, "formatted": "-1.00", "fxRef": "r:fx:{A}"}));
         let parameter = printed.parameter.expect("a parameter");
-        assert_eq!((parameter.name.as_str(), parameter.value.as_deref(), parameter.owner.as_deref()), ("Ceiling", Some("-1.00"), Some("ReaLimit")));
+        assert_eq!(
+            (parameter.name.as_str(), parameter.value.as_deref(), parameter.owner.as_deref()),
+            ("Ceiling", Some("-1.00"), Some("ReaLimit"))
+        );
         // A plug-in that prints nothing for it: the number, as before, rather than nothing.
         let bare = focus(json!({"name": "Ceiling", "value": 0.5, "formatted": " "}));
         assert_eq!(bare.parameter.and_then(|p| p.value).as_deref(), Some("0.5"));
