@@ -5,6 +5,7 @@
 //! host cancels gets its signal, settles, and gets no answer (MCP's rule). One host call runs once (C2's outer dedup,
 //! CC-5): a call that repeats `_host.tool_call_id` with the same arguments gets the first one's answer. When the
 //! host's input ends, or the runtime is told to stop (SIGTERM), every call in flight is cancelled and given [`SETTLE`]
+//! (or, while a call holds a settle guard, its own bound, 360 s at most)
 //! to settle, `status.json` says the runtime stopped, and it returns.
 
 use super::core;
@@ -107,10 +108,11 @@ where
         server.all_settled().await;
         server.ctx.jobs().all_settled().await;
     };
-    if tokio::time::timeout(SETTLE, settling).await.is_err() {
+    if !settle(&server.ctx, settling).await {
         let (calls, jobs) = (server.calls.borrow().len(), server.ctx.jobs().running());
-        say(&format!("kumi serve: {calls} call(s) and {jobs} job(s) still settling after {} s; stopping", SETTLE.as_secs()));
+        say(&format!("kumi serve: {calls} call(s) and {jobs} job(s) still settling at the stop's bound; stopping"));
     }
+    server.ctx.set_settling_until(None);
     server.ctx.jobs().interrupt_running(server.ctx.snapshots());
     heartbeat.abort();
     server.ctx.link().close().await;
@@ -516,6 +518,32 @@ impl Server {
     }
 }
 
+/// Waits for `settled` up to [`SETTLE`], or while a call's guard lives up to the largest bound it holds
+/// ([`super::ctx::SETTLE_MOST`] at most), read again each second, since a guard taken as the stop began counts too.
+/// While it waits on a guard, `owner.json` says until when. Whether everything settled.
+async fn settle(ctx: &Ctx, settled: impl Future<Output = ()>) -> bool {
+    let started = tokio::time::Instant::now();
+    tokio::pin!(settled);
+    loop {
+        let guarded = ctx.settle_bound();
+        let deadline = started + guarded.map_or(SETTLE, |bound| bound.max(SETTLE));
+        let left = deadline.saturating_duration_since(tokio::time::Instant::now());
+        let until = guarded.map(|_| kumi_common::time::now_ms() + left.as_millis() as i64);
+        if until.is_some() != ctx.settling_until().is_some() {
+            ctx.set_settling_until(until);
+            core::publish_owner(ctx, true);
+        }
+        let tick = deadline.min(tokio::time::Instant::now() + Duration::from_secs(1));
+        tokio::select! {
+            () = &mut settled => return true,
+            () = tokio::time::sleep_until(tick) => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            return false;
+        }
+    }
+}
+
 /// What a call asks, digested (CC-5): its operation's name and its arguments (`_host` left out), written with every
 /// object's keys sorted, so the same question digests the same however its fields were ordered. As HISTORY keeps it.
 pub(crate) fn digest(operation: &str, args: &Map<String, Value>) -> String {
@@ -719,7 +747,26 @@ mod tests {
         })
     }
 
-    static OPERATIONS: &[&Operation] = &[&WAIT, &ECHO, &BOOM, &SCAN, &PLACE, &SMASH, &HOLD];
+    /// Renders until it's cancelled, then puts the DAW back for `restore` seconds, under a guard of `bound` seconds.
+    static RESTORE: Operation =
+        Operation { name: "restore", description: "Renders, then restores.", schema: object, effect: reads, run: restore };
+    fn restore(ctx: &Ctx, call: Call) -> OpFuture<'_> {
+        Box::pin(async move {
+            let seconds = |name: &str| {
+                call.args
+                    .get("word")
+                    .and_then(Value::as_str)
+                    .and_then(|word| word.split(',').find_map(|part| part.strip_prefix(name)?.parse::<u64>().ok()))
+            };
+            let _guard = ctx.settling(Duration::from_secs(seconds("b").unwrap_or(0)));
+            call.signal.cancelled().await;
+            tokio::time::sleep(Duration::from_secs(seconds("r").unwrap_or(0))).await;
+            SETTLED.with(|settled| settled.set(true));
+            Ok(json!({"state": "restored"}))
+        })
+    }
+
+    static OPERATIONS: &[&Operation] = &[&WAIT, &ECHO, &BOOM, &SCAN, &PLACE, &SMASH, &HOLD, &RESTORE];
 
     struct Session {
         to: Option<DuplexStream>,
@@ -832,7 +879,7 @@ mod tests {
             session.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
             let listed = session.next().await.unwrap();
             let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().filter_map(|tool| tool["name"].as_str()).collect();
-            assert_eq!(names, ["wait", "echo", "boom", "scan", "place", "smash", "hold"]);
+            assert_eq!(names, ["wait", "echo", "boom", "scan", "place", "smash", "hold", "restore"]);
             assert_eq!(listed["result"]["tools"][1]["inputSchema"], object());
             let mut asked = call(json!("c3"), "echo", json!({"word": "hi", "_host": {"profile_id": "default", "tool_call_id": "t9"}}));
             asked["params"]["_meta"] = json!({"progressToken": "p3"});
@@ -1128,6 +1175,44 @@ mod tests {
             session.send(call(json!(3), "place", json!({"word": "snare", "_host": {"tool_call_id": "tc-8"}}))).await;
             assert_eq!(session.next().await.unwrap()["result"]["structuredContent"]["state"], "applied", "another call runs");
             session.end().await;
+        })
+        .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_stop_waits_for_a_calls_own_cleanup_bound_and_no_longer() {
+        local(async {
+            // A render that needs 90 s to put the DAW back, under a 120 s guard: the stop waits for it, past 20 s.
+            let mut session = Session::start().initialized().await;
+            session.send(call(json!(1), "restore", json!({"word": "b120,r90"}))).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            assert_eq!(session.ctx.settle_bound(), Some(Duration::from_secs(120)));
+            drop(session.to.take());
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            assert!(session.state("owner.json")["settling_until_ms"].is_i64(), "the host can tell a slow stop from a hung one");
+            tokio::time::timeout(Duration::from_secs(400), &mut session.served).await.unwrap().unwrap().unwrap();
+            assert!(SETTLED.with(Cell::get), "its cleanup finished");
+            assert_eq!(session.ctx.settle_bound(), None, "the guard went with the call");
+            assert!(session.state("owner.json").get("settling_until_ms").is_none());
+        })
+        .await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_guard_holds_a_stop_only_to_its_own_bound() {
+        local(async {
+            let mut session = Session::start().initialized().await;
+            session.send(call(json!(1), "restore", json!({"word": "b30,r200"}))).await;
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            drop(session.to.take());
+            let started = tokio::time::Instant::now();
+            tokio::time::timeout(Duration::from_secs(400), &mut session.served).await.unwrap().unwrap().unwrap();
+            let waited = started.elapsed();
+            assert!(waited >= Duration::from_secs(30) && waited < Duration::from_secs(40), "{waited:?}");
+            assert!(!SETTLED.with(Cell::get), "stopped before its cleanup could finish");
+            let long = session.ctx.settling(Duration::from_secs(1000));
+            assert_eq!(session.ctx.settle_bound(), Some(Duration::from_secs(360)), "never past 360 s");
+            drop(long);
         })
         .await;
     }

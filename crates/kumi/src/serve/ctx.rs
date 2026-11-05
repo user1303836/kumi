@@ -309,6 +309,27 @@ pub struct Ctx {
     link: Link,
     lease: super::lease::Lease,
     history: super::history::History,
+    /// The calls' own settle bounds (a track listen's render and restoration), each while its guard lives.
+    settles: Rc<RefCell<Vec<(u64, std::time::Duration)>>>,
+    /// When a stop that waits on a call's own bound gives up (ms), while it waits.
+    settling_until: Cell<Option<i64>>,
+}
+
+/// The most a stop waits for a call's own settle bound.
+pub const SETTLE_MOST: std::time::Duration = std::time::Duration::from_secs(360);
+
+/// A call's own bound for settling when the runtime stops (a track listen's render, then the DAW put back): while it
+/// lives, a stop waits up to the largest live bound ([`SETTLE_MOST`] at most) for the calls to finish, not just the
+/// runtime's own few seconds.
+pub struct Settling {
+    settles: Rc<RefCell<Vec<(u64, std::time::Duration)>>>,
+    id: u64,
+}
+
+impl Drop for Settling {
+    fn drop(&mut self) {
+        self.settles.borrow_mut().retain(|(id, _)| *id != self.id);
+    }
 }
 
 impl Ctx {
@@ -339,6 +360,8 @@ impl Ctx {
             shutdown: Signal::new(),
             offered: Cell::new(super::registry::OPERATIONS),
             scratches: Cell::new(0),
+            settles: Rc::new(RefCell::new(Vec::new())),
+            settling_until: Cell::new(None),
             started,
             answers,
             link: Link::new(started.max(0) as u64),
@@ -465,6 +488,29 @@ impl Ctx {
         let path = self.paths.state_dir.join("scratch").join(op).join(format!("{}-{n}", kumi_common::time::now_ms()));
         make_private_dir(&path).map_err(|error| OpError::Failed { reason: format!("no scratch folder: {error}") })?;
         Ok(Scratch { path })
+    }
+
+    /// A guard holding a stop to `bound` (at most [`SETTLE_MOST`]) while it lives: take it just before the work whose
+    /// cleanup must finish (a render and the DAW put back), and drop it once that's done.
+    pub fn settling(&self, bound: std::time::Duration) -> Settling {
+        let id = self.scratches.get() + 1;
+        self.scratches.set(id);
+        self.settles.borrow_mut().push((id, bound.min(SETTLE_MOST)));
+        Settling { settles: self.settles.clone(), id }
+    }
+
+    /// The largest bound a live guard holds a stop to, if any.
+    pub fn settle_bound(&self) -> Option<std::time::Duration> {
+        self.settles.borrow().iter().map(|(_, bound)| *bound).max()
+    }
+
+    /// When a stop waiting on a call's bound gives up (ms), while it waits: `status` says it.
+    pub fn settling_until(&self) -> Option<i64> {
+        self.settling_until.get()
+    }
+
+    pub(super) fn set_settling_until(&self, until: Option<i64>) {
+        self.settling_until.set(until);
     }
 
     /// When the runtime started (ms since the epoch).
