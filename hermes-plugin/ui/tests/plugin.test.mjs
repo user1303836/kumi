@@ -231,3 +231,57 @@ test('the built Desktop file uses only the SDK and React, and none of the doors 
     assert.ok(!pattern.test(bundle), `desktop/plugin.js contains ${why}`)
   }
 })
+
+// CC-9: the plugin's own events for the chat in front, when Hermes sends no tool.complete (tool progress off).
+function inFront(h, { chat = SESSION, profile = 'default' } = {}) {
+  globalThis.__kumiTestHost.state = { ...globalThis.__kumiTestHost.state, focusedStoredSessionId: atom(chat), focusedSessionProfile: atom(profile) }
+  return h
+}
+
+const found = (over = {}) => ({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-1', map_revision: 'r7', sound_ids: ['s-r7-0091'], ...over } })
+
+test('a sounds.found event opens the map for the chat in front, once with its tool.complete, and never for another profile or chat', async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  const h = inFront(harness())
+  plugin.register(h.ctx)
+  await settle()
+  const event = h.events.get('plugin.kumi.sounds.found')
+  event(found({ profile: 'work' }))
+  event(found({ session_id: 'another-chat' }))
+  event(found({ profile: undefined }))
+  event(found({ tool_call_id: 'call-0', sound_ids: [] }))
+  assert.equal(h.calls.workspaces.length, 0)
+  event(found())
+  h.events.get('tool.complete')({ payload: { name: 'kumi_sounds', tool_id: 'call-1', result: { map_revision: 'r7', items: [{ sound_id: 's-r7-0091' }] } } })
+  assert.equal(h.calls.workspaces.length, 1, 'the event and the same call\'s tool.complete open the map once')
+  h.events.get('tool.complete')({ payload: { name: 'kumi_sounds', tool_id: 'call-2', result: { map_revision: 'r7', items: [{ sound_id: 's-r7-0092' }] } } })
+  event(found({ tool_call_id: 'call-2', sound_ids: ['s-r7-0092'] }))
+  assert.equal(h.calls.workspaces.length, 2, 'in either order')
+})
+
+test('a listen.done event opens Measurements only when its call\'s tool.complete doesn\'t come within 2 s, and only for the chat in front', async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  const h = inFront(harness())
+  const timers = []
+  h.ctx.setTimeout = (fn, ms) => {
+    const timer = { fn, ms, cancelled: false }
+    timers.push(timer)
+    return () => (timer.cancelled = true)
+  }
+  plugin.register(h.ctx)
+  await settle()
+  const done = h.events.get('plugin.kumi.listen.done')
+  const result = { metrics: { file: 'Dusty Snare 04.wav', loudness: { integratedLufs: -14.2 } }, artifact_id: 'a-1' }
+  done({ payload: { profile: 'work', session_id: SESSION, tool_call_id: 'call-3', result } })
+  done({ payload: { profile: 'default', session_id: 'another-chat', tool_call_id: 'call-3', result } })
+  assert.equal(timers.filter(timer => timer.ms === 2000).length, 0)
+  done({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-3', result } })
+  h.events.get('tool.complete')({ payload: { name: 'kumi_listen', tool_id: 'call-3', result } })
+  const waited = timers.filter(timer => timer.ms === 2000)
+  assert.deepEqual(waited.map(timer => timer.cancelled), [true])
+  waited[0].fn()
+  assert.ok(!h.calls.workspaces.some(([id]) => id === 'kumi-measurements'), 'the transcript shows the card: no tab')
+  done({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-4', result } })
+  timers.filter(timer => timer.ms === 2000 && !timer.cancelled).at(-1).fn()
+  assert.deepEqual(h.calls.workspaces.filter(([id]) => id === 'kumi-measurements'), [['kumi-measurements', 'Measurements']])
+})

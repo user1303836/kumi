@@ -24,12 +24,18 @@ import { ask } from './actions.ts'
 import { ListenCard } from './card.tsx'
 import { FocusHint } from './composer.tsx'
 import { StatusChip } from './chip.tsx'
+import { callId, Calls, forChatInFront, payloadOf } from './events.ts'
 import { MapWorkspace } from './map.tsx'
+import { MeasurementsWorkspace } from './measurements.tsx'
 import { KumiPane, ownerSession } from './pane.tsx'
 import { OPEN_MAP_ON_FIND, SettingsPage } from './settings.tsx'
 
 export const PLUGIN_ID = 'kumi'
 export const MAP_WORKSPACE = 'kumi-sound-map'
+export const MEASUREMENTS_WORKSPACE = 'kumi-measurements'
+/** How long a `listen.done` event waits for its call's `tool.complete` (whose tool part draws the card) before the
+ *  Measurements tab opens instead (CC-9). */
+export const LISTEN_FALLBACK_MS = 2000
 /** How often /status is read while the window is in view: events are faster, but only reach the process that emits. */
 export const POLL_MS = 5000
 /** How often a running job is read while the window is in view (none is read when nothing runs). */
@@ -66,6 +72,23 @@ const plugin: HermesPlugin = {
         render: () => <MapWorkspace audition={audition} ctx={ctx} store={store} />
       })
     }
+    let closeMeasurements: (() => void) | null = null
+    let measurementsPane: (() => void) | null = null
+    const openMeasurements = () => {
+      const render = () => <MeasurementsWorkspace audition={audition} store={store} />
+      if (typeof host.openWorkspace === 'function') {
+        closeMeasurements = host.openWorkspace(MEASUREMENTS_WORKSPACE, {
+          title: 'Measurements',
+          minWidth: '24rem',
+          render,
+          onClose: () => {
+            closeMeasurements = null
+          }
+        })
+        return
+      }
+      measurementsPane ??= ctx.register({ id: 'measurements-pane', area: PANES_AREA, title: 'Measurements', data: { placement: 'main' }, render })
+    }
     const openSettings = () => host.navigate(typeof sdk.pluginSettingsHref === 'function' ? sdk.pluginSettingsHref(PLUGIN_ID) : '/settings?tab=plugins')
 
     // Read /status now, every few seconds while the window is in view, and on every event that says something moved.
@@ -81,27 +104,66 @@ const plugin: HermesPlugin = {
     ctx.setInterval(() => {
       if (document.visibilityState !== 'hidden') void store.refreshJobs()
     }, JOB_POLL_MS)
-    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, event => {
-      const payload = event.payload && typeof event.payload === 'object' ? event.payload : {}
-      store.trackJob('job_id' in payload ? payload.job_id : undefined)
-    })
+    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, event => store.trackJob(payloadOf(event).job_id))
     ctx.onEvent(`plugin.${PLUGIN_ID}.settings.changed`, () => {
       refresh()
       void store.refresh('setup')
     })
+
+    // A search's finds and a measurement reach this window twice: as the call's `tool.complete` (not sent while
+    // Hermes's tool progress is off, or in focus view) and as a plugin event (CC-9). Each call is acted on once.
+    const calls = new Calls()
+    const waiting = new Map<string, () => void>()
+    const showFound = (id: string | null, revision: string | null, ids: string[]) => {
+      if (id) {
+        if (calls.has(id)) return
+        calls.add(id)
+      }
+      if (!ids.length) return
+      store.found(revision, ids)
+      if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap()
+    }
+    ctx.onEvent(`plugin.${PLUGIN_ID}.sounds.found`, event => {
+      const payload = payloadOf(event)
+      const id = callId(payload.tool_call_id)
+      if (!id || !forChatInFront(payload)) return
+      const ids = Array.isArray(payload.sound_ids) ? payload.sound_ids.filter((value): value is string => typeof value === 'string') : []
+      showFound(id, typeof payload.map_revision === 'string' ? payload.map_revision : null, ids.slice(0, 200))
+    })
+    ctx.onEvent(`plugin.${PLUGIN_ID}.listen.done`, event => {
+      const payload = payloadOf(event)
+      const id = callId(payload.tool_call_id)
+      if (!id || !forChatInFront(payload) || calls.has(id) || waiting.has(id)) return
+      // The transcript draws the card in the call's tool part: the tab opens only when no tool.complete comes for it.
+      waiting.set(
+        id,
+        ctx.setTimeout(() => {
+          waiting.delete(id)
+          if (calls.has(id)) return
+          calls.add(id)
+          store.measure(id, payload.result)
+          openMeasurements()
+        }, LISTEN_FALLBACK_MS)
+      )
+    })
     ctx.onEvent('tool.complete', event => {
-      const payload = event.payload && typeof event.payload === 'object' ? event.payload : {}
-      const name = 'name' in payload && typeof payload.name === 'string' ? payload.name : ''
+      const payload = payloadOf(event)
+      const name = typeof payload.name === 'string' ? payload.name : ''
       if (!name.startsWith('kumi_')) return
       refresh()
-      const result = 'result' in payload ? payload.result : undefined
       // A scan (or any call that starts a job) answers with its job's id: follow it.
-      store.trackJob(jobOf(result))
+      store.trackJob(jobOf(payload.result))
+      const id = callId(payload.tool_id)
+      if (name === 'kumi_listen' && id) {
+        // Its tool part shows, card and all: no tab.
+        calls.add(id)
+        waiting.get(id)?.()
+        waiting.delete(id)
+        return
+      }
       if (name !== 'kumi_sounds') return
-      const found = foundSounds(result)
-      if (!found?.ids.length) return
-      store.found(found.revision, found.ids)
-      if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap()
+      const found = foundSounds(payload.result)
+      if (found) showFound(id, found.revision, found.ids)
     })
     // Another profile or connection: another backend, another Kumi.
     for (const atom of [host.state.profile, host.state.connectionId]) {
@@ -113,7 +175,9 @@ const plugin: HermesPlugin = {
       if (stop) ctx.onDispose(stop)
     }
     ctx.onDispose(() => {
+      for (const cancel of waiting.values()) cancel()
       closeMap?.()
+      closeMeasurements?.()
       audition.dispose()
     })
 
