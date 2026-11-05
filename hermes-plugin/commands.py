@@ -26,7 +26,7 @@ def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
     state = status.get("setup") or {}
     if state.get("state") != "ready":
         return (f"Kumi isn't ready: {state.get('message')} Ask the agent to set Kumi up, or run `hermes kumi setup` "
-                "in a terminal.")
+                "in a terminal (Hermes leaves plugin commands out when `plugins.isolation` is `host`).")
     lines = [f"Kumi {(state.get('runtime') or {}).get('version')} is set up ({state.get('target')}); DAW: {daw}."]
     if not status.get("connected"):
         lines.append(status.get("message") or f"Kumi isn't connected to {daw}: ask the agent to connect.")

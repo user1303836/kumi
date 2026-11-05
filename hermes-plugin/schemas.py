@@ -35,11 +35,12 @@ KUMI_SETUP = _tool(
     "kumi_setup",
     "Set Kumi up in this Hermes profile, one approved step at a time. `plan` says the next step and exactly what it "
     "will do: download Kumi's runtime (the release this plugin pins, from Kumi's GitHub releases, checked against its "
-    "SHA-256) into this profile's plugin data, or install Kumi's part in the DAW at the exact paths it names. `install` "
-    "does the planned step, and the producer is asked first; plan again after each step until the plan says nothing "
-    "is left. When another Kumi installation already owns the DAW's part, the plan says so, and `adopt` uses that "
-    "installation's connection to the DAW instead of replacing it (also asked first). Setup never starts or quits "
-    "the DAW. kumi_status says where setup stands.",
+    "SHA-256) into this profile's plugin data, or install Kumi's part in the DAW at the exact paths it names. Planning "
+    "the DAW step starts Kumi's runtime for a dry run, which changes nothing. `install` does the planned step, and the "
+    "producer is asked first; plan again after each step until the plan says nothing is left. When another Kumi "
+    "installation already owns the DAW's part, the plan says so, and `adopt` uses that installation's connection to "
+    "the DAW instead of replacing it (also asked first). Setup never starts or quits the DAW. kumi_status says where "
+    "setup stands.",
     {"action": {"type": "string", "enum": ["plan", "install", "adopt"]},
      "daw": {"type": "string", "enum": list(DAWS), "description": "The DAW to set up for; the DAW setting when left out."}},
     ("action",))

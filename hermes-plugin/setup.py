@@ -31,6 +31,7 @@ import sys
 import tarfile
 import time
 from typing import Any, Callable, Iterator, Mapping
+import unicodedata
 import urllib.error
 import urllib.request
 
@@ -49,6 +50,11 @@ _PLATFORM_NAMES = {"aarch64-apple-darwin": "macOS (Apple silicon)", "x86_64-appl
                    "aarch64-pc-windows-msvc": "Windows (Arm)", "x86_64-pc-windows-msvc": "Windows (x64)",
                    "aarch64-unknown-linux-gnu": "Linux (Arm)", "x86_64-unknown-linux-gnu": "Linux (x64)"}
 _COMPONENT_STATES = {"missing", "same", "older", "newer", "other_owner"}
+# Setup shows the producer its lines verbatim, in the chat's approval and in the terminal, so it refuses text it
+# couldn't show as it is: longer than a path can be, more lines than an approval should hold, or characters that hide,
+# reorder or redraw text (controls; bidi, zero-width, BOM and tag characters; lone surrogates; line separators).
+_MAX_PATH, _MAX_LINE, _MAX_LINES = 1024, 1280, 24
+_HIDDEN = {"Cc", "Cf", "Cs", "Zl", "Zp"}
 
 
 class SetupError(Exception):
@@ -269,16 +275,38 @@ def _digest(plan: Mapping[str, Any]) -> str:
     return hashlib.sha256(json.dumps(canonical, sort_keys=True).encode()).hexdigest()
 
 
+def _plain(text: Any, limit: int) -> bool:
+    """Whether `text` can be shown to the producer exactly as it is (see `_HIDDEN`). Setup refuses anything else rather
+    than clean it: a cleaned path isn't the path written."""
+    return (isinstance(text, str) and 0 < len(text) <= limit
+            and not any(unicodedata.category(char) in _HIDDEN for char in text))
+
+
 def _component(result: Any) -> dict:
-    """A `setup_daw` result, checked before anything acts on it."""
+    """A `setup_daw` result, checked before anything acts on it or shows it."""
     if not isinstance(result, dict) or result.get("state") not in _COMPONENT_STATES:
         raise SetupError("bad_runtime_reply", "Kumi's runtime gave setup an answer it doesn't understand.")
     paths, effects = result.get("paths"), result.get("effects")
-    if not isinstance(paths, list) or not all(isinstance(p, str) and Path(p).is_absolute() for p in paths):
-        raise SetupError("bad_runtime_reply", "Kumi's runtime didn't name the exact paths its DAW step writes.")
-    if not isinstance(effects, list) or not all(isinstance(e, str) for e in effects):
-        raise SetupError("bad_runtime_reply", "Kumi's runtime didn't describe its DAW step.")
+    if not isinstance(paths, list) or not all(_plain(p, _MAX_PATH) and Path(p).is_absolute() for p in paths):
+        raise SetupError("bad_runtime_reply", "Kumi's runtime didn't name the exact paths its DAW step writes, as "
+                                              "plain absolute paths setup can show.")
+    if not isinstance(effects, list) or not all(_plain(e, _MAX_LINE) for e in effects):
+        raise SetupError("bad_runtime_reply", "Kumi's runtime didn't describe its DAW step in plain lines setup can show.")
+    if len(paths) + len(effects) > _MAX_LINES:
+        raise SetupError("bad_runtime_reply", f"Kumi's runtime described its DAW step in more than {_MAX_LINES} lines.")
+    owner = result.get("owner")
+    home = owner.get("kumi_home") if isinstance(owner, dict) else None
+    named = [result.get(key) for key in ("component", "version") if result.get(key) is not None]
+    if (home is not None and not _plain(home, _MAX_PATH)) or not all(_plain(name, 200) for name in named):
+        raise SetupError("bad_runtime_reply", "Kumi's runtime named its DAW component or its owner in text setup "
+                                              "can't show.")
     return result
+
+
+# A step that changes what the runtime runs with stops this Hermes's runtime for the profile (the `kumi_setup` handler
+# does), which ends a chat's DAW connection until its next Kumi call: the approval says so.
+_RESTART = ("If Kumi's runtime is running in this Hermes, it stops: a chat connected to your DAW reconnects at its next "
+            "Kumi call")
 
 
 def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: Path, plugin_dir: Path | None,
@@ -301,7 +329,7 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
                     effects=[f"Download Kumi {pin['kumi']} for {_PLATFORM_NAMES.get(target, target)} "
                              f"({_mb(record['size'])}) from {record['url']}",
                              "Check it against the SHA-256 this plugin pins, and stop if it differs",
-                             f"Unpack it ({_mb(record['unpacked_bytes'])}) into {destination}"])
+                             f"Unpack it ({_mb(record['unpacked_bytes'])}) into {destination}", _RESTART])
         return plan
     if setup_daw is None:
         raise SetupError("needs_runtime_client", "Setup needs Kumi's runtime to plan the DAW step.")
@@ -370,19 +398,20 @@ def _cached_plan(daw: str, data_dir: Path, now: int | None = None, path: Path | 
 
 def approval(daw: str, *, action: str = "install", data_dir: Path | None = None, now: int | None = None) -> dict | None:
     """What the producer approves for `kumi_setup` `install` or `adopt`: `{"title", "effects", "message", "digest"}`
-    (`message` is the title and one effect per line, every path in full), from the recorded plan only (no network, no
-    subprocess), or None when there is no fresh plan for `daw` that this action carries out (the hook then blocks:
-    "run kumi_setup plan first"). `install()` and `adopt()` carry out only the plan with that digest (their
-    `expected_digest`), so what runs is what was approved, even if another chat plans meanwhile."""
+    (`message` is the title and one line per effect and per path written, each verbatim), from the recorded plan only
+    (no network, no subprocess), or None when there is no fresh plan for `daw` that this action carries out, or one
+    setup couldn't show as it is (the hook then blocks: "run kumi_setup plan first"). `install()` and `adopt()` carry
+    out only the plan with that digest (their `expected_digest`), so what runs is what was approved, even if another
+    chat plans meanwhile."""
     cached = _cached_plan(daw, data_dir or default_data_dir(), now)
     lines = _approval_lines(cached, daw, action) if cached else None
-    if not lines:
-        return None
+    if not lines or len(lines) > _MAX_LINES + 6 or not all(_plain(line, _MAX_LINE) for line in lines):
+        return None  # the runtime's lines are capped at _MAX_LINES; setup adds at most a title and five of its own
     return {"title": lines[0], "effects": lines[1:], "message": "\n".join(lines), "digest": cached["digest"]}
 
 
 def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str] | None:
-    """The approval's title, then each effect of the plan, as the producer reads them."""
+    """The approval's title, then each effect of the plan and each path it writes, as the producer reads them."""
     if action == "adopt":
         home = _owner_home(plan)
         if plan.get("step") != "owned_elsewhere" or home is None:
@@ -391,12 +420,12 @@ def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str]
         return [f"Kumi: use the existing Kumi installation at {home} for {DAWS[daw]}",
                 "Kumi's runtime will read that installation's DAW connection files and write its own connection state "
                 "there (never its sign-in, settings or account)",
-                f"The {component} it installed stays as it is", *_TAGGING.get(daw, ())]
+                f"The {component} it installed stays as it is", _RESTART, *_TAGGING.get(daw, ())]
     if action != "install" or plan.get("step") not in ("runtime", "daw_component"):
         return None
     title = (f"Kumi: set up Kumi {plan['version']}'s runtime" if plan["step"] == "runtime"
              else f"Kumi: install Kumi's part in {DAWS[daw]}")
-    return [title, *plan["effects"]]
+    return [title, *plan["effects"], *(f"Writes: {path}" for path in plan["paths"])]
 
 
 def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -> dict:
@@ -411,11 +440,15 @@ def _claim(daw: str, data_dir: Path, expected_digest: str | None, action: str) -
     except FileNotFoundError:
         raise SetupError("no_plan", "There's no setup plan to carry out (it ran or was replaced); plan again.") from None
     try:
-        claimed = _cached_plan(daw, data_dir, path=taken)
+        claimed = _read_json(taken)
     finally:
         taken.unlink(missing_ok=True)
-    if claimed is None or claimed.get("digest") != expected_digest:
+    if (not claimed or claimed.get("daw") != daw or claimed.get("digest") != expected_digest
+            or claimed.get("digest") != _digest(claimed)):
         raise SetupError("plan_changed", "The setup plan changed after it was approved; plan again and approve that.")
+    if not isinstance(claimed.get("made_at"), int) or _now_ms() - claimed["made_at"] > PLAN_TTL_MS:
+        raise SetupError("expired", f"The approved setup plan is more than {PLAN_TTL_MS // 60000} minutes old, so "
+                                    "setup didn't use it; plan again and approve that.")
     if _approval_lines(claimed, daw, action) is None:
         if action == "install" and claimed.get("step") == "owned_elsewhere":
             raise SetupError("owned_elsewhere", "Another Kumi installation owns this DAW's component; adopt it "
@@ -666,14 +699,11 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
             print(status(daw=daw, data_dir=data_dir, plugin_dir=plugin_dir, target=target)["message"], file=stdout)
             return 0
         adopting = step["step"] == "owned_elsewhere"
-        if adopting:
-            lines = _approval_lines(step, daw, "adopt")
-            if lines is None:
-                print("Another Kumi installation owns this DAW's component:", *step["effects"], sep="\n  ", file=stdout)
-                return 1
-            print(lines[0], *lines[1:], sep="\n  ", file=stdout)
-        else:
-            print("Kumi setup will:", *step["effects"], sep="\n  ", file=stdout)
+        lines = _approval_lines(step, daw, "adopt" if adopting else "install")  # what a chat's approval shows
+        if lines is None:  # another installation owns the component, and it names no folder to adopt
+            print("Another Kumi installation owns this DAW's component:", *step["effects"], sep="\n  ", file=stdout)
+            return 1
+        print(lines[0], *lines[1:], sep="\n  ", file=stdout)
         print("Go ahead? [y/N] ", end="", file=stdout, flush=True)
         if stdin.readline().strip().lower() not in ("y", "yes"):
             print("Nothing was changed.", file=stdout)

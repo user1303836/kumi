@@ -70,8 +70,9 @@ class Served:
 class Runtime:
     """The runtime's setup_daw as W1 answers it: a dry run names the paths; a real install does exactly that."""
 
-    def __init__(self, state: str = "missing", owner: str | None = None, library: str = str(FAKE_LIBRARY)) -> None:
-        self.state, self.owner, self.library, self.calls = state, owner, library, []
+    def __init__(self, state: str = "missing", owner: str | None = None, library: str = str(FAKE_LIBRARY),
+                 **reply) -> None:
+        self.state, self.owner, self.library, self.reply, self.calls = state, owner, library, reply, []
 
     def __call__(self, args: dict) -> dict:
         self.calls.append(args)
@@ -79,7 +80,8 @@ class Runtime:
                  "paths": [f"{self.library}/Remote Scripts/AbletonMcpBridge"],
                  "state": self.state, "owner": {"kumi_home": self.owner} if self.owner else None,
                  "after": "choose_control_surface",
-                 "effects": [f"Copy the AbletonMcpBridge Remote Script into {self.library}/Remote Scripts"]}
+                 "effects": [f"Copy the AbletonMcpBridge Remote Script into {self.library}/Remote Scripts"],
+                 **self.reply}
         if not args["dry_run"]:
             reply.update(state="same", installed_at=1730764800000)
         return reply
@@ -160,8 +162,10 @@ class SetupTest(unittest.TestCase):
         asked = setup.approval("ableton", data_dir=self.data)
         self.assertIn(URL, asked["message"])
         self.assertEqual(asked["digest"], plan["digest"])
-        self.assertEqual((asked["title"], asked["effects"]), (f"Kumi: set up Kumi {VERSION}'s runtime", plan["effects"]),
-                         "each effect is its own line, its URL and folder in full")
+        self.assertEqual((asked["title"], asked["effects"]),
+                         (f"Kumi: set up Kumi {VERSION}'s runtime", [*plan["effects"], f"Writes: {plan['paths'][0]}"]),
+                         "each effect is its own line, its URL and folder in full, then the folder it writes")
+        self.assertIn("reconnects at its next Kumi call", asked["message"], "it says a running runtime stops")
         self.assertIsNone(setup.approval("reaper", data_dir=self.data), "a plan for Live doesn't approve REAPER")
         later = plan["made_at"] + setup.PLAN_TTL_MS + 1
         self.assertIsNone(setup.approval("ableton", data_dir=self.data, now=later), "a stale plan approves nothing")
@@ -209,6 +213,47 @@ class SetupTest(unittest.TestCase):
         setup.plan("ableton", setup_daw=elsewhere, data_dir=self.data, plugin_dir=self.plugin, target=TARGET)
         self.assertEqual(self.install(Served(b""), setup_daw=elsewhere)["error"]["code"], "plan_changed")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, elsewhere.calls, "nothing approved was installed")
+
+    def test_an_approval_answered_after_the_plan_expired_is_refused_as_expired(self) -> None:
+        approved = self.plan()
+        served = Served(BUNDLE)
+        with mock.patch.object(setup, "_now_ms", return_value=approved["made_at"] + setup.PLAN_TTL_MS + 1):
+            result = self.install(served)
+        self.assertEqual(result["error"]["code"], "expired", "nothing changed: the plan only got too old")
+        self.assertEqual(served.asked, [])
+
+    def test_the_daw_steps_approval_shows_each_path_it_writes_verbatim(self) -> None:
+        self.install_runtime()
+        paths = [str(FAKE_LIBRARY / "Remote Scripts" / "AbletonMcpBridge"),
+                 str(FAKE_LIBRARY.parent / "Preferences" / "Live 12" / "My  Library.cfg"),
+                 str(FAKE_LIBRARY.parent / ("long " * 180) / "Kumi")]
+        self.plan(setup_daw=Runtime(paths=paths, effects=["Copy the Remote Script into your User Library"]))
+        asked = setup.approval("ableton", data_dir=self.data)
+        self.assertEqual(asked["effects"], ["Copy the Remote Script into your User Library",
+                                            *(f"Writes: {path}" for path in paths)],
+                         "every path the plan writes, whatever the runtime's words, each whole and as it is")
+
+    def test_runtime_text_setup_couldnt_show_as_it_is_is_refused_not_cleaned(self) -> None:
+        self.install_runtime()
+        bridge = str(FAKE_LIBRARY / "Remote Scripts" / "AbletonMcpBridge")
+        hidden = {"an escape": "\x1b[2J", "a newline": "\n", "a bidi override": "\u202e", "a zero-width space": "\u200b",
+                  "a BOM": "\ufeff", "a tag character": "\U000e0041", "a line separator": "\u2028"}
+        replies = {f"a path with {name}": {"paths": [bridge + char]} for name, char in hidden.items()}
+        replies.update({f"an effect with {name}": {"effects": [f"Copy it{char} into your User Library"]}
+                        for name, char in hidden.items()})
+        replies.update({
+            "an owner folder with a bidi override": {"state": "other_owner",
+                                                     "owner": {"kumi_home": str(self.data.parent / "kumi\u202e")}},
+            "a component name with an escape": {"component": "Remote Script\x1b[31m"},
+            "a path longer than any path": {"paths": [str(FAKE_LIBRARY / ("x" * 1025))]},
+            "more lines than an approval holds": {"effects": [f"Step {n}" for n in range(setup._MAX_LINES)]},
+        })
+        for name, reply in replies.items():
+            with self.subTest(name):
+                with self.assertRaises(setup.SetupError) as refused:
+                    self.plan(setup_daw=Runtime(**reply))
+                self.assertEqual(refused.exception.code, "bad_runtime_reply")
+                self.assertFalse((self.data / "setup" / "plan.json").exists(), "nothing is planned to be approved")
 
     def test_one_setup_step_runs_at_a_time_and_a_dead_setups_lock_frees_itself(self) -> None:
         self.plan()
@@ -363,6 +408,7 @@ class SetupTest(unittest.TestCase):
         self.assertIn(str(standalone), asked["message"])
         self.assertIn("never its sign-in", asked["message"])
         self.assertIn("write its own connection state there", asked["message"])
+        self.assertIn("reconnects at its next Kumi call", asked["message"], "it says a running runtime stops")
         result = self.adopt(runtime)
         self.assertTrue(result["ok"], result)
         current = json.loads((self.data / "runtime" / "current.json").read_text())
@@ -416,6 +462,7 @@ class SetupTest(unittest.TestCase):
         code, said = cli("n\n")
         self.assertEqual(code, 1)
         self.assertIn(URL, said)
+        self.assertIn(f"Writes: {self.data / 'runtime' / VERSION}", said, "the terminal asks with the approval's lines")
         self.assertFalse((self.data / "runtime" / "current.json").exists())
         code, said = cli("y\n")
         self.assertEqual(code, 0, said)

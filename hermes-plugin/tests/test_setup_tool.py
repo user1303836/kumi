@@ -48,6 +48,11 @@ class SetupTool(unittest.TestCase):
         asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1", tool_call_id="c1")
         self.assertEqual(asked["action"], "approve")
         self.assertIn("Kumi Ears.amxd", asked["message"])
+        shown = setup.approval("ableton", data_dir=data)
+        self.assertEqual(asked["message"].splitlines(), [shown["title"], *(f"• {line}" for line in shown["effects"])],
+                         "setup's lines verbatim: nothing cut or collapsed")
+        for path in plan["paths"]:
+            self.assertIn(f"• Writes: {path}", asked["message"].splitlines(), "each path it writes, on its own line")
         self.assertEqual(asked["rule_key"], f"kumi:setup:{plan['digest']}", "'always' covers this exact plan only")
 
     def test_install_or_adopt_without_a_plan_is_blocked_before_anyone_is_asked(self):

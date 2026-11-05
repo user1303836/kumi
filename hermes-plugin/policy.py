@@ -28,7 +28,6 @@ LINE = 120
 # A track listen's one line: which track or the mix, the exact beats, and what's put back after. The runtime writes it
 # and bounds the names in it, so it's cut only far past what a preview says.
 PLAYBACK_LINE = 600
-SETUP_LINE = 400  # setup's lines carry whole URLs and paths, which the producer must see in full
 EFFECTS = {"write", "import", "playback"}
 PASS = {"kumi_status", "kumi_connect", "kumi_observe", "kumi_read", "kumi_history", "kumi_sounds", "kumi_job"}
 FOOTER = "(Values as Kumi read them just now.)"
@@ -223,8 +222,10 @@ def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
 
 def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
     """Setup (C8): a plan passes (it records the plan in Kumi's own data). Installing or adopting asks in the words of
-    the plan it carries out, every URL and path in full, under a rule key naming that plan, so "always" never covers
-    another download or path; the plan's digest is bound to this call (CC-5), and only that plan runs."""
+    the plan it carries out, under a rule key naming that plan, so "always" never covers another download or path; the
+    plan's digest is bound to this call (CC-5), and only that plan runs. Its lines are shown verbatim, uncut: setup
+    refuses any it couldn't show as they are (control, bidi, zero-width or tag characters, or too long), since a cut
+    or cleaned path isn't the path written."""
     action = args.get("action")
     if action == "plan":
         return None, {}
@@ -233,6 +234,6 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
     asked = setup.approval(args.get("daw") or host.daw(), action=action, data_dir=host.data_dir())
     if asked is None:
         return block("Kumi did not set anything up: run kumi_setup plan first."), {}
-    lines = [one_line(asked["title"], SETUP_LINE), *(f"• {one_line(effect, SETUP_LINE)}" for effect in asked["effects"])]
+    lines = [asked["title"], *(f"• {line}" for line in asked["effects"])]
     decision = {"action": "approve", "message": "\n".join(lines), "rule_key": f"kumi:setup:{asked['digest']}"}
     return decision, {"digest": asked["digest"]}

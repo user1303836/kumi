@@ -146,7 +146,8 @@ class Command(unittest.TestCase):
         host, _, data = support.host(self, installed=False)
         self.assertEqual(commands.kumi(host, "", session_id="s1"),
                          "Kumi isn't ready: Kumi needs its runtime: 26.0 MB from github.com/user1303836/kumi. Ask the "
-                         "agent to set Kumi up, or run `hermes kumi setup` in a terminal.")
+                         "agent to set Kumi up, or run `hermes kumi setup` in a terminal (Hermes leaves plugin "
+                         "commands out when `plugins.isolation` is `host`).")
         support.install(data)
         support.call(host, "kumi_connect", {}, session_id="s1")
         self.assertEqual(commands.kumi(host, "", session_id="s1").splitlines()[1],
