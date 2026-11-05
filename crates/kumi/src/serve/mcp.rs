@@ -112,6 +112,7 @@ where
     }
     server.ctx.jobs().interrupt_running(server.ctx.snapshots());
     heartbeat.abort();
+    server.ctx.link().close().await;
     core::publish_stopped(&server.ctx).await;
     let _ = server.outbox.send(Out::Close);
     if let Some(written) = writer {
@@ -645,7 +646,7 @@ mod tests {
             };
             let given = Env::from([("HOME".into(), state.path().display().to_string()), ("KUMI_PROCESSES".into(), "none".into())]);
             let env = environment(&args, given);
-            let ctx = Ctx::new(args, env).unwrap();
+            let ctx = Ctx::new(args, env, Default::default()).unwrap();
             // A pipe each way: dropping the host's end of its input ends the runtime's.
             let (to, server_in) = tokio::io::duplex(1 << 16);
             let (server_out, from) = tokio::io::duplex(1 << 16);

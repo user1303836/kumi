@@ -7,6 +7,7 @@
 //!
 //! The operations it offers are in [`registry`]; [`ctx`] is what each is given; [`mcp`] is the wire.
 
+pub mod connection;
 pub mod ctx;
 pub mod jobs;
 pub mod mcp;
@@ -155,7 +156,7 @@ pub fn main(args: &[String]) -> i32 {
     let env = environment(&args, kumi_types::system::process_env());
     let local = tokio::task::LocalSet::new();
     let code = local.block_on(&runtime, async move {
-        let ctx = match ctx::Ctx::new(args, env) {
+        let ctx = match ctx::Ctx::new(args, env, kumi_daw::io::Answers::default()) {
             Ok(ctx) => ctx,
             Err(why) => {
                 say(&format!("kumi serve: {why}"));

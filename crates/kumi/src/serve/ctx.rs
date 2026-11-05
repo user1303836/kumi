@@ -2,6 +2,7 @@
 //! arguments, the host's identity for it, its cancel signal and its progress) and the runtime it runs in ([`Ctx`]).
 //! Every stream's operations are written against these; each module adds its own to [`super::registry`].
 
+use super::connection::Link;
 use super::jobs::{JobHandle, Jobs};
 use super::snapshots::Snapshots;
 use super::Args;
@@ -283,12 +284,16 @@ pub struct Ctx {
     scratches: Cell<u64>,
     /// When the runtime started (ms).
     started: i64,
+    /// The DAW's stand-ins a test gives (as the app's `run` takes them); none otherwise.
+    answers: kumi_daw::io::Answers,
+    link: Link,
 }
 
 impl Ctx {
     /// The runtime for these arguments: its state folder made when it isn't there and the owner's alone either way,
-    /// and resolved on disk, so every path under it (scratch included) compares as the library's roots do.
-    pub fn new(args: Args, env: Env) -> Result<Rc<Ctx>, String> {
+    /// and resolved on disk, so every path under it (scratch included) compares as the library's roots do. `answers`
+    /// are the DAW's stand-ins a test gives; the runtime itself gives none.
+    pub fn new(args: Args, env: Env, answers: kumi_daw::io::Answers) -> Result<Rc<Ctx>, String> {
         let unmade = |error: std::io::Error| format!("can't make {}: {error}", args.state_dir.display());
         make_private_dir(&args.state_dir).map_err(unmade)?;
         let state_dir = std::fs::canonicalize(&args.state_dir).map_err(unmade)?;
@@ -308,6 +313,8 @@ impl Ctx {
             offered: Cell::new(super::registry::OPERATIONS),
             scratches: Cell::new(0),
             started: kumi_common::time::now_ms(),
+            answers,
+            link: Link::default(),
         });
         ctx.project_library_roots();
         Ok(ctx)
@@ -402,6 +409,25 @@ impl Ctx {
     /// When the runtime started (ms since the epoch).
     pub fn started(&self) -> i64 {
         self.started
+    }
+
+    /// The runtime itself, for what outlasts a call (a callback the DAW's integration keeps).
+    pub fn handle(&self) -> Weak<Ctx> {
+        self.me.clone()
+    }
+
+    pub fn answers(&self) -> &kumi_daw::io::Answers {
+        &self.answers
+    }
+
+    /// The connection to the DAW and the project last seen (none before `connect`).
+    pub fn link(&self) -> &Link {
+        &self.link
+    }
+
+    /// The connection to the DAW: `connect` first.
+    pub fn connection(&self) -> Result<Rc<super::connection::Connection>, OpError> {
+        self.link.connection().ok_or_else(|| OpError::NotConnected { reason: "Kumi isn't connected to the DAW: connect first.".into() })
     }
 
     /// The operations the runtime offers.
@@ -534,7 +560,7 @@ mod tests {
             media_roots: vec![],
             tools: BTreeMap::new(),
         };
-        let ctx = Ctx::new(args, Env::new()).unwrap();
+        let ctx = Ctx::new(args, Env::new(), Default::default()).unwrap();
         let (one, two) = (ctx.scratch("listen").unwrap(), ctx.scratch("listen").unwrap());
         assert_ne!(one.path(), two.path());
         let under = std::fs::canonicalize(dir.path()).unwrap().join("state/scratch/listen");
@@ -562,7 +588,7 @@ mod tests {
             media_roots: vec![dir.path().join("media"), dir.path().join("kick.wav")],
             tools: BTreeMap::new(),
         };
-        let ctx = Ctx::new(args, Env::new()).unwrap();
+        let ctx = Ctx::new(args, Env::new(), Default::default()).unwrap();
         let resolved = |name: &str| std::fs::canonicalize(dir.path().join(name)).unwrap();
         assert_eq!(ctx.library_roots(), [resolved("Samples")], "a root not there grants nothing; one root named twice is one");
         assert_eq!(ctx.media_roots(), [resolved("media")], "a file is no root");

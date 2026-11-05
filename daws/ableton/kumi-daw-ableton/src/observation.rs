@@ -728,7 +728,9 @@ impl Observer {
             // The tracks' own ids, made whole in the background when their list changed or one is missing or
             // shared: within the project (or the unsaved Set), and never written into a template.
             let scope = project_id.clone().unwrap_or_else(|| format!("unsaved:{identity}"));
-            let writable = path.as_deref().is_none_or(|path| !project::template_location(path));
+            // Nothing is written when the host keeps nothing in the Set: the pass still runs without writing, so the
+            // ids the tracks already carry are read and kept, and none it would have given is taken as theirs.
+            let writable = self.remember.persist_identity.get() && path.as_deref().is_none_or(|path| !project::template_location(path));
             let structure = connection.structure_events.get();
             let gaps = if writable { track_gaps } else { vec![] };
             if self.remember.track_ids.due(&scope, track_revision.as_deref(), &gaps, structure) {

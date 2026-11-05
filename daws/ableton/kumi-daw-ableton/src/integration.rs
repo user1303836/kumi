@@ -108,6 +108,7 @@ impl Ableton {
             }));
             let connection = LiveConnection::new(config);
             let remember = Remember::new(connection.clone(), options.project_store.clone(), options.on_catch_up.clone());
+            remember.persist_identity.set(options.policy.persist_identity);
             let history = Rc::new(History::new(connection.clone(), remember.clone(), options.change_timeout_ms, options.on_change.clone()));
             let observer = Rc::new(Observer::new(connection.clone(), remember.clone()));
             let shown = Rc::downgrade(&observer);
