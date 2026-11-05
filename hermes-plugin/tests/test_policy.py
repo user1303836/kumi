@@ -41,18 +41,19 @@ class Approvals(unittest.TestCase):
         self.assertIsNone(self.hook("kumi_listen", {"source": {"sound_id": "s-r1-1", "map_revision": "r1"},
                                                     "compare_to": {"file": "/Samples/a.wav"}}))
 
-    def test_a_scheduled_job_reads_only_kumis_published_status_and_never_reaches_the_runtime(self):
+    def test_a_scheduled_job_reads_only_kumis_published_status_and_history_and_never_reaches_the_runtime(self):
         track = {"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}, **PROJECT}
         calls = {"kumi_connect": {}, "kumi_setup": {}, "kumi_change": change(), "kumi_undo": {"history_id": "h-1"},
                  "kumi_listen": track, "kumi_library": {"action": "add_folder", "folder": support.DRUMS},
                  "kumi_observe": {"scope": "focus"}, "kumi_read": {"action": "data"}, "kumi_sounds": {"query": "a"},
-                 "kumi_history": {}, "kumi_job": {"job_id": "j-1"}}
+                 "kumi_job": {"job_id": "j-1"}}
         before = support.requests(self.data / "state")
         self.ctx.cron_execution = object()  # Hermes's ctx.current_cron_execution(): a cron run is executing now
         for tool, args in calls.items():  # with the producer's chat's runtime running, whatever Hermes would allow
             decision = self.hook(tool, args)
             self.assertEqual((decision["action"], decision["message"]), ("block", tools.SCHEDULED), tool)
         self.assertIsNone(self.hook("kumi_status", {}))
+        self.assertIsNone(self.hook("kumi_history", {}))
         published = support.call(self.host, "kumi_status", {}, session_id="cron-1")
         self.assertEqual((published["connected"], published["project"]["name"]), (True, "Night Drive"))
         self.assertEqual(support.requests(self.data / "state"), before, "nothing reached the runtime")

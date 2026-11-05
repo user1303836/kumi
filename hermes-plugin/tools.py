@@ -186,9 +186,9 @@ class Host:
 UNATTENDED_SURFACES = frozenset({"webhook", "msgraph_webhook", "api_server"})
 # What a scheduled job may call: reads answered from what Kumi last published, never from the runtime, whose every
 # call makes its caller the runtime's holder (C3's owner).
-SCHEDULED_READS = frozenset({"kumi_status"})
-SCHEDULED = ("A scheduled job reads only Kumi's status, as Kumi last published it: it never starts or calls Kumi's "
-             "runtime, or changes anything. Open a chat with Kumi for that.")
+SCHEDULED_READS = frozenset({"kumi_status", "kumi_history"})
+SCHEDULED = ("A scheduled job reads only Kumi's status and HISTORY, as Kumi last published them: it never starts or "
+             "calls Kumi's runtime, or changes anything. Open a chat with Kumi for that.")
 
 
 def _session_values(*names: str) -> list[str]:
@@ -420,6 +420,59 @@ def kumi_undo(host: Host, args: dict, **kwargs: Any) -> dict:
     return _write(host, "undo", {key: value for key, value in args.items() if key != "preview"}, kwargs)
 
 
+# What a HISTORY row may say outside Kumi (C1, CC-12's 12a), live or published: never CC-5's internals or the runtime's
+# own fields, and no `note`, whose error text can name a path (12f).
+HISTORY_FIELDS = ("id", "title", "family", "at", "state", "undo_available", "track")
+
+
+def kumi_history(host: Host, args: dict, **kwargs: Any) -> dict:
+    """HISTORY (C1): from this process's runtime in a chat; as Kumi last published it (CC-12) when no runtime runs
+    here, and always in a scheduled job, whose runtime call would make it the runtime's holder (12d). Either way, each
+    row says only C1's fields. The published answer needs no setup check: its snapshot is there whatever setup says."""
+    data_dir = host.data_dir()
+    scheduled = host.unattended() == "scheduled"
+    live = None if scheduled else host.runtimes.get(data_dir)
+    if live is not None:
+        answer = live.call("history", args, host.identity(kwargs), timeout=READ_TIMEOUT)
+        rows = answer.get("items") if isinstance(answer.get("items"), list) else []
+        return {**answer, "items": [_c1_row(row) for row in rows if isinstance(row, dict)]}
+    return published_history(Path(data_dir) / "state", args.get("limit", 20), scheduled=scheduled)
+
+
+def _c1_row(row: dict) -> dict:
+    return {key: row[key] for key in HISTORY_FIELDS if key in row}
+
+
+def published_history(state: Path, limit: object, *, scheduled: bool) -> dict:
+    """HISTORY as the runtime last published it (CC-12), from one read of its snapshot: it starts, writes and remembers
+    nothing. C1's fields only, nothing undoable from here (12b), when it's from (`as_of`), whether the runtime runs (its
+    owner's `running` and `stale`), and why this answer is a published one (12c)."""
+    published = snapshots.read(state, "history")
+    if published is None:
+        unread = "Kumi's published HISTORY can't be read." if (state / "history.json").exists() else None
+        return {"items": [], "from": "last_published", "note": unread or "Kumi hasn't run in this profile yet."}
+    rows = published.get("items") if isinstance(published.get("items"), list) else []
+    try:
+        count = max(1, min(int(limit), snapshots.HISTORY_MAX))  # type: ignore[call-overload]
+    except (TypeError, ValueError):
+        count = 20
+    items = [{**_c1_row(row), "undo_available": False} for row in rows[:count] if isinstance(row, dict)]
+    owner = snapshots.owner(state)
+    stale, running = owner["stale"], owner.get("running") if isinstance(owner.get("running"), bool) else None
+    if scheduled:
+        note = "A scheduled job reads HISTORY as Kumi last published it: nothing can be undone from here."
+    elif not stale:
+        note = ("Kumi runs in another Hermes process: this is HISTORY as it last published it, and nothing can be "
+                "undone from here.")
+    else:
+        note = ("Kumi isn't running: this is HISTORY as Kumi last published it. Nothing can be undone until Kumi "
+                "connects again.")
+    if stale and running is not False:  # it never said it stopped: it died
+        note += " Kumi stopped unexpectedly; its last change may be missing here or unsure."
+    return {"items": items, "from": "last_published", "as_of": published.get("at"), "running": running,
+            "stale": stale, "note": note}
+
+
 SOURCE_KEYS = {"file", "sound_id", "map_revision", "artifact_id"}
 TRACK_KEYS = {"track", "from_beat", "beats"}
 MAX_BEATS = 256
@@ -611,7 +664,7 @@ TOOLS: tuple[tuple[str, dict, Callable[..., dict], str], ...] = (
     ("kumi_read", schemas.KUMI_READ, _forward("read", READ_TIMEOUT), "📖"),
     ("kumi_change", schemas.KUMI_CHANGE, kumi_change, "🎚️"),
     ("kumi_undo", schemas.KUMI_UNDO, kumi_undo, "↩️"),
-    ("kumi_history", schemas.KUMI_HISTORY, _forward("history", READ_TIMEOUT), "🕘"),
+    ("kumi_history", schemas.KUMI_HISTORY, kumi_history, "🕘"),
     ("kumi_listen", schemas.KUMI_LISTEN, kumi_listen, "📈"),
     ("kumi_sounds", schemas.KUMI_SOUNDS, kumi_sounds, "🔎"),
     ("kumi_library", schemas.KUMI_LIBRARY, kumi_library, "🗂️"),

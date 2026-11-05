@@ -38,6 +38,7 @@ rules keep its changes exact, approved and reversible.
 - **Undo with `kumi_undo` and a HISTORY id** from `kumi_history` or a `kumi_change` result. The producer approves it too.
 - **Never "undo" by making a reverse change from your memory** of what the project was.
 - **`kept`** means the producer changed that thing since, so Kumi left it. **`expired`** means Kumi's runtime or the project restarted since. HISTORY still records the change, but it can't be undone from here.
+- **When Kumi's runtime doesn't run in this Hermes process, and always in a scheduled job,** `kumi_history` answers with HISTORY as Kumi last published it (`from: last_published`, `as_of`, and a note on why). Nothing in it can be undone from there, and the project may have changed since: say when it's from, and never act on it without connecting and observing first.
 
 ## Hearing
 - Kumi measures audio; it doesn't hear it, and neither do you. Say what was measured (`kumi_listen`, skill `kumi:listening`), never that something "sounds" a way unless the producer said so.

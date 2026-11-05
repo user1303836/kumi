@@ -314,10 +314,14 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
             track["devices"][0]["pads"][0]["sample"] = target["sample"]
     ident = f"h-{fixture.set['key']}-g1-c{len(fixture.history) + 1}"
     track = fixture.track(steps[0]["input"]["track_ref"])
+    # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note) and CC-5's
+    # (tool_call_id, digest, call_outcome), which the plugin never passes on.
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
                             "runtime_generation": "g1", "title": args.get("title") or "Kumi change",
                             "family": describe(fixture, steps[0])["family"], "at": now(), "state": "applied",
-                            "undo_available": True, "track": track["name"], "before": before})
+                            "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
+                            "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
+                            "call_outcome": "applied", "before": before})
     fixture.publish("history", "focus")
     applied = [{"tool": step["tool"], "state": "applied"} for step in steps]
     return {"state": "applied", "history_ids": [ident], "steps": applied, "summary": args.get("title") or "Applied.",
