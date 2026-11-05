@@ -44,8 +44,18 @@ complete N/4 timebase (N from 1 through 16, /16 division), Custom LCD and the co
 and meter identity. Unknown or multiple meters, producer cycle edits and changed
 timebase refuse writes or restores; `discard` does not override these checks.
 Cycle changes create no native Undo step. Kumi can restore confirmed values;
-missing original evidence stays in HISTORY with manual guidance. The remaining
-M4 kinds and project saving are not enabled, and current native acceptance is pending.
+missing original evidence stays in HISTORY with manual guidance. Apart from the two Region value previews below, the remaining M4 kinds and project saving are not enabled, and current native acceptance is pending.
+
+Two further M4 value previews add `region_rename {ref,name}` and
+`region_loop {ref,loop}` (19 kinds total). The requested region must already be
+selected alone, with Inspector and Mixer visible and complete readable project,
+track, region and Inspector facts. Kumi changes only the name or Loop checkbox;
+it does not select a target, post keys, press native Undo or change panes. Unknown,
+duplicate, replaced or producer-changed facts refuse writes/restores even with
+`discard`. Rename invalidates old refs; read again afterwards. A general region
+read does not establish the Inspector Loop value. Missing original evidence is
+manual-only; uncertain writes are never resent. These are limited source previews,
+not general M4 coverage or fresh real-Logic acceptance.
 
 The [wire contract](LOGIC_CONTRACT.md) describes the recorded shapes and
 limits. Replay tests do not establish native acceptance on the current Logic

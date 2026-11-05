@@ -1,4 +1,4 @@
-# Logic Pro 桥接协议（M2、M3 与 Loop Range 预览）
+# Logic Pro 桥接协议（M2、M3 与 Loop Range、区域值预览）
 
 M2 的六个读取方法为 `ping`、`status`、`focus`、`read`、`snapshot`、`focus_body`。M3 添加 `change_preview`、`change_apply`、`change_restore`、`transport_play`、`transport_stop`、`cursor_set`、`undo_step_begin`、`undo_step_end`。
 
@@ -11,3 +11,5 @@ M2 的六个读取方法为 `ping`、`status`、`focus`、`read`、`snapshot`、
 Kumi 不会自动移除新增轨道，也不会自动恢复已删除轨道或标记。Logic 的界面无法完整显示自动化、关闭的插件状态或隐藏元数据，撤销标题也无法唯一识别某一步。请在 Logic 自身的撤销历史中查看相应步骤并手动撤销。添加或移动标记时，若原始 Text 列等必要字段未显示，也需要手动撤销；之后显示字段无法恢复其原值。只有完整捕获原始行与列表身份时才允许按值恢复，discard 不能绕过未知内容。已确认的手动修改在 HISTORY 中保留为 Kept，默认 /undo 会说明限制且不发送 RPC，不会跳到更早修改。不确定的写入仍保持不确定。
 
 M4 的首个预览只在 M3 的16种修改之外添加 loop_range。startBeats 和 endBeats 使用四分音符单位，必须精确对齐每四分音符960刻度后才能启用循环，不会自动取整；必须事先显示 Custom LCD 与完整 Signature List，使用单一 N/4 拍号（N 为1至16）及 /16 细分，并停止播放与录音；0,0 会关闭循环并保留定位点。写入前必须完整读取当前单一拍号与时间基准，围栏同时绑定循环开关、两个定位点和拍号身份。未知或多个拍号、制作者更改循环值、时间基准变化都会拒绝写入或恢复，discard 不能绕过检查。循环不进入 Logic 自身撤销历史；Kumi 仅按值恢复完整确认的状态，缺少原始证据时在 HISTORY 中保留手动操作说明，不会跳到更早修改。其他 M4 修改及工程保存仍未启用。这只移植历史提交 6f8f6e9bbc3666159ce68be1ce7466aa30e82670 的 Loop Range，不代表新的实机验收。
+
+另外只添加 Region Rename（region_rename {ref,name}）和 Region Loop（region_loop {ref,loop}），共19种修改。必须事先只选中目标区域并显示 Inspector 与 Mixer。Kumi 完整检查工程、轨道、区域和 Inspector 事实后，只写入名称或 Loop 复选框；不会改变选择、发送按键、操作 Logic 原生撤销或切换面板。未知、重复、替换或已被制作者更改的事实都会拒绝写入或恢复，discard 不能绕过检查。重命名后须重新读取引用；普通区域读取的 looped 不能证明 Inspector Loop 的值。完整原始证据只保留在主机日志中，公开响应仅含名称、Loop 值和严格验证的恢复能力。证据缺失的已确认修改保留为 Kept 并提供手动操作说明，默认撤销不会跳到更早修改；不确定写入不会重发。界面观测完全相同的替换仍是身份限制。这不代表其他 M4 修改、工程保存或新的实机验收。

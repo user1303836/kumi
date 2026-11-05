@@ -1,9 +1,11 @@
-//! Logic's native M3 capabilities plus the first M4 Loop Range slice. The shared host owns the journal; only the methods implemented by the native
+//! Logic's native M3 capabilities plus the M4 Loop Range, Region Rename and Region Loop slices. The shared host owns the journal; only the methods implemented by the native
 //! bridge are exposed here. Logic has no native undo block, so a plan's step counts changes without grouping them.
 use serde_json::{json, Value};
 
-/// The original 16 M3 kinds plus Loop Range from the first M4 slice; other M4 kinds stay disabled.
-pub const CHANGE_KINDS: [&str; 17] = [
+pub(crate) mod region_values;
+
+/// The original 16 M3 kinds plus three controlled M4 value kinds; other M4 kinds stay disabled.
+pub const CHANGE_KINDS: [&str; 19] = [
     "track-volume",
     "track-pan",
     "track-mute",
@@ -15,6 +17,8 @@ pub const CHANGE_KINDS: [&str; 17] = [
     "marker-add",
     "marker-move",
     "marker-delete",
+    "region-rename",
+    "region-loop",
     "loop-range",
     "tempo-set",
     "notes-add",
@@ -43,11 +47,32 @@ fn manual_hint(reason: &'static str) -> Value {
     json!({"mode":"manual", "reason":reason, "guidance":"Use Logic Pro's own undo manually."})
 }
 
+/// Full region identity remains in the journal and on the native wire, never in public change replies.
+pub(crate) fn public_state(kind: &str, state: &Value) -> Option<Value> {
+    if !["region-rename", "region-loop"].contains(&kind) {
+        return None;
+    }
+    let mut public = serde_json::Map::new();
+    for key in ["name", "loop"] {
+        if let Some(value) = state.get(key).filter(|value| if key == "name" { value.is_string() } else { value.is_boolean() }) {
+            public.insert(key.into(), value.clone());
+        }
+    }
+    Some(Value::Object(public))
+}
+
 /// The opaque material stays in the host journal. A positive restore capability requires both the native hint
 /// and complete captured original/applied identity; display text or title equality never grants permission.
 pub(crate) fn restore_hint(kind: &str, prior: &Value, reply: &Value) -> Option<Value> {
     if kind == "track-add" {
         return Some(manual_hint(MANUAL_TRACK_ADD));
+    }
+    if ["region-rename", "region-loop"].contains(&kind) {
+        return Some(if region_values::restorable(kind, prior, reply) {
+            json!({"mode":"value"})
+        } else {
+            manual_hint(region_values::MANUAL)
+        });
     }
     if kind == "loop-range" {
         let applied = &reply["applied"];
@@ -154,7 +179,7 @@ pub(crate) fn change_tools(pick: &Value) -> Vec<Value> {
     vec![
         json!({
             "name":"change_preview", "title":"Preview a Logic Pro change",
-            "description":"What one change would do in Logic Pro, without making it: {transactionId, confirmation, prior, display, target, epoch}. Apply it with change_apply. Only the 16 M3 kinds and the first M4 Loop Range slice are implemented. Loop Range requires Custom LCD and the complete Signature List already visible, one N/4 meter (N from 1 to 16), /16 division, and stopped nonrecording transport; startBeats/endBeats must align to 1/960 quarter-note ticks, and 0/0 disables Cycle while preserving locators. A preview reports unavailable controls; an apply may be refused or uncertain.",
+            "description":"What one change would do in Logic Pro, without making it: {transactionId, confirmation, prior, display, target, epoch}. Apply it with change_apply. Only the 16 M3 kinds and the M4 Loop Range, Region Rename and Region Loop value previews are implemented. Region Rename/Loop require the requested region already solely selected with complete Inspector and project/track/region evidence; no selection, key or native Undo action is made. Loop Range requires Custom LCD and the complete Signature List already visible, one N/4 meter (N from 1 to 16), /16 division, and stopped nonrecording transport; startBeats/endBeats must align to 1/960 quarter-note ticks, and 0/0 disables Cycle while preserving locators. A preview reports unavailable controls; an apply may be refused or uncertain.",
             "inputSchema":{"type":"object","properties":picked(pick,json!({
                 "kind":{"type":"string","enum":CHANGE_KINDS},
                 "input":{"type":"object","description":"The change kind's input, with refs from the current epoch."},

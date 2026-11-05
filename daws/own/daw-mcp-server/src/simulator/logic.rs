@@ -416,6 +416,11 @@ struct State {
     cycle: Value,
     loop_readiness: Value,
     recording: bool,
+    /// Region values require explicit synthetic full proof and sole selection; M2 supplies neither by default.
+    region_values: Value,
+    region_selected: Value,
+    region_readiness: Value,
+    region_tracks: Value,
     /// The playhead, in beats from the project's start.
     playhead: f64,
     playing: bool,
@@ -748,6 +753,10 @@ impl State {
             cycle: Value::Null,
             loop_readiness: Value::Null,
             recording: false,
+            region_values: Value::Null,
+            region_selected: Value::Null,
+            region_readiness: Value::Null,
+            region_tracks: Value::Null,
             playhead: focus["transport"]["beat"].as_f64().unwrap_or(0.0),
             playing: focus["transport"]["playing"] == true,
             undo: vec![],
@@ -900,6 +909,7 @@ impl State {
             return Err(bad(format!("Logic Pro's bridge can't make a {kind} change yet: {why}")));
         }
         match kind.as_str() {
+            "region-rename" | "region-loop" => self.region_value(method,params,&kind),
             "loop-range" => self.loop_range(method, params),
             "track-add" => self.track_add(method, params),
             "track-delete" => self.track_delete(method, params),
@@ -1448,6 +1458,233 @@ impl State {
         }
     }
 
+    // ----- two additional M4 values: the already selected Region Inspector -----
+
+    fn region_now(&self, kind: &str, reference: &str) -> Result<(usize, Value), Fault> {
+        if self.region_readiness != json!({"inspector":true,"mixer":true,"complete":true}) {
+            return Err(failed(
+                "Select only the requested region and show complete Inspector and Mixer facts; Kumi leaves selection and panes unchanged",
+            ));
+        }
+        let tracks: Vec<_> = self.tracks.iter().enumerate().map(|(i, track)| track.row(i + 1)).collect();
+        if self.region_tracks != json!(tracks) {
+            return Err(changed("the owning track or project facts changed"));
+        }
+        if self.region_selected != json!([reference]) {
+            return Err(failed("the requested region must already be selected alone"));
+        }
+        let rows = self.region_values.as_array().ok_or_else(|| failed("the complete selected-region proof is unknown"))?;
+        let matches: Vec<_> = rows.iter().enumerate().filter(|(_, row)| row["ref"] == reference).collect();
+        let [(index, row)] = matches.as_slice() else {
+            return Err(failed("the selected region is missing or ambiguous"));
+        };
+        let mode = if kind == "region-rename" { "rename" } else { "loop" };
+        let state = &row[mode];
+        if !crate::logic::region_values::complete(&row["rename"], "region-rename")
+            || !crate::logic::region_values::complete(&row["loop"], "region-loop")
+            || row["rename"]["name"] != row["loop"]["name"]
+            || row["rename"]["loop"] != row["loop"]["loop"]
+            || reference != format!("{}:region:{}", self.epoch, state["identity"]["target"].as_u64().unwrap_or(0))
+        {
+            return Err(failed(crate::logic::region_values::MANUAL));
+        }
+        if !crate::logic::region_values::complete(state, kind) {
+            return Err(failed(crate::logic::region_values::MANUAL));
+        }
+        if rows.iter().filter(|row| row[mode]["identity"] == state["identity"]).count() != 1 {
+            return Err(failed("the region identity is ambiguous"));
+        }
+        let project = another_project(&serde_json::to_value(project()).unwrap(), self.project);
+        if state["identity"]["project"] != project {
+            return Err(changed("the saved project identity changed"));
+        }
+        Ok((*index, state.clone()))
+    }
+
+    fn put_region_value(&mut self, index: usize, property: &str, wanted: &Value) {
+        let rows = self.region_values.as_array_mut().unwrap();
+        let old_name = rows[index]["rename"]["name"].as_str().unwrap().to_owned();
+        for mode in ["rename", "loop"] {
+            rows[index][mode][property] = wanted.clone();
+        }
+        if property == "name" {
+            // Only explicit target labels are updated. Owning-track names and other regions are untouched.
+            let proof = &mut rows[index]["loop"]["identity"];
+            let target = proof["target"].as_u64().unwrap() as usize;
+            let mut at = 0;
+            for lane in proof["lanes"].as_array_mut().unwrap() {
+                for region in lane["regions"].as_array_mut().unwrap() {
+                    at += 1;
+                    if at == target {
+                        fn rename(node: &mut Value, old: &str, new: &Value) {
+                            for key in ["desc", "title", "value", "valueDesc"] {
+                                if node[key] == old {
+                                    node[key] = new.clone();
+                                }
+                            }
+                        }
+                        rename(&mut region["node"], &old_name, wanted);
+                        for node in
+                            region["node"]["children"].as_array_mut().unwrap().iter_mut().filter(|node| node["role"] == "AXTextField")
+                        {
+                            rename(node, &old_name, wanted);
+                        }
+                    }
+                }
+            }
+            for field in proof["inspector"]["children"].as_array_mut().unwrap().iter_mut().filter(|node| node["role"] == "AXTextField") {
+                for key in ["desc", "title", "value", "valueDesc"] {
+                    if field[key] == old_name {
+                        field[key] = wanted.clone();
+                    }
+                }
+            }
+        } else {
+            fn update(node: &mut Value, wanted: &Value) {
+                if node["role"] == "AXCheckBox" {
+                    node["value"] = wanted.clone();
+                    if node.get("valueDesc").is_some() {
+                        node["valueDesc"] = json!(if wanted == true { "On" } else { "Off" });
+                    }
+                }
+                for child in node["children"].as_array_mut().unwrap() {
+                    update(child, wanted);
+                }
+            }
+            fn walk(node: &mut Value, wanted: &Value) {
+                let is_loop = node["role"] == "AXRow"
+                    && node["children"].as_array().is_some_and(|children| children.iter().any(|n| n["value"] == "Loop:"));
+                if is_loop {
+                    update(node, wanted);
+                } else {
+                    for child in node["children"].as_array_mut().unwrap() {
+                        walk(child, wanted);
+                    }
+                }
+            }
+            walk(&mut rows[index]["rename"]["identity"]["inspector"], wanted);
+            let proof = &mut rows[index]["rename"]["identity"];
+            let target = proof["target"].as_u64().unwrap() as usize;
+            let mut at = 0;
+            for lane in proof["lanes"].as_array_mut().unwrap() {
+                for region in lane["regions"].as_array_mut().unwrap() {
+                    at += 1;
+                    if at == target {
+                        for handle in region["node"]["children"]
+                            .as_array_mut()
+                            .unwrap()
+                            .iter_mut()
+                            .filter(|node| node["role"] == "AXHandle" && node["desc"] == "loop")
+                        {
+                            if !handle["value"].is_null() {
+                                handle["value"] = wanted.clone();
+                            }
+                            if handle.get("valueDesc").is_some() {
+                                handle["valueDesc"] = json!(if wanted == true { "On" } else { "Off" });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        if property == "name" {
+            self.bump_epoch();
+            for row in self.region_values.as_array_mut().unwrap() {
+                let old = row["ref"].as_str().unwrap().to_owned();
+                row["ref"] = json!(format!("{}:{}", self.epoch, old.split_once(':').unwrap().1));
+            }
+            for selected in self.region_selected.as_array_mut().unwrap() {
+                let old = selected.as_str().unwrap().to_owned();
+                *selected = json!(format!("{}:{}", self.epoch, old.split_once(':').unwrap().1));
+            }
+        }
+    }
+
+    fn region_value(&mut self, method: &str, params: &Value, kind: &str) -> Answer {
+        let (mode, property, other, step) =
+            if kind == "region-rename" { ("rename", "name", "loop", "Renaming") } else { ("loop", "loop", "name", "Set Loop") };
+        if method == "change_restore" {
+            let (prior, applied) = (&params["prior"], &params["applied"]);
+            if !crate::logic::region_values::restorable(kind, prior, &json!({"applied":applied,"material":{"undo":{"mode":"value"}}})) {
+                return Err(failed(crate::logic::region_values::MANUAL));
+            }
+            let reference = params["target"]["ref"].as_str().ok_or_else(|| failed(crate::logic::region_values::MANUAL))?;
+            let target = reference.split_once(':').and_then(|(_, rest)| rest.strip_prefix("region:")).and_then(|n| n.parse::<u64>().ok());
+            if epoch_of(reference).is_none() || target != prior["identity"]["target"].as_u64() {
+                return Err(failed(crate::logic::region_values::MANUAL));
+            }
+            // Old epochs may be carried only by unique complete proof. Never select a replacement by ordinal/name.
+            let matching: Vec<_> =
+                self.region_values.as_array().into_iter().flatten().filter(|row| row[mode]["identity"] == prior["identity"]).collect();
+            let [matched] = matching.as_slice() else {
+                return Err(changed("the complete region proof is missing or ambiguous"));
+            };
+            let current_ref = matched["ref"].as_str().ok_or_else(|| failed(crate::logic::region_values::MANUAL))?.to_owned();
+            let (index, now) = self.region_now(kind, &current_ref)?;
+            if now["identity"] != prior["identity"] || now[other] != prior[other] || now != *prior && now != *applied {
+                return Err(changed("the complete region identity or property changed; discard cannot override it"));
+            }
+            let desc = Self::desc(params)?;
+            if now != *prior {
+                self.put_region_value(index, property, &prior[property]);
+            }
+            let restored = self.region_values[index][mode].clone();
+            if restored != *prior {
+                return Err(uncertain("the complete region restore readback differs"));
+            }
+            let undo = if now != *prior { self.restored(Some(step), &desc)? } else { json!({"desc":desc,"entry":false}) };
+            return Ok(
+                json!({"epoch":self.epoch_text(),"restored":restored,"display":{"title":"Region property restored","before":{property:now[property]},"after":{property:restored[property]}},"undo":undo}),
+            );
+        }
+        let input = &params["input"];
+        let wanted = if property == "name" {
+            input["name"]
+                .as_str()
+                .filter(|name| !name.trim().is_empty() && name.chars().count() <= 256 && !name.chars().any(char::is_control))
+                .map(|name| json!(name))
+                .ok_or_else(|| bad("name must be one nonempty line of at most 256 characters"))?
+        } else {
+            input["loop"].as_bool().map(|on| json!(on)).ok_or_else(|| bad("loop must be true or false"))?
+        };
+        let reference = input["ref"].as_str().ok_or_else(|| bad("ref must name the already selected region"))?;
+        if epoch_of(reference) != Some(self.epoch) {
+            return Err(("stale".into(), "read this region's current ref again".into()));
+        }
+        let (index, now) = self.region_now(kind, reference)?;
+        let mut after = now.clone();
+        after[property] = wanted;
+        let title = if property == "name" {
+            format!("Renamed region {} → {}", quoted(now["name"].as_str().unwrap()), quoted(after["name"].as_str().unwrap()))
+        } else {
+            format!("region {} {}", quoted(now["name"].as_str().unwrap()), if after["loop"] == true { "looped" } else { "not looped" })
+        };
+        let mut display = json!({"title":title,"before":{property:now[property]},"after":{property:after[property]}});
+        if now == after {
+            display["unchanged"] = true.into();
+        }
+        if method == "change_preview" {
+            return Ok(
+                json!({"epoch":self.epoch_text(),"target":{"ref":reference,"kind":"region"},"prior":now,"fence":now,"display":display}),
+            );
+        }
+        if params["fence"] != now {
+            return Err(changed("the complete region fence changed since preview"));
+        }
+        let desc = Self::desc(params)?;
+        if now != after {
+            self.put_region_value(index, property, &after[property]);
+        }
+        let applied = self.region_values[index][mode].clone();
+        if applied != after {
+            return Err(uncertain("the complete region property readback differs"));
+        }
+        let undo = if now != after { self.applied(Some(step), &desc)? } else { json!({"desc":desc,"entry":false}) };
+        Ok(
+            json!({"epoch":self.epoch_text(),"applied":applied,"target":{"ref":self.region_values[index]["ref"],"kind":"region"},"material":{"undo":{"mode":"value"}},"display":display,"undo":undo}),
+        )
+    }
+
     // ----- first M4 slice: controlled Loop Range only -----
 
     fn loop_now(&self) -> Result<Value, Fault> {
@@ -1650,6 +1887,28 @@ impl State {
             }
             "read" if kind == Some("track") && asked.get("parent").is_none() => page_of(track_rows(), asked),
             "read" if kind == Some("marker") && asked.get("parent").is_none() => page_of(marker_rows(), asked),
+            "read" if kind == Some("region") && self.region_values.is_array() => recorded("read", asked.clone()).map(|mut page| {
+                for item in page["items"].as_array_mut().into_iter().flatten() {
+                    let rest = item["ref"].as_str().and_then(|reference| reference.split_once(':')).map(|(_, rest)| rest.to_owned());
+                    if let Some(rest) = rest {
+                        let candidates: Vec<_> = self
+                            .region_values
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .filter(|row| {
+                                row["ref"].as_str().and_then(|reference| reference.split_once(':')).is_some_and(|(_, value)| value == rest)
+                            })
+                            .collect();
+                        if let [row] = candidates.as_slice() {
+                            item["name"] = row["rename"]["name"].clone();
+                            item["ref"] = row["ref"].clone();
+                            item["selected"] = json!(self.region_selected == json!([row["ref"]]));
+                        }
+                    }
+                }
+                page
+            }),
             "read" if kind == Some("project") => recorded("read", asked.clone()).map(|mut page| {
                 page["items"][0]["tempo"] = self.tempo.into();
                 page["items"][0]["trackCount"] = self.tracks.len().into();
@@ -1806,6 +2065,86 @@ impl LogicScript {
     }
     pub fn set_recording(&self, recording: bool) {
         self.state.lock().unwrap().recording = recording;
+    }
+
+    /// Builds independent modeled facts only. It neither configures selection nor changes the frozen recordings.
+    pub fn synthetic_region_values(&self) -> Value {
+        fn node(role: &str, value: Value, children: Vec<Value>) -> Value {
+            json!({"role":role,"value":value,"children":children})
+        }
+        fn named(name: &str) -> Value {
+            let mut field = node("AXTextField", json!(name), vec![]);
+            field["desc"] = json!(name);
+            field
+        }
+        fn header(name: &str) -> Value {
+            node("AXLayoutItem", Value::Null, vec![named(name), node("AXSlider", json!(0.0), vec![])])
+        }
+        let region_name = "Keys";
+        let mut handle = node("AXHandle", Value::Null, vec![]);
+        handle["desc"] = json!("loop");
+        let mut item = node("AXLayoutItem", Value::Null, vec![named(region_name), handle]);
+        item["desc"] = json!(region_name);
+        item["id"] = json!("synthetic-private-region-proof");
+        item["help"] = json!("Region starts at 1 bar and ends at 5 bars, MIDI region.");
+        let region = json!({"node":item,"start":{"bar":1,"beat":1,"division":1,"tick":1},"end":{"bar":5,"beat":1,"division":1,"tick":1},"kind":"midi"});
+        let mut name = node("AXTextField", json!(region_name), vec![]);
+        name["desc"] = json!("Region name");
+        let mut checkbox = node("AXCheckBox", json!(false), vec![]);
+        checkbox["desc"] = json!("Loop");
+        checkbox["valueDesc"] = json!("Off");
+        let inspector = node(
+            "AXGroup",
+            Value::Null,
+            vec![
+                node("AXStaticText", json!("Region:"), vec![]),
+                name,
+                node("AXRow", Value::Null, vec![node("AXTextField", json!("Loop:"), vec![]), checkbox]),
+                node(
+                    "AXRow",
+                    Value::Null,
+                    vec![node("AXTextField", json!("Quantize:"), vec![]), node("AXPopUpButton", json!("Off"), vec![])],
+                ),
+            ],
+        );
+        let mut owner_name = named("Keys");
+        owner_name["desc"] = json!("name");
+        let mut instrument = node("AXButton", Value::Null, vec![]);
+        instrument["help"] = json!("Instrument slot");
+        let identity = json!({"version":1,"mode":"rename","project":self.project(),"headers":[header("Vocal"),header("Keys")],
+            "lanes":[{"node":node("AXLayoutArea",Value::Null,vec![]),"regions":[]},{"node":node("AXLayoutArea",Value::Null,vec![]),"regions":[region]}],
+            "owner":{"name":"Keys","kind":"instrument","strip":node("AXLayoutItem",Value::Null,vec![owner_name,instrument,node("AXPopUpButton",json!("Stereo Output"),vec![])])},"inspector":inspector,"target":1});
+        let mut rename = json!({"name":region_name,"loop":false,"identity":identity});
+        rename["identity"]["lanes"][1]["regions"][0]["node"]["desc"] = json!({"controlled":"name"});
+        rename["identity"]["lanes"][1]["regions"][0]["node"]["children"][0]["desc"] = json!({"controlled":"name"});
+        rename["identity"]["lanes"][1]["regions"][0]["node"]["children"][0]["value"] = json!({"controlled":"name"});
+        rename["identity"]["inspector"]["children"][1]["value"] = json!({"controlled":"name"});
+        let mut looped = json!({"name":region_name,"loop":false,"identity":identity});
+        looped["identity"]["mode"] = json!("loop");
+        looped["identity"]["inspector"]["children"][2]["children"][1]["value"] = json!({"controlled":"loop"});
+        looped["identity"]["inspector"]["children"][2]["children"][1]["valueDesc"] = json!({"controlled":"loop"});
+        let epoch = self.epoch();
+        json!([{"ref":format!("{epoch}:region:1"),"rename":rename,"loop":looped}])
+    }
+
+    /// Explicit full version-one synthetic proofs for both modes; this never infers a selected target from M2.
+    pub fn set_region_value_fixture(&self, rows: Value, selected: Value, readiness: Value) {
+        let mut state = self.state.lock().unwrap();
+        state.region_values = rows;
+        state.region_selected = selected;
+        state.region_readiness = readiness;
+        state.region_tracks = json!(state.tracks.iter().enumerate().map(|(i, track)| track.row(i + 1)).collect::<Vec<_>>());
+    }
+    pub fn region_value_fixture(&self) -> Value {
+        self.state.lock().unwrap().region_values.clone()
+    }
+    pub fn region_selection(&self) -> Value {
+        self.state.lock().unwrap().region_selected.clone()
+    }
+    /// A producer edit in the explicit model, not a DAW action or a recovery controller.
+    pub fn edit_region_fixture(&self, index: usize, property: &str, value: Value) {
+        assert!(["name", "loop"].contains(&property));
+        self.state.lock().unwrap().put_region_value(index, property, &value);
     }
 
     pub fn tempo(&self) -> f64 {

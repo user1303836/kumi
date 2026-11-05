@@ -21,7 +21,7 @@
 
 https://github.com/user-attachments/assets/f53fe0be-c9a9-476e-a1d5-efe3dc429526
 
-macOS 上的 Logic Pro 12 可通过 `kumi --daw logic` 显式选择实验性集成。可读取工程和 FOCUS 正文，提供 M3 的16种修改及首个 Loop Range 预览；新增和已删除轨道、已删除标记，以及原始信息不完整的标记修改需在 Logic 撤销历史中手动撤销。本次移植的真实 Logic 验收尚未完成；聆听仍未启用。详见 [Logic Pro](docs/zh-CN/DAWS.md#logic-pro实验性读取)。
+macOS 上的 Logic Pro 12 可通过 `kumi --daw logic` 显式选择实验性集成。可读取工程和 FOCUS 正文，提供 M3 的16种修改及Loop Range、Region Rename 和 Region Loop 限定预览；新增和已删除轨道、已删除标记，以及原始信息不完整的标记修改需在 Logic 撤销历史中手动撤销。本次移植的真实 Logic 验收尚未完成；聆听仍未启用。详见 [Logic Pro](docs/zh-CN/DAWS.md#logic-pro实验性读取)。
 
 ## 快速开始
 

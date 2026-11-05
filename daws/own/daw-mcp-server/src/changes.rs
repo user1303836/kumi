@@ -145,6 +145,8 @@ pub struct Journal {
     outside_undo: &'static [&'static str],
     /// A DAW may publish a validated restore hint without exposing its private undo material.
     restore_hint: Option<fn(&str, &Value, &Value) -> Option<Value>>,
+    /// New kinds may keep their proof private while exposing only controlled values.
+    public_state: Option<fn(&str, &Value) -> Option<Value>>,
 }
 
 /// Four base-36 characters from a counter and the clock, unique among the records kept.
@@ -170,7 +172,33 @@ impl Journal {
         Journal {
             outside_undo: crate::tools::kinds(daw).outside_undo,
             restore_hint: (daw == daw_bridge::Daw::Logic).then_some(crate::logic::restore_hint),
+            public_state: (daw == daw_bridge::Daw::Logic).then_some(crate::logic::public_state),
             ..Journal::default()
+        }
+    }
+
+    fn public_field(&self, kind: &str, field: &str, value: &Value) -> Value {
+        let Some(project) = self.public_state.filter(|project| project(kind, &Value::Null).is_some()) else {
+            return value.clone();
+        };
+        match field {
+            "prior" | "applied" | "restored" => project(kind, value).unwrap(),
+            "display" => {
+                let mut display = Map::new();
+                for key in ["title", "note", "unchanged", "before", "after"] {
+                    if let Some(value) = value.get(key) {
+                        if matches!(key, "title" | "note") && !value.is_string() || key == "unchanged" && !value.is_boolean() {
+                            continue;
+                        }
+                        display.insert(
+                            key.into(),
+                            if matches!(key, "before" | "after") { project(kind, value).unwrap() } else { value.clone() },
+                        );
+                    }
+                }
+                Value::Object(display)
+            }
+            _ => value.clone(),
         }
     }
 
@@ -338,7 +366,7 @@ impl Journal {
                 // `kept` (Renoise): the epoch moved only for devices, patterns or the sequence, and the tracks' refs hold.
                 for field in ["applied", "created", "display", "undo", "epoch", "layout", "kept"] {
                     if let Some(value) = applied.get(field).filter(|value| !value.is_null()) {
-                        reply.insert(field.into(), value.clone());
+                        reply.insert(field.into(), self.public_field(&record.kind, field, value));
                     }
                 }
                 if let Some(hint) = self.restore_hint.and_then(|derive| derive(&record.kind, &record.prior, applied)) {
@@ -424,7 +452,7 @@ impl Journal {
                 let mut reply = json!({"transactionId": record.id, "state": "undone"});
                 for field in ["display", "restored", "epoch", "layout", "kept"] {
                     if let Some(value) = restored.get(field).filter(|value| !value.is_null()) {
-                        reply[field] = value.clone();
+                        reply[field] = self.public_field(&record.kind, field, value);
                     }
                 }
                 (reply, false)
@@ -764,7 +792,9 @@ impl crate::host::Host {
         };
         match self.journal().previewed(&kind, input, &answer, layout, pick) {
             Ok(record) => {
-                let mut reply = json!({"transactionId": record.id, "confirmation": record.confirmation, "prior": record.prior, "display": record.display, "target": record.target});
+                let mut reply = json!({"transactionId": record.id, "confirmation": record.confirmation,
+                    "prior": self.journal().public_field(&record.kind,"prior",&record.prior),
+                    "display": self.journal().public_field(&record.kind,"display",&record.display), "target": record.target});
                 place(&mut reply, record.epoch.as_deref(), record.layout);
                 (reply, false)
             }
@@ -1103,6 +1133,53 @@ impl crate::host::Host {
 mod tests {
     use super::*;
     use crate::host::Pick;
+
+    #[test]
+    fn logic_region_public_projection_keeps_native_proof_and_updated_target_private_and_intact() {
+        let journal = Journal::for_daw(daw_bridge::Daw::Logic);
+        let private = json!({"name":"Keys","loop":false,"identity":{"private":"PRIVATE REGION PROOF ".repeat(300)}});
+        let mut after = private.clone();
+        after["name"] = json!("Lead");
+        let display = json!({"title":"Renamed region","before":private,"after":after,"private":private["identity"]});
+        let record = journal
+            .previewed(
+                "region-rename",
+                &json!({"ref":"1:region:1","name":"Lead"}),
+                &json!({"prior":private,"fence":private,"display":display,"target":{"ref":"1:region:1","kind":"region"}}),
+                None,
+                Pick::default(),
+            )
+            .unwrap();
+        assert_eq!(journal.public_field("region-rename", "prior", &record.prior), json!({"name":"Keys","loop":false}));
+        let material = json!({"undo":{"mode":"value"},"private":private["identity"]});
+        let (reply, error) = journal.end_apply(
+            &record.id,
+            "apply",
+            Ok(&json!({"applied":after,"target":{"ref":"2:region:7","kind":"region"},"epoch":"2","material":material,"display":display})),
+        );
+        assert!(!error);
+        assert!(!reply.to_string().contains("PRIVATE REGION PROOF"));
+        assert_eq!(reply["applied"], json!({"name":"Lead","loop":false}));
+        assert!(reply.get("material").is_none());
+        let Ok(Ok((native, _))) = journal.begin_undo(&record.id, "undo") else { panic!("undoable") };
+        assert_eq!(native.prior, private);
+        assert_eq!(native.fence, private);
+        assert_eq!(native.applied, Some(after));
+        assert_eq!(native.material, Some(material));
+        assert_eq!(
+            native.target,
+            json!({"ref":"2:region:7","kind":"region"}),
+            "the apply target is adopted, never guessed from an old ordinal"
+        );
+        let (restored, error) = journal.end_undo(&record.id, "undo", Ok(&json!({"restored":private,"display":display})));
+        assert!(!error);
+        assert_eq!(restored["restored"], json!({"name":"Keys","loop":false}));
+        assert!(!restored.to_string().contains("PRIVATE REGION PROOF"));
+        for daw in [daw_bridge::Daw::Reaper, daw_bridge::Daw::Renoise, daw_bridge::Daw::SoundCraft] {
+            assert_eq!(Journal::for_daw(daw).public_field("region-rename", "prior", &private), private);
+        }
+        assert_eq!(journal.public_field("track-volume", "applied", &private), private, "other Logic kinds are unchanged");
+    }
 
     fn preview(journal: &Journal) -> Record {
         let answer = json!({"epoch": "e1", "target": {"ref": "r:track:{A}", "kind": "track"}, "prior": {"volumeDb": 0.0}, "fence": {"volumeDb": 0.0}, "display": {"title": "Bass volume −6 dB"}});

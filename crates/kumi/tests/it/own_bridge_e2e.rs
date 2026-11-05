@@ -2028,3 +2028,108 @@ async fn logics_loop_range_uses_explicit_timebase_fences_noops_and_truthful_refu
         })
         .await;
 }
+
+/// Only the two Region Inspector values are enabled; original proof stays private and uncertainty never resends.
+#[tokio::test(flavor = "current_thread")]
+async fn logics_region_name_and_loop_require_complete_selected_facts_and_keep_refusals_truthful() {
+    tokio::task::LocalSet::new()
+        .run_until(async {
+            for (kind, property, wanted, unchanged) in
+                [("region_rename", "name", json!("Lead"), json!("Keys")), ("region_loop", "loop", json!(true), json!(false))]
+            {
+                let home = tempfile::tempdir().unwrap();
+                let paths = BridgePaths::new(home.path(), Daw::Logic);
+                let script = LogicScript::new();
+                let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "com.apple.logic10");
+                config.discovery_dir = Some(paths.discovery());
+                let simulator = Simulator::start(config).await.unwrap();
+                let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(Daw::Logic, home.path())), id: Cell::new(0) });
+                let connect: Connect = Rc::new(move |_| {
+                    let endpoint = endpoint.clone();
+                    async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+                });
+                let told: Rc<RefCell<Vec<ChangeRecord>>> = Rc::default();
+                let into = told.clone();
+                let mut context = IntegrationContext::new(Rc::new(|_, _| {}));
+                context.on_change = Some(Rc::new(move |record| into.borrow_mut().push(record)));
+                let logic = create_logic_integration(OwnOptions {
+                    context,
+                    kumi_home: home.path().into(),
+                    connect: Some(connect),
+                    open_file: None,
+                });
+                logic.start(Signal::new()).await.unwrap();
+                let look = logic.observe(Signal::new(), None).await.unwrap();
+                let read = tool(&look, "logic_read").execute(input(json!({"kind":"region"})), Signal::new()).await.unwrap();
+                let read: Value = serde_json::from_str(&read.text).unwrap();
+                let reference = read["items"][0]["ref"].clone();
+                let ask = |reference: Value, value: Value| input(json!({"steps":[{"tool":kind,"input":{"ref":reference,property:value}}]}));
+                let plan = tool(&look, "make_changes");
+                let schema = serde_json::to_string(&plan.input_schema()).unwrap();
+                assert!(schema.contains("region_rename") && schema.contains("region_loop") && schema.contains("loop_range"));
+                for unavailable in ["region_delete", "region_move", "region_resize", "region_split", "project_save", "key_command"] {
+                    assert!(!schema.contains(unavailable), "no broader M4 write is enabled: {unavailable}");
+                }
+                let unknown = plan.execute(ask(reference.clone(), wanted.clone()), Signal::new()).await.unwrap();
+                assert!(unknown.is_error, "M2 selected=true cannot authorize a property write: {}", unknown.text);
+                assert!(told.borrow().is_empty());
+                assert!(!script.asked().iter().any(|(method, _)| method == "change_apply"));
+                let rows = script.synthetic_region_values();
+                script.set_region_value_fixture(
+                    rows.clone(),
+                    json!([rows[0]["ref"]]),
+                    json!({"inspector":true,"mixer":true,"complete":true}),
+                );
+                let noop = plan.execute(ask(reference.clone(), unchanged), Signal::new()).await.unwrap();
+                assert!(!noop.is_error, "{}", noop.text);
+                assert!(told.borrow().is_empty(), "no-op creates no HISTORY row");
+                let done = plan.execute(ask(reference, wanted.clone()), Signal::new()).await.unwrap();
+                assert!(!done.is_error, "{}", done.text);
+                assert!(!done.text.contains("synthetic-private-region-proof"));
+                assert_eq!(told.borrow().last().unwrap().state, ChangeState::Applied);
+                assert_eq!(logic.undo(None, Signal::new()).await.unwrap().state, ChangeState::Undone);
+                assert_eq!(script.region_value_fixture()[0]["rename"]["name"], "Keys");
+                assert_eq!(script.region_value_fixture()[0]["loop"]["loop"], false);
+
+                let fresh = logic.observe(Signal::new(), None).await.unwrap();
+                let read = tool(&fresh, "logic_read").execute(input(json!({"kind":"region"})), Signal::new()).await.unwrap();
+                let read: Value = serde_json::from_str(&read.text).unwrap();
+                let done = tool(&fresh, "make_changes").execute(ask(read["items"][0]["ref"].clone(), wanted), Signal::new()).await.unwrap();
+                assert!(!done.is_error, "{}", done.text);
+                let id = told.borrow().last().unwrap().id.clone();
+                script.edit_region_fixture(0, "name", json!("Producer replacement name"));
+                let producer = script.region_value_fixture();
+                let refused = logic.undo(Some(&id), Signal::new()).await.unwrap();
+                assert_eq!(refused.state, ChangeState::Kept, "a refusal cannot be reported undone");
+                let refused = tool(&fresh, "undo_change").execute(input(json!({"change":id,"discard":true})), Signal::new()).await.unwrap();
+                assert!(refused.is_error, "{}", refused.text);
+                assert_eq!(script.region_value_fixture(), producer);
+
+                let fresh = logic.observe(Signal::new(), None).await.unwrap();
+                let read = tool(&fresh, "logic_read").execute(input(json!({"kind":"region"})), Signal::new()).await.unwrap();
+                let read: Value = serde_json::from_str(&read.text).unwrap();
+                let value = if property == "name" { json!("Unconfirmed name") } else { json!(false) };
+                script.uncertain_once();
+                let unsure =
+                    tool(&fresh, "make_changes").execute(ask(read["items"][0]["ref"].clone(), value), Signal::new()).await.unwrap();
+                assert!(unsure.is_error, "{}", unsure.text);
+                let record = told.borrow().last().cloned().unwrap();
+                assert_eq!(record.state, ChangeState::Unsure);
+                let writes = script.asked().iter().filter(|(method, _)| method == "change_apply" || method == "change_restore").count();
+                for _ in 0..2 {
+                    let refused = tool(&fresh, "undo_change").execute(input(json!({"change":record.id})), Signal::new()).await.unwrap();
+                    assert!(refused.is_error, "{}", refused.text);
+                }
+                assert_eq!(
+                    script.asked().iter().filter(|(method, _)| method == "change_apply" || method == "change_restore").count(),
+                    writes,
+                    "no uncertain write or restore is resent"
+                );
+                assert_eq!(script.track_count(), 2);
+                assert!(script.asked().iter().all(|(method, _)| !matches!(method.as_str(), "keys" | "select" | "undo")));
+                logic.close().await.unwrap();
+                simulator.stop();
+            }
+        })
+        .await;
+}

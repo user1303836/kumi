@@ -1,4 +1,4 @@
-# Logic Pro bridge contract (M2, M3 and Loop Range preview)
+# Logic Pro bridge contract (M2, M3 and three M4 value previews)
 
 What `logic-kumi` answers over `kumi-daw/1`, and which macOS channel each answer comes from. The
 wire, handshake, discovery files and lifecycle are daw-bridge's; this page is only Logic's shapes.
@@ -223,8 +223,7 @@ each change in the plan stays its own step of Logic's undo.
 ### First M4 slice: Loop Range only
 
 `loop-range` (`loop_range`) is the 17th kind, ported only from the Loop Range slice
-of historical commit `6f8f6e9bbc3666159ce68be1ce7466aa30e82670`. Other M4 kinds and
-`project_save` remain disabled. The input requires nonnegative `startBeats` and
+of historical commit `6f8f6e9bbc3666159ce68be1ce7466aa30e82670`. Region Rename and Region Loop are the two additional value previews below; other M4 kinds and `project_save` remain disabled. The input requires nonnegative `startBeats` and
 `endBeats`, in quarter notes; end must follow start, except `0,0` disables Cycle
 without changing either locator. A preflight bound of 64 scrubber actions refuses distant ranges before writing; any transition that could cross locators when higher segments reset lower fields also requires manual editing. Locator values must align to 960 ticks per quarter note; other fractions are refused.
 
@@ -241,6 +240,36 @@ make default Undo skip to an earlier change. An unanswered write stays uncertain
 The host simulator's cycle and single-meter timebase are explicit synthetic test
 state, not inferred from M2 recordings. The preserved original cycle scene is
 historical evidence; replay and fixture checks do not claim current native acceptance.
+
+### Region Rename and Region Loop only
+
+The 18th and 19th kinds are `region-rename` (`region_rename {ref,name}`) and
+`region-loop` (`region_loop {ref,loop}`), from the same historical M4 source slice.
+They change only the requested region's name or Inspector Loop checkbox. That
+region must already be the sole selection, with the Inspector and Mixer visible.
+Complete ordered headers, region lanes, the owning strip and Region Inspector
+must be readable. The current controller recognizes the observed complete English
+region-position grammar; it makes no guessed meter conversion, selection write,
+key command, native Undo action or pane setup/cleanup.
+
+The native private state contains `name`, `loop` and a bounded version-one identity
+for the saved project, full track/region lists, owner strip and Inspector. Only
+the controlled property's known fields are normalized; all other fields fence the
+operation. Both original and applied proof must be complete and identical except
+for that property. Unknown, legacy, changed, replaced or ambiguous evidence
+refuses before writing, including with `discard` or an already-restored claim.
+Identical observable replacements remain a UI identity limit.
+
+The host keeps that proof and material private. Public preview/apply/restored
+states expose only `name` and `loop`; the separate `undo.restore` capability is
+`value` only after strict proof validation. Missing or malformed capability makes
+a confirmed app change `Kept` with manual guidance and blocks default Undo from
+skipping to an earlier change. The journal adopts the native apply's actual target
+ref after a rename; it never guesses a replacement ref. Rename changes the epoch,
+so read refs again. General M2 region `looped` reads do not establish the Inspector
+checkbox's value. Post-dispatch uncertainty is never followed by a resend,
+compensating write or automatic rollback. These previews do not enable other M4
+writes or project saving, and no new native acceptance is claimed.
 
 ### The undo stack and `undone_in_daw`
 

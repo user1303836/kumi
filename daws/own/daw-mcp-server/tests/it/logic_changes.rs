@@ -993,3 +993,143 @@ async fn cycle_fences_refuse_producer_edits_and_changed_or_unknown_timebase_even
         lab.simulator.stop();
     }
 }
+
+fn region_ready() -> Value {
+    json!({"inspector":true,"mixer":true,"complete":true})
+}
+fn configure_region(script: &LogicScript) {
+    let rows = script.synthetic_region_values();
+    script.set_region_value_fixture(rows.clone(), json!([rows[0]["ref"]]), region_ready());
+}
+
+#[tokio::test]
+async fn the_two_region_values_use_complete_private_proofs_and_publish_only_controlled_values() {
+    for (kind, property, wanted, mode) in [("region-rename", "name", json!("Lead"), "rename"), ("region-loop", "loop", json!(true), "loop")]
+    {
+        let mut lab = Lab::start().await;
+        configure_region(&lab.script);
+        let original = lab.script.region_value_fixture()[0][mode].clone();
+        let preview = lab.preview(kind, json!({"ref":"1:region:1",property:wanted})).await;
+        assert_eq!(preview["prior"], json!({"name":"Keys","loop":false}));
+        assert!(!preview.to_string().contains("synthetic-private-region-proof"));
+        let (applied, error) = lab.apply(&preview, "apply").await;
+        assert!(!error, "{applied}");
+        assert_eq!(applied["undo"]["restore"], json!({"mode":"value"}));
+        assert_eq!(applied["applied"][property], wanted);
+        assert!(applied["applied"].get("identity").is_none());
+        assert!(applied.get("material").is_none());
+        assert!(!applied.to_string().contains("synthetic-private-region-proof"));
+        let current = lab.script.region_value_fixture();
+        let current_ref = current[0]["ref"].clone();
+        let request = lab.script.asked().into_iter().find(|(method, _)| method == "change_apply").unwrap().1;
+        assert_eq!(request["fence"], original, "the public projection must not change the native fence");
+        let (back, error) = lab.undo(&preview, "undo", false).await;
+        assert!(!error && back["state"] == "undone", "{back}");
+        assert_eq!(back["restored"], json!({"name":"Keys","loop":false}));
+        assert!(!back.to_string().contains("synthetic-private-region-proof"));
+        let request = lab.script.asked().into_iter().find(|(method, _)| method == "change_restore").unwrap().1;
+        assert_eq!(request["target"]["ref"], current_ref, "adopt the actual native apply target after rename");
+        assert_eq!(request["prior"], original);
+        assert!(request["applied"]["identity"].is_object());
+        assert_eq!(lab.script.region_value_fixture()[0][mode], original);
+        assert_eq!(lab.script.track_count(), 2);
+        assert!(
+            lab.script.asked().iter().all(|(method, _)| !matches!(method.as_str(), "keys" | "select" | "undo")),
+            "no key, selection or native Undo method"
+        );
+        lab.simulator.stop();
+    }
+}
+
+#[tokio::test]
+async fn region_value_writes_refuse_unknown_selection_ambiguous_material_and_changed_facts_before_dispatch() {
+    for kind in ["region-rename", "region-loop"] {
+        let property = if kind == "region-rename" { "name" } else { "loop" };
+        let wanted = if property == "name" { json!("Lead") } else { json!(true) };
+        let input = json!({"ref":"1:region:1",property:wanted});
+        let mut lab = Lab::start().await;
+        assert!(lab.try_preview(kind, input.clone()).await.1, "M2 sole selection does not establish complete proof");
+        configure_region(&lab.script);
+        let original = lab.script.region_value_fixture();
+        for selection in [Value::Null, json!([]), json!(["1:region:1", "1:region:2"]), json!(["1:region:2"])] {
+            lab.script.set_region_value_fixture(original.clone(), selection, region_ready());
+            assert!(lab.try_preview(kind, input.clone()).await.1);
+            assert_eq!(lab.script.region_value_fixture(), original);
+        }
+        let mut duplicates = original.clone();
+        duplicates.as_array_mut().unwrap().push(original[0].clone());
+        lab.script.set_region_value_fixture(duplicates.clone(), json!(["1:region:1"]), region_ready());
+        assert!(lab.try_preview(kind, input.clone()).await.1);
+        assert_eq!(lab.script.region_value_fixture(), duplicates);
+        for pointer in [
+            "/identity/version",
+            "/identity/owner/strip/children",
+            "/identity/lanes/1/regions/0/start/tick",
+            "/identity/inspector/children",
+        ] {
+            let mut unknown = original.clone();
+            let mode = if kind == "region-rename" { "rename" } else { "loop" };
+            *unknown[0][mode].pointer_mut(pointer).unwrap() = Value::Null;
+            lab.script.set_region_value_fixture(unknown.clone(), json!(["1:region:1"]), region_ready());
+            assert!(lab.try_preview(kind, input.clone()).await.1, "{pointer}");
+            assert_eq!(lab.script.region_value_fixture(), unknown);
+        }
+        lab.script.set_region_value_fixture(original.clone(), json!(["1:region:1"]), region_ready());
+        let preview = lab.preview(kind, input.clone()).await;
+        let mut changed = original.clone();
+        for mode in ["rename", "loop"] {
+            changed[0][mode]["identity"]["inspector"]["children"][3]["children"][1]["value"] = json!("1/16 Note");
+        }
+        lab.script.set_region_value_fixture(changed.clone(), json!(["1:region:1"]), region_ready());
+        let (refused, error) = lab.apply(&preview, "changed").await;
+        assert!(error && refused["code"] == "changed", "{refused}");
+        assert_eq!(lab.script.region_value_fixture(), changed);
+        assert!(lab.script.undo_titles().is_empty());
+        lab.simulator.stop();
+    }
+}
+
+#[tokio::test]
+async fn region_restores_never_overwrite_replacements_other_properties_or_unknown_legacy_facts_even_with_discard() {
+    for (kind, property, wanted) in [("region-rename", "name", json!("Lead")), ("region-loop", "loop", json!(true))] {
+        for changed_part in ["owner", "region", "inspector", "selection", "duplicates"] {
+            let mut lab = Lab::start().await;
+            configure_region(&lab.script);
+            let (preview, applied) = lab.make(kind, json!({"ref":"1:region:1",property:wanted}), "apply").await;
+            let mut current = lab.script.region_value_fixture();
+            let selected = json!([current[0]["ref"]]);
+            for mode in ["rename", "loop"] {
+                match changed_part {
+                    "owner" => current[0][mode]["identity"]["owner"]["strip"]["children"]
+                        .as_array_mut()
+                        .unwrap()
+                        .push(json!({"role":"AXButton","value":"producer FX","children":[]})),
+                    "region" => current[0][mode]["identity"]["lanes"][1]["regions"][0]["node"]["id"] = json!("producer replacement"),
+                    "inspector" => current[0][mode]["identity"]["inspector"]["children"][3]["children"][1]["value"] = json!("1/8 Note"),
+                    _ => {}
+                }
+            }
+            if changed_part == "duplicates" {
+                let duplicate = current[0].clone();
+                current.as_array_mut().unwrap().push(duplicate);
+            }
+            let selected = if changed_part == "selection" { json!([]) } else { selected };
+            lab.script.set_region_value_fixture(current.clone(), selected, region_ready());
+            let titles = lab.script.undo_titles();
+            for (key, discard) in [("normal", false), ("discard", true)] {
+                let (refused, error) = lab.undo(&preview, key, discard).await;
+                assert!(error && matches!(refused["code"].as_str(), Some("changed" | "failed")), "{changed_part}: {refused}");
+                assert_eq!(lab.script.region_value_fixture(), current);
+                assert_eq!(lab.script.undo_titles(), titles);
+            }
+            let direct = (lab.script.respond())(
+                "change_restore",
+                &json!({"kind":kind,"target":preview["target"],"prior":preview["prior"],"applied":applied["applied"],"discard":true}),
+            )
+            .unwrap();
+            assert!(matches!(direct,Err((code,_)) if code=="failed"), "public or legacy state never grants native restore permission");
+            assert_eq!(lab.script.region_value_fixture(), current);
+            lab.simulator.stop();
+        }
+    }
+}
