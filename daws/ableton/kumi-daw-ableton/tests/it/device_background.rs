@@ -13,6 +13,7 @@ use kumi_common::abort::Signal;
 use kumi_daw_ableton::{
     devices::amxd::{decode_amxd, DeviceType},
     integration::Ableton,
+    observation::ObservationHost,
     options::AbletonOptions,
 };
 use kumi_types::{
