@@ -811,7 +811,7 @@ mod tests {
             if call.args.get("hold").and_then(Value::as_bool) == Some(true) {
                 call.signal.cancelled().await;
             }
-            Ok(json!({"state": "applied", "keyed": keyed}))
+            Ok(json!({"state": "applied", "keyed": keyed, "bounded": call.host.private.get("_listen").is_some()}))
         })
     }
 
@@ -1339,6 +1339,20 @@ mod tests {
             let hosted = json!({"word": "kick", "_host": {}, "_mirelo": {"api_key": "sk-sentinel-77"}});
             session.send(call(json!(2), "pay", hosted)).await;
             assert_eq!(session.next().await.unwrap()["result"]["structuredContent"]["keyed"], true);
+            // A2's `_listen` (a track listen's approved bounds) is the host's the same way: refused without `_host`;
+            // with it, given to the call and outside what the call asked, so a retry with other bounds is the same call.
+            let bounds = |deadline: u64| json!({"estimated_seconds": 8, "prepare_seconds": 0, "deadline_seconds": deadline});
+            session.send(call(json!(3), "pay", json!({"word": "snare", "_listen": bounds(120)}))).await;
+            let refused = session.next().await.unwrap();
+            assert_eq!(refused["result"]["structuredContent"]["error"]["code"], "invalid", "{refused}");
+            let timed = json!({"word": "snare", "_host": {"tool_call_id": "tc-l"}, "_listen": bounds(120)});
+            session.send(call(json!(4), "pay", timed)).await;
+            let first = session.next().await.unwrap()["result"]["structuredContent"].clone();
+            assert_eq!((first["state"].clone(), first["bounded"].clone()), (json!("applied"), json!(true)), "{first}");
+            let again = json!({"word": "snare", "_host": {"tool_call_id": "tc-l"}, "_listen": bounds(300)});
+            session.send(call(json!(5), "pay", again)).await;
+            assert_eq!(session.next().await.unwrap()["result"]["structuredContent"], first, "the same call, answered again");
+            assert_eq!(RUNS.with(Cell::get), 2, "the snare ran once");
             session.end().await;
         })
         .await;

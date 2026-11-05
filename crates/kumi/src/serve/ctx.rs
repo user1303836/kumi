@@ -105,12 +105,14 @@ pub struct Host {
     pub private: Private,
 }
 
-/// The arguments the host adds to a call after its approval, for the call alone (CC-13's `_mirelo`: a service's key,
-/// the producer's acknowledgment and the credits reserved), each an object, and only with `_host`.
+/// The arguments the host adds to a call after its approval, for the call alone, each an object, and only with
+/// `_host`: CC-13's `_mirelo` (a service's key, the producer's acknowledgment and the credits reserved) and CC-2 A2's
+/// `_listen` (the approved track listen's `estimated_seconds`, `prepare_seconds` and `deadline_seconds`, which the
+/// listen checks itself).
 ///
-/// W2's plugin handler is their only writer: it adds `_mirelo` after its approval, and strips every `_`-prefixed key
-/// the model wrote before then, so one that reaches the runtime is the host's.
-pub const PRIVATE_ARGS: [&str; 1] = ["_mirelo"];
+/// W2's plugin handler is their only writer: it adds them after its approval, and strips every `_`-prefixed key the
+/// model wrote before then, so one that reaches the runtime is the host's.
+pub const PRIVATE_ARGS: [&str; 2] = ["_mirelo", "_listen"];
 
 /// The fields of [`PRIVATE_ARGS`] that are secrets, as (argument, field): a job's checkpoint never holds one
 /// ([`JobHandle::checkpoint`]). The rest (the acknowledgment, the reservation) may be kept: CC-13 checkpoints the
