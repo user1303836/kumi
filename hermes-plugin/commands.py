@@ -69,10 +69,9 @@ def status_text(host: tools.Host) -> str:
             lines.append(f"Not connected to {daw}.")
     folders = host.library_folders()
     lines.append("Sample folders: " + (", ".join(folders) if folders else "none yet."))
-    bypassed = tools.approvals_bypassed("")  # no chat here: --yolo for every chat, or approvals.mode: off
-    if bypassed is not None:
-        lines.append("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without asking."
-                     if bypassed else "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that).")
+    lines.append("Approvals: off in Hermes (approvals.mode: off or --yolo), so Kumi's changes run without asking."
+                 if tools.approvals_bypassed(host, chat=False)
+                 else "Approvals: Hermes asks before each Kumi change (a chat's /yolo skips that).")
     return "\n".join(lines)
 
 

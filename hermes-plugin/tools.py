@@ -193,16 +193,27 @@ NO_APPROVALS = ("Hermes's approvals are off here (--yolo, /yolo or approvals.mod
                 "listens, folder reads and setup steps run without asking the producer.")
 
 
-def approvals_bypassed(session_key: str | None = None) -> bool | None:
-    """Whether Hermes runs a call it would ask about without asking (`--yolo`, a chat's `/yolo`, or
-    `approvals.mode: off`): Hermes's own check, for this call's chat, or without a chat when `session_key` is "".
-    None when it can't be told (Hermes isn't importable)."""
+def approvals_bypassed(host: Host, *, chat: bool = True) -> bool:
+    """Whether Hermes runs a call it would ask about without asking:
+    - `approvals.mode: off` in Hermes's settings (YAML's bare `off` reads as false);
+    - `HERMES_YOLO_MODE` set for this process (what `--yolo` sets);
+    - for a chat (`chat`), that chat's `/yolo`. Hermes has no documented way to read it, so this is a stated coupling
+      with Hermes v0.22.7's `tools.approval.is_current_session_yolo_enabled`; if that moves, only a chat's `/yolo`
+      goes unreported.
+    A terminal (`chat=False`) can't see any chat's `/yolo`."""
+    approvals = host.hermes_config().get("approvals")
+    mode = approvals.get("mode") if isinstance(approvals, dict) else None
+    if mode is False or (isinstance(mode, str) and mode.strip().lower() == "off"):
+        return True
+    if os.environ.get("HERMES_YOLO_MODE", "").strip().lower() in ("1", "true", "yes", "on"):
+        return True
+    if not chat:
+        return False
     try:
-        from tools.approval import is_approval_bypass_active, is_approval_bypass_active_for_session  # Hermes's
-        return bool(is_approval_bypass_active() if session_key is None
-                    else is_approval_bypass_active_for_session(session_key))
+        from tools.approval import is_current_session_yolo_enabled  # Hermes's; see above
+        return bool(is_current_session_yolo_enabled())
     except Exception:
-        return None
+        return False
 
 
 def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -211,7 +222,7 @@ def kumi_status(host: Host, args: dict, **kwargs: Any) -> dict:
     report: dict[str, Any] = {"setup": setup.status(daw=daw, data_dir=data_dir, plugin_dir=host.plugin_dir),
                               "runtime": None, "connected": False, "daw": daw, "project": None, "owner": None,
                               "capabilities": []}
-    if approvals_bypassed():
+    if approvals_bypassed(host):
         report["approvals"] = NO_APPROVALS  # say it to the producer before changing anything
     try:
         host.install(data_dir)
