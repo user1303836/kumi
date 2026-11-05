@@ -1072,6 +1072,7 @@ mod tests {
         std::os::unix::fs::symlink(target, link).unwrap();
         #[cfg(windows)]
         {
+            use std::os::windows::process::CommandExt;
             fn plain(path: &Path) -> std::borrow::Cow<'_, Path> {
                 let mut components = path.components();
                 if let Some(std::path::Component::Prefix(prefix)) = components.next() {
@@ -1083,16 +1084,20 @@ mod tests {
                 }
                 std::borrow::Cow::Borrowed(path)
             }
+            let link = plain(link);
+            let target = plain(target);
+            // cmd parses its command after /c itself; CRT argument quoting is not its quoting.
+            // /s removes the outer pair, leaving one explicitly quoted path for each mklink operand.
+            let mut command = std::ffi::OsString::from("\"mklink /J \"");
+            command.push(link.as_os_str());
+            command.push("\" \"");
+            command.push(target.as_os_str());
+            command.push("\"\"");
             let cmd = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
-            let output = std::process::Command::new(cmd)
-                .args(["/d", "/c", "mklink", "/J"])
-                .arg(plain(link).as_ref())
-                .arg(plain(target).as_ref())
-                .output()
-                .unwrap();
+            let output = std::process::Command::new(cmd).args(["/d", "/s", "/c"]).raw_arg(&command).output().unwrap();
             assert!(
                 output.status.success(),
-                "stdout: {}\nstderr: {}",
+                "junction link={link:?}, target={target:?}, command={command:?}\nstdout: {}\nstderr: {}",
                 String::from_utf8_lossy(&output.stdout),
                 String::from_utf8_lossy(&output.stderr)
             );
@@ -1103,10 +1108,10 @@ mod tests {
     #[test]
     fn a_pending_media_descendant_cannot_become_a_link_or_junction_to_another_folder() {
         let dir = tempfile::tempdir().unwrap();
-        let base = dir.path().canonicalize().unwrap().join("media");
+        let base = dir.path().canonicalize().unwrap().join("media with spaces");
         std::fs::create_dir(&base).unwrap();
         let ctx = media_context(dir.path(), vec![base.join("generated/audio")]);
-        let outside = dir.path().canonicalize().unwrap().join("outside");
+        let outside = dir.path().canonicalize().unwrap().join("outside with spaces");
         std::fs::create_dir_all(outside.join("audio")).unwrap();
         let escaped = outside.join("audio/private.wav");
         std::fs::write(&escaped, b"outside").unwrap();
