@@ -875,10 +875,16 @@ mod tests {
 
         /// A runtime on `state`'s folders (another runtime's, once it stopped).
         fn at(state: tempfile::TempDir) -> Session {
-            let args = Args { state_dir: state.path().join("state"), kumi_home: state.path().join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
-            library_roots: vec![],
-            media_roots: vec![],
-            tools: BTreeMap::new(), };
+            let args = Args {
+                state_dir: state.path().join("state"),
+                kumi_home: state.path().join("home"),
+                hermes_home: None,
+                hermes_root: None,
+                daw: DawId::Reaper,
+                library_roots: vec![],
+                media_roots: vec![],
+                tools: BTreeMap::new(),
+            };
             let given = Env::from([("HOME".into(), state.path().display().to_string()), ("KUMI_PROCESSES".into(), "none".into())]);
             let env = environment(&args, given);
             let ctx = Ctx::new(args, env, Default::default()).unwrap();

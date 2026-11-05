@@ -762,8 +762,8 @@ fn safe_grant(root: &Path, state: &Path, private: &ProtectedRoots, media: bool) 
             }
             // APFS firmlinks can preserve a different path spelling. Check protected ancestors by identity,
             // including a volume alias exposing the protected tree at its root-relative path.
-            for protected in private.ancestors.iter().chain(&private.subtrees).chain(&private.hermes)
-                .map(PathBuf::as_path).chain(std::iter::once(state))
+            for protected in
+                private.ancestors.iter().chain(&private.subtrees).chain(&private.hermes).map(PathBuf::as_path).chain(std::iter::once(state))
             {
                 for ancestor in protected.ancestors() {
                     match std::fs::metadata(ancestor) {
@@ -772,7 +772,8 @@ fn safe_grant(root: &Path, state: &Path, private: &ProtectedRoots, media: bool) 
                             if let Ok(relative) = protected.strip_prefix("/") {
                                 let below = root.join(relative);
                                 if let Some(below) = below.to_str().and_then(kumi_library::sources::canonical_local_path) {
-                                    if std::fs::metadata(below).is_ok_and(|alias| alias.dev() == found.dev() && alias.ino() == found.ino()) {
+                                    if std::fs::metadata(below).is_ok_and(|alias| alias.dev() == found.dev() && alias.ino() == found.ino())
+                                    {
                                         return false;
                                     }
                                 }
@@ -793,9 +794,12 @@ fn safe_grant(root: &Path, state: &Path, private: &ProtectedRoots, media: bool) 
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
                 Err(_) => return false,
             };
-            for excluded in private.subtrees.iter()
+            for excluded in private
+                .subtrees
+                .iter()
                 .chain(private.hermes.iter().filter(|_| !generated_audio))
-                .map(PathBuf::as_path).chain(std::iter::once(state))
+                .map(PathBuf::as_path)
+                .chain(std::iter::once(state))
             {
                 match std::fs::metadata(excluded) {
                     Ok(blocked) if found.dev() == blocked.dev() && found.ino() == blocked.ino() => return false,
@@ -812,8 +816,10 @@ fn safe_grant(root: &Path, state: &Path, private: &ProtectedRoots, media: bool) 
 }
 
 fn protected_roots(args: &Args, state: &Path) -> Result<ProtectedRoots, String> {
-    let freeze = |path: &Path| pending_media_root(path)
-        .ok_or_else(|| "private folders must be local absolute paths without traversal or redirected components".to_owned());
+    let freeze = |path: &Path| {
+        pending_media_root(path)
+            .ok_or_else(|| "private folders must be local absolute paths without traversal or redirected components".to_owned())
+    };
     let mut ancestors = Vec::new();
     for name in ["HOME", "USERPROFILE"] {
         if let Some(home) = std::env::var_os(name).and_then(|home| pending_media_root(Path::new(&home))) {
@@ -840,12 +846,7 @@ fn protected_roots(args: &Args, state: &Path) -> Result<ProtectedRoots, String> 
     if let Some(parent) = state.parent().filter(|parent| parent.file_name().is_some_and(|name| name == "kumi")) {
         subtrees.push(parent.to_path_buf());
     }
-    Ok(ProtectedRoots {
-        ancestors,
-        subtrees,
-        hermes,
-        generated_audio: active.map(|home| home.join("cache/generated/audio")),
-    })
+    Ok(ProtectedRoots { ancestors, subtrees, hermes, generated_audio: active.map(|home| home.join("cache/generated/audio")) })
 }
 
 /// Resolve the deepest existing ancestor once, then retain the missing suffix literally. A later resolution of a
@@ -974,10 +975,16 @@ mod tests {
     #[test]
     fn a_calls_scratch_is_its_own_named_by_the_runtime_and_goes_with_it() {
         let dir = tempfile::tempdir().unwrap();
-        let args = Args { state_dir: dir.path().join("state"), kumi_home: dir.path().join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
-        library_roots: vec![],
-        media_roots: vec![],
-        tools: BTreeMap::new(), };
+        let args = Args {
+            state_dir: dir.path().join("state"),
+            kumi_home: dir.path().join("home"),
+            hermes_home: None,
+            hermes_root: None,
+            daw: DawId::Reaper,
+            library_roots: vec![],
+            media_roots: vec![],
+            tools: BTreeMap::new(),
+        };
         let ctx = Ctx::new(args, Env::new(), Default::default()).unwrap();
         let (one, two) = (ctx.scratch("listen").unwrap(), ctx.scratch("listen").unwrap());
         assert_ne!(one.path(), two.path());
@@ -998,10 +1005,16 @@ mod tests {
             std::fs::create_dir_all(dir.path().join(folder)).unwrap();
         }
         std::fs::write(dir.path().join("kick.wav"), b"RIFF").unwrap();
-        let args = Args { state_dir: dir.path().join("state"), kumi_home: dir.path().join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
-        library_roots: vec![dir.path().join("Samples"), dir.path().join("Gone"), dir.path().join("Samples/../Samples")],
-        media_roots: vec![dir.path().join("media"), dir.path().join("kick.wav")],
-        tools: BTreeMap::new(), };
+        let args = Args {
+            state_dir: dir.path().join("state"),
+            kumi_home: dir.path().join("home"),
+            hermes_home: None,
+            hermes_root: None,
+            daw: DawId::Reaper,
+            library_roots: vec![dir.path().join("Samples"), dir.path().join("Gone"), dir.path().join("Samples/../Samples")],
+            media_roots: vec![dir.path().join("media"), dir.path().join("kick.wav")],
+            tools: BTreeMap::new(),
+        };
         let ctx = Ctx::new(args, Env::new(), Default::default()).unwrap();
         let resolved = |name: &str| std::fs::canonicalize(dir.path().join(name)).unwrap();
         assert_eq!(ctx.library_roots(), [resolved("Samples")], "a root not there grants nothing; one root named twice is one");
@@ -1017,10 +1030,16 @@ mod tests {
 
     fn media_context(dir: &Path, roots: Vec<PathBuf>) -> Rc<Ctx> {
         Ctx::new(
-            Args { state_dir: dir.join("state"), kumi_home: dir.join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
-            library_roots: Vec::new(),
-            media_roots: roots,
-            tools: BTreeMap::new(), },
+            Args {
+                state_dir: dir.join("state"),
+                kumi_home: dir.join("home"),
+                hermes_home: None,
+                hermes_root: None,
+                daw: DawId::Reaper,
+                library_roots: Vec::new(),
+                media_roots: roots,
+                tools: BTreeMap::new(),
+            },
             Env::new(),
             Default::default(),
         )
@@ -1053,9 +1072,30 @@ mod tests {
         std::os::unix::fs::symlink(target, link).unwrap();
         #[cfg(windows)]
         {
+            fn plain(path: &Path) -> std::borrow::Cow<'_, Path> {
+                let mut components = path.components();
+                if let Some(std::path::Component::Prefix(prefix)) = components.next() {
+                    if let std::path::Prefix::VerbatimDisk(drive) = prefix.kind() {
+                        let mut plain = PathBuf::from(format!("{}:", char::from(drive)));
+                        plain.push(components.as_path());
+                        return std::borrow::Cow::Owned(plain);
+                    }
+                }
+                std::borrow::Cow::Borrowed(path)
+            }
             let cmd = PathBuf::from(std::env::var_os("SystemRoot").unwrap()).join("System32/cmd.exe");
-            let output = std::process::Command::new(cmd).args(["/d", "/c", "mklink", "/J"]).arg(link).arg(target).output().unwrap();
-            assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+            let output = std::process::Command::new(cmd)
+                .args(["/d", "/c", "mklink", "/J"])
+                .arg(plain(link).as_ref())
+                .arg(plain(target).as_ref())
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "stdout: {}\nstderr: {}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
         }
     }
 
@@ -1172,7 +1212,8 @@ mod tests {
             },
             Env::new(),
             Default::default(),
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(ctx.library_roots(), [samples.clone()]);
         assert_eq!(ctx.media_roots(), [generated.clone(), samples]);
         assert_eq!(ctx.add_checked_library_root(generated.clone()).unwrap_err().code(), "unsafe_folder");
@@ -1206,7 +1247,8 @@ mod tests {
             },
             Env::new(),
             Default::default(),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(ctx.media_roots().is_empty());
         for root in [&generated, &private, &transport.join("later")] {
             std::fs::create_dir_all(root).unwrap();

@@ -1034,8 +1034,22 @@ mod tests {
         assert_eq!(
             said[0].args,
             [
-                "-hide_banner", "-nostats", "-v", "info", "-nostdin", "-y", "-i", "in.mp3",
-                "-vn", "-t", "31.000", "-acodec", "pcm_f32le", "-f", "wav", "out.wav"
+                "-hide_banner",
+                "-nostats",
+                "-v",
+                "info",
+                "-nostdin",
+                "-y",
+                "-i",
+                "in.mp3",
+                "-vn",
+                "-t",
+                "31.000",
+                "-acodec",
+                "pcm_f32le",
+                "-f",
+                "wav",
+                "out.wav"
             ]
         );
         let quiet = attempts(false, "ffmpeg", "in.mp3", "out.wav", Some((31.0, "31.000")), None, None, false, None);

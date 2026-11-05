@@ -67,10 +67,16 @@ pub struct Args {
 pub fn parse(args: &[String]) -> Result<Args, String> {
     let mut stdio = false;
     let (mut state_dir, mut kumi_home, mut daw) = (None, None, None);
-    let mut parsed = Args { state_dir: PathBuf::new(), kumi_home: PathBuf::new(), hermes_home: None, hermes_root: None, daw: DawId::Ableton,
-    library_roots: vec![],
-    media_roots: vec![],
-    tools: BTreeMap::new(), };
+    let mut parsed = Args {
+        state_dir: PathBuf::new(),
+        kumi_home: PathBuf::new(),
+        hermes_home: None,
+        hermes_root: None,
+        daw: DawId::Ableton,
+        library_roots: vec![],
+        media_roots: vec![],
+        tools: BTreeMap::new(),
+    };
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         let mut value = |flag: &str| rest.next().cloned().ok_or_else(|| format!("{flag} needs a value"));
@@ -284,6 +290,10 @@ mod tests {
         assert!(refused(&["--stdio", "--state-dir", &state, "--kumi-home", &kumi_home, "--daw", "reaper", "--tool", "ffmpeg"])
             .contains("<name>=<path>"));
         assert!(refused(&["--stdio", "--state-dir", &state, "--kumi-home", &kumi_home, "--daw", "reaper", "--yes"]).contains("unknown"));
+        for flag in ["--hermes-home", "--hermes-root"] {
+            assert!(refused(&["--stdio", "--state-dir", &state, "--kumi-home", &kumi_home, "--daw", "reaper", flag, "relative"])
+                .contains("whole path"));
+        }
         assert!(refused(&["--stdio", "--state-dir"]).contains("needs a value"));
     }
 

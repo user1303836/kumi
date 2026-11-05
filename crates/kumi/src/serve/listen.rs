@@ -225,10 +225,16 @@ mod tests {
             std::fs::create_dir(&root).unwrap();
             let root = root.canonicalize().unwrap();
             let ctx = Ctx::new(
-                Args { state_dir: dir.path().join("state"), kumi_home: dir.path().join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
-                library_roots: vec![root.clone()],
-                media_roots: Vec::new(),
-                tools: BTreeMap::new(), },
+                Args {
+                    state_dir: dir.path().join("state"),
+                    kumi_home: dir.path().join("home"),
+                    hermes_home: None,
+                    hermes_root: None,
+                    daw: DawId::Reaper,
+                    library_roots: vec![root.clone()],
+                    media_roots: Vec::new(),
+                    tools: BTreeMap::new(),
+                },
                 Env::new(),
                 Default::default(),
             )
@@ -505,10 +511,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let media = dir.path().canonicalize().unwrap().join("generated/audio");
         let ctx = Ctx::new(
-            Args { state_dir: dir.path().join("state"), kumi_home: dir.path().join("home"), hermes_home: None, hermes_root: None, daw: DawId::Reaper,
-            library_roots: Vec::new(),
-            media_roots: vec![media.clone()],
-            tools: BTreeMap::new(), },
+            Args {
+                state_dir: dir.path().join("state"),
+                kumi_home: dir.path().join("home"),
+                hermes_home: None,
+                hermes_root: None,
+                daw: DawId::Reaper,
+                library_roots: Vec::new(),
+                media_roots: vec![media.clone()],
+                tools: BTreeMap::new(),
+            },
             Env::new(),
             Default::default(),
         )
