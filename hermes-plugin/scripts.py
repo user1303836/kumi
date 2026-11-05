@@ -52,8 +52,6 @@ WARNING = "Runs with the DAW's access to your computer. Kumi can't undo it; the 
 # terminal and code tools and a new tool included, until it's listed here.
 LOCAL_TOOLS = frozenset({"read_file", "write_file", "patch", "search_files", "todo_list", "clarify", "skills_list",
                          "skill_view", "skill_manage"})
-# Kumi's own tools that bring outside content: a video's page, captions and frames (CC-21's `kumi_watch`).
-OUTSIDE_KUMI_TOOLS = frozenset({"kumi_watch"})
 # Hermes's chat surfaces where the producer is at this computer: the terminal, Desktop, and an editor (ACP). Anything
 # else (a messaging app, or a surface Hermes can't name) is a messaging chat here: tainted, and refused unless
 # `scripts_in_messaging` is on.
@@ -96,7 +94,7 @@ def taints(tool: str) -> str | None:
     """Why a finished call of `tool` brings outside content into the chat, or None when it doesn't (r2)."""
     if not isinstance(tool, str) or not tool:
         return "a tool Kumi can't name"
-    if (tool.startswith("kumi_") and tool not in OUTSIDE_KUMI_TOOLS) or tool in LOCAL_TOOLS:
+    if tool.startswith("kumi_") or tool in LOCAL_TOOLS:
         return None
     return tool
 
