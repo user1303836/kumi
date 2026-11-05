@@ -18,7 +18,6 @@ returns at once, the runtime is never waited for, and a preview gets at most hal
 """
 from __future__ import annotations
 
-import collections
 import itertools
 import logging
 import re
@@ -285,26 +284,20 @@ def _change(host: Any, args: dict, kwargs: dict) -> dict:
 
 
 # CC-20's 20c, when the runtime's preview doesn't give its own words (it does, with the right key for the producer's
-# system: Cmd+Z or Ctrl+Z).
-DAW_UNDO = ("Kumi can't undo this change. The DAW's own Undo takes all of it back while it's still the DAW's latest "
-            "step.")
+# system, and how many presses of its Undo the change takes: 18-r1).
+DAW_UNDO = "Kumi can't undo this change: only the DAW's own Undo can take it back."
 
 
 def daw_undo_lines(answer: dict, steps: list[dict]) -> list[str]:
     """CC-20's 20d: a change with a step only the DAW's own Undo takes back (`undo: "daw"`: a Live rack's added chain,
-    a sample loaded onto a pad) says so before its steps, in the runtime's words (20c), and names the change's other
-    steps, which lose Kumi's undo with it: Kumi never undoes part of such a change, since its own undo would then sit
-    on top in the DAW's history. Empty for a change Kumi can undo."""
+    a sample loaded onto a pad) says so before its steps, in the runtime's words: 20c's, and how many presses of the
+    DAW's Undo it takes (18-r1). They're kept whole, a sentence a line, so none is cut. Serve refuses such a step
+    mixed with other kinds (#1137), so the whole change is the DAW's to take back. Empty for a change Kumi can undo."""
     if answer.get("undo") != "daw" and not any(step.get("undo") == "daw" for step in steps):
         return []
     note = answer.get("undo_note")
-    lines = [one_line(note, STEP_LINE) if isinstance(note, str) and note.strip() else DAW_UNDO]
-    others = collections.Counter(one_line(step["family"], 40) for step in steps if step.get("undo") != "daw")
-    if others:
-        counted = [f"{count} {family} change{'s' if count != 1 else ''}" for family, count in sorted(others.items())]
-        listed = counted[0] if len(counted) == 1 else f"{', '.join(counted[:-1])} and {counted[-1]}"
-        lines.append(f"Kumi can't undo this change, including its {listed}.")
-    return lines
+    words = one_line(note, 1000) if isinstance(note, str) and note.strip() else DAW_UNDO
+    return [sentence for sentence in re.split(r"(?<=[.!?])\s+", words) if sentence]
 
 
 def compact_lines(title: str, steps: list[dict]) -> list[str] | None:

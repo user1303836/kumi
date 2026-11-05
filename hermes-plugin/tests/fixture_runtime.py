@@ -330,6 +330,10 @@ def plan_refusal(fixture: Fixture, args: dict) -> tuple[str, str] | None:
     unknown = [step.get("tool") for step in steps if step.get("tool") not in STEPS]
     if not steps or len(steps) > 20 or unknown:
         return "unknown_step", f"Kumi doesn't take these steps here: {unknown or 'none given'}"
+    kinds = {step.get("tool") == "edit_rack" for step in steps}
+    if len(kinds) > 1:  # as #1137 refuses: Live's own Undo would take a mixed change back in parts
+        return "not_allowed", ("A step only Live's own Undo takes back (edit_rack's add-chain) goes in a change of its "
+                               "own, so that Live's Undo takes the whole change back.")
     for step in steps:
         target = step.get("input") or {}
         if step["tool"] == "set_track_volume":
