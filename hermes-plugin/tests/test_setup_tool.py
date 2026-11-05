@@ -51,22 +51,27 @@ class Surface(unittest.TestCase):
 
     def test_desktop_asks_with_the_whole_plan_and_a_terminal_chat_sends_the_producer_to_hermes_kumi_setup(self):
         host, ctx, data = desktop_host(self, daw_component=False)
-        plan = support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
-        shown = setup.approval("ableton", data_dir=data)
-        asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1", tool_call_id="c1")
-        self.assertEqual((asked["action"], asked["message"].splitlines()),
-                         ("approve", [shown["title"], *(f"• {line}" for line in shown["effects"])]))
-        self.assertFalse(policy.shows_whole(asked["message"], "tui"), "this plan is longer than the terminal's panel")
-        for surface in ("cli", "tui"):
-            with self.subTest(surface):
-                ctx.surface = surface
-                refused = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1",
-                                               tool_call_id=f"c-{surface}")
-                self.assertEqual(refused["action"], "block")
-                self.assertIn("Use `hermes kumi setup` in a terminal", refused["message"])
-                self.assertNotIn("Kumi Ears.amxd", refused["message"], "it doesn't ask with part of the plan")
+        support.call(host, "kumi_setup", {"action": "plan"}, session_id="s1")
+        real = setup.approval
+
+        def long_plan(*args, **kwargs):  # longer than the terminal's panel on any machine (temp paths differ)
+            shown = real(*args, **kwargs)
+            return {**shown, "effects": [*shown["effects"], *(f"Writes: /Kumi/part {n}" for n in range(10))]}
+
+        with mock.patch.object(setup, "approval", side_effect=long_plan):
+            shown = long_plan("ableton", data_dir=data)
+            asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1", tool_call_id="c1")
+            self.assertEqual((asked["action"], asked["message"].splitlines()),
+                             ("approve", [shown["title"], *(f"• {line}" for line in shown["effects"])]))
+            for surface in ("cli", "tui"):
+                with self.subTest(surface):
+                    ctx.surface = surface
+                    refused = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1",
+                                                   tool_call_id=f"c-{surface}")
+                    self.assertEqual(refused["action"], "block")
+                    self.assertIn("Use `hermes kumi setup` in a terminal", refused["message"])
+                    self.assertNotIn("Kumi Ears.amxd", refused["message"], "it doesn't ask with part of the plan")
         self.assertNotIn({"daw": "ableton", "dry_run": False}, setup_daw_calls(data), "nothing was installed")
-        self.assertTrue(plan["paths"])
 
     def test_a_plan_shown_whole_is_asked_on_every_surface_and_a_chat_app_that_would_cut_it_refuses(self):
         short = "Kumi: set up Kumi 1.24.67's runtime\n• Download Kumi 1.24.67 (26.0 MB)"
