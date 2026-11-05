@@ -37,6 +37,7 @@ rules keep its changes exact, approved and reversible.
 
   The file field holds a source, never a path: a map sound `{"sound_id", "map_revision"}` from `kumi_sounds`, a file Kumi made `{"artifact_id"}`, or a file in an approved folder `{"file", "provenance": {"host_tool", "tool_call_id"}}`. A path there is refused. The other fields are the step's own: `kumi_read` with `action: schema` gives them.
 - **The producer approves each change** with Kumi's description of it, naming the targets and current values. Never split a change to get around an approval, and never ask the producer to switch approvals off.
+- **When Kumi says a change's approval doesn't fit this window** (a terminal or a chat app shows less than Hermes Desktop, even with like steps grouped), split it into smaller changes, each approved on its own (by track, or by kind of step), or ask the producer to approve it in Hermes Desktop. That's the only reason to split a change.
 - **Report the result as Kumi gives it:**
   - `applied`: done.
   - `partial`: say which steps ran.
