@@ -145,7 +145,12 @@ impl GoalPass<LiveGoal> for LivePass<'_> {
         Ok(())
     }
     async fn before_set(&mut self, signal: Signal) -> Result<Vec<String>, RuntimeError> {
-        let mut rig = self.goal.rig.lock().await;
+        let mut rig = tokio::select! {
+            biased;
+            _ = signal.cancelled() => return Err(RuntimeError::Aborted),
+            rig = self.goal.rig.lock() => rig,
+        };
+        signal.check()?;
         let gone = self.goal.retire_gone(&mut rig, signal).await?;
         self.rig = Some(rig);
         Ok(gone)

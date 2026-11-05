@@ -857,6 +857,42 @@ fn on_a_paused_clock(work: impl std::future::Future<Output = ()>) {
     runtime.block_on(tokio::task::LocalSet::new().run_until(work));
 }
 
+#[test]
+fn a_trial_stopped_while_waiting_for_a_closing_rig_releases_its_rendering_flag() {
+    on_a_paused_clock(async {
+        for ears in [false, true] {
+            let live = Live::new_with_ears(&[("Candidate", &["Synth"])], ears).await;
+            let goal = live.goal(&["Candidate"]).await;
+            let slot = slot_named(&goal, "Candidate");
+            let before_close = live.set.asked.borrow().len();
+            let mut closing = goal.close();
+            // The fixture records each native call before yielding: close owns the rig while its call waits here.
+            assert!(closing.as_mut().now_or_never().is_none());
+            let while_closing = live.set.asked.borrow().len();
+            assert!(while_closing > before_close);
+
+            let signal = Signal::new();
+            let trials = [trial(&slot, &[("Synth", "Tone", 0.8)])];
+            let mut generation = goal.generation(&trials, signal.clone(), None);
+            assert!(generation.as_mut().now_or_never().is_none());
+            assert!(live.rendering.is_rendering());
+            assert_eq!(live.set.asked.borrow().len(), while_closing);
+
+            // Keep close unpolled: stopping only this trial must finish without acquiring its held rig or calling Live.
+            signal.cancel();
+            assert!(matches!(generation.as_mut().now_or_never(), Some(Err(RuntimeError::Aborted))));
+            assert!(!live.rendering.is_rendering());
+            assert_eq!(live.set.asked.borrow().len(), while_closing);
+            assert_eq!(live.set.knob("Candidate", "Synth", "Tone"), 0.5);
+
+            closing.await.unwrap();
+            assert!(!live.set.tracks.borrow().iter().any(|track| track.name.starts_with("Kumi · render")));
+            assert!(!live.set.chain("Candidate").iter().any(|device| device == EARS_NAME));
+            assert!(!live.set.undo_step.get(), "cleanup closes its Live undo steps");
+        }
+    });
+}
+
 /// (#399) A device put in above moves the refs of everything below it, and neither the lease nor the epoch changes: a running
 /// search still finds each knob, rather than sending its values to whatever is at the old places.
 #[test]
