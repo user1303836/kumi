@@ -182,7 +182,9 @@ project as…** with **Copy all media into project directory**), or they'll miss
     Kumi can't tell it apart.
 - **HISTORY and undo:** HISTORY records what actually happened, including when an outcome is uncertain. Kumi can undo
   a change only while the runtime that made it is still running; after that, use your DAW's own Undo. In Live, an undo
-  refuses to touch a value you've changed by hand since; in REAPER and Renoise, it puts the value back anyway.
+  refuses to touch a value you've changed by hand since; in REAPER and Renoise, it puts the value back anyway. In Live,
+  Kumi can't take back a device it loaded yet (#1101): right after the change, Live's own undo takes back Kumi's whole
+  change; if anything changed in Live since, remove the device by hand instead (select it and press Delete).
 - **Listening to a track or the mix** happens only in the DAWs this Kumi release can (elsewhere it says so and plays
   nothing).
   - **The window:** it plays only the window you approve (60 seconds at most), starting with the DAW stopped, and puts

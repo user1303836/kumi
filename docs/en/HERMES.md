@@ -193,6 +193,9 @@ without asking there, and Kumi can't tell it from a chat.
   value by hand since: the undo says so and changes nothing. Before it asks, an undo shows each value as it is now and
   as the undo would put it back. In REAPER and Renoise, an undo puts the value back even if you've changed it by hand
   since.
+- In Live, Kumi can't take back a device it loaded yet (#1101). Right after the change, Live's own undo (Cmd-Z, or
+  Ctrl-Z on Windows) takes back Kumi's whole change, since Live keeps it as one undo step. If anything changed in Live
+  since, Live's undo would take that back first, so remove the device by hand instead (select it and press Delete).
 - Kumi for Hermes leaves out what would act without Hermes's approval: running code inside the DAW, driving Live's
   menus, recording, and saving or opening projects.
 
