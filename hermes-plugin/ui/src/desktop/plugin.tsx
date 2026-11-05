@@ -18,7 +18,7 @@ import * as sdk from '@hermes/plugin-sdk'
 import { host, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from '@hermes/plugin-sdk'
 import type { ReactNode } from 'react'
 
-import { canUndo, undoRequest } from '../shared/format.ts'
+import { canUndoChange, changesOf, undoRequest, undoRowOf } from '../shared/format.ts'
 import { Audition } from '../shared/hooks.ts'
 import { english, MESSAGES, type Translate } from '../shared/i18n.ts'
 import { parseListen } from '../shared/listen.ts'
@@ -331,14 +331,16 @@ const plugin: HermesPlugin = {
           keywords: ['kumi', 'undo', 'history', 'revert'],
           run: () => {
             const state = store.get()
-            // The last change is the newest row not already undone: never an older one past a change Kumi isn't sure of.
-            const last = state.history?.items.find(item => item.state !== 'undone')
-            if (!last || !canUndo(state.status, last)) {
-              const unsure = Boolean(state.status?.unsure) || last?.state === 'unsure' || last?.state === 'partial'
+            // The last change is the newest one with a row not already undone: never an older one past a change Kumi
+            // isn't sure of. Its request names the row its undo starts from, for the whole change (CC-3 A2).
+            const last = changesOf(state.history?.items ?? []).find(rows => undoRowOf(rows) !== undefined)
+            const next = last && undoRowOf(last)
+            if (!last || !next || !canUndoChange(state.status, last)) {
+              const unsure = Boolean(state.status?.unsure) || next?.state === 'unsure' || next?.state === 'partial'
               host.notify({ kind: 'info', message: wordsOf(ctx)(unsure ? 'notify.undoUnsure' : 'notify.nothingToUndo') })
               return
             }
-            void ask(ctx, undoRequest(last), { send: true, session: ownerSession(state) })
+            void ask(ctx, undoRequest(next), { send: true, session: ownerSession(state) })
           }
         } satisfies PaletteContribution
       },

@@ -3,7 +3,7 @@
 import type { PluginContext } from '@hermes/plugin-sdk'
 import { useEffect, useState } from 'react'
 
-import { canUndo, chipWords, clean, cleanupWords, connectRequest, dawName, LOOK_AGAIN_REQUEST, setupRequest, undoRequest } from '../shared/format.ts'
+import { canUndoChange, changesOf, chipWords, clean, cleanupWords, connectRequest, dawName, LOOK_AGAIN_REQUEST, setupRequest, undoRequest, undoRowOf } from '../shared/format.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { useKumi } from '../shared/hooks.ts'
 import { english, type Translate } from '../shared/i18n.ts'
@@ -87,7 +87,11 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
   const session = ownerSession(state)
   const connected = Boolean(state.status?.connected)
   const setupMessage = setupWords(state)
-  const undoable = (state.history?.items ?? []).filter(item => canUndo(state.status, item)).length
+  // One Undo per change (CC-3 A2): on the row it starts from (its newest not yet undone), for all its rows left,
+  // counted as one.
+  const changes = changesOf(state.history?.items ?? [])
+  const changeOf = new Map(changes.flatMap(rows => rows.map(row => [row, rows] as const)))
+  const undoable = changes.filter(rows => canUndoChange(state.status, rows)).length
   return (
     <div style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', color: T.text }}>
       <div style={{ ...S.section, gap: 8 }}>
@@ -144,17 +148,20 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
           history={state.history}
           live={Boolean(state.status?.connected) && state.status?.stale !== true}
           now={now}
-          action={item =>
-            canUndo(state.status, item) ? (
+          action={item => {
+            const rows = changeOf.get(item)
+            if (!rows || undoRowOf(rows) !== item || !canUndoChange(state.status, rows)) return null
+            const left = rows.filter(row => row.state !== 'undone').length
+            return (
               <TextButton
                 label={t('pane.undoLabel', clean(item.title ?? item.label ?? item.id, 120))}
                 onClick={() => void ask(ctx, undoRequest(item), { send: true, session })}
-                title={t('pane.undoTitle')}
+                title={left > 1 ? t('pane.undoChangeTitle', left) : t('pane.undoTitle')}
               >
                 {t('pane.undo')}
               </TextButton>
-            ) : null
-          }
+            )
+          }}
         />
         {/* Rows are kept while Kumi is away, but undoing one needs it back: said under them, and only when there are some. */}
         {!connected && state.status?.owner && (state.history?.items?.length ?? 0) > 0 && <span style={S.faint}>{t('pane.undoNeedsConnection')}</span>}

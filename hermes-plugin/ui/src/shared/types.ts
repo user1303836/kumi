@@ -94,6 +94,8 @@ export interface Focus extends Liveness {
 
 export interface HistoryItem {
   id: string
+  /** The serve-made id every row of one `change` call shares (CC-3 A2); absent on a change of a single row. */
+  change_id?: string
   label?: string
   title?: string
   family?: string

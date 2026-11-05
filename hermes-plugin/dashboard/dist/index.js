@@ -83,6 +83,7 @@
       undoable: (n) => `· ${n} can be undone`,
       undo: "Undo",
       undoTitle: "Ask Hermes to undo this change",
+      undoChangeTitle: (n) => `Ask Hermes to undo all ${n} steps of this change, with one approval`,
       undoLabel: (change) => `Undo ${change}`,
       openMap: "Open the sound map",
       undoNeedsConnection: "Undo needs a connected Kumi."
@@ -355,6 +356,7 @@
       undoable: (n) => `· ${n} 件取り消せます`,
       undo: "取り消す",
       undoTitle: "この変更の取り消しを Hermes に頼む",
+      undoChangeTitle: (n) => `この変更の ${n} ステップすべての取り消しを、1 回の承認で Hermes に頼む`,
       undoLabel: (change) => `${change} を取り消す`,
       openMap: "サンプルマップを開く",
       undoNeedsConnection: "取り消すには Kumi の接続が必要です。"
@@ -626,6 +628,7 @@
       undoable: (n) => `· ${n} 项可撤销`,
       undo: "撤销",
       undoTitle: "让 Hermes 撤销这次改动",
+      undoChangeTitle: (n) => `让 Hermes 用一次批准撤销这次改动的全部 ${n} 步`,
       undoLabel: (change) => `撤销 ${change}`,
       openMap: "打开采样地图",
       undoNeedsConnection: "撤销需要 Kumi 已连接。"
@@ -956,6 +959,22 @@
   }
   function undoRequest(item) {
     return `Undo Kumi change ${plainId(item.id) ?? ""}`.trim();
+  }
+  function changesOf(items) {
+    const byChange = /* @__PURE__ */ new Map();
+    for (const item of items) {
+      const key = typeof item.change_id === "string" && item.change_id ? `change:${item.change_id}` : `row:${item.id}`;
+      const rows = byChange.get(key);
+      if (rows) rows.push(item);
+      else byChange.set(key, [item]);
+    }
+    return [...byChange.values()];
+  }
+  function undoRowOf(rows) {
+    return rows.find((row) => row.state !== "undone");
+  }
+  function canUndoChange(status, rows) {
+    return canUndo(status, undoRowOf(rows));
   }
   var QUOTE_MARKS = /["“”„‟″‶〃＂«»「」『』〝〞〟｢｣﹁﹂﹃﹄]/g;
   function quotable(name, max = 80) {
@@ -2093,7 +2112,10 @@
           /* @__PURE__ */ jsx(Section, { title: t("pane.history"), children: /* @__PURE__ */ jsx(
             HistoryView,
             {
-              action: (item) => canUndo(state.status, item) ? /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUndo"), text: undoRequest(item) }) : null,
+              action: (item) => {
+                const rows = changesOf(state.history?.items ?? []).find((change) => change.includes(item));
+                return rows && undoRowOf(rows) === item && canUndoChange(state.status, rows) ? /* @__PURE__ */ jsx(CopyButton, { label: t("dashboard.copyUndo"), text: undoRequest(item) }) : null;
+              },
               daw: state.status?.daw,
               history: state.history,
               live: Boolean(state.status?.connected) && state.status?.stale !== true,
