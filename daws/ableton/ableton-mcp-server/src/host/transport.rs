@@ -153,8 +153,11 @@ impl McpHost {
             {
                 let mut row = record.borrow_mut();
                 row["appliedRevision"] = confirmed["revision"].clone();
-                // Where play starts as the apply left it (a playhead write moves it too): what the undo owns.
-                row["appliedStartTime"] = confirmed["transport"]["startTime"].clone();
+                // Where play starts as the apply left it (a playhead write moves it too): what the undo owns. A Live that
+                // doesn't say where play starts leaves nothing to own.
+                if confirmed["transport"]["startTime"].is_number() {
+                    row["appliedStartTime"] = confirmed["transport"]["startTime"].clone();
+                }
                 row["applyKey"] = params["idempotencyKey"].clone();
                 row["state"] = json!("applied");
             }
