@@ -7,14 +7,12 @@ use kumi_library::{
     learner::{LearnerMessage, LearnerOptions, LearnerReply},
     plan::PlanOptions,
     sources::SourceOptions,
-    state::read_state,
+    state::{read_state, still_running},
     Library, LibraryOptions,
 };
-use std::{
-    process::Stdio,
-    rc::Rc,
-    time::{Duration, Instant},
-};
+#[cfg(unix)]
+use std::time::Instant;
+use std::{process::Stdio, rc::Rc, time::Duration};
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader, Lines},
     process::{Child, ChildStdin, ChildStdout, Command},
@@ -203,8 +201,8 @@ async fn closing_as_the_library_starts_learning_ends_its_learner_at_once() {
         .await;
 }
 
-/// A learner that has said where it is stops as the library closes, within the time it's given, and puts its state and
-/// its lock away.
+/// A paused learner that has reported progress exits when the library closes and releases its lock and learning state.
+/// Check that acknowledgement, not the runner's scheduling against the library's own stop deadline.
 #[tokio::test(flavor = "current_thread")]
 async fn closing_while_the_library_learns_stops_its_learner() {
     let studio = Studio::new();
@@ -215,10 +213,13 @@ async fn closing_while_the_library_learns_stops_its_learner() {
             library.pause();
             library.start();
             until(|| library.status().todo == Some(7)).await;
-            let closing = Instant::now();
+            let lock = studio.dir.join("learning.lock");
+            let holder: serde_json::Value = serde_json::from_slice(&std::fs::read(&lock).unwrap()).unwrap();
+            let (pid, at) = (holder["pid"].as_f64().unwrap(), holder["at"].as_f64().unwrap());
+            assert!(still_running(pid, at), "the paused learner is running before close");
             library.close().await;
-            assert!(closing.elapsed() < Duration::from_millis(1500), "{:?}", closing.elapsed());
-            assert!(!studio.dir.join("learning.lock").exists());
+            assert!(!still_running(pid, at), "the learner exited before close returned");
+            assert!(!lock.exists());
             assert!(read_state(studio.dir.to_str().unwrap()).await.unwrap().learning.is_none());
         })
         .await;
