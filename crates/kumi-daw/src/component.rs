@@ -51,8 +51,8 @@ pub struct ComponentPlan {
     /// The version of the part that is in the DAW once this plan has run: the one this Kumi brings, or the one there
     /// when it stays (newer, or another Kumi's).
     pub version: Option<String>,
-    /// How the whole part stands: another Kumi's or newer when its main part is; else missing or older when any part
-    /// is; else the same.
+    /// How the whole part stands: another Kumi's when its main part is; newer when any owned part may be newer;
+    /// else missing or older when any part is; else the same.
     pub state: PartState,
     /// The Kumi home the part belongs to when it's another's (`OtherOwner`), when the DAW's files say.
     pub owner: Option<String>,
@@ -62,11 +62,6 @@ pub struct ComponentPlan {
     /// what it replaces with a random suffix, and removes them before it returns, done or failed: the effects say where.
     /// One an interruption (a crash, a kill) leaves stays, except the own bridges' staged copies
     /// (`.<name>.kumi-new-…`), which the next plan names and removes.
-    ///
-    /// Known limits (#1025): Kumi Ears is replaced when this home's record says it wrote the bytes there, whatever their
-    /// version, so a runtime older than the one that wrote them can replace them; and the device is written before its
-    /// record, so one whose record couldn't be written stays this home's in fact but not on record, and setup no longer
-    /// updates it.
     pub paths: Vec<String>,
     /// What putting it in does, in plain sentences naming those paths.
     pub effects: Vec<String>,
