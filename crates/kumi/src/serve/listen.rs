@@ -11,12 +11,12 @@ use std::path::{Path, PathBuf};
 pub const LISTEN: Operation = Operation {
     name: "listen",
     description: "Measure approved audio by file, revision-scoped sound, or retained artifact. Optionally compare it with a reference. Returns measured loudness, spectrum, dynamics and retained audio; changes nothing in the DAW.",
-    schema,
+    schema: file_schema,
     effect: reads,
     run,
 };
 
-fn source_schema() -> Value {
+pub fn source_schema() -> Value {
     json!({
         "type": "object", "additionalProperties": false,
         "properties": {
@@ -33,7 +33,7 @@ fn source_schema() -> Value {
     })
 }
 
-fn schema() -> Value {
+pub fn file_schema() -> Value {
     json!({
         "type": "object", "additionalProperties": false, "required": ["source"],
         "properties": {"source": source_schema(), "compare_to": source_schema()}
@@ -70,6 +70,11 @@ impl<'a> Source<'a> {
         // Neither a saved artifact nor a map snapshot is itself a permission grant.
         ctx.approved(&path)
     }
+}
+
+/// Authorize a file, current map sound or registered artifact without staging it or running DSP.
+pub async fn resolve_source(ctx: &Ctx, value: &Value, signal: &Signal) -> Result<PathBuf, OpError> {
+    Source::parse(value)?.resolve(ctx, signal).await
 }
 
 fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
