@@ -116,6 +116,12 @@ export function pick(model: MapModel, view: MapViewport, size: number, px: numbe
   return best
 }
 
+/** A sound's name as the canvas draws it beside its point: `clean()`ed and cut at 28 characters. `fillText` applies
+ *  the bidi algorithm, so a raw name holding a bidi control could reorder its own label. */
+export function mapLabel(name: unknown): string {
+  return clean(name, 28)
+}
+
 /** The sounds a search names: every word must appear in the name, class, kind or folder. Null for no search. */
 export function searchSounds(model: MapModel, query: string): Set<string> | null {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)

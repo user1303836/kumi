@@ -7,7 +7,7 @@ import type { ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num, seconds } from './format.ts'
-import { buildModel, fitView, frame, type MapViewport, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
+import { buildModel, fitView, frame, mapLabel, type MapViewport, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
 import { Chip, S, useT } from './ui.tsx'
@@ -129,8 +129,12 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
     const colors = resolve(canvas)
     context.setTransform(ratio, 0, 0, ratio, 0, 0)
     context.clearRect(0, 0, size.width, size.height)
-    const radius = Math.min(5, 2.2 + Math.log2(view.scale) * 0.8)
+    // A small map (a fresh folder of a few sounds) draws bigger points than a library of thousands.
+    const count = model.points.length
+    const base = count <= 40 ? 5 : count <= 300 ? 3.2 : 2.2
+    const radius = Math.max(1.5, Math.min(base + 3, base + Math.log2(view.scale) * 0.8))
     const groupColor = new Map(model.groups.map(group => [group.key, group.color]))
+    const labelled: [number, number, string][] = []
     // Dimmed points first, then the ones the search and legend keep, so those sit on top.
     for (const pass of [false, true]) {
       context.globalAlpha = pass ? 0.92 : 0.16
@@ -142,7 +146,26 @@ export function MapCanvas({ map, found, playing, selected, onPick, actions, empt
         context.beginPath()
         context.arc(x, y, radius, 0, Math.PI * 2)
         context.fill()
+        if (pass) labelled.push([x, y, model.sounds[point.id]?.name ?? ''])
       })
+    }
+    // Few enough on screen (a small map, a narrow search, or zoomed in) to read: each one's name beside it, the sound
+    // file's own name drawn as canvas text, never markup. A name that would overlap one already drawn is left out, so
+    // a tight cluster stays legible (its sounds are named on hover and in the list above).
+    if (labelled.length <= 40) {
+      context.globalAlpha = 0.85
+      context.fillStyle = colors.text
+      context.font = `11px ${getComputedStyle(canvas).fontFamily || 'sans-serif'}`
+      context.textBaseline = 'middle'
+      const placed: [number, number, number, number][] = []
+      for (const [x, y, name] of labelled) {
+        const text = mapLabel(name)
+        if (!text) continue
+        const box: [number, number, number, number] = [x + radius + 4, y - 7, context.measureText(text).width, 14]
+        if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue
+        placed.push(box)
+        context.fillText(text, box[0], y)
+      }
     }
     context.globalAlpha = 1
     const ring = (id: string, color: string, extra: number, width: number) => {

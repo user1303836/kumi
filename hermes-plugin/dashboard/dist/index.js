@@ -1231,6 +1231,9 @@
     }
     return best;
   }
+  function mapLabel(name) {
+    return clean(name, 28);
+  }
   function searchSounds(model, query) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return null;
@@ -1342,8 +1345,11 @@
       const colors = resolve(canvas);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, size.width, size.height);
-      const radius = Math.min(5, 2.2 + Math.log2(view.scale) * 0.8);
+      const count = model.points.length;
+      const base = count <= 40 ? 5 : count <= 300 ? 3.2 : 2.2;
+      const radius = Math.max(1.5, Math.min(base + 3, base + Math.log2(view.scale) * 0.8));
       const groupColor2 = new Map(model.groups.map((group) => [group.key, group.color]));
+      const labelled = [];
       for (const pass of [false, true]) {
         context.globalAlpha = pass ? 0.92 : 0.16;
         model.points.forEach((point, index) => {
@@ -1354,7 +1360,23 @@
           context.beginPath();
           context.arc(x, y, radius, 0, Math.PI * 2);
           context.fill();
+          if (pass) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
         });
+      }
+      if (labelled.length <= 40) {
+        context.globalAlpha = 0.85;
+        context.fillStyle = colors.text;
+        context.font = `11px ${getComputedStyle(canvas).fontFamily || "sans-serif"}`;
+        context.textBaseline = "middle";
+        const placed = [];
+        for (const [x, y, name] of labelled) {
+          const text = mapLabel(name);
+          if (!text) continue;
+          const box = [x + radius + 4, y - 7, context.measureText(text).width, 14];
+          if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue;
+          placed.push(box);
+          context.fillText(text, box[0], y);
+        }
       }
       context.globalAlpha = 1;
       const ring = (id, color, extra, width) => {
