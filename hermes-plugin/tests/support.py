@@ -217,7 +217,8 @@ def host(test, settings: dict | None = None, *fixture_args: str, installed: bool
     if installed:
         install(data, *fixture_args, daw_component=daw_component)
     ctx = Context(settings if settings is not None else {"daw": "ableton"})
-    runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10)
+    runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10,
+                                          hermes=lambda: (None, None))  # never this machine's Hermes homes
     test.addCleanup(stopped, runtimes, data)
     return (module("tools").Host(ctx, runtimes, data_dir=lambda: data, pinned=lambda: VERSION,
                                  hook_timeout=lambda: hook_timeout, plugin_dir=Path(plugin.name),
