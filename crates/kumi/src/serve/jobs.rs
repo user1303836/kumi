@@ -22,7 +22,7 @@ use tokio::sync::Notify;
 
 /// How often a job's progress is written to its file at most (its state changes are written at once).
 const WRITE_EVERY: Duration = Duration::from_millis(500);
-/// How many jobs are kept, newest first: in memory and on disk.
+/// How many recent jobs are kept. Unsettled generation receipts additionally remain on disk.
 const KEPT: usize = 100;
 /// How many jobs may run at once: another is refused `busy` until one ends.
 pub const RUNNING: usize = 8;
@@ -99,10 +99,10 @@ pub struct Jobs {
 
 impl Jobs {
     /// The jobs of a runtime starting with `snapshots`: a job an earlier runtime left `running` now reads
-    /// `interrupted`, and only the newest [`KEPT`] jobs' files stay. Only one runtime works in a state folder at a time
+    /// `interrupted`. Old ordinary jobs are pruned; unresolved billing and failed delivery are retained.
     /// (CC-6: its parent holds the folder's lock), so no job found here is another live runtime's.
     pub(crate) fn new(snapshots: &Snapshots, state_dir: &Path) -> Jobs {
-        settle_earlier(snapshots, &state_dir.join("jobs"));
+        settle_earlier(snapshots, state_dir);
         Jobs {
             jobs: RefCell::new(HashMap::new()),
             order: RefCell::new(VecDeque::new()),
@@ -221,25 +221,43 @@ impl Jobs {
             write(ctx.snapshots(), &started, &job);
             let jobs = ctx.jobs();
             jobs.running.set(jobs.running.get() - 1);
-            jobs.forget_oldest(&ctx.paths().state_dir);
+            jobs.forget_oldest(&ctx.paths().state_dir).await;
             if jobs.running.get() == 0 {
                 jobs.settled.notify_waiters();
             }
         });
     }
 
-    /// Past [`KEPT`] jobs, the oldest finished ones are forgotten, their files with them.
-    fn forget_oldest(&self, state_dir: &Path) {
+    /// Evict old settled jobs from memory. A generation file stays until its ledger accounts for it;
+    /// even a charged job must retain its GET-only recovery route if output delivery failed.
+    async fn forget_oldest(&self, state_dir: &Path) {
+        let mut generations = Vec::new();
         while self.order.borrow().len() > KEPT {
             let oldest = {
                 let jobs = self.jobs.borrow();
                 let order = self.order.borrow();
                 order.iter().position(|id| jobs.get(id).is_some_and(|job| job.state.get() != State::Running))
             };
-            let Some(at) = oldest else { return };
-            let Some(id) = self.order.borrow_mut().remove(at) else { return };
-            self.jobs.borrow_mut().remove(&id);
-            let _ = std::fs::remove_file(state_dir.join("jobs").join(format!("{id}.json")));
+            let Some(at) = oldest else { break };
+            let Some(id) = self.order.borrow_mut().remove(at) else { break };
+            let removed = self.jobs.borrow_mut().remove(&id);
+            if removed.as_ref().is_some_and(|job| job.kind == "generate") {
+                generations.push((id, removed.is_some_and(|job| job.state.get() == State::Done)));
+            } else {
+                let _ = std::fs::remove_file(state_dir.join("jobs").join(format!("{id}.json")));
+            }
+        }
+        if !generations.is_empty() {
+            let state_dir = state_dir.to_owned();
+            let _ = tokio::task::spawn_blocking(move || {
+                let Ok(authority) = super::generate_ledger::Authority::read(&state_dir) else { return };
+                for (id, delivered) in generations {
+                    if can_prune_generation(&authority, &id, delivered) {
+                        let _ = std::fs::remove_file(state_dir.join("jobs").join(format!("{id}.json")));
+                    }
+                }
+            })
+            .await;
         }
     }
 
@@ -367,25 +385,43 @@ fn write(snapshots: &Snapshots, id: &str, job: &Job) {
     }
 }
 
-/// The jobs an earlier runtime left: `running` ones now `interrupted`, the oldest past [`KEPT`] deleted.
-fn settle_earlier(snapshots: &Snapshots, folder: &Path) {
-    let Ok(entries) = std::fs::read_dir(folder) else { return };
+fn can_prune_generation(authority: &super::generate_ledger::Authority, id: &str, delivered: bool) -> bool {
+    authority
+        .for_job(id)
+        .ok()
+        .flatten()
+        .is_some_and(|record| record.settlement == "not_submitted" || (record.settlement == "charged" && delivered))
+}
+
+/// Old ordinary jobs are pruned; unaccounted generation receipts and failed deliveries survive.
+fn settle_earlier(snapshots: &Snapshots, state_dir: &Path) {
+    let folder = state_dir.join("jobs");
+    let Ok(entries) = std::fs::read_dir(&folder) else { return };
     let mut files: Vec<(std::time::SystemTime, std::path::PathBuf)> = entries
         .filter_map(Result::ok)
         .filter(|entry| entry.file_name().to_string_lossy().ends_with(".json"))
         .map(|entry| (entry.metadata().and_then(|meta| meta.modified()).unwrap_or(std::time::UNIX_EPOCH), entry.path()))
         .collect();
     files.sort_by(|a, b| b.0.cmp(&a.0));
+    let mut authority = None;
     for (n, (_, path)) in files.iter().enumerate() {
-        if n >= KEPT {
-            let _ = std::fs::remove_file(path);
-            continue;
-        }
         let Some(id) = path.file_stem().map(|stem| stem.to_string_lossy().into_owned()) else { continue };
         let Ok(mut kept) = std::fs::read(path).map_err(|_| ()).and_then(|bytes| serde_json::from_slice::<Value>(&bytes).map_err(|_| ()))
         else {
             continue;
         };
+        if n >= KEPT {
+            let prune = if kept["kind"] == "generate" {
+                let authority = authority.get_or_insert_with(|| super::generate_ledger::Authority::read(state_dir));
+                authority.as_ref().is_ok_and(|authority| can_prune_generation(authority, &id, kept["state"] == "done"))
+            } else {
+                true
+            };
+            if prune {
+                let _ = std::fs::remove_file(path);
+                continue;
+            }
+        }
         if kept["state"] == State::Running.as_str() {
             kept["state"] = json!(State::Interrupted.as_str());
             if let Err(error) = snapshots.write(&format!("jobs/{id}"), &kept) {

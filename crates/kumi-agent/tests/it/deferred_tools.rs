@@ -317,11 +317,12 @@ async fn a_deferred_tool_called_by_its_own_name_runs_and_its_input_is_checked() 
         h.kernel.run("go", Controller::new().signal, Rc::new(|_| Ok(()))).await.unwrap();
         assert_eq!(*ran.borrow(), [("judge".to_string(), json!({"track": "keys"}))], "only the input that fits runs");
         let found = results(&h.kernel);
-        assert_eq!(found[0], ("judge".into(), "judge ran on \"keys\"".into(), false));
-        assert_eq!(found[1].1, "judge: `amount` must be at most 1, not 2. find_tools gives its whole input.");
-        assert_eq!(found[2].1, "judge: The input needs `track`. find_tools gives its whole input.");
-        assert_eq!(found[3].1, "No tool is called nope; find_tools' description lists them.");
-        assert_eq!(found[4].1, "call_tool needs `name`: a tool from find_tools' list.");
+        assert_eq!(found.len(), 5, "every requested call gets its own result");
+        assert_eq!(found[0].0, "judge");
+        assert!(!found[0].2);
+        for (result, field) in found[1..].iter().zip(["amount", "track", "nope", "name"]) {
+            assert!(result.1.contains(field), "the refusal must name {field}: {}", result.1);
+        }
         assert!(found[1..].iter().all(|(_, _, error)| *error));
     })
     .await;

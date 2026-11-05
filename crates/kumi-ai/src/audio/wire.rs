@@ -4,10 +4,13 @@ use kumi_types::errors::RuntimeError;
 use reqwest::{multipart, Method, RequestBuilder, Response};
 use serde_json::{json, Value};
 use std::{
+    borrow::Cow,
+    fmt,
+    io::{ErrorKind, SeekFrom},
     path::{Path, PathBuf},
     time::Duration,
 };
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncReadExt, AsyncSeekExt, AsyncWriteExt};
 use url::Url;
 
 const MAX_FILE: u64 = 512 * 1024 * 1024;
@@ -22,10 +25,36 @@ pub(super) struct Failure {
     status: Option<reqwest::StatusCode>,
     retry_after: Option<Duration>,
     billing: Option<String>,
+    cause: &'static str,
+    io_kind: Option<ErrorKind>,
+    os_error: Option<i32>,
 }
 impl Failure {
-    pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into(), availability: false, status: None, retry_after: None, billing: None }
+    pub fn new(message: impl Into<Cow<'static, str>>) -> Self {
+        let message = message.into();
+        let cause = match &message {
+            Cow::Borrowed(message) => *message,
+            Cow::Owned(_) => "Request or provider response validation failed",
+        };
+        Self {
+            message: message.into_owned(),
+            availability: false,
+            status: None,
+            retry_after: None,
+            billing: None,
+            cause,
+            io_kind: None,
+            os_error: None,
+        }
+    }
+    fn io(operation: &'static str, error: std::io::Error) -> Self {
+        let mut failure = Self::new(operation);
+        failure.io_kind = Some(error.kind());
+        failure.os_error = error.raw_os_error();
+        failure
+    }
+    pub(super) fn diagnostic(&self) -> Diagnostic<'_> {
+        Diagnostic(self)
     }
     pub fn runtime(self) -> RuntimeError {
         RuntimeError::plain(self.message)
@@ -36,6 +65,20 @@ impl Failure {
         let id = job.get("id").or_else(|| job.get("job_id")).and_then(Value::as_str).unwrap_or("unknown (submission response lost)");
         self.message = format!("{}; job={id}, credits={}. Submission may have been billed or may still be running. Do not submit again automatically; no retry or fallback was attempted.", self.message, job.get("credits").unwrap_or(&Value::Null));
         self
+    }
+}
+/// Only code-owned text and numeric/enum codes; never a provider body, path or URL.
+pub(super) struct Diagnostic<'a>(&'a Failure);
+impl fmt::Display for Diagnostic<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            f,
+            "cause={}; http={:?}; io={:?}; os={:?}",
+            self.0.cause,
+            self.0.status.map(|status| status.as_u16()),
+            self.0.io_kind,
+            self.0.os_error
+        )
     }
 }
 pub(super) fn base_url(value: &str) -> Result<Url, String> {
@@ -221,36 +264,28 @@ impl Client {
         }
         result
     }
-    async fn run(&self, task: Task, input: &Value, model: Option<&str>, output: &Path, signal: &Signal) -> Result<Value, Failure> {
-        if let Some(id) = input.get("job_id") {
-            if input.as_object().is_none_or(|object| object.len() != 1) {
-                return Err(Failure::new("job_id recovery cannot be mixed with generation inputs"));
-            }
-            let id = id.as_str().filter(|id| valid_job_id(id)).ok_or_else(|| Failure::new("Invalid audio job_id"))?;
-            let path = job_path(task, id);
-            let job = json!({"id":id,"job_id":id,"status":"queued","urls":{"self":path}});
-            return self.poll(task, job, Value::Null, output, signal, true).await;
-        }
+    pub(super) async fn prepare_request(
+        &self,
+        task: Task,
+        input: &Value,
+        model: Option<&str>,
+        uploads: super::mirelo::Uploads<'_>,
+        signal: &Signal,
+    ) -> Result<(Value, String, Value), Failure> {
         validate_input(task, input)?;
         if self.local && task != Task::AudioToMidi && model.is_none() && input.get("model").and_then(Value::as_str).is_none() {
             return Err(Failure::new("Configure an explicit release for this Mirelo-compatible SFX endpoint, or provide model"));
         }
-        // Reject invalid local files before any upload, quote, or generation request.
-        for (field, video) in [("audio", false), ("video", true)] {
-            if let Some(value) = input.get(field) {
-                let value = value.as_str().ok_or_else(|| Failure::new("Media must be an absolute file path or public URL"))?;
-                if value.starts_with("https://") || value.starts_with("http://") {
-                    public_source(&Url::parse(value).map_err(|_| Failure::new("Invalid media URL"))?)?;
-                } else {
-                    let file = media_file(value, video).await?;
-                    if task == Task::AudioToMidi
-                        && !matches!(file.mime, "audio/wav" | "audio/flac" | "audio/mpeg" | "audio/ogg" | "audio/aac")
-                    {
-                        return Err(Failure::new("Mirelo MIDI supports WAV, FLAC, MP3, OGG and AAC input only"));
-                    }
-                    if task == Task::AudioToMidi && file.bytes > 100 * 1024 * 1024 {
-                        return Err(Failure::new("Mirelo MIDI input exceeds 100 MiB"));
-                    }
+        // Validate once and retain each opened handle through header inspection and upload.
+        let audio = input_source(input.get("audio"), uploads.audio, false).await?;
+        let video = input_source(input.get("video"), uploads.video, true).await?;
+        if task == Task::AudioToMidi {
+            if let Some(Source::File(file)) = &audio {
+                if !matches!(file.mime, "audio/wav" | "audio/flac" | "audio/mpeg" | "audio/ogg" | "audio/aac") {
+                    return Err(Failure::new("Mirelo MIDI supports WAV, FLAC, MP3, OGG and AAC input only"));
+                }
+                if file.bytes > 100 * 1024 * 1024 {
+                    return Err(Failure::new("Mirelo MIDI input exceeds 100 MiB"));
                 }
             }
         }
@@ -261,10 +296,10 @@ impl Client {
             }
             let quote = self.json(Method::GET, &format!("/v2/audio-to-midi/v1.0/preflight?duration_ms={duration}"), None, signal).await?;
             if input["quote"] == true {
-                return Ok(self.quote(task, quote));
+                return Ok((Value::Null, String::new(), quote));
             }
             affordable(&quote, true)?;
-            let audio = self.source(required_string(input, "audio")?, false, true, signal).await?;
+            let audio = self.source(audio.ok_or_else(|| Failure::new("Missing audio input"))?, true, signal).await?;
             let mut body = json!({"audio":audio});
             if let Some(instruments) = input.get("instruments") {
                 body["instruments"] = instruments.clone();
@@ -288,16 +323,9 @@ impl Client {
             if let Some(prompt) = input.get("prompt") {
                 content["prompt"] = prompt.clone();
             }
-            for (field, video) in [("audio", false), ("video", true)] {
-                if let Some(value) = input.get(field) {
-                    content[field] = self
-                        .source(
-                            value.as_str().ok_or_else(|| Failure::new("Media must be a file path or public URL"))?,
-                            video,
-                            false,
-                            signal,
-                        )
-                        .await?;
+            for (field, source) in [("audio", audio), ("video", video)] {
+                if let Some(source) = source {
+                    content[field] = self.source(source, false, signal).await?;
                 }
             }
             let mut body = json!({"model":release,"input":content,"output":{"format":"wav"}});
@@ -321,27 +349,31 @@ impl Client {
             let path = format!("/v3/{}/{family}", task.as_str());
             let quote = self.json(Method::POST, &format!("{path}/preflight"), Some(&body), signal).await?;
             if input["quote"] == true {
-                return Ok(self.quote(task, quote));
+                return Ok((Value::Null, String::new(), quote));
             }
             affordable(&quote, false)?;
             (body, path, quote)
         };
+        Ok((body, path, quote))
+    }
+    async fn run(&self, task: Task, input: &Value, model: Option<&str>, output: &Path, signal: &Signal) -> Result<Value, Failure> {
+        if let Some(id) = input.get("job_id") {
+            if input.as_object().is_none_or(|object| object.len() != 1) {
+                return Err(Failure::new("job_id recovery cannot be mixed with generation inputs"));
+            }
+            let id = id.as_str().filter(|id| valid_job_id(id)).ok_or_else(|| Failure::new("Invalid audio job_id"))?;
+            let path = job_path(task, id);
+            let job = json!({"id":id,"job_id":id,"status":"queued","urls":{"self":path}});
+            return self.poll(task, job, Value::Null, output, signal, true).await;
+        }
+        let (body, path, quote) = self.prepare_request(task, input, model, Default::default(), signal).await?;
+        if input["quote"] == true {
+            return Ok(self.quote(task, quote));
+        }
         if signal.is_cancelled() {
             return Err(Failure::new("Operation cancelled before submission"));
         }
-        use sha2::{Digest, Sha256};
-        let midi = task == Task::AudioToMidi;
-        let idempotency_key = (!midi).then(|| uuid::Uuid::new_v4().to_string());
-        let encoded = serde_json::to_vec(&body).map_err(|_| Failure::new("Could not encode audio request"))?;
-        let body_hash = hex::encode(Sha256::digest(&encoded));
-        let mut request = self
-            .api(Method::POST, &if midi { path } else { format!("{path}?wait=25") })?
-            .timeout(Duration::from_secs(120))
-            .header(reqwest::header::CONTENT_TYPE, "application/json")
-            .body(encoded);
-        if let Some(key) = &idempotency_key {
-            request = request.header("Idempotency-Key", key);
-        }
+        let (request, body_hash, idempotency_key) = self.submission(task, body, path)?;
         let lost = |error: Failure| {
             let mut error = error.submitted(&Value::Null);
             error.message.push_str(&format!(
@@ -363,15 +395,27 @@ impl Client {
         let job = decode(response, signal).await.map_err(lost)?;
         self.poll(task, job, quote, output, signal, false).await
     }
-    async fn poll(
-        &self,
-        task: Task,
-        mut job: Value,
-        quote: Value,
-        output: &Path,
-        signal: &Signal,
-        mut immediate: bool,
-    ) -> Result<Value, Failure> {
+    pub(super) fn submission(&self, task: Task, body: Value, path: String) -> Result<(RequestBuilder, String, Option<String>), Failure> {
+        use sha2::{Digest, Sha256};
+        let midi = task == Task::AudioToMidi;
+        let idempotency_key = (!midi).then(|| uuid::Uuid::new_v4().to_string());
+        let encoded = serde_json::to_vec(&body).map_err(|_| Failure::new("Could not encode audio request"))?;
+        let body_hash = hex::encode(Sha256::digest(&encoded));
+        let mut request = self
+            .api(Method::POST, &if midi { path } else { format!("{path}?wait=25") })?
+            .timeout(Duration::from_secs(120))
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .body(encoded);
+        if let Some(key) = &idempotency_key {
+            request = request.header("Idempotency-Key", key);
+        }
+        Ok((request, body_hash, idempotency_key))
+    }
+    async fn poll(&self, task: Task, job: Value, quote: Value, output: &Path, signal: &Signal, immediate: bool) -> Result<Value, Failure> {
+        let job = self.wait_job(task, job, signal, immediate).await?;
+        self.finish(task, job, quote, output, signal, MAX_FILE, false).await
+    }
+    pub(super) async fn wait_job(&self, task: Task, mut job: Value, signal: &Signal, mut immediate: bool) -> Result<Value, Failure> {
         let deadline = tokio::time::Instant::now() + JOB_WAIT;
         let mut delay = Duration::from_secs(2);
         loop {
@@ -426,36 +470,29 @@ impl Client {
                 }
             }
         }
-        self.finish(task, job, quote, output, signal).await
+        Ok(job)
     }
     fn quote(&self, task: Task, quote: Value) -> Value {
         json!({"provider":if self.local {"local"} else {"mirelo"},"task":task,"quote":quote,"submitted":false,
             "attribution":if self.local {Value::Null} else {json!("Powered by Mirelo")},
             "cost_basis":if task == Task::AudioToMidi {"Estimate from supplied duration_ms; final credits use server-measured media duration"} else {"Preflight for this exact request"}})
     }
-    async fn source(&self, value: &str, video: bool, midi: bool, signal: &Signal) -> Result<Value, Failure> {
-        if value.starts_with("https://") || value.starts_with("http://") {
-            let url = Url::parse(value).map_err(|_| Failure::new("Invalid media URL"))?;
-            public_source(&url)?;
-            return Ok(if midi { json!({"type":"url","audio_url":value}) } else { json!({"type":"url","url":value}) });
-        }
-        let media = media_file(value, video).await?;
-        if midi && !matches!(media.mime, "audio/wav" | "audio/flac" | "audio/mpeg" | "audio/ogg" | "audio/aac") {
-            return Err(Failure::new("Mirelo MIDI supports WAV, FLAC, MP3, OGG and AAC input only"));
-        }
-        if midi && media.bytes > 100 * 1024 * 1024 {
-            return Err(Failure::new("Mirelo MIDI input exceeds 100 MiB"));
-        }
+    async fn source(&self, source: Source<'_>, midi: bool, signal: &Signal) -> Result<Value, Failure> {
+        let media = match source {
+            Source::Url(value) => {
+                return Ok(if midi { json!({"type":"url","audio_url":value}) } else { json!({"type":"url","url":value}) });
+            }
+            Source::File(media) => media,
+        };
         let ticket = self
             .json(Method::POST, if midi { "/v2/assets" } else { "/v3/assets" }, Some(&json!({"content_type":media.mime})), signal)
             .await?;
         let upload = self.external(required_string(&ticket, "upload_url")?)?;
-        let file = tokio::fs::File::open(&media.path).await.map_err(|_| Failure::new("Could not open media file"))?;
         let request = if midi {
             self.transfer(Method::PUT, upload)
                 .header(reqwest::header::CONTENT_TYPE, media.mime)
                 .header(reqwest::header::CONTENT_LENGTH, media.bytes)
-                .body(file)
+                .body(media.file)
         } else {
             let maximum = ticket["max_bytes"].as_u64().ok_or_else(|| Failure::new("Upload ticket omitted max_bytes"))?;
             if media.bytes > maximum {
@@ -466,7 +503,7 @@ impl Client {
             for (name, value) in fields {
                 form = form.text(name.clone(), value.as_str().ok_or_else(|| Failure::new("Invalid upload form field"))?.to_owned());
             }
-            let part = multipart::Part::stream_with_length(file, media.bytes)
+            let part = multipart::Part::stream_with_length(media.file, media.bytes)
                 .file_name(media.name)
                 .mime_str(media.mime)
                 .map_err(|_| Failure::new("Invalid media MIME type"))?;
@@ -476,12 +513,21 @@ impl Client {
         let id = required_string(&ticket, if midi { "asset_id" } else { "id" })?;
         Ok(if midi { json!({"type":"asset","asset_id":id}) } else { json!({"type":"asset","id":id}) })
     }
-    async fn finish(&self, task: Task, job: Value, quote: Value, output: &Path, signal: &Signal) -> Result<Value, Failure> {
+    pub(super) async fn finish(
+        &self,
+        task: Task,
+        job: Value,
+        quote: Value,
+        output: &Path,
+        signal: &Signal,
+        max_bytes: u64,
+        native: bool,
+    ) -> Result<Value, Failure> {
         if output_count(&job) > MAX_OUTPUTS {
             return Err(Failure::new("Audio job exceeds Kumi's limit of 32 downloadable files; no files downloaded. Recover this job after arranging a smaller result; do not recreate it.").submitted(&job));
         }
         let mut files = Vec::new();
-        let mut remaining_bytes = MAX_FILE;
+        let mut remaining_bytes = max_bytes.min(MAX_FILE);
         let mut failures = Vec::new();
         let mut result = json!({"provider":if self.local {"local"} else {"mirelo"},"task":task,
             "job_id":job.get("id").or_else(|| job.get("job_id")),"status":job["status"],"credits":job["credits"],
@@ -493,6 +539,13 @@ impl Client {
             result["notes"] = job.pointer("/result/notes").cloned().unwrap_or(Value::Null);
             if result["notes"].is_array() {
                 normalize_notes(&mut result["notes"]).map_err(|error| error.submitted(&job))?;
+                if native {
+                    for note in result["notes"].as_array_mut().unwrap() {
+                        note.as_object_mut()
+                            .unwrap()
+                            .retain(|field, _| matches!(field.as_str(), "pitch" | "velocity" | "start" | "end" | "instrument"));
+                    }
+                }
             }
             result["timing"] = job.pointer("/result/timing").cloned().unwrap_or(Value::Null);
             for (field, extension) in [("midi_url", "mid"), ("musicxml_url", "musicxml")] {
@@ -528,6 +581,10 @@ impl Client {
                         for kind in ["audio", "video"] {
                             if let Some(file) = variant["files"].get(kind) {
                                 found = true;
+                                if native && kind == "video" {
+                                    failures.push("Native generation does not support video output".into());
+                                    continue;
+                                }
                                 let extension = if kind == "video" {
                                     "mp4"
                                 } else {
@@ -553,13 +610,13 @@ impl Client {
             }
         }
         if task == Task::AudioToMidi && result["notes"].is_array() {
-            match save_notes(output, &result["notes"], signal).await {
+            match save_notes_bounded(output, &result["notes"], signal, if native { remaining_bytes } else { u64::MAX }).await {
                 Ok(path) => result["notes_path"] = json!(path),
                 Err(error) => failures.push(error.message),
             }
         }
         result["files"] = json!(files);
-        if files.is_empty()
+        if (files.is_empty() && !(native && result["notes_path"].is_string()))
             || !matches!(job["status"].as_str(), Some("succeeded"))
             || !failures.is_empty()
             || (task == Task::AudioToMidi && !result["notes"].is_array())
@@ -698,10 +755,10 @@ async fn poll_wait(delay: Duration, deadline: tokio::time::Instant, signal: &Sig
         _ = tokio::time::sleep(delay) => Ok(())
     }
 }
-fn valid_job_id(id: &str) -> bool {
+pub(super) fn valid_job_id(id: &str) -> bool {
     !id.is_empty() && id.len() <= 128 && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
-fn job_path(task: Task, id: &str) -> String {
+pub(super) fn job_path(task: Task, id: &str) -> String {
     if task == Task::AudioToMidi {
         format!("/v2/audio-to-midi/v1.0/jobs/{id}")
     } else {
@@ -767,7 +824,7 @@ pub(super) async fn bounded(mut response: Response, limit: u64, signal: &Signal)
     }
     Ok(bytes)
 }
-async fn decode(response: Response, signal: &Signal) -> Result<Value, Failure> {
+pub(super) async fn decode(response: Response, signal: &Signal) -> Result<Value, Failure> {
     serde_json::from_slice(&bounded(response, MAX_JSON, signal).await?).map_err(|_| Failure::new("Audio server returned invalid JSON"))
 }
 pub(super) async fn save(output: &Path, extension: &str, bytes: &[u8], signal: &Signal) -> Result<PathBuf, Failure> {
@@ -800,10 +857,36 @@ async fn output_file(output: &Path, extension: &str) -> Result<(PathBuf, tokio::
     Ok((path, file))
 }
 pub(super) struct Media {
-    pub path: PathBuf,
+    pub file: tokio::fs::File,
     pub name: String,
     pub mime: &'static str,
     pub bytes: u64,
+}
+enum Source<'a> {
+    Url(&'a str),
+    File(Media),
+}
+async fn input_source<'a>(
+    value: Option<&'a Value>,
+    upload: Option<super::mirelo::Upload<'_>>,
+    video: bool,
+) -> Result<Option<Source<'a>>, Failure> {
+    let Some(value) = value else {
+        return if upload.is_some() { Err(Failure::new("An opened upload requires its audio or video input field")) } else { Ok(None) };
+    };
+    let value = value.as_str().ok_or_else(|| Failure::new("Media must be an absolute file path or public URL"))?;
+    let source = if let Some(upload) = upload {
+        // The caller authorized this handle. The input string is only its label, never a path to reopen.
+        let mut file = tokio::fs::File::from_std(upload.file);
+        file.seek(SeekFrom::Start(0)).await.map_err(|error| Failure::io("Could not rewind approved media", error))?;
+        Source::File(media_handle(file, upload.extension, video).await?)
+    } else if value.starts_with("https://") || value.starts_with("http://") {
+        public_source(&Url::parse(value).map_err(|_| Failure::new("Invalid media URL"))?)?;
+        Source::Url(value)
+    } else {
+        Source::File(media_file(value, video).await?)
+    };
+    Ok(Some(source))
 }
 pub(super) async fn media_file(value: &str, video: bool) -> Result<Media, Failure> {
     if kumi_common::path::network_or_device(value) || kumi_common::path::reserved_device(value) || value.chars().any(char::is_control) {
@@ -813,11 +896,16 @@ pub(super) async fn media_file(value: &str, video: bool) -> Result<Media, Failur
     if !path.is_absolute() {
         return Err(Failure::new("Media must be an absolute local file path or public HTTPS URL"));
     }
-    let metadata = tokio::fs::metadata(path).await.map_err(|_| Failure::new("Media file is missing or unreadable"))?;
-    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_FILE {
-        return Err(Failure::new("Media must be a nonempty regular file no larger than 512 MiB"));
-    }
-    let extension = path.extension().and_then(|value| value.to_str()).unwrap_or("").to_ascii_lowercase();
+    // Reject pipes/devices before opening; inspect the handle again in case the named file changed.
+    let metadata = tokio::fs::metadata(path).await.map_err(|error| Failure::io("Media file is missing or unreadable", error))?;
+    media_size(&metadata)?;
+    let file = tokio::fs::File::open(path).await.map_err(|error| Failure::io("Could not open media file", error))?;
+    media_handle(file, path.extension().and_then(|value| value.to_str()).unwrap_or(""), video).await
+}
+async fn media_handle(mut file: tokio::fs::File, extension: &str, video: bool) -> Result<Media, Failure> {
+    let metadata = file.metadata().await.map_err(|error| Failure::io("Could not inspect media file", error))?;
+    let bytes = media_size(&metadata)?;
+    let extension = extension.to_ascii_lowercase();
     let mime = match (video, extension.as_str()) {
         (false, "wav" | "wave") => "audio/wav",
         (false, "flac") => "audio/flac",
@@ -830,9 +918,8 @@ pub(super) async fn media_file(value: &str, video: bool) -> Result<Media, Failur
         (true, "webm") => "video/webm",
         _ => return Err(Failure::new("Unsupported media file extension")),
     };
-    let mut file = tokio::fs::File::open(path).await.map_err(|_| Failure::new("Could not read media file"))?;
     let mut header = [0; 16];
-    let len = file.read(&mut header).await.map_err(|_| Failure::new("Could not read media header"))?;
+    let len = file.read(&mut header).await.map_err(|error| Failure::io("Could not read media header", error))?;
     let header = &header[..len];
     let recognized = match mime {
         "audio/wav" => header.starts_with(b"RIFF") && header.get(8..12) == Some(b"WAVE"),
@@ -845,7 +932,14 @@ pub(super) async fn media_file(value: &str, video: bool) -> Result<Media, Failur
     if !recognized {
         return Err(Failure::new("Media header does not match its file type"));
     }
-    Ok(Media { path: path.to_path_buf(), name: format!("input.{extension}"), mime, bytes: metadata.len() })
+    file.seek(SeekFrom::Start(0)).await.map_err(|error| Failure::io("Could not rewind media for upload", error))?;
+    Ok(Media { file, name: format!("input.{extension}"), mime, bytes })
+}
+fn media_size(metadata: &std::fs::Metadata) -> Result<u64, Failure> {
+    if !metadata.is_file() || metadata.len() == 0 || metadata.len() > MAX_FILE {
+        return Err(Failure::new("Media must be a nonempty regular file no larger than 512 MiB"));
+    }
+    Ok(metadata.len())
 }
 fn public_source(url: &Url) -> Result<(), Failure> {
     secure_url(url).map_err(Failure::new)?;
@@ -980,6 +1074,9 @@ fn affordable(quote: &Value, midi: bool) -> Result<(), Failure> {
 }
 
 pub(super) async fn save_notes(output: &Path, notes: &Value, signal: &Signal) -> Result<PathBuf, Failure> {
+    save_notes_bounded(output, notes, signal, u64::MAX).await
+}
+async fn save_notes_bounded(output: &Path, notes: &Value, signal: &Signal, max_bytes: u64) -> Result<PathBuf, Failure> {
     let notes = notes.as_array().ok_or_else(|| Failure::new("Audio-to-MIDI result omitted its authoritative notes"))?;
     for note in notes {
         let valid = note["pitch"].as_f64().is_some_and(|pitch| pitch.is_finite() && (0.0..=127.0).contains(&pitch) && pitch.fract() == 0.0)
@@ -992,12 +1089,33 @@ pub(super) async fn save_notes(output: &Path, notes: &Value, signal: &Signal) ->
         }
     }
     let bytes = serde_json::to_vec(notes).map_err(|_| Failure::new("Could not encode transcription notes"))?;
+    if bytes.len() as u64 > max_bytes {
+        return Err(Failure::new("Audio job exceeds its remaining output budget"));
+    }
     save(output, "json", &bytes, signal).await
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn preparation_diagnostics_keep_codes_but_never_provider_or_os_text() {
+        let sentinel = "key-sentinel /private/source.wav https://signed.example/?secret=key-sentinel";
+        let mut response = Failure::new(sentinel.to_owned());
+        response.status = Some(reqwest::StatusCode::BAD_REQUEST);
+        let io = Failure::io("Could not open media file", std::io::Error::new(ErrorKind::PermissionDenied, sentinel));
+        let os = Failure::io("Could not open media file", std::io::Error::from_raw_os_error(5));
+        for failure in [&response, &io, &os] {
+            let diagnostic = failure.diagnostic().to_string();
+            for private in ["key-sentinel", "/private/", "https://", "signed.example"] {
+                assert!(!diagnostic.contains(private), "{diagnostic}");
+            }
+        }
+        assert!(response.diagnostic().to_string().contains("400"));
+        assert!(io.diagnostic().to_string().contains("PermissionDenied"));
+        assert!(os.diagnostic().to_string().contains("os=Some(5)"));
+    }
 
     #[test]
     fn redirect_policy_checks_each_hop_without_reopening_loopback_exception() {

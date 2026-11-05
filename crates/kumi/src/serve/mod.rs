@@ -26,6 +26,10 @@ pub mod setup;
 pub mod snapshots;
 
 mod core;
+mod generate;
+mod generate_ledger;
+mod generate_output;
+mod generate_source;
 
 use kumi_types::daw::DawId;
 use kumi_types::system::Env;

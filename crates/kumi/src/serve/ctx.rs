@@ -361,6 +361,7 @@ pub struct Ctx {
     artifacts: super::artifacts::Artifacts,
     maps: super::map::MapStore,
     library: super::library::LibraryState,
+    generation: super::generate::Generation,
     snapshots: Snapshots,
     jobs: Jobs,
     shutdown: Signal,
@@ -429,6 +430,7 @@ impl Ctx {
             artifacts,
             maps,
             library: super::library::LibraryState::default(),
+            generation: super::generate::Generation::default(),
             paths: Paths { state_dir, kumi_home: args.kumi_home },
             env,
             library_roots: RefCell::new(library_roots),
@@ -556,6 +558,10 @@ impl Ctx {
 
     pub(crate) fn library_state(&self) -> &super::library::LibraryState {
         &self.library
+    }
+
+    pub(crate) fn generation(&self) -> &super::generate::Generation {
+        &self.generation
     }
 
     pub fn approved(&self, path: &Path) -> Result<PathBuf, OpError> {

@@ -161,15 +161,19 @@ impl StagedArtifact {
         }
     }
 
-    pub(crate) fn verify(&self) -> Result<(), OpError> {
-        let path = local(self.path())?;
-        let opened = match &self.file {
+    /// The already-owned file. Read it in place instead of reopening a writable Windows temp file.
+    pub(crate) fn opened(&self) -> &File {
+        match &self.file {
             StagedFile::Owned(file) => file.as_file(),
             StagedFile::Registered { handle, .. } => handle,
-        };
+        }
+    }
+
+    pub(crate) fn verify(&self) -> Result<(), OpError> {
+        let path = local(self.path())?;
         if path != self.path()
             || FileIdentity::at(&path).map_err(failed)? != self.identity
-            || FileIdentity::of(opened).map_err(failed)? != self.identity
+            || FileIdentity::of(self.opened()).map_err(failed)? != self.identity
         {
             return Err(refused("stale", "The retained audio changed; choose the source again."));
         }
@@ -514,7 +518,7 @@ fn artifact_id(id: &str) -> bool {
         && (3..=80).contains(&id.len())
         && id.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'-' || byte == b'_')
 }
-fn open_regular(path: &Path) -> io::Result<File> {
+pub(crate) fn open_regular(path: &Path) -> io::Result<File> {
     let mut options = OpenOptions::new();
     options.read(true);
     #[cfg(unix)]

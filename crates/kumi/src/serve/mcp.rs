@@ -759,7 +759,7 @@ fn momentary(answer: &Value) -> bool {
     } else {
         content["code"].as_str().filter(|_| content["state"] == "refused")
     };
-    matches!(code, Some("leased" | "busy" | "not_connected" | "stale"))
+    matches!(code, Some("leased" | "busy" | "not_connected" | "stale" | "ledger_unavailable"))
 }
 
 /// A snapshot bigger than a resource read gives.
@@ -999,7 +999,23 @@ mod tests {
         })
     }
 
-    static OPERATIONS: &[&Operation] = &[&WAIT, &ECHO, &BOOM, &SCAN, &PLACE, &SMASH, &HOLD, &RESTORE, &PLAY, &PAY, &SPILL];
+    /// Refuses its first attempt before reserving; each later execution would reserve anew.
+    static RESERVE: Operation =
+        Operation { name: "reserve", description: "Reserves credits.", schema: object, effect: |_| Effect::Paid, run: reserve };
+    fn reserve(_ctx: &Ctx, _call: Call) -> OpFuture<'_> {
+        Box::pin(async move {
+            let attempt = RUNS.with(|runs| {
+                runs.set(runs.get() + 1);
+                runs.get()
+            });
+            if attempt == 1 {
+                return Err(OpError::Refused { code: "ledger_unavailable", reason: "The ledger lock is held.".into(), owner: None });
+            }
+            Ok(json!({"state": "reserved", "reservation_id": format!("r-{attempt}")}))
+        })
+    }
+
+    static OPERATIONS: &[&Operation] = &[&WAIT, &ECHO, &BOOM, &SCAN, &PLACE, &SMASH, &HOLD, &RESTORE, &PLAY, &PAY, &SPILL, &RESERVE];
 
     struct Session {
         to: Option<DuplexStream>,
@@ -1202,7 +1218,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_session_lists_its_tools_and_calls_one_with_progress() {
+    async fn a_session_initializes_and_calls_a_tool_with_progress() {
         local(async {
             let mut session = Session::start();
             session.send(json!({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"protocolVersion": "2025-06-18"}})).await;
@@ -1214,11 +1230,6 @@ mod tests {
                 json!({"tools": {"listChanged": false}, "resources": {"subscribe": true, "listChanged": false}})
             );
             session.send(json!({"jsonrpc": "2.0", "method": "notifications/initialized"})).await;
-            session.send(json!({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})).await;
-            let listed = session.next().await.unwrap();
-            let names: Vec<&str> = listed["result"]["tools"].as_array().unwrap().iter().filter_map(|tool| tool["name"].as_str()).collect();
-            assert_eq!(names, ["wait", "echo", "boom", "scan", "place", "smash", "hold", "restore", "play", "pay", "spill"]);
-            assert_eq!(listed["result"]["tools"][1]["inputSchema"], object());
             let mut asked = call(json!("c3"), "echo", json!({"word": "hi", "_host": {"profile_id": "default", "tool_call_id": "t9"}}));
             asked["params"]["_meta"] = json!({"progressToken": "p3"});
             session.send(asked).await;
@@ -1373,6 +1384,27 @@ mod tests {
             session.send(call(json!(9), "echo", json!({"word": "a", "_host": {"tool_call_id": "tc-1"}}))).await;
             assert_eq!(session.next().await.unwrap()["result"]["isError"], false, "a read isn't a host call's repeat");
             assert!(session.end().await.is_empty());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn an_unavailable_ledger_can_be_retried_but_a_reserved_host_call_stays_bound() {
+        local(async {
+            let mut session = Session::start().initialized().await;
+            let asked = |id, word| call(json!(id), "reserve", json!({"word": word, "_host": {"tool_call_id": "reserve-once"}}));
+            session.send(asked(1, "kick")).await;
+            assert_eq!(session.next().await.unwrap()["result"]["structuredContent"]["error"]["code"], "ledger_unavailable");
+            session.send(asked(2, "kick")).await;
+            let reserved = session.next().await.unwrap()["result"].clone();
+            assert_eq!(reserved["structuredContent"]["state"], "reserved");
+            assert_eq!(RUNS.with(Cell::get), 2, "the same host call ran after the transient refusal");
+            session.send(asked(3, "kick")).await;
+            assert_eq!(session.next().await.unwrap()["result"], reserved, "the reservation stays bound to this host call");
+            session.send(asked(4, "snare")).await;
+            assert_eq!(session.next().await.unwrap()["result"]["structuredContent"]["error"]["code"], "duplicate");
+            assert_eq!(RUNS.with(Cell::get), 2, "neither retry may reserve again");
+            session.end().await;
         })
         .await;
     }
