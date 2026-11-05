@@ -84,8 +84,15 @@ class Surface(unittest.TestCase):
         ctx.surface = "tui"
         with mock.patch.object(setup, "approval", side_effect=short_plan):
             asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1", tool_call_id="c1")
-        self.assertEqual((asked["action"], asked["message"]),
-                         ("approve", "Kumi: install Kumi's part in Live\n• Writes: /Kumi/part"))
+            self.assertEqual((asked["action"], asked["message"]),
+                             ("approve", "Kumi: install Kumi's part in Live\n• Writes: /Kumi/part"))
+            ctx.surface = RuntimeError("the plugin host's channel is gone")
+            with self.assertLogs(level="WARNING"):
+                unknown = policy.pre_tool_call(host, "kumi_setup", {"action": "install"}, session_id="s1",
+                                               tool_call_id="c2")
+        self.assertEqual(unknown["action"], "block", "where Hermes can't say, nothing is taken as shown whole")
+        self.assertIn("hermes kumi setup", unknown["message"])
+        self.assertFalse(policy.shows_whole("x", "unknown"))
 
     def test_a_plan_shown_whole_is_asked_on_every_surface_and_a_chat_app_that_would_cut_it_refuses(self):
         short = "Kumi: set up Kumi 1.24.67's runtime\n• Download Kumi 1.24.67 (26.0 MB)"

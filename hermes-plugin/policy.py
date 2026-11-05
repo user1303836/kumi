@@ -283,9 +283,12 @@ def _setup(host: Any, args: dict) -> tuple[dict | None, dict]:
 
 
 def shows_whole(message: str, surface: str) -> bool:
-    """Whether Hermes shows `message`, an approval's reason, whole on `surface` (`ctx.session_surface()`): Desktop and
-    any client without a known limit do; the terminal's panel wraps each line on its own (long words broken) into at
-    most 10 rows of 64 columns; Telegram, Slack and Discord cut it at a length (Telegram's after escaping)."""
+    """Whether Hermes shows `message`, an approval's reason, whole on `surface` (`Host.session_surface()`): Desktop
+    and any client without a known limit do; the terminal's panel wraps each line on its own (long words broken) into
+    at most 10 rows of 64 columns; Telegram, Slack and Discord cut it at a length (Telegram's after escaping). An
+    "unknown" surface (Hermes couldn't say) shows nothing whole."""
+    if surface == "unknown":
+        return False
     if surface in ("cli", "tui"):
         rows = sum(len(textwrap.wrap(line, PANEL_COLUMNS, replace_whitespace=False, drop_whitespace=False) or [""])
                    for line in message.splitlines())
