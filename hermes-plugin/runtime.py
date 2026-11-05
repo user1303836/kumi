@@ -33,8 +33,6 @@ MCP_PROTOCOL = "2025-11-25"
 SERVER_NAME = "kumi-serve"
 RUNTIME_PROTOCOL = "kumi-serve/1"
 CLIENT_INFO = {"name": "kumi-hermes", "version": "1"}
-# The snapshots `kumi serve` advertises as resources (C2), each named as its C3 file and its C5 event.
-RESOURCES = {"kumi://status": "status", "kumi://focus": "focus", "kumi://history": "history", "kumi://map": "map"}
 # What `kumi serve` gets of Hermes's environment: what a program needs to start and to find the user's folders on each
 # system. Never a key, a token or Hermes's own settings (C2, catalog rule 11).
 LAUNCH_VARIABLES = frozenset({
@@ -485,13 +483,15 @@ def _end(process: subprocess.Popen) -> None:
 
 @dataclass
 class Runtime:
-    """A started `kumi serve`: its client, what it runs, the chat that owns it, and whether a call is in flight."""
+    """A started `kumi serve`: its client, what it runs, the chat that owns it, the Hermes profile it's for, and whether
+    a call is in flight."""
     client: Client
     install: Install
     data_dir: Path
     daw: str
     owner_session: str | None
     state_lock: StateLock
+    profile: str = ""
     info: dict = field(default_factory=dict)
     last_used: float = field(default_factory=time.monotonic)
     in_flight: int = 0
@@ -542,7 +542,8 @@ Spawn = Callable[..., Client]
 
 class Runtimes:
     """This process's runtimes: one per profile (its plugin-data folder), each owned by the chat that started it.
-    `events(name, payload)` is told when a snapshot changes (C5: `status.changed`, `focus.changed`, …)."""
+    `events(name, payload)` is told when a snapshot the runtime publishes changes (C5: `status.changed`,
+    `focus.changed`, `history.changed`, `map.changed`, `job.progress`), each payload with its `profile`."""
 
     def __init__(self, *, events: Callable[[str, dict], None] | None = None, spawn: Spawn = Client,
                  environ: Callable[[], Mapping[str, str]] = lambda: os.environ, start_timeout: float = 30.0,
@@ -565,12 +566,13 @@ class Runtimes:
             runtime = self._running.get(data_dir.resolve())
         return runtime if runtime is not None and runtime.client.running and not runtime.closing else None
 
-    def start(self, data_dir: Path, install: Install, daw: str, session_id: str | None, *,
+    def start(self, data_dir: Path, install: Install, daw: str, session_id: str | None, *, profile: str,
               library_roots: Iterable[str] = ()) -> Runtime:
         """The profile's runtime, started for `session_id` when none runs: this process takes the profile's state
-        lock (CC-6), then the runtime is initialized, checked to be the pinned runtime (its name, version and protocol,
-        before anything else is asked of it) and subscribed to its snapshots. A runtime that isn't the pinned one is
-        stopped and Unavailable("wrong_runtime") raised. Another profile's start never waits for this one."""
+        lock (CC-6), then the runtime is initialized and checked to be the pinned runtime (its name, version and
+        protocol, before anything else is asked of it), and its snapshots are watched for C5's events. A runtime that
+        isn't the pinned one is stopped and Unavailable("wrong_runtime") raised. Another profile's start never waits
+        for this one."""
         key = data_dir.resolve()
         with self._lock:
             starting = self._starting.setdefault(key, threading.Lock())
@@ -592,9 +594,8 @@ class Runtimes:
                 holder: dict[str, Runtime] = {}
                 client = self._spawn(serve_argv(install, state, daw, library_roots), launch_environment(self._environ()),
                                      cwd=str(data_dir), keep_fds=lock.keep(),
-                                     on_notification=lambda method, params: self._notified(holder, method, params),
                                      on_exit=lambda reason: self._exited(holder))
-                runtime = Runtime(client, install, data_dir, daw, session_id, lock)
+                runtime = Runtime(client, install, data_dir, daw, session_id, lock, profile)
                 runtime.info = self._handshake(runtime)
                 holder["runtime"] = runtime
                 with self._lock:  # the mark is checked and the runtime published as one step, so no stop falls between
@@ -617,7 +618,8 @@ class Runtimes:
                 raise
         if watch:
             _thread(self._watch_idle, "kumi-runtime-idle").start()
-        self._emit("status.changed", {"seq": None})
+        _thread(self._watch_snapshots, "kumi-runtime-snapshots", runtime).start()
+        self._emit("status.changed", {"seq": None, "profile": runtime.profile})
         return runtime
 
     def stop(self, data_dir: Path, *, wait: float = STOP_WAIT) -> None:
@@ -681,48 +683,47 @@ class Runtimes:
             raise Unavailable("wrong_runtime", f"Kumi's runtime speaks MCP {result.get('protocolVersion')}, not "
                                                f"{MCP_PROTOCOL}: set Kumi up again.")
         client.notify("notifications/initialized")
-        status = runtime.call("status", {}, {"profile_id": "", "session_id": runtime.owner_session, "task_id": None,
-                                             "tool_call_id": None, "request_id": "handshake"}, timeout=left())
+        status = runtime.call("status", {}, {"profile_id": runtime.profile, "session_id": runtime.owner_session,
+                                             "task_id": None, "tool_call_id": None, "request_id": "handshake"},
+                              timeout=left())
         protocol = status.get("runtime", {}).get("protocol") if isinstance(status.get("runtime"), dict) else None
         if protocol != RUNTIME_PROTOCOL:
             raise Unavailable("wrong_runtime", f"Kumi's runtime speaks {protocol}, not {RUNTIME_PROTOCOL}: set Kumi up "
                                                "again.")
-        if (result.get("capabilities") or {}).get("resources", {}).get("subscribe"):
-            self._subscribe(client, left)
         return info
 
-    def _subscribe(self, client: Client, left: Callable[[], float]) -> None:
-        """Subscribe to each of C2's snapshots the runtime lists. One it refuses goes without events, and the UIs' poll
-        still sees it (C5)."""
+    def _watch_snapshots(self, runtime: Runtime) -> None:
+        """C5's events from the snapshots the runtime publishes (C3): every `WATCH_EVERY` seconds while it runs, each
+        file that changed since becomes its event. What's there when it starts isn't news."""
+        seen: dict[str, tuple] = {}
         try:
-            listed = client.request("resources/list", {}, timeout=left())
-        except Unavailable as failure:
-            if failure.code != "protocol":
-                raise
-            log.warning("Kumi's runtime didn't list its resources: no snapshot events (%s)", failure.reason)
-            return
-        uris = {resource.get("uri") for resource in (listed or {}).get("resources") or [] if isinstance(resource, dict)}
-        for uri in RESOURCES:
-            if uri in uris:
-                try:
-                    client.request("resources/subscribe", {"uri": uri}, timeout=left())
-                except Unavailable as failure:
-                    if failure.code != "protocol":
-                        raise
-                    log.warning("Kumi's runtime refused a subscription to %s: %s", uri, failure.reason)
+            seen = _snapshot_marks(runtime.state_dir)
+        except Exception:
+            log.exception("Kumi couldn't look at its runtime's snapshots")
+        while not runtime.gone.wait(WATCH_EVERY):
+            try:  # one bad pass (a file mid-replace, an unreadable folder) mustn't end the events
+                marks = _snapshot_marks(runtime.state_dir)
+                changed = sorted(name for name, mark in marks.items() if seen.get(name) != mark)
+                seen = marks
+                for name in changed:
+                    self._snapshot_changed(runtime, name)
+            except Exception:
+                log.exception("Kumi couldn't look at its runtime's snapshots")
 
-    def _notified(self, holder: dict[str, Runtime], method: str, params: dict) -> None:
-        runtime = holder.get("runtime")
-        if runtime is None or method != "notifications/resources/updated":
-            return
-        name = RESOURCES.get(params.get("uri"))
+    def _snapshot_changed(self, runtime: Runtime, name: str) -> None:
+        state, profile = runtime.state_dir, runtime.profile
         if name == "map":
-            revision = _read_text(runtime.state_dir / "map" / "current")
-            snapshot = _read_json(runtime.state_dir / "map" / f"{revision}.json") if revision else None
-            self._emit("map.changed", {"revision": revision, "seq": (snapshot or {}).get("seq")})
-        elif name is not None:
-            snapshot = _read_json(runtime.state_dir / f"{name}.json")
-            self._emit(f"{name}.changed", {"seq": (snapshot or {}).get("seq")})
+            revision = _read_text(state / "map" / "current")
+            snapshot = _read_json(state / "map" / f"{revision}.json") if revision else None
+            self._emit("map.changed", {"revision": revision, "seq": (snapshot or {}).get("seq"), "profile": profile})
+        elif name.startswith("jobs/"):
+            job = _read_json(state / f"{name}.json")
+            if job is not None and isinstance(job.get("job_id"), str):
+                self._emit("job.progress", {"job_id": job["job_id"], "state": job.get("state"),
+                                            "progress": job.get("progress"), "profile": profile})
+        else:
+            snapshot = _read_json(state / f"{name}.json")
+            self._emit(f"{name}.changed", {"seq": (snapshot or {}).get("seq"), "profile": profile})
 
     def _exited(self, holder: dict[str, Runtime]) -> None:
         runtime = holder.get("runtime")
@@ -742,7 +743,7 @@ class Runtimes:
             return
         try:
             runtime.state_lock.release()
-            self._emit("status.changed", {"seq": None})
+            self._emit("status.changed", {"seq": None, "profile": runtime.profile})
         finally:
             runtime.gone.set()
 
@@ -768,3 +769,36 @@ def _read_text(path: Path) -> str | None:
     except OSError:
         return None
     return text or None
+
+
+WATCH_EVERY = 0.5  # how often a running runtime's snapshots are looked at (C5)
+SNAPSHOTS = ("status", "focus", "history")
+
+
+def _snapshot_marks(state: Path) -> dict[str, tuple]:
+    """Each published snapshot's name (`status`, `focus`, `history`, `map`, `jobs/<id>`) and what says it changed:
+    its file's modification time and size (the map's: its `current` file and that revision's)."""
+    marks: dict[str, tuple] = {}
+    for name in SNAPSHOTS:
+        if (mark := _mark(state / f"{name}.json")) is not None:
+            marks[name] = mark
+    current = _mark(state / "map" / "current")
+    if current is not None:
+        revision = _read_text(state / "map" / "current")
+        marks["map"] = (current, revision, _mark(state / "map" / f"{revision}.json") if revision else None)
+    try:
+        jobs = list(os.scandir(state / "jobs"))
+    except OSError:
+        jobs = []
+    for entry in jobs:
+        if entry.name.endswith(".json") and (mark := _mark(Path(entry.path))) is not None:
+            marks[f"jobs/{entry.name[:-5]}"] = mark
+    return marks
+
+
+def _mark(path: Path) -> tuple | None:
+    try:
+        found = path.stat()
+    except OSError:
+        return None
+    return found.st_mtime_ns, found.st_size, found.st_ino  # the inode too: a snapshot is replaced, never rewritten
