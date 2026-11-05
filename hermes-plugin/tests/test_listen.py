@@ -11,6 +11,7 @@ import support
 
 policy = support.module("policy")
 tools = support.module("tools")
+runtime = support.module("runtime")
 
 PROJECT = {"expected_project_key": "live:night-drive", "expected_epoch": "1"}
 
@@ -123,7 +124,7 @@ class Outcomes(unittest.TestCase):
                     self.assertEqual((result["cleanup"], result["hint"]), ("unsure", tools.UNSURE_HINT))
 
     def test_an_answer_past_the_runtimes_own_deadline_is_unsure_and_never_sent_again(self):
-        with mock.patch.object(tools, "TRACK_MARGIN", 0):  # the preview says 1 s; the answer takes 2 s
+        with mock.patch.object(runtime, "TRACK_MARGIN", 0):  # the preview says 1 s; the answer takes 2 s
             result, data = self.listen("--slow", "listen=2", "--listen-deadline", "1")
         self.assertEqual((result["state"], result["code"], result["cleanup"]), ("unsure", "timeout", "unsure"))
         self.assertEqual(result["hint"], tools.UNSURE_HINT)

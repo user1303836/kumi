@@ -43,9 +43,20 @@ LAUNCH_VARIABLES = frozenset({
 })
 MAX_LINE = 16 * 1024 * 1024  # the longest message the runtime may send; a longer line is skipped
 IDLE_AFTER = 15 * 60.0  # RESEARCH.md §3.1
-# How long a stop waits for the runtime to settle before ending it: within the 10 s Hermes's gateway gives a chat's
+# How long a stop waits for an idle runtime to exit before ending it: within the 10 s Hermes's gateway gives a chat's
 # finalization, with the terminate's own wait after it.
 STOP_WAIT = 5.0
+# A track listen waits for the runtime's own deadline, which its preview gives (`deadline_seconds`: capture or render,
+# restore and measure), plus a margin. CC-2's A2: a whole number of seconds from 1 to 360 (a 60 s window's offline
+# render with restoring and measuring); a preview without one isn't approved, and no deadline is ever guessed.
+TRACK_DEADLINE_MAX = 360
+TRACK_MARGIN = 30.0
+# How long a runtime stopped with work unsettled may take to settle it before it's ended: W1's bound for settling after
+# its stdin ends is the largest call's own (at most a track listen's 360 s; agent-s), then it closes the DAW (5 s at
+# most) and exits. A reaper waits, never the stop, which returns at once within Hermes's 10 s.
+SETTLE_WAIT = TRACK_DEADLINE_MAX + TRACK_MARGIN
+BUSY = ("Kumi's runtime is still stopping: it finishes what it was doing first (putting the project back after a "
+        "listen, say). Try again in a moment.")
 
 
 class Unavailable(Exception):
@@ -322,6 +333,10 @@ class Client:
         self._lock = threading.Lock()
         self._outbox: queue.Queue[bytes | None] = queue.Queue()
         self._gone: str | None = None
+        self._input_ended = False  # once true, nothing more is written: a request then is refused, never queued
+        # Requests given up on (timed out, and cancelled) whose answer hasn't come: cancelling isn't settling, so the
+        # runtime may still be at them (research-2). An answer, however late, or the runtime's end clears each.
+        self._abandoned: set[int] = set()
         self._on_notification = on_notification
         self._on_exit = on_exit
         self._exit_wait = exit_wait
@@ -344,11 +359,15 @@ class Client:
         with self._lock:
             if self._gone is not None:
                 raise Unavailable("not_running", f"{self._gone} Nothing was sent.")
+            if self._input_ended:
+                raise Unavailable("not_running", "Kumi's runtime is stopping. Nothing was sent.")
             ident = next(self._ids)
             self._pending[ident] = pending
             self._outbox.put(_line({"jsonrpc": "2.0", "id": ident, "method": method, "params": params or {}}))
         try:
             if not pending.done.wait(timeout):
+                with self._lock:
+                    self._abandoned.add(ident)
                 self.notify("notifications/cancelled", {"requestId": ident, "reason": "Hermes stopped waiting"})
                 raise Unavailable("timeout", f"Kumi didn't answer {method} within {timeout:g} s; it was cancelled, and "
                                              "what it did is unknown.")
@@ -363,13 +382,27 @@ class Client:
 
     def notify(self, method: str, params: dict | None = None) -> None:
         with self._lock:
-            if self._gone is None:
+            if self._gone is None and not self._input_ended:
                 self._outbox.put(_line({"jsonrpc": "2.0", "method": method, "params": params or {}}))
 
+    @property
+    def unsettled(self) -> bool:
+        """A request given up on (it timed out, and was cancelled) is still unanswered: the runtime may be at it."""
+        with self._lock:
+            return bool(self._abandoned)
+
+    def end_input(self) -> None:
+        """End the runtime's stdin once what's queued is written: it settles what's in flight, then exits. Nothing is
+        written after this."""
+        with self._lock:
+            if not self._input_ended:
+                self._input_ended = True
+                self._outbox.put(None)
+
     def close(self, timeout: float = STOP_WAIT) -> None:
-        """End the runtime's stdin once what's queued is written: it settles what's in flight and exits. One still
-        running after `timeout` seconds is terminated, then killed."""
-        self._outbox.put(None)
+        """End the runtime's stdin, and wait for it to exit. One still running after `timeout` seconds is terminated,
+        then killed."""
+        self.end_input()
         try:
             self._process.wait(timeout)
         except subprocess.TimeoutExpired:
@@ -416,6 +449,7 @@ class Client:
         if method is None:
             with self._lock:
                 pending = self._pending.get(message.get("id"))
+                self._abandoned.discard(message.get("id"))
             if pending is not None:
                 pending.result, pending.error = message.get("result"), message.get("error")
                 pending.done.set()
@@ -441,6 +475,7 @@ class Client:
         with self._lock:
             self._gone = reason
             waiting = list(self._pending.values())
+            self._abandoned.clear()
             self._outbox.put(None)
         for pending in waiting:
             if not pending.done.is_set():  # an answer read before the end stands
@@ -547,12 +582,14 @@ class Runtimes:
 
     def __init__(self, *, events: Callable[[str, dict], None] | None = None, spawn: Spawn = Client,
                  environ: Callable[[], Mapping[str, str]] = lambda: os.environ, start_timeout: float = 30.0,
-                 idle_after: float = IDLE_AFTER):
+                 idle_after: float = IDLE_AFTER, stop_wait: float = STOP_WAIT, settle_wait: float = SETTLE_WAIT):
         self._events = events
         self._spawn = spawn
         self._environ = environ
         self._start_timeout = start_timeout
         self._idle_after = idle_after
+        self._stop_wait = stop_wait
+        self._settle_wait = settle_wait
         self._lock = threading.Lock()  # the registry only: never held while a runtime starts or stops
         self._running: dict[Path, Runtime] = {}
         self._starting: dict[Path, threading.Lock] = {}
@@ -565,6 +602,23 @@ class Runtimes:
         with self._lock:
             runtime = self._running.get(data_dir.resolve())
         return runtime if runtime is not None and runtime.client.running and not runtime.closing else None
+
+    def settling(self, data_dir: Path) -> Runtime | None:
+        """The profile's runtime while it's stopping and settling what it was doing: it holds the profile till it
+        exits. A registry read; it never waits."""
+        with self._lock:
+            runtime = self._running.get(data_dir.resolve())
+        return runtime if runtime is not None and runtime.closing and not runtime.retired else None
+
+    def require(self, data_dir: Path) -> Runtime:
+        """The profile's running runtime, else Unavailable: `busy` while one is still stopping, else `not_connected`.
+        It never waits (the approval hook uses it)."""
+        live = self.get(data_dir)
+        if live is not None:
+            return live
+        if self.settling(data_dir) is not None:
+            raise Unavailable("busy", BUSY)
+        raise Unavailable("not_connected", "Kumi isn't connected to the DAW: call kumi_connect first.")
 
     def start(self, data_dir: Path, install: Install, daw: str, session_id: str | None, *, profile: str,
               library_roots: Iterable[str] = ()) -> Runtime:
@@ -582,6 +636,8 @@ class Runtimes:
                 if running.daw != daw:
                     raise Unavailable("other_daw", f"Kumi's runtime in this profile works in {running.daw}, not {daw}.")
                 return running
+            if self.settling(data_dir) is not None:  # stopping, it holds the profile until it exits
+                raise Unavailable("busy", BUSY)
             state = data_dir / "state"
             lock = StateLock(state / "runtime.lock")
             lock.acquire()
@@ -622,16 +678,35 @@ class Runtimes:
         self._emit("status.changed", {"seq": None, "profile": runtime.profile})
         return runtime
 
-    def stop(self, data_dir: Path, *, wait: float = STOP_WAIT) -> None:
+    def stop(self, data_dir: Path, *, wait: float | None = None) -> None:
+        """Stop the profile's runtime: its stdin ends, and it settles what it was doing, then exits. An idle one is
+        waited for (`wait`, else the stop wait), then ended. One with a call in flight, or a call whose answer was
+        lost, may take minutes to settle (a cancelled render puts the project back), so the stop returns at once,
+        within Hermes's 10 s for a chat's end, says so (status.changed, settling), and a reaper waits up to the settle
+        wait before ending it; the profile stays held until it has exited."""
         key = data_dir.resolve()
         with self._lock:
             runtime = self._running.get(key)
             if key in self._pending:
                 self._cancelled.add(key)
-        if runtime is not None:
-            runtime.closing = True
-            runtime.client.close(timeout=wait)
-            self._retire(runtime)
+        if runtime is None:
+            return
+        with runtime._lock:
+            stopping, runtime.closing = runtime.closing, True
+            settling = runtime.in_flight > 0 or runtime.client.unsettled
+        if stopping:  # another stop, or the idle watch, is already ending it
+            return
+        if settling:
+            runtime.client.end_input()
+            self._emit("status.changed", {"seq": None, "profile": runtime.profile, "settling": True})
+            _thread(self._settle, "kumi-runtime-settling", runtime).start()
+            return
+        runtime.client.close(timeout=self._stop_wait if wait is None else wait)
+        self._retire(runtime)
+
+    def _settle(self, runtime: Runtime) -> None:
+        runtime.client.close(timeout=self._settle_wait)
+        self._retire(runtime)
 
     def stop_session(self, session_id: str | None) -> None:
         """Stop the runtimes `session_id` owns (its chat ended), a start of its own under way included."""
@@ -662,7 +737,7 @@ class Runtimes:
             for runtime in runtimes:
                 if runtime.close_if_idle(self._idle_after, time.monotonic()):
                     log.info("Kumi's runtime for %s was idle for %g s: stopping it", runtime.data_dir, self._idle_after)
-                    runtime.client.close(timeout=STOP_WAIT)
+                    runtime.client.close(timeout=self._stop_wait)
                     self._retire(runtime)
 
     def _handshake(self, runtime: Runtime) -> dict:
