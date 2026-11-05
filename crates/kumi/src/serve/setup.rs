@@ -1,8 +1,9 @@
 //! `setup_daw` (C8): Kumi's part in the runtime's DAW for its Kumi home (`--kumi-home`), as the host's setup puts it
-//! there. A dry run reads what's there and plans the step, writing nothing at all (not even the lease's file); a real
-//! one takes the DAW endpoint's lease and carries out that plan, which the DAW's crate makes again under the lease. It
-//! refuses rather than overwrite another Kumi's part, downgrade a newer one, or write into an adopted installation; it
-//! never asks, never waits for the DAW, neither starts nor quits it, and needs no connection to it.
+//! there. A dry run reads what's there and plans the step, writing nothing at all (not even the lease's file), and gives
+//! the plan's `digest`; a real one takes the DAW endpoint's lease and carries out the plan the DAW's crate makes again
+//! under the lease, only if it's still the one approved (`expected`, that digest). It refuses rather than overwrite
+//! another Kumi's part, downgrade a newer one, or write into an adopted installation; it never asks, never waits for
+//! the DAW, neither starts nor quits it, and needs no connection to it.
 //!
 //! Its effect is `Setup`, which isn't one of the adapter's writes: those record the call in flight and audit a broken
 //! one in a project's HISTORY, and setup has no project. So it takes the lease itself, for a real install only.
@@ -11,14 +12,16 @@ use kumi_daw::component::{ApplyError, ComponentPlan, PartState};
 use kumi_daw::io::DawIo;
 use kumi_daw::process::Run;
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
 pub static SETUP_DAW: Operation = Operation {
     name: "setup_daw",
     description: "Kumi's part in this runtime's DAW (Live's Remote Script with Kumi Ears, REAPER's extension, Renoise's tool), as \
                   the host's setup puts it there: with dry_run, what's there and what putting it in would write, every path \
-                  named; without, that plan carried out. It never asks, waits for, starts or quits the DAW, and leaves another \
-                  Kumi's part, a newer one and an adopted installation as they are.",
+                  named, and the plan's digest; without, that plan carried out (refused when it isn't the expected digest's \
+                  any more). It never asks, waits for, starts or quits the DAW, and leaves another Kumi's part, a newer one \
+                  and an adopted installation as they are.",
     schema,
     effect,
     run,
@@ -30,6 +33,7 @@ fn schema() -> Value {
         "properties": {
             "daw": {"enum": ["ableton", "reaper", "renoise"]},
             "dry_run": {"type": "boolean"},
+            "expected": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         },
         "required": ["daw", "dry_run"],
         "additionalProperties": false,
@@ -81,6 +85,12 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         }
         let _held = ctx.lease().take(&call.host).await?;
         let plan = provider.component_plan(&io, &home).map_err(failed)?;
+        if call.args.get("expected").and_then(Value::as_str).is_some_and(|expected| expected != digest(&plan)) {
+            let reason = format!(
+                "What's in {app} changed since this step was approved, so nothing was installed: plan it again and approve what it shows now."
+            );
+            return Err(OpError::Refused { code: "changed", reason, owner: None });
+        }
         match plan.state {
             PartState::OtherOwner => {
                 let reason = format!(
@@ -131,8 +141,15 @@ fn fix(ctx: &Ctx) -> String {
     format!("{} --daw {} bridge", *kumi_types::command::KUMI, ctx.daw().as_str())
 }
 
-/// The result C8 gives: the plan as the host shows it. In an adopted installation it writes nothing, so it names no
-/// path, and says what does instead.
+/// The plan's digest, over what the producer approves of it: how it stands, the version, every path it writes and each
+/// part. A real install refuses a plan whose digest isn't the one approved (C8: changed targets need a new approval).
+fn digest(plan: &ComponentPlan) -> String {
+    let approved = json!({"state": plan.state, "version": plan.version, "paths": plan.paths, "parts": plan.parts});
+    hex::encode(Sha256::digest(approved.to_string()))
+}
+
+/// The result C8 gives: the plan as the host shows it, with its digest. In an adopted installation it writes nothing,
+/// so it names no path, and says what does instead.
 fn reply(ctx: &Ctx, app: &str, plan: &ComponentPlan, adopted: bool, installed_at: Option<i64>) -> Value {
     let (paths, effects, after) = match adopted {
         false => (plan.paths.clone(), plan.effects.clone(), plan.after),
@@ -157,6 +174,7 @@ fn reply(ctx: &Ctx, app: &str, plan: &ComponentPlan, adopted: bool, installed_at
         "after": after,
         "parts": plan.parts,
         "keep_identity": plan.keep_identity,
+        "digest": digest(plan),
     });
     if let Some(at) = installed_at {
         reply["installed_at"] = json!(at);

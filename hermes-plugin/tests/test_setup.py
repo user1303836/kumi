@@ -273,6 +273,7 @@ class SetupTest(unittest.TestCase):
             "a component name with an escape": {"component": "Remote Script\x1b[31m"},
             "a path longer than any path": {"paths": [str(FAKE_LIBRARY / ("x" * 1025))]},
             "more lines than an approval holds": {"effects": [f"Step {n}" for n in range(setup._MAX_LINES)]},
+            "a digest that isn't one": {"digest": "not a digest"},
         })
         for name, reply in replies.items():
             with self.subTest(name):
@@ -366,6 +367,15 @@ class SetupTest(unittest.TestCase):
         self.assertEqual((state["state"], state["next_step"]), ("ready", "choose_control_surface"))
         self.assertEqual(state["daw_component"]["version"], "1.0.105")
         self.assertEqual(self.plan(setup_daw=Runtime("same"))["step"], "none")
+
+    def test_the_runtime_installs_only_the_daw_step_that_was_approved(self) -> None:
+        self.install_runtime()
+        approved = "a1" * 32
+        runtime = Runtime(digest=approved)
+        self.plan(setup_daw=runtime)
+        self.assertTrue(self.install(Served(b""), setup_daw=runtime)["ok"])
+        self.assertEqual(runtime.calls[-1], {"daw": "ableton", "dry_run": False, "expected": approved},
+                         "the runtime plans again under the DAW's lease and refuses one that isn't this digest's")
 
     def test_a_component_another_kumi_owns_is_never_overwritten(self) -> None:
         self.install_runtime()

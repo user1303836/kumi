@@ -107,6 +107,12 @@ pub struct Own {
 #[derive(Clone)]
 pub struct OwnHosts(pub Rc<dyn Fn(DawId) -> crate::bridge::Connect>);
 
+/// The folder a release lays its DAW components out in (`daws/<daw>/…`), for an agent host's setup (`setup_daw`), in
+/// place of the folder Kumi's runtime runs from: a test's bundle. Setup takes a component from a release's layout
+/// only, never a checkout's build.
+#[derive(Clone)]
+pub struct CarriedBy(pub PathBuf);
+
 pub(crate) fn kumi_home(env: &Env) -> PathBuf {
     PathBuf::from(kumi_daw::io::kumi_home(env))
 }
@@ -770,16 +776,25 @@ impl DawProvider for Own {
         kumi_agent::integrations::none::create_no_daw_integration(*self.profile, self.instructions, on_connection)
     }
     fn component_plan(&self, io: &DawIo, home: &Path) -> Result<ComponentPlan, String> {
-        self.look(&io.env, home).map(|look| look.plan)
+        self.look(io, home).map(|look| look.plan)
     }
     fn component_apply<'a>(&'a self, io: &'a DawIo, home: &'a Path, plan: &'a ComponentPlan) -> LocalBoxFuture<'a, Result<(), ApplyError>> {
         async move {
-            let look = self.look(&io.env, home).map_err(ApplyError::Failed)?;
+            let look = self.look(io, home).map_err(ApplyError::Failed)?;
             if look.plan != *plan {
                 return Err(ApplyError::Changed(format!("What's in {} changed since setup looked: plan the step again.", self.name())));
             }
             if plan.paths.is_empty() {
                 return Ok(());
+            }
+            // Windows won't let a file the DAW holds open be replaced: said before anything is touched.
+            if let Some(held) = look.replaced.iter().find(|copy| held(copy)) {
+                let app = self.name();
+                return Err(ApplyError::InUse(format!(
+                    "{app} has {} open ({}), so it can't be replaced while {app} runs: quit {app}, then set Kumi up for {app} again.",
+                    self.bridge,
+                    held.display()
+                )));
             }
             self.put(look.life, &look.source, false)
                 .map(|_| ())
@@ -794,14 +809,50 @@ struct Look {
     plan: ComponentPlan,
     source: PathBuf,
     life: Lifecycle,
+    /// The copies of this home's it replaces, which the DAW mustn't have open.
+    replaced: Vec<PathBuf>,
+}
+
+/// Whether the DAW holds the file at `path` (or one in the folder there) open so that it can't be replaced: Windows
+/// refuses a file another program has open without sharing (a loaded DLL). Elsewhere a file can always be replaced.
+#[cfg(windows)]
+fn held(path: &Path) -> bool {
+    use std::os::windows::fs::OpenOptionsExt;
+    const SHARING_VIOLATION: i32 = 32;
+    let mut files = vec![path.to_path_buf()];
+    while let Some(file) = files.pop() {
+        if file.is_dir() {
+            files.extend(std::fs::read_dir(&file).into_iter().flatten().flatten().map(|entry| entry.path()));
+        } else if let Err(error) = std::fs::OpenOptions::new().read(true).write(true).share_mode(0).open(&file) {
+            if error.raw_os_error() == Some(SHARING_VIOLATION) {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+#[cfg(not(windows))]
+fn held(_: &Path) -> bool {
+    false
 }
 
 impl Own {
-    /// Kumi's part in the DAW for the Kumi home `home` (C8's `setup_daw`): this Kumi's bridge at the target detection
-    /// finds, with each other copy of Kumi's the lifecycle brings along. The copy there is this home's when its receipt
-    /// put it there (as connect takes it), or its reference names this home; any other stays as it is.
-    fn look(&self, env: &Env, home: &Path) -> Result<Look, String> {
-        let source = self.bundled_source().ok_or_else(|| format!("this Kumi doesn't carry {} for {}", self.bridge, self.name()))?;
+    /// Kumi's part in the DAW for the Kumi home `home` (C8's `setup_daw`): this runtime's own bundled bridge (a release
+    /// lays it out in `daws/<daw>/` beside Kumi; never a checkout's build) at the target detection finds, with each other
+    /// copy of this home's the lifecycle brings along. The copy there is this home's when its receipt put it there (as
+    /// connect takes it), or its reference names this home; any other stays as it is, and so does any copy of this
+    /// home's newer than this Kumi's.
+    fn look(&self, io: &DawIo, home: &Path) -> Result<Look, String> {
+        let env = &io.env;
+        let beside = match io.answers.get::<CarriedBy>() {
+            Some(carried) => Some(carried.0.clone()),
+            None => std::env::current_exe().ok().and_then(|exe| exe.parent().map(Path::to_path_buf)),
+        };
+        let source = beside
+            .as_deref()
+            .and_then(|beside| self.carried_by(beside))
+            .ok_or_else(|| format!("this Kumi runtime doesn't carry {} for {}: set up Kumi's runtime again", self.bridge, self.name()))?;
         let target = self.target(env)?;
         if let Some(why) = (self.unloadable)(self, env, &source) {
             return Err(why);
@@ -812,8 +863,7 @@ impl Own {
             _ => "DAW component",
         };
         let bundled = self.version_of(&source);
-        let path = target.path();
-        let reference = target.reference.clone();
+        let (path, reference, dir) = (target.path(), target.reference.clone(), target.dir.clone());
         let life = Lifecycle::new(home, target).with_elsewhere((self.elsewhere)(env));
         let receipt = life.receipt().map_err(|why| why.to_string())?.filter(|receipt| receipt.status == "installed");
         let there = std::fs::symlink_metadata(&path).is_ok();
@@ -821,12 +871,25 @@ impl Own {
         let owner = if there && !placed_here { reference_owner(&reference, self.daw) } else { None };
         let theirs = there && !placed_here && !owner.as_deref().is_some_and(|owner| same_folder(Path::new(owner), home));
         let planned = life.plan(&source).map_err(|why| why.to_string())?;
-        let installed = receipt.as_ref().filter(|_| placed_here).and_then(|receipt| receipt.version.clone());
-        let state = match (&installed, &bundled) {
+        // The version of the copy there: its receipt's, else (a copy of this home's whose receipt is gone, or that the
+        // DAW copied into a newer folder of its own) its own files'.
+        let installed = match receipt.as_ref().filter(|_| placed_here) {
+            Some(receipt) => receipt.version.clone(),
+            None if there && !theirs => self.version_of(&path),
+            None => None,
+        };
+        let newer_than_ours = |version: &str| bundled.as_deref().is_some_and(|bundled| kumi_daw::provider::newer(version, bundled));
+        // Never a downgrade: another copy of this home's it would replace that says it's newer than this Kumi's.
+        let newer_copy =
+            planned.replaced.iter().filter(|copy| **copy != path).find_map(|copy| self.version_of(copy).filter(|v| newer_than_ours(v)));
+        let state = match &installed {
             _ if theirs => PartState::OtherOwner,
-            _ if !there => PartState::Missing,
             _ if planned.in_place => PartState::Same,
-            (Some(installed), Some(bundled)) if kumi_daw::provider::newer(installed, bundled) => PartState::Newer,
+            _ if newer_copy.is_some() => PartState::Newer,
+            _ if !there => PartState::Missing,
+            Some(installed) if newer_than_ours(installed) => PartState::Newer,
+            // Older only when known: a copy with no receipt that doesn't say its version may be newer, and stays.
+            None if !placed_here => PartState::Newer,
             _ => PartState::Older,
         };
         let (name, shown) = (self.name(), path.display().to_string());
@@ -835,7 +898,12 @@ impl Own {
         let (mut paths, mut effects) = (vec![], vec![]);
         match state {
             PartState::Missing | PartState::Older => {
+                let replaces = planned.writes.contains(&path);
                 effects.push(match (state, &installed) {
+                    _ if !replaces => format!(
+                        "Put back what {} needs to reach Kumi's runtime (where it finds it, and its secret); {} itself stays as it is",
+                        self.bridge, self.bridge
+                    ),
                     (PartState::Older, Some(installed)) => format!(
                         "Update {} in {name} ({shown}) from {installed} to {version}; the one it replaces is kept in {} to go back to",
                         self.bridge,
@@ -845,21 +913,41 @@ impl Own {
                     _ => format!("Put {} {version} in {name}: {shown}", self.bridge),
                 });
                 for written in planned.writes.iter().filter(|written| **written != path) {
-                    effects.push(if *written == reference {
-                        format!("Write where it finds Kumi's runtime (never the secret itself): {}", written.display())
+                    effects.push(if planned.replaced.contains(written) {
+                        format!("Bring this Kumi's copy there up to date too: {}", written.display())
                     } else {
-                        format!("Bring Kumi's copy there up to date too: {}", written.display())
+                        format!("Write where it finds Kumi's runtime (never the secret itself): {}", written.display())
                     });
                 }
+                if replaces || !planned.replaced.is_empty() {
+                    effects.push(format!(
+                        "Each copy goes in through a temporary copy beside it ({}), removed when it's done",
+                        dir.join(format!(".{}.kumi-new-…", path.file_name().unwrap_or_default().to_string_lossy())).display()
+                    ));
+                }
+                for leftover in &planned.leftovers {
+                    effects.push(format!("Remove what an interrupted install left: {}", leftover.display()));
+                }
                 effects.push(format!("Keep its secret, its receipt and the versions it can go back to in {}", ours.display()));
-                paths.extend(planned.writes.iter().map(|written| written.display().to_string()));
+                paths.extend(planned.writes.iter().chain(&planned.leftovers).map(|written| written.display().to_string()));
                 paths.push(ours.display().to_string());
             }
-            PartState::Newer => effects.push(format!(
-                "{} in {name} ({shown}) is {}, newer than this Kumi's {version}: it stays as it is. Update Kumi for Hermes to match it",
-                self.bridge,
-                installed.as_deref().unwrap_or("newer")
-            )),
+            PartState::Newer => effects.push(match (&installed, &newer_copy) {
+                (_, Some(copy)) => format!(
+                    "A copy of {} in {name} is {copy}, newer than this Kumi's {version}: it stays as it is. Update Kumi for Hermes to match it",
+                    self.bridge
+                ),
+                (Some(installed), None) => format!(
+                    "{} in {name} ({shown}) is {installed}, newer than this Kumi's {version}: it stays as it is. Update Kumi for Hermes to match it",
+                    self.bridge
+                ),
+                (None, None) => format!(
+                    "{} in {name} ({shown}) has no receipt and doesn't say its version, so it stays as it is: run {} --daw {} bridge to replace it",
+                    self.bridge,
+                    *kumi_types::command::KUMI,
+                    self.id.as_str()
+                ),
+            }),
             PartState::OtherOwner => effects.push(match &owner {
                 Some(owner) => format!("{} in {name} ({shown}) belongs to the Kumi at {owner}: it stays as it is", self.bridge),
                 None => format!("The copy in {name} at {shown} doesn't say which Kumi it belongs to: it stays as it is"),
@@ -867,14 +955,15 @@ impl Own {
             PartState::Same => {}
         }
         let version = match state {
-            PartState::Newer | PartState::OtherOwner => installed.clone(),
+            PartState::Newer => newer_copy.clone().or(installed.clone()),
+            PartState::OtherOwner => installed.clone(),
             _ => bundled.clone(),
         };
         let after = if paths.is_empty() { After::None } else { After::RestartDaw };
         let parts = vec![Part { name: component, path: shown, state }];
         let owner = owner.filter(|_| state == PartState::OtherOwner);
         let plan = ComponentPlan { component, version, state, owner, paths, effects, after, parts, keep_identity: false };
-        Ok(Look { plan, source, life })
+        Ok(Look { plan, source, life, replaced: planned.replaced })
     }
 }
 

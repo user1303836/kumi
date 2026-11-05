@@ -336,11 +336,17 @@ pub struct Status {
 /// What an install would do ([`Lifecycle::plan`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Planned {
-    /// The copy in place is this one already, and so is every other copy of Kumi's: nothing changes.
+    /// The copy in place is this one already, with its reference and Kumi's secret as they should be, and every other
+    /// copy of this home's is this one too: nothing changes.
     pub in_place: bool,
-    /// Each file or folder it writes in the DAW's folders, whole: the target, its reference, and each other copy of
-    /// Kumi's it brings along with that copy's reference.
+    /// Each file or folder it writes in the DAW's folders, whole: the target (unless it's this one already), its
+    /// reference, and each other copy of this home's it brings along with that copy's reference.
     pub writes: Vec<PathBuf>,
+    /// The copies of this home's it replaces: the target when it's there and isn't this one, and each other copy it
+    /// brings along. Their versions are for the caller to check first (never a downgrade).
+    pub replaced: Vec<PathBuf>,
+    /// What an interrupted action left that it removes first ([`Lifecycle::leftovers`]).
+    pub leftovers: Vec<PathBuf>,
 }
 
 /// One DAW's bridge lifecycle, over Kumi's folder for it.
@@ -375,8 +381,8 @@ impl Lifecycle {
         Ok(self.others(Some(&receipt)).into_iter().find(|other| tree_sha256(&other.path()).is_ok_and(|sha| ours.contains(&sha))))
     }
 
-    /// Every other place there may be a copy of Kumi's bridge, besides the target: the receipt's copies, its target when
-    /// that was elsewhere, and the places given; each once.
+    /// Every other place there may be a copy of this home's bridge, besides the target: the receipt's copies, its target
+    /// when that was elsewhere, and the places given; each once, and only where the copy's reference names this home.
     fn others(&self, receipt: Option<&Receipt>) -> Vec<Target> {
         let here = self.target.path();
         let mut others: Vec<Target> = vec![];
@@ -392,6 +398,7 @@ impl Lifecycle {
                 others.push(target);
             }
         }
+        others.retain(|other| self.owned_here(other));
         others
     }
 
@@ -647,7 +654,8 @@ impl Lifecycle {
     }
 
     /// Brings each other copy that's still Kumi's (one of `ours`) to `generation` (whose hash is `sha`): the copies kept,
-    /// each now holding it. One gone, or one the producer changed since, is left as it is and no longer counted.
+    /// each now holding it. One gone, or one the producer changed since, is left as it is and no longer counted; so is
+    /// one that isn't this home's (`others` holds only this home's).
     fn follow_copies(&self, others: &[Target], generation: &str, sha: &str, ours: &[String]) -> Result<Vec<Copy>, LifecycleError> {
         let mut copies = vec![];
         for other in others {
@@ -662,6 +670,39 @@ impl Lifecycle {
             copies.push(other.copy());
         }
         Ok(copies)
+    }
+
+    /// Whether the copy at `at` is this home's: the reference beside it names this home's secret. Another Kumi home's
+    /// copy (its reference names that home's), or one whose reference is gone, is never followed, replaced or removed,
+    /// whatever its files: an equal payload isn't ownership.
+    fn owned_here(&self, at: &Target) -> bool {
+        Reference::read(&at.reference).is_ok_and(|reference| Path::new(&reference.secret_file) == self.paths.secret())
+    }
+
+    /// What [`recover`](Self::recover) removes before an action, found without removing anything: an interrupted
+    /// action's leftovers (its journal's), old copies a running DAW held (`<name>.kumi-old-*` beside the target), and
+    /// Kumi's folder made aside and never put in place.
+    pub fn leftovers(&self) -> Vec<PathBuf> {
+        let there = |path: &Path| std::fs::symlink_metadata(path).is_ok();
+        let mut found: Vec<PathBuf> = std::fs::read_to_string(self.paths.journal())
+            .ok()
+            .and_then(|text| serde_json::from_str::<Journal>(&text).ok())
+            .map(|journal| journal.leftovers.into_iter().map(PathBuf::from).filter(|path| there(path)).collect())
+            .unwrap_or_default();
+        let mut named = |dir: &Path, prefix: &str| {
+            if let Ok(entries) = std::fs::read_dir(dir) {
+                found.extend(
+                    entries.flatten().filter(|entry| entry.file_name().to_string_lossy().starts_with(prefix)).map(|entry| entry.path()),
+                );
+            }
+        };
+        named(&self.target.dir, &format!("{}.kumi-old-", self.target.name));
+        if let (Some(parent), Some(name)) = (self.paths.root.parent(), self.paths.root.file_name()) {
+            named(parent, &format!(".{}.tmp-", name.to_string_lossy()));
+        }
+        found.sort();
+        found.dedup();
+        found
     }
 
     fn prune(&self, receipt: &Receipt) {
@@ -709,10 +750,14 @@ impl Lifecycle {
         let in_place =
             before.as_ref().is_some_and(|before| before.target == here.to_string_lossy() && before.sha256.as_deref() == Some(sha.as_str()))
                 && tree_sha256(&here).ok().as_deref() == Some(sha.as_str());
-        if in_place && !others.iter().any(behind) {
-            return Ok(Planned { in_place: true, writes: vec![] });
+        // What the bridge needs beside its files to reach Kumi: `put` writes them even when the copy is in place.
+        let ready = Reference::read(&self.target.reference)
+            .is_ok_and(|reference| reference == Reference::new(self.target.daw, &self.paths))
+            && crate::files::read_secret(&self.paths.secret()).is_ok();
+        if in_place && ready && !others.iter().any(behind) {
+            return Ok(Planned { in_place: true, writes: vec![], replaced: vec![], leftovers: vec![] });
         }
-        let mut writes = vec![];
+        let (mut writes, mut replaced) = (vec![], vec![]);
         let mut add = |path: PathBuf| {
             if !writes.iter().any(|written: &PathBuf| path.starts_with(written)) {
                 writes.push(path);
@@ -720,21 +765,25 @@ impl Lifecycle {
         };
         if !in_place {
             add(here.clone());
+            if std::fs::symlink_metadata(&here).is_ok() {
+                replaced.push(here.clone());
+            }
         }
         add(self.target.reference.clone());
-        // As `follow_copies` does: each other copy that's this one already gets its reference; one that's an earlier
-        // copy of Kumi's is replaced; any other is left as it is.
+        // As `follow_copies` does, over this home's copies only: each one that's this one already gets its reference;
+        // one that's an earlier copy of Kumi's is replaced; any other is left as it is.
         for other in &others {
             match found(other) {
                 Some(found) if found == sha => add(other.reference.clone()),
                 Some(_) if behind(other) => {
                     add(other.path());
                     add(other.reference.clone());
+                    replaced.push(other.path());
                 }
                 _ => {}
             }
         }
-        Ok(Planned { in_place: false, writes })
+        Ok(Planned { in_place: false, writes, replaced, leftovers: self.leftovers() })
     }
 
     /// Installs `source` (the bridge's file or folder) as `version`, or upgrades to it when installed already: the

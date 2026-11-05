@@ -33,7 +33,11 @@ const IN_USE: &str =
 #[derive(Debug, Clone, PartialEq)]
 struct Look {
     home: String,
+    /// The Remote Scripts folder: the installed bridge's receipt's when it's this home's, else Live's (as the env says).
     scripts: String,
+    /// The state folder, secret and Remote Scripts folder this home's installed bridge's receipt names (`owner_paths`):
+    /// an update writes there, wherever that is (an earlier install's own folder, say).
+    owned: Option<(String, String, String)>,
     /// The bridge's configuration, when Live has Kumi's Remote Script with a reference to one.
     config: Option<String>,
     /// The version of the bridge it starts, when it says one.
@@ -62,6 +66,11 @@ impl Look {
         let ours = owner.as_deref().is_some_and(|owner| same_folder(Path::new(owner), home));
         let installed = server.as_ref().and_then(|server| server.version.clone());
         let native = server.as_ref().is_some_and(|server| server.native());
+        let package = server.as_ref().and_then(|server| server.package_root());
+        let owned = (config.as_deref().zip(package.as_deref()))
+            .filter(|_| ours)
+            .and_then(|(config, package)| owner_paths(config, package, &home.display().to_string()));
+        let scripts = owned.as_ref().map(|(_, _, scripts)| scripts.clone()).unwrap_or(scripts);
         let script = match (&config, &installed) {
             // A Remote Script with no reference to a bridge says nothing of whose it is: it stays.
             (None, _) if Path::new(&join(&scripts, FOLDER)).exists() => PartState::OtherOwner,
@@ -74,9 +83,12 @@ impl Look {
         let parent = dirname(&scripts);
         let library =
             (Path::new(&scripts).file_name().is_some_and(|name| name == "Remote Scripts") && Path::new(&parent).is_dir()).then_some(parent);
+        // Kumi Ears follows the Remote Script's owner: one that isn't this Kumi's, with no Remote Script of this home's
+        // to say it is, is another Kumi's device (perhaps a newer one), and stays.
         let ears = match library.as_deref().map(|library| std::fs::read(ears_path(library))) {
             Some(Ok(bytes)) if bytes == ears_file() => PartState::Same,
-            Some(Ok(_)) => PartState::Older,
+            Some(Ok(_)) if matches!(script, PartState::Same | PartState::Older) => PartState::Older,
+            Some(Ok(_)) => PartState::OtherOwner,
             _ => PartState::Missing,
         };
         let earlier_ears = library.as_deref().map(|library| join(library, &format!("Kumi/{EARS_NAME}.amxd"))).filter(|earlier| {
@@ -91,6 +103,7 @@ impl Look {
         let look = Look {
             home: home.display().to_string(),
             scripts,
+            owned,
             config,
             installed,
             owner,
@@ -135,6 +148,16 @@ impl Look {
         join(&self.scripts, FOLDER)
     }
 
+    /// The state folder an install or update of the bridge writes (its configuration, secret, receipt and journal): the
+    /// receipt's, else the configuration's own folder, else `<home>/bridge/state` for a new one.
+    fn state_dir(&self) -> String {
+        match (&self.owned, &self.config) {
+            (Some((state, _, _)), _) => state.clone(),
+            (None, Some(config)) => dirname(config),
+            (None, None) => join(&self.home, "bridge/state"),
+        }
+    }
+
     fn plan(&self) -> ComponentPlan {
         let (script, bridge) = (self.script_path(), join(&self.home, "bridge"));
         let installed = self.installed.as_deref().unwrap_or("an earlier version");
@@ -157,11 +180,11 @@ impl Look {
             }
             PartState::Older => {
                 effects.push(format!(
-                    "Update Kumi's Remote Script for Live in {script} from {installed} to {}; the one it replaces is kept in {bridge} to go back to",
+                    "Update Kumi's Remote Script for Live in {script} from {installed} to {}, with the bridge it starts in {bridge}; the bridge keeps the one it replaces to go back to",
                     self.bundled
                 ));
                 effects.push(CLOSED.into());
-                paths.extend([script.clone(), bridge]);
+                paths.extend([script.clone(), bridge.clone()]);
             }
             PartState::Newer => effects.push(format!(
                 "Kumi's Remote Script in {script} is {installed}, newer than this Kumi's {}: it stays as it is. Update Kumi for Hermes to match it",
@@ -172,6 +195,18 @@ impl Look {
                 None => format!("The Remote Script in {script} doesn't say which Kumi it belongs to: it stays as it is"),
             }),
             PartState::Same => {}
+        }
+        if self.script_writes() {
+            // The bridge's lifecycle writes its configuration, secret, receipt and journal in the state folder, and the
+            // configuration where it is: named too when that isn't in this home's bridge folder (an earlier install's).
+            let mut others: Vec<String> = vec![self.state_dir()];
+            others.extend(self.config.as_deref().map(dirname));
+            for folder in others {
+                if !paths.iter().any(|path| Path::new(&folder).starts_with(path)) {
+                    effects.push(format!("Update the bridge's settings, secret and receipt where this installation keeps them: {folder}"));
+                    paths.push(folder);
+                }
+            }
         }
         let ears = self.library.as_deref().map(ears_path);
         if self.ears_writes() {
@@ -185,6 +220,8 @@ impl Look {
                 effects.push(format!("Remove the earlier copy of Kumi Ears at {earlier}"));
                 paths.push(earlier.clone());
             }
+        } else if self.script == PartState::Missing && self.ears == PartState::OtherOwner {
+            effects.push(format!("The Kumi Ears at {} isn't this Kumi's copy: it stays as it is", ears.clone().unwrap_or_default()));
         }
         let mut parts = vec![Part { name: SCRIPT, path: script, state: self.script }];
         parts.extend(ears.map(|path| Part { name: EARS, path, state: self.ears }));
@@ -236,9 +273,15 @@ pub async fn apply(io: &DawIo, home: &Path, plan: &ComponentPlan) -> Result<(), 
     }
     if look.ears_writes() {
         let library = look.library.as_deref().unwrap_or_default();
-        install_ears(library)
-            .await
-            .map_err(|error| ApplyError::Failed(format!("Kumi couldn't put Kumi Ears in your User Library: {error}")))?;
+        install_ears(library).await.map_err(|error| {
+            ApplyError::Failed(match look.script_writes() {
+                // Each part goes in whole or not at all: the next setup puts in the one that's missing.
+                true => {
+                    format!("Kumi's Remote Script for Live is in, but Kumi Ears isn't ({error}): set Kumi up for Live again to add it.")
+                }
+                false => format!("Kumi couldn't put Kumi Ears in your User Library: {error}"),
+            })
+        })?;
     }
     Ok(())
 }
@@ -281,12 +324,8 @@ async fn put_script(io: &DawIo, look: &Look) -> Result<(), ApplyError> {
     }
     unpack_into(&folder, &name, ".").map_err(|why| failed(format!("Unpacking the bridge failed: {why}")))?;
     let root = join(&folder, "package");
-    let server = read_bridge_server_of(look);
-    let owned = look.config.as_deref().zip(server.as_deref()).and_then(|(config, package)| owner_paths(config, package, &look.home));
-    let (state, secret, scripts) = match owned {
-        Some((state, secret, scripts)) => (state, Some(secret), scripts),
-        None => (look.config.as_deref().map(dirname).unwrap_or_else(|| join(&look.home, "bridge/state")), None, look.scripts.clone()),
-    };
+    // The receipt's own folders when there's one, as the plan named them.
+    let (state, secret, scripts) = (look.state_dir(), look.owned.as_ref().map(|(_, secret, _)| secret.clone()), look.scripts.clone());
     let action = if look.config.is_some() { "upgrade" } else { "install" };
     let lifecycle = |apply: bool| {
         let mut args: Vec<String> =
@@ -314,9 +353,4 @@ async fn put_script(io: &DawIo, look: &Look) -> Result<(), ApplyError> {
         .map_err(|why| failed(format!("The bridge's installer stopped, and put back what was there: {why}")))?;
     unfinished.keep();
     Ok(())
-}
-
-/// The package the installed bridge starts from, when Live has one.
-fn read_bridge_server_of(look: &Look) -> Option<String> {
-    look.config.as_deref().and_then(|config| read_bridge_server(config).ok()).and_then(|server| server.package_root())
 }
