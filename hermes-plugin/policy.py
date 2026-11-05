@@ -83,11 +83,16 @@ def preview_timeout(hook_timeout: float | None) -> float:
     return min(PREVIEW_TIMEOUT, hook_timeout / 2)
 
 
+_JOINERS = {"\u200c", "\u200d"}  # format characters words need: ZWNJ (Persian, Indic) and ZWJ (emoji, scripts)
+
+
 def one_line(text: Any, limit: int = LINE) -> str:
     """`text` as one line of at most `limit` characters: no line breaks, control characters, or invisible format
-    characters (zero-width, direction overrides, Unicode tags), so model- or project-written text can neither push the
-    runtime's own words out of an approval nor say something a person reading it can't see."""
-    visible = "".join(char for char in _CONTROL.sub(" ", str(text)) if unicodedata.category(char) != "Cf")
+    characters (zero-width spaces, direction overrides, Unicode tags; the two joiners words need stay), so model- or
+    project-written text can neither push the runtime's own words out of an approval nor say something a person
+    reading it can't see."""
+    visible = "".join(char for char in _CONTROL.sub(" ", str(text))
+                      if char in _JOINERS or unicodedata.category(char) != "Cf")
     line = " ".join(visible.split())
     return line if len(line) <= limit else line[:limit - 1].rstrip() + "…"
 

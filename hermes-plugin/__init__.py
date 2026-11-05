@@ -48,6 +48,7 @@ def register(ctx) -> None:
     ctx.register_hook("post_approval_response", approval_outcome)
     ctx.register_hook("post_tool_call", call_ended)
     ctx.register_hook("pre_llm_call", focus)
+    ctx.register_hook("post_compaction", context.post_compaction)
     ctx.register_hook("on_session_finalize", host.on_session_finalize)
     ctx.register_command("kumi", kumi_command, description=commands.DESCRIPTION)
     commands.register_cli(ctx, host)

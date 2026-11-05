@@ -172,11 +172,12 @@ class Fixture:
                 "owner": self.owner, "capabilities": ["observe", "read", "change", "undo", "history"]}
 
     def focus(self) -> dict:
-        """focus.json as kumi serve writes it (CC-7): `project` with `seen_at`, `focus` a DawFocus, `transport` without
-        a clock, and `catch_up` CatchUp entries ({set, lastSeenAt, lines, more, afterReconnect?}), camelCase."""
+        """focus.json as kumi serve writes it (CC-7): `project` with its epoch as a number (W1's u64) and `seen_at`,
+        `focus` a DawFocus, `transport` without a clock, and `catch_up` CatchUp entries ({set, lastSeenAt, lines, more,
+        afterReconnect?}), camelCase."""
         drums = self.set["tracks"][0]
         project = self.project()
-        return {"project": {**project, "seen_at": self.seen_at} if project else None,
+        return {"project": {**project, "epoch": int(project["epoch"]), "seen_at": self.seen_at} if project else None,
                 "focus": {"track": {"name": drums["name"]}, "trackRef": drums["ref"], "device": "Drum Rack",
                           "view": "Arrangement"},
                 "transport": {"playing": False, "tempo": self.set["tempo"]}, "catch_up": []}
