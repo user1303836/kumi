@@ -208,6 +208,21 @@ impl McpHost {
         if t["state"] == "undone" && t["undoKey"] == p["idempotencyKey"] {
             return success_text(id, &json!({"transactionId":t["id"],"state":"undone","idempotent":true}));
         }
+        if ["load-sample", "sample-chain", "load-samples"].contains(&action)
+            && ["applied", "uncertain"].iter().any(|state| t["state"] == *state)
+        {
+            // The installed native deletion fence checks chain identities, not the sound.
+            // No receipt or later host read can add the missing native dispatch guard. Stop
+            // before starting or replaying any legacy deletion plan, even with a fingerprint.
+            let reason = if t["state"] == "uncertain" {
+                "Kumi cannot safely undo this sample-pad load because Live cannot verify that its sample, device settings and chain mixer are unchanged. This request sent nothing to Live; the earlier undo remains uncertain. Review the change with Live's own Undo."
+            } else {
+                "Kumi cannot safely undo this sample-pad load because Live cannot verify that its sample, device settings and chain mixer are unchanged. Nothing was sent to Live. Use Live's own Undo for this change."
+            };
+            let mut refusal = success_text(id, &json!({"code":"changed_since","reason":reason,"undoUnavailable":true}));
+            refusal["result"]["isError"] = json!(true);
+            return refusal;
+        }
         let reconcile = t["state"] == "uncertain" && t["undoKey"] == p["idempotencyKey"];
         if (t["state"] != "applied" && !reconcile) || !truthy(&t["prior"]) {
             return transaction_error(id, "Only an applied or exact-key uncertain drum-pad transaction can be undone");
