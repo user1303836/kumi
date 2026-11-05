@@ -119,7 +119,8 @@ export const RAW_FROZEN = { ...FROZEN, result: frozenRaw }
  *  get, its size and its content SHA-256; it isn't a job, and the UI never reads it as one. */
 export const PREVIEW = { state: 'preview', upload: { file: 'Bass Loop 03.wav', bytes: 1048576, identity_sha256: 'a'.repeat(64) } }
 
-/** CC-15's kinds (W4-c), drafted by W4 from the agreed fields for W3 to confirm against real outputs. Each has a
+/** CC-15's kinds (W4-c), W4's from the agreed fields. agent-m (W3) confirmed what each field means and checks them
+ *  against exercised native results when CC-15's P2 lands. Each has a
  *  create answer, a running job, a done job and one that ended with its charge unknown. `seconds` is the billed span
  *  (the video's window, the appended span, the region's width), never the returned file's length; `source_seconds`
  *  is the measured source. A done job's `file` is its own output, a new artifact: the source is never overwritten. */
