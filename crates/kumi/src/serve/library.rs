@@ -160,12 +160,9 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
                     let folder = tokio::task::spawn_blocking(move || canonical_local_path(&folder).filter(|folder| folder.is_dir()))
                         .await
                         .map_err(failed)?
-                        .ok_or_else(|| {
-                            OpError::Invalid {
-                        reason:
-                            "Choose an existing local folder by its canonical absolute path, without symlinks or network/device namespaces."
+                        .ok_or_else(|| OpError::Invalid {
+                            reason: "Choose an existing folder on this computer by its full path: not a link, a network share or a device."
                                 .into(),
-                    }
                         })?;
                     check(&call.signal)?;
                     // The checked path is the grant. Resolving it again here could silently grant a replacement link.
@@ -235,7 +232,7 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
                                 .map_err(failed)?
                                 .ok_or_else(|| OpError::Refused {
                                     code: "busy",
-                                    reason: "Another scan holds this library's lock.".into(),
+                                    reason: "Another library scan is running: wait for it to finish.".into(),
                                     owner: None,
                                 })?;
                             check(&job.signal)?;

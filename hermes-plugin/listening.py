@@ -319,12 +319,12 @@ def interpret(llm: Any, result: dict[str, Any], *, timeout: float) -> dict[str, 
             timeout=min(float(timeout), _MAX_ATTEMPT_TIMEOUT),
         )
     except TimeoutError:
-        raise InterpretationError("Model interpretation timed out; the measured results remain available.") from None
+        raise InterpretationError("Model interpretation timed out; the measurements remain available.") from None
     except PermissionError:
-        raise InterpretationError("Hermes refused the listening auxiliary task; check its model settings. The measurements remain available.") from None
+        raise InterpretationError("Hermes didn't allow Kumi listening interpretation: check that task's model in Hermes's settings. The measurements remain available.") from None
     except Exception as error:
         if any(block["type"] == "image" for block in blocks) and _rejects_image_input(error):
-            raise InterpretationError("interpretation unavailable: the listening model needs image input") from None
+            raise InterpretationError("No interpretation: the model set for Kumi listening interpretation doesn't accept images. Choose one that does in Hermes's model settings. The measurements remain available.") from None
         raise InterpretationError("Model interpretation failed; the measurements remain available.") from None
     parsed = getattr(completed, "parsed", None)
     # Hermes validates JSON Schema only when its optional jsonschema dependency
