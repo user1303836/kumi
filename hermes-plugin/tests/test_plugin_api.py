@@ -149,6 +149,31 @@ class Routes(unittest.TestCase):
         (folder / f"{hashlib.sha256(long).hexdigest()}.py").write_bytes(long)
         refused(hashlib.sha256(long).hexdigest(), "python")
 
+    def test_a_devices_saved_spec_is_served_by_the_hash_its_approval_keyed_on(self) -> None:
+        import hashlib
+        import json as json_module
+
+        from fastapi import HTTPException
+
+        spec = {"name": "Soft Clip", "about": "Gentle saturation", "controls": [{"name": "Drive", "type": "number", "min": 0, "max": 1, "default": 0.3}],
+                "code": "out1 = tanh(in1 * (1 + Drive * 4));\nout2 = tanh(in2 * (1 + Drive * 4));\n"}
+        # CC-22: the plugin's canonical bytes, named by their own hash.
+        data = json_module.dumps(spec, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        sha = hashlib.sha256(data).hexdigest()
+        folder = self.state / "scripts"
+        folder.mkdir()
+        (folder / f"{sha}.device.json").write_bytes(data)
+        served = self.api.script(sha=sha, language="device")
+        self.assertEqual((served["sha256"], served["language"], served["lines"]), (sha, "device", 2))
+        self.assertEqual(json_module.loads(served["code"]), spec)
+        # The same file isn't a Python script, and JSON without code isn't a device's spec.
+        with self.assertRaises(HTTPException):
+            self.api.script(sha=sha, language="python")
+        bare = json_module.dumps({"name": "x"}).encode("utf-8")
+        (folder / f"{hashlib.sha256(bare).hexdigest()}.device.json").write_bytes(bare)
+        with self.assertRaises(HTTPException):
+            self.api.script(sha=hashlib.sha256(bare).hexdigest(), language="device")
+
     def test_only_audio_or_png_is_served_and_sound_says_what_can_play_the_same_way(self) -> None:
         from fastapi import HTTPException
 

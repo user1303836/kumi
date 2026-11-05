@@ -186,6 +186,12 @@
       says: (purpose) => `Hermes says: ${purpose}`,
       python: "Python",
       lua: "Lua",
+      device: "A Max for Live device (GenExpr)",
+      controls: "The device’s controls",
+      noControls: "No controls.",
+      control: "Control",
+      range: "Range",
+      default: "Default",
       in: (language, daw) => `${language} in ${daw}`,
       lines: (count) => count === 1 ? "1 line" : `${count} lines`,
       sha: (short) => `SHA-256 ${short}…`,
@@ -498,6 +504,12 @@
       says: (purpose) => `Hermes の説明: ${purpose}`,
       python: "Python",
       lua: "Lua",
+      device: "Max for Live デバイス（GenExpr）",
+      controls: "デバイスのコントロール",
+      noControls: "コントロールはありません。",
+      control: "コントロール",
+      range: "範囲",
+      default: "初期値",
       in: (language, daw) => `${daw} の ${language}`,
       lines: (count) => `${count} 行`,
       sha: (short) => `SHA-256 ${short}…`,
@@ -809,6 +821,12 @@
       says: (purpose) => `Hermes 说：${purpose}`,
       python: "Python",
       lua: "Lua",
+      device: "Max for Live 设备（GenExpr）",
+      controls: "设备的控件",
+      noControls: "没有控件。",
+      control: "控件",
+      range: "范围",
+      default: "默认值",
       in: (language, daw) => `${daw} 中的 ${language}`,
       lines: (count) => `${count} 行`,
       sha: (short) => `SHA-256 ${short}…`,
@@ -1996,7 +2014,7 @@
     if (!payload || typeof payload !== "object") return null;
     const value = payload;
     const id = plainId(value.tool_call_id);
-    const language = value.language === "python" || value.language === "lua" ? value.language : null;
+    const language = value.language === "python" || value.language === "lua" || value.language === "device" ? value.language : null;
     if (!id || !language || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
     const text = (key) => typeof value[key] === "string" ? value[key] : void 0;
     const lines = typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : void 0;

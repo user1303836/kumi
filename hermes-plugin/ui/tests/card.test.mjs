@@ -304,6 +304,25 @@ test("a pending script (CC-19) shows Hermes's claim as one, its facts, the appro
   assert.ok(unreadable.includes(english('script.unreadable').replaceAll("'", '&#x27;')) && !unreadable.includes('<pre'))
 })
 
+test('a pending device (CC-22) shows its controls, each with its range and default, beside its GenExpr code', async () => {
+  const { PendingScriptView } = await load('src/desktop/script.tsx', { react: 'real' })
+  const spec = {
+    name: 'Soft Clip',
+    about: 'Gentle saturation',
+    controls: [{ name: 'Drive', type: 'number', min: 0, max: 1, default: 0.3 }, { name: 'Shape', type: 'choice', options: ['soft', 'hard'], default: 'soft' }, { name: 'Bypass', type: 'switch', default: false }],
+    code: 'out1 = tanh(in1 * (1 + Drive * 4));\nout2 = tanh(in2 * (1 + Drive * 4));\n'
+  }
+  const sha = 'd'.repeat(64)
+  const pending = { tool_call_id: 'call-9', language: 'device', sha256: sha, purpose: 'Gentle saturation', warning: 'Writes a new Max for Live device into your User Library (Kumi folder)' }
+  const html = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'ableton', script: { pending, code: { sha256: sha, language: 'device', code: JSON.stringify(spec), lines: 2 } } }))
+  for (const text of ['Soft Clip', english('script.device'), 'Drive', '0–1', '0.3', 'soft / hard', 'off / on', 'out1 = tanh(in1 * (1 + Drive * 4));', '>2<', 'User Library (Kumi folder)']) {
+    assert.ok(html.includes(text), `${text} in ${html}`)
+  }
+  // A file that isn't a device's spec (no code) shows no code, only that it can't be read.
+  const broken = renderToStaticMarkup(createElement(PendingScriptView, { daw: 'ableton', script: { pending, code: { sha256: sha, language: 'device', code: '{"name":"x"}', lines: 0 } } }))
+  assert.ok(broken.includes(english('script.unreadable').replaceAll("'", '&#x27;')) && !broken.includes('<pre'))
+})
+
 test('the Measurements tab draws the latest measurement an event brought, or says where the numbers are', async () => {
   const { MeasurementsWorkspace } = await load('src/desktop/measurements.tsx', { react: 'real' })
   const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })

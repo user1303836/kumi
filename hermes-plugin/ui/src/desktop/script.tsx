@@ -1,17 +1,65 @@
 // CC-19's pane part. While a script's approval waits in the chat in front, the pane shows the whole of it beside
 // Hermes's approval: what Hermes says it does (its claim; the code is the truth), its language, size and SHA-256, the
-// approval's own warning, and every line. A script's HISTORY row can show the code it ran, after a restart too. The
-// code comes from the file the plugin saved when it asked, re-hashed by `/script`; nothing here runs anything.
+// approval's own warning, and every line. A device (CC-22) shows its controls (name, range, default) beside its GenExpr
+// code, all from the one spec its hash names. A script's HISTORY row can show the code it ran, after a restart too.
+// The code comes from the file the plugin saved when it asked, re-hashed by `/script`; nothing here runs anything.
 import { T } from '@kumi/theme'
 import { useEffect, useState } from 'react'
 
 import { CodeBlock } from '../shared/Code.tsx'
 import { clean, dawName } from '../shared/format.ts'
 import type { KumiStore } from '../shared/store.ts'
-import type { HistoryItem, PendingScript, ScriptCode, ScriptLanguage } from '../shared/types.ts'
+import type { DeviceSpec, HistoryItem, PendingScript, ScriptCode, ScriptLanguage } from '../shared/types.ts'
 import { S, TextButton, useT } from '../shared/ui.tsx'
 
-const LANGUAGE: Record<ScriptLanguage, string> = { python: 'script.python', lua: 'script.lua' }
+const LANGUAGE: Record<ScriptLanguage, string> = { python: 'script.python', lua: 'script.lua', device: 'script.device' }
+
+/** A device's saved spec, parsed: the code and controls the approval named, or null for anything else. */
+export function deviceSpecOf(text: string): DeviceSpec | null {
+  try {
+    const value: unknown = JSON.parse(text)
+    if (!value || typeof value !== 'object' || typeof (value as DeviceSpec).code !== 'string') return null
+    const controls = (value as DeviceSpec).controls
+    return controls === undefined || Array.isArray(controls) ? (value as DeviceSpec) : null
+  } catch {
+    return null
+  }
+}
+
+function range(control: NonNullable<DeviceSpec['controls']>[number]): string {
+  const unit = typeof control.unit === 'string' && control.unit ? ` ${clean(control.unit, 12)}` : ''
+  if (control.type === 'switch') return 'off / on'
+  if (control.type === 'choice' && Array.isArray(control.options)) return control.options.map(option => clean(String(option), 20)).join(' / ')
+  return typeof control.min === 'number' && typeof control.max === 'number' ? `${control.min}–${control.max}${unit}` : '—'
+}
+
+/** The device's controls, each with its range and default, as the approval named them. */
+function Controls({ spec }: { spec: DeviceSpec }) {
+  const t = useT()
+  const controls = (spec.controls ?? []).slice(0, 16)
+  if (!controls.length) return <span style={S.faint}>{t('script.noControls')}</span>
+  const cell = { padding: '2px 6px', textAlign: 'left', whiteSpace: 'nowrap' } as const
+  return (
+    <table aria-label={t('script.controls')} style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, color: T.text, margin: 0 }}>
+      <thead>
+        <tr style={{ color: T.muted, fontSize: 11 }}>
+          <th style={{ ...cell, fontWeight: 400 }}>{t('script.control')}</th>
+          <th style={{ ...cell, fontWeight: 400 }}>{t('script.range')}</th>
+          <th style={{ ...cell, fontWeight: 400 }}>{t('script.default')}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {controls.map((control, index) => (
+          <tr key={index} style={{ borderTop: `1px solid ${T.border}` }}>
+            <td style={cell}>{clean(String(control.name ?? ''), 32)}</td>
+            <td style={{ ...cell, color: T.muted }}>{range(control)}</td>
+            <td style={{ ...cell, color: T.muted }}>{control.default === undefined ? '—' : clean(String(control.default), 20)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
 
 export function PendingScriptView({ script, daw }: { script: { pending: PendingScript; code: ScriptCode | null | false }; daw: unknown }) {
   const t = useT()
@@ -31,7 +79,22 @@ export function PendingScriptView({ script, daw }: { script: { pending: PendingS
       </span>
       {pending.warning && <span style={{ ...S.muted, color: T.warn }}>{clean(pending.warning, 300)}</span>}
       {code ? (
-        <CodeBlock code={code.code} label={t('script.code')} />
+        pending.language === 'device' ? (
+          (() => {
+            const spec = deviceSpecOf(code.code)
+            return spec ? (
+              <>
+                {spec.name && <span style={{ ...S.text, fontWeight: 600 }}>{clean(spec.name, 32)}</span>}
+                <Controls spec={spec} />
+                <CodeBlock code={spec.code} label={t('script.code')} />
+              </>
+            ) : (
+              <span style={S.muted}>{t('script.unreadable')}</span>
+            )
+          })()
+        ) : (
+          <CodeBlock code={code.code} label={t('script.code')} />
+        )
       ) : code === false ? (
         <span style={S.muted}>{t('script.unreadable')}</span>
       ) : (

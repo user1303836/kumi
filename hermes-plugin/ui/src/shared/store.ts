@@ -58,7 +58,7 @@ export function pendingScriptOf(payload: unknown): PendingScript | null {
   if (!payload || typeof payload !== 'object') return null
   const value = payload as Record<string, unknown>
   const id = plainId(value.tool_call_id)
-  const language = value.language === 'python' || value.language === 'lua' ? value.language : null
+  const language = value.language === 'python' || value.language === 'lua' || value.language === 'device' ? value.language : null
   if (!id || !language || typeof value.sha256 !== 'string' || !SHA256.test(value.sha256)) return null
   const text = (key: string) => (typeof value[key] === 'string' ? (value[key] as string) : undefined)
   const lines = typeof value.lines === 'number' && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : undefined

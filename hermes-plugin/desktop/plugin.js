@@ -147,6 +147,12 @@ var en = {
     says: (purpose) => `Hermes says: ${purpose}`,
     python: "Python",
     lua: "Lua",
+    device: "A Max for Live device (GenExpr)",
+    controls: "The device’s controls",
+    noControls: "No controls.",
+    control: "Control",
+    range: "Range",
+    default: "Default",
     in: (language, daw) => `${language} in ${daw}`,
     lines: (count2) => count2 === 1 ? "1 line" : `${count2} lines`,
     sha: (short) => `SHA-256 ${short}…`,
@@ -459,6 +465,12 @@ var ja = {
     says: (purpose) => `Hermes の説明: ${purpose}`,
     python: "Python",
     lua: "Lua",
+    device: "Max for Live デバイス（GenExpr）",
+    controls: "デバイスのコントロール",
+    noControls: "コントロールはありません。",
+    control: "コントロール",
+    range: "範囲",
+    default: "初期値",
     in: (language, daw) => `${daw} の ${language}`,
     lines: (count2) => `${count2} 行`,
     sha: (short) => `SHA-256 ${short}…`,
@@ -770,6 +782,12 @@ var zh = {
     says: (purpose) => `Hermes 说：${purpose}`,
     python: "Python",
     lua: "Lua",
+    device: "Max for Live 设备（GenExpr）",
+    controls: "设备的控件",
+    noControls: "没有控件。",
+    control: "控件",
+    range: "范围",
+    default: "默认值",
     in: (language, daw) => `${daw} 中的 ${language}`,
     lines: (count2) => `${count2} 行`,
     sha: (short) => `SHA-256 ${short}…`,
@@ -1429,7 +1447,7 @@ function pendingScriptOf(payload) {
   if (!payload || typeof payload !== "object") return null;
   const value = payload;
   const id = plainId(value.tool_call_id);
-  const language = value.language === "python" || value.language === "lua" ? value.language : null;
+  const language = value.language === "python" || value.language === "lua" || value.language === "device" ? value.language : null;
   if (!id || !language || typeof value.sha256 !== "string" || !SHA256.test(value.sha256)) return null;
   const text = (key) => typeof value[key] === "string" ? value[key] : void 0;
   const lines = typeof value.lines === "number" && Number.isInteger(value.lines) && value.lines >= 0 ? value.lines : void 0;
@@ -2411,8 +2429,42 @@ function CodeBlock({ code, label }) {
 }
 
 // src/desktop/script.tsx
-import { jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
-var LANGUAGE = { python: "script.python", lua: "script.lua" };
+import { Fragment, jsx as jsx6, jsxs as jsxs6 } from "react/jsx-runtime";
+var LANGUAGE = { python: "script.python", lua: "script.lua", device: "script.device" };
+function deviceSpecOf(text) {
+  try {
+    const value = JSON.parse(text);
+    if (!value || typeof value !== "object" || typeof value.code !== "string") return null;
+    const controls = value.controls;
+    return controls === void 0 || Array.isArray(controls) ? value : null;
+  } catch {
+    return null;
+  }
+}
+function range(control) {
+  const unit = typeof control.unit === "string" && control.unit ? ` ${clean(control.unit, 12)}` : "";
+  if (control.type === "switch") return "off / on";
+  if (control.type === "choice" && Array.isArray(control.options)) return control.options.map((option) => clean(String(option), 20)).join(" / ");
+  return typeof control.min === "number" && typeof control.max === "number" ? `${control.min}–${control.max}${unit}` : "—";
+}
+function Controls({ spec }) {
+  const t = useT();
+  const controls = (spec.controls ?? []).slice(0, 16);
+  if (!controls.length) return /* @__PURE__ */ jsx6("span", { style: S.faint, children: t("script.noControls") });
+  const cell = { padding: "2px 6px", textAlign: "left", whiteSpace: "nowrap" };
+  return /* @__PURE__ */ jsxs6("table", { "aria-label": t("script.controls"), style: { borderCollapse: "collapse", fontSize: 12, lineHeight: 1.45, color: T.text, margin: 0 }, children: [
+    /* @__PURE__ */ jsx6("thead", { children: /* @__PURE__ */ jsxs6("tr", { style: { color: T.muted, fontSize: 11 }, children: [
+      /* @__PURE__ */ jsx6("th", { style: { ...cell, fontWeight: 400 }, children: t("script.control") }),
+      /* @__PURE__ */ jsx6("th", { style: { ...cell, fontWeight: 400 }, children: t("script.range") }),
+      /* @__PURE__ */ jsx6("th", { style: { ...cell, fontWeight: 400 }, children: t("script.default") })
+    ] }) }),
+    /* @__PURE__ */ jsx6("tbody", { children: controls.map((control, index) => /* @__PURE__ */ jsxs6("tr", { style: { borderTop: `1px solid ${T.border}` }, children: [
+      /* @__PURE__ */ jsx6("td", { style: cell, children: clean(String(control.name ?? ""), 32) }),
+      /* @__PURE__ */ jsx6("td", { style: { ...cell, color: T.muted }, children: range(control) }),
+      /* @__PURE__ */ jsx6("td", { style: { ...cell, color: T.muted }, children: control.default === void 0 ? "—" : clean(String(control.default), 20) })
+    ] }, index)) })
+  ] });
+}
 function PendingScriptView({ script, daw }) {
   const t = useT();
   const { pending, code } = script;
@@ -2427,7 +2479,14 @@ function PendingScriptView({ script, daw }) {
     pending.purpose && /* @__PURE__ */ jsx6("span", { style: S.text, children: t("script.says", clean(pending.purpose, 200)) }),
     /* @__PURE__ */ jsx6("span", { style: S.faint, title: t("script.shaTitle", pending.sha256), children: facts.join(" · ") }),
     pending.warning && /* @__PURE__ */ jsx6("span", { style: { ...S.muted, color: T.warn }, children: clean(pending.warning, 300) }),
-    code ? /* @__PURE__ */ jsx6(CodeBlock, { code: code.code, label: t("script.code") }) : code === false ? /* @__PURE__ */ jsx6("span", { style: S.muted, children: t("script.unreadable") }) : /* @__PURE__ */ jsx6("span", { style: S.faint, children: t("script.reading") })
+    code ? pending.language === "device" ? (() => {
+      const spec = deviceSpecOf(code.code);
+      return spec ? /* @__PURE__ */ jsxs6(Fragment, { children: [
+        spec.name && /* @__PURE__ */ jsx6("span", { style: { ...S.text, fontWeight: 600 }, children: clean(spec.name, 32) }),
+        /* @__PURE__ */ jsx6(Controls, { spec }),
+        /* @__PURE__ */ jsx6(CodeBlock, { code: spec.code, label: t("script.code") })
+      ] }) : /* @__PURE__ */ jsx6("span", { style: S.muted, children: t("script.unreadable") });
+    })() : /* @__PURE__ */ jsx6(CodeBlock, { code: code.code, label: t("script.code") }) : code === false ? /* @__PURE__ */ jsx6("span", { style: S.muted, children: t("script.unreadable") }) : /* @__PURE__ */ jsx6("span", { style: S.faint, children: t("script.reading") })
   ] });
 }
 function SavedScript({ item, store }) {
@@ -2454,7 +2513,7 @@ function SavedScript({ item, store }) {
 }
 
 // src/desktop/pane.tsx
-import { Fragment, jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
+import { Fragment as Fragment2, jsx as jsx7, jsxs as jsxs7 } from "react/jsx-runtime";
 function useNow(every = 3e4) {
   const [now, setNow] = useState3(() => Date.now());
   useEffect4(() => {
@@ -2540,7 +2599,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
     /* @__PURE__ */ jsxs7(
       Section,
       {
-        title: /* @__PURE__ */ jsxs7(Fragment, { children: [
+        title: /* @__PURE__ */ jsxs7(Fragment2, { children: [
           t("pane.history"),
           " ",
           /* @__PURE__ */ jsx7("span", { style: { textTransform: "none", letterSpacing: 0 }, children: undoable ? t("pane.undoable", undoable) : "" })
@@ -3303,7 +3362,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
 }
 
 // src/desktop/map.tsx
-import { Fragment as Fragment2, jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
+import { Fragment as Fragment3, jsx as jsx12, jsxs as jsxs12 } from "react/jsx-runtime";
 function errorText(error) {
   const text = error instanceof Error ? error.message : String(error ?? "");
   const json = text.indexOf("{");
@@ -3333,7 +3392,7 @@ function MapWorkspace({ ctx, store, audition }) {
       actions: (id, sound) => {
         const request = soundRequest(id, sound.name, map?.revision);
         const near = nearRequest(id, sound.name, map?.revision);
-        return /* @__PURE__ */ jsxs12(Fragment2, { children: [
+        return /* @__PURE__ */ jsxs12(Fragment3, { children: [
           /* @__PURE__ */ jsx12(TextButton, { onClick: () => playing === id ? audition.stop() : play(id), title: t("map.playTitle"), children: playing === id ? t("map.stop") : t("map.play") }),
           near && /* @__PURE__ */ jsx12(TextButton, { onClick: () => void ask(ctx, near, { send: false, session: ownerSession(state) }), title: t("map.moreLikeTitle"), children: t("map.moreLike") }),
           request && /* @__PURE__ */ jsx12(
@@ -3362,12 +3421,12 @@ function MapWorkspace({ ctx, store, audition }) {
 }
 
 // src/desktop/measurements.tsx
-import { Fragment as Fragment3, jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
+import { Fragment as Fragment4, jsx as jsx13, jsxs as jsxs13 } from "react/jsx-runtime";
 function MeasurementsWorkspace({ store, audition }) {
   const t = useT();
   const { measured } = useKumi(store);
   const note = (text) => /* @__PURE__ */ jsx13("span", { style: S.muted, children: text });
-  return /* @__PURE__ */ jsx13("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs13(Fragment3, { children: [
+  return /* @__PURE__ */ jsx13("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note(t("measurements.nothing")) : measured.result === null ? note(t("measurements.tooMuch")) : /* @__PURE__ */ jsxs13(Fragment4, { children: [
     /* @__PURE__ */ jsx13("span", { style: S.faint, children: t("measurements.measured", ago(measured.at, Date.now(), t)) }),
     /* @__PURE__ */ jsx13(ListenResultCard, { audition, fallback: note(t("measurements.inReply")), result: measured.result, store })
   ] }) });
@@ -3396,7 +3455,7 @@ function petLine(before, after, t) {
 // src/desktop/settings.tsx
 import { host as host5 } from "@hermes/plugin-sdk";
 import { useState as useState6 } from "react";
-import { Fragment as Fragment4, jsx as jsx14, jsxs as jsxs14 } from "react/jsx-runtime";
+import { Fragment as Fragment5, jsx as jsx14, jsxs as jsxs14 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATES2 = /* @__PURE__ */ new Set(["ready", "needs_runtime", "outdated_runtime", "damaged_runtime", "needs_daw_component", "no_pin", "unsupported_platform", "unknown"]);
 var COMPONENT_STATES = /* @__PURE__ */ new Set(["not_installed", "installed", "outdated", "unknown"]);
@@ -3439,7 +3498,7 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       /* @__PURE__ */ jsx14("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
       /* @__PURE__ */ jsx14("span", { style: S.muted, children: t("settings.intro", knownDaw(daw) ?? "") })
     ] }),
-    state.available === false ? /* @__PURE__ */ jsx14("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs14(Fragment4, { children: [
+    state.available === false ? /* @__PURE__ */ jsx14("span", { style: S.text, children: t("settings.agentOff") }) : /* @__PURE__ */ jsxs14(Fragment5, { children: [
       /* @__PURE__ */ jsxs14("div", { children: [
         /* @__PURE__ */ jsx14("h3", { style: HEADING, children: t("settings.setup") }),
         /* @__PURE__ */ jsx14(Line, { label: t("settings.state"), children: STATES2.has(setupState) ? t(`settings.states.${setupState}`) : clean(setupState, 40) }),
