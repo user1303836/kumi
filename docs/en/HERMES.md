@@ -132,8 +132,8 @@ When no change Kumi knows fits, Hermes can write code for it.
   an undo.
 - **Asked every time, once a chat has read outside content:** web pages, transcripts, files from the internet,
   another plugin's results, or any terminal command or code run. In such a chat, each script and device is asked
-  with its code, and none runs while Hermes's approvals are off. In a chat that hasn't, allowing one for the session
-  covers that chat.
+  with its code, and none runs while Hermes's approvals are off. In a chat that hasn't, allowing a script for the
+  session covers that chat's scripts; each new device is still asked.
 - **Refused before anyone is asked:** a script, or a device's code, over 400 lines or 32 KB; a script with a hidden or
   direction-changing character, or one that runs processes or reaches the network (`os.execute`, `io.popen`,
   `subprocess`, `os.system`, `socket`, `urllib`, `ctypes`). That check is a safeguard, not a sandbox.
@@ -192,8 +192,8 @@ run without asking there, and Kumi can't tell it from a chat.
     show the project as modified after a listen, since only saving clears that flag; Kumi never saves.
   - **Renoise's tempo:** rendering can change its BPM and lines per beat. Kumi puts them back only if they're still
     what the render left; if they're different, it leaves both as they are and says it couldn't restore the tempo.
-  - **The audio:** the DAW renders into the listening folder of Kumi's part; Kumi copies that one file into its own
-    data and measures it there.
+  - **The audio:** the DAW renders into the listening folder of Kumi's part in that DAW; Kumi copies that one file into
+    its own data and measures it there.
 - **Scripts** run with your DAW's access to your computer: what one reads, writes or sends follows its code, which you
   approve. Kumi keeps each approved script's code in its own data.
 - **Max for Live devices** are new files Kumi writes into Live's User Library (`User Library/Kumi/Audio Effects`),
@@ -220,8 +220,9 @@ run without asking there, and Kumi can't tell it from a chat.
   file you allowed (not the libraries it loads, which an upgrade can change). ffmpeg gets only the one file Kumi is
   reading: never a URL or a playlist, and nothing from the network. A file Kumi reads can be up to 50 MiB, and it
   measures at most 12 minutes of it.
-- Kumi's REAPER extension keeps an id in a saved project, and its Renoise tool in a song, only when a standalone Kumi
-  connected to that DAW asks it to; Kumi for Hermes never asks. Once kept, the id is saved with the project.
+- Kumi's REAPER extension keeps an id in a saved project, and its Renoise tool keeps one in a song, only when a
+  standalone Kumi connected to that DAW asks it to; Kumi for Hermes never asks. Once kept, the id is saved with the
+  project.
 - On Windows, a sample in a network folder (`\\server\share`, or a share reached through a link) can't be played in
   Hermes Desktop or the dashboard: they play only files on this computer's own drives.
 - Stop in Hermes Desktop or Hermes's terminal UI, or `/stop` or `/new` in a chat app, cancels a Kumi change, undo or
@@ -309,6 +310,6 @@ those samples.
 - A listen in REAPER or Renoise is refused because Kumi's part there is older: run setup again, which updates it,
   then restart the DAW.
 - A listen asks you to stop playback, or Renoise "is not ready to render": stop playback and recording, turn off
-  Renoise's Edit Mode, and wait for its tempo scan to finish. Kumi won't stop them for you.
+  Renoise's Edit Mode, and wait for its tempo scan to finish. Kumi won't stop playback or recording for you.
 - "Play it" is refused while your DAW records or its record is on: Kumi never starts a play that would record. Turn
   recording off in the DAW first.

@@ -210,19 +210,19 @@ project as…** with **Copy all media into project directory**), or they'll miss
   a change of its own, with the number of Cmd+Z (Ctrl+Z) presses said before you approve; and a script, in any DAW.
 - **Listening:** Kumi measures audio files on this computer. In REAPER and Renoise it can also listen to a track or
   the mix: after you approve, the DAW renders only that window (60 seconds at most, with the DAW stopped) into the
-  listening folder of Kumi's part, and Kumi copies that one file into its data. The render's temporary transport,
-  routing and device settings are put back after; REAPER may show the project as modified, and Renoise's BPM and
-  lines per beat are put back only if they're still what the render left. In Live, Kumi doesn't listen to a track or
-  the mix yet (it says so and plays nothing).
+  listening folder of Kumi's part in that DAW, and Kumi copies that one file into its data. The render's temporary
+  transport, routing and device settings are put back after; REAPER may show the project as modified, and Renoise's
+  BPM and lines per beat are put back only if they're still what the render left. In Live, Kumi doesn't listen to a
+  track or the mix yet (it says so and plays nothing).
 - **Playback:** play asks first and never starts a play that would record; stop never asks. Neither changes anything
   in the project but where play starts.
 - **Scripts:** a script you approve runs inside your DAW with the DAW's access to this computer (its files and
   network). Kumi refuses one over 400 lines or 32 KB, with hidden or direction-changing characters, or using process
   or network calls it recognises; that check is a safeguard, not a sandbox. Kumi stops a script after 10 seconds (0.8
   in Renoise).
-- **Project ids:** Kumi's REAPER extension keeps an id in a saved project, and its Renoise tool in a song, only when a
-  standalone Kumi connected to that DAW asks it to; Kumi for Hermes never asks. Once kept, the id is saved with the
-  project.
+- **Project ids:** Kumi's REAPER extension keeps an id in a saved project, and its Renoise tool keeps one in a song,
+  only when a standalone Kumi connected to that DAW asks it to; Kumi for Hermes never asks. Once kept, the id is saved
+  with the project.
 - **ffmpeg:** with your approval at setup, Kumi's runtime runs an ffmpeg already on this computer to decode compressed
   audio. Kumi never downloads one, and checks the ffmpeg file you allowed before each start (not the libraries it
   loads, which an upgrade can change). It hands ffmpeg only the one file it's reading, never a URL or a playlist, and
