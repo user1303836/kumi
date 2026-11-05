@@ -100,6 +100,65 @@ pub struct Host {
     pub tool_call_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub request_id: Option<String>,
+    /// What the host gives the call privately, after its approval: never written or said anywhere.
+    #[serde(skip)]
+    pub private: Private,
+}
+
+/// The arguments the host adds to a call after its approval, for the call alone (CC-13's `_mirelo`: a service's key,
+/// the producer's acknowledgment and the credits reserved), each an object, and only with `_host`.
+///
+/// W2's plugin handler is their only writer: it adds `_mirelo` after its approval, and strips every `_`-prefixed key
+/// the model wrote before then, so one that reaches the runtime is the host's.
+pub const PRIVATE_ARGS: [&str; 1] = ["_mirelo"];
+
+/// The fields of [`PRIVATE_ARGS`] that are secrets, as (argument, field): a job's checkpoint never holds one
+/// ([`JobHandle::checkpoint`]). The rest (the acknowledgment, the reservation) may be kept: CC-13 checkpoints the
+/// reservation.
+pub const SECRET_FIELDS: [(&str, &str); 1] = [("_mirelo", "api_key")];
+
+/// The most bytes one of [`PRIVATE_ARGS`] takes, as JSON.
+pub const PRIVATE_MOST: usize = 4096;
+
+/// What the host passes a call privately ([`PRIVATE_ARGS`], by name), taken out of its arguments before anything
+/// reads them: so never in what the call asked (its digest and deduplication), its in-flight record, HISTORY, a
+/// snapshot, a log or an error. Its `Debug` shows only how many there are.
+#[derive(Clone, Default, PartialEq, Eq)]
+pub struct Private(Map<String, Value>);
+
+impl From<Map<String, Value>> for Private {
+    fn from(arguments: Map<String, Value>) -> Private {
+        Private(arguments)
+    }
+}
+
+impl Private {
+    /// The private argument `name` (`"_mirelo"`), if the host gave it.
+    pub fn get(&self, name: &str) -> Option<&Value> {
+        self.0.get(name)
+    }
+
+    /// The secrets in it ([`SECRET_FIELDS`]), each non-empty.
+    pub fn secrets(&self) -> Vec<String> {
+        SECRET_FIELDS
+            .iter()
+            .filter_map(|(name, field)| self.0.get(*name)?.get(*field)?.as_str())
+            .filter(|secret| !secret.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+}
+
+tokio::task_local! {
+    /// The private arguments of the call whose operation is running (the adapter sets it around each run): a job the
+    /// call starts keeps their secrets, so its checkpoints are refused any that hold one.
+    pub static CALL_PRIVATE: Private;
+}
+
+impl std::fmt::Debug for Private {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Private({} argument(s))", self.0.len())
+    }
 }
 
 impl Host {
@@ -472,13 +531,15 @@ impl Ctx {
     /// Starts `work` as a background job of `kind` (`scan`, say): its id at once, for the call to answer with. `work`
     /// gets the runtime and the job's handle (its signal fires when the runtime stops; its progress goes to
     /// `jobs/<id>.json`); what it returns is the job's result. Refused `busy` while [`super::jobs::RUNNING`] jobs run.
+    /// The job keeps the secrets of the call it's started in ([`CALL_PRIVATE`]), so its checkpoints never hold them.
     pub fn start_job<W, F>(&self, kind: &'static str, work: W) -> Result<String, OpError>
     where
         W: FnOnce(Rc<Ctx>, JobHandle) -> F + 'static,
         F: Future<Output = Result<Value, OpError>> + 'static,
     {
         let ctx = self.me.upgrade().ok_or_else(|| OpError::Failed { reason: "the runtime is stopping".into() })?;
-        self.jobs.start(ctx, kind, work)
+        let secrets = CALL_PRIVATE.try_with(Private::secrets).unwrap_or_default();
+        self.jobs.start(ctx, kind, secrets, work)
     }
 
     /// A scratch folder for one call of `op`: `<state>/scratch/<op>/<id>/`, the id the runtime's own (never anything

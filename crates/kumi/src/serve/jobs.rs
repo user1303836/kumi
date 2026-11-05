@@ -26,6 +26,8 @@ const WRITE_EVERY: Duration = Duration::from_millis(500);
 const KEPT: usize = 100;
 /// How many jobs may run at once: another is refused `busy` until one ends.
 pub const RUNNING: usize = 8;
+/// The most bytes a job's checkpoint takes, as JSON.
+pub const CHECKPOINT_MOST: usize = 16 * 1024;
 
 /// Where a job is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,6 +59,10 @@ struct Job {
     /// `{done, total?, message?}`.
     progress: RefCell<Value>,
     outcome: RefCell<Option<Result<Value, OpError>>>,
+    /// What the job has come to so far ([`JobHandle::checkpoint`]), while it runs and beside an error.
+    checkpoint: RefCell<Option<Value>>,
+    /// The secrets of the call that started it ([`super::ctx::SECRET_FIELDS`]): never in a checkpoint.
+    secrets: Vec<String>,
     signal: Signal,
     written: Cell<Option<Instant>>,
 }
@@ -69,6 +75,12 @@ impl Job {
             Some(Ok(result)) => view["result"] = result.clone(),
             Some(Err(error)) => view["error"] = error.to_value()["error"].clone(),
             None => {}
+        }
+        // What it came to before it failed, was cancelled or interrupted, or so far while it runs.
+        if view.get("result").is_none() {
+            if let Some(kept) = &*self.checkpoint.borrow() {
+                view["result"] = kept.clone();
+            }
         }
         view
     }
@@ -102,8 +114,8 @@ impl Jobs {
 
     /// Starts `work` as a job of `kind` (`scan`, say): its id at once. `work` gets the runtime and the job's handle,
     /// whose signal fires when the runtime stops; what it returns is the job's result (an [`OpError`]: it failed).
-    /// Refused `busy` while [`RUNNING`] jobs run.
-    pub(crate) fn start<W, F>(&self, ctx: Rc<Ctx>, kind: &'static str, work: W) -> Result<String, OpError>
+    /// `secrets` are the starting call's, refused in a checkpoint. Refused `busy` while [`RUNNING`] jobs run.
+    pub(crate) fn start<W, F>(&self, ctx: Rc<Ctx>, kind: &'static str, secrets: Vec<String>, work: W) -> Result<String, OpError>
     where
         W: FnOnce(Rc<Ctx>, JobHandle) -> F + 'static,
         F: Future<Output = Result<Value, OpError>> + 'static,
@@ -121,6 +133,8 @@ impl Jobs {
             state: Cell::new(State::Running),
             progress: RefCell::new(json!({"done": 0})),
             outcome: RefCell::new(None),
+            checkpoint: RefCell::new(None),
+            secrets,
             signal: own.clone(),
             written: Cell::new(None),
         });
@@ -244,6 +258,36 @@ impl JobHandle {
             write(self.ctx.snapshots(), &self.id, &self.job);
         }
     }
+
+    /// What the job has come to so far (a paid job's reservation, whether it was submitted, the vendor's id): `job`
+    /// gives it while the job runs, and beside its error when it fails, is cancelled or is interrupted. It's on disk
+    /// before this returns, so a runtime that dies after it leaves it for the next start (CC-13's recovery).
+    ///
+    /// For the job's boundaries (before it submits, once the vendor accepted), not its progress ([`Self::report`]):
+    /// each is a durable write. Refused [`OpError::Invalid`], with nothing kept, when it's over [`CHECKPOINT_MOST`]
+    /// bytes as JSON or holds a secret of the call that started the job; a whole path in it is kept as its name.
+    pub async fn checkpoint(&self, mut result: Value) -> Result<(), OpError> {
+        let text = result.to_string();
+        if text.len() > CHECKPOINT_MOST {
+            return Err(OpError::Invalid { reason: format!("A job's checkpoint is at most {CHECKPOINT_MOST} bytes as JSON.") });
+        }
+        // As given and as JSON writes it (a secret with a quote or a backslash in it is escaped there).
+        let held = self.job.secrets.iter().any(|secret| {
+            let quoted = Value::String(secret.clone()).to_string();
+            text.contains(secret.as_str()) || text.contains(&quoted[1..quoted.len() - 1])
+        });
+        if held {
+            return Err(OpError::Invalid { reason: "A job's checkpoint never holds the key the host gave its call.".into() });
+        }
+        super::connection::names_only(&mut result);
+        *self.job.checkpoint.borrow_mut() = Some(result);
+        self.job.written.set(Some(Instant::now()));
+        let view = self.job.view(&self.id);
+        match self.ctx.snapshots().write_durably(&format!("jobs/{}", self.id), view).await {
+            Ok(_) => Ok(()),
+            Err(error) => Err(OpError::Failed { reason: format!("Kumi couldn't keep the job's state on disk: {error}") }),
+        }
+    }
 }
 
 fn write(snapshots: &Snapshots, id: &str, job: &Job) {
@@ -340,6 +384,122 @@ mod tests {
                 (written["state"].clone(), written["result"].clone(), written["schema"].clone()),
                 (json!("done"), json!({"sounds": 4}), json!(1))
             );
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn what_a_job_came_to_is_on_disk_at_once_and_outlasts_its_error_and_its_runtime() {
+        local(async {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = runtime(dir.path());
+            let (go, gone) = tokio::sync::oneshot::channel::<()>();
+            let failing = ctx
+                .start_job("generate", |_ctx, job| async move {
+                    job.checkpoint(json!({"submission": "unknown", "reservation_id": "r-1"})).await?;
+                    let _ = gone.await;
+                    Err(OpError::Failed { reason: "the download failed".into() })
+                })
+                .unwrap();
+            tokio::task::yield_now().await;
+            // On disk before the work goes on, and given while it runs.
+            assert_eq!(file(&ctx, &failing)["result"]["submission"], "unknown");
+            assert_eq!(ctx.jobs().get(&failing, dir.path()).unwrap()["result"]["reservation_id"], "r-1");
+            go.send(()).unwrap();
+            ctx.jobs().all_settled().await;
+            let failed = ctx.jobs().get(&failing, dir.path()).unwrap();
+            assert_eq!(
+                (failed["state"].clone(), failed["result"]["reservation_id"].clone()),
+                (json!("failed"), json!("r-1")),
+                "beside its error"
+            );
+            assert_eq!(failed["error"]["reason"], "the download failed");
+            // A runtime that dies with a job running leaves what it came to for the next.
+            let left = ctx
+                .start_job("generate", |_ctx, job| async move {
+                    job.checkpoint(json!({"submission": "submitted", "provider_job_id": "v-9"})).await?;
+                    std::future::pending::<()>().await;
+                    Ok(json!({}))
+                })
+                .unwrap();
+            tokio::task::yield_now().await;
+            tokio::task::yield_now().await;
+            ctx.snapshots().flush();
+            let later = runtime(dir.path());
+            let found = later.jobs().get(&left, dir.path()).unwrap();
+            assert_eq!((found["state"].clone(), found["result"]["provider_job_id"].clone()), (json!("interrupted"), json!("v-9")));
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_checkpoint_is_bounded_keeps_names_not_paths_and_never_the_calls_key() {
+        const KEY: &str = "sk-sentinel-c13";
+        local(async {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = runtime(dir.path());
+            let given = json!({"_mirelo": {"api_key": KEY, "acknowledged": true, "reservation_id": "r-7"}});
+            let private = crate::serve::ctx::Private::from(given.as_object().unwrap().clone());
+            let (tried, outcomes) = tokio::sync::oneshot::channel();
+            // Started inside the call, as the adapter runs it: the job keeps the call's key.
+            let id = crate::serve::ctx::CALL_PRIVATE
+                .sync_scope(private, || {
+                    ctx.start_job("generate", |_ctx, job| async move {
+                        let mut said = vec![];
+                        for result in [
+                            json!({"note": "x".repeat(CHECKPOINT_MOST)}),
+                            json!({"submission": "unknown", "echo": format!("Bearer {KEY}")}),
+                            json!({"submission": "unknown", "reservation_id": "r-7", "file": "/Users/someone/Music/kick.wav"}),
+                        ] {
+                            said.push(job.checkpoint(result).await);
+                        }
+                        let _ = tried.send(said);
+                        std::future::pending::<()>().await;
+                        Ok(json!({}))
+                    })
+                })
+                .unwrap();
+            let said = outcomes.await.unwrap();
+            for refused in &said[..2] {
+                let Err(OpError::Invalid { reason }) = refused else { panic!("refused invalid: {refused:?}") };
+                assert!(!reason.contains(KEY), "{reason}");
+            }
+            assert!(said[2].is_ok(), "{:?}", said[2]);
+            let kept = file(&ctx, &id)["result"].clone();
+            assert_eq!(
+                kept,
+                json!({"submission": "unknown", "reservation_id": "r-7", "file": "kick.wav"}),
+                "the last alone, its path a name"
+            );
+            let bytes = std::fs::read(ctx.paths().state_dir.join("jobs").join(format!("{id}.json"))).unwrap();
+            assert!(!String::from_utf8_lossy(&bytes).contains(KEY));
+            ctx.jobs().interrupt_running(ctx.snapshots());
+        })
+        .await;
+    }
+
+    #[tokio::test]
+    async fn a_refused_checkpoint_writes_nothing() {
+        local(async {
+            let dir = tempfile::tempdir().unwrap();
+            let ctx = runtime(dir.path());
+            let given = json!({"_mirelo": {"api_key": "sk-sentinel-c13"}});
+            let private = crate::serve::ctx::Private::from(given.as_object().unwrap().clone());
+            let (tried, outcome) = tokio::sync::oneshot::channel();
+            let id = crate::serve::ctx::CALL_PRIVATE
+                .sync_scope(private, || {
+                    ctx.start_job("generate", |_ctx, job| async move {
+                        let _ = tried.send(job.checkpoint(json!({"key": "sk-sentinel-c13"})).await);
+                        std::future::pending::<()>().await;
+                        Ok(json!({}))
+                    })
+                })
+                .unwrap();
+            assert!(matches!(outcome.await.unwrap(), Err(OpError::Invalid { .. })));
+            let written = file(&ctx, &id);
+            assert_eq!((written["state"].clone(), written.get("result")), (json!("running"), None), "{written}");
+            assert!(ctx.jobs().get(&id, dir.path()).unwrap().get("result").is_none());
+            ctx.jobs().interrupt_running(ctx.snapshots());
         })
         .await;
     }
