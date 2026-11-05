@@ -347,7 +347,7 @@ impl Host {
                             Ok(status) => {
                                 row["project"] = status["project"].clone();
                                 row["busy"] = status["busy"].clone();
-                                for key in ["demo", "listening"] {
+                                for key in ["demo", "listening", "permission"] {
                                     if let Some(value) = status.get(key) {
                                         row[key] = value.clone();
                                     }
@@ -489,8 +489,8 @@ impl Host {
             Ok(status) => {
                 result["project"] = status["project"].clone();
                 result["busy"] = status.get("busy").cloned().unwrap_or(Value::Bool(false));
-                // (Renoise's demo; what listening each bridge can do now, M5)
-                for key in ["demo", "listening"] {
+                // (Renoise's demo; what listening each bridge can do now, M5; Logic's missing Accessibility permission)
+                for key in ["demo", "listening", "permission"] {
                     if let Some(value) = status.get(key) {
                         result[key] = value.clone();
                     }

@@ -13,19 +13,22 @@ pub const PORTS_PER_DAW: u16 = 10;
 pub enum Daw {
     Reaper,
     Renoise,
+    /// A status bridge beside the running app (`logic-kumi`); Logic loads nothing of Kumi's.
+    Logic,
     /// Its bridge is a program beside the app (`soundcraft-kumi`), which the host starts: nothing of Kumi's goes in
     /// SoundCraft.
     SoundCraft,
 }
 
 impl Daw {
-    pub const ALL: [Daw; 3] = [Daw::Reaper, Daw::Renoise, Daw::SoundCraft];
+    pub const ALL: [Daw; 4] = [Daw::Reaper, Daw::Renoise, Daw::Logic, Daw::SoundCraft];
 
     /// The id on the wire, in file names and on the command line.
     pub fn id(self) -> &'static str {
         match self {
             Daw::Reaper => "reaper",
             Daw::Renoise => "renoise",
+            Daw::Logic => "logic",
             Daw::SoundCraft => "soundcraft",
         }
     }
@@ -39,6 +42,7 @@ impl Daw {
         match self {
             Daw::Reaper => "REAPER",
             Daw::Renoise => "Renoise",
+            Daw::Logic => "Logic Pro",
             Daw::SoundCraft => "SoundCraft",
         }
     }
@@ -48,7 +52,7 @@ impl Daw {
         match self {
             Daw::Reaper => 9770,
             Daw::Renoise => 9780,
-            // (9790-9799 are kept for Logic's bridge, #374)
+            Daw::Logic => 9790,
             Daw::SoundCraft => 9800,
         }
     }
@@ -80,6 +84,7 @@ mod tests {
             }
             assert_eq!(Daw::from_id(daw.id()), Some(daw));
             assert_eq!(serde_json::to_value(daw).unwrap(), daw.id());
+            assert_eq!(serde_json::from_value::<Daw>(serde_json::json!(daw.id())).unwrap(), daw);
         }
     }
 }

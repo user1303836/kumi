@@ -26,6 +26,8 @@ pub struct Kinds {
 
 pub fn kinds(daw: Daw) -> Kinds {
     match daw {
+        // Logic's M1 bridge only answers ping/status. Synthetic rows must never advertise product capabilities.
+        Daw::Logic => Kinds { read: &[], bodies: &[], outside_undo: &[] },
         Daw::Reaper => Kinds {
             read: &[
                 "project", "track", "item", "take", "fx", "param", "send", "marker", "region", "note", "event", "envelope", "point",

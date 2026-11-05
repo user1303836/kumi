@@ -104,6 +104,7 @@ default-filter = '''
   | (binary_id(ableton-mcp-server::it) & test(/^(host_probes|analysis_runner|sqlite_reader|native_connected)::/))
   | (binary_id(ableton-mcp-server::it) & test(/^(remote_adapter|loopback)::/))
   | (binary_id(soundcraft-kumi::it) & test(/^(control|launch|server)::/))
+  | (binary_id(logic-kumi::it) & test(/^(status|vectors|lifecycle)::/))
   | (binary_id(kumi-ai::it) & test(/^ai_transport::/))
   | (binary_id(kumi-net::it) & test(/^network::/))
   | (binary_id(kumi-store::it) & test(/^store::/))

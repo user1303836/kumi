@@ -57,6 +57,27 @@ impl std::fmt::Debug for SimulatorConfig {
 }
 
 impl SimulatorConfig {
+    /// Logic's M1 bridge: it attaches beside a running app and serves only ping/status, including whether its
+    /// Accessibility permission is missing. No synthetic reads, changes or listening stand in for an implemented API.
+    pub fn logic(secret: Secret, bundle: &str) -> Self {
+        Self {
+            secret,
+            identity: Identity {
+                preset_files: Vec::new(),
+                daw: Daw::Logic.id().into(),
+                bridge: "0.1.0".into(),
+                daw_version: "12.3.1".into(),
+                pid: std::process::id(),
+                resource: bundle.into(),
+                project: None,
+            },
+            offer: Offer { events: vec![event::PROJECT.into()], ..Offer::default() },
+            status_extra: Map::from_iter([("permission".into(), Value::Null)]),
+            discovery_dir: None,
+            respond: None,
+            status_more: None,
+        }
+    }
     /// REAPER 7.82 on a portable resource folder, with a saved project.
     pub fn reaper(secret: Secret, resource: &str) -> Self {
         Self {

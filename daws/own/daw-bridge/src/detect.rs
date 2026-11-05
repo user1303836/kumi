@@ -1058,6 +1058,7 @@ pub fn process_is(daw: Daw, name: &str) -> bool {
     match daw {
         Daw::Reaper => matches!(base, "REAPER" | "REAPER64" | "reaper"),
         Daw::Renoise => base == "Renoise" || base == "renoise" || base.starts_with("Renoise ") || base.starts_with("renoise-"),
+        Daw::Logic => base == "Logic Pro",
         // (macOS's bundle runs `SoundCraft`, Windows `soundcraft.exe`, Linux `soundcraft`; never its `soundcraft-cli`)
         Daw::SoundCraft => base.eq_ignore_ascii_case("soundcraft"),
     }
@@ -1601,6 +1602,16 @@ mod tests {
             ["soundcraft-cli", "/usr/local/bin/soundcraft-cli", "SoundCraftHelper", "/Applications/REAPER.app/Contents/MacOS/REAPER"]
         {
             assert!(!process_is(Daw::SoundCraft, name), "{name}");
+        }
+    }
+
+    #[test]
+    fn logics_main_process_is_told_from_the_bridge_and_helpers() {
+        for name in ["Logic Pro", "/Applications/Logic Pro.app/Contents/MacOS/Logic Pro", "/lab/Logic Beta.app/Contents/MacOS/Logic Pro"] {
+            assert!(process_is(Daw::Logic, name), "{name}");
+        }
+        for name in ["Logic", "Logic Pro X", "logic-kumi", "kumi-logic-hands-arm64", "AUHostingService", "Logic Pro Helper"] {
+            assert!(!process_is(Daw::Logic, name), "{name}");
         }
     }
 

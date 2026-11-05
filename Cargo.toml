@@ -26,6 +26,7 @@ members = [
     "daws/soundcraft/kumi-daw-soundcraft",
     "daws/own/kumi-daw-own",
     "daws/soundcraft/soundcraft-kumi",
+    "daws/logic/logic-kumi",
 ]
 
 [workspace.package]

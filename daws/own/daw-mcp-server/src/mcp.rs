@@ -27,8 +27,13 @@ pub fn tools(host: &Host) -> Value {
 fn tool_list(daw: Daw) -> Value {
     let pick = json!({
         "pid": {"type": "integer", "minimum": 1, "description": format!("The {daw} process to use, from discover, when several run.")},
-        "resource": {"type": "string", "description": format!("The {daw} resource or preferences folder to use, from discover, when several run.")},
+        "resource": {"type": "string", "description": if daw == Daw::Logic {
+            "The Logic Pro bundle identity to use, from discover, when several run.".to_string()
+        } else { format!("The {daw} resource or preferences folder to use, from discover, when several run.") }},
     });
+    if daw == Daw::Logic {
+        return json!(finding(daw, "project", &pick));
+    }
     // (SoundCraft's bridge serves ping, status, read, snapshot, focus and focus_body so far: its change and listening tools
     // come as it learns them)
     if daw == Daw::SoundCraft {
@@ -76,7 +81,7 @@ fn tool_list(daw: Daw) -> Value {
             "The ref of what the rows are in: a track for its items or sends, an FX for its parameters.",
             "the take or track it is about",
         ),
-        Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
+        Daw::SoundCraft | Daw::Logic => unreachable!("their tools are listed above"),
     };
     // Renoise plays from a slot and line; REAPER from where it is (cursor_set moves it).
     let play = match daw {
@@ -85,7 +90,7 @@ fn tool_list(daw: Daw) -> Value {
             json!({"sequence": {"type": "integer", "minimum": 1}, "line": {"type": "integer", "minimum": 0}, "epoch": {"type": "string"}}),
         ),
         Daw::Reaper => ("Starts REAPER's playback from where it is (cursor_set moves it first).", json!({"epoch": {"type": "string"}})),
-        Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
+        Daw::SoundCraft | Daw::Logic => unreachable!("their tools are listed above"),
     };
     let [status, discover] = finding(daw, place, &pick);
     let grid = json!({
@@ -188,7 +193,7 @@ fn tool_list(daw: Daw) -> Value {
     let (save_title, save) = match daw {
         Daw::Reaper => ("Save the REAPER project", "Saves the open REAPER project where it is, or as its next version (version: true). A project never saved is saved only under path, a .rpp inside the folder REAPER saves projects in, and never over a file."),
         Daw::Renoise => ("Save the Renoise song", "Saves the open Renoise song where it is, or as path (a whole path to a .xrns file that isn't there yet; the song is that file from then on). A song never saved is saved only under path, and never over a file. (version is REAPER's: Renoise refuses it.)"),
-        Daw::SoundCraft => unreachable!("SoundCraft's tools are listed above"),
+        Daw::SoundCraft | Daw::Logic => unreachable!("their tools are listed above"),
     };
     if let Some(tools) = list.as_array_mut() {
         tools.push(json!({
@@ -496,6 +501,7 @@ fn focus_body_tool(daw: Daw, (about, tracks): (&str, &str), bodies: &[&str], pic
 
 /// The tools every DAW's host lists: whether its bridge is connected, and which copies of the DAW run with one.
 fn finding(daw: Daw, place: &str, pick: &Value) -> [Value; 2] {
+    let resource = if daw == Daw::Logic { "bundle identity" } else { "resource folder" };
     // (a bridge the host starts runs beside its DAW; the others are loaded into it)
     let bridge =
         if crate::spawn::bridge_program(daw).is_some() { format!("Kumi's bridge beside {daw}") } else { format!("Kumi's bridge in {daw}") };
@@ -510,7 +516,7 @@ fn finding(daw: Daw, place: &str, pick: &Value) -> [Value; 2] {
         json!({
             "name": "discover",
             "title": format!("Find running {daw}"),
-            "description": format!("Every running {daw} with Kumi's bridge: process id, port, resource folder, versions, open {place}, and whether it answers. Use it when status reports none, or to choose among several."),
+            "description": format!("Every running {daw} with Kumi's bridge: process id, port, {resource}, versions, open {place}, and whether it answers. Use it when status reports none, or to choose among several."),
             "inputSchema": {"type": "object", "properties": {}, "additionalProperties": false},
             "annotations": {"readOnlyHint": true, "idempotentHint": true, "openWorldHint": false},
         }),

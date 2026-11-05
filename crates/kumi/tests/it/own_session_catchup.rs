@@ -139,7 +139,7 @@ async fn session_with(daw: Daw, home: &Path, steps: Vec<Step>, question: &str, l
     let (profile, create): (DawProfile, fn(OwnOptions) -> Rc<dyn Integration>) = match daw {
         Daw::Reaper => (DawProfile::REAPER, kumi_daw_reaper::create_reaper_integration),
         Daw::Renoise => (DawProfile::RENOISE, kumi_daw_renoise::create_renoise_integration),
-        Daw::SoundCraft => unreachable!("these catch-up tests run REAPER's and Renoise's integrations"),
+        Daw::SoundCraft | Daw::Logic => unreachable!("these catch-up tests run REAPER's and Renoise's integrations"),
     };
     let events = Rc::new(RefCell::new(vec![]));
     let home_path = home.to_path_buf();
