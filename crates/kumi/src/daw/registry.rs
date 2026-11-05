@@ -40,7 +40,7 @@ pub fn profile(id: DawId) -> Option<&'static DawProfile> {
 
 /// DAWs whose integrations implement the plugin's guarded, temporary-state listening policy.
 pub(crate) fn supports_restricted_listening(id: DawId) -> bool {
-    matches!(id, DawId::Reaper | DawId::Renoise)
+    matches!(id, DawId::Ableton | DawId::Reaper | DawId::Renoise)
 }
 
 /// How the app shows a registered DAW's own tools.

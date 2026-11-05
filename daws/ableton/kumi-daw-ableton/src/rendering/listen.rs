@@ -103,7 +103,7 @@ impl LiveRenderer {
     ) -> Result<Result<Vec<HeardTake>, String>, RuntimeError> {
         if matches!(self.listening_policy, ListeningPolicy::Restricted { .. }) {
             // Never fall through to standalone capture: it may install Ears, record or play.
-            return Err(restricted_track_unsupported());
+            return self.hear_restricted(request, original).await;
         }
         if !self.available() {
             return Ok(Err(NO_CURRENT_LIVE.into()));
