@@ -830,7 +830,10 @@ async fn the_first_m4_cycle_slice_restores_known_values_and_preserves_locators_w
         lab.script.set_loop_fixture(original.clone(), loop_ready());
         let (cycle, applied) = lab.make("loop-range", json!({"startBeats":8,"endBeats":20}), "enable").await;
         assert_eq!(cycle["prior"], original);
-        assert_eq!(cycle["fence"], original);
+        assert!(cycle.get("fence").is_none(), "the authorization fence stays private");
+        let requests = lab.script.asked();
+        let (_, request) = requests.iter().rev().find(|(method, _)| method == "change_apply").unwrap();
+        assert_eq!(request["fence"], original, "the native apply receives the complete original fence");
         assert_eq!(applied["undo"]["restore"], json!({"mode":"value"}));
         assert_eq!(applied["undo"]["entry"], false);
         assert!(applied.get("material").is_none(), "private hints do not expose material");
