@@ -167,6 +167,12 @@ pub fn close_inherited_on_exec() {
 
 /// `kumi serve` with the arguments after `serve`: serves until stdin ends or it's told to stop; the exit code.
 pub fn main(args: &[String]) -> i32 {
+    // Before anything runs: a panic's message may hold what a call was given (the host's private key among it), so
+    // the log says only where it was.
+    std::panic::set_hook(Box::new(|info| {
+        let at = info.location().map_or_else(|| "an unknown place".to_string(), |at| format!("{}:{}", at.file(), at.line()));
+        say(&format!("kumi serve: a call failed unexpectedly at {at}"));
+    }));
     // Before anything starts a program.
     #[cfg(unix)]
     close_inherited_on_exec();
