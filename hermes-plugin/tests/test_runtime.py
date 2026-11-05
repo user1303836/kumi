@@ -52,7 +52,7 @@ class Runtimes(unittest.TestCase):
                                                      "OPENAI_API_KEY": "sk-secret", "MIRELO_API_KEY": "m-secret",
                                                      "HERMES_HOME": "/elsewhere", "KUMI_HOME": "/elsewhere"},
                                     start_timeout=10, **options)
-        self.addCleanup(runtimes.stop_all)
+        self.addCleanup(support.stopped, runtimes, self.data)
         return runtimes
 
     def start(self, *fixture_args: str, session: str | None = "s1", runtimes=None, daw: str = "ableton"):

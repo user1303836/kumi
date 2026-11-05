@@ -201,10 +201,19 @@ def host(test, settings: dict | None = None, *fixture_args: str, installed: bool
         install(data, *fixture_args, daw_component=daw_component)
     ctx = Context(settings if settings is not None else {"daw": "ableton"})
     runtimes = module("runtime").Runtimes(environ=lambda: {"PATH": "/usr/bin:/bin"}, start_timeout=10)
-    test.addCleanup(runtimes.stop_all)
+    test.addCleanup(stopped, runtimes, data)
     return (module("tools").Host(ctx, runtimes, data_dir=lambda: data, pinned=lambda: VERSION,
                                  hook_timeout=lambda: hook_timeout, plugin_dir=Path(plugin.name),
                                  hermes_config=lambda: dict(hermes_config or {})), ctx, data)
+
+
+def stopped(runtimes, data: Path, wait: float = 30.0) -> None:
+    """Stop a test's runtimes and wait for one still settling to exit (a call whose answer was lost leaves it so):
+    Windows can't remove a folder whose files a running runtime holds."""
+    runtimes.stop_all()
+    settling = runtimes.settling(data)
+    if settling is not None:
+        settling.gone.wait(wait)
 
 
 _IDS = iter(range(1, 1 << 30))
