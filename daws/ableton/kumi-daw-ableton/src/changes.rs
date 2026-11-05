@@ -70,8 +70,112 @@ pub trait ChangeContext {
     async fn drum_pads(&self, _device_ref: &str) -> Option<Vec<DrumPad>> {
         None
     }
+    /// The values at which Live shows `asked`'s labels on the track `track_ref`'s mixer (`{"volume": "-6.0 dB",
+    /// "pan": "25L", "sends": ["-inf dB"]}`), as Live itself reads them: each `{"value", "shown"}`, `{"near": [below,
+    /// above]}` when Live shows no such label, `{"missing": true}` for a control the track hasn't, or `{"unread": true}`.
+    async fn mixer_for_display(&self, _track_ref: &str, _asked: &Value) -> Result<Result<Value, String>, RuntimeError> {
+        Ok(Err("Give volume, pan and sends as numbers here: Kumi can't read how Live shows this mixer.".into()))
+    }
 }
 pub use super::notes::DrumPad;
+/// `set_mixer`'s levels as Live shows them (`volumeDb`, `panDisplay`, `sendsDb`) turned into the values Live shows them
+/// at, read from Live itself: its volume curve isn't linear, so +2 dB is wherever Live says "2.0 dB". A label Live
+/// shows nowhere is refused with the nearest it shows; the input is as given when it names none.
+async fn mixer_from_display(input: &JsonObject, context: &dyn ChangeContext) -> Result<Result<JsonObject, String>, RuntimeError> {
+    const SHOWN: [(&str, &str); 3] = [("volumeDb", "volume"), ("panDisplay", "pan"), ("sendsDb", "sends")];
+    if !SHOWN.iter().any(|(shown, _)| input.contains_key(*shown)) {
+        return Ok(Ok(input.clone()));
+    }
+    if let Some((shown, raw)) = SHOWN.iter().find(|(shown, raw)| input.contains_key(*shown) && input.contains_key(*raw)) {
+        return Ok(Err(format!("Give {raw} or {shown}, not both.")));
+    }
+    let mut asked = json!({});
+    if let Some(volume) = input.get("volumeDb") {
+        let Some(label) = db_label(volume) else {
+            return Ok(Err("volumeDb is a level in dB (-6, 2.5) or \"-inf\".".into()));
+        };
+        asked["volume"] = json!(label);
+    }
+    if let Some(pan) = input.get("panDisplay") {
+        let Some(label) = pan.as_str().map(str::trim).filter(|label| !label.is_empty()) else {
+            return Ok(Err("panDisplay is the pan as Live shows it (\"25L\", \"C\", \"50R\").".into()));
+        };
+        asked["pan"] = json!(label.to_ascii_uppercase());
+    }
+    if let Some(sends) = input.get("sendsDb") {
+        let labels: Option<Vec<Value>> =
+            sends.as_array().map(|sends| sends.iter().map(|send| db_label(send).map(Value::from)).collect()).flatten();
+        let Some(labels) = labels else {
+            return Ok(Err("sendsDb lists levels in dB (-6, -12) or \"-inf\", one per return track in order.".into()));
+        };
+        asked["sends"] = Value::Array(labels);
+    }
+    let Some(track) = input.get("trackRef").and_then(Value::as_str) else {
+        return Ok(Err("trackRef is the track whose mixer changes.".into()));
+    };
+    let found = match context.mixer_for_display(track, &asked).await? {
+        Ok(found) => found,
+        Err(why) => return Ok(Err(why)),
+    };
+    let value_of = |field: &str, label: &str, found: &Value| -> Result<Value, String> {
+        if let Some(value) = found.get("value").and_then(Value::as_f64) {
+            return Ok(json!(value));
+        }
+        if found.get("missing") == Some(&Value::Bool(true)) {
+            return Err(format!("{field}: this track has no such control in Live."));
+        }
+        if let Some([below, above]) = found.get("near").and_then(Value::as_array).map(Vec::as_slice) {
+            let (below, above) = (below.as_str().unwrap_or("?"), above.as_str().unwrap_or("?"));
+            return Err(format!("{field}: Live doesn't show {label} exactly; the nearest it shows are {below} and {above}."));
+        }
+        Err(format!("{field}: Kumi couldn't read how Live shows it; give a value from 0 to 1 instead."))
+    };
+    let mut out = input.clone();
+    for (shown, _) in SHOWN {
+        out.shift_remove(shown);
+    }
+    if let Some(label) = asked.get("volume").and_then(Value::as_str) {
+        match value_of("volumeDb", label, &found["volume"]) {
+            Ok(value) => out.insert("volume".into(), value),
+            Err(why) => return Ok(Err(why)),
+        };
+    }
+    if let Some(label) = asked.get("pan").and_then(Value::as_str) {
+        match value_of("panDisplay", label, &found["pan"]) {
+            Ok(value) => out.insert("pan".into(), value),
+            Err(why) => return Ok(Err(why)),
+        };
+    }
+    if let Some(labels) = asked.get("sends").and_then(Value::as_array) {
+        let mut values = Vec::new();
+        for (n, label) in labels.iter().enumerate() {
+            match value_of(&format!("sendsDb[{n}]"), label.as_str().unwrap_or_default(), &found["sends"][n]) {
+                Ok(value) => values.push(value),
+                Err(why) => return Ok(Err(why)),
+            }
+        }
+        out.insert("sends".into(), Value::Array(values));
+    }
+    Ok(Ok(out))
+}
+/// A level in dB as Live writes it: tenths ("-6.0 dB", "2.0 dB", "0.0 dB"), or "-inf dB". One with more decimals is
+/// asked as given, which Live shows only if it can.
+fn db_label(value: &Value) -> Option<String> {
+    match value {
+        Value::Number(number) => {
+            let level = number.as_f64().filter(|level| level.is_finite())?;
+            let tenths = (level * 10.0).round();
+            Some(if (level * 10.0 - tenths).abs() < 1e-9 {
+                let level = tenths / 10.0;
+                format!("{:.1} dB", if level == 0.0 { 0.0 } else { level })
+            } else {
+                format!("{level} dB")
+            })
+        }
+        Value::String(text) if text.trim().eq_ignore_ascii_case("-inf") => Some("-inf dB".into()),
+        _ => None,
+    }
+}
 /// The notes for `wanted` samples loaded onto a Drum Rack without one: its next empty pads in the order Live lays them
 /// out, row by row from its first (C1, C#1, D1, D#1, then E1 above on a new rack), past the notes `given` to the others.
 pub fn free_pads(pads: &[DrumPad], given: &[u8], wanted: usize) -> Result<Vec<u8>, String> {
@@ -374,6 +478,7 @@ impl ChangeKind {
         }
         let out = match self.tool.as_str() {
             "set_device_parameter" | "set_device_parameters" => return resolve_parameters(input, context).await,
+            "set_mixer" => return mixer_from_display(input, context).await,
             "load_sample" | "load_sample_to_pad" => {
                 let found = match sample_for(input.get("sample"), context).await? {
                     Ok(found) => found,
@@ -664,6 +769,24 @@ impl ChangeKind {
                 }
             }
             schema["properties"] = Value::Object(properties);
+        } else if self.tool == "set_mixer" {
+            // Levels as Live shows them, besides its own 0 to 1 values: Live's volume curve isn't linear.
+            let level = json!({"anyOf":[{"type":"number","maximum":6},{"type":"string","const":"-inf"}]});
+            if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
+                let mut volume = level.clone();
+                volume["description"] = json!(
+                    "The fader as Live shows it, in dB (-6, 2.5, \"-inf\"), instead of volume: set exactly where Live shows that level"
+                );
+                properties.insert("volumeDb".into(), volume);
+                properties.insert(
+                    "panDisplay".into(),
+                    json!({"type":"string","minLength":1,"maxLength":4,"description":"The pan as Live shows it (\"25L\", \"C\", \"50R\"), instead of pan"}),
+                );
+                properties.insert(
+                    "sendsDb".into(),
+                    json!({"type":"array","minItems":1,"maxItems":12,"items":level,"description":"Send levels as Live shows them, in dB, for return tracks A, B, … in order (a shorter list leaves the rest), instead of sends"}),
+                );
+            }
         } else if self.tool == "set_audio_clip" {
             // Live's API has no clip fades (12.4.15b5): the bridge's fields for them change nothing.
             if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {

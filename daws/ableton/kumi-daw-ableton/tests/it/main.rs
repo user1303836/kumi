@@ -33,6 +33,9 @@ mod live_snapshots;
 mod live_views;
 mod loop_run;
 mod media_foundations;
+/// set_mixer's words since it takes levels as Live shows them, put back for the oracles' replays.
+#[path = "../support/mixer_in_db.rs"]
+mod mixer_in_db;
 mod notation_tools;
 mod observe_without_writes;
 mod older_bridge;

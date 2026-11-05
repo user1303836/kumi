@@ -45,6 +45,26 @@ impl ChangeContext for Context {
         self.calls.borrow_mut().push(json!(["drumPads", device]));
         self.pads.clone()
     }
+    async fn mixer_for_display(&self, track: &str, asked: &Value) -> Result<Result<Value, String>, RuntimeError> {
+        self.calls.borrow_mut().push(json!(["mixerForDisplay", track, asked]));
+        // As Live 12.4 shows it: its own labels for the fader and the sends (to a thousandth of a dB, "2.555 dB"), and
+        // its own pan labels.
+        let level = |label: &Value| match label.as_str() {
+            Some("-6.0 dB") => json!({"value": 0.6667, "shown": "-6.0 dB"}),
+            Some("2.0 dB") => json!({"value": 0.9112, "shown": "2.0 dB"}),
+            Some("-inf dB") => json!({"value": 0.0, "shown": "-inf dB"}),
+            Some("-12.0 dB") => json!({"value": 0.5223, "shown": "-12.0 dB"}),
+            Some(_) => json!({"near": ["2.555 dB", "2.556 dB"]}),
+            None => Value::Null,
+        };
+        let pan = match asked["pan"].as_str() {
+            Some("25L") => json!({"value": -0.5, "shown": "25L"}),
+            Some(_) => json!({"near": ["49L", "50L"]}),
+            None => Value::Null,
+        };
+        let sends: Vec<Value> = asked["sends"].as_array().map(|sends| sends.iter().map(level).collect()).unwrap_or_default();
+        Ok(Ok(json!({"volume": level(&asked["volume"]), "pan": pan, "sends": sends})))
+    }
 }
 fn kind(case: &Value) -> &'static ChangeKind {
     CHANGES.iter().find(|k| k.tool == case["tool"]).unwrap()
@@ -103,7 +123,8 @@ fn change_schemas_outputs_permanence_and_human_messages_match_source() {
         assert_eq!(serde_json::to_value(hex_color(&case["value"])).unwrap(), case["color"]);
         assert_eq!(format_number(value, None), case["format"]);
     }
-    assert_eq!(crate::pads_in_order::legacy_json(&serde_json::to_value(&*CHANGES).unwrap()), data["kinds"]);
+    let kinds = crate::mixer_in_db::legacy_kinds(&crate::pads_in_order::legacy_json(&serde_json::to_value(&*CHANGES).unwrap()));
+    assert_eq!(kinds, data["kinds"]);
     assert_eq!(*SAMPLE_INPUT, data["sampleInput"].as_object().unwrap().clone());
     assert_eq!(*REFERENCE_FIELDS, serde_json::from_value::<Vec<String>>(data["referenceFields"].clone()).unwrap());
     assert_eq!(
@@ -321,4 +342,134 @@ async fn samples_given_no_note_fill_the_racks_next_empty_pads_in_order() {
     // Every note given: nothing read.
     let named = json!([{"sample": "/samples/Kick.wav", "note": 36}, {"sample": "/samples/Snare.wav", "note": 38}]);
     assert_eq!(kit(named, context(None)).await, (vec![json!(36), json!(38)], 0));
+}
+
+fn mixer_context() -> Context {
+    Context { calls: RefCell::new(vec![]), parameters: vec![], display: false, pads: None }
+}
+
+/// The level a producer names in dB (or a pan as Live shows it) is set where Live itself shows it: Live's fader curve
+/// isn't linear, so no formula gives "+2 dB".
+#[tokio::test]
+async fn a_mixer_level_given_as_live_shows_it_is_set_where_live_shows_it() {
+    let mixer = kind(&json!({"tool": "set_mixer"}));
+    // As before when no level is given as Live shows it: nothing read.
+    let context = mixer_context();
+    let raw = json!({"trackRef": "1:track:0", "volume": 0.8});
+    assert_eq!(mixer.prepare(raw.as_object().unwrap(), &context).await.unwrap().unwrap(), *raw.as_object().unwrap());
+    assert!(context.calls.borrow().is_empty());
+    // Each one asked of Live by its label, and set at the value Live shows it at.
+    let context = mixer_context();
+    let given = json!({"trackRef": "1:track:0", "volumeDb": 2, "panDisplay": "25l", "sendsDb": [-12, "-inf"], "mute": false});
+    let prepared = mixer.prepare(given.as_object().unwrap(), &context).await.unwrap().unwrap();
+    assert_eq!(
+        Value::Object(prepared),
+        json!({"trackRef": "1:track:0", "mute": false, "volume": 0.9112, "pan": -0.5, "sends": [0.5223, 0.0]})
+    );
+    assert_eq!(
+        context.calls.borrow()[0],
+        json!(["mixerForDisplay", "1:track:0", {"volume": "2.0 dB", "pan": "25L", "sends": ["-12.0 dB", "-inf dB"]}])
+    );
+    // A level Live shows nowhere is refused, with the nearest it shows; nothing is set.
+    let context = mixer_context();
+    let between = json!({"trackRef": "1:track:0", "volumeDb": 2.5555});
+    let refused = mixer.prepare(between.as_object().unwrap(), &context).await.unwrap().unwrap_err();
+    assert!(refused.contains("2.5555 dB") && refused.contains("2.555 dB") && refused.contains("2.556 dB"), "{refused}");
+    // Both forms of one control at once, or a level that isn't one, is refused before Live is asked.
+    let context = mixer_context();
+    for wrong in [
+        json!({"trackRef": "1:track:0", "volume": 0.8, "volumeDb": -6}),
+        json!({"trackRef": "1:track:0", "volumeDb": "loud"}),
+        json!({"trackRef": "1:track:0", "sendsDb": [-6, "half"]}),
+    ] {
+        assert!(mixer.prepare(wrong.as_object().unwrap(), &context).await.unwrap().is_err(), "{wrong}");
+    }
+    assert!(context.calls.borrow().is_empty());
+}
+
+#[test]
+fn set_mixers_schema_offers_levels_as_live_shows_them_beside_its_own() {
+    let mixer = kind(&json!({"tool": "set_mixer"}));
+    let bridge = json!({"type": "object", "additionalProperties": false, "required": ["trackRef"], "properties": {
+        "trackRef": {"type": "string"}, "volume": {"type": "number", "minimum": 0, "maximum": 1}
+    }});
+    let schema = Value::Object(mixer.schema(bridge.as_object().unwrap()));
+    for field in ["trackRef", "volume", "volumeDb", "panDisplay", "sendsDb"] {
+        assert!(schema["properties"].get(field).is_some(), "{field}: {schema}");
+    }
+    assert_eq!(schema["required"], json!(["trackRef"]));
+}
+
+/// The mixer script, run as Live runs it against a stand-in whose labels are as uneven as Live's: a level is found by
+/// what it is ("-40 dB" is -40.0 dB), set inside the values Live shows it at, and one Live shows nowhere (or past the
+/// fader's ends) gets the labels either side, never a value.
+#[test]
+fn the_mixer_script_finds_a_level_by_lives_own_labels() {
+    use std::io::Write;
+    let stand_in = r#"
+import json, math
+NBSP = u'\xa0'
+class P:
+    def __init__(self, lo, hi, fmt): self.min, self.max, self.fmt = lo, hi, fmt
+    def str_for_value(self, v): return self.fmt(v)
+def level(v):
+    db = 6 + 85 * math.log10(v) if v > 0 else float('-inf')
+    if db < -70: return '-inf' + NBSP + 'dB'
+    if abs(db) >= 30: return '%d%sdB' % (round(db), NBSP)
+    text = ('%.3f' % db).rstrip('0')
+    text = text + '0' if text.endswith('.') else text
+    return ('0.0' if text == '-0.0' else text) + NBSP + 'dB'
+def pan(v):
+    p = int(round(v * 50))
+    return 'C' if p == 0 else ('%dL' % -p if p < 0 else '%dR' % p)
+class Mixer:
+    def __init__(self): self.volume, self.panning, self.sends = P(0.0, 1.0, level), P(-1.0, 1.0, pan), [P(0.0, 1.0, level)]
+class Track:
+    mixer_device = Mixer()
+obj = Track()
+"#;
+    let cases = json!([
+        {"volume": "-40.0 dB", "pan": "25L", "sends": ["-inf dB", "-12.0 dB"]},
+        {"volume": "2.5555 dB"},
+        {"volume": "7.0 dB"},
+        {"volume": "2.0 dB", "pan": "C"},
+    ]);
+    let source = format!(
+        "{stand_in}\nCASES = json.loads({})\nSCRIPT = {}\nout = []\nfor ARGS in CASES:\n    exec(SCRIPT)\n    out.append(result)\nprint(json.dumps(out))\n",
+        stringify(&Value::String(stringify(&cases))),
+        stringify(&Value::String(kumi_daw_ableton::display::MIXER_DISPLAY_SCRIPT.into()))
+    );
+    let mut child = std::process::Command::new("python3")
+        .arg("-")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.take().unwrap().write_all(source.as_bytes()).unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{}", String::from_utf8_lossy(&output.stderr));
+    let out: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let db = |label: &Value| -> f64 {
+        let text = label.as_str().unwrap().replace('\u{a0}', " ");
+        let number = text.trim_end_matches("dB").trim();
+        if number == "-inf" {
+            f64::NEG_INFINITY
+        } else {
+            number.parse().unwrap()
+        }
+    };
+    // By level, whatever Live's spelling: asked "-40.0 dB", found where Live shows "-40 dB".
+    assert_eq!(db(&out[0]["volume"]["shown"]), -40.0, "{out}");
+    assert_eq!(out[0]["pan"]["shown"], "25L");
+    assert!((out[0]["pan"]["value"].as_f64().unwrap() + 0.5).abs() < 0.01, "inside the values shown 25L: {out}");
+    assert_eq!(out[0]["sends"][0]["value"], 0.0, "-inf is the fader's end");
+    assert_eq!(out[0]["sends"][1], json!({"missing": true}), "a send the track hasn't");
+    // A level Live shows nowhere: the labels either side, and no value.
+    let near = out[1]["volume"]["near"].as_array().unwrap();
+    assert!(out[1]["volume"].get("value").is_none() && db(&near[0]) < 2.5555 && 2.5555 < db(&near[1]), "{out}");
+    // Past the fader's top: its two ends.
+    let ends = out[2]["volume"]["near"].as_array().unwrap();
+    assert_eq!((db(&ends[0]), db(&ends[1])), (f64::NEG_INFINITY, 6.0), "{out}");
+    assert_eq!((db(&out[3]["volume"]["shown"]), out[3]["pan"]["shown"].clone()), (2.0, json!("C")), "{out}");
 }
