@@ -1278,7 +1278,12 @@
       color: groupColor(group?.color, Number(key)),
       count: typeof group?.count === "number" ? group.count : points.filter((point) => point.group === Number(key)).length
     })).filter((group) => Number.isInteger(group.key)).sort((a, b) => a.key - b.key);
-    return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells };
+    const sounds = map?.sounds ?? {};
+    const haystack = points.map((point) => {
+      const sound = sounds[point.id];
+      return [sound?.name, sound?.class, sound?.kind, sound?.folder].filter((value) => typeof value === "string").join(" ").toLowerCase();
+    });
+    return { revision: map?.revision ?? null, points, groups, sounds, cells, haystack };
   }
   function fitView(width, height, margin = 16) {
     const size = Math.max(1, Math.min(width, height) - 2 * margin);
@@ -1377,11 +1382,10 @@
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return null;
     const found = /* @__PURE__ */ new Set();
-    for (const point of model.points) {
-      const sound = model.sounds[point.id];
-      const text = [sound?.name, sound?.class, sound?.kind, sound?.folder].filter(Boolean).join(" ").toLowerCase();
+    model.points.forEach((point, index) => {
+      const text = model.haystack[index];
       if (words.every((word) => text.includes(word))) found.add(point.id);
-    }
+    });
     return found;
   }
   function frame(model, ids, width, height, margin = 48) {
@@ -1420,27 +1424,50 @@
     const [size, setSize] = useState({ width: 0, height: 0 });
     const [view, setView] = useState(null);
     const [query, setQuery] = useState("");
+    const [searchFor, setSearchFor] = useState("");
     const [hidden, setHidden] = useState(() => /* @__PURE__ */ new Set());
     const [hover, setHover] = useState(null);
     const drag = useRef(null);
+    const viewRef = useRef(null);
+    viewRef.current = view;
+    const nextView = useRef(null);
+    const frameRef = useRef(0);
+    const queueView = (next) => {
+      nextView.current = next;
+      if (frameRef.current) return;
+      frameRef.current = requestAnimationFrame(() => {
+        frameRef.current = 0;
+        const latest = nextView.current;
+        nextView.current = null;
+        if (latest) setView(latest);
+      });
+    };
+    useEffect(() => () => cancelAnimationFrame(frameRef.current), []);
+    const backing = useRef("");
     const [said, setSaid] = useState("");
     const [hintId] = useState(() => `kumi-map-keys-${maps += 1}`);
     const mapSize = Math.max(1, Math.min(size.width, size.height) - 32);
     const hasPoints = model.points.length > 0;
-    const searched = useMemo(() => searchSounds(model, query), [model, query]);
+    useEffect(() => {
+      if (query === searchFor) return;
+      const timer = setTimeout(() => setSearchFor(query), query ? 150 : 0);
+      return () => clearTimeout(timer);
+    }, [query, searchFor]);
+    const searched = useMemo(() => searchSounds(model, searchFor), [model, searchFor]);
     const indexOf = useMemo(() => new Map(model.points.map((point, index) => [point.id, index])), [model]);
     const foundIds = useMemo(
       () => found && (found.revision === null || found.revision === model.revision) ? new Set(found.ids) : null,
       [found, model.revision]
     );
-    const visible = useMemo(() => {
-      const groupHidden = hidden.size > 0;
-      return (index) => {
-        const point = model.points[index];
-        if (groupHidden && hidden.has(point.group)) return false;
-        return !searched || searched.has(point.id);
-      };
+    const mask = useMemo(() => {
+      const out = new Uint8Array(model.points.length);
+      model.points.forEach((point, index) => {
+        out[index] = hidden.size > 0 && hidden.has(point.group) || searched !== null && !searched.has(point.id) ? 0 : 1;
+      });
+      return out;
     }, [model, hidden, searched]);
+    const visible = useMemo(() => (index) => mask[index] === 1, [mask]);
+    const shown = useMemo(() => mask.reduce((count, keep) => count + keep, 0), [mask]);
     const matches = useMemo(() => {
       const ids = searched ?? foundIds;
       return ids ? [...ids].filter((id) => indexOf.has(id) && visible(indexOf.get(id))) : [];
@@ -1481,7 +1508,8 @@
         event.preventDefault();
         const rect = canvas.getBoundingClientRect();
         const factor = Math.exp(-event.deltaY * (event.ctrlKey ? 0.01 : 25e-4));
-        setView((current) => current ? zoomAt(current, factor, event.clientX - rect.left, event.clientY - rect.top) : current);
+        const base = nextView.current ?? viewRef.current;
+        if (base) queueView(zoomAt(base, factor, event.clientX - rect.left, event.clientY - rect.top));
       };
       canvas.addEventListener("wheel", wheel, { passive: false });
       return () => canvas.removeEventListener("wheel", wheel);
@@ -1490,32 +1518,51 @@
       const canvas = canvasRef.current;
       if (!canvas || !view || size.width === 0) return;
       const ratio = window.devicePixelRatio || 1;
-      canvas.width = Math.round(size.width * ratio);
-      canvas.height = Math.round(size.height * ratio);
+      const wanted = `${Math.round(size.width * ratio)}x${Math.round(size.height * ratio)}`;
+      if (backing.current !== wanted) {
+        backing.current = wanted;
+        canvas.width = Math.round(size.width * ratio);
+        canvas.height = Math.round(size.height * ratio);
+      }
       const context = canvas.getContext("2d");
       if (!context) return;
       const colors = resolve(canvas);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, size.width, size.height);
-      const count = model.points.length;
+      const points = model.points;
+      const count = points.length;
       const base = count <= 40 ? 5 : count <= 300 ? 3.2 : 2.2;
       const radius = Math.max(1.5, Math.min(base + 3, base + Math.log2(view.scale) * 0.8));
       const groupColor2 = new Map(model.groups.map((group) => [group.key, group.color]));
+      const unit = mapSize * view.scale;
+      const [left, top, right, bottom] = [-8, -8, size.width + 8, size.height + 8];
       const labelled = [];
-      for (const pass of [false, true]) {
+      let onScreen = 0;
+      for (const pass of [0, 1]) {
+        const paths = /* @__PURE__ */ new Map();
+        for (let index = 0; index < count; index++) {
+          if (mask[index] !== pass) continue;
+          const point = points[index];
+          const x = point.x * unit + view.dx;
+          const y = point.y * unit + view.dy;
+          if (x < left || y < top || x > right || y > bottom) continue;
+          const color = groupColor2.get(point.group) ?? colors.faint;
+          let path = paths.get(color);
+          if (!path) {
+            path = new Path2D();
+            paths.set(color, path);
+          }
+          path.moveTo(x + radius, y);
+          path.arc(x, y, radius, 0, Math.PI * 2);
+          if (pass === 1 && ++onScreen <= 41) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
+        }
         context.globalAlpha = pass ? 0.92 : 0.16;
-        model.points.forEach((point, index) => {
-          if (visible(index) !== pass) return;
-          const [x, y] = toScreen(view, mapSize, point.x, point.y);
-          if (x < -8 || y < -8 || x > size.width + 8 || y > size.height + 8) return;
-          context.fillStyle = groupColor2.get(point.group) ?? colors.faint;
-          context.beginPath();
-          context.arc(x, y, radius, 0, Math.PI * 2);
-          context.fill();
-          if (pass) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
-        });
+        for (const [color, path] of paths) {
+          context.fillStyle = color;
+          context.fill(path);
+        }
       }
-      if (labelled.length <= 40) {
+      if (onScreen <= 40) {
         context.globalAlpha = 0.85;
         context.fillStyle = colors.text;
         context.font = `11px ${getComputedStyle(canvas).fontFamily || "sans-serif"}`;
@@ -1525,7 +1572,7 @@
           const text = mapLabel(name);
           if (!text) continue;
           const box = [x + radius + 4, y - 7, context.measureText(text).width, 14];
-          if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue;
+          if (placed.some(([left2, top2, width, height]) => box[0] < left2 + width && left2 < box[0] + box[2] && box[1] < top2 + height && top2 < box[1] + box[3])) continue;
           placed.push(box);
           context.fillText(text, box[0], y);
         }
@@ -1544,7 +1591,7 @@
       foundIds?.forEach((id) => ring(id, colors.accent, 3, 1.5));
       if (playing) ring(playing, colors.accent, 6, 2);
       if (selected) ring(selected, colors.strong, 4, 2);
-    }, [model, indexOf, view, size, visible, foundIds, selected, playing, mapSize, painted]);
+    }, [model, indexOf, view, size, mask, foundIds, selected, playing, mapSize, painted]);
     const at = (event) => {
       const rect = canvasRef.current?.getBoundingClientRect();
       return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
@@ -1578,7 +1625,6 @@
     const chosen = selected ? model.sounds[selected] : void 0;
     const hovered = hover ? model.points[hover.index] : void 0;
     const hoveredSound = hovered ? model.sounds[hovered.id] : void 0;
-    const shown = model.points.reduce((count, _, index) => count + (visible(index) ? 1 : 0), 0);
     return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", height: "100%", minHeight: 240, color: T.text }, children: [
       /* @__PURE__ */ jsxs("div", { style: { ...S.row, flexWrap: "wrap", padding: "8px 10px", gap: 6, borderBottom: `1px solid ${T.border}` }, children: [
         /* @__PURE__ */ jsx(
@@ -1662,7 +1708,7 @@
               const held = drag.current;
               if (held) {
                 if (Math.abs(x - held.x) + Math.abs(y - held.y) > 3) held.moved = true;
-                if (held.moved) setView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
+                if (held.moved) queueView({ ...held.view, dx: held.view.dx + x - held.x, dy: held.view.dy + y - held.y });
                 return;
               }
               if (!view) return;

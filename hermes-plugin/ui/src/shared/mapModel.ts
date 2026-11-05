@@ -24,6 +24,8 @@ export interface MapModel {
   sounds: Record<string, MapSound>
   /** Point indexes by grid cell (`GRID` × `GRID` over [0, 1]²). */
   cells: Map<number, number[]>
+  /** Each point's search text, lowercased once per map: its name, class, kind and folder (`searchSounds`). */
+  haystack: string[]
 }
 
 /** Where the map sits in its canvas: map x in [0, 1] → `x * size * scale + dx` pixels. */
@@ -69,7 +71,12 @@ export function buildModel(map: SoundMap | null): MapModel {
     }))
     .filter(group => Number.isInteger(group.key))
     .sort((a, b) => a.key - b.key)
-  return { revision: map?.revision ?? null, points, groups, sounds: map?.sounds ?? {}, cells }
+  const sounds = map?.sounds ?? {}
+  const haystack = points.map(point => {
+    const sound = sounds[point.id]
+    return [sound?.name, sound?.class, sound?.kind, sound?.folder].filter(value => typeof value === 'string').join(' ').toLowerCase()
+  })
+  return { revision: map?.revision ?? null, points, groups, sounds, cells, haystack }
 }
 
 /** The view that shows the whole map in a `width` × `height` canvas, with a margin. */
@@ -217,16 +224,16 @@ export function mapLabel(name: unknown): string {
   return clean(name, 28)
 }
 
-/** The sounds a search names: every word must appear in the name, class, kind or folder. Null for no search. */
+/** The sounds a search names: every word must appear in the name, class, kind or folder. Null for no search. The
+ *  text is the model's `haystack`, built once per map, so a keystroke over 25,000 sounds is one pass of `includes`. */
 export function searchSounds(model: MapModel, query: string): Set<string> | null {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean)
   if (!words.length) return null
   const found = new Set<string>()
-  for (const point of model.points) {
-    const sound = model.sounds[point.id]
-    const text = [sound?.name, sound?.class, sound?.kind, sound?.folder].filter(Boolean).join(' ').toLowerCase()
+  model.points.forEach((point, index) => {
+    const text = model.haystack[index]
     if (words.every(word => text.includes(word))) found.add(point.id)
-  }
+  })
   return found
 }
 
