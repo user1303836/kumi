@@ -301,3 +301,22 @@ test("a track listen's capture note shows as plain text under the capture line, 
   assert.ok(html.includes('Captured 6.1 s of the 7.9 s window; &lt;b&gt;Live&lt;/b&gt; was put back.'), 'the note is text, never markup')
   assert.equal(card('  '), card(undefined), 'an empty note adds nothing')
 })
+
+test('the generate card shows what was asked, the file, the waveform, the cost and the cap, and Place… for audio only', async () => {
+  const { GenerateCard } = await load('src/desktop/generate.tsx', { react: 'real' })
+  const fixtures = await import('./generation.fixtures.mjs')
+  const media = (result, kind = 'audio') => ({ file: { kind }, result, fallback: createElement('i', null, 'player') })
+  const audition = new Audition(async () => ({ data_url: 'data:audio/wav;base64,' }))
+  const card = (result, kind) => renderToStaticMarkup(createElement(GenerateCard, { media: media(result, kind), audition, ctx: {}, store: { get: () => ({ status: null }) } }))
+  const audio = card(fixtures.DONE)
+  for (const text of ['“a short metallic impact”', 'a-primary.wav', 'aria-label="Waveform of a short metallic impact"', '12 credits (est. 15)', '68 of 100 credits left under your cap', 'Place…']) {
+    assert.ok(audio.includes(text), `${text} in ${audio}`)
+  }
+  // Notes from audio: Desktop's own file chip, the note count and Plan notes…; no waveform and no Place step.
+  const notes = card(fixtures.MIDI_DONE, 'file')
+  for (const text of ['<i>player</i>', 'MIDI file', '128 notes', 'Plan notes…']) assert.ok(notes.includes(text), `${text} in ${notes}`)
+  assert.ok(!notes.includes('Place…') && !notes.includes('Waveform'))
+  assert.ok(card(fixtures.FROZEN).includes('New paid generations are paused'))
+  // A scan's answer keeps Desktop's own player, unchanged.
+  assert.equal(card({ job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }), '<i>player</i>')
+})

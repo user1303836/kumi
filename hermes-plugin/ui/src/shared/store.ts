@@ -30,6 +30,8 @@ export interface KumiState {
 export interface TrackedJob extends Job {
   /** When this window saw it finish (ms, this window's clock); null while it runs. */
   ended_at: number | null
+  /** A generation's latest `generate.updated` card (CC-13): its reconciled ledger, which the raw `/job` snapshot lacks. */
+  card?: unknown
 }
 
 /** How long a finished job stays in view, and how many jobs are followed at once (ids come from events). */
@@ -77,6 +79,8 @@ export class KumiStore {
   private reads = new Map<string, { promise: Promise<void>; again: boolean }>()
   private wanted = new Map<Part, number>()
   private generation = 0
+  /** `generate.updated` cards for jobs not read yet, by job id; kept on the job once it's read. */
+  private cards = new Map<string, unknown>()
 
   constructor(private readonly fetch: Fetch, private readonly historyLimit = 50) {}
 
@@ -103,6 +107,7 @@ export class KumiStore {
   reset(): void {
     this.generation += 1
     this.reads.clear()
+    this.cards.clear()
     this.state = EMPTY
     for (const fn of [...this.listeners]) fn()
   }
@@ -193,6 +198,24 @@ export class KumiStore {
     void this.refreshJob(jobId)
   }
 
+  /** A `generate.updated` card (CC-13): keep it on its job, since its ledger is reconciled and the raw `/job` snapshot
+   *  has none, and read the job as news. Unlike a job first met finished elsewhere, a generation the event reports
+   *  shows even when it has already ended: with tool progress off, this row is where it shows. */
+  noteGeneration(card: unknown): void {
+    const id = jobOf(card)
+    if (!id) return
+    const before = this.state.jobs[id]
+    if (before) this.set({ jobs: { ...this.state.jobs, [id]: { ...before, card } } })
+    else if (Object.keys(this.state.jobs).length >= MOST_JOBS) return
+    else {
+      this.cards.delete(id)
+      this.cards.set(id, card)
+      // Bounded like the jobs themselves: the oldest card waiting for its first read goes first.
+      if (this.cards.size > MOST_JOBS) this.cards.delete(this.cards.keys().next().value as string)
+    }
+    void this.refreshJob(id)
+  }
+
   /** Read every job still running and forget the finished ones kept long enough. While the runtime is quiet nothing
    *  moves, so nothing's read; once it has stopped, each job is read a last time, and one still "running" then ended
    *  with it. */
@@ -211,13 +234,19 @@ export class KumiStore {
         const read = await this.fetch<Job>(`/job?id=${encodeURIComponent(id)}`)
         if (generation !== this.generation) return
         const before = this.state.jobs[id]
-        // A job first seen finished isn't news: it isn't shown as if it had just ended.
-        if (!before && finished(read)) return
+        // A job first seen finished isn't news: it isn't shown as if it had just ended. One a generation event
+        // reported is (its card waits here until the first read), whichever read gets there first.
+        const waiting = this.cards.has(id)
+        if (!before && finished(read) && !waiting) return
+        const card = before?.card ?? this.cards.get(id)
+        this.cards.delete(id)
         const job: Job = stopped && !finished(read) ? { ...read, state: 'interrupted' } : read
         const ended_at = finished(job) ? (before?.ended_at ?? Date.now()) : null
-        this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at } } })
+        this.set({ jobs: { ...this.state.jobs, [id]: { ...job, job_id: id, ended_at, ...(card === undefined ? {} : { card }) } } })
       } catch (error) {
-        if (generation !== this.generation || statusOf(error) !== 404 || !this.state.jobs[id]) return
+        if (generation !== this.generation || statusOf(error) !== 404) return
+        this.cards.delete(id)
+        if (!this.state.jobs[id]) return
         // No such job in this profile (long gone): nothing to follow.
         const { [id]: _gone, ...rest } = this.state.jobs
         this.set({ jobs: rest })
