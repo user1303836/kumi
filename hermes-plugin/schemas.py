@@ -79,14 +79,16 @@ KUMI_READ = _tool(
     "values a change needs. Reads only; never runs code.",
     {"action": {"type": "string", "enum": ["data", "schema"]},
      "query": {"type": "object", "description": "action data: what to read, in the DAW's read schema."},
-     "tool": {"type": "string", "description": "action schema: the step to describe, e.g. set_track_volume."}},
+     "tool": {"type": "string", "description": "action schema: the step to describe, e.g. set_mixer (Live) or "
+                                               "track_volume (REAPER, Renoise)."}},
     ("action",))
 
 KUMI_CHANGE = _tool(
     "kumi_change",
     "Change the open project with a bounded, typed plan of up to 20 steps, each one of the DAW's own change steps "
     "(look one up with kumi_read action schema), as one entry in Kumi's HISTORY. The producer approves the exact change "
-    "before it runs. Pass the project key and epoch from your latest kumi_observe or kumi_read: a changed project is "
+    "before it runs. Pass the project key and epoch from your latest kumi_observe or kumi_read, or the ones a done "
+    "kumi_change returned (its project_key and epoch serve the next change in the same turn): a changed project is "
     "refused, not guessed. A file goes in through the DAW's own file step (Live replace_sample or import_audio, REAPER "
     "item_import, Renoise sample_load), whose file field holds a source: {sound_id, map_revision}, {artifact_id} or "
     "{file, provenance}, never a path. "
