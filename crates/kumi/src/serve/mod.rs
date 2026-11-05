@@ -7,6 +7,7 @@
 //!
 //! The operations it offers are in [`registry`]; [`ctx`] is what each is given; [`mcp`] is the wire.
 
+pub mod connection;
 pub mod ctx;
 pub mod jobs;
 pub mod mcp;
@@ -134,8 +135,36 @@ fn set_process_environment(args: &Args) {
     }
 }
 
+/// Every descriptor the runtime was started with past stdin, stdout and stderr (the host's lock on the state folder,
+/// CC-6) is marked close-on-exec: the runtime keeps it open, but no program it starts (a DAW's host) inherits it, so
+/// the lock lasts exactly as long as the runtime. The descriptors are the ones `/dev/fd` lists (Linux and macOS).
+#[cfg(unix)]
+pub fn close_inherited_on_exec() {
+    let open: Vec<libc::c_int> = match std::fs::read_dir("/dev/fd") {
+        Ok(entries) => entries
+            .filter_map(Result::ok)
+            .filter_map(|entry| entry.file_name().to_str().and_then(|name| name.parse().ok()))
+            .filter(|fd| *fd > 2)
+            .collect(),
+        // No listing: every descriptor a process is likely to have been given.
+        Err(_) => (3..1024).collect(),
+    };
+    for fd in open {
+        // SAFETY: fcntl on a descriptor number reads or sets its flags only; one that isn't open fails, untouched.
+        unsafe {
+            let flags = libc::fcntl(fd, libc::F_GETFD);
+            if flags >= 0 && flags & libc::FD_CLOEXEC == 0 {
+                libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC);
+            }
+        }
+    }
+}
+
 /// `kumi serve` with the arguments after `serve`: serves until stdin ends or it's told to stop; the exit code.
 pub fn main(args: &[String]) -> i32 {
+    // Before anything starts a program.
+    #[cfg(unix)]
+    close_inherited_on_exec();
     let args = match parse(args) {
         Ok(args) => args,
         Err(why) => {
@@ -155,7 +184,7 @@ pub fn main(args: &[String]) -> i32 {
     let env = environment(&args, kumi_types::system::process_env());
     let local = tokio::task::LocalSet::new();
     let code = local.block_on(&runtime, async move {
-        let ctx = match ctx::Ctx::new(args, env) {
+        let ctx = match ctx::Ctx::new(args, env, kumi_daw::io::Answers::default()) {
             Ok(ctx) => ctx,
             Err(why) => {
                 say(&format!("kumi serve: {why}"));
@@ -236,6 +265,21 @@ mod tests {
             .contains("<name>=<path>"));
         assert!(refused(&["--stdio", "--state-dir", &state, "--kumi-home", &kumi_home, "--daw", "reaper", "--yes"]).contains("unknown"));
         assert!(refused(&["--stdio", "--state-dir"]).contains("needs a value"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_descriptor_the_runtime_was_started_with_stays_open_but_isnt_passed_on() {
+        use std::os::fd::AsRawFd;
+        let lock = tempfile::tempfile().unwrap();
+        let fd = lock.as_raw_fd();
+        let close_on_exec = || unsafe { libc::fcntl(fd, libc::F_GETFD) } & libc::FD_CLOEXEC != 0;
+        // As a host passes it (Python's pass_fds): inheritable.
+        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::fcntl(fd, libc::F_GETFD) & !libc::FD_CLOEXEC) };
+        assert!(!close_on_exec());
+        close_inherited_on_exec();
+        assert!(close_on_exec(), "a program the runtime starts doesn't get it");
+        assert!(lock.metadata().is_ok(), "the runtime keeps it open");
     }
 
     #[test]

@@ -34,6 +34,7 @@ mod live_views;
 mod loop_run;
 mod media_foundations;
 mod notation_tools;
+mod observe_without_writes;
 mod older_bridge;
 /// Kumi's words since a kit's pads fill in order, put back for the oracles' replays.
 #[path = "../support/pads_in_order.rs"]

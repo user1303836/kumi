@@ -70,6 +70,9 @@ pub struct Remember {
     pub track_ids: super::track_ids::TrackIds,
     /// What Kumi keeps of clips its changes cut or delete, for its undo, and in the Set's history.
     pub history: super::snapshots::SetHistory,
+    /// Whether a look may keep Kumi's ids inside the Set (`HostPolicy::persist_identity`). Off, the project and
+    /// track ids are still decided and read, but nothing is written into Live.
+    pub persist_identity: Cell<bool>,
 }
 impl Remember {
     pub fn new(connection: Rc<LiveConnection>, store: Option<Rc<dyn ProjectStore>>, on_catch_up: Option<Rc<dyn Fn(CatchUp)>>) -> Rc<Self> {
@@ -88,6 +91,7 @@ impl Remember {
             timer: RefCell::new(None),
             track_ids: Default::default(),
             history: Default::default(),
+            persist_identity: Cell::new(true),
         })
     }
     pub fn current(&self) -> Option<Rc<CurrentProject>> {
@@ -288,7 +292,9 @@ impl Remember {
                 && store.load_set(&mine, path).await.ok().flatten().is_some_and(|b| b.path == path || project::same_file(&b.path, path));
         }
         let (id, keep) = project::decide_project(kept.as_deref(), path, last.as_deref(), first_save || seen_here);
-        if keep && connection.has("live_data_preview") && connection.has("live_data_apply") {
+        // Not kept when the host keeps nothing in the Set: the id decided is returned all the same, as when keeping
+        // it fails, so a Set that holds no id is the project its path gives.
+        if keep && self.persist_identity.get() && connection.has("live_data_preview") && connection.has("live_data_apply") {
             let kept: Result<(), RuntimeError> = async {
                 let preview = payload(
                     &connection

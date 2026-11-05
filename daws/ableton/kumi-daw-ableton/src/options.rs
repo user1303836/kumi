@@ -6,6 +6,7 @@ use super::{
 use crate::{ears::link::EarsLink, hands::Hands};
 use chrono::{DateTime, Utc};
 use futures::future::LocalBoxFuture;
+use kumi_agent::core::context::HostPolicy;
 use kumi_agent::core::contracts::*;
 use kumi_types::contracts::*;
 use kumi_types::errors::RuntimeError;
@@ -23,6 +24,7 @@ pub use kumi_agent::core::context::{IntegrationContext, LowDisk};
 pub use kumi_listening::listener::ListenerSource;
 
 pub struct AbletonOptions {
+    pub policy: HostPolicy,
     pub on_connection: ConnectionListener,
     pub bridge_config: Option<String>,
     pub connect: Option<Connect>,
@@ -67,6 +69,7 @@ pub struct AbletonOptions {
 impl AbletonOptions {
     pub fn new(on_connection: ConnectionListener) -> Self {
         Self {
+            policy: HostPolicy::standalone(),
             on_connection,
             bridge_config: None,
             connect: None,
@@ -103,6 +106,7 @@ impl AbletonOptions {
     /// Live's options from the app's neutral half; what only Live has is set after.
     pub fn with_context(context: IntegrationContext) -> Self {
         let mut options = Self::new(context.on_connection);
+        options.policy = context.policy;
         options.now = context.now;
         options.generation = context.generation;
         options.on_dispatch = context.on_dispatch;
@@ -128,6 +132,7 @@ impl AbletonOptions {
     /// The neutral half of these options.
     pub fn context(&self) -> IntegrationContext {
         IntegrationContext {
+            policy: self.policy.clone(),
             on_connection: self.on_connection.clone(),
             now: self.now.clone(),
             generation: self.generation.clone(),

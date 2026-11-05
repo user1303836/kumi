@@ -66,6 +66,14 @@ impl DawProvider for Ableton {
     fn bridge_config(&self, env: &Env) -> Option<String> {
         super::folders::find_bridge_config(env)
     }
+    /// Live has one Remote Scripts folder, whichever Kumi put the bridge there: its configuration is in that Kumi's
+    /// home, at `<home>/bridge/state/` (as setup places it), so the home is the configuration's folder's grandparent.
+    fn bridge_owner(&self, bridge_config: &str, _env: &Env) -> Option<String> {
+        let config = std::fs::canonicalize(bridge_config).ok()?;
+        let state = config.parent().filter(|state| state.file_name().is_some_and(|name| name == "state"))?;
+        let bridge = state.parent().filter(|bridge| bridge.file_name().is_some_and(|name| name == self.bridge_folder()))?;
+        bridge.parent().map(|home| home.display().to_string())
+    }
     fn bundled_bridge_version(&self) -> Option<String> {
         bridge_setup::bundled_bridge_version()
     }

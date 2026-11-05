@@ -62,6 +62,7 @@ mod plain_farewell;
 mod print;
 mod report;
 mod serve;
+mod serve_daw;
 mod session;
 mod session_thread;
 mod spinner;

@@ -300,7 +300,7 @@ mod tests {
             media_roots: vec![],
             tools: BTreeMap::new(),
         };
-        Ctx::new(args, Env::new()).unwrap()
+        Ctx::new(args, Env::new(), Default::default()).unwrap()
     }
 
     /// Job `id`'s file once every write so far is done.

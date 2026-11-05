@@ -1,7 +1,8 @@
 //! The runtime core's operations (W1). `status` says what the runtime is and what it can reach; the DAW connection,
 //! looks, reads, changes, undo, HISTORY and setup join it.
 
-use super::ctx::{reads, Call, Ctx, OpError, OpFuture, Operation};
+use super::connection::{self, Project};
+use super::ctx::{reads, Call, Ctx, Effect, JsonObject, OpError, OpFuture, Operation};
 use super::PROTOCOL;
 use serde_json::{json, Value};
 
@@ -21,6 +22,134 @@ fn no_arguments() -> Value {
 
 fn run_status(ctx: &Ctx, _call: Call) -> OpFuture<'_> {
     Box::pin(async move { Ok(publish_status(ctx, false).await) })
+}
+
+pub static CONNECT: Operation = Operation {
+    name: "connect",
+    description: "Connects the runtime to the DAW through Kumi's part in it, and takes a first look at the open project. \
+                  Writes nothing into the DAW or the project. Answers as status does.",
+    schema: connect_schema,
+    effect: connects,
+    run: run_connect,
+};
+
+fn connect_schema() -> Value {
+    json!({"type": "object", "additionalProperties": false, "properties": {
+        "daw": {"type": "string", "enum": ["ableton", "reaper", "renoise"], "description": "The DAW, when you'd check it's the one this runtime works with"}
+    }})
+}
+
+fn connects(_: &JsonObject) -> Effect {
+    Effect::Connect
+}
+
+fn run_connect(ctx: &Ctx, call: Call) -> OpFuture<'_> {
+    Box::pin(async move {
+        if let Some(daw) = call.args.get("daw").and_then(Value::as_str).filter(|daw| *daw != ctx.daw().as_str()) {
+            let reason = format!("This runtime works with {}, not {daw}: change the DAW in the plugin's settings.", ctx.daw().as_str());
+            return Err(OpError::Refused { code: "other_daw", reason, owner: None });
+        }
+        let connection = connection::connect(ctx, call.signal.clone()).await?;
+        // A first look, for the project's key and epoch: a DAW that doesn't answer yet leaves it for observe.
+        if let Ok(observation) = connection.integration.observe(call.signal.clone(), None).await {
+            ctx.link().saw(&observation);
+            connection::publish_focus(&ctx.handle());
+        }
+        Ok(publish_status(ctx, false).await)
+    })
+}
+
+pub static OBSERVE: Operation = Operation {
+    name: "observe",
+    description: "Looks at the open project now: `project` gives its full description with the refs a change names, \
+                  `focus` what the producer has selected and the transport, `catch_up` what changed since the last look. \
+                  Every answer has the project's key and epoch, which a change names. Writes nothing into the DAW.",
+    schema: observe_schema,
+    effect: reads,
+    run: run_observe,
+};
+
+/// The longest `text` an observation gives when it isn't told (`max_chars`), and the bounds of what it may be told.
+const MAX_CHARS: (u64, u64, u64) = (4000, 200, 20000);
+
+fn observe_schema() -> Value {
+    json!({"type": "object", "additionalProperties": false, "required": ["scope"], "properties": {
+        "scope": {"type": "string", "enum": ["focus", "catch_up", "project"]},
+        "max_chars": {"type": "integer", "minimum": MAX_CHARS.1, "maximum": MAX_CHARS.2, "description": "The longest text to answer with (4000 if left out)"}
+    }})
+}
+
+fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
+    Box::pin(async move {
+        let connection = ctx.connection()?;
+        let observation = connection
+            .integration
+            .observe(call.signal.clone(), None)
+            .await
+            .map_err(|error| OpError::Failed { reason: format!("Kumi couldn't look at the project: {error}") })?;
+        let project = ctx.link().saw(&observation);
+        let (focus, transport, catch_up) = (connection.focus(), connection.transport(), connection.take_catch_up());
+        let scope = call.args.get("scope").and_then(Value::as_str).unwrap_or("project");
+        let text = match scope {
+            "focus" => focus_text(&project, focus.as_ref(), transport.as_ref()),
+            "catch_up" if catch_up.is_empty() => format!("Nothing has changed in {} since the last look.", project.name),
+            "catch_up" => catch_up
+                .iter()
+                .flat_map(|seen| seen.lines.iter().cloned().chain((seen.more > 0).then(|| format!("…and {} more", seen.more))))
+                .collect::<Vec<_>>()
+                .join("\n"),
+            _ => observation.context.clone(),
+        };
+        let most = call.args.get("max_chars").and_then(Value::as_u64).unwrap_or(MAX_CHARS.0);
+        let refs = connection::refs(&connection, call.signal.clone()).await;
+        connection::publish_focus(&ctx.handle());
+        publish_status(ctx, false).await;
+        Ok(json!({
+            "text": bounded(&text, most as usize),
+            "project_key": project.key,
+            "epoch": project.epoch,
+            "project": project_value(&project),
+            "focus": focus.as_ref().map(connection::focus_value),
+            "transport": transport.as_ref().map(connection::transport_value),
+            "catch_up": catch_up,
+            "refs": refs,
+            "age_ms": kumi_common::time::now_ms() - project.seen_at,
+        }))
+    })
+}
+
+/// What the producer has selected and the transport, in a few lines.
+fn focus_text(
+    project: &Project,
+    focus: Option<&kumi_agent::core::view::DawFocus>,
+    transport: Option<&kumi_agent::core::view::Transport>,
+) -> String {
+    let mut lines = vec![format!("{} (epoch {})", project.name, project.epoch)];
+    match focus {
+        Some(focus) => lines.push(format!("Selected: {}", serde_json::to_string(focus).unwrap_or_default())),
+        None => lines.push("Selected: nothing the DAW has said yet".into()),
+    }
+    if let Some(transport) = transport {
+        let state = if transport.playing { "playing" } else { "stopped" };
+        let tempo = transport.tempo.map(|tempo| format!(" at {tempo} BPM")).unwrap_or_default();
+        let beat = transport.beat.map(|beat| format!(", beat {beat}")).unwrap_or_default();
+        lines.push(format!("Transport: {state}{tempo}{beat}"));
+    }
+    lines.join("\n")
+}
+
+/// `text` cut to at most `most` characters, saying how much more there was.
+fn bounded(text: &str, most: usize) -> String {
+    let total = text.chars().count();
+    if total <= most {
+        return text.to_string();
+    }
+    let kept: String = text.chars().take(most).collect();
+    format!("{kept}\n… ({} more characters: ask again with a larger max_chars, or read what you need)", total - most)
+}
+
+fn project_value(project: &Project) -> Value {
+    json!({"name": project.name, "key": project.key, "epoch": project.epoch})
 }
 
 pub static JOB: Operation = Operation {
@@ -46,9 +175,13 @@ fn run_job(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     })
 }
 
-/// The runtime's status now, also written as `status.json` (`stale` there: whether the runtime has stopped).
+/// The runtime's status now, also written as `status.json` (`stale` there: whether the runtime has stopped). Once the
+/// runtime is stopping, only the stop is written: a late write from before (a connection change) never undoes it.
 pub async fn publish_status(ctx: &Ctx, stale: bool) -> Value {
     let status = status(ctx).await;
+    if !stale && ctx.shutdown().is_cancelled() {
+        return status;
+    }
     let mut snapshot = status.clone();
     snapshot["stale"] = json!(stale);
     if let Err(error) = ctx.snapshots().write("status", &snapshot) {
@@ -89,7 +222,7 @@ pub fn publish_owner(ctx: &Ctx, running: bool) {
 }
 
 /// What `status` answers (C1): `runtime` (its version, protocol and Kumi home), `daw`, `setup`, `connected`,
-/// `project`, `owner` and `capabilities` (the operations offered, by name).
+/// `project` (`{name, key, epoch}` once seen), `owner` and `capabilities` (the operations offered, by name).
 pub async fn status(ctx: &Ctx) -> Value {
     let (installed, version, bundled, daw_open) = match crate::daw::provider(ctx.daw()) {
         Some(provider) => {
@@ -102,12 +235,13 @@ pub async fn status(ctx: &Ctx) -> Value {
     // The process's own, which every part of Kumi reads: `main` set it before anything else ran.
     let home = std::env::var_os("KUMI_HOME").map(|home| home.to_string_lossy().into_owned());
     let capabilities: Vec<&str> = ctx.offered().iter().map(|operation| operation.name).collect();
+    let connected = ctx.link().connection().is_some_and(|connection| connection.answering());
     json!({
         "runtime": {"version": env!("CARGO_PKG_VERSION"), "protocol": PROTOCOL, "home": home},
         "daw": ctx.daw().as_str(),
         "setup": {"component": {"installed": installed, "version": version, "bundled": bundled}, "daw_open": daw_open},
-        "connected": false,
-        "project": null,
+        "connected": connected,
+        "project": ctx.link().project().as_ref().map(project_value),
         "owner": null,
         "capabilities": capabilities,
     })

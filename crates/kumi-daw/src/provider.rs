@@ -175,6 +175,13 @@ pub trait DawProvider {
     fn site(&self) -> &'static str;
     /// Where Kumi's bridge for the DAW says how to reach it, when the bridge is installed.
     fn bridge_config(&self, env: &Env) -> Option<String>;
+    /// The Kumi home whose installation `bridge_config` belongs to (where its connection state is kept), when it can
+    /// tell: a host that keeps to one home uses only that home's. By default the configuration was found through this
+    /// `env`'s Kumi home (a receipt there), so it's that home's.
+    fn bridge_owner(&self, bridge_config: &str, env: &Env) -> Option<String> {
+        let _ = bridge_config;
+        Some(crate::io::kumi_home(env))
+    }
     /// The version of the bridge this Kumi brings for the DAW.
     fn bundled_bridge_version(&self) -> Option<String>;
     /// The version of the bridge installed where a configuration says.

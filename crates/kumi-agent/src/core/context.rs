@@ -5,6 +5,7 @@ use crate::core::view::{DawFocus, Transport};
 use chrono::{DateTime, Utc};
 use futures::future::LocalBoxFuture;
 use kumi_types::contracts::{AuditionEvent, ChangeRecord};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 /// Asks the producer to free disk space before a recording: what's recorded, the bytes needed, where.
@@ -13,9 +14,38 @@ pub type LowDisk = Rc<dyn Fn(String, f64, String) -> LocalBoxFuture<'static, Opt
 // The listening model's finder (kumi-listening), beside the Listener it finds.
 use kumi_listening::listener::ListenerSource;
 
+/// What the host permits beyond an individual tool call. Both constructors are explicit so a new
+/// permission has to be decided for standalone Kumi and for an embedded plugin.
+#[derive(Clone, Debug)]
+pub struct HostPolicy {
+    /// May keep project and track identities in the DAW's saved document.
+    pub persist_identity: bool,
+    pub listening: ListeningPolicy,
+}
+
+#[derive(Clone, Debug)]
+pub enum ListeningPolicy {
+    /// Standalone listening may prepare Ears, use recording tracks and audition an offline render.
+    Standalone,
+    /// Only preinstalled capture devices and a caller-owned directory below this root. No recording
+    /// fallback, automatic audition, installation or shared-cache sweep.
+    Restricted { scratch_root: PathBuf },
+}
+
+impl HostPolicy {
+    pub fn standalone() -> Self {
+        Self { persist_identity: true, listening: ListeningPolicy::Standalone }
+    }
+
+    pub fn plugin(listen_root: PathBuf) -> Self {
+        Self { persist_identity: false, listening: ListeningPolicy::Restricted { scratch_root: listen_root } }
+    }
+}
+
 /// The sinks a DAW's integration reports to, and the services and timings the app gives it.
 #[derive(Clone)]
 pub struct IntegrationContext {
+    pub policy: HostPolicy,
     pub on_connection: ConnectionListener,
     pub now: Option<Rc<dyn Fn() -> DateTime<Utc>>>,
     pub generation: Option<String>,
@@ -53,6 +83,7 @@ pub struct IntegrationContext {
 impl IntegrationContext {
     pub fn new(on_connection: ConnectionListener) -> Self {
         Self {
+            policy: HostPolicy::standalone(),
             on_connection,
             now: None,
             generation: None,
