@@ -54,8 +54,9 @@ impl Kernel for UnavailableKernel {
     }
 }
 /// How the watch for Live paces itself: a look at Live's port every `look_ms`, and while it answers
-/// but the session isn't connected, a reconnect at once and then every `retry_ms`, at most `tries`
-/// times until it stops answering (then the count starts again). It ends after `looks` (quick ones aside). A Live
+/// but the session isn't connected, a reconnect at once and then every `retry_ms`. After `tries` failed attempts,
+/// it keeps trying at a third of that rate: a dialog can keep the DAW busy longer than the first attempts. A port
+/// that stops answering starts the count again. It ends after `looks` (quick ones aside). A Live
 /// that's open but not answering yet gets `hold_ms` before Kumi says how to make it answer.
 ///
 /// For `quick_for_ms` from when the DAW is seen open (as the watch starts, or opening later among several DAWs) or its
@@ -250,18 +251,26 @@ async fn connect_when_daw_answers<F, A, O, B, W, R, S>(
         was_answering = Some(answering);
         let quick = quick_since(seen_open);
         if answering {
-            if (quick || tries < pace.tries) && next.is_some_and(|at| tokio::time::Instant::now() >= at) {
+            if next.is_some_and(|at| tokio::time::Instant::now() >= at) {
                 // A quick try doesn't count against the tries: a Live that takes a while to answer after its port
                 // opens would otherwise use them all up within the minute.
                 if !quick {
-                    tries += 1;
+                    tries = tries.saturating_add(1);
                 }
                 // A turn under way makes this fail; it's tried again later.
                 if session.reconnect().await.is_ok() && session.connected() {
                     emit(SessionEvent::Notice { message: words.answered.into() });
                     break;
                 }
-                let retry = if quick { pace.look_ms } else { pace.retry_ms };
+                let retry = if quick {
+                    pace.look_ms
+                } else if tries >= pace.tries {
+                    // A persistent failure (including a stale secret) gets fewer attempts, while a dialog closed
+                    // later still reconnects without the producer having to ask.
+                    pace.retry_ms.saturating_mul(3).max(pace.look_ms)
+                } else {
+                    pace.retry_ms
+                };
                 next = Some(tokio::time::Instant::now() + std::time::Duration::from_millis(retry));
             }
         } else {
@@ -2036,11 +2045,23 @@ mod watch_tests {
         assert_eq!(reconnects, 3, "at once, then again while Live answers and the session isn't connected");
         assert_eq!(notices, [live_words().unreachable, "Live answered, so Kumi is connected to it now."]);
         assert!(!watching);
-        // A Live that answers but never connects gets a bounded number of tries.
+        // A dialog that outlasts the first ten attempts still connects once it is answered.
+        assert_eq!(watch(12, true, false, 0).await.0, 12);
+        // A Live that answers but never connects keeps trying during the watch.
         let (reconnects, _, _) = watch(u32::MAX, true, false, 0).await;
-        assert_eq!(reconnects, 10);
+        assert!(reconnects > 10);
         // A Live that never answers isn't asked at all.
         assert_eq!(watch(1, false, false, 0).await.0, 0);
+    }
+
+    #[tokio::test(flavor = "current_thread", start_paused = true)]
+    async fn a_persistent_reconnect_failure_slows_down_without_stopping() {
+        // One initial attempt at 0, then slower attempts at 180 and 360 seconds. A port that never authenticates
+        // doesn't get the initial retry rate forever, and a DAW that eventually answers can still connect.
+        let (_, reconnects) = watched(pace(1_000, 20, 0, 1), false, 0, u32::MAX, &[179_000]).await;
+        assert_eq!(reconnects, 1);
+        let (_, reconnects) = watched(pace(1_000, 20, 0, 1), false, 0, 3, &[361_000]).await;
+        assert_eq!(reconnects, 3);
     }
 
     #[tokio::test(flavor = "current_thread")]
