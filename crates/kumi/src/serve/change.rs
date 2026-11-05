@@ -575,12 +575,12 @@ async fn undo(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         Err(error) => return Ok(json!({"state": "refused", "code": error.code(), "reason": error.reason()})),
     };
     let here = ctx.link().expect_project(&row.project_key);
-    let track = row.track.as_deref().map(|track| format!(" on {track}")).unwrap_or_default();
     if previewing(&call.args) {
         if let Err(error) = here {
             return Ok(json!({"state": "refused", "code": error.code(), "reason": error.reason()}));
         }
-        let mut preview = json!({"state": "preview", "text": format!("Undo {}{track}", row.title), "undo_available": why_not.is_none()});
+        let text = format!("Undo {}{}", row.title, on_track(&row.title, row.track.as_deref()));
+        let mut preview = json!({"state": "preview", "text": text, "undo_available": why_not.is_none()});
         if let Some((reason, _, _)) = why_not {
             preview["reason"] = json!(reason);
         }
@@ -711,10 +711,37 @@ fn run_history(ctx: &Ctx, call: Call) -> OpFuture<'_> {
     })
 }
 
+/// " on <track>" after an undo's words, unless they name the track already, as a change's title often does ("1 Drums
+/// volume …", "Simpler on 1 Drums now plays …"): the track is said once.
+fn on_track(words: &str, track: Option<&str>) -> String {
+    let Some(track) = track.filter(|track| !track.is_empty()) else { return String::new() };
+    let named = words.match_indices(track).any(|(at, _)| {
+        let before = words[..at].chars().next_back();
+        let after = words[at + track.len()..].chars().next();
+        !before.is_some_and(char::is_alphanumeric) && !after.is_some_and(char::is_alphanumeric)
+    });
+    if named {
+        String::new()
+    } else {
+        format!(" on {track}")
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use kumi_types::contracts::ToolResult;
+
+    /// An undo's words say the track once: not again when the change's title names it, and not for a name that's only
+    /// part of another word in it.
+    #[test]
+    fn an_undo_says_its_track_once() {
+        let sample = "Simpler on 1 Drums now plays “Snare 909 Tune7”";
+        assert_eq!(format!("Undo {sample}{}", on_track(sample, Some("1 Drums"))), format!("Undo {sample}"));
+        assert_eq!(on_track("volume -4.0 dB → -6.0 dB", Some("1 Drums")), " on 1 Drums");
+        assert_eq!(on_track("Drumset volume up", Some("Drums")), " on Drums", "Drums inside Drumset isn't the track");
+        assert_eq!(on_track("Tempo 120 → 124 BPM", None), "");
+    }
 
     fn row(state: &str) -> Row {
         Row {
