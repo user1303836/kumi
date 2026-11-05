@@ -60,6 +60,15 @@ class Host:
             return {}
         return config if isinstance(config, dict) else {}
 
+    def session_surface(self) -> str:
+        """The calling session's client (`cli`, `tui`, `desktop`, `acp`) or messaging platform (`telegram`, …), as
+        Hermes names it (`ctx.session_surface()`); "" outside a session or on a Hermes without it."""
+        try:
+            surface = self._ctx.session_surface()
+        except Exception:
+            return ""
+        return surface if isinstance(surface, str) else ""
+
     def hook_timeout(self) -> float | None:
         """Hermes's `plugins.hook_callback_timeout` (default 30 s; 0 or less: none), read on each call."""
         if self._hook_timeout is not None:
