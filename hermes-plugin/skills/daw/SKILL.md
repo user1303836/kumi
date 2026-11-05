@@ -135,9 +135,11 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
   - `notes_transpose` and `notes_humanize` change notes in place.
 - **"Write me a drum beat", on a new track, in Live:**
   1. Look first (`kumi_observe` with `scope: focus`) for the project key, the epoch and the Set's tempo and meter, and ask what's missing: style, tempo feel, how many bars.
-  2. Plan one `kumi_change` with three steps:
+  2. Plan one `kumi_change`:
      - `add_tracks_and_scenes` adds the track: `{"tracks": [{"name": "Drums", "kind": "midi"}], "scenes": []}`, `as: "drums"`;
-     - `load_device` puts a ready-made kit on it (`itemId`, `trackRef: "@drums"`): one the producer names, or a Drum Rack kit preset under `instruments/Drum Rack/…`. Never an empty Drum Rack: it plays nothing, and the plugin can't fill its pads yet.
+     - **a kit, either:**
+       - `load_device` with a ready-made kit (`itemId`, `trackRef: "@drums"`): one the producer names, or a Drum Rack kit preset under `instruments/Drum Rack/…`;
+       - or an empty `Drum Rack` (`as: "rack"`), then a `load_sample_to_pad` for each sound the producer picked with `kumi_sounds` (`deviceRef: "@rack"`). Leave `note` out and the pads fill in order from C1, so a kick, a snare and a hat land on `C1`, `C#1` and `D1`. Name those lanes by pitch.
      - `write_midi_clip` writes into its first empty Session slot (`trackRef: "@drums"`, `sceneIndex`, `name`, and `length`), with lanes such as:
 
        ```
