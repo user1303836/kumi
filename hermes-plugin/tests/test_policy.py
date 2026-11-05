@@ -110,13 +110,6 @@ class Approvals(unittest.TestCase):
         self.assertEqual(decision["rule_key"], "kumi:folder_read:scan")
         self.assertTrue(decision["message"].endswith(f"• {support.DRUMS}"), decision["message"])
 
-    def test_listening_to_anything_but_a_file_sound_or_artifact_is_blocked(self):
-        for args in ({"source": {"track": {"ref": "t1"}, "from_beat": 0, "beats": 8}},
-                     {"source": {"sound_id": "s-r1-1"}, "compare_to": {"track": {"mix": True}}},
-                     {"source": {}}, {}):
-            with self.subTest(args=args):
-                self.assertEqual(self.hook("kumi_listen", args)["action"], "block")
-
 
 class Blocked(unittest.TestCase):
     def hook(self, host, tool: str, args: dict) -> dict | None:
@@ -250,11 +243,6 @@ class CallIds(unittest.TestCase):
         self.hook("kumi_history", {"limit": "5"}, "coerced")  # the model wrote "5"; Hermes's handler gets 5
         support.handle(self.host, "kumi_history", {"limit": 5}, session_id="s1", task_id="t1")
         self.assertEqual(self.received("history")[-1]["_host"]["tool_call_id"], "coerced")
-
-    def test_a_listen_on_a_track_never_runs_even_without_the_hook(self):
-        refused = support.handle(self.host, "kumi_listen", {"source": {"track": {"ref": "t1"}}}, session_id="s1")
-        self.assertEqual(refused["error"]["code"], "invalid")
-        self.assertEqual(self.received("listen"), [])
 
 
 class ThroughHermes(unittest.TestCase):

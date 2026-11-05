@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import os
 from pathlib import Path
 from typing import Any, Callable
@@ -20,6 +21,11 @@ STATUS_TIMEOUT = 15.0
 CONNECT_TIMEOUT = 60.0
 READ_TIMEOUT = 30.0
 WRITE_TIMEOUT = 120.0
+# A track listen waits for the runtime's own deadline, which its preview gives (`deadline_seconds`: capture or render,
+# restore and measure), plus a margin; without one, for CC-2's longest: an offline render's 240 s, restore and measure.
+TRACK_TIMEOUT = 300.0
+TRACK_MARGIN = 30.0
+TRACK_LONGEST = 900.0  # a preview's deadline past this isn't believed
 UNSURE_HINT = ("What it did is unknown. Don't send it again: check kumi_history and the project (kumi_observe) "
                "first.")
 
@@ -174,25 +180,108 @@ def kumi_undo(host: Host, args: dict, **kwargs: Any) -> dict:
 
 
 SOURCE_KEYS = {"file", "sound_id", "map_revision", "artifact_id"}
+TRACK_KEYS = {"track", "from_beat", "beats"}
+MAX_BEATS = 256
+# What a listen that didn't succeed never carries (CC-2's R5): no measurements, no artifact, no MEDIA: line.
+MEASURED = ("metrics", "artifact_id", "media_tag", "verdict_text", "capture")
+
+
+def is_track_listen(args: dict) -> bool:
+    """A listen to a track or the mix of the open project (CC-2): it plays the project, so the producer approves it."""
+    source = args.get("source")
+    return isinstance(source, dict) and "track" in source
 
 
 def listen_refusal(args: dict) -> str | None:
-    """Why `kumi_listen` can't measure this, or None: a source is a file, a sound or an artifact. (A DAW track plays the
-    project, so it needs its own approval: CC-2.)"""
-    for name in ("source", "compare_to"):
-        source = args.get(name)
-        if source is None and name == "compare_to":
-            continue
-        if not isinstance(source, dict) or not source or not set(source) <= SOURCE_KEYS:
-            return f"{name} is a file, a sound or an artifact here."
+    """Why `kumi_listen` can't take these arguments, or None. A source is a file, a sound or an artifact, or one track
+    or the mix over a beat window (CC-2); `compare_to` is never a track. The runtime checks the window against the
+    tempo (60 s at most) and the project; this checks only what needs no DAW."""
+    source = args.get("source")
+    if is_track_listen(args):
+        refusal = _track_refusal(source, args)
+        if refusal:
+            return refusal
+    elif not _file_source(source):
+        return "source is a file, a sound, an artifact, or a track of the open project."
+    if args.get("compare_to") is not None and not _file_source(args["compare_to"]):
+        return "compare_to is a file, a sound or an artifact."
     return None
+
+
+def _file_source(source: Any) -> bool:
+    return isinstance(source, dict) and bool(source) and set(source) <= SOURCE_KEYS
+
+
+def _track_refusal(source: dict, args: dict) -> str | None:
+    if not set(source) <= TRACK_KEYS:
+        return "a track source is {track, from_beat, beats} and nothing else."
+    track = source.get("track")
+    one = (isinstance(track, dict) and set(track) == {"ref"} and isinstance(track["ref"], str)
+           and bool(track["ref"].strip()))
+    mix = isinstance(track, dict) and set(track) == {"mix"} and track["mix"] in (True, "true")
+    if not (one or mix):
+        return 'track is {"ref": "<a track ref from kumi_observe>"} or {"mix": true}: one track or the mix.'
+    start, beats = _beat(source.get("from_beat")), _beat(source.get("beats"))
+    if start is None or start < 0:
+        return "from_beat is the beat to start at: 0 or more."
+    if beats is None or not 0 < beats <= MAX_BEATS or not math.isfinite(start + beats):
+        return f"beats is how many beats to listen to: more than 0 and at most {MAX_BEATS}."
+    if not all(isinstance(args.get(key), (str, int)) and not isinstance(args.get(key), bool) and str(args[key]).strip()
+               for key in ("expected_project_key", "expected_epoch")):
+        return "expected_project_key and expected_epoch are the project key and epoch kumi_observe gave: observe first."
+    return None
+
+
+def _beat(value: Any) -> int | float | None:
+    """A finite number of beats, from a number or a number's text (the hook sees the model's arguments uncoerced)."""
+    if isinstance(value, str):
+        try:
+            value = float(value.strip())
+        except ValueError:
+            return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+        return None
+    return int(value) if float(value).is_integer() else float(value)
+
+
+def listen_args(args: dict) -> dict:
+    """What the runtime's `listen` gets: the model's arguments without `preview` (the approval hook's alone, CC-2), and
+    a track's window as numbers, `mix` as true and the epoch as text."""
+    sent = {key: value for key, value in args.items() if key != "preview"}
+    if is_track_listen(sent):
+        source = dict(sent["source"])
+        source.update({key: _beat(source[key]) for key in ("from_beat", "beats") if key in source})
+        if isinstance(source.get("track"), dict) and "mix" in source["track"]:
+            source["track"] = {"mix": True}
+        sent["source"] = source
+        if "expected_epoch" in sent:
+            sent["expected_epoch"] = str(sent["expected_epoch"])
+    return sent
 
 
 def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
     refusal = listen_refusal(args)  # the approval hook checks this too; a dispatch without it mustn't play the DAW
     if refusal:
         return {"error": {"code": "invalid", "reason": refusal}}
-    return host.live().call("listen", args, host.identity(kwargs), timeout=WRITE_TIMEOUT)
+    if not is_track_listen(args):
+        return host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
+    # A track listen plays the project: sent once, and an answer that never came is unsure, never resent (CC-2).
+    call = kwargs.get("kumi_call")
+    deadline = call.extra.get("deadline") if isinstance(call, calls.Entry) else None
+    timeout = (deadline + TRACK_MARGIN if isinstance(deadline, (int, float)) and not isinstance(deadline, bool)
+               and 0 < deadline <= TRACK_LONGEST else TRACK_TIMEOUT)
+    try:
+        result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout)
+    except runtime.Unavailable as failure:
+        if failure.code not in ("timeout", "stopped", "protocol"):
+            raise
+        return {"state": "unsure", "code": failure.code, "reason": failure.reason, "cleanup": "unsure",
+                "hint": UNSURE_HINT}
+    if result.get("state") in ("refused", "cancelled", "unsure"):
+        result = {key: value for key, value in result.items() if key not in MEASURED}
+        if result["state"] == "unsure":
+            result.setdefault("hint", UNSURE_HINT)
+    return result
 
 
 def kumi_sounds(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -262,7 +351,9 @@ ALWAYS_SHOWN = {"kumi_status", "kumi_connect"}
 
 def approved_only(name: str, args: dict) -> bool:
     """The calls policy.py puts to the producer: they run only as approved (CC-5)."""
-    return name in ("kumi_change", "kumi_undo") or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
+    return (name in ("kumi_change", "kumi_undo")
+            or (name == "kumi_library" and args.get("action") in ("add_folder", "scan"))
+            or (name == "kumi_listen" and is_track_listen(args)))
 
 
 def handler(name: str, function: Callable[..., dict], host: Host) -> Callable[..., str]:
