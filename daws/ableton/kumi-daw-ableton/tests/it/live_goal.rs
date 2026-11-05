@@ -71,13 +71,15 @@ assert plain(SimpleNamespace(state=3))["state"] == 3
 }
 
 /// The tools a goal can reach, as the oracle's bridge lists them.
-const TOOLS: [&str; 39] = [
+const TOOLS: [&str; 41] = [
     "live_run_python",
     "server_status",
     "live_status",
     "live_discover",
     "live_snapshot",
     "live_undo",
+    "live_undo_step_begin",
+    "live_undo_step_end",
     "live_transaction_release",
     "live_tempo_preview",
     "live_tempo_apply",
@@ -193,6 +195,8 @@ struct Set {
     next: Cell<u32>,
     previews: RefCell<HashMap<String, (String, JsonObject)>>,
     undos: RefCell<HashMap<String, Undo>>,
+    /// Removing a loaded device runs inside one Live undo step, so Live's own undo stays sound (#1101).
+    undo_step: Cell<bool>,
     /// How many looks Live takes to have stopped playing, after it's asked: till then it shows no take.
     lag: Cell<u32>,
     stopping: Cell<u32>,
@@ -229,6 +233,7 @@ impl Set {
             next: Cell::new(0),
             previews: RefCell::default(),
             undos: RefCell::default(),
+            undo_step: Cell::new(false),
             lag: Cell::new(0),
             stopping: Cell::new(0),
             refused: RefCell::default(),
@@ -528,6 +533,7 @@ impl Set {
         match self.undos.borrow_mut().remove(transaction) {
             Some(Undo::Remove(made)) => tracks.retain(|track| !made.contains(&track.id)),
             Some(Undo::Device(identity)) => {
+                assert!(self.undo_step.get(), "a listening device is removed inside one Live undo step");
                 for track in tracks.iter_mut() {
                     track.devices.retain(|device| device.identity != identity);
                 }
@@ -568,6 +574,15 @@ impl McpEndpoint for Set {
         Ok(reply(match name {
             "live_discover" => self.discover(&args),
             "live_undo" => self.undo(&args),
+            "live_undo_step_begin" => {
+                assert!(!self.undo_step.replace(true), "a Live undo step is already open");
+                json!({"open":true,"stepId":"fixture_undo_step"})
+            }
+            "live_undo_step_end" => {
+                assert_eq!(args["stepId"], "fixture_undo_step");
+                assert!(self.undo_step.replace(false), "the Live undo step was open");
+                json!({"closed":true,"stepId":"fixture_undo_step"})
+            }
             "live_run_python" => self.python(&args),
             "live_status" => json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":7}),
             "live_transaction_release" => json!({}),
@@ -960,6 +975,7 @@ fn a_gone_candidate_leaves_the_real_render_paths_and_the_others_go_on() {
                 let said = goal.close().await.unwrap();
                 assert!(said.iter().any(|line| line.contains("“Gone”") && line.contains("left the search")), "{said:?}");
                 goal.put_back(Signal::new()).await;
+                assert!(!live.set.undo_step.get(), "cleanup closes its Live undo steps");
                 assert_eq!(live.set.chain("Stays"), ["New", "Synth"]);
                 assert_eq!(live.set.has_track("Renamed"), renamed, "a renamed producer track is kept");
                 if renamed {
