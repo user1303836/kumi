@@ -379,7 +379,7 @@ case!(a_plans_change_across_tracks_is_one_entry_with_one_picture_and_one_undo, a
         let row = history_row(&lines, "Drums, Bass and Keys: edited");
         for track in ["Drums", "Bass", "Keys"] {
             assert!(
-                lines[row + 1..].iter().any(|line| framed(line).trim() == track),
+                lines[row + 1..].iter().any(|line| framed(line).rsplit('│').next().unwrap_or("").trim() == track),
                 "{kind}: a heading for {track}:\n{}",
                 lines.join("\n")
             );
