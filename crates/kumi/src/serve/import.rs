@@ -71,7 +71,9 @@ pub async fn find(ctx: &Ctx, source: &Value, signal: &Signal) -> Result<Found, O
 pub async fn keep(ctx: &Ctx, found: Found, signal: &Signal) -> Result<(PathBuf, Value), OpError> {
     let mut record = found.record;
     let path = if record.get("host_tool").is_some() {
-        let saved = ctx.artifacts().add(ctx, &found.path, "audio", found.mime, "change", signal).await?;
+        // Copied from the file the approval named, through one opened handle: another put in its place since is
+        // refused stale (11b), whatever its path says.
+        let saved = ctx.artifacts().add(ctx, &found.path, Some(&found.named), "audio", found.mime, "change", signal).await?;
         record["artifact_id"] = json!(saved.id);
         saved.path
     } else {
@@ -82,13 +84,10 @@ pub async fn keep(ctx: &Ctx, found: Found, signal: &Signal) -> Result<(PathBuf, 
     Ok((path, record))
 }
 
-/// A file's identity: its size, when it was last written (ns) and, where the system gives one, its inode.
+/// The identity of the file at `path`, as the artifacts' copy checks it ([`super::artifacts::file_identity`]: its
+/// volume and file, size and last write, read from the open file).
 fn identity(path: &Path) -> Result<Value, OpError> {
-    let meta = std::fs::metadata(path).map_err(|error| OpError::Failed { reason: format!("Kumi couldn't read the file: {error}") })?;
-    let mtime_ns = meta.modified().ok().and_then(|at| at.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |at| at.as_nanos());
-    #[cfg(unix)]
-    let ino = std::os::unix::fs::MetadataExt::ino(&meta);
-    #[cfg(not(unix))]
-    let ino = 0u64;
-    Ok(json!({"size": meta.len(), "mtime_ns": mtime_ns.to_string(), "ino": ino}))
+    let unreadable = |error: std::io::Error| OpError::Failed { reason: format!("Kumi couldn't read the file: {error}") };
+    let file = std::fs::File::open(path).map_err(unreadable)?;
+    super::artifacts::file_identity(&file).map_err(unreadable)
 }
