@@ -42,7 +42,10 @@ class Unfreeable(ledger.Ledger):
         raise ledger.LedgerError("ledger_unavailable", "Kumi's credit ledger is busy.")
 
 
-class Generation(unittest.TestCase):
+class Paid:
+    """What a paid-generation test does: a host on the fixture runtime with W3's ledger, the runtime's `generate`
+    calls, and the approval hook (also CC-15's tests, test_generate_kinds)."""
+
     def host(self, settings: dict | None = None, *fixture_args: str, key: str | None = KEY, ledger: type | None = None):
         host, ctx, data = support.host(self, dict(ON if settings is None else settings), *fixture_args,
                                        ledger=ledger, mirelo_key=key)
@@ -63,6 +66,8 @@ class Generation(unittest.TestCase):
         self.assertEqual(self.hook(host, args, call)["action"], "approve")
         policy.post_approval_response(host, tool_call_id=call, choice="once")
 
+
+class Generation(Paid, unittest.TestCase):
     def generation(self, host) -> dict:
         """A sound effect quoted, created as approved and followed to its end: its job's answer."""
         quote_id = support.call(host, "kumi_generate", SFX, session_id="s1")["quote_id"]
@@ -264,7 +269,8 @@ class Generation(unittest.TestCase):
         host, _, data = self.host()
         asked = self.hook(host, MIDI)
         self.assertEqual(asked["action"], "approve")
-        self.assertRegex(asked["rule_key"], r"^kumi:upload:[0-9a-f]{64}:s1$", "the file's own key, in this chat")
+        self.assertRegex(asked["rule_key"], r"^kumi:upload:audio_to_midi:[0-9a-f]{64}:s1$",
+                         "what it's sent for and the file's own key, in this chat")
         self.assertIn("Dusty Snare 04.wav", asked["message"])
         self.assertIn("480 KB", asked["message"], "a file under a megabyte isn't shown as 0.5 MB, or 0.0")
         self.assertTrue((data / generate.LEDGER_FILE).is_file(), "the producer's policy is in the ledger first")
