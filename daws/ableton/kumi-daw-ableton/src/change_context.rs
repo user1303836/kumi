@@ -321,6 +321,13 @@ impl ChangeContext for PreparationContext<'_> {
     async fn drum_pads(&self, device_ref: &str) -> Option<Vec<super::notes::DrumPad>> {
         super::notes::drum_pads(&self.parameters.history.connection, device_ref, &self.signal).await
     }
+    async fn mixer_for_display(
+        &self,
+        track_ref: &str,
+        asked: &serde_json::Value,
+    ) -> Result<Result<serde_json::Value, String>, RuntimeError> {
+        self.parameters.mixer_for_display(track_ref, asked, self.signal.clone()).await
+    }
 }
 impl PreparationContext<'_> {
     async fn read(&self, device_ref: &str, ranges: bool) -> Result<Vec<ParameterRange>, RuntimeError> {

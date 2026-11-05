@@ -4,7 +4,7 @@ use super::{
     changes::{new_record, pictures, ChangeKind, ChangeSummary},
     connection::LiveConnection,
     context,
-    display::{value_for_display, DisplayMap, DISPLAY_MAP_SCRIPT},
+    display::{value_for_display, DisplayMap, DISPLAY_MAP_SCRIPT, MIXER_DISPLAY_SCRIPT},
     fast::{find_script, set_script},
     history::{FastResult, History},
     views::ViewHost,
@@ -125,6 +125,32 @@ impl Parameters {
             map
         };
         Ok(value_for_display(&map, text))
+    }
+    /// [`super::changes::ChangeContext::mixer_for_display`]: Live's own reading of the track's mixer, by a fixed
+    /// read-only script.
+    pub async fn mixer_for_display(&self, track_ref: &str, asked: &Value, signal: Signal) -> Result<Result<Value, String>, RuntimeError> {
+        let connection = &self.history.connection;
+        if !at_least(connection.version().as_deref(), PYTHON_BRIDGE) || !connection.has("live_run_python") {
+            return Ok(Err(format!(
+                "Give volume, pan and sends as numbers: this bridge can't read how Live shows its mixer (update it with {} bridge).",
+                *KUMI
+            )));
+        }
+        let named = connection.references.borrow().lengthen(&json!({"trackRef":track_ref}));
+        let long = named["trackRef"].as_str().unwrap_or(track_ref).to_owned();
+        let code = super::fast::with_args("mixer-display", asked, MIXER_DISPLAY_SCRIPT);
+        let read = connection
+            .call(
+                "live_run_python",
+                object(json!({"code":code,"mode":"exec","ref":long,"timeoutMs":5000})),
+                abort::any([signal, connection.lifetime.clone()]),
+            )
+            .await?;
+        let done = if read.is_error == Some(true) { None } else { Some(context::payload(&read)?) };
+        Ok(match done.filter(|done| done.get("ok") == Some(&Value::Bool(true))) {
+            Some(done) => Ok(done.get("result").cloned().unwrap_or(Value::Null)),
+            None => Err("Kumi couldn't read how Live shows this track's mixer; give volume, pan and sends as numbers from 0 to 1.".into()),
+        })
     }
     pub async fn fast_parameters(&self, kind: &ChangeKind, input: &JsonObject, signal: Signal) -> Result<ChangeOutcome, RuntimeError> {
         let Some(device) = input.get("deviceRef").and_then(Value::as_str).filter(|s| !s.is_empty()) else {
