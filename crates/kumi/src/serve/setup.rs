@@ -107,9 +107,14 @@ fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
                 return Err(failed(reason));
             }
         }
-        let installed_at = kumi_common::time::now_ms();
-        let done = provider.component_plan(&io, &home).unwrap_or(plan);
-        Ok(reply(ctx, app, &done, false, Some(installed_at)))
+        // What was done, as the plan it carried out names it (the paths written, what the producer does next), and how
+        // each part stands now.
+        let mut answer = reply(ctx, app, &plan, false, Some(kumi_common::time::now_ms()));
+        if let Ok(now) = provider.component_plan(&io, &home) {
+            answer["state"] = json!(now.state);
+            answer["parts"] = json!(now.parts);
+        }
+        Ok(answer)
     })
 }
 

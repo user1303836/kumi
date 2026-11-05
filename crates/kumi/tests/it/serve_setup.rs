@@ -261,7 +261,8 @@ case!(setup_daw_puts_lives_part_in_exactly_as_planned_and_again_changes_nothing,
     let before = lab.tree();
     let done = lab.setup(false).await.unwrap();
     within(&differ(&before, &lab.tree()), &plan, &lab.lease());
-    assert_eq!((done["state"].as_str(), &done["paths"]), (Some("same"), &json!([])), "{done}");
+    assert_eq!((done["state"].as_str(), &done["paths"], &done["after"]), (Some("same"), &plan["paths"], &plan["after"]), "{done}");
+    assert_eq!((done["parts"][0]["state"].as_str(), done["parts"][1]["state"].as_str()), (Some("same"), Some("same")));
     assert!(done["installed_at"].as_i64().is_some_and(|at| at > 0));
     assert_eq!(std::fs::read(lab.ears()).unwrap(), kumi_daw_ableton::ears::device::ears_file(), "Kumi Ears is in place");
     {
@@ -365,7 +366,7 @@ case!(setup_daw_puts_renoises_tool_in_exactly_as_planned_and_leaves_another_kumi
     );
     let done = lab.setup(false).await.unwrap();
     within(&differ(&before, &lab.tree()), &plan, &lab.lease());
-    assert_eq!(done["state"], "same", "{done}");
+    assert_eq!((done["state"].as_str(), &done["paths"]), (Some("same"), &plan["paths"]), "what it wrote, and how it stands: {done}");
     assert!(tool.join("main.lua").is_file());
     let before = lab.tree();
     assert_eq!(lab.setup(false).await.unwrap().get("installed_at"), None);
