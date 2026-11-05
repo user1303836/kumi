@@ -2,16 +2,16 @@
 //! arguments, the host's identity for it, its cancel signal and its progress) and the runtime it runs in ([`Ctx`]).
 //! Every stream's operations are written against these; each module adds its own to [`super::registry`].
 
-use super::Args;
 use super::connection::Link;
 use super::jobs::{JobHandle, Jobs};
 use super::snapshots::Snapshots;
+use super::Args;
 use futures::future::LocalBoxFuture;
 use kumi_common::abort::Signal;
 use kumi_types::daw::DawId;
 use kumi_types::system::Env;
 use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::{json, Map, Value};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -972,8 +972,8 @@ fn make_private_windows_dir(path: &Path, policy: WindowsDirectoryPolicy) -> std:
         path::{Component, Prefix},
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY, FILE_READ_ATTRIBUTES,
-        FILE_SHARE_READ, FILE_SHARE_WRITE, GetDriveTypeW,
+        GetDriveTypeW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
 
     let unsafe_path = |check: &str| std::io::Error::other(format!("private runtime directory check failed: {check}"));
@@ -996,8 +996,6 @@ fn make_private_windows_dir(path: &Path, policy: WindowsDirectoryPolicy) -> std:
     let root: Vec<u16> = format!("{}:\\", char::from(drive)).encode_utf16().chain([0]).collect();
     // SAFETY: the local drive root is NUL-terminated; reject remote/unknown drives before any filesystem lookup.
     let drive_type = unsafe { GetDriveTypeW(root.as_ptr()) };
-    #[cfg(debug_assertions)]
-    eprintln!("WINDOWS_STATE path={path:?} drive_type={drive_type} fixed_local={}", drive_type == 3);
     if drive_type != 3 {
         return Err(unsafe_path("volume is not a fixed local drive"));
     }
@@ -1010,8 +1008,6 @@ fn make_private_windows_dir(path: &Path, policy: WindowsDirectoryPolicy) -> std:
             continue;
         }
         let target = components.peek().is_none();
-        #[cfg(debug_assertions)]
-        eprintln!("WINDOWS_STATE component={at:?} target={target}");
         let (created, file) = if matches!(component, Component::RootDir) {
             let file = OpenOptions::new()
                 .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES)
@@ -1024,23 +1020,15 @@ fn make_private_windows_dir(path: &Path, policy: WindowsDirectoryPolicy) -> std:
             match native_acl::open_directory_at(parent, component.as_os_str(), target && fresh, target) {
                 Ok(file) => (target && fresh, file),
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound && !(target && fresh) => {
-                    #[cfg(debug_assertions)]
-                    eprintln!("WINDOWS_STATE component_open=not_found component={at:?} target={target}");
                     if !target && matches!(policy, WindowsDirectoryPolicy::BootstrapStateRoot) {
                         // Startup authorizes the selected root, not creating missing ancestors.
                         return Err(unsafe_path("state-root ancestor does not exist; bootstrap cannot create ancestors"));
                     }
                     (true, native_acl::open_directory_at(parent, component.as_os_str(), true, target)?)
                 }
-                Err(error) => {
-                    #[cfg(debug_assertions)]
-                    eprintln!("WINDOWS_STATE component_open_error component={at:?} error={error}");
-                    return Err(error);
-                }
+                Err(error) => return Err(error),
             }
         };
-        #[cfg(debug_assertions)]
-        native_acl::diagnose_handle(&file);
         let metadata = file.metadata()?;
         if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
             return Err(unsafe_path("pinned component is not a directory or has FILE_ATTRIBUTE_REPARSE_POINT"));

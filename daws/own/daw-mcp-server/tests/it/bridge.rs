@@ -4,7 +4,7 @@ use daw_bridge::auth::Secret;
 use daw_bridge::wire::Project;
 use daw_mcp_server::client::{BridgeClient, ConnectError, RequestError};
 use daw_mcp_server::simulator::{Line, Simulator, SimulatorConfig};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::time::Duration;
 
@@ -420,9 +420,9 @@ async fn a_host_tops_a_bridge_up_to_its_receive_buffer_then_gives_back_what_it_r
 mod restricted_renoise_staging {
     use super::*;
     use daw_bridge::{
-        Daw,
         lifecycle::native_acl::{self, shapes},
         paths::BridgePaths,
+        Daw,
     };
     use daw_mcp_server::host::{Host, ListeningMode};
     use std::os::windows::fs::OpenOptionsExt;
@@ -589,8 +589,6 @@ mod restricted_renoise_staging {
                 assert_eq!(error.raw_os_error(), Some(1314), "unexpected symlink fixture failure: {error}");
                 continue; // This case needs Windows' symbolic-link privilege.
             }
-            #[cfg(debug_assertions)]
-            shapes::diagnose(&folder);
             let observed = if foreign { &folder } else { &target };
             let before = shapes::descriptor(observed);
             let lab = Lab::start(home, ListeningMode::Restricted).await;
@@ -688,8 +686,6 @@ mod restricted_renoise_staging {
                 _ => unreachable!(),
             }
             let observed = if matches!(hazard, "reparse" | "unowned") { &outside } else { &file };
-            #[cfg(debug_assertions)]
-            shapes::diagnose(&file);
             let before = shapes::descriptor(observed);
             let runs = daw_bridge::owner::acl_runs_on_this_thread();
             let (done, error) = lab.host.listen_job(&json!({"jobId": started["jobId"]})).await;

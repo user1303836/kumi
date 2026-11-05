@@ -38,6 +38,11 @@ pub fn profile(id: DawId) -> Option<&'static DawProfile> {
     registered().find(|profile| profile.id == Some(id))
 }
 
+/// DAWs whose integrations implement the plugin's guarded, temporary-state listening policy.
+pub(crate) fn supports_restricted_listening(id: DawId) -> bool {
+    matches!(id, DawId::Reaper | DawId::Renoise)
+}
+
 /// How the app shows a registered DAW's own tools.
 pub fn presentation(id: DawId) -> Option<&'static ToolPresentation> {
     super::provider(id).map(|daw| daw.presentation())

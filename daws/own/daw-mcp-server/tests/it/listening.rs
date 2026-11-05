@@ -202,14 +202,16 @@ async fn listening_maintenance_respects_the_startup_policy_and_keeps_per_call_cl
             };
             assert!(!failed, "{job}");
             check();
-            // Model the partial output already written by a running native job.
-            for file in job["files"].as_array().unwrap() {
-                std::fs::write(file["file"].as_str().unwrap(), b"partial capture").unwrap();
+            // Windows deliberately hides Renoise's paths until the completed output is protected.
+            // Seed the native job's partial files, not unpublished paths from the public answer.
+            let files = listening.job_files(job["jobId"].as_str().expect("started capture job"));
+            for file in &files {
+                std::fs::write(file, b"partial capture").unwrap();
             }
             let (cancelled, failed) = host.listen_cancel(&json!({"jobId": job["jobId"]})).await;
             assert!(!failed && cancelled["state"] == "cancelled", "{cancelled}");
-            for file in job["files"].as_array().unwrap() {
-                assert!(!PathBuf::from(file["file"].as_str().unwrap()).exists(), "{file}");
+            for file in files {
+                assert!(!file.exists(), "{file:?}");
             }
             check();
         }

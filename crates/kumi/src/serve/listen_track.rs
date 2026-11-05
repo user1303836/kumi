@@ -177,7 +177,10 @@ fn preview_text(request: &HearRequest, preview: &HearPreview) -> String {
     let action = if preview.method == HearMethod::Ears { "Capture" } else { "Render" };
     let label = one_line(&preview.label, 80).replace('"', "'");
     let target = request.tracks.first().map(|reference| format!("{} ", one_line(reference, 80))).unwrap_or_default();
-    format!("{action} beats {from}–{to} ({:.3} s); restore the temporary transport, routing and device state before returning. {} Target: {target}\"{label}\".", preview.seconds, preview.disclosure)
+    format!(
+        "{action} beats {from}–{to} ({:.3} s); restore the temporary transport, routing and device state before returning. {} Target: {target}\"{label}\".",
+        preview.seconds, preview.disclosure
+    )
 }
 
 pub fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
@@ -186,6 +189,15 @@ pub fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
 
 async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let mut request = request(&call.args)?;
+    if !crate::daw::registry::supports_restricted_listening(ctx.daw()) {
+        return Ok(outcome(
+            "refused",
+            "unsupported",
+            "Guarded track and mix listening is not available for this DAW; use an approved audio file.",
+            true,
+            false,
+        ));
+    }
     let key = call
         .args
         .get("expected_project_key")
@@ -251,7 +263,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             Ok(()) => {}
             Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
             Err(_) => {
-                return Err(OpError::Failed { reason: "The runtime could not prepare its private quarantine; no capture started.".into() })
+                return Err(OpError::Failed { reason: "The runtime could not prepare its private quarantine; no capture started.".into() });
             }
         }
     }
@@ -265,7 +277,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 "The DAW returned no verified restoration outcome. Observe again before another action.",
                 false,
                 false,
-            ))
+            ));
         }
         Ok(Err(error)) => return hearing_error(error, true),
         Err(_) => {
@@ -275,7 +287,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 "The approved native deadline expired before restoration was verified. Observe again before another action.",
                 false,
                 false,
-            ))
+            ));
         }
     };
     let [take] = takes.as_slice() else {
@@ -317,7 +329,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 "The captured audio could not be validated after DAW restoration; no audio was published.",
                 true,
                 take.marked_modified,
-            ))
+            ));
         }
         Err(_) => {
             stop.cancel();
@@ -341,7 +353,7 @@ async fn capture(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
                 "The validated audio could not be retained after DAW restoration; no audio was published.",
                 true,
                 take.marked_modified,
-            ))
+            ));
         }
     };
     result["state"] = json!("done");

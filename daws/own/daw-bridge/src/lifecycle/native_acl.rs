@@ -52,8 +52,6 @@ unsafe extern "system" {
     fn CreateDirectoryW(path: *const u16, attributes: *const SecurityAttributes) -> i32;
     fn GetFileInformationByHandle(handle: Handle, information: *mut FileInformation) -> i32;
     fn GetFinalPathNameByHandleW(handle: Handle, path: *mut u16, size: u32, flags: u32) -> u32;
-    #[cfg(debug_assertions)]
-    fn GetFileInformationByHandleEx(handle: Handle, class: u32, information: *mut c_void, length: u32) -> i32;
 }
 #[link(name = "advapi32")]
 unsafe extern "system" {
@@ -91,8 +89,6 @@ unsafe extern "system" {
     fn AddAccessAllowedAceEx(acl: Acl, revision: u32, flags: u32, mask: u32, sid: Sid) -> i32;
     fn AddAccessDeniedAceEx(acl: Acl, revision: u32, flags: u32, mask: u32, sid: Sid) -> i32;
     fn ConvertStringSidToSidW(text: *const u16, sid: *mut Sid) -> i32;
-    #[cfg(debug_assertions)]
-    fn ConvertSidToStringSidW(sid: Sid, text: *mut *mut u16) -> i32;
     fn ConvertSecurityDescriptorToStringSecurityDescriptorW(
         descriptor: *mut c_void,
         revision: u32,
@@ -448,8 +444,8 @@ pub fn open_directory_at(parent: &std::fs::File, name: &std::ffi::OsStr, create:
     };
     let mut handle = null_mut();
     let mut status = [0usize; 2]; // IO_STATUS_BLOCK: pointer-sized status union, then Information.
-    // LIST_DIRECTORY, READ_ATTRIBUTES, READ_CONTROL, SYNCHRONIZE; WRITE_DAC only on
-    // the exact target. FILE_CREATE never adopts a collision; FILE_OPEN never creates.
+                                  // LIST_DIRECTORY, READ_ATTRIBUTES, READ_CONTROL, SYNCHRONIZE; WRITE_DAC only on
+                                  // the exact target. FILE_CREATE never adopts a collision; FILE_OPEN never creates.
     let access = 0x0012_0081 | if exclusive { 0x0004_0000 } else { 0 };
     // SAFETY: the parent's live handle anchors this single component. Name, descriptor,
     // SID, ACL and outputs live through the synchronous call. No handle is inherited.
@@ -533,59 +529,6 @@ pub fn file_path(file: &std::fs::File) -> Result<std::path::PathBuf, String> {
         return Err("the pinned staging path changed while being read".into());
     }
     Ok(std::path::PathBuf::from(std::ffi::OsString::from_wide(&path[..written as usize])))
-}
-
-/// Temporary Windows CI diagnostics: reads only an already pinned entry, never follows a path.
-#[cfg(debug_assertions)]
-pub fn diagnose_handle(file: &std::fs::File) {
-    use std::os::windows::io::AsRawHandle;
-    unsafe fn sid_text(sid: Sid) -> String {
-        // SAFETY: each SID belongs to a live token or security descriptor. Windows owns the returned text.
-        unsafe {
-            let mut text = null_mut();
-            if sid.is_null() || ConvertSidToStringSidW(sid, &mut text) == 0 {
-                return format!("<unreadable: {}>", std::io::Error::last_os_error());
-            }
-            let mut length = 0;
-            while *text.add(length) != 0 {
-                length += 1;
-            }
-            let value = String::from_utf16_lossy(std::slice::from_raw_parts(text, length));
-            LocalFree(text.cast());
-            value
-        }
-    }
-    // SAFETY: the pinned handle, token buffers and descriptor remain live through these read-only queries.
-    unsafe {
-        let mut tag = [0u32; 2]; // FILE_ATTRIBUTE_TAG_INFO: FileAttributes, ReparseTag.
-        let tag_read = GetFileInformationByHandleEx(file.as_raw_handle(), 9, tag.as_mut_ptr().cast(), 8);
-        let tag_error = if tag_read == 0 { Some(std::io::Error::last_os_error()) } else { None };
-        let (mut owner, mut descriptor) = (null_mut(), null_mut());
-        let owner_read = GetSecurityInfo(
-            file.as_raw_handle(),
-            SE_FILE_OBJECT,
-            OWNER_SECURITY_INFORMATION,
-            &mut owner,
-            null_mut(),
-            null_mut(),
-            null_mut(),
-            &mut descriptor,
-        );
-        let actual = if owner_read == 0 { sid_text(owner) } else { format!("<GetSecurityInfo error {owner_read}>") };
-        if !descriptor.is_null() {
-            LocalFree(descriptor);
-        }
-        let (user, default_owner) = Account::current()
-            .map(|account| (sid_text(account.sid()), sid_text(account.owner_sid())))
-            .unwrap_or_else(|| ("<token unreadable>".into(), "<token unreadable>".into()));
-        eprintln!(
-            "WINDOWS_STATE entry={:?} owner_sid={actual} token_user_sid={user} token_owner_sid={default_owner} attributes={:#010x} reparse={} reparse_tag={:#010x} attribute_error={tag_error:?}",
-            file_path(file),
-            tag[0],
-            tag[0] & FILE_ATTRIBUTE_REPARSE_POINT != 0,
-            tag[1],
-        );
-    }
 }
 
 /// Checks the exact private shape of a pinned root or cache without resolving its path.
@@ -827,21 +770,6 @@ pub mod shapes {
     pub const INHERITABLE: u32 = 0x3;
     pub const INHERIT_ONLY: u32 = 0x8;
 
-    /// Diagnostic fixture paths are disposable, with their ancestors created by the test.
-    #[cfg(debug_assertions)]
-    pub fn diagnose(path: &Path) {
-        use std::os::windows::fs::OpenOptionsExt;
-        eprintln!("WINDOWS_STATE fixture={path:?} plain_local={}", plain_local(path));
-        match std::fs::OpenOptions::new()
-            .access_mode(0x0002_0080) // READ_CONTROL | READ_ATTRIBUTES; no data read or write.
-            .share_mode(7)
-            .custom_flags(0x0220_0000) // BACKUP_SEMANTICS | OPEN_REPARSE_POINT.
-            .open(path)
-        {
-            Ok(file) => diagnose_handle(&file),
-            Err(error) => eprintln!("WINDOWS_STATE fixture_open_error={error}"),
-        }
-    }
     /// Whether Windows created this entry with this token's actual default owner.
     pub fn has_default_owner(path: &Path) -> bool {
         let account = Account::current().unwrap();

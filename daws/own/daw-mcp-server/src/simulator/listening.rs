@@ -369,6 +369,11 @@ impl SimListening {
         self.state.lock().unwrap().renders.clone()
     }
 
+    /// Native output paths, including those not yet published in a host answer.
+    pub fn job_files(&self, id: &str) -> Vec<PathBuf> {
+        self.state.lock().unwrap().jobs[id].files.iter().map(|(_, path, ..)| path.clone()).collect()
+    }
+
     /// Times a job put back what it changed.
     pub fn restored(&self) -> u32 {
         self.state.lock().unwrap().restored
