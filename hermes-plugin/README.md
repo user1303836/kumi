@@ -104,8 +104,10 @@ be reversed. Listening to a track or the mix also asks first: it plays only the 
 most), only while the DAW is stopped, and may change routing and transport briefly, restoring them after. Live captures
 it through Kumi Ears (Max for Live); REAPER and Renoise render it into the listening folder of the Kumi installation
 that owns their component, and Kumi copies the file it asked for and removes exactly that file. Audio is measured on
-this computer and not uploaded. The project details Kumi notes for FOCUS, and the measurements it
-returns, go to the model you use in Hermes as part of the conversation. With `listen_interpretation` on, Kumi also
+this computer and is never sent to a model; in a messaging chat (Telegram, Discord…), a sound or measured audio you ask
+Hermes to send you goes to that chat as an attachment, through that app. The project details Kumi notes for FOCUS,
+and the measurements it returns, go to the model you use in Hermes as part of the conversation. With
+`listen_interpretation` on, Kumi also
 sends the measurements and a small image of the measured band energy (never the audio or file paths) through Hermes's
 own model access: to the auxiliary model you choose for the `kumi_listen` task in Hermes (it must accept images), or to
 the fallback providers Hermes is configured to try for that task. Hermes retries a failed attempt and may fall back,
