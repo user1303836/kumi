@@ -44,10 +44,11 @@ SECTIONS = {"scene": "scene", "marker": "marker", "region": "region", "sequence-
 
 
 def focus_text(focus: dict, owner: dict, *, connected: bool | None = None, max_chars: int = MAX_CHARS,
-               now_ms: int | None = None, changes: list | None = None) -> str | None:
+               now_ms: int | None = None, changes: list | None = None, session: Any = None) -> str | None:
     """The fenced note, from focus.json's body (CC-7) and snapshots.owner(); None when no project was published.
     `connected` is status.json's (None: not known). A stopped runtime gets one line instead of the last state.
-    `changes` are HISTORY's rows, newest first: the latest three are named, so "undo that" has its id."""
+    `changes` are HISTORY's rows, newest first: the latest three are named, so "undo that" has its id, and one
+    another chat than `session` made says so."""
     if owner.get("running") is False:
         return fenced([STOPPED], max_chars)
     project = _dict(focus.get("project"))
@@ -78,7 +79,7 @@ def focus_text(focus: dict, owner: dict, *, connected: bool | None = None, max_c
     if said := _transport(_dict(focus.get("transport"))):
         lines.append("Transport: " + ", ".join(said))
     lines += _catch_up(focus.get("catch_up"))
-    lines += _latest(changes)
+    lines += _latest(changes, session)
     return fenced(lines, max_chars)
 
 
@@ -160,8 +161,9 @@ def _this(place: dict) -> str | None:
 LATEST = 3
 
 
-def _latest(changes: Any) -> list[str]:
-    """Kumi's latest changes, newest first, by HISTORY id: what "undo that" means (item 3)."""
+def _latest(changes: Any, session: Any = None) -> list[str]:
+    """Kumi's latest changes, newest first, by HISTORY id. One another chat made (its `session_id`, outside this
+    chat's lineage of compactions) says so: "undo that" is this chat's newest change (CC-3 A2)."""
     rows = [row for row in changes if isinstance(row, dict)][:LATEST] if isinstance(changes, list) else []
     lines = []
     for row in rows:
@@ -171,7 +173,10 @@ def _latest(changes: Any) -> list[str]:
         where = f" on {track}" if (track := quoted(row.get("track"), 40)) else ""
         state = quoted(row.get("state"), 20) or "unknown"
         undo = "can be undone" if row.get("undo_available") is True else "can't be undone"
-        lines.append(f"- {quoted(row.get('title'), 60) or 'a change'}{where}: {state}, {undo} (id {ident})")
+        maker = row.get("session_id")
+        other = (" (another chat's)" if isinstance(session, str) and isinstance(maker, str) and maker
+                 and not LINEAGE.continues(session, maker) else "")
+        lines.append(f"- {quoted(row.get('title'), 60) or 'a change'}{where}{other}: {state}, {undo} (id {ident})")
     return ["Kumi's latest changes, newest first:", *lines] if lines else []
 
 
@@ -307,7 +312,7 @@ def pre_llm_call(host: Any, session_id: Any = None, **kwargs: Any) -> dict | Non
         status = snapshots.read(state, "status") or {}
         connected = status.get("connected") if isinstance(status.get("connected"), bool) else None
         history = snapshots.history(state, limit=LATEST)
-        text = focus_text(focus, owner, connected=connected, changes=history["items"])
+        text = focus_text(focus, owner, connected=connected, changes=history["items"], session=session_id)
         key = (focus.get("seq"), history.get("seq"), bool(owner.get("stale")), owner.get("running"), connected)
         if text is None or not SENT.first((str(state), session_id), key):
             return None

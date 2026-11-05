@@ -83,6 +83,17 @@ class Focus(unittest.TestCase):
         latest = body.split("Kumi's latest changes, newest first:\n", 1)[1].splitlines()
         self.assertEqual(latest[0], f'- "Louder drums" on "Drums": "applied", can be undone (id "{made[0]["history_ids"][0]}")')
 
+    def test_a_change_another_chat_made_is_marked_so_undo_that_means_this_chats(self):
+        context.LINEAGE.compacted("s1-c", "s1")
+        rows = [{"id": "h-3", "title": "Brighter", "state": "applied", "undo_available": True, "session_id": "s2"},
+                {"id": "h-2", "title": "Wider", "state": "applied", "undo_available": True, "session_id": "s1"},
+                {"id": "h-1", "title": "Older", "state": "applied", "undo_available": True}]
+        focus = {"project": {"name": "Night Drive", "epoch": 1}}
+        body = fenced(context.focus_text(focus, {}, changes=rows, session="s1-c"))
+        self.assertIn('- "Brighter" (another chat\'s): "applied", can be undone (id "h-3")', body)
+        self.assertIn('- "Wider": "applied", can be undone (id "h-2")', body, "the same chat before its compaction")
+        self.assertIn('- "Older": "applied", can be undone (id "h-1")', body, "a row without a chat isn't guessed")
+
     def test_a_compacted_chat_keeps_focus_and_a_subagent_never_gets_it(self):
         self.connect("s1")
         self.assertIsNotNone(self.note("s1"))
