@@ -35,10 +35,20 @@ Kumi builds a sound map from sample folders the producer approved. Similar sound
 
 ## Placing a sound
 - **Placing is a change:** `kumi_change` with the DAW's own file step (skill `kumi:daw`), with the sound as its source in the file field: `{"sound_id", "map_revision"}`, never the sound's path.
-  - Live: `replace_sample` swaps a Simpler's audio (a drum pad's, by its `deviceRef` from your latest observe); `import_audio` fills an empty Session slot or a take lane.
+  - **Live, from a sound:**
+    - `load_sample_to_pad` puts it on a Drum Rack pad that's empty (`deviceRef`: the Drum Rack; `note`: the pad), in a new Simpler. Undo clears the pad.
+    - `replace_sample` swaps the audio of a pad, or a track, that already has a Simpler (`deviceRef`: that Simpler).
+    - `load_sample` puts it in a new Simpler on an empty MIDI track.
+    - `import_audio` puts it in an empty Session slot of an audio track. `add_arrangement_clip` puts it in the Arrangement, on an audio track at a `position` in beats.
   - REAPER: `item_import` puts it on a track at a position. Renoise: `sample_load` loads it into an instrument.
   - For a new track, add it in an earlier step of the same plan, named with `as`, and refer to it as `@name`.
-  - Example (Live, a drum pad): `{"tool": "replace_sample", "input": {"deviceRef": "<the Simpler's ref>", "sample": {"sound_id": "s-…", "map_revision": "r…"}}}`.
+  - Example (Live, an empty pad): `{"tool": "load_sample_to_pad", "input": {"deviceRef": "<the Drum Rack's ref>", "note": 38, "sample": {"sound_id": "s-…", "map_revision": "r…"}}}`.
+- **"Find me a dusty, lo-fi snare and put it on pad 3", end to end, in Live:**
+  1. `kumi_sounds` with the producer's words in `query` and the kind (`{"query": "dusty lo-fi", "kind": "snare"}`).
+  2. Offer the two or three likeliest by name. Measure them if the producer wants to compare them (skill `kumi:listening`).
+  3. Look (`kumi_observe` with `scope: focus`) for the Drum Rack's ref, and whether that pad already holds a Simpler.
+  4. **Name the pad by its note.** A pad's note is the reliable name: "pad 3" counted from the first is `note` 38 (D1), since the first pad is 36 (C1), row by row. When the producer's numbering could mean another pad, ask.
+  5. Place the pick with one `kumi_change`: `load_sample_to_pad` for an empty pad, or `replace_sample` for the pad's Simpler. Then report the pad, the sound and the HISTORY id.
 - **The producer approves the exact placement,** and HISTORY lets them undo it.
 - **When a producer picks a sound on the map,** Desktop puts a request in the chat ("Use sound s-… on the selected track"). Treat it like any other request: observe, then make an approved change.
 
