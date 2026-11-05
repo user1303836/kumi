@@ -114,24 +114,14 @@ pub fn hidden_by_panels(patcher: &Value) -> Vec<String> {
     lines
 }
 
-/// For a device just loaded from the User Library (`user_library/…/name.amxd`, as the Browser names it): what
+/// For a device just loaded from the User Library (`user_library/…/name`, as the Browser names it): what
 /// hides its face, as a note for the model, which can't see Live. None for anything else, or nothing hidden.
 pub fn face_note(user_library: &Path, item_id: &str) -> Option<String> {
-    let relative = item_id.strip_prefix("user_library/")?;
-    // A Browser id for a second item at one path ends "#2" (#183): the file is the path's.
-    let relative = relative.rsplit_once('#').filter(|(_, n)| n.chars().all(|c| c.is_ascii_digit())).map_or(relative, |(path, _)| path);
-    // Only a path inside the library: no part that climbs out, and none Windows reads as more than one part
-    // (`..\x`) or as a drive (`C:`).
-    if !relative.to_lowercase().ends_with(".amxd")
-        || relative.split('/').any(|part| part.is_empty() || part == ".." || part.contains(['\\', ':']))
-    {
-        return None;
-    }
-    let file = relative.split('/').fold(user_library.to_path_buf(), |path, part| path.join(part));
-    if std::fs::metadata(&file).ok()?.len() > MAX_BYTES {
-        return None;
-    }
-    let lines = hidden_by_panels(&decode_amxd(&std::fs::read(&file).ok()?)?.patcher);
+    item_id.strip_prefix("user_library/")?;
+    // The same guarded Browser path as make_device's `from`: Live leaves .amxd out of a device's name.
+    let file = super::existing::find(item_id, user_library).ok()?;
+    let bytes = super::existing::read_limited(&file, MAX_BYTES).ok()?;
+    let lines = hidden_by_panels(&decode_amxd(&bytes)?.patcher);
     (!lines.is_empty()).then(|| {
         format!(
             "Its face may not show as built: {}. Max draws a box above the boxes after it in the same layer, and background boxes below every other: put a full-size backdrop last among the background boxes, and text before the panel it sits on. Tell the producer what they'll see until it's fixed.",
@@ -212,13 +202,16 @@ mod tests {
             comment("obj-2", "ILLEGAL SIGNAL", [10., 10., 100., 20.]),
         ]);
         std::fs::write(library.path().join("Kumi").join("PANIC VHS.amxd"), encode_amxd(DeviceType::AudioEffect, &flyer)).unwrap();
-        let note = face_note(library.path(), "user_library/Kumi/PANIC VHS.amxd").unwrap();
+        let note = face_note(library.path(), "user_library/Kumi/PANIC VHS").unwrap();
         assert!(note.starts_with("Its face may not show as built: `rave-bg` (728×169, opaque) is drawn over 1 object"), "{note}");
-        assert_eq!(face_note(library.path(), "user_library/Kumi/PANIC VHS.amxd#2"), Some(note), "a repeat's id is the same file");
+        for item in ["user_library/Kumi/PANIC VHS#2", "user_library/Kumi/PANIC VHS.amxd", "user_library/Kumi/PANIC VHS.amxd#2"] {
+            assert_eq!(face_note(library.path(), item), Some(note.clone()), "{item}: the same file");
+        }
         assert_eq!(face_note(library.path(), "audio_effects/Reverb"), None);
         assert_eq!(face_note(library.path(), "user_library/Kumi/../secret.amxd"), None);
         assert_eq!(face_note(library.path(), "user_library/Kumi/..\\..\\secret.amxd"), None, "Windows' separator");
         assert_eq!(face_note(library.path(), "user_library/C:/secret.amxd"), None, "a drive");
         assert_eq!(face_note(library.path(), "user_library/Kumi/Missing.amxd"), None);
+        assert_eq!(face_note(library.path(), "user_library/Kumi/Missing"), None);
     }
 }
