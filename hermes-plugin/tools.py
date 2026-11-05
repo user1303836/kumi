@@ -450,12 +450,19 @@ def kumi_setup(host: Host, args: dict, **kwargs: Any) -> dict:
         error = result.get("error") or {}
         code = error.get("code") or "failed"
         return {"error": {"code": code, "reason": setup.reason_for_model(code, error.get("message"))}}
-    if result.get("use_daw") == daw:  # the producer approved making it Kumi's DAW: the runtime starts again with it
-        host.set_daw(daw)
-        result = {**result, "message": f"{result['message']} {schemas.DAW_NAMES[daw]} is Kumi's DAW in this profile "
-                                       "now.".strip()}
-    if action == "adopt" or result.get("step") in ("runtime", "ffmpeg") or result.get("use_daw"):
-        host.runtimes.stop(data_dir)  # the next start uses the new runtime, the adopted --kumi-home, the ffmpeg or DAW
+    if result.get("use_daw") == daw:  # the producer approved making it Kumi's DAW (the runtime already works in it)
+        name = schemas.DAW_NAMES[daw]
+        try:
+            host.set_daw(daw)
+            said = f"{name} is Kumi's DAW in this profile now."
+        except Exception:
+            log.warning("Kumi couldn't change its DAW setting")
+            said = (f"Kumi couldn't change its DAW setting, so it still connects to {schemas.DAW_NAMES[current]}: "
+                    f"the producer sets it to {daw} in Hermes's settings for the Kumi plugin.")
+            result = {key: value for key, value in result.items() if key != "use_daw"}
+        result = {**result, "message": f"{result['message']} {said}".strip()}
+    if action == "adopt" or result.get("step") in ("runtime", "ffmpeg"):
+        host.runtimes.stop(data_dir)  # the next start uses the new runtime, the adopted --kumi-home or the ffmpeg
     return {**result, "status": setup.for_model(result.get("status") or {})}
 
 

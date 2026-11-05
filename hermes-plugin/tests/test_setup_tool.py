@@ -237,7 +237,7 @@ class SetupTool(unittest.TestCase):
         installed = support.handle(host, "kumi_setup", {"action": "install", "daw": "reaper"}, session_id="s1")
         self.assertTrue(installed["ok"], installed)
         self.assertEqual(ctx.settings["daw"], "reaper", "kumi_connect now goes to REAPER")
-        self.assertIsNone(host.runtimes.get(data), "and the runtime starts again for it")
+        self.assertEqual(host.runtimes.get(data).daw, "reaper", "the runtime that set it up already works in it")
 
     def test_a_second_daw_set_up_leaves_the_one_set_up_as_kumis_daw_unless_asked(self):
         host, ctx, data = desktop_host(self, daw_component=False)
@@ -254,6 +254,59 @@ class SetupTool(unittest.TestCase):
         self.assertEqual(commands.cli_setup(host, "reaper", use=True, stdin=Tty("y\n"), stdout=out), 0, out.getvalue())
         self.assertIn("Kumi: make REAPER Kumi's DAW in this profile", out.getvalue(), "asked first")
         self.assertEqual(ctx.settings["daw"], "reaper", "asked for, and approved")
+
+    def test_the_switch_is_part_of_what_was_approved(self):
+        host, ctx, data = desktop_host(self, daw_component=False)
+        support.call(host, "kumi_setup", {"action": "plan", "daw": "reaper"}, session_id="s1")  # makes REAPER Kumi's
+        hook = {"session_id": "s1", "task_id": None, "tool_call_id": "c1"}
+        self.assertEqual(policy.pre_tool_call(host, "kumi_setup", {"action": "install", "daw": "reaper"}, **hook)
+                         ["action"], "approve")
+        policy.post_approval_response(host, tool_call_id="c1", choice="once")
+        ctx.settings["daw"] = "reaper"  # the setting changed after the approval: the plan would no longer switch it
+        result = support.handle(host, "kumi_setup", {"action": "install", "daw": "reaper"}, session_id="s1")
+        self.assertEqual(result["error"]["code"], "plan_changed")
+        self.assertNotIn({"daw": "reaper", "dry_run": False}, setup_daw_calls(data), "nothing installed")
+
+    def test_a_daw_already_in_place_is_made_kumis_daw_by_a_step_of_its_own(self):
+        host, ctx, data = desktop_host(self, None, "--component-state", "same", daw_component=False)
+        plan = support.call(host, "kumi_setup", {"action": "plan", "daw": "reaper"}, session_id="s1")
+        self.assertEqual((plan["step"], plan["next"]), ("use_daw", "kumi_setup install"))
+        asked = policy.pre_tool_call(host, "kumi_setup", {"action": "install", "daw": "reaper"}, session_id="s1",
+                                     tool_call_id="c1")
+        self.assertEqual(asked["message"].splitlines()[0], "Kumi: make REAPER Kumi's DAW in this profile")
+        policy.post_approval_response(host, tool_call_id="c1", choice="once")
+        self.assertTrue(support.handle(host, "kumi_setup", {"action": "install", "daw": "reaper"}, session_id="s1")
+                        ["ok"])
+        self.assertEqual(ctx.settings["daw"], "reaper")
+        self.assertNotIn({"daw": "reaper", "dry_run": False}, setup_daw_calls(data), "nothing was installed for it")
+
+    def test_a_daw_set_up_beside_kumis_daw_says_how_to_switch_and_changes_nothing_unasked(self):
+        host, ctx, _ = desktop_host(self, None, "--component-state", "same")  # Live and REAPER are both set up
+        plan = support.call(host, "kumi_setup", {"action": "plan", "daw": "reaper"}, session_id="s1")
+        self.assertEqual(plan["step"], "none")
+        self.assertIn(f"still connects to {setup.DAWS['ableton']}", plan["next"])
+        self.assertIn("hermes kumi setup --daw reaper --use", plan["next"])
+        host.runtimes.stop_all()
+        out = Tty()
+        self.assertEqual(commands.cli_setup(host, "reaper", use=True, stdin=Tty("n\n"), stdout=out), 1)
+        self.assertIn("Nothing was changed.", out.getvalue())
+        self.assertEqual(commands.cli_setup(host, "reaper", use=True, stdin=io.StringIO("y\n"),
+                                            stdout=io.StringIO()), 1, "no terminal: nothing is asked")
+        self.assertEqual(ctx.settings["daw"], "ableton")
+
+    def test_a_setting_kumi_cant_write_is_said_and_never_asked_again(self):
+        host, ctx, data = desktop_host(self, daw_component=False)
+        support.call(host, "kumi_setup", {"action": "plan", "daw": "reaper"}, session_id="s1")
+        with mock.patch.object(ctx, "set_config", side_effect=PermissionError("a managed install's settings")):
+            installed = support.call(host, "kumi_setup", {"action": "install", "daw": "reaper"}, session_id="s1")
+        self.assertTrue(installed["ok"], "REAPER's part is installed all the same")
+        self.assertNotIn("use_daw", installed)
+        self.assertIn("couldn't change its DAW setting", installed["message"])
+        self.assertEqual(ctx.settings["daw"], "ableton")
+        out = Tty()
+        with mock.patch.object(ctx, "set_config", side_effect=PermissionError("a managed install's settings")):
+            self.assertEqual(commands.cli_setup(host, "reaper", stdin=Tty("y\ny\ny\n"), stdout=out), 1)
+        self.assertEqual(out.getvalue().count("Go ahead?"), 1, "asked once, then stopped")
 
     def test_installing_the_runtime_downloads_the_pinned_bundle_and_stops_the_older_runtime(self):
         host, _, data = desktop_host(self)  # Kumi 1.24.66's runtime, set up

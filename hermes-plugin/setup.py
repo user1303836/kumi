@@ -1073,11 +1073,12 @@ def cli_main(daw: str | None = None, *, setup_daw: Callable[[dict], Any] | None 
                 if make_current is None:
                     raise RuntimeError("no settings writer")
                 make_current(daw)
-                current = daw
-                message = f"{message} {DAWS[daw]} is Kumi's DAW in this profile now.".strip()
             except Exception:
-                message = (f"{message} Kumi couldn't change its DAW setting: set it to {daw} in Hermes's settings for "
-                           "the Kumi plugin.").strip()
+                print(f"{message} Kumi couldn't change its DAW setting, so it still connects to {DAWS[current]}: set "
+                      f"it to {daw} in Hermes's settings for the Kumi plugin.".strip(), file=stdout)
+                return 1
+            current = daw
+            message = f"{message} {DAWS[daw]} is Kumi's DAW in this profile now.".strip()
         print(message, file=stdout)
         if adopting:
             return 0
