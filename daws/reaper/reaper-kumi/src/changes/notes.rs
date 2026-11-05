@@ -274,12 +274,29 @@ fn quarter_notes(ctx: &Ctx, take: Take, ppq: f64) -> Done<f64> {
 }
 
 pub(super) fn new_note(ctx: &Ctx, take: Take, item_qn: f64, spec: &Value) -> Done<Note> {
+    note_from(ctx, take, item_qn, spec, false)
+}
+
+/// A variation replaces the source's whole note list, including notes before its item's trimmed start. Their starts
+/// may be negative in item beats, but must still lie at or after the source's tick 0.
+pub(super) fn variation_note(ctx: &Ctx, take: Take, item_qn: f64, spec: &Value) -> Done<Note> {
+    note_from(ctx, take, item_qn, spec, true)
+}
+
+fn note_from(ctx: &Ctx, take: Take, item_qn: f64, spec: &Value, before_item: bool) -> Done<Note> {
     let pitch = whole(spec, "pitch", 0, 127)?.ok_or_else(|| bad("every note needs a pitch (0 to 127)"))?;
-    let start = number(spec, "start")?
-        .filter(|s| *s >= 0.0)
-        .ok_or_else(|| bad("every note needs a start from 0 (quarter notes from the start of the item)"))?;
+    let start = number(spec, "start")?.filter(|s| before_item || *s >= 0.0).ok_or_else(|| {
+        bad(if before_item {
+            "every note needs a start (quarter notes from the start of the item)"
+        } else {
+            "every note needs a start from 0 (quarter notes from the start of the item)"
+        })
+    })?;
     let length = number(spec, "length")?.filter(|l| *l > 0.0).ok_or_else(|| bad("every note needs a length above 0 (quarter notes)"))?;
     let (start_ppq, end_ppq) = (ticks(ctx, take, item_qn, start)?, ticks(ctx, take, item_qn, start + length)?);
+    if before_item && start_ppq < 0.0 {
+        return Err(bad("a variation's note must start at or after its source's tick 0"));
+    }
     if end_ppq <= start_ppq {
         return Err(bad("a note must be at least one tick long"));
     }

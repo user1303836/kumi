@@ -48,11 +48,46 @@ fn an_audio_take_is_its_items_copy_with_its_own_settings_and_its_undo_takes_it_a
 /// 7.82), so a take of an eight-second loop of a two-second pattern played it once. An audio take never loops (above).
 #[test]
 fn a_looped_midi_items_take_goes_on_looping() {
-    let lab = Lab::new();
-    state(|s| s.tracks[2].items[0].extra.insert("B_LOOPSRC".into(), 1.0));
-    let (_, made) = lab.make("item-variation", json!({"ref": S1, "position": 20.0, "notes": [{"pitch": 38, "start": 0.0, "length": 0.5}]}));
-    let (_, take) = item(&guid_in(&made["created"]["ref"])).unwrap();
-    assert_eq!(take.extra.get("B_LOOPSRC").copied(), Some(1.0));
+    for (offset, rate) in [(0.5, 1.), (0.123456, 1.5)] {
+        let lab = Lab::new();
+        state(|s| {
+            let source = &mut s.tracks[2].items[0];
+            source.extra.insert("B_LOOPSRC".into(), 1.0);
+            source.takes[0].extra.insert("D_STARTOFFS".into(), offset);
+            source.takes[0].extra.insert("D_PLAYRATE".into(), rate);
+        });
+        // At 120 BPM the offset's tick is offset × 2 × 960, independent of playrate. A note at source tick 0 is
+        // before the item's start, also with a fractional offset and a non-unit playrate.
+        let first = -offset * 2. / rate;
+        let input = json!({"ref": S1, "position": 20.0, "notes": [
+            {"pitch": 38, "start": first, "length": 0.25}, {"pitch": 40, "start": 0.5, "length": 0.25}
+        ]});
+        let (preview, made) = lab.make("item-variation", input);
+        let copy = guid_in(&made["created"]["ref"]);
+        let (_, take) = item(&copy).unwrap();
+        assert_eq!(take.extra.get("B_LOOPSRC").copied(), Some(1.0));
+        assert_eq!(take.takes[0].notes[0].start_ppq, 0., "the hidden note stays at its source's start");
+        // Ordinary note writes still start at the item, and a variation can't write before the source itself.
+        let negative = json!({"ref": S1, "notes": [{"pitch": 38, "start": first, "length": 0.25}]});
+        assert_eq!(code(lab.preview("notes-add", negative)), "bad-params");
+        let too_early = json!({"ref": S1, "position": 30.0, "notes": [{"pitch": 38, "start": first - 1. / (960. * rate), "length": 0.25}]});
+        let refused = lab.preview("item-variation", too_early.clone()).unwrap();
+        let before = state(|s| s.tracks.clone());
+        assert_eq!(code(lab.apply_with("item-variation", &too_early, &refused, "Kumi: too early (k0002)")), "bad-params");
+        assert!(state(|s| s.tracks.clone()) == before, "a refused copy leaves nothing half-made");
+        // Changing a take and undoing it keeps the earlier hidden note, then undoing the make takes only the copy away.
+        let rewrite = json!({"ref": made["created"]["ref"], "notes": [
+            {"pitch": 38, "start": first, "length": 0.25}, {"pitch": 42, "start": 0.5, "length": 0.25}
+        ]});
+        let (rewritten_preview, rewritten) = lab.make("item-variation-set", rewrite);
+        assert_eq!(item(&copy).unwrap().1.takes[0].notes[1].pitch, 42);
+        lab.undo("item-variation-set", &rewritten_preview, &rewritten).unwrap();
+        let (_, back) = item(&copy).unwrap();
+        assert_eq!((back.takes[0].notes[0].start_ppq, back.takes[0].notes[1].pitch), (0., 40));
+        lab.undo("item-variation", &preview, &made).unwrap();
+        assert!(item(&copy).is_none());
+        assert!(item("{ITEM-S1}").is_some(), "the source stays");
+    }
 }
 
 #[test]
