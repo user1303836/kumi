@@ -11,6 +11,7 @@ pub mod artifacts;
 pub mod change;
 pub mod connection;
 pub mod ctx;
+pub mod device;
 pub mod history;
 pub mod import;
 pub mod inflight;
