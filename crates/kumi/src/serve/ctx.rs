@@ -933,8 +933,8 @@ pub(crate) fn make_private_dir(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Pins each component before looking below it, keeping all pins until creation/protection has finished. Directory
-/// data access makes the read-only sharing effective: metadata-only opens do not prevent a rename or reparse write.
+/// Pins each directory against replacement and opens the next component relative to that handle, refusing reparses.
+/// Ancestors allow ordinary child writes (including snapshot renames); only the exact ACL target excludes writers.
 #[cfg(windows)]
 fn make_private_windows_dir(path: &Path, fresh: bool) -> std::io::Result<()> {
     use daw_bridge::lifecycle::native_acl;
@@ -948,7 +948,7 @@ fn make_private_windows_dir(path: &Path, fresh: bool) -> std::io::Result<()> {
     };
     use windows_sys::Win32::Storage::FileSystem::{
         GetDriveTypeW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
-        FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_READ, FILE_SHARE_WRITE,
     };
 
     let unsafe_path = || std::io::Error::other("a private runtime folder must be a local, owned directory without reparse points");
@@ -981,24 +981,22 @@ fn make_private_windows_dir(path: &Path, fresh: bool) -> std::io::Result<()> {
             continue;
         }
         let target = components.peek().is_none();
-        let mut options = OpenOptions::new();
-        // READ_CONTROL for the owner/DACL check; WRITE_DAC only on the exact owned target, never an ancestor.
-        let access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | if target { 0x0002_0000 | 0x0004_0000 } else { 0 };
-        options.access_mode(access).share_mode(FILE_SHARE_READ).custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
-        let mut created = false;
-        if target && fresh {
-            native_acl::create_kumis_folder(&at)?;
-            created = true;
-        }
-        let file = match options.open(&at) {
-            Ok(file) => file,
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound && matches!(component, Component::Normal(_)) => {
-                native_acl::create_kumis_folder(&at)?;
-                created = true;
-                options.access_mode(access | 0x0002_0000);
-                options.open(&at)?
+        let (created, file) = if matches!(component, Component::RootDir) {
+            let file = OpenOptions::new()
+                .access_mode(FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES)
+                .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
+                .custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT)
+                .open(&at)?;
+            (false, file)
+        } else {
+            let parent = pins.last().ok_or_else(unsafe_path)?;
+            match native_acl::open_directory_at(parent, component.as_os_str(), target && fresh, target) {
+                Ok(file) => (target && fresh, file),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound && !(target && fresh) => {
+                    (true, native_acl::open_directory_at(parent, component.as_os_str(), true, target)?)
+                }
+                Err(error) => return Err(error),
             }
-            Err(error) => return Err(error),
         };
         let metadata = file.metadata()?;
         if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
@@ -1035,6 +1033,34 @@ mod tests {
         assert_eq!(make_private_windows_dir(&path, true).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(shapes::descriptor(&path), before);
         assert_eq!(std::fs::read(path.join("kept")).unwrap(), b"not this call's");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_scratch_creation_coexists_with_writes_in_its_state_ancestor() {
+        use daw_bridge::lifecycle::native_acl::is_kumis_shape;
+        use std::os::windows::fs::OpenOptionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        make_private_dir(&state).unwrap();
+        let state = std::fs::canonicalize(state).unwrap();
+        // Atomic snapshot rename opens its destination directory for adding an entry.
+        // Such access is not permission to replace an ancestor with a reparse point.
+        let _writer = std::fs::OpenOptions::new()
+            .access_mode(2 | 4) // FILE_ADD_FILE | FILE_ADD_SUBDIRECTORY
+            .share_mode(7)
+            .custom_flags(0x0220_0000)
+            .open(&state)
+            .unwrap();
+        let scratch = state.join("scratch/listen/call");
+        make_private_windows_dir(&scratch, true).unwrap();
+        assert!(is_kumis_shape(&scratch));
+        std::fs::write(scratch.join("take.wav"), b"private capture").unwrap();
+        let queued = state.join("status.pending");
+        std::fs::write(&queued, b"new snapshot").unwrap();
+        std::fs::rename(queued, state.join("status.json")).unwrap();
+        assert_eq!(std::fs::read(state.join("status.json")).unwrap(), b"new snapshot");
+        assert_eq!(std::fs::read(scratch.join("take.wav")).unwrap(), b"private capture");
     }
 
     #[cfg(windows)]

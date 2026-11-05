@@ -105,6 +105,20 @@ unsafe extern "system" {
 #[link(name = "ntdll")]
 unsafe extern "system" {
     fn NtSetSecurityObject(handle: Handle, information: u32, descriptor: *mut c_void) -> i32;
+    fn NtCreateFile(
+        handle: *mut Handle,
+        access: u32,
+        attributes: *const ObjectAttributes,
+        status: *mut c_void,
+        allocation: *const i64,
+        file_attributes: u32,
+        sharing: u32,
+        disposition: u32,
+        options: u32,
+        ea: *const c_void,
+        ea_length: u32,
+    ) -> i32;
+    fn RtlNtStatusToDosError(status: i32) -> u32;
 }
 
 const DRIVE_REMOTE: u32 = 4;
@@ -312,24 +326,124 @@ pub fn create_kumis_folder(path: &Path) -> std::io::Result<()> {
     let account = Account::current().ok_or_else(|| std::io::Error::other("the current account could not be read"))?;
     let mut buffer = owner_acl(&account, FOLDER_FLAGS).map_err(std::io::Error::other)?;
     let name = wide(path);
-    // SECURITY_DESCRIPTOR is at most 40 bytes on 64-bit Windows, aligned for pointers.
-    let mut descriptor = [0u64; 5];
-    let descriptor = descriptor.as_mut_ptr().cast();
+    let mut descriptor = folder_descriptor(&account, &mut buffer)?;
     // SAFETY: descriptor, ACL, SID and NUL-terminated name live through CreateDirectoryW.
     unsafe {
-        if InitializeSecurityDescriptor(descriptor, 1) == 0
-            || SetSecurityDescriptorOwner(descriptor, account.sid(), 0) == 0
-            || SetSecurityDescriptorDacl(descriptor, 1, buffer.as_mut_ptr().cast(), 0) == 0
-            || SetSecurityDescriptorControl(descriptor, SE_DACL_PROTECTED, SE_DACL_PROTECTED) == 0
-        {
-            return Err(std::io::Error::last_os_error());
-        }
-        let attributes = SecurityAttributes { length: std::mem::size_of::<SecurityAttributes>() as u32, descriptor, inherit: 0 };
+        let attributes = SecurityAttributes {
+            length: std::mem::size_of::<SecurityAttributes>() as u32,
+            descriptor: descriptor.as_mut_ptr().cast(),
+            inherit: 0,
+        };
         if CreateDirectoryW(name.as_ptr(), &attributes) == 0 {
             return Err(std::io::Error::last_os_error());
         }
     }
     Ok(())
+}
+
+/// The descriptor borrows the SID and ACL's heap buffers, not its own address.
+fn folder_descriptor(account: &Account, acl: &mut [u32]) -> std::io::Result<[u64; 5]> {
+    // SECURITY_DESCRIPTOR is at most 40 bytes on 64-bit Windows, aligned for pointers.
+    let mut descriptor = [0u64; 5];
+    let address = descriptor.as_mut_ptr().cast();
+    // SAFETY: all backing storage lives through the caller's creation call.
+    unsafe {
+        if InitializeSecurityDescriptor(address, 1) == 0
+            || SetSecurityDescriptorOwner(address, account.sid(), 0) == 0
+            || SetSecurityDescriptorDacl(address, 1, acl.as_mut_ptr().cast(), 0) == 0
+            || SetSecurityDescriptorControl(address, SE_DACL_PROTECTED, SE_DACL_PROTECTED) == 0
+        {
+            return Err(std::io::Error::last_os_error());
+        }
+    }
+    Ok(descriptor)
+}
+
+#[repr(C)]
+struct UnicodeString {
+    length: u16,
+    maximum: u16,
+    buffer: *mut u16,
+}
+
+#[repr(C)]
+struct ObjectAttributes {
+    length: u32,
+    root: Handle,
+    name: *mut UnicodeString,
+    attributes: u32,
+    security: *mut c_void,
+    security_qos: *mut c_void,
+}
+
+/// Opens one directory component relative to an already opened directory, never by
+/// re-resolving its ancestors. Reparse points are refused by the kernel, not followed.
+/// A new directory is born private. `exclusive` is only for a target whose ACL the
+/// caller will check/tighten; ancestors permit child-file writes such as snapshot
+/// renames. All returned handles exclude deletion of the directory itself.
+pub fn open_directory_at(parent: &std::fs::File, name: &std::ffi::OsStr, create: bool, exclusive: bool) -> std::io::Result<std::fs::File> {
+    use std::os::windows::{
+        fs::MetadataExt,
+        io::{AsRawHandle, FromRawHandle},
+    };
+    let invalid = || std::io::Error::new(std::io::ErrorKind::InvalidInput, "not one plain directory component");
+    let mut parts = Path::new(name).components();
+    if !matches!(parts.next(), Some(std::path::Component::Normal(_))) || parts.next().is_some() {
+        return Err(invalid());
+    }
+    let meta = parent.metadata()?;
+    if !meta.is_dir() || meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err(invalid());
+    }
+    let mut name: Vec<u16> = name.encode_wide().collect();
+    if name.iter().any(|unit| matches!(*unit, 0 | 47 | 58 | 92)) {
+        return Err(invalid());
+    }
+    let length = u16::try_from(name.len().checked_mul(2).ok_or_else(invalid)?).map_err(|_| invalid())?;
+    let mut unicode = UnicodeString { length, maximum: length, buffer: name.as_mut_ptr() };
+    let mut private = if create {
+        let account = Account::current().ok_or_else(|| std::io::Error::other("the current account could not be read"))?;
+        let acl = owner_acl(&account, FOLDER_FLAGS).map_err(std::io::Error::other)?;
+        Some((account, acl))
+    } else {
+        None
+    };
+    let mut descriptor = private.as_mut().map(|(account, acl)| folder_descriptor(account, acl)).transpose()?;
+    let attributes = ObjectAttributes {
+        length: std::mem::size_of::<ObjectAttributes>() as u32,
+        root: parent.as_raw_handle(),
+        name: &mut unicode,
+        attributes: 0x40 | 0x1000, // OBJ_CASE_INSENSITIVE | OBJ_DONT_REPARSE
+        security: descriptor.as_mut().map_or(null_mut(), |value| value.as_mut_ptr().cast()),
+        security_qos: null_mut(),
+    };
+    let mut handle = null_mut();
+    let mut status = [0usize; 2]; // IO_STATUS_BLOCK: pointer-sized status union, then Information.
+                                  // LIST_DIRECTORY, READ_ATTRIBUTES, READ_CONTROL, SYNCHRONIZE; WRITE_DAC only on
+                                  // the exact target. FILE_CREATE never adopts a collision; FILE_OPEN never creates.
+    let access = 0x0012_0081 | if exclusive { 0x0004_0000 } else { 0 };
+    // SAFETY: the parent's live handle anchors this single component. Name, descriptor,
+    // SID, ACL and outputs live through the synchronous call. No handle is inherited.
+    let result = unsafe {
+        NtCreateFile(
+            &mut handle,
+            access,
+            &attributes,
+            status.as_mut_ptr().cast(),
+            std::ptr::null(),
+            0x10,
+            if exclusive { 1 } else { 3 },
+            if create { 2 } else { 1 },
+            0x1 | 0x20 | 0x0020_0000, // DIRECTORY_FILE | SYNCHRONOUS_IO_NONALERT | OPEN_REPARSE_POINT
+            std::ptr::null(),
+            0,
+        )
+    };
+    if result < 0 {
+        return Err(std::io::Error::from_raw_os_error(unsafe { RtlNtStatusToDosError(result) } as i32));
+    }
+    // SAFETY: a successful synchronous NtCreateFile returned this owned handle.
+    Ok(unsafe { std::fs::File::from_raw_handle(handle) })
 }
 
 #[repr(C)]

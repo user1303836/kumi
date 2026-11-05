@@ -664,7 +664,10 @@ mod restricted_renoise_staging {
                     Some(&[own_full(0), shapes::Ace { allow: true, flags: 0, mask: 0x0012_0089, whose: shapes::Whose::Sid("S-1-1-0") }]),
                     true,
                 ),
-                "hardlink" => std::fs::hard_link(&file, file.with_file_name("second-link.wav")).unwrap(),
+                // Linking into the pinned cache needs a writable directory handle,
+                // which the host intentionally excludes. A link outside it still
+                // raises this exact returned file's link count and must be refused.
+                "hardlink" => std::fs::hard_link(&file, lab.home.path().join("second-link.wav")).unwrap(),
                 "foreign" => {
                     if !shapes::own(&file, "S-1-5-32-544") {
                         continue;
@@ -756,6 +759,10 @@ mod restricted_renoise_staging {
         assert_eq!(Path::new(done["files"][0]["file"].as_str().unwrap()), file.as_path());
         assert!(native_acl::is_kumis_shape(&file));
         assert_eq!(std::fs::read(&file).unwrap(), b"owned render boundary fixture");
-        std::fs::rename(&file, &other).unwrap();
+        // The file pin ended, but the host still pins the cache directory. Ordinary
+        // owner writes/deletion work; a rename would also need a cache-directory writer.
+        std::fs::write(&file, b"owner changed the exposed file").unwrap();
+        std::fs::remove_file(&file).unwrap();
+        assert!(!file.exists());
     }
 }
