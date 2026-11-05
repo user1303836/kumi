@@ -137,9 +137,7 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
   1. Look first (`kumi_observe` with `scope: focus`) for the project key, the epoch and the Set's tempo and meter, and ask what's missing: style, tempo feel, how many bars.
   2. Plan one `kumi_change`:
      - `add_tracks_and_scenes` adds the track: `{"tracks": [{"name": "Drums", "kind": "midi"}], "scenes": []}`, `as: "drums"`;
-     - **a kit, either:**
-       - `load_device` with a ready-made kit (`itemId`, `trackRef: "@drums"`): one the producer names, or a Drum Rack kit preset under `instruments/Drum Rack/…`;
-       - or an empty `Drum Rack` (`as: "rack"`), then a `load_sample_to_pad` for each sound the producer picked with `kumi_sounds` (`deviceRef: "@rack"`). Leave `note` out and the pads fill in order from C1, so a kick, a snare and a hat land on `C1`, `C#1` and `D1`. Name those lanes by pitch.
+     - `load_device` puts a kit on it (`itemId`, `trackRef: "@drums"`): one the producer names, or a Drum Rack kit preset under `instruments/Drum Rack/…`;
      - `write_midi_clip` writes into its first empty Session slot (`trackRef: "@drums"`, `sceneIndex`, `name`, and `length`), with lanes such as:
 
        ```
@@ -149,6 +147,11 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
        ```
   3. The producer approves it as one change. Report the track, the clip, its bars and the pattern in words, and the HISTORY id.
   4. To hear it, the producer plays the clip in Live. Offer variations as new clips in empty slots, never by deleting this one.
+
+  - **With sounds the producer picked** (`kumi_sounds`), make it three changes, since Kumi can't undo a pad load:
+    1. the track and an empty `Drum Rack` (`load_device`);
+    2. the pads, in a change of their own: one `load_sample_to_pad` per sound (`deviceRef`: the rack, from a fresh look). Leave `note` out and the pads fill in order from C1, so a kick, a snare and a hat land on `C1`, `C#1` and `D1`;
+    3. the clip, with lanes named by pitch.
 
   - **REAPER:** `track_add`, then `fx_add` with a drum plug-in the producer has (as REAPER's FX browser names it), then `item_add` and `notes_add`. Use General MIDI keys (36 kick, 38 snare, 42 hat), or the plug-in's own map. REAPER's `drum_kit` step is refused.
   - **Renoise:** an existing kit instrument, or `instrument_add`, then `sample_load` for each sound, then `keyzone_drumkit`. Then `notes_write` on an existing pattern, with keys from `C-4`. Renoise's `instrument_kit` step is refused.
