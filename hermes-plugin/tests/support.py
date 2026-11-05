@@ -3,13 +3,43 @@ hyphen), a context that records what register() does, and a runtime installed as
 fixture_runtime.py."""
 from __future__ import annotations
 
+from dataclasses import dataclass
 import importlib.util
 import json
 import os
 from pathlib import Path
 import stat
 import sys
+import types
 from typing import Any
+
+
+def _context_references() -> None:
+    """Hermes's context-reference classes (agent.context_references), or stand-ins of their shape where the tests run
+    without Hermes on the path: register() builds Kumi's @kumi: provider from them."""
+    try:
+        import agent.context_references  # noqa: F401  (Hermes's own, when it's there)
+        return
+    except ImportError:
+        pass
+
+    class ContextReferenceProvider:
+        prefix = ""
+        description = ""
+
+    @dataclass
+    class ContextCompletionItem:
+        text: str
+        display: str = ""
+        meta: str = ""
+
+    stand_in = types.ModuleType("agent.context_references")
+    stand_in.ContextReferenceProvider, stand_in.ContextCompletionItem = ContextReferenceProvider, ContextCompletionItem
+    sys.modules.setdefault("agent", types.ModuleType("agent"))
+    sys.modules["agent.context_references"] = stand_in
+
+
+_context_references()
 
 TESTS = Path(__file__).resolve().parent
 PLUGIN_DIR = TESTS.parent
@@ -49,6 +79,7 @@ class Context:
         self.unloads: list = []
         self.commands: dict[str, Any] = {}
         self.cli: dict[str, dict] = {}
+        self.references: dict[str, Any] = {}
         self.skills: dict[str, Path] = {}
         self.prompt: dict[str, str] = {}
         self.aux_tasks: dict[str, dict] = {}
@@ -70,6 +101,9 @@ class Context:
 
     def register_cli_command(self, name, help, setup_fn, handler_fn=None, description=""):
         self.cli[name] = {"help": help, "setup_fn": setup_fn, "handler_fn": handler_fn}
+
+    def register_context_reference(self, provider):
+        self.references[provider.prefix] = provider
 
     def register_skill(self, name, path, description="", frontmatter=None):
         if not Path(path).is_file():

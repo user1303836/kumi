@@ -34,6 +34,7 @@ class Register(unittest.TestCase):
         self.assertEqual(set(ctx.hooks), declared("provides_hooks"))
         self.assertEqual(set(ctx.commands), {"kumi"})
         self.assertEqual(set(ctx.cli), {"kumi"})
+        self.assertEqual(set(ctx.references), {"kumi"})
         self.assertEqual(set(ctx.skills), {"daw", "sounds", "listening"})
         self.assertIn("kumi:daw", ctx.prompt["kumi"])
 

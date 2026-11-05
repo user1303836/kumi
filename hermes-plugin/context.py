@@ -11,7 +11,8 @@ Hermes adds the note to the user's message and keeps it in the chat's history, s
 - a chat gets it only when it changed since the last one that chat got;
 - it's at most 1,500 characters.
 
-`focus_text` is also what @kumi:focus shows.
+`focus_text` is also what @kumi:focus shows, and references.py fences @kumi:history and @kumi:status the same way,
+with `fenced` and `quoted`.
 """
 from __future__ import annotations
 
@@ -47,10 +48,10 @@ def focus_text(focus: dict, owner: dict, *, connected: bool | None = None, max_c
     """The fenced note, from focus.json's body (CC-7) and snapshots.owner(); None when no project was published.
     `connected` is status.json's (None: not known). A stopped runtime gets one line instead of the last state."""
     if owner.get("running") is False:
-        return _fenced([STOPPED], max_chars)
+        return fenced([STOPPED], max_chars)
     project = _dict(focus.get("project"))
     if not project:
-        return _fenced([NOT_CONNECTED], max_chars) if connected is False else None
+        return fenced([NOT_CONNECTED], max_chars) if connected is False else None
     lines = [HEADER]
     if owner.get("stale"):
         age = owner.get("age_ms")
@@ -60,33 +61,34 @@ def focus_text(focus: dict, owner: dict, *, connected: bool | None = None, max_c
         lines.append("Kumi isn't connected to the DAW now; this is the last known state.")
     looked = _looked(project.get("seen_at"), int(time.time() * 1000) if now_ms is None else now_ms)
     epoch = project.get("epoch")
-    epoch = str(epoch) if isinstance(epoch, int) and not isinstance(epoch, bool) else _quoted(epoch, 20)
-    lines.append(f"Project: {_quoted(project.get('name'), 80) or 'untitled'}"
+    epoch = str(epoch) if isinstance(epoch, int) and not isinstance(epoch, bool) else quoted(epoch, 20)
+    lines.append(f"Project: {quoted(project.get('name'), 80) or 'untitled'}"
                  + (f" (epoch {epoch}{looked})" if epoch else ""))
     place = _dict(focus.get("focus"))
-    if busy := _quoted(place.get("busy"), 80):
+    if busy := quoted(place.get("busy"), 80):
         lines.append(f"The DAW is busy ({busy}), so what it shows may be out of date.")
     if on := _on(place):
-        views = [view for view in (_quoted(_dict(place.get("mainView")).get("label"), 30)
-                                   or _quoted(place.get("view"), 30),
-                                   _quoted(_dict(place.get("editorView")).get("label"), 30)) if view]
+        views = [view for view in (quoted(_dict(place.get("mainView")).get("label"), 30)
+                                   or quoted(place.get("view"), 30),
+                                   quoted(_dict(place.get("editorView")).get("label"), 30)) if view]
         lines.append("On: " + ", ".join(on) + (f" (view {', '.join(views)})" if views else ""))
     if said := _transport(_dict(focus.get("transport"))):
         lines.append("Transport: " + ", ".join(said))
     lines += _catch_up(focus.get("catch_up"))
-    return _fenced(lines, max_chars)
+    return fenced(lines, max_chars)
 
 
-def _fenced(lines: list[str], max_chars: int) -> str:
-    """The lines inside the fence, with the closing tag always last. A note too long loses whole lines from its end
-    (never part of a value), and says so with a last "…" line."""
-    room = max_chars - len(OPEN) - len(CLOSE) - 2
+def fenced(lines: list[str], max_chars: int, tag: str = "kumi-focus") -> str:
+    """The lines inside a `<tag>` fence, with the closing tag always last. A note too long loses whole lines from its
+    end (never part of a value), and says so with a last "…" line."""
+    opening, closing = f"<{tag}>", f"</{tag}>"
+    room = max_chars - len(opening) - len(closing) - 2
     kept = list(lines)
     if len("\n".join(kept)) > room:
         while kept and len("\n".join([*kept, "…"])) > room:
             kept.pop()
         kept.append("…")
-    return f"{OPEN}\n" + "\n".join(kept) + f"\n{CLOSE}"
+    return f"{opening}\n" + "\n".join(kept) + f"\n{closing}"
 
 
 # `<` and `>`, and the characters that look like them, as escapes: no name can show anything like the fence's tags.
@@ -95,7 +97,7 @@ _ANGLES = {ord(char): f"\\u{ord(char):04x}" for char in
            "\u02c2\u02c3"}
 
 
-def _quoted(value: Any, limit: int) -> str | None:
+def quoted(value: Any, limit: int) -> str | None:
     """A value from the project as a quoted one-line string, `<`, `>` and their lookalikes escaped, so it can't close
     or fake the fence; None for anything but a non-empty string."""
     if not isinstance(value, str) or not value.strip():
@@ -106,24 +108,24 @@ def _quoted(value: Any, limit: int) -> str | None:
 def _on(place: dict) -> list[str]:
     """What the producer has selected, by name: track, device, the item in the editor, the section, the parameter."""
     on = []
-    if track := _quoted(_dict(place.get("track")).get("name"), 60):
+    if track := quoted(_dict(place.get("track")).get("name"), 60):
         on.append(f"track {track}")
-    if device := _quoted(place.get("device"), 60):
+    if device := quoted(place.get("device"), 60):
         on.append(f"device {device}")
     item = _dict(place.get("item"))
-    if clip := _quoted(place.get("clip"), 60):
+    if clip := quoted(place.get("clip"), 60):
         on.append(f"clip {clip}")
-    elif name := _quoted(item.get("name"), 60):
+    elif name := quoted(item.get("name"), 60):
         on.append(f"{ITEMS.get(item.get('kind'), 'item')} {name}")
     section = _dict(place.get("section"))
-    if scene := _quoted(place.get("scene"), 60):
+    if scene := quoted(place.get("scene"), 60):
         on.append(f"scene {scene}")
-    elif name := _quoted(section.get("name"), 60):
+    elif name := quoted(section.get("name"), 60):
         on.append(f"{SECTIONS.get(section.get('kind'), 'section')} {name}")
     parameter = _dict(place.get("parameter"))
-    if name := _quoted(parameter.get("name"), 40):
-        device = f" on {owner}" if (owner := _quoted(parameter.get("owner"), 40)) else ""
-        value = f" = {value}" if (value := _quoted(parameter.get("value"), 30)) else ""
+    if name := quoted(parameter.get("name"), 40):
+        device = f" on {owner}" if (owner := quoted(parameter.get("owner"), 40)) else ""
+        value = f" = {value}" if (value := quoted(parameter.get("value"), 30)) else ""
         on.append(f"parameter {name}{device}{value}")
     return on
 
@@ -134,7 +136,7 @@ def _transport(transport: dict) -> list[str]:
         said.append("playing" if transport["playing"] else "stopped")
     if _number(transport.get("tempo")) and transport["tempo"] > 0:
         said.append(f"{transport['tempo']:g} BPM")
-    if meter := _quoted(transport.get("meter"), 20):
+    if meter := quoted(transport.get("meter"), 20):
         said.append(f"meter {meter}")
     return said
 
@@ -145,7 +147,7 @@ def _catch_up(entries: Any) -> list[str]:
     for entry in entries if isinstance(entries, list) else []:
         entry = _dict(entry)
         lines = entry.get("lines")
-        changes += [said for line in (lines if isinstance(lines, list) else []) if (said := _quoted(line, 100))]
+        changes += [said for line in (lines if isinstance(lines, list) else []) if (said := quoted(line, 100))]
         more += entry["more"] if isinstance(entry.get("more"), int) and not isinstance(entry["more"], bool) \
             and entry["more"] > 0 else 0
         reconnected = reconnected or entry.get("afterReconnect") is True
