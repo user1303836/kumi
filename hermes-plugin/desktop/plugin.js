@@ -1327,6 +1327,14 @@ var KumiStore = class {
     });
   }
 };
+function dawPartWorks(state) {
+  const setup = state.setup;
+  const onlyDawPart = setup?.state === "needs_daw_component" || setup?.state === "ready" && setup.next_step === "install_daw_component";
+  if (!onlyDawPart || !state.status?.connected) return false;
+  const component = state.status.setup?.component;
+  if (!component) return true;
+  return component.installed === true && typeof component.version === "string" && component.version === component.bundled;
+}
 function jobOf(result) {
   let value = result;
   if (typeof value === "string") {
@@ -1877,7 +1885,7 @@ var NEEDS_SETUP = { needs_runtime: true, outdated_runtime: true, damaged_runtime
 function nextStep(state, t = english) {
   const setup = state.setup;
   const daw = state.status?.daw ?? setup?.daw;
-  if (setup && (NEEDS_SETUP[setup.state ?? ""] || setup.next_step === "install_runtime" || setup.next_step === "install_daw_component")) {
+  if (setup && !dawPartWorks(state) && (NEEDS_SETUP[setup.state ?? ""] || setup.next_step === "install_runtime" || setup.next_step === "install_daw_component")) {
     return { label: t("step.setup", dawName(daw, t)), request: setupRequest(daw) };
   }
   if (setup?.state === "ready" && !state.status?.connected) return { label: t("step.connect", dawName(daw, t)), request: connectRequest(daw) };
@@ -1902,7 +1910,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
   const session = ownerSession(state);
   const connected = Boolean(state.status?.connected);
   const setupState = state.setup?.state;
-  const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" ? state.setup.message : null;
+  const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" && !dawPartWorks(state) ? state.setup.message : null;
   const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
   return /* @__PURE__ */ jsxs5("div", { style: { height: "100%", overflowY: "auto", overflowX: "hidden", color: T.text }, children: [
     /* @__PURE__ */ jsxs5("div", { style: { ...S.section, gap: 8 }, children: [
@@ -2216,6 +2224,9 @@ function pick(model, view, size, px, py, radius = 8, visible) {
   }
   return best;
 }
+function mapLabel(name) {
+  return clean(name, 28);
+}
 function searchSounds(model, query) {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (!words.length) return null;
@@ -2328,8 +2339,11 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
     const colors = resolve(canvas);
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, size.width, size.height);
-    const radius = Math.min(5, 2.2 + Math.log2(view.scale) * 0.8);
+    const count2 = model.points.length;
+    const base = count2 <= 40 ? 5 : count2 <= 300 ? 3.2 : 2.2;
+    const radius = Math.max(1.5, Math.min(base + 3, base + Math.log2(view.scale) * 0.8));
     const groupColor2 = new Map(model.groups.map((group) => [group.key, group.color]));
+    const labelled = [];
     for (const pass of [false, true]) {
       context.globalAlpha = pass ? 0.92 : 0.16;
       model.points.forEach((point, index) => {
@@ -2340,7 +2354,23 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
         context.beginPath();
         context.arc(x, y, radius, 0, Math.PI * 2);
         context.fill();
+        if (pass) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
       });
+    }
+    if (labelled.length <= 40) {
+      context.globalAlpha = 0.85;
+      context.fillStyle = colors.text;
+      context.font = `11px ${getComputedStyle(canvas).fontFamily || "sans-serif"}`;
+      context.textBaseline = "middle";
+      const placed = [];
+      for (const [x, y, name] of labelled) {
+        const text = mapLabel(name);
+        if (!text) continue;
+        const box = [x + radius + 4, y - 7, context.measureText(text).width, 14];
+        if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue;
+        placed.push(box);
+        context.fillText(text, box[0], y);
+      }
     }
     context.globalAlpha = 1;
     const ring = (id, color, extra, width) => {
@@ -2380,10 +2410,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           value: query
         }
       ),
-      /* @__PURE__ */ jsxs9("span", { style: S.faint, children: [
-        shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)),
-        model.revision ? ` · ${t("map.revision", model.revision)}` : ""
-      ] })
+      /* @__PURE__ */ jsx9("span", { style: S.faint, title: model.revision ? t("map.revision", model.revision) : void 0, children: shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)) })
     ] }),
     /* @__PURE__ */ jsx9("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
       const off = hidden.has(group.key);

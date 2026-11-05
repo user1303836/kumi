@@ -38,6 +38,9 @@ pub struct Project {
     pub epoch: u64,
     /// When it was seen (ms).
     pub seen_at: i64,
+    /// The DAW's own epoch the look read it at (an own bridge's snapshot epoch, a Live look's): with the project, so a
+    /// caller that checks it ([`Link::expect`]) has the epoch of that same look, with no second read between.
+    pub native_epoch: Option<String>,
 }
 
 /// What the integration reports between looks, kept for `observe` and `focus.json`.
@@ -113,9 +116,10 @@ pub struct Link {
     ref_names: RefCell<HashMap<String, String>>,
     /// A write whose outcome is unsure, until the next look (CC-2's R6): `{at, op, reason, cleanup}`.
     unsure: RefCell<Option<Value>>,
-    /// The epoch an own bridge's reader gave at the last look: a page of another (a tab switched since) isn't the
-    /// looked project's.
-    page_epoch: RefCell<Option<String>>,
+    /// The DAW's own epoch the last look read, taken with that look: an own bridge's page of another epoch (a tab
+    /// switched since) isn't the looked project's. Never read again after the look, so a switch between the two can't
+    /// pair the looked project's key with another's epoch.
+    native_epoch: RefCell<Option<String>>,
 }
 
 impl Link {
@@ -131,7 +135,7 @@ impl Link {
             tools: RefCell::new(Vec::new()),
             ref_names: RefCell::new(HashMap::new()),
             unsure: RefCell::new(None),
-            page_epoch: RefCell::new(None),
+            native_epoch: RefCell::new(None),
         }
     }
 
@@ -191,7 +195,8 @@ impl Link {
 
     /// The project `observation` is about, as the runtime keys it (the integration's key with the DAW's identity for
     /// the open project, so a copy open in another tab, or the same file opened again, is another): the epoch moves
-    /// on when it's another project than last seen, or the DAW came back since.
+    /// on when it's another project than last seen, or the DAW came back since. The DAW's own epoch is kept from the
+    /// same observation, so the looked page epoch is always the looked project's.
     pub fn saw(&self, observation: &Observation) -> Project {
         let open =
             observation.set.as_deref().or_else(|| observation.identity.as_ref().and_then(|identity| identity.open_identity.as_deref()));
@@ -203,22 +208,26 @@ impl Link {
         }
         self.returns_seen.set(returns);
         let name = observation.identity.as_ref().map_or_else(|| observation.label.clone(), |identity| identity.name.clone());
-        let project = Project { key, name, epoch: self.epoch.get(), seen_at: kumi_common::time::now_ms() };
+        let native_epoch = observation.native_epoch.clone();
+        let project =
+            Project { key, name, epoch: self.epoch.get(), seen_at: kumi_common::time::now_ms(), native_epoch: native_epoch.clone() };
         *self.project.borrow_mut() = Some(project.clone());
         *self.tools.borrow_mut() = observation.tools.clone();
-        *self.page_epoch.borrow_mut() = None;
+        *self.native_epoch.borrow_mut() = native_epoch;
         project
     }
 
-    /// The epoch an own bridge's reader gave right after the last look.
-    pub fn saw_page_epoch(&self, epoch: Option<String>) {
-        *self.page_epoch.borrow_mut() = epoch;
+    /// The DAW's own epoch the last look read, taken with that look (an own bridge's from its snapshot): None when the
+    /// DAW gave none or no look read the project. A capture names it, so another project's state is never taken for the
+    /// looked one. Where the project is checked too, take it from [`Link::expect`]'s [`Project`], the same look's.
+    pub fn observed_native_epoch(&self) -> Option<String> {
+        self.native_epoch.borrow().clone()
     }
 
     /// Whether an own bridge's page with this epoch is of the state of the project the last look saw: both known, and
     /// the same.
     pub fn page_is_looked(&self, epoch: Option<&str>) -> bool {
-        matches!((self.page_epoch.borrow().as_deref(), epoch), (Some(looked), Some(now)) if looked == now)
+        matches!((self.native_epoch.borrow().as_deref(), epoch), (Some(looked), Some(now)) if looked == now)
     }
 
     /// Moves the epoch on (a write's outcome is unsure): refs from earlier looks no longer hold.
@@ -564,6 +573,7 @@ mod tests {
             tracks: None,
             saved_at: None,
             identity: None,
+            native_epoch: None,
         }
     }
 
@@ -660,5 +670,29 @@ mod tests {
         // While it doesn't answer, nothing is written.
         reported.connected.set(false);
         let Err(OpError::NotConnected { .. }) = link.expect(&again.key, again.epoch) else { panic!("a plan while the DAW is away") };
+    }
+
+    /// The looked page epoch is the look's own: an A→B switch after the look leaves A's key with A's epoch, so B's page
+    /// is never the looked project's; a look that gave none pins nothing.
+    #[test]
+    fn a_look_keeps_its_own_epoch_so_another_projects_page_is_never_the_looked_ones() {
+        let link = Link::new(1_700_000_000_000);
+        connected(&link);
+        let looked = |open: &str, epoch: Option<&str>| Observation { native_epoch: epoch.map(str::to_owned), ..seen("0123", open) };
+        assert_eq!(link.observed_native_epoch(), None, "no look yet");
+        let a = link.saw(&looked("4242:1", Some("eA")));
+        assert_eq!(link.observed_native_epoch().as_deref(), Some("eA"));
+        assert!(link.page_is_looked(Some("eA")));
+        assert!(!link.page_is_looked(Some("eB")), "B's page isn't A's");
+        assert!(!link.page_is_looked(None));
+        // The next look is B's: its key and its epoch together.
+        let b = link.saw(&looked("4242:2", Some("eB")));
+        assert_ne!(a.key, b.key);
+        assert_eq!(link.observed_native_epoch().as_deref(), Some("eB"));
+        assert!(!link.page_is_looked(Some("eA")));
+        // A look that gave no epoch (one that couldn't read the project): no page is taken on trust.
+        link.saw(&looked("4242:2", None));
+        assert_eq!(link.observed_native_epoch(), None);
+        assert!(!link.page_is_looked(Some("eB")));
     }
 }

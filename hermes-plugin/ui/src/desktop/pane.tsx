@@ -7,7 +7,7 @@ import { canUndo, chipWords, clean, cleanupWords, connectRequest, dawName, LOOK_
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { useKumi } from '../shared/hooks.ts'
 import { english, type Translate } from '../shared/i18n.ts'
-import type { KumiState, KumiStore } from '../shared/store.ts'
+import { dawPartWorks, type KumiState, type KumiStore } from '../shared/store.ts'
 import { Dot, S, Section, TextButton, useT } from '../shared/ui.tsx'
 import { T } from '@kumi/theme'
 import { ask } from './actions.ts'
@@ -37,7 +37,7 @@ const NEEDS_SETUP: Record<string, true> = { needs_runtime: true, outdated_runtim
 export function nextStep(state: KumiState, t: Translate = english): { label: string; request: string } | null {
   const setup = state.setup
   const daw = state.status?.daw ?? setup?.daw
-  if (setup && (NEEDS_SETUP[setup.state ?? ''] || setup.next_step === 'install_runtime' || setup.next_step === 'install_daw_component')) {
+  if (setup && !dawPartWorks(state) && (NEEDS_SETUP[setup.state ?? ''] || setup.next_step === 'install_runtime' || setup.next_step === 'install_daw_component')) {
     return { label: t('step.setup', dawName(daw, t)), request: setupRequest(daw) }
   }
   if (setup?.state === 'ready' && !state.status?.connected) return { label: t('step.connect', dawName(daw, t)), request: connectRequest(daw) }
@@ -67,7 +67,7 @@ export function KumiPane({ ctx, store, onOpenMap }: { ctx: PluginContext; store:
   const connected = Boolean(state.status?.connected)
   // Setup's word only when there's something to do; an unknown state is the settings page's to explain.
   const setupState = state.setup?.state
-  const setupMessage = typeof state.setup?.message === 'string' && setupState && setupState !== 'ready' && setupState !== 'unknown' ? state.setup.message : null
+  const setupMessage = typeof state.setup?.message === 'string' && setupState && setupState !== 'ready' && setupState !== 'unknown' && !dawPartWorks(state) ? state.setup.message : null
   const undoable = (state.history?.items ?? []).filter(item => canUndo(state.status, item)).length
   return (
     <div style={{ height: '100%', overflowY: 'auto', overflowX: 'hidden', color: T.text }}>

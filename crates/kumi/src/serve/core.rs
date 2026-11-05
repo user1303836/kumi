@@ -53,8 +53,6 @@ fn run_connect(ctx: &Ctx, call: Call) -> OpFuture<'_> {
         // A first look, for the project's key and epoch: a DAW that doesn't answer yet leaves it for observe.
         if let Ok(observation) = connection.integration.observe(call.signal.clone(), None).await {
             ctx.link().saw(&observation);
-            let epoch = super::read::page_epoch_now(&observation.tools, call.signal.clone()).await;
-            ctx.link().saw_page_epoch(epoch);
             connection::publish_focus(&ctx.handle());
         }
         Ok(publish_status(ctx, false).await)
@@ -91,8 +89,6 @@ fn run_observe(ctx: &Ctx, call: Call) -> OpFuture<'_> {
             .map_err(|error| OpError::Failed { reason: format!("Kumi couldn't look at the project: {error}") })?;
         let project = ctx.link().saw(&observation);
         ctx.link().clear_unsure();
-        let epoch = super::read::page_epoch_now(&observation.tools, call.signal.clone()).await;
-        ctx.link().saw_page_epoch(epoch);
         let (focus, transport, catch_up) = (connection.focus(), connection.transport(), connection.take_catch_up());
         let scope = call.args.get("scope").and_then(Value::as_str).unwrap_or("project");
         let text = match scope {

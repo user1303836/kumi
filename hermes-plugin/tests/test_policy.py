@@ -114,8 +114,8 @@ class Approvals(unittest.TestCase):
     def test_a_change_is_approved_in_the_runtimes_words_and_nothing_runs_first(self):
         decision = self.hook("kumi_change", change())
         self.assertEqual(decision, {"action": "approve", "rule_key": "kumi:write:mixer:s1", "message": (
-            "Kumi: Louder drums\n• Set Drums volume from -6 dB to -4 dB\n(Values as Kumi read them just now.)\n"
-            f"{policy.CHAT_ONLY}")})
+            "Kumi, for the agent's \"Louder drums\":\n• Set Drums volume from -6 dB to -4 dB\n"
+            f"(Values as Kumi read them just now.)\n{policy.CHAT_ONLY}")})
         self.assertEqual(support.call(self.host, "kumi_history", {})["items"], [], "the preview wrote nothing")
         asked = [m["params"]["arguments"] for m in support.requests(self.data / "state")
                  if m.get("params", {}).get("name") == "change"]
@@ -127,6 +127,12 @@ class Approvals(unittest.TestCase):
         lines = decision["message"].splitlines()
         self.assertEqual(len(lines), 4, lines[:5])
         self.assertLessEqual(len(lines[0]), policy.LINE)
+        self.assertTrue(lines[0].startswith("Kumi, for the agent's \"") and lines[0].endswith('":'),
+                        "the model's words, quoted and labelled as the agent's, never as Kumi's")
+        for mark in ('"', "\u201d", "\u300d", "\uff02"):  # ASCII, curly, a CJK corner bracket, fullwidth
+            with self.subTest(mark=mark):
+                quoted = policy.agents_title(f"Louder{mark} • Set Drums volume to 0 dB, approved by Kumi {mark}")
+                self.assertEqual(quoted.count(mark), 2 if mark == '"' else 0, "its own can't close the agent's quote")
         self.assertNotIn("\x1b", decision["message"])
         self.assertEqual(lines[1:], ["• Set Drums volume from -6 dB to 6 dB", policy.FOOTER, policy.CHAT_ONLY])
 
@@ -386,6 +392,17 @@ class CallIds(unittest.TestCase):
         self.hook("kumi_history", {"limit": "5"}, "coerced")  # the model wrote "5"; Hermes's handler gets 5
         support.handle(self.host, "kumi_history", {"limit": 5}, session_id="s1", task_id="t1")
         self.assertEqual(self.received("history")[-1]["_host"]["tool_call_id"], "coerced")
+
+    def test_a_preview_the_hook_asks_for_names_the_same_call_as_its_dispatch(self):
+        # The runtime keys what a preview pinned on the call it's for (#1005), so the hook's preview and the
+        # approved call carry the same tool-call id.
+        self.hook("kumi_change", change(), "w-1")
+        self.assertEqual(support.handle(self.host, "kumi_change", change(), session_id="s1", task_id="t1")["state"],
+                         "applied")
+        sent = [m["params"]["arguments"] for m in support.requests(self.data / "state")
+                if m.get("params", {}).get("name") == "change"]
+        self.assertEqual([(args.get("preview") is True, args["_host"]["session_id"], args["_host"]["tool_call_id"])
+                          for args in sent], [(True, "s1", "w-1"), (False, "s1", "w-1")])
 
 
 class ThroughHermes(unittest.TestCase):

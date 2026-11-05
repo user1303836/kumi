@@ -125,6 +125,14 @@ const sample = {
   sounds: { 's-1': { name: 'Dusty Snare 04', class: 'snare', folder: 'Drums/Snares' }, 's-2': { name: 'Tape Snare 01', class: 'snare' }, 's-3': { name: 'Warm Pad', class: 'pad' } }
 }
 
+test("a map label is the sound's name with nothing that reorders it, cut to 28 characters", () => {
+  // fillText applies bidi: an RLO in a sample's name would draw "Snare" + "exe.wav" reversed (rgzm, #1021).
+  assert.equal(map.mapLabel('Snare\u202eexe.wav'), 'Snareexe.wav')
+  assert.equal(map.mapLabel('Snare\u2066Kick\u2069 01'), 'SnareKick 01')
+  assert.equal(map.mapLabel('A very long sample name that keeps going on'), 'A very long sample name tha…')
+  assert.equal(map.mapLabel(undefined), '')
+})
+
 test('the map keeps valid points, colours each group, and picks the nearest point under the pointer', () => {
   const model = map.buildModel(sample)
   assert.equal(model.points.length, 3)
@@ -525,8 +533,9 @@ test("a generation an event reports shows even when first read finished, keeps t
   assert.ok(generate.generationJobWords(job).detail.endsWith('New paid generations are paused: a charge came in above its estimate'))
 })
 
-test('a quote, a scan and a refusal before any job are not generations', () => {
-  for (const value of [fixtures.QUOTE, { job_id: 'j-scan-1', kind: 'scan', state: 'running' }, { job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }, { error: { code: 'cap_exceeded', reason: 'Over your cap' }, ledger: {} }]) {
+test('a quote, an upload preview, a scan and a refusal before any job are not generations', () => {
+  // The preview (CC-13 amendment A) is the approval hook's own Read: no job state, no job id.
+  for (const value of [fixtures.QUOTE, fixtures.PREVIEW, { job_id: 'j-scan-1', kind: 'scan', state: 'running' }, { job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }, { error: { code: 'cap_exceeded', reason: 'Over your cap' }, ledger: {} }]) {
     assert.equal(generate.parseGeneration(value), null, JSON.stringify(value))
   }
 })

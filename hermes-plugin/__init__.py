@@ -51,6 +51,7 @@ def register(ctx) -> None:
     ctx.register_hook("pre_llm_call", focus)
     ctx.register_hook("post_compaction", context.post_compaction)
     ctx.register_hook("on_session_finalize", host.on_session_finalize)
+    ctx.register_hook("agent_loop_stopped", host.on_loop_stopped)  # the producer's Stop cancels a call in flight
     ctx.register_command("kumi", kumi_command, description=commands.DESCRIPTION)
     commands.register_cli(ctx, host)
     ctx.register_auxiliary_task(listening.AUX_TASK_KEY, **listening.AUX_TASK)  # CC-1; ctx.llm is read only per call

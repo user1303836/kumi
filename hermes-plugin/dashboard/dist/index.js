@@ -1231,6 +1231,9 @@
     }
     return best;
   }
+  function mapLabel(name) {
+    return clean(name, 28);
+  }
   function searchSounds(model, query) {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     if (!words.length) return null;
@@ -1342,8 +1345,11 @@
       const colors = resolve(canvas);
       context.setTransform(ratio, 0, 0, ratio, 0, 0);
       context.clearRect(0, 0, size.width, size.height);
-      const radius = Math.min(5, 2.2 + Math.log2(view.scale) * 0.8);
+      const count = model.points.length;
+      const base = count <= 40 ? 5 : count <= 300 ? 3.2 : 2.2;
+      const radius = Math.max(1.5, Math.min(base + 3, base + Math.log2(view.scale) * 0.8));
       const groupColor2 = new Map(model.groups.map((group) => [group.key, group.color]));
+      const labelled = [];
       for (const pass of [false, true]) {
         context.globalAlpha = pass ? 0.92 : 0.16;
         model.points.forEach((point, index) => {
@@ -1354,7 +1360,23 @@
           context.beginPath();
           context.arc(x, y, radius, 0, Math.PI * 2);
           context.fill();
+          if (pass) labelled.push([x, y, model.sounds[point.id]?.name ?? ""]);
         });
+      }
+      if (labelled.length <= 40) {
+        context.globalAlpha = 0.85;
+        context.fillStyle = colors.text;
+        context.font = `11px ${getComputedStyle(canvas).fontFamily || "sans-serif"}`;
+        context.textBaseline = "middle";
+        const placed = [];
+        for (const [x, y, name] of labelled) {
+          const text = mapLabel(name);
+          if (!text) continue;
+          const box = [x + radius + 4, y - 7, context.measureText(text).width, 14];
+          if (placed.some(([left, top, width, height]) => box[0] < left + width && left < box[0] + box[2] && box[1] < top + height && top < box[1] + box[3])) continue;
+          placed.push(box);
+          context.fillText(text, box[0], y);
+        }
       }
       context.globalAlpha = 1;
       const ring = (id, color, extra, width) => {
@@ -1394,10 +1416,7 @@
             value: query
           }
         ),
-        /* @__PURE__ */ jsxs("span", { style: S.faint, children: [
-          shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)),
-          model.revision ? ` · ${t("map.revision", model.revision)}` : ""
-        ] })
+        /* @__PURE__ */ jsx("span", { style: S.faint, title: model.revision ? t("map.revision", model.revision) : void 0, children: shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)) })
       ] }),
       /* @__PURE__ */ jsx("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
         const off = hidden.has(group.key);
@@ -1703,6 +1722,14 @@
       });
     }
   };
+  function dawPartWorks(state) {
+    const setup = state.setup;
+    const onlyDawPart = setup?.state === "needs_daw_component" || setup?.state === "ready" && setup.next_step === "install_daw_component";
+    if (!onlyDawPart || !state.status?.connected) return false;
+    const component = state.status.setup?.component;
+    if (!component) return true;
+    return component.installed === true && typeof component.version === "string" && component.version === component.bundled;
+  }
   function jobOf(result) {
     let value = result;
     if (typeof value === "string") {
@@ -1784,7 +1811,7 @@
           "Kumi ",
           state.status.runtime.version
         ] }),
-        state.setup?.message && state.setup.state && state.setup.state !== "ready" && state.setup.state !== "unknown" && /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message })
+        state.setup?.message && state.setup.state && state.setup.state !== "ready" && state.setup.state !== "unknown" && !dawPartWorks(state) && /* @__PURE__ */ jsx("span", { style: S.muted, children: state.setup.message })
       ] }),
       state.status?.unsure && /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 10, padding: "0 2px", alignItems: "flex-start" }, children: [
         /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, flex: 1 }, children: [

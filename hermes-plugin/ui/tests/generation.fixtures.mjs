@@ -114,3 +114,7 @@ export const MIDI_DONE = {
 /** FROZEN as the plugin's `/job` route serves it: the raw snapshot, without the ledger. */
 const { ledger: _frozenLedger, ...frozenRaw } = FROZEN.result
 export const RAW_FROZEN = { ...FROZEN, result: frozenRaw }
+
+/** CC-13 amendment A's upload preview: the approval hook's own Read before a MIDI quote. It names the file Mirelo would
+ *  get, its size and its content SHA-256; it isn't a job, and the UI never reads it as one. */
+export const PREVIEW = { state: 'preview', upload: { file: 'Bass Loop 03.wav', bytes: 1048576, identity_sha256: 'a'.repeat(64) } }

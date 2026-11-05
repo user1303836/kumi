@@ -106,6 +106,33 @@ test("the pane warns while Kumi isn't sure of the project and offers no Undo, un
   assert.ok(cleared.includes('>Undo<'))
 })
 
+test("while Kumi is connected through a current DAW part setup didn't install, the pane doesn't ask to install it; an older one still asks", async () => {
+  const { KumiPane } = await load('src/desktop/pane.tsx', { react: 'real' })
+  const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
+  const setup = { state: 'needs_daw_component', daw: 'ableton', message: "Kumi's runtime is ready; next, install Kumi's part in Live." }
+  const render = async (status, answer = setup) => {
+    const store = new KumiStore(async path => {
+      if (path.startsWith('/status')) return { stale: false, daw: 'ableton', revisions: {}, ...status }
+      if (path.startsWith('/setup')) return answer
+      throw Object.assign(new Error('not here'), { status: 404 })
+    })
+    await store.refreshStatus()
+    return renderToStaticMarkup(createElement(KumiPane, { ctx: {}, store, onOpenMap() {} }))
+  }
+  const asks = html => html.includes('Set up Kumi for Live') || html.includes("install Kumi's part")
+  const part = (installed, version) => ({ setup: { component: { installed, version, bundled: '1.0.104' }, daw_open: true } })
+  // Connected through the part this Kumi bundles (an adopted Kumi's, or one put in place by hand): it evidently works.
+  assert.equal(asks(await render({ connected: true, owner: { session_id: 's1' }, ...part(true, '1.0.104') })), false)
+  // A runtime that doesn't report its part: nothing says it's out of date.
+  assert.equal(asks(await render({ connected: true })), false)
+  // Connected through an older part (just after a bridge bump), or none the runtime can see: the update is next.
+  assert.equal(asks(await render({ connected: true, ...part(true, '1.0.103') })), true)
+  assert.equal(asks(await render({ connected: true, ...part(false, null) })), true)
+  // Not connected, or missing the runtime itself, setup is still the next step.
+  assert.equal(asks(await render({ connected: false, ...part(true, '1.0.104') })), true)
+  assert.equal(asks(await render({ connected: true, ...part(true, '1.0.104') }, { ...setup, state: 'needs_runtime' })), true)
+})
+
 test('"Last heard" counts from when the runtime was last heard, so it keeps moving while nothing new is read', async () => {
   const { FocusView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
   const heardAt = 1_000_000_000
@@ -317,6 +344,7 @@ test('the generate card shows what was asked, the file, the waveform, the cost a
   for (const text of ['<i>player</i>', 'MIDI file', '128 notes', 'Plan notes…']) assert.ok(notes.includes(text), `${text} in ${notes}`)
   assert.ok(!notes.includes('Place…') && !notes.includes('Waveform'))
   assert.ok(card(fixtures.FROZEN).includes('New paid generations are paused'))
-  // A scan's answer keeps Desktop's own player, unchanged.
+  // A scan's answer, or an upload preview (CC-13 amendment A), keeps Desktop's own player, unchanged.
   assert.equal(card({ job_id: 'j-scan-1', kind: 'scan', state: 'done', result: { sounds: 3 } }), '<i>player</i>')
+  assert.equal(card(fixtures.PREVIEW), '<i>player</i>')
 })

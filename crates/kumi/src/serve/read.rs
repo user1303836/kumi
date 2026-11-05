@@ -98,8 +98,8 @@ async fn read(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
             if ran.is_error {
                 return Err(OpError::Invalid { reason: super::core::bounded(&names_only_text(&ran.text), most) });
             }
-            // An own bridge's page is the looked project's only when its epoch is the one the look kept: one that's
-            // unknown either side (the reader busy at the look, say) isn't taken for it.
+            // An own bridge's page is the looked project's only when its epoch is the one the look read with its key:
+            // one that's unknown either side (a look that couldn't read the project, say) isn't taken for it.
             if own_reader(name) {
                 let page_epoch = serde_json::from_str::<Value>(&ran.text)
                     .ok()
@@ -119,18 +119,6 @@ async fn read(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
 /// One of Kumi's own bridges' readers, whose pages carry the bridge's epoch.
 fn own_reader(name: &str) -> bool {
     matches!(name, "reaper_read" | "renoise_read")
-}
-
-/// The epoch an own bridge's reader gives now, read right after a look (its first kind, one row), so a later page of
-/// another epoch is known for another state of the project. None when there's no own reader (Live: its Set switch is
-/// a return) or it didn't answer with one; an own reader's page is then refused, never taken on trust.
-pub(super) async fn page_epoch_now(tools: &[Rc<dyn KernelTool>], signal: kumi_common::abort::Signal) -> Option<String> {
-    let reader = tools.iter().find(|tool| own_reader(tool.name()))?;
-    let schema = reader.input_schema();
-    let kind = schema.get("properties")?.get("kind")?.get("enum")?.as_array()?.first()?.as_str()?.to_string();
-    let query: Map<String, Value> = [("kind".to_string(), json!(kind)), ("limit".to_string(), json!(1))].into_iter().collect();
-    let ran = reader.execute(query, signal).await.ok().filter(|ran| !ran.is_error)?;
-    serde_json::from_str::<Value>(&ran.text).ok()?.get("epoch")?.as_str().map(str::to_string)
 }
 
 /// A reader's answer as `read` gives it: names, not folders, and at most `most` characters, with the page's cursor
@@ -244,7 +232,8 @@ mod tests {
 
     #[test]
     fn a_page_names_files_not_folders_and_keeps_its_cursor_through_a_cut() {
-        let project = super::super::connection::Project { key: "p-1".into(), name: "Song".into(), epoch: 7, seen_at: 0 };
+        let project =
+            super::super::connection::Project { native_epoch: None, key: "p-1".into(), name: "Song".into(), epoch: 7, seen_at: 0 };
         let rows = json!({
             "items": [
                 {"ref": "r:item:{4F2A}", "name": "Vox", "source": "/Users/me/Music/Takes/Vox take 2.wav"},
