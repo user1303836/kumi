@@ -15,6 +15,7 @@ use kumi_agent::mcp::client::{McpEndpoint, StderrStatus};
 use kumi_agent::mcp::types::{CallToolResult, Implementation, ListToolsResult};
 use kumi_common::abort::Signal;
 use kumi_daw_ableton::app::AbletonFactory;
+use kumi_daw_own::bridge::{HostStart, OwnOptions};
 use kumi_daw_own::provider::OwnHosts;
 use kumi_types::contracts::JsonObject;
 use kumi_types::system::Env;
@@ -119,11 +120,13 @@ impl Lab {
             ("KUMI_REAPER_RESOURCE_DIR".into(), home.path().join("REAPER").display().to_string()),
             ("KUMI_RENOISE_PREFS_DIR".into(), home.path().join("Renoise").display().to_string()),
         ]);
+        // (made as the integration starts it: its ask to keep the project's id is the host's, as KUMI_KEEP_IDENTITY is)
         let host_home = transport.clone();
         let own_host = OwnHosts(Rc::new(move |_| {
-            let endpoint = Rc::new(InProcess { host: Arc::new(Host::new(bridge, &host_home)), id: Cell::new(0) });
-            Rc::new(move |_| {
-                let endpoint = endpoint.clone();
+            let host_home = host_home.clone();
+            Rc::new(move |start: HostStart| {
+                let host = Host::new(bridge, &host_home).with_keep_identity(start.keep_identity);
+                let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
                 async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
             })
         }));
@@ -264,6 +267,64 @@ case!(serve_connects_to_reaper_and_gives_each_project_its_key_and_epoch, async {
     let sent = lab.methods_sent();
     assert!(!sent.is_empty() && sent.iter().all(|method| reads.contains(&method.as_str())), "{sent:?}");
     lab.ctx.link().close().await;
+});
+
+/// What each hello the simulated bridge was sent said of keeping the project's id (`keepIdentity`), in order.
+fn identity_asks(simulator: &Simulator) -> Vec<Option<Value>> {
+    simulator
+        .transcript()
+        .into_iter()
+        .filter(|line| line.from_host)
+        .filter_map(|line| serde_json::from_str::<Value>(&line.text).ok())
+        .filter(|frame| frame["type"] == "hello")
+        .map(|frame| frame.get("keepIdentity").cloned())
+        .collect()
+}
+
+// The plugin's runtime only observes: its host never asks REAPER to keep the project's id, so nothing is written into the
+// project (contract C2), while REAPER says it would keep one for a client that asked.
+case!(serve_never_asks_reaper_to_keep_the_projects_id_and_nothing_is_written_into_it, async {
+    let script = ReaperScript::new(3, 0);
+    let written = script.clone();
+    let lab = Lab::new(DawId::Reaper, Daw::Reaper, Some(Box::new(move |secret| script.config(secret, "/lab/REAPER")))).await;
+    let connected = lab.call("connect", json!({"daw": "reaper"})).await.unwrap();
+    assert_eq!(connected["connected"], true, "{connected}");
+    lab.call("observe", json!({"scope": "project"})).await.unwrap();
+    let simulator = lab.simulator.as_ref().unwrap();
+    let asks = identity_asks(simulator);
+    assert!(!asks.is_empty() && asks.iter().all(Option::is_none), "{asks:?}");
+    assert!(!simulator.keeps_identity());
+    assert_eq!(written.ids_written(), Vec::<String>::new(), "nothing written into the project");
+    let status = lab.state("status.json");
+    assert_eq!(status["connected"], true, "{status}");
+    lab.ctx.link().close().await;
+});
+
+// Standalone Kumi (its integration with the standalone policy) asks, and REAPER writes the project's id into it while it
+// is connected.
+case!(serve_daw_standalone_kumi_asks_reaper_to_keep_the_projects_id_and_it_is_written, async {
+    let home = tempfile::tempdir().unwrap();
+    let paths = BridgePaths::new(home.path(), Daw::Reaper);
+    let script = ReaperScript::new(3, 0);
+    let mut config = script.config(ensure_secret(&paths.secret()).unwrap(), "/lab/REAPER");
+    config.discovery_dir = Some(paths.discovery());
+    let simulator = Simulator::start(config).await.unwrap();
+    let host_home = home.path().to_path_buf();
+    let connect: kumi_daw_own::bridge::Connect = Rc::new(move |start: HostStart| {
+        let host = Host::new(Daw::Reaper, &host_home).with_keep_identity(start.keep_identity);
+        let endpoint = Rc::new(InProcess { host: Arc::new(host), id: Cell::new(0) });
+        async move { Ok(endpoint as Rc<dyn McpEndpoint>) }.boxed_local()
+    });
+    let context = kumi_agent::core::context::IntegrationContext::new(Rc::new(|_, _| {}));
+    assert!(context.policy.persist_identity, "standalone Kumi's policy");
+    let reaper = kumi_daw_reaper::create_reaper_integration(OwnOptions { context, kumi_home: home.path().into(), connect: Some(connect) });
+    reaper.start(Signal::new()).await.unwrap();
+    reaper.observe(Signal::new(), None).await.unwrap();
+    let asks = identity_asks(&simulator);
+    assert!(!asks.is_empty() && asks.iter().all(|ask| *ask == Some(json!(true))), "{asks:?}");
+    assert!(simulator.keeps_identity());
+    assert_eq!(script.ids_written(), ["/lab/Song.rpp"], "the project's id written into it");
+    reaper.close().await.unwrap();
 });
 
 case!(serve_wont_connect_before_kumis_part_is_in_the_daw, async {

@@ -140,8 +140,28 @@ pub struct OwnDaw {
     pub outside_code: &'static str,
 }
 
+/// What the integration says as it starts its host.
+pub struct HostStart {
+    pub signal: Signal,
+    /// The host's connections ask the bridge to keep the project's id in the project while they last (the hello's
+    /// `keepIdentity`; `KUMI_KEEP_IDENTITY=1` in `daw-mcp-server`'s environment): the context's `policy.persist_identity`,
+    /// true for standalone Kumi and false for the plugin's runtime, whose host then has nothing written into the project.
+    pub keep_identity: bool,
+}
+
+/// What `daw-mcp-server`'s environment gets beside the MCP client's own: `KUMI_KEEP_IDENTITY=1` when the host is to ask.
+/// In the environment, not the arguments: a host from before the ask ignores the variable and asks nothing, where it
+/// would refuse an argument it doesn't know.
+fn host_environment(keep_identity: bool) -> Vec<(String, String)> {
+    if keep_identity {
+        vec![(daw_bridge::wire::KEEP_IDENTITY_VARIABLE.into(), "1".into())]
+    } else {
+        vec![]
+    }
+}
+
 /// Starts Kumi's host for a DAW: the production one runs `daw-mcp-server`; a test's stand-in answers in its place.
-pub type Connect = Rc<dyn Fn(Signal) -> LocalBoxFuture<'static, Result<Rc<dyn McpEndpoint>, RuntimeError>>>;
+pub type Connect = Rc<dyn Fn(HostStart) -> LocalBoxFuture<'static, Result<Rc<dyn McpEndpoint>, RuntimeError>>>;
 
 /// What the app gives a DAW's integration beside the neutral context.
 #[derive(Clone)]
@@ -717,8 +737,9 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
         if let Some(endpoint) = self.endpoint.borrow().clone() {
             return Ok(endpoint);
         }
+        let keep_identity = self.options.context.policy.persist_identity;
         let endpoint = match &self.options.connect {
-            Some(connect) => connect(signal).await?,
+            Some(connect) => connect(HostStart { signal, keep_identity }).await?,
             None => {
                 let args = vec![
                     "--daw".into(),
@@ -726,8 +747,15 @@ impl<S: RefScheme + 'static> OwnIntegration<S> {
                     "--kumi-home".into(),
                     self.options.kumi_home.to_string_lossy().into_owned(),
                 ];
-                connect_mcp(Options { signal, args, timeout_ms: Some(CALL_MS), bridge: Some(self.daw.descriptor), ..Default::default() })
-                    .await?
+                let options = Options {
+                    signal,
+                    args,
+                    env: host_environment(keep_identity),
+                    timeout_ms: Some(CALL_MS),
+                    bridge: Some(self.daw.descriptor),
+                    ..Default::default()
+                };
+                connect_mcp(options).await?
             }
         };
         *self.endpoint.borrow_mut() = Some(endpoint.clone());
@@ -2445,6 +2473,12 @@ impl<S: RefScheme + 'static> KernelTool for ReadTool<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_host_is_asked_to_keep_the_projects_id_through_its_environment_only_when_the_policy_keeps_it() {
+        assert_eq!(host_environment(true), [("KUMI_KEEP_IDENTITY".to_string(), "1".to_string())]);
+        assert!(host_environment(false).is_empty());
+    }
 
     fn answered(message: Value) -> CallToolResult {
         CallToolResult::from_object(message.as_object().cloned().unwrap()).unwrap()

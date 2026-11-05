@@ -121,7 +121,21 @@ impl BridgeClient {
     /// `TimedOut` (Windows keeps retrying the SYN to a closed loopback port for about 2 s before it refuses), a handshake
     /// that doesn't finish is `Timeout`.
     pub async fn connect_within(address: SocketAddr, secret: Secret, client: &str, timeout: Duration) -> Result<Self, ConnectError> {
-        Self::connect_with(address, secret, client, timeout, RECV_BUFFER_BYTES).await
+        Self::open(address, secret, client, false, timeout, RECV_BUFFER_BYTES).await
+    }
+
+    /// As [`connect_within`], the hello asking the bridge to keep the project's id in the project while this connection
+    /// lasts when `keep_identity` is true (`keepIdentity`).
+    ///
+    /// [`connect_within`]: BridgeClient::connect_within
+    pub async fn connect_asking(
+        address: SocketAddr,
+        secret: Secret,
+        client: &str,
+        keep_identity: bool,
+        timeout: Duration,
+    ) -> Result<Self, ConnectError> {
+        Self::open(address, secret, client, keep_identity, timeout, RECV_BUFFER_BYTES).await
     }
 
     /// As [`connect_within`], asking the system for a receive buffer of `recv_buffer` bytes (a test gives a small one).
@@ -131,6 +145,17 @@ impl BridgeClient {
         address: SocketAddr,
         secret: Secret,
         client: &str,
+        timeout: Duration,
+        recv_buffer: u32,
+    ) -> Result<Self, ConnectError> {
+        Self::open(address, secret, client, false, timeout, recv_buffer).await
+    }
+
+    async fn open(
+        address: SocketAddr,
+        secret: Secret,
+        client: &str,
+        keep_identity: bool,
         timeout: Duration,
         recv_buffer: u32,
     ) -> Result<Self, ConnectError> {
@@ -149,16 +174,16 @@ impl BridgeClient {
                 return Err(ConnectError::Io(std::io::Error::new(std::io::ErrorKind::TimedOut, "nothing accepted the connection in time")))
             }
         };
-        match tokio::time::timeout_at(deadline, Self::handshake(stream, secret, client, held)).await {
+        match tokio::time::timeout_at(deadline, Self::handshake(stream, secret, client, keep_identity, held)).await {
             Ok(result) => result,
             Err(_) => Err(ConnectError::Timeout),
         }
     }
 
-    async fn handshake(stream: TcpStream, secret: Secret, client: &str, held: usize) -> Result<Self, ConnectError> {
+    async fn handshake(stream: TcpStream, secret: Secret, client: &str, keep_identity: bool, held: usize) -> Result<Self, ConnectError> {
         stream.set_nodelay(true).map_err(ConnectError::Io)?;
         let (mut reader, mut writer) = stream.into_split();
-        let (mut handshake, hello) = ClientHandshake::start(secret, client);
+        let (mut handshake, hello) = ClientHandshake::start_asking(secret, client, keep_identity);
         writer.write_all(&hello).await.map_err(ConnectError::Io)?;
         let mut framer = Framer::new(HANDSHAKE_LINE_BYTES);
         let mut chunk = vec![0u8; READ_CHUNK];

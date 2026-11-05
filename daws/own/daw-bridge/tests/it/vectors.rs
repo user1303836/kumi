@@ -238,6 +238,15 @@ fn frame_vectors() {
         ("a credit without bytes", "{\"type\":\"credit\"}".to_string()),
         ("a welcome naming creditBytes", welcome_with("65536")),
         ("a welcome naming creditBytes written 1.5", welcome_with("1.5")),
+        (
+            "a hello asking the bridge to keep the project's identity",
+            "{\"type\":\"hello\",\"protocol\":\"kumi-daw/1\",\"nonce\":\"00000000000000000000000000000000\",\"client\":\"kumi/1\",\"keepIdentity\":true}"
+                .to_string(),
+        ),
+        (
+            "a hello whose keepIdentity isn't a boolean",
+            "{\"type\":\"hello\",\"protocol\":\"kumi-daw/1\",\"nonce\":\"00000000000000000000000000000000\",\"keepIdentity\":\"yes\"}".to_string(),
+        ),
         ("a name with a surrogate pair", "{\"type\":\"event\",\"seq\":1,\"name\":\"\\ud83d\\ude00\"}".to_string()),
         ("a name with a lone high surrogate", "{\"type\":\"event\",\"seq\":1,\"name\":\"\\ud800x\"}".to_string()),
         ("a name with a lone low surrogate", "{\"type\":\"event\",\"seq\":1,\"name\":\"\\udc00\"}".to_string()),

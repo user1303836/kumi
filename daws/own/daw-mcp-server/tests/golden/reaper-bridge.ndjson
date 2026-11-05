@@ -5,14 +5,14 @@
 1 > {"type":"request","id":1,"method":"ping","params":{},"deadlineMs":"<deadline>"}
 1 < {"type":"response","id":1,"ok":true,"result":{}}
 1 > {"type":"request","id":2,"method":"status","params":{},"deadlineMs":"<deadline>"}
-1 < {"type":"response","id":2,"ok":true,"result":{"daw":"reaper","bridge":"0.1.0","dawVersion":"7.82/macOS-arm64","pid":"<pid>","resource":"/lab/REAPER","project":{"name":"Song.rpp","path":"/lab/REAPER/Projects/Song.rpp"},"busy":false}}
+1 < {"type":"response","id":2,"ok":true,"result":{"daw":"reaper","bridge":"0.1.0","dawVersion":"7.82/macOS-arm64","pid":"<pid>","resource":"/lab/REAPER","project":{"name":"Song.rpp","path":"/lab/REAPER/Projects/Song.rpp"},"busy":false,"keep_identity":true}}
 1 > {"type":"request","id":3,"method":"render","params":{},"deadlineMs":"<deadline>"}
 1 < {"type":"response","id":3,"ok":false,"error":{"code":"unknown-method","message":"no method render"}}
 1 < {"type":"event","seq":1,"name":"project","data":{"name":"Next"}}
 1 > {"type":"request","id":4,"method":"status","params":{},"deadlineMs":"<deadline>"}
-1 < {"type":"response","id":4,"ok":true,"result":{"daw":"reaper","bridge":"0.1.0","dawVersion":"7.82/macOS-arm64","pid":"<pid>","resource":"/lab/REAPER","project":{"name":"Next"},"busy":false}}
+1 < {"type":"response","id":4,"ok":true,"result":{"daw":"reaper","bridge":"0.1.0","dawVersion":"7.82/macOS-arm64","pid":"<pid>","resource":"/lab/REAPER","project":{"name":"Next"},"busy":false,"keep_identity":true}}
 1 > {"type":"request","id":5,"method":"status","params":{},"deadlineMs":"<deadline>"}
-1 < {"type":"response","id":5,"ok":true,"result":{"daw":"reaper","bridge":"0.1.0","dawVersion":"7.82/macOS-arm64","pid":"<pid>","resource":"/lab/REAPER","project":{"name":"Next"},"busy":"rendering"}}
+1 < {"type":"response","id":5,"ok":true,"result":{"daw":"reaper","bridge":"0.1.0","dawVersion":"7.82/macOS-arm64","pid":"<pid>","resource":"/lab/REAPER","project":{"name":"Next"},"busy":"rendering","keep_identity":true}}
 1 > {"type":"request","id":6,"method":"render","params":{},"deadlineMs":"<deadline>"}
 1 < {"type":"response","id":6,"ok":false,"error":{"code":"busy","message":"reaper is rendering"}}
 1 < {"type":"bye","reason":"quit"}

@@ -83,6 +83,8 @@ pub struct Host {
     spawn: Option<Spawn>,
     /// The least time a listening call is given ([`Host::with_listening_timeout`]); zero keeps each call's own limit.
     pub(crate) listening_floor: Duration,
+    /// Whether each connection's hello asks the bridge to keep the project's id in the project ([`Host::with_keep_identity`]).
+    keep_identity: bool,
 }
 
 /// Which running instance a tool means, when several run.
@@ -167,6 +169,7 @@ impl Host {
             jobs: crate::listening::Jobs::default(),
             spawn: Spawn::of(daw, kumi_home),
             listening_floor: Duration::ZERO,
+            keep_identity: false,
         };
         if daw == Daw::Renoise {
             crate::renoise::instruments::sweep_work(&host.paths.root.join("work"), std::time::SystemTime::now());
@@ -185,6 +188,14 @@ impl Host {
     /// Starts the DAW's bridge with `spawn` (a test's), as for a DAW whose bridge runs beside it.
     pub fn with_spawn(mut self, spawn: Spawn) -> Self {
         self.spawn = Some(spawn);
+        self
+    }
+
+    /// The host whose connections ask the bridge (the hello's `keepIdentity`) to keep the project's id in the project
+    /// while they last: standalone Kumi's host does (`KUMI_KEEP_IDENTITY=1`); the plugin's runtime's doesn't, and
+    /// then the bridge writes nothing into the project for it. Reads name a saved project by its path's id either way.
+    pub fn with_keep_identity(mut self, keep_identity: bool) -> Self {
+        self.keep_identity = keep_identity;
         self
     }
 
@@ -252,7 +263,7 @@ impl Host {
     /// and the result is None.
     async fn connect(&self, discovery: &Discovery, secret: &daw_bridge::auth::Secret) -> Option<Result<BridgeClient, String>> {
         let address = SocketAddr::from(([127, 0, 0, 1], discovery.port));
-        let client = match BridgeClient::connect_within(address, secret.clone(), CLIENT_NAME, CONNECT_TIMEOUT).await {
+        let client = match BridgeClient::connect_asking(address, secret.clone(), CLIENT_NAME, self.keep_identity, CONNECT_TIMEOUT).await {
             Ok(client) => client,
             Err(ConnectError::Io(error)) if (discovery.pid == 0 || self.spawn.is_some()) && no_listener(&error) => {
                 let _ = std::fs::remove_file(self.paths.discovery().join(discovery.file_name()));
@@ -347,7 +358,7 @@ impl Host {
                             Ok(status) => {
                                 row["project"] = status["project"].clone();
                                 row["busy"] = status["busy"].clone();
-                                for key in ["demo", "listening"] {
+                                for key in ["demo", "listening", "keep_identity"] {
                                     if let Some(value) = status.get(key) {
                                         row[key] = value.clone();
                                     }
@@ -489,8 +500,9 @@ impl Host {
             Ok(status) => {
                 result["project"] = status["project"].clone();
                 result["busy"] = status.get("busy").cloned().unwrap_or(Value::Bool(false));
-                // (Renoise's demo; what listening each bridge can do now, M5)
-                for key in ["demo", "listening"] {
+                // (Renoise's demo; what listening each bridge can do now, M5; whether it keeps the project's id only while a
+                // connection asks, which a bridge from before doesn't say)
+                for key in ["demo", "listening", "keep_identity"] {
                     if let Some(value) = status.get(key) {
                         result[key] = value.clone();
                     }

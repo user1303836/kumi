@@ -59,6 +59,11 @@ struct State {
     page_rows: Option<usize>,
     /// MIDI items a test adds (`add_midi_item`): groove reads their notes and moves them with notes-change.
     midi: Vec<SimMidi>,
+    /// Whether a connected client asks that the project's id be kept in the project (a hello's `keepIdentity`).
+    keep_identity: bool,
+    /// The paths of the saved projects the sim wrote an id into, in order, as the extension's
+    /// `SetProjExtState(kumi, project, …)`: it does that only while a client asks, once for a project with no id of its own.
+    ids_written: Vec<String>,
 }
 
 /// A MIDI item of the sim's: its GUID and its active take's, its track, name and place in beats, and its notes (pitch,
@@ -276,6 +281,8 @@ impl ReaperScript {
                 next_fx: 0,
                 page_rows: None,
                 midi: vec![],
+                keep_identity: false,
+                ids_written: vec![],
             })),
             listening: SimListening::new(daw_bridge::Daw::Reaper),
         }
@@ -504,6 +511,25 @@ impl ReaperScript {
         self.state.lock().unwrap().asked.clone()
     }
 
+    /// The saved projects (their paths) whose id the sim wrote into them: only while a connected client asked.
+    pub fn ids_written(&self) -> Vec<String> {
+        self.state.lock().unwrap().ids_written.clone()
+    }
+
+    /// While a client asks, a saved project with no id of its own gets one written into it (the extension does it on its
+    /// next look at the project; the sim on the ask and on each request). What the project row says is unchanged: the
+    /// extension names such a project by its path's id before the write and after it alike.
+    fn keep_project_id(state: &mut State) {
+        if !state.keep_identity {
+            return;
+        }
+        let project = Self::project(state);
+        let path = project["path"].as_str().unwrap_or_default().to_owned();
+        if !path.is_empty() && project["id"].is_null() && !state.ids_written.contains(&path) {
+            state.ids_written.push(path);
+        }
+    }
+
     pub fn respond(&self) -> Respond {
         let script = self.clone();
         Arc::new(move |method, params| script.answer(method, params))
@@ -532,6 +558,12 @@ impl ReaperScript {
             let mut more = serde_json::Map::new();
             more.insert("listening".into(), listening.flags());
             more
+        }));
+        let script = self.clone();
+        config.on_keep_identity = Some(Arc::new(move |asked| {
+            let mut state = script.state.lock().unwrap();
+            state.keep_identity = asked;
+            Self::keep_project_id(&mut state);
         }));
         config
     }
@@ -1203,6 +1235,7 @@ impl ReaperScript {
     fn answer(&self, method: &str, params: &Value) -> Option<Result<Value, (String, String)>> {
         let mut state = self.state.lock().unwrap();
         state.asked.push((method.to_string(), params.clone()));
+        Self::keep_project_id(&mut state);
         let epoch = Self::epoch_text(&state);
         if LISTENING_METHODS.contains(&method) {
             if let Some(sent) = params.get("epoch").and_then(Value::as_str).filter(|sent| *sent != epoch) {

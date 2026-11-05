@@ -21,11 +21,15 @@ pub mod tools;
 use daw_bridge::Daw;
 use std::path::PathBuf;
 
-/// The command line: `--daw reaper|renoise|soundcraft` (or KUMI_DAW), and `--kumi-home <folder>` (or KUMI_HOME).
+/// The command line: `--daw reaper|renoise|soundcraft` (or KUMI_DAW), and `--kumi-home <folder>` (or KUMI_HOME); and
+/// `KUMI_KEEP_IDENTITY=1` in the environment, which standalone Kumi sets: the host asks the bridge to keep the project's
+/// id in the project.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Options {
     pub daw: Daw,
     pub kumi_home: PathBuf,
+    /// See [`host::Host::with_keep_identity`].
+    pub keep_identity: bool,
 }
 
 pub fn parse_args(args: &[String], env: &dyn Fn(&str) -> Option<String>, home: Option<PathBuf>) -> Result<Options, String> {
@@ -33,6 +37,7 @@ pub fn parse_args(args: &[String], env: &dyn Fn(&str) -> Option<String>, home: O
     let usage = format!("usage: daw-mcp-server --daw {} [--kumi-home <folder>]", ids.join("|"));
     let mut daw = env("KUMI_DAW").filter(|value| !value.is_empty());
     let mut kumi_home = None;
+    let keep_identity = env(daw_bridge::wire::KEEP_IDENTITY_VARIABLE).as_deref() == Some("1");
     let mut rest = args.iter();
     while let Some(arg) = rest.next() {
         match arg.as_str() {
@@ -46,7 +51,7 @@ pub fn parse_args(args: &[String], env: &dyn Fn(&str) -> Option<String>, home: O
     let daw = Daw::from_id(&daw).ok_or_else(|| format!("unknown DAW {daw}: one of {}", ids.join(", ")))?;
     let kumi_home =
         kumi_home.or_else(|| daw_bridge::paths::kumi_home_from(env, home)).ok_or("no home folder: set KUMI_HOME or pass --kumi-home")?;
-    Ok(Options { daw, kumi_home })
+    Ok(Options { daw, kumi_home, keep_identity })
 }
 
 #[cfg(test)]
@@ -63,7 +68,7 @@ mod tests {
         let none = |_: &str| None;
         assert_eq!(
             parse_args(&strings(&["--daw", "renoise"]), &none, home.clone()).unwrap(),
-            Options { daw: Daw::Renoise, kumi_home: PathBuf::from("/h/.kumi") }
+            Options { daw: Daw::Renoise, kumi_home: PathBuf::from("/h/.kumi"), keep_identity: false }
         );
         let env = |name: &str| (name == "KUMI_DAW").then(|| "reaper".to_string());
         assert_eq!(parse_args(&[], &env, home.clone()).unwrap().daw, Daw::Reaper);
@@ -74,5 +79,15 @@ mod tests {
         assert!(parse_args(&[], &none, home.clone()).is_err());
         assert!(parse_args(&strings(&["--daw", "live"]), &none, home.clone()).is_err());
         assert!(parse_args(&strings(&["--daw"]), &none, home).is_err());
+    }
+
+    #[test]
+    fn the_ask_to_keep_the_projects_id_comes_from_the_environment() {
+        let home = Some(PathBuf::from("/h"));
+        let daw = strings(&["--daw", "reaper"]);
+        let with = |value: &'static str| move |name: &str| (name == "KUMI_KEEP_IDENTITY").then(|| value.to_string());
+        assert!(parse_args(&daw, &with("1"), home.clone()).unwrap().keep_identity);
+        assert!(!parse_args(&daw, &with("0"), home.clone()).unwrap().keep_identity);
+        assert!(!parse_args(&daw, &|_: &str| None, home).unwrap().keep_identity);
     }
 }
