@@ -21,7 +21,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **Several candidates against one reference:** the first `kumi_listen` with `compare_to` returns `compare.artifact_id`, Kumi's kept copy of the reference. Pass `{"artifact_id": …}` as `compare_to` for the next candidates: every candidate is measured against the same reference audio, even if the original moves or the map changes.
 - **Which files Kumi can measure:** a file inside one of the producer's approved sample folders or this profile's media, a map sound, or a file Kumi made. A mixdown exported anywhere else is refused: ask the producer to export it into an approved folder, or to add its folder (`kumi_library` `add_folder`).
 - **How far from a loudness target** (−14 LUFS for streaming, or the producer's figure): measure the file, then report its integrated LUFS against the target, and its true peak against −1 dBTP.
-  - This recipe only measures: say what's off, and by how much.
+  - This recipe only measures: say what's off, and by how much. To bring the mix to a reference, see "Mastering against a reference" below.
   - Where a level change is the fix, offer one, as an approved `kumi_change`.
   - Measuring the same file again can't show that change: it measures as before. To check it, the producer exports or bounces again into an approved folder, and you measure the new file. Otherwise say Kumi can't check the result itself.
 
@@ -52,7 +52,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
 - **The baseline:** observe, then capture it through the normal `kumi_listen` approval, and keep its `artifact_id`.
   - A refused, cancelled or unsure listen isn't a baseline, and neither is one without an artifact.
   - Every candidate uses the same source, the same window, and that `artifact_id` as `compare_to`.
-  - For a fader or level change, measure the mix: a track's capture can't show its fader's effect.
+  - For a fader or level change, measure the mix: some DAWs capture a track before its fader, where the capture can't show the change.
 - **One candidate at a time.** Apply it with `kumi_change`, approved like any change, and keep every `history_id` it returns: together they are this candidate. Never batch candidates, or ask for several at once.
 - **Your own change moves the epoch.** A done change returns the new epoch: adopt that one only, then observe again and check that it's the same project and source. Every capture and every undo is approved as usual.
 - **Measure each candidate the same way.**
@@ -74,7 +74,7 @@ description: What Kumi's audio measurements mean and how to report them honestly
   - the reference file (in an approved folder, a map sound, or a file Kumi made);
   - one window of the mix, its loudest part, 60 s at most;
   - the target: the reference's loudness and true peak, its tonal balance, its stereo width.
-- **The extents differ.** `kumi_listen` measures a reference file's first 12 minutes, and the mix only over what was captured or bounced. So prefer a reference already cut to the matching section. Otherwise say what each measurement covers, and never take the window's loudness range for the whole song's.
+- **The extents differ.** `kumi_listen` measures a reference file for up to its first 12 minutes, and the mix only over what was captured or bounced. So prefer a reference already cut to the matching section. Report the range each measurement covers (its `analyzed` from and to), and never take the window's loudness range for the whole song's.
 - **Measuring the mix:** by capture where `kumi_listen` offers the mix in this DAW. Otherwise, and that's every DAW until its description says so, by bounce:
   - the producer bounces the same range, after each approved round, into an approved folder (`kumi_library` `add_folder` if needed);
   - Kumi can't tell a file from before a round from one after it, so the producer confirms which round each file is;
@@ -94,16 +94,22 @@ description: What Kumi's audio measurements mean and how to report them honestly
     - EQ toward the reference's balance: Live `EQ Eight` (`audio_effects/EQ Eight`), REAPER `ReaEQ (Cockos)`, Renoise `EQ 10`;
     - gentle glue compression: Live `Glue Compressor` (`audio_effects/Glue Compressor`; where the Browser has none, `Compressor`), REAPER `ReaComp (Cockos)`, Renoise `Bus Compressor`;
     - a limiter: Live `Limiter` (`audio_effects/Limiter`), REAPER `ReaLimit (Cockos)`, Renoise `Maximizer`.
-  - **Each limiter's gain and ceiling:**
-    - Live `Limiter`: raise `Gain` toward the reference's LUFS, with `Ceiling` under the true-peak target.
+  - **Each limiter's gain and ceiling.** Use the parameter names the device shows when Kumi reads it, for native devices as for Ozone: names change across versions and modes.
+    - Live `Limiter`: its gain control (`Input Gain` in Live 12.4; its Maximize mode has its own threshold and output controls), raised toward the reference's LUFS, with the ceiling under the true-peak target.
     - REAPER `ReaLimit`: lower `Threshold` for gain, with `Ceiling` a few tenths of a dB under the target.
     - Renoise `Maximizer`: raise `Boost` for gain, with `Ceiling` under the target. Renoise's master fader tops out at +3 dB.
-  - **In one plan, name each device as you load it, then set it:** load the EQ (`as: "eq"`), set `@eq`, then the compressor, then the limiter. Later rounds read the devices again and change only their settings.
+  - **In one plan, name each device as you load it, then set it:** load the EQ (`as: "eq"`), set `@eq`, then the compressor, then the limiter. When you can't be sure of a device's parameter names in this version, load the devices in one change, read them, and set them in the next. Later rounds read the devices again and change only their settings.
   - **REAPER:** the master track's own FX chain, enabled, never its monitoring FX (monitoring FX aren't rendered).
 - **−1 dBTP is a measured target, not a knob value.** Set the limiter's ceiling with a margin under it, then let the next measurement show the true peak. Never report a ceiling setting as the result.
 - **After each round, measure the mix again the same way** (the same window, or the producer's next bounce), with `compare_to` the reference's kept copy (`compare.artifact_id`), and report what moved.
+  - **Rounds add up.** A round that made things better stays applied, and the next one builds on it. Keep the HISTORY ids of every round still applied.
   - **A round that made nothing better ends the rounds:** stop there, without another try.
-  - **To take back a worse round,** `kumi_undo` the HISTORY ids its plan returned (one for each kind of change in it), newest first, each approved. Stop at the first that isn't undone.
+  - **To take back a worse round,** `kumi_undo` the HISTORY ids its plan returned (one for each kind of change in it), newest first, each approved. That returns the mix to the last round that stays. Stop at the first undo that doesn't come back undone.
   - **Stop when the gaps are within what the producer agreed,** or after the third round. Any more rounds are the producer's new decision.
 - **The rounds section's stops apply here too,** and so does a plan that came back `partial`, `refused` or `unsure`.
-- **Say what this is:** the numbers match the reference's, measured, not heard. A limiter can't fix a mix: say so when the gaps are in the mix itself, such as a harsh band or a narrow image.
+- **End with the measurements, not a match:**
+  - the gaps that remain;
+  - the HISTORY ids of every round still applied;
+  - why the rounds stopped.
+
+  Say that the gaps are measured, not heard. Never say the mix matches the reference when the rounds stopped at the cap or stopped improving. A limiter can't fix a mix: say so when the gaps are in the mix itself, such as a harsh band or a narrow image.

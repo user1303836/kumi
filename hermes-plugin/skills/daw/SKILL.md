@@ -124,7 +124,7 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
     - The pattern must exist (`slot_insert`; `pattern_length` sets its lines).
   - **`line`** is Renoise's line number, in decimal from 0. The grid is the pattern's lines at the song's lines per beat.
   - **A note cell is `{col 1–12, note, instrument, volume, panning, delay, fx}`.**
-    - `note` is `C-5` for middle C (MIDI 60): Renoise names octaves one higher than Live's `C3`.
+    - `note` is `C-5` for middle C (MIDI 60): Renoise's notes are MIDI's numbers, so its octave names run two above Live's (`C3` there).
     - Write sharps (`C#5`), never flats. `OFF` ends a note, and `---` empties one.
     - `instrument` is a number (decimal from 0: 10 is `0A`), a hex string, or an `instrumentRef`.
     - `volume` and `panning` are hex strings or column commands. `delay` is 0–255 or hex, where 128 is half a line.
