@@ -22,6 +22,7 @@ serde_json = { workspace = true }
 tempfile.workspace = true
 
 [dev-dependencies]
+daw-bridge = { workspace = true, features = ["test-support"] }
 kumi-testkit.workspace = true
 hex = { workspace = true }
 

@@ -542,19 +542,30 @@ mod restricted_renoise_staging {
         );
         let old = folder.join("previous.wav");
         std::fs::write(&old, b"previous audio").unwrap();
+        let old_folder = folder.join("older");
+        std::fs::create_dir(&old_folder).unwrap();
+        let nested_old = old_folder.join("previous.wav");
+        std::fs::write(&nested_old, b"nested previous audio").unwrap();
         let neighbor = root.join("other-cache");
         std::fs::create_dir(&neighbor).unwrap();
-        let before = [&root, &old, &neighbor].map(|path| shapes::descriptor(path));
+        let before = [&root, &old, &old_folder, &nested_old, &neighbor].map(|path| shapes::descriptor(path));
         let runs = daw_bridge::owner::acl_runs_on_this_thread();
         let host = Host::new(Daw::Renoise, home.path(), ListeningMode::Restricted);
         assert!(native_acl::is_kumis_shape(&folder));
         assert_eq!(
-            [&root, &old, &neighbor].map(|path| shapes::descriptor(path)),
+            [&root, &old, &old_folder, &nested_old, &neighbor].map(|path| shapes::descriptor(path)),
             before,
             "startup changes only the exact cache directory, not old children, neighbors or its root"
         );
         assert_eq!(std::fs::read(&old).unwrap(), b"previous audio");
         assert!(std::fs::rename(&folder, root.join("replaced")).is_err(), "the host pins its approved folder identity");
+        assert!(std::fs::rename(&root, root.with_file_name("renoise-replaced")).is_err(), "the owning root is pinned too");
+        for path in [&root, &folder] {
+            assert!(
+                std::fs::OpenOptions::new().access_mode(2).share_mode(7).custom_flags(0x0220_0000).open(path).is_err(),
+                "a pinned directory must exclude data writes that could replace its reparse metadata"
+            );
+        }
         assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
         drop(host);
         std::fs::rename(&folder, root.join("replaced")).unwrap();
@@ -716,23 +727,35 @@ mod restricted_renoise_staging {
         assert!(native_acl::is_kumis_shape(&lab.file()), "a later terminal observation can still authorize exact cleanup");
     }
 
-    #[test]
-    fn restricted_windows_renoise_blocks_swaps_through_pinned_file_protection() {
-        let home = private_home();
-        let folder = BridgePaths::new(home.path(), Daw::Renoise).root.join("listening");
-        native_acl::create_kumis_folder(&folder).unwrap();
-        let file = folder.join("owned.wav");
-        std::fs::write(&file, b"owned").unwrap();
-        shapes::own_mine(&file);
-        let pinned = std::fs::OpenOptions::new().access_mode(0x0006_0080).share_mode(1).custom_flags(0x0020_0000).open(&file).unwrap();
-        let other = folder.join("swapped.wav");
-        assert!(std::fs::rename(&file, &other).is_err());
-        assert!(std::fs::write(&file, b"replacement").is_err());
-        native_acl::protect_inherited_render(&pinned).unwrap();
-        assert!(std::fs::remove_file(&file).is_err());
+    #[tokio::test]
+    async fn restricted_windows_renoise_blocks_swaps_through_pinned_file_protection() {
+        let lab = Lab::start(private_home(), ListeningMode::Restricted).await;
+        let (started, error) = lab.host.render(&request()).await;
+        assert!(!error, "{started}");
+        let file = lab.file();
+        let other = file.with_file_name("swapped.wav");
+        let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = attempts.clone();
+        let expected = file.clone();
+        let swapped = other.clone();
+        let _probe = shapes::probe_next_render(move |pinned, protected| {
+            // This is the host's actual open, before the first ACL check and after
+            // protection/read-back, not a test-created handle with copied flags.
+            assert_eq!(native_acl::file_path(pinned).unwrap(), std::fs::canonicalize(&expected).unwrap());
+            assert_eq!(native_acl::is_kumis_shape_handle(pinned, false), protected);
+            assert!(std::fs::rename(&expected, &swapped).is_err());
+            assert!(std::fs::write(&expected, b"replacement").is_err());
+            assert!(std::fs::OpenOptions::new().append(true).share_mode(7).open(&expected).is_err());
+            assert!(std::fs::remove_file(&expected).is_err());
+            assert_eq!(std::fs::read(&expected).unwrap(), b"owned render boundary fixture");
+            observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        });
+        let (done, error) = lab.host.listen_job(&json!({"jobId": started["jobId"]})).await;
+        assert!(!error && done["state"] == "done", "{done}");
+        assert_eq!(attempts.load(std::sync::atomic::Ordering::SeqCst), 2, "both ends of the real pinned interval were exercised");
+        assert_eq!(Path::new(done["files"][0]["file"].as_str().unwrap()), file.as_path());
         assert!(native_acl::is_kumis_shape(&file));
-        assert_eq!(std::fs::read(&file).unwrap(), b"owned");
-        drop(pinned);
+        assert_eq!(std::fs::read(&file).unwrap(), b"owned render boundary fixture");
         std::fs::rename(&file, &other).unwrap();
     }
 }

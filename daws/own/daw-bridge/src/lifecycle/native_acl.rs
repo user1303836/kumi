@@ -102,6 +102,11 @@ unsafe extern "system" {
     fn SetFileSecurityW(name: *const u16, information: u32, descriptor: *mut c_void) -> i32;
 }
 
+#[link(name = "ntdll")]
+unsafe extern "system" {
+    fn NtSetSecurityObject(handle: Handle, information: u32, descriptor: *mut c_void) -> i32;
+}
+
 const DRIVE_REMOTE: u32 = 4;
 const FILE_ATTRIBUTE_REPARSE_POINT: u32 = 0x400;
 const SE_FILE_OBJECT: u32 = 1;
@@ -122,10 +127,16 @@ const FULL_CONTROL: u32 = 0x001F_01FF;
 const FILE_FLAGS: u8 = 0;
 const FOLDER_FLAGS: u8 = 0x3;
 
+#[cfg(feature = "test-support")]
+type RenderProbe = Box<dyn FnMut(&std::fs::File, bool)>;
+
 thread_local! {
     /// Tests only (`shapes::refuse_on_this_thread`): this thread's writes fail, as a call can, and owner.rs's PowerShell
     /// steps take them.
     static REFUSED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    #[cfg(feature = "test-support")]
+    /// Scoped behavioral probes bracket the real render handle's check/protect interval.
+    static RENDER_PROBE: std::cell::RefCell<Option<RenderProbe>> = const { std::cell::RefCell::new(None) };
 }
 
 /// This process's account (TOKEN_USER, whose SID points into the same buffer).
@@ -348,17 +359,18 @@ fn file_information(file: &std::fs::File) -> Result<FileInformation, String> {
 
 /// Protects an exact newly produced render file, never a pathname that can be replaced.
 /// The caller owns the creation, holds `original` from before its rename, and pins
-/// `file` without write/delete sharing with READ_CONTROL and WRITE_DAC access.
+/// `file` with FILE_READ_DATA, READ_CONTROL and WRITE_DAC, without write/delete sharing.
 /// Existing cache entries must not use this.
 pub fn protect_created_file(original: &std::fs::File, file: &std::fs::File) -> Result<(), String> {
-    protect_pinned(original, file, Protection::CreatedFile)
+    protect_render(original, file, Protection::CreatedFile)
 }
 
-/// Component startup may protect its dedicated, already owned listening directory.
-/// Both handles must pin the same non-reparse directory; this never takes ownership.
-/// `directory` must be opened with exclusive sharing (or MAXIMUM_ALLOWED), which
-/// suppresses SetSecurityInfo's automatic propagation to existing cache children.
-/// Capture-time checks and the runtime must not use this to repair an adopted path.
+/// An owning component may protect its dedicated listening directory at startup; an
+/// owning plugin runtime may protect an exact directory in its own --state-dir tree.
+/// Both handles must pin the same current-user-owned, non-reparse directory, with
+/// FILE_LIST_DIRECTORY access and no write/delete sharing; `directory` also needs WRITE_DAC.
+/// Only this entry's DACL changes: no ownership takeover or propagation to old children.
+/// This is never authority to repair an adopted source, an ancestor or a neighbor.
 pub fn protect_owned_directory(original: &std::fs::File, directory: &std::fs::File) -> Result<(), String> {
     protect_pinned(original, directory, Protection::OwnedDirectory)
 }
@@ -412,9 +424,10 @@ pub fn is_kumis_shape_handle(file: &std::fs::File, directory: bool) -> bool {
 
 /// Protects an owned completed Renoise render only if its starting ACL is exactly the
 /// single owner FullControl ACE inherited from its secured cache, or already protected.
-/// The caller proves job ownership/containment and pins it without write/delete sharing.
+/// The caller proves job ownership/containment and opens with FILE_READ_DATA,
+/// READ_CONTROL and WRITE_DAC, without write/delete sharing, before any checks.
 pub fn protect_inherited_render(file: &std::fs::File) -> Result<(), String> {
-    protect_pinned(file, file, Protection::InheritedRender)
+    protect_render(file, file, Protection::InheritedRender)
 }
 
 #[derive(Clone, Copy)]
@@ -422,6 +435,23 @@ enum Protection {
     CreatedFile,
     OwnedDirectory,
     InheritedRender,
+}
+
+fn protect_render(original: &std::fs::File, file: &std::fs::File, protection: Protection) -> Result<(), String> {
+    #[cfg(feature = "test-support")]
+    let mut probe = RENDER_PROBE.with(|slot| slot.borrow_mut().take());
+    #[cfg(feature = "test-support")]
+    if let Some(probe) = probe.as_mut() {
+        probe(file, false);
+    }
+    let result = protect_pinned(original, file, protection);
+    #[cfg(feature = "test-support")]
+    if result.is_ok() {
+        if let Some(probe) = probe.as_mut() {
+            probe(file, true);
+        }
+    }
+    result
 }
 
 fn protect_pinned(original: &std::fs::File, file: &std::fs::File, protection: Protection) -> Result<(), String> {
@@ -472,8 +502,21 @@ fn protect_pinned(original: &std::fs::File, file: &std::fs::File, protection: Pr
             return Ok(()); // Already read-confirmed; do not rewrite a completed file's ACL.
         }
         let mut buffer = owner_acl(&account, flags)?;
-        let information = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
-        if SetSecurityInfo(handle, SE_FILE_OBJECT, information, null_mut(), null_mut(), buffer.as_mut_ptr().cast(), null_mut()) != 0 {
+        let changed = if directory {
+            // SetSecurityInfo walks existing children; sharing mode is not an ACL
+            // propagation boundary. Set only this pinned object's descriptor instead.
+            // https://learn.microsoft.com/windows-hardware/drivers/ddi/ntifs/nf-ntifs-ntsetsecurityobject
+            let mut descriptor = [0u64; 5]; // Absolute SECURITY_DESCRIPTOR, pointer-aligned.
+            let descriptor = descriptor.as_mut_ptr().cast();
+            InitializeSecurityDescriptor(descriptor, 1) != 0
+                && SetSecurityDescriptorDacl(descriptor, 1, buffer.as_mut_ptr().cast(), 0) != 0
+                && SetSecurityDescriptorControl(descriptor, SE_DACL_PROTECTED, SE_DACL_PROTECTED) != 0
+                && NtSetSecurityObject(handle, DACL_SECURITY_INFORMATION, descriptor) >= 0
+        } else {
+            let information = DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION;
+            SetSecurityInfo(handle, SE_FILE_OBJECT, information, null_mut(), null_mut(), buffer.as_mut_ptr().cast(), null_mut()) == 0
+        };
+        if !changed {
             return Err("the pinned staging entry could not be protected".into());
         }
         let (mut owner, mut dacl, mut descriptor) = (null_mut(), null_mut(), null_mut());
@@ -591,6 +634,29 @@ pub mod shapes {
     /// Makes this thread's writes fail, as one of Windows' calls can, so that owner.rs's PowerShell steps take them.
     pub fn refuse_on_this_thread(refused: bool) {
         REFUSED.with(|cell| cell.set(refused));
+    }
+
+    #[cfg(feature = "test-support")]
+    /// Clears an unused probe on its installing thread, including when a test unwinds.
+    pub struct RenderProbeGuard(std::marker::PhantomData<std::rc::Rc<()>>);
+
+    #[cfg(feature = "test-support")]
+    impl Drop for RenderProbeGuard {
+        fn drop(&mut self) {
+            RENDER_PROBE.with(|slot| drop(slot.borrow_mut().take()));
+        }
+    }
+
+    #[cfg(feature = "test-support")]
+    /// Probes the next real render protection on this thread, with the same handle
+    /// before its first check (`false`) and after successful ACL read-back (`true`).
+    pub fn probe_next_render(probe: impl FnMut(&std::fs::File, bool) + 'static) -> RenderProbeGuard {
+        RENDER_PROBE.with(|slot| {
+            let mut slot = slot.borrow_mut();
+            assert!(slot.is_none(), "a render protection probe is already installed");
+            *slot = Some(Box::new(probe));
+        });
+        RenderProbeGuard(std::marker::PhantomData)
     }
 
     /// Stable owner/DACL evidence for behavioral regressions, without PowerShell.

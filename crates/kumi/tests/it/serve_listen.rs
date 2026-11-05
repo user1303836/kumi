@@ -77,7 +77,6 @@ case!(preview_is_read_only_and_a_restored_capture_is_retained_once, async {
         approve(&mut args, &preview);
 
         // A neighboring cache file is not this call's staging and must survive even though the bridge normally tidies its cache.
-        kumi_types::private::create_dir_all(&listening.folder()).unwrap();
         let neighbor = listening.folder().join("unrelated.wav");
         daw_mcp_server::simulator::listening::write_noise(&neighbor, 0.1, 0.2, 42).unwrap();
         let neighbor_bytes = std::fs::read(&neighbor).unwrap();

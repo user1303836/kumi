@@ -374,17 +374,12 @@ pub(crate) struct WindowsStaging {
 impl WindowsStaging {
     fn open(path: &Path, directory: bool, write_acl: bool) -> Result<std::fs::File, String> {
         use std::os::windows::fs::{MetadataExt, OpenOptionsExt};
-        let access = 0x0002_0080 | if write_acl { 0x0004_0000 } else { 0 }; // READ_CONTROL, READ_ATTRIBUTES, WRITE_DAC
+        // Metadata-only opens do not enforce sharing. FILE_READ_DATA (also
+        // FILE_LIST_DIRECTORY) makes the no-write/delete shares real identity pins.
+        let access = 0x0002_0081 | if write_acl { 0x0004_0000 } else { 0 }; // READ_CONTROL, READ_ATTRIBUTES, READ_DATA, WRITE_DAC
         let file = std::fs::OpenOptions::new()
             .access_mode(access)
-            // Exclusive directory protection suppresses propagation to existing children.
-            .share_mode(if directory && write_acl {
-                0
-            } else if directory {
-                3
-            } else {
-                1
-            })
+            .share_mode(1) // Exclude writers/reparse updates and deletion; metadata-only ACL opens remain compatible.
             .custom_flags(0x0020_0000 | if directory { 0x0200_0000 } else { 0 })
             .open(path)
             .map_err(|_| "The staging entry could not be pinned safely.")?;

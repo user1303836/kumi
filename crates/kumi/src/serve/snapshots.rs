@@ -427,19 +427,21 @@ mod tests {
     #[tokio::test]
     async fn a_write_waited_for_is_on_disk_when_it_returns_after_every_write_made_before_it() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         snapshots.write_owned("map/r7", json!({"revision": "r7"})).unwrap();
         let seq = snapshots.write_durably("map/current", json!({"revision": "r7"})).await.unwrap();
-        assert_eq!(read(&dir.path().join("map/current.json"))["seq"], json!(seq), "on disk, without a flush");
-        assert_eq!(read(&dir.path().join("map/r7.json"))["revision"], "r7", "the map it points at landed first");
+        assert_eq!(read(&state.join("map/current.json"))["seq"], json!(seq), "on disk, without a flush");
+        assert_eq!(read(&state.join("map/r7.json"))["revision"], "r7", "the map it points at landed first");
     }
 
     #[tokio::test]
     async fn a_reader_bound_includes_escaping_and_the_envelope_and_preserves_the_prior_file_on_failure() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         snapshots.write_durably_bounded("map/r1", json!({"revision":"r1","sounds":{}}), 1024).await.unwrap();
-        let path = dir.path().join("map/r1.json");
+        let path = state.join("map/r1.json");
         let before = std::fs::read(&path).unwrap();
         // The raw string fits; its JSON escaping plus the envelope does not.
         let error = snapshots.write_durably_bounded("map/r1", json!({"name":"\n".repeat(512)}), 1024).await.unwrap_err();
@@ -447,7 +449,7 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), before);
         assert_eq!(read(&path)["revision"], "r1");
         assert_eq!(snapshots.write_durably_bounded("map/r2", json!({}), 2).await.unwrap_err().kind(), std::io::ErrorKind::InvalidData,);
-        assert!(!dir.path().join("map/r2.json").exists());
+        assert!(!state.join("map/r2.json").exists());
     }
 
     #[tokio::test]
@@ -461,34 +463,38 @@ mod tests {
     #[test]
     fn the_last_write_of_a_file_is_the_one_kept() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         let mut last = 0;
         for n in 0..200 {
             last = snapshots.write("focus", &json!({"n": n})).unwrap();
         }
         snapshots.flush();
-        let focus = read(&dir.path().join("focus.json"));
+        let focus = read(&state.join("focus.json"));
         assert_eq!((focus["n"].clone(), focus["seq"].clone()), (json!(199), json!(last)));
     }
 
     #[test]
     fn a_restarted_runtime_writes_past_the_newest_snapshot_even_one_from_ahead_of_the_clock() {
         let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        super::super::ctx::make_private_dir(&state).unwrap();
         let ahead = now_us() + 3_600_000_000;
-        std::fs::write(dir.path().join("status.json"), json!({"schema": 1, "seq": ahead}).to_string()).unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        std::fs::write(state.join("status.json"), json!({"schema": 1, "seq": ahead}).to_string()).unwrap();
+        let snapshots = Snapshots::new(state);
         assert!(snapshots.write("focus", &json!({})).unwrap() > ahead);
     }
 
     #[test]
     fn a_snapshot_another_runtime_wrote_last_isnt_this_ones() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
         snapshots.write("status", &json!({})).unwrap();
         snapshots.flush();
-        let mut theirs = read(&dir.path().join("status.json"));
+        let mut theirs = read(&state.join("status.json"));
         theirs["owner"]["pid"] = json!(std::process::id() + 1);
-        std::fs::write(dir.path().join("status.json"), theirs.to_string()).unwrap();
+        std::fs::write(state.join("status.json"), theirs.to_string()).unwrap();
         assert!(!snapshots.is_mine("status"));
     }
 

@@ -363,8 +363,9 @@ mod tests {
     #[test]
     fn a_calls_changes_are_its_rows_and_their_states_follow() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
-        let history = History::new(dir.path(), "g1".into());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
+        let history = History::new(&state, "g1".into());
         history.begin_call();
         history.record(&change("c1", ChangeState::Applied), "p-earlier", &snapshots);
         history.end_call(call("tc-0", "d0"), &snapshots);
@@ -386,17 +387,18 @@ mod tests {
         assert_eq!(undone.tool_call_id.as_deref(), Some("tc-1"));
         assert!(!history.record(&change("c3", ChangeState::Unsure), "p-1", &snapshots).undo_available, "unsure isn't undone from here");
         snapshots.flush();
-        let kept: Value = serde_json::from_slice(&std::fs::read(dir.path().join("history.json")).unwrap()).unwrap();
+        let kept: Value = serde_json::from_slice(&std::fs::read(state.join("history.json")).unwrap()).unwrap();
         assert_eq!(kept["items"][0]["id"], "h-g1-c3", "newest first");
     }
 
     #[test]
     fn rows_an_earlier_runtime_left_are_for_the_record_only() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
-        History::new(dir.path(), "g1".into()).record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
+        History::new(&state, "g1".into()).record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
         snapshots.flush();
-        let later = History::new(dir.path(), "g2".into());
+        let later = History::new(&state, "g2".into());
         let row = later.row("h-g1-c1").unwrap();
         assert!(!row.undo_available, "its undo went with its runtime");
         later.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
@@ -410,8 +412,9 @@ mod tests {
     #[test]
     fn a_host_call_its_rows_remember_is_answered_from_them_after_a_restart() {
         let dir = tempfile::tempdir().unwrap();
-        let snapshots = Snapshots::new(dir.path().to_path_buf());
-        let first = History::new(dir.path(), "g1".into());
+        let state = dir.path().join("state");
+        let snapshots = Snapshots::new(state.clone());
+        let first = History::new(&state, "g1".into());
         first.begin_call();
         first.record(&change("c1", ChangeState::Applied), "p-1", &snapshots);
         first.record(&change("c2", ChangeState::Applied), "p-1", &snapshots);
@@ -420,7 +423,7 @@ mod tests {
         first.record(&change("c2", ChangeState::Undone), "p-1", &snapshots);
         first.audit("Raise the bass", "p-1", "REAPER stopped answering", call("tc-2", "d2"), &snapshots);
         snapshots.flush();
-        let later = History::new(dir.path(), "g2".into());
+        let later = History::new(&state, "g2".into());
         let again = later.ran(call("tc-1", "d1")).unwrap().unwrap();
         assert_eq!(
             (again["state"].clone(), again["history_ids"].clone()),

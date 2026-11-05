@@ -919,8 +919,9 @@ pub fn run(reaper: &Reaper, reads: &Reads, plan: &Plan, hooks: &dyn Hooks) -> En
             #[cfg(windows)]
             let original = if plan.guarded_range.is_some() {
                 use std::os::windows::fs::OpenOptionsExt;
-                // Keep the produced working file across its rename, but exclude writers.
-                match std::fs::OpenOptions::new().access_mode(0x0002_0080).share_mode(5).custom_flags(0x0020_0000).open(file) {
+                // FILE_READ_DATA makes sharing enforcement effective: keep the working
+                // file across its rename, but exclude existing and subsequent writers.
+                match std::fs::OpenOptions::new().access_mode(0x0002_0081).share_mode(5).custom_flags(0x0020_0000).open(file) {
                     Ok(file) => Some(file),
                     Err(_) => {
                         outcome = Err(("failed".into(), "The rendered output could not be pinned.".into()));
@@ -942,7 +943,7 @@ pub fn run(reaper: &Reaper, reads: &Reads, plan: &Plan, hooks: &dyn Hooks) -> En
                 // Reopen the new name without delete sharing, then compare the two live
                 // identities before changing the exact handle's ACL, never the path's.
                 let protected = std::fs::OpenOptions::new()
-                    .access_mode(0x0006_0080)
+                    .access_mode(0x0006_0081)
                     .share_mode(1)
                     .custom_flags(0x0020_0000)
                     .open(made.last().expect("just named render"))

@@ -604,8 +604,20 @@ fn component_startup_upgrades_only_its_existing_owned_listening_directory() {
     let unrelated = bridge.join("unrelated");
     std::fs::create_dir(&folder).unwrap();
     native_acl::shapes::own_mine(&folder);
+    use native_acl::shapes::{self, Ace, Whose};
+    shapes::write(
+        &folder,
+        Some(&[
+            Ace { allow: true, flags: shapes::INHERITABLE, mask: shapes::FULL, whose: Whose::Me },
+            Ace { allow: true, flags: shapes::INHERITABLE, mask: shapes::FULL, whose: Whose::Sid("S-1-5-18") },
+            Ace { allow: true, flags: shapes::INHERITABLE, mask: shapes::FULL, whose: Whose::Sid("S-1-5-32-544") },
+        ]),
+        false,
+    );
     std::fs::create_dir(&unrelated).unwrap();
-    std::fs::write(folder.join("old-standalone.wav"), b"keep").unwrap();
+    let old = folder.join("old-standalone.wav");
+    std::fs::write(&old, b"keep").unwrap();
+    let before = [&bridge, &unrelated, &old].map(|path| shapes::descriptor(path));
     assert!(!native_acl::is_kumis_shape(&folder), "old standalone folders inherit their ACL");
     let runs = daw_bridge::owner::acl_runs_on_this_thread();
     let listening = super::Listening::new(Arc::new(super::Board::default()));
@@ -613,7 +625,8 @@ fn component_startup_upgrades_only_its_existing_owned_listening_directory() {
     assert!(native_acl::is_kumis_shape(&folder));
     assert!(super::guarded_folder(&folder, false).is_ok());
     assert!(!native_acl::is_kumis_shape(&unrelated));
-    assert_eq!(std::fs::read(folder.join("old-standalone.wav")).unwrap(), b"keep");
+    assert_eq!(std::fs::read(&old).unwrap(), b"keep");
+    assert_eq!([&bridge, &unrelated, &old].map(|path| shapes::descriptor(path)), before, "only the owned directory's ACL changes");
     assert_eq!(daw_bridge::owner::acl_runs_on_this_thread(), runs);
 
     std::fs::rename(&folder, bridge.join("old-listening")).unwrap();
@@ -636,7 +649,7 @@ fn component_directory_upgrade_refuses_replaced_and_foreign_owned_handles() {
     let folder = bridge.join("listening");
     std::fs::create_dir(&folder).unwrap();
     let open = |path: &std::path::Path, share| {
-        std::fs::OpenOptions::new().access_mode(0x0006_0080).share_mode(share).custom_flags(0x0220_0000).open(path).unwrap()
+        std::fs::OpenOptions::new().access_mode(0x0006_0081).share_mode(share).custom_flags(0x0220_0000).open(path).unwrap()
     };
     let original = open(&folder, 7);
     std::fs::rename(&folder, bridge.join("old-listening")).unwrap();
@@ -664,8 +677,21 @@ fn component_directory_upgrade_refuses_replaced_and_foreign_owned_handles() {
 #[cfg(windows)]
 #[test]
 fn guarded_windows_render_creates_private_staging_without_main_thread_powershell() {
+    use daw_bridge::lifecycle::native_acl;
+    use std::os::windows::fs::OpenOptionsExt;
     let rig = Rig::new();
     let runs = daw_bridge::owner::acl_runs_on_this_thread();
+    let attempts = std::rc::Rc::new(std::cell::Cell::new(0));
+    let observed = attempts.clone();
+    let _probe = native_acl::shapes::probe_next_render(move |pinned, protected| {
+        let path = native_acl::file_path(pinned).unwrap();
+        assert_eq!(native_acl::is_kumis_shape_handle(pinned, false), protected);
+        assert!(std::fs::rename(&path, path.with_file_name("swapped.wav")).is_err());
+        assert!(std::fs::write(&path, b"replacement").is_err());
+        assert!(std::fs::OpenOptions::new().append(true).share_mode(7).open(&path).is_err());
+        assert!(std::fs::remove_file(&path).is_err());
+        observed.set(observed.get() + 1);
+    });
     rig.ask(
         "render_start",
         json!({
@@ -676,6 +702,7 @@ fn guarded_windows_render_creates_private_staging_without_main_thread_powershell
     .unwrap();
     let done = rig.until_ended("private-output");
     assert_eq!(done["state"], "done");
+    assert_eq!(attempts.get(), 2, "both ends of the component's real protection pin were exercised");
     assert!(daw_bridge::lifecycle::native_acl::is_kumis_shape(&rig.folder()));
     let file = std::path::Path::new(done["files"][0]["file"].as_str().unwrap());
     assert!(daw_bridge::lifecycle::native_acl::is_kumis_shape(file));
@@ -700,16 +727,16 @@ fn guarded_windows_acl_protection_rejects_substituted_and_hardlinked_outputs() {
     native_acl::create_kumis_folder(&folder).unwrap();
     let source = folder.join("render.wav");
     std::fs::write(&source, b"original").unwrap();
-    let original = std::fs::OpenOptions::new().access_mode(0x0002_0080).share_mode(5).open(&source).unwrap();
+    let original = std::fs::OpenOptions::new().access_mode(0x0002_0081).share_mode(5).open(&source).unwrap();
     std::fs::rename(&source, folder.join("kept.wav")).unwrap();
     std::fs::write(&source, b"replacement").unwrap();
-    let replaced = std::fs::OpenOptions::new().access_mode(0x0006_0080).share_mode(1).open(&source).unwrap();
+    let replaced = std::fs::OpenOptions::new().access_mode(0x0006_0081).share_mode(1).open(&source).unwrap();
     let runs = daw_bridge::owner::acl_runs_on_this_thread();
     assert!(native_acl::protect_created_file(&original, &replaced).is_err());
     assert!(!native_acl::is_kumis_shape(&source), "the replacement ACL must not change");
     drop(replaced);
     std::fs::hard_link(&source, folder.join("linked.wav")).unwrap();
-    let linked = std::fs::OpenOptions::new().access_mode(0x0006_0080).share_mode(1).open(&source).unwrap();
+    let linked = std::fs::OpenOptions::new().access_mode(0x0006_0081).share_mode(1).open(&source).unwrap();
     assert!(native_acl::protect_created_file(&linked, &linked).is_err());
     assert!(!native_acl::is_kumis_shape(&source));
     assert!(native_acl::create_kumis_folder(&folder).is_err(), "creation never adopts an existing directory");

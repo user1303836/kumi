@@ -613,7 +613,17 @@ impl Ctx {
         let n = self.scratches.get() + 1;
         self.scratches.set(n);
         let path = self.paths.state_dir.join("scratch").join(op).join(format!("{}-{n}", kumi_common::time::now_ms()));
-        make_private_dir(&path).map_err(|error| OpError::Failed { reason: format!("no scratch folder: {error}") })?;
+        #[cfg(windows)]
+        let made = (|| {
+            // These are exact runtime-owned targets, not ancestors supplied by the host. An old scratch tree may
+            // need its own ACL tightened too; the per-call leaf must never adopt a collision that Drop would delete.
+            make_private_dir(&self.paths.state_dir.join("scratch"))?;
+            make_private_dir(path.parent().unwrap())?;
+            make_private_windows_dir(&path, true)
+        })();
+        #[cfg(not(windows))]
+        let made = make_private_dir(&path);
+        made.map_err(|error| OpError::Failed { reason: format!("no scratch folder: {error}") })?;
         Ok(Scratch { path })
     }
 
@@ -902,6 +912,8 @@ fn pending_media_root(root: &Path) -> Option<PathBuf> {
 }
 
 /// A folder only its owner can open: made with its parents when it isn't there, and made the owner's alone when it is.
+/// On Windows every new component is born private; only the exact existing target may be tightened, and only when
+/// this account already owns it. Links, foreign owners and nonlocal paths are refused without repairing them.
 pub(crate) fn make_private_dir(path: &Path) -> std::io::Result<()> {
     #[cfg(unix)]
     {
@@ -911,15 +923,185 @@ pub(crate) fn make_private_dir(path: &Path) -> std::io::Result<()> {
         }
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
     }
-    #[cfg(not(unix))]
+    #[cfg(windows)]
+    {
+        make_private_windows_dir(path, false)
+    }
+    #[cfg(not(any(unix, windows)))]
     {
         std::fs::create_dir_all(path)
     }
 }
 
+/// Pins each component before looking below it, keeping all pins until creation/protection has finished. Directory
+/// data access makes the read-only sharing effective: metadata-only opens do not prevent a rename or reparse write.
+#[cfg(windows)]
+fn make_private_windows_dir(path: &Path, fresh: bool) -> std::io::Result<()> {
+    use daw_bridge::lifecycle::native_acl;
+    use std::{
+        fs::OpenOptions,
+        os::windows::{
+            ffi::OsStrExt,
+            fs::{MetadataExt, OpenOptionsExt},
+        },
+        path::{Component, Prefix},
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetDriveTypeW, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_BACKUP_SEMANTICS, FILE_FLAG_OPEN_REPARSE_POINT, FILE_LIST_DIRECTORY,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_READ,
+    };
+
+    let unsafe_path = || std::io::Error::other("a private runtime folder must be a local, owned directory without reparse points");
+    let path = if path.is_absolute() { path.to_path_buf() } else { std::env::current_dir()?.join(path) };
+    if path.as_os_str().encode_wide().any(|unit| unit == 0)
+        || path.components().any(|component| matches!(component, Component::ParentDir))
+        || path.file_name().is_none()
+        || !path.has_root()
+    {
+        return Err(unsafe_path());
+    }
+    let drive = match path.components().next() {
+        Some(Component::Prefix(prefix)) => match prefix.kind() {
+            Prefix::Disk(drive) | Prefix::VerbatimDisk(drive) => drive,
+            _ => return Err(unsafe_path()),
+        },
+        _ => return Err(unsafe_path()),
+    };
+    let root: Vec<u16> = format!("{}:\\", char::from(drive)).encode_utf16().chain([0]).collect();
+    // SAFETY: the local drive root is NUL-terminated; reject remote/unknown drives before any filesystem lookup.
+    if unsafe { GetDriveTypeW(root.as_ptr()) } != 3 {
+        return Err(unsafe_path());
+    }
+    let mut components = path.components().peekable();
+    let mut at = PathBuf::new();
+    let mut pins = Vec::new();
+    while let Some(component) = components.next() {
+        at.push(component);
+        if matches!(component, Component::Prefix(_) | Component::CurDir) {
+            continue;
+        }
+        let target = components.peek().is_none();
+        let mut options = OpenOptions::new();
+        // READ_CONTROL for the owner/DACL check; WRITE_DAC only on the exact owned target, never an ancestor.
+        let access = FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | if target { 0x0002_0000 | 0x0004_0000 } else { 0 };
+        options.access_mode(access).share_mode(FILE_SHARE_READ).custom_flags(FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OPEN_REPARSE_POINT);
+        let mut created = false;
+        if target && fresh {
+            native_acl::create_kumis_folder(&at)?;
+            created = true;
+        }
+        let file = match options.open(&at) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && matches!(component, Component::Normal(_)) => {
+                native_acl::create_kumis_folder(&at)?;
+                created = true;
+                options.access_mode(access | 0x0002_0000);
+                options.open(&at)?
+            }
+            Err(error) => return Err(error),
+        };
+        let metadata = file.metadata()?;
+        if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(unsafe_path());
+        }
+        if created {
+            if !native_acl::is_kumis_shape_handle(&file, true) {
+                return Err(unsafe_path());
+            }
+        } else if target {
+            // The native setter checks the current owner and changes only this pinned object's DACL, without
+            // ownership takeover or inheritance propagation to old children. Adopted source paths never come here.
+            native_acl::protect_owned_directory(&file, &file).map_err(std::io::Error::other)?;
+        }
+        pins.push(file);
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn a_windows_scratch_collision_is_refused_without_adopting_or_deleting_it() {
+        use daw_bridge::lifecycle::native_acl::{is_kumis_shape, shapes};
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state/scratch/listen/call");
+        make_private_windows_dir(&path, true).unwrap();
+        assert!(is_kumis_shape(&path));
+        std::fs::write(path.join("kept"), b"not this call's").unwrap();
+        let before = shapes::descriptor(&path);
+        assert_eq!(make_private_windows_dir(&path, true).unwrap_err().kind(), std::io::ErrorKind::AlreadyExists);
+        assert_eq!(shapes::descriptor(&path), before);
+        assert_eq!(std::fs::read(path.join("kept")).unwrap(), b"not this call's");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn securing_an_owned_windows_state_changes_only_that_exact_directory() {
+        use daw_bridge::lifecycle::native_acl::{is_kumis_shape, shapes};
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        let neighbor = dir.path().join("neighbor");
+        std::fs::create_dir(&state).unwrap();
+        std::fs::create_dir(&neighbor).unwrap();
+        shapes::own_mine(&state);
+        let child = state.join("old");
+        std::fs::create_dir(&child).unwrap();
+        let file = child.join("kept");
+        std::fs::write(&file, b"unchanged").unwrap();
+        let untouched = [dir.path(), neighbor.as_path(), child.as_path(), file.as_path()];
+        let before: Vec<_> = untouched.iter().map(|path| shapes::descriptor(path)).collect();
+        make_private_dir(&state).unwrap();
+        assert!(is_kumis_shape(&state));
+        make_private_dir(&state).unwrap();
+        for (path, descriptor) in untouched.into_iter().zip(before) {
+            assert_eq!(shapes::descriptor(path), descriptor, "changed {}", path.display());
+        }
+        assert_eq!(std::fs::read(file).unwrap(), b"unchanged");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_private_directories_refuse_foreign_owners_without_taking_them_over() {
+        use daw_bridge::lifecycle::native_acl::shapes;
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("state");
+        make_private_dir(&state).unwrap();
+        if !shapes::own(&state, "S-1-5-32-544") {
+            assert!(std::env::var_os("CI").is_none(), "CI must exercise foreign-owner refusal");
+            return; // A non-elevated developer account cannot assign Administrators as owner.
+        }
+        let before = shapes::descriptor(&state);
+        let result = make_private_dir(&state);
+        let after = shapes::descriptor(&state);
+        shapes::own_mine(&state);
+        assert!(result.is_err());
+        assert_eq!(after, before);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_private_directories_refuse_files_and_junctions_without_touching_their_targets() {
+        use daw_bridge::lifecycle::native_acl::shapes;
+        let dir = tempfile::tempdir().unwrap();
+        let outside = dir.path().join("outside");
+        make_private_dir(&outside).unwrap();
+        let file = outside.join("kept");
+        std::fs::write(&file, b"outside").unwrap();
+        let before = [shapes::descriptor(&outside), shapes::descriptor(&file)];
+        let link = dir.path().join("redirect");
+        directory_link(&outside, &link);
+        assert!(make_private_dir(&link).is_err());
+        assert!(make_private_dir(&link.join("new/child")).is_err());
+        assert!(make_private_windows_dir(&link.join("call"), true).is_err());
+        assert!(make_private_dir(&file).is_err());
+        assert!(!outside.join("new").exists() && !outside.join("call").exists());
+        assert_eq!([shapes::descriptor(&outside), shapes::descriptor(&file)], before);
+        assert_eq!(std::fs::read(&file).unwrap(), b"outside");
+        std::fs::remove_dir(link).unwrap();
+    }
 
     #[test]
     fn the_host_says_who_asked_and_nothing_else() {
@@ -998,6 +1180,10 @@ mod tests {
         assert_ne!(one.path(), two.path());
         let under = std::fs::canonicalize(dir.path()).unwrap().join("state/scratch/listen");
         assert!(one.path().starts_with(&under) && one.path().is_dir(), "{}", one.path().display());
+        #[cfg(windows)]
+        for folder in [ctx.paths().state_dir.clone(), under.parent().unwrap().to_path_buf(), under.clone(), one.path().to_path_buf()] {
+            assert!(daw_bridge::lifecycle::native_acl::is_kumis_shape(&folder), "not private from creation: {}", folder.display());
+        }
         std::fs::create_dir(one.path().join("takes")).unwrap();
         std::fs::write(one.path().join("takes/take.wav"), b"RIFF").unwrap();
         let gone = one.path().to_path_buf();
@@ -1208,6 +1394,8 @@ mod tests {
             active.join("plugin-data/kumi/setup"),
             generated.join("child"),
         ];
+        // The runtime owns its state even on an elevated Windows runner, whose default creator owner is Administrators.
+        make_private_dir(&state).unwrap();
         for root in refused.iter().chain([&samples, &generated]) {
             std::fs::create_dir_all(root).unwrap();
             std::fs::write(root.join("take.wav"), b"not granted by its extension").unwrap();

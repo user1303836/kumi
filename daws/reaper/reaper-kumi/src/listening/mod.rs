@@ -277,16 +277,17 @@ impl Listening {
         };
         // Pin the owning bridge directory, then this exact existing cache; the native
         // helper verifies current-account ownership and type before changing its handle.
-        let pinned_parent = open(parent, 0x0002_0080, 3).map_err(|_| "the owning bridge directory could not be pinned")?;
+        let pinned_parent = open(parent, 0x0002_0081, 1).map_err(|_| "the owning bridge directory could not be pinned")?;
         if !native_acl::is_kumis_shape(parent) || !native_acl::is_kumis_shape_handle(&pinned_parent, true) {
             return Err("the owning bridge directory is not verifiably private".into());
         }
         if native_acl::is_kumis_shape(folder) {
             return Ok(());
         }
-        let original = open(folder, 0x0002_0080, 3).map_err(|_| "the existing listening directory could not be pinned")?;
-        // Exclusive access suppresses SetSecurityInfo's propagation to old cache children.
-        let current = open(folder, 0x0006_0080, 0).map_err(|_| "the existing listening directory could not be protected")?;
+        // FILE_LIST_DIRECTORY makes no-write/delete sharing effective; metadata-only
+        // ACL access stays compatible with both read pins throughout protection.
+        let original = open(folder, 0x0002_0081, 1).map_err(|_| "the existing listening directory could not be pinned")?;
+        let current = open(folder, 0x0006_0081, 1).map_err(|_| "the existing listening directory could not be protected")?;
         if native_acl::file_path(&current)?.parent() != Some(native_acl::file_path(&pinned_parent)?.as_path()) {
             return Err("the listening directory is outside its pinned owning bridge root".into());
         }
