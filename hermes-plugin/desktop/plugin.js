@@ -540,8 +540,9 @@ var S = {
   section: { display: "flex", flexDirection: "column", gap: 6, padding: "10px 12px", borderBottom: `1px solid ${T.border}` },
   heading: { display: "flex", alignItems: "center", gap: 6, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase", color: T.muted },
   row: { display: "flex", alignItems: "center", gap: 6, minWidth: 0 },
-  text: { fontSize: 12.5, color: T.text, lineHeight: 1.45 },
-  muted: { fontSize: 12, color: T.muted, lineHeight: 1.45 },
+  // A message can hold a URL or a path with no place to break: it wraps anywhere rather than widen the pane.
+  text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: "anywhere" },
+  muted: { fontSize: 12, color: T.muted, lineHeight: 1.45, overflowWrap: "anywhere" },
   faint: { fontSize: 11.5, color: T.faint },
   ellipsis: { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", minWidth: 0 }
 };
@@ -857,7 +858,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
   const setupState = state.setup?.state;
   const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" ? state.setup.message : null;
   const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
-  return /* @__PURE__ */ jsxs4("div", { style: { height: "100%", overflowY: "auto", color: T.text }, children: [
+  return /* @__PURE__ */ jsxs4("div", { style: { height: "100%", overflowY: "auto", overflowX: "hidden", color: T.text }, children: [
     /* @__PURE__ */ jsxs4("div", { style: { ...S.section, gap: 8 }, children: [
       /* @__PURE__ */ jsxs4("div", { style: { ...S.row, gap: 8 }, children: [
         /* @__PURE__ */ jsx4(Dot, { color: TONE2[words.tone], size: 8 }),
@@ -1402,7 +1403,7 @@ var STATE_WORDS = {
 function Line({ label, children }) {
   return /* @__PURE__ */ jsxs9("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
     /* @__PURE__ */ jsx9("span", { style: S.muted, children: label }),
-    /* @__PURE__ */ jsx9("span", { style: { ...S.text, minWidth: 0, overflowWrap: "anywhere" }, children })
+    /* @__PURE__ */ jsx9("span", { style: { ...S.text, minWidth: 0 }, children })
   ] });
 }
 function megabytes(bytes) {

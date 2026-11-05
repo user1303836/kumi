@@ -31,7 +31,7 @@ function Line({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '9rem 1fr', gap: 8, alignItems: 'baseline', padding: '5px 0', borderTop: `1px solid ${T.border}` }}>
       <span style={S.muted}>{label}</span>
-      <span style={{ ...S.text, minWidth: 0, overflowWrap: 'anywhere' }}>{children}</span>
+      <span style={{ ...S.text, minWidth: 0 }}>{children}</span>
     </div>
   )
 }

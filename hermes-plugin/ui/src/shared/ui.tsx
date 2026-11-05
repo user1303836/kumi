@@ -7,8 +7,9 @@ export const S = {
   section: { display: 'flex', flexDirection: 'column', gap: 6, padding: '10px 12px', borderBottom: `1px solid ${T.border}` },
   heading: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: T.muted },
   row: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
-  text: { fontSize: 12.5, color: T.text, lineHeight: 1.45 },
-  muted: { fontSize: 12, color: T.muted, lineHeight: 1.45 },
+  // A message can hold a URL or a path with no place to break: it wraps anywhere rather than widen the pane.
+  text: { fontSize: 12.5, color: T.text, lineHeight: 1.45, overflowWrap: 'anywhere' },
+  muted: { fontSize: 12, color: T.muted, lineHeight: 1.45, overflowWrap: 'anywhere' },
   faint: { fontSize: 11.5, color: T.faint },
   ellipsis: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }
 } satisfies Record<string, CSSProperties>
