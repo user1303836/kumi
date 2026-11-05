@@ -54,9 +54,10 @@ KUMI_SETUP = _tool(
 KUMI_CONNECT = _tool(
     "kumi_connect",
     "Connect Kumi to the DAW: Ableton Live (ableton), REAPER or Renoise. Starts Kumi's runtime for this chat when it "
-    "isn't running (Kumi's local program and its link to the DAW, as background processes on this computer, until the "
-    "chat ends); changes nothing in the DAW or the project. The DAW must be open with Kumi's part in it enabled (Live: "
-    "the AbletonMcpBridge control surface). Returns what kumi_status returns.",
+    "isn't running (Kumi's local program and its link to the DAW, as background processes on this computer). It runs "
+    "until the chat ends, or until it has had nothing to do for 2 hours while connected (15 minutes when it isn't); its "
+    "changes can be undone only while it runs. Changes nothing in the DAW or the project. The DAW must be open with "
+    "Kumi's part in it enabled (Live: the AbletonMcpBridge control surface). Returns what kumi_status returns.",
     {"daw": {"type": "string", "enum": list(DAWS), "description": "The DAW to connect to; the DAW setting when left out."}})
 
 KUMI_OBSERVE = _tool(
@@ -105,7 +106,8 @@ KUMI_CHANGE = _tool(
 KUMI_UNDO = _tool(
     "kumi_undo",
     "Undo one change Kumi made, by its HISTORY id from kumi_history or kumi_change. The producer approves it first. "
-    "Returns undone, kept (the producer changed it since, so it was left), unsure, expired or refused. Undo only from "
+    "Returns undone, kept (the producer changed it since, so it was left), unsure, expired or refused. A change made "
+    "before Kumi's runtime restarted is expired, and its reason says what the producer can do instead. Undo only from "
     "HISTORY, never from memory of what the project was.",
     {"history_id": {"type": "string"}}, ("history_id",))
 

@@ -34,6 +34,10 @@ from typing import Any
 VERSION = "1.24.66"
 PROTOCOL = "kumi-serve/1"
 MCP = "2025-11-25"
+DAW_NAMES = {"ableton": "Live", "reaper": "REAPER", "renoise": "Renoise"}
+# serve/change.rs's words for a change an earlier runtime made (agent-s, kumi-adv's D2).
+RESTARTED = ("Kumi restarted since this change, so it can't undo it safely: undo it in {daw} if it's still the latest "
+             "step there, or ask Hermes to set it back.")
 # The plan steps the fixture applies, as the real runtime names Kumi's tools (W1-REGISTRY: `{tool, input, as}`), with
 # the HISTORY family each one is in Live's change table (#965: a preview's `family`, so an approval's rule key).
 STEPS = {"set_track_volume": "mixer", "replace_sample": "device"}
@@ -61,7 +65,11 @@ class Fixture:
         self.daw = options.daw
         self.epoch = "1"
         self.set = copy.deepcopy(SET)
-        self.history: list[dict] = []
+        # As kumi serve's History::new: an earlier runtime's rows stay for the record, none of them undoable from here.
+        self.generation = options.generation
+        kept = (json.loads((self.state / "history.json").read_text(encoding="utf-8"))
+                if (self.state / "history.json").exists() else {})
+        self.history: list[dict] = [{**row, "undo_available": False} for row in reversed(kept.get("items") or [])]
         self.owner: dict | None = None
         self.running = True
         self.since = now()
@@ -179,9 +187,10 @@ class Fixture:
                 "transport": {"playing": False, "tempo": self.set["tempo"]}, "catch_up": []}
 
     def history_snapshot(self) -> dict:
-        """HISTORY, newest first, as C3 has it: each row without the Set the fixture keeps to undo it."""
-        return {"items": [{key: value for key, value in row.items() if key != "before"}
-                          for row in reversed(self.history)][:200]}
+        """HISTORY, newest first, as C3 has it: each row without the Set the fixture keeps to undo it, and this
+        runtime's generation (#1047), which an earlier runtime's rows don't have."""
+        return {"generation": self.generation, "items": [{key: value for key, value in row.items() if key != "before"}
+                                                         for row in reversed(self.history)][:200]}
 
     def track(self, ref: str) -> dict | None:
         return next((track for track in self.set["tracks"] if track["ref"] == ref), None)
@@ -362,11 +371,11 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
             fixture.simpler(target["deviceRef"])[1]["sample"] = source_name(target["sample"])
     first = steps[0]["input"]
     track = fixture.track(first["track_ref"]) if "track_ref" in first else fixture.simpler(first["deviceRef"])[0]
-    ident = f"h-{fixture.set['key']}-g1-c{len(fixture.history) + 1}"
+    ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
     # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note) and CC-5's
     # (tool_call_id, digest, call_outcome), which the plugin never passes on.
     fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
-                            "runtime_generation": "g1", "title": args.get("title") or "Kumi change",
+                            "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
                             "family": STEPS[steps[0]["tool"]], "at": now(), "state": "applied",
                             "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
                             "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
@@ -381,16 +390,19 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
 
 def undo(fixture: Fixture, args: dict, host: dict) -> dict:
     row = next((row for row in fixture.history if row["id"] == args.get("history_id")), None)
+    # Why it can't be undone from here, as serve/change.rs says it: CC-3's reason, C1's state and the words.
+    why_not = (("restarted", "expired", RESTARTED) if row and row["runtime_generation"] != fixture.generation
+               else ("expired", "expired", "It can't be undone any more.") if row and not row["undo_available"]
+               else None)
     if args.get("preview"):
         if row is None:
             return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
-        preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}",
-                   "undo_available": row["undo_available"]}
-        return preview if row["undo_available"] else {**preview, "reason": "expired"}
+        preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": not why_not}
+        return {**preview, "reason": why_not[0]} if why_not else preview
     if row is None:
         return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
-    if not row["undo_available"]:
-        return {"state": "expired", "reason": "That change can't be undone any more."}
+    if why_not:
+        return {"state": why_not[1], "reason": why_not[2].format(daw=DAW_NAMES[fixture.daw])}
     fixture.set = row.pop("before")
     row.update(state="undone", undo_available=False)
     fixture.publish("history", "focus")
@@ -590,6 +602,7 @@ def main() -> None:
     parser.add_argument("--stderr-flood", type=int, default=0, help="bytes written to stderr on start")
     parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")
+    parser.add_argument("--generation", default="g1", help="this runtime's generation, as HISTORY's ids carry it")
     parser.add_argument("--library-root", action="append", default=[])
     parser.add_argument("--hermes-home", help="the profile's Hermes home, as kumi serve takes it (#985)")
     parser.add_argument("--hermes-root", help="the root holding every Hermes profile, as kumi serve takes it (#985)")

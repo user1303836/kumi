@@ -43,7 +43,8 @@ rules keep its changes exact, approved and reversible.
 ## Undo
 - **Undo with `kumi_undo` and a HISTORY id** from `kumi_history` or a `kumi_change` result. The producer approves it too.
 - **Never "undo" by making a reverse change from your memory** of what the project was.
-- **`kept`** means the producer changed that thing since, so Kumi left it. **`expired`** means Kumi's runtime or the project restarted since. HISTORY still records the change, but it can't be undone from here.
+- **`kept`** means the producer changed that thing since, so Kumi left it. **`expired`** means it can't be undone any more.
+- **Kumi restarted since the change** (`kumi_undo` says so, and `@kumi:history` marks it): Kumi's undo for it went with the runtime that made it. Tell the producer just that, and that they can undo it in the DAW if it's still the latest step there, or ask you to set it back. Setting it back is a new change: observe first, take what HISTORY says the change was, and the producer approves it like any other.
 - **When Kumi's runtime doesn't run in this Hermes process, and always in a scheduled job,** `kumi_history` answers with HISTORY as Kumi last published it (`from: last_published`, `as_of`, and a note on why). Nothing in it can be undone from there, and the project may have changed since: say when it's from, and never act on it without connecting and observing first.
 
 ## Hearing
