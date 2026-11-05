@@ -1,15 +1,16 @@
 // The sound map, drawn on a canvas: each sound of the library where Kumi's layout put it, coloured by its group.
 // Wheel zooms, a drag pans, a click picks the sound under the pointer. Search and the legend dim what they leave out;
 // sounds the agent just found get a ring. What a search or a find picks out is also listed by name, for the keyboard.
-// On the keyboard, the arrow keys move between sounds (each one named to a screen reader), Enter or Space plays the
-// one picked, Escape lets it go, plus and minus zoom and 0 fits the map.
+// On the keyboard (`mapKey`), the arrows move to the nearest sound that way, Shift+←/→ step through every sound in turn,
+// Shift+↑/↓ zoom and Home shows the whole map; each sound reached is named to a screen reader, and Tab goes on to its
+// Play and Use….
 // Both UI halves use it; what a picked sound can do comes from `actions`.
 import { CANVAS, T } from '@kumi/theme'
 import type { KeyboardEvent, ReactNode } from 'react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 
 import { clean, num, seconds } from './format.ts'
-import { buildModel, fitView, frame, keepInView, mapLabel, type MapViewport, pick, searchSounds, step, toScreen, zoomAt } from './mapModel.ts'
+import { buildModel, fitView, frame, keepInView, mapKey, mapLabel, type MapViewport, moveWith, pick, searchSounds, toScreen, zoomAt } from './mapModel.ts'
 import type { KumiState } from './store.ts'
 import type { MapSound, SoundMap } from './types.ts'
 import { Chip, FOCUSABLE, S, useT } from './ui.tsx'
@@ -19,10 +20,10 @@ export interface MapCanvasProps {
   found: KumiState['found']
   playing: string | null
   selected: string | null
-  /** A click, or Enter on the sound the keyboard picked: pick it and play it. */
+  /** A click, or a found list's row: pick that sound and play it. */
   onPick: (id: string) => void
-  /** The keyboard moved to a sound (picked, not played), or let it go (null). */
-  onSelect: (id: string | null) => void
+  /** The keyboard moved to a sound: picked, not played (its Play is the next tab stop). */
+  onSelect: (id: string) => void
   actions?: (id: string, sound: MapSound) => ReactNode
   empty: ReactNode
 }
@@ -47,7 +48,6 @@ function resolve(canvas: HTMLCanvasElement): Record<keyof typeof CANVAS, string>
   }
 }
 
-const ARROWS: Record<string, [number, number]> = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }
 // Each map's own id for its keys hint. Not React's useId: the hosts' React builds differ, and this needs none of it.
 let maps = 0
 
@@ -215,12 +215,20 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
   }
 
   const onKey = (event: KeyboardEvent<HTMLCanvasElement>) => {
-    if (!view || event.altKey || event.ctrlKey || event.metaKey) return
-    const direction = ARROWS[event.key]
-    if (direction) {
-      event.preventDefault()
-      const from = selected === null ? undefined : indexOf.get(selected)
-      const next = step(model, view, mapSize, from !== undefined && visible(from) ? from : undefined, direction, [size.width / 2, size.height / 2], visible)
+    const key = mapKey(event)
+    if (!view || !key) return
+    event.preventDefault()
+    const from = selected === null ? undefined : indexOf.get(selected)
+    const picked = from !== undefined && visible(from) ? from : undefined
+    const middle: [number, number] = [size.width / 2, size.height / 2]
+    if ('fit' in key) {
+      setView(fitView(size.width, size.height))
+    } else if ('zoom' in key) {
+      // Around the sound picked, so it stays where it is; else around the middle.
+      const [x, y] = picked === undefined ? middle : toScreen(view, mapSize, model.points[picked].x, model.points[picked].y)
+      setView(zoomAt(view, key.zoom, x, y))
+    } else {
+      const next = moveWith(model, view, mapSize, picked, key, middle, visible)
       if (next < 0) return
       const point = model.points[next]
       const [x, y] = toScreen(view, mapSize, point.x, point.y)
@@ -228,19 +236,6 @@ export function MapCanvas({ map, found, playing, selected, onPick, onSelect, act
       onSelect(point.id)
       const sound = model.sounds[point.id]
       setSaid([clean(sound?.name ?? point.id, 80), clean(sound?.class, 16), clean(sound?.folder, 60)].filter(Boolean).join(', '))
-    } else if ((event.key === 'Enter' || event.key === ' ') && selected !== null) {
-      event.preventDefault()
-      onPick(selected)
-    } else if (event.key === 'Escape' && selected !== null) {
-      event.preventDefault()
-      onSelect(null)
-      setSaid('')
-    } else if (event.key === '+' || event.key === '=' || event.key === '-') {
-      event.preventDefault()
-      setView(zoomAt(view, event.key === '-' ? 1 / 1.5 : 1.5, size.width / 2, size.height / 2))
-    } else if (event.key === '0') {
-      event.preventDefault()
-      setView(fitView(size.width, size.height))
     }
   }
 

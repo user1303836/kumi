@@ -133,7 +133,7 @@ test("a map label is the sound's name with nothing that reorders it, cut to 28 c
   assert.equal(map.mapLabel(undefined), '')
 })
 
-test('the arrow keys move to the nearest sound that way, in line before off to the side, and every sound stays in reach', () => {
+test('the arrow keys move to the nearest sound that way, in line before off to the side', () => {
   const model = map.buildModel({
     revision: 'r1',
     points: [['mid', 0.5, 0.5, 0], ['right', 0.75, 0.5, 0], ['up-right', 0.6, 0.3, 0], ['left', 0.2, 0.52, 0], ['down', 0.5, 0.9, 1]],
@@ -158,6 +158,71 @@ test('the arrow keys move to the nearest sound that way, in line before off to t
   assert.deepEqual(map.keepInView(view, 130, 50, 100, 100), { scale: 1, dx: -54, dy: 0 })
   assert.deepEqual(map.keepInView(view, 10, -5, 100, 100), { scale: 1, dx: 14, dy: 29 })
   assert.equal(map.keepInView(view, 50, 50, 100, 100), view)
+})
+
+test('the map takes only keys no host claims first: the arrows, Shift with an arrow, and Home', () => {
+  const press = (key, held = {}) => map.mapKey({ key, shiftKey: false, altKey: false, ctrlKey: false, metaKey: false, ...held })
+  assert.deepEqual(press('ArrowRight'), { move: [1, 0] })
+  assert.deepEqual(press('ArrowUp'), { move: [0, -1] })
+  assert.deepEqual(press('ArrowRight', { shiftKey: true }), { order: 1 })
+  assert.deepEqual(press('ArrowLeft', { shiftKey: true }), { order: -1 })
+  assert.ok(press('ArrowUp', { shiftKey: true }).zoom > 1 && press('ArrowDown', { shiftKey: true }).zoom < 1)
+  assert.deepEqual(press('Home'), { fit: true })
+  // Desktop routes these before the map sees them: printable keys type into the composer, Enter focuses it, Escape
+  // cancels the turn, PageUp and PageDown scroll the chat. Chords belong to the app.
+  for (const key of [' ', '+', '-', '=', '0', 'a', 'Enter', 'Escape', 'PageUp', 'PageDown', 'End']) assert.equal(press(key), null, key)
+  for (const held of [{ altKey: true }, { ctrlKey: true }, { metaKey: true }]) assert.equal(press('ArrowRight', held), null)
+})
+
+test('from the first sound the keys pick, they reach every visible sound: seeded and clustered maps, sounds on one spot included', () => {
+  // mulberry32: the same maps on every run.
+  const random = seed => () => {
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  const cloud = (seed, clustered) => {
+    const next = random(seed)
+    const centres = Array.from({ length: 5 }, () => [0.15 + 0.7 * next(), 0.15 + 0.7 * next()])
+    const points = Array.from({ length: clustered ? 220 : 160 }, (_, index) => {
+      if (!clustered) return [`s${index}`, next(), next(), index % 4]
+      const [cx, cy] = centres[index % 5]
+      // Box–Muller: tight gaussian clusters.
+      const radius = 0.04 * Math.sqrt(-2 * Math.log(1 - next()))
+      const angle = 2 * Math.PI * next()
+      return [`s${index}`, cx + radius * Math.cos(angle), cy + radius * Math.sin(angle), index % 4]
+    })
+    // One in ten sounds sits exactly where another one does.
+    for (let index = 0; index < points.length; index += 10) points.push([`dup${index}`, points[index][1], points[index][2], points[index][3]])
+    return map.buildModel({ revision: `r${seed}`, points, groups: {}, sounds: {} })
+  }
+  const view = { scale: 2.5, dx: -150, dy: -90 }
+  const keys = [['ArrowLeft'], ['ArrowRight'], ['ArrowUp'], ['ArrowDown'], ['ArrowLeft', true], ['ArrowRight', true]].map(([key, shiftKey = false]) =>
+    map.mapKey({ key, shiftKey, altKey: false, ctrlKey: false, metaKey: false })
+  )
+  for (const seed of [1, 2, 3, 4, 5, 6]) {
+    for (const clustered of [false, true]) {
+      const model = cloud(seed, clustered)
+      for (const visible of [() => true, index => model.points[index].group !== 2]) {
+        const first = map.moveWith(model, view, 400, undefined, keys[1], [200, 200], visible)
+        const reached = new Set([first])
+        const queue = [first]
+        while (queue.length) {
+          const from = queue.shift()
+          for (const key of keys) {
+            const next = map.moveWith(model, view, 400, from, key, [200, 200], visible)
+            if (next >= 0 && !reached.has(next)) {
+              reached.add(next)
+              queue.push(next)
+            }
+          }
+        }
+        const shown = model.points.map((_, index) => index).filter(visible)
+        assert.deepEqual([...reached].sort((a, b) => a - b), shown, `seed ${seed}, ${clustered ? 'clustered' : 'spread'}`)
+      }
+    }
+  }
 })
 
 test('the map keeps valid points, colours each group, and picks the nearest point under the pointer', () => {

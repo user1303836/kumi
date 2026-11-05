@@ -104,7 +104,7 @@ var en = {
     tab: "Sound map",
     canvas: "Sound map",
     roledescription: "sound map",
-    keys: "Arrow keys move between sounds, Enter or Space plays the one picked, Escape lets it go, plus and minus zoom, 0 shows the whole map.",
+    keys: "Arrow keys move to the nearest sound that way. Shift with left or right steps through every sound in turn, Shift with up or down zooms, and Home shows the whole map. Tab goes on to Play and Use… for the sound picked.",
     agentOff: "Kumi's agent half is off in this profile, so there's no map to show.",
     reading: "Reading the sound map…",
     empty: "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there.",
@@ -353,7 +353,7 @@ var ja = {
     tab: "サンプルマップ",
     canvas: "サンプルマップ",
     roledescription: "サンプルマップ",
-    keys: "矢印キーでサウンドを移動、Enter かスペースで選んだサウンドを再生、Escape で選択を解除、プラスとマイナスでズーム、0 でマップ全体を表示します。",
+    keys: "矢印キーでその方向の一番近いサウンドへ移動します。Shift と左右キーで全サウンドを順に移動、Shift と上下キーでズーム、Home でマップ全体を表示します。Tab で選んだサウンドの再生と使用に移れます。",
     agentOff: "このプロファイルでは Kumi のエージェント側がオフのため、表示できるマップがありません。",
     reading: "サンプルマップを読み込み中…",
     empty: "まだサンプルマップがありません。Kumi の設定でサンプルフォルダを追加し、Kumi にスキャンを頼んでください。見つかったサウンドからマップが作られます。",
@@ -602,7 +602,7 @@ var zh = {
     tab: "采样地图",
     canvas: "采样地图",
     roledescription: "采样地图",
-    keys: "方向键在声音之间移动，Enter 或空格播放选中的声音，Escape 取消选择，加号和减号缩放，0 显示整张地图。",
+    keys: "方向键移到该方向最近的声音。Shift 加左右键按顺序经过每个声音，Shift 加上下键缩放，Home 显示整张地图。按 Tab 可到所选声音的播放和使用。",
     agentOff: "此配置中 Kumi 的 Agent 部分已关闭，没有可显示的地图。",
     reading: "正在读取采样地图…",
     empty: "还没有采样地图。请在 Kumi 设置中添加采样文件夹，并让 Kumi 扫描；地图会根据找到的声音生成。",
@@ -2272,6 +2272,27 @@ function pick(model, view, size, px, py, radius = 8, visible) {
   }
   return best;
 }
+function mapKey(event) {
+  if (event.altKey || event.ctrlKey || event.metaKey) return null;
+  const direction = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] }[event.key];
+  if (direction) {
+    if (!event.shiftKey) return { move: direction };
+    return direction[0] ? { order: direction[0] } : { zoom: direction[1] < 0 ? 1.5 : 1 / 1.5 };
+  }
+  return event.key === "Home" && !event.shiftKey ? { fit: true } : null;
+}
+function moveWith(model, view, size, from, key, middle, visible) {
+  return "move" in key ? step(model, view, size, from, key.move, middle, visible) : stepOrder(model, from, key.order, visible);
+}
+function stepOrder(model, from, delta, visible) {
+  const count2 = model.points.length;
+  let index = from ?? (delta > 0 ? -1 : count2);
+  for (let tried = 0; tried < count2; tried++) {
+    index = ((index + delta) % count2 + count2) % count2;
+    if (index !== from && (!visible || visible(index))) return index;
+  }
+  return -1;
+}
 function step(model, view, size, from, direction, middle, visible) {
   const origin = from === void 0 ? middle : toScreen(view, size, model.points[from].x, model.points[from].y);
   const best = [-1, -1];
@@ -2346,7 +2367,6 @@ function resolve(canvas) {
     strong: read(CANVAS.strong, "#ddd")
   };
 }
-var ARROWS = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
 var maps = 0;
 function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, empty }) {
   const t = useT();
@@ -2486,12 +2506,19 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
     return rect ? [event.clientX - rect.left, event.clientY - rect.top] : [0, 0];
   };
   const onKey = (event) => {
-    if (!view || event.altKey || event.ctrlKey || event.metaKey) return;
-    const direction = ARROWS[event.key];
-    if (direction) {
-      event.preventDefault();
-      const from = selected === null ? void 0 : indexOf.get(selected);
-      const next = step(model, view, mapSize, from !== void 0 && visible(from) ? from : void 0, direction, [size.width / 2, size.height / 2], visible);
+    const key = mapKey(event);
+    if (!view || !key) return;
+    event.preventDefault();
+    const from = selected === null ? void 0 : indexOf.get(selected);
+    const picked = from !== void 0 && visible(from) ? from : void 0;
+    const middle = [size.width / 2, size.height / 2];
+    if ("fit" in key) {
+      setView(fitView(size.width, size.height));
+    } else if ("zoom" in key) {
+      const [x, y] = picked === void 0 ? middle : toScreen(view, mapSize, model.points[picked].x, model.points[picked].y);
+      setView(zoomAt(view, key.zoom, x, y));
+    } else {
+      const next = moveWith(model, view, mapSize, picked, key, middle, visible);
       if (next < 0) return;
       const point = model.points[next];
       const [x, y] = toScreen(view, mapSize, point.x, point.y);
@@ -2499,19 +2526,6 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
       onSelect(point.id);
       const sound = model.sounds[point.id];
       setSaid([clean(sound?.name ?? point.id, 80), clean(sound?.class, 16), clean(sound?.folder, 60)].filter(Boolean).join(", "));
-    } else if ((event.key === "Enter" || event.key === " ") && selected !== null) {
-      event.preventDefault();
-      onPick(selected);
-    } else if (event.key === "Escape" && selected !== null) {
-      event.preventDefault();
-      onSelect(null);
-      setSaid("");
-    } else if (event.key === "+" || event.key === "=" || event.key === "-") {
-      event.preventDefault();
-      setView(zoomAt(view, event.key === "-" ? 1 / 1.5 : 1.5, size.width / 2, size.height / 2));
-    } else if (event.key === "0") {
-      event.preventDefault();
-      setView(fitView(size.width, size.height));
     }
   };
   if (!model.points.length) {
