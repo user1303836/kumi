@@ -118,7 +118,8 @@
     if (!id) return null;
     const from = revision ? plainId(revision) : null;
     const said = clean(name ?? "", 80);
-    return `Use sound ${id}${from ? ` from map ${from}` : ""}${said ? ` (“${said}”)` : ""} on the selected track`;
+    const which = `sound ${id}${from ? ` from map ${from}` : ""}`;
+    return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`;
   }
   var LOOK_AGAIN_REQUEST = "Kumi, look at my project again before changing anything else";
   function cleanupWords(cleanup) {
