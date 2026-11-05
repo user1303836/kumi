@@ -262,7 +262,8 @@ class Approvals(unittest.TestCase):
         written = os.path.join(str(support.SAMPLES), "Pads", "..", "Drums") + os.sep
         decision = self.hook("kumi_library", {"action": "add_folder", "folder": written})
         self.assertEqual(decision["rule_key"], f"kumi:folder_read:{support.DRUMS}:s1")
-        self.assertTrue(decision["message"].startswith(f"Kumi: read the folder {support.DRUMS} and everything in it"))
+        self.assertEqual(decision["message"].splitlines()[1:3], [f"• {support.DRUMS}", policy.AUDIO_ONLY],
+                         "the folder as Kumi keeps it, and what it reads there (item 7: audio files only)")
         refused = ["Samples", str(support.ROOT), os.path.expanduser("~"), support.DRUMS + "\nKicks",
                    os.path.join(str(support.ROOT), "Users", "me", "Samples", "..", "..", "..")]
         if os.name == "nt":
@@ -331,7 +332,7 @@ class Approvals(unittest.TestCase):
         support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS}, session_id="s1")
         decision = self.hook("kumi_library", {"action": "scan"})
         self.assertEqual(decision["rule_key"], "kumi:folder_read:scan:s1")
-        self.assertIn(f"• {support.DRUMS}\n{policy.CHAT_ONLY}", decision["message"])
+        self.assertIn(f"• {support.DRUMS}\n{policy.AUDIO_ONLY}\n{policy.CHAT_ONLY}", decision["message"])
 
 
 class Blocked(unittest.TestCase):
