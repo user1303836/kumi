@@ -432,3 +432,17 @@ async fn an_explicit_start_moved_after_the_change_refuses_its_undo() {
     assert!(refused.to_string().contains("changed after apply"), "{refused}");
     assert_eq!(adapter.sim.state.borrow()["playback"]["transport"]["startTime"].as_f64(), Some(12.0));
 }
+
+/// While Live plays, undoing a change that moved the playhead puts back the rest (here the loop) and leaves the playhead
+/// and the start it moved as playback has them.
+#[tokio::test]
+async fn undoing_a_playhead_change_while_playing_puts_back_the_rest() {
+    let (adapter, host) = transport_host(28.0, 0.0);
+    let undone = apply_and_undo(&host, json!({"position": 8.0, "loopEnabled": true}), || {
+        adapter.sim.state.borrow_mut()["playback"]["transport"]["playing"] = json!(true)
+    })
+    .await;
+    assert_eq!(undone["state"], "undone", "{undone}");
+    assert_eq!(adapter.sim.state.borrow()["playback"]["transport"]["loop"]["enabled"], json!(false));
+    assert!(undone["restored"].get("startTime").is_none() && undone["restored"].get("position").is_none(), "{undone}");
+}

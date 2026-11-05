@@ -359,7 +359,7 @@ impl McpHost {
                 // Deleted either way. What the delete kept and whether it held are the Remote Script's reading in the
                 // delete's own step. A replay of a delete that already ran knows neither, so nothing is said to be kept.
                 let mut kept =
-                    selection.unwrap_or_else(|| json!({"before":keep["previous"]["row"],"after":null,"restored":false,"previous":false}));
+                    selection.unwrap_or_else(|| json!({"before":keep["previous"]["row"],"after":null,"restored":false,"previous":null}));
                 // Read again now, after that step: Live may move a selection on its next tick, as it does the playhead.
                 match self.selection_view(Some(&context)).await.ok().filter(|view| view["selection"].is_object()) {
                     Some(view) => {

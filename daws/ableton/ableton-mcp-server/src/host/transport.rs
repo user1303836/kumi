@@ -231,13 +231,16 @@ impl McpHost {
                     restore["startTime"] = if ours { prior["startTime"].clone() } else { json!(now) };
                 }
             }
-            if !reconciliation && current["playing"] == true && restore.get("startTime").is_some() {
+            // While Live plays, the playhead and the start its write moved are left as playback has them; only a start
+            // the change set itself refuses the undo.
+            if !reconciliation && current["playing"] == true && t["proposed"].get("startTime").is_some() {
                 return Ok(refuse(
                     "transport undo refused while playing: where play starts is put back only on a stopped transport; stop playback first",
                 ));
             }
             if !reconciliation && current["playing"] == true {
                 restore.as_object_mut().unwrap().remove("position");
+                restore.as_object_mut().unwrap().remove("startTime");
             }
             if !reconciliation && restore.as_object().unwrap().is_empty() {
                 return Ok(refuse("transport undo refused while playing: only the playhead changed; stop playback first"));
