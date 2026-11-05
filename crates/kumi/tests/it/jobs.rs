@@ -821,3 +821,109 @@ fn a_reports_first_line_is_plain_words() {
     assert_eq!(first_line("\n## What tape saturation emulates\n"), "What tape saturation emulates");
     assert_eq!(first_line("1. Groove Pool: repeatable swing"), "1. Groove Pool: repeatable swing");
 }
+
+local_test!(a_workers_tokens_count_finished_calls_while_it_runs_without_counting_the_final_total_twice, {
+    let first_seen = Rc::new(Notify::new());
+    let next_call = Rc::new(Notify::new());
+    let second_seen = Rc::new(Notify::new());
+    let finish = Rc::new(Notify::new());
+    let ended = Rc::new(Notify::new());
+    let first = Usage { input_tokens: 700., output_tokens: 100., cache_read_tokens: 200., cache_write_tokens: 50. };
+    let second = Usage { input_tokens: 500., output_tokens: 200., cache_read_tokens: 100., cache_write_tokens: 25. };
+    let total = Usage { input_tokens: 1200., output_tokens: 300., cache_read_tokens: 300., cache_write_tokens: 75. };
+    let worker: Script = {
+        let (first_seen, next_call, second_seen, finish) = (first_seen.clone(), next_call.clone(), second_seen.clone(), finish.clone());
+        let (first, second, total) = (first.clone(), second.clone(), total.clone());
+        Rc::new(move |turn| {
+            let (first_seen, next_call, second_seen, finish) = (first_seen.clone(), next_call.clone(), second_seen.clone(), finish.clone());
+            let (first, second, total) = (first.clone(), second.clone(), total.clone());
+            async move {
+                (turn.emit)(KernelEvent::Usage(first))?;
+                first_seen.notify_one();
+                next_call.notified().await;
+                (turn.emit)(KernelEvent::Usage(second))?;
+                second_seen.notify_one();
+                finish.notified().await;
+                (turn.emit)(KernelEvent::Text { text: "Found the vocal technique.".into() })?;
+                Ok(TurnResult { stop_reason: StopReason::Completed, usage: Some(total) })
+            }
+            .boxed_local()
+        })
+    };
+    let h = harness(starts_a_worker("tell"), worker, |options| {
+        let forward = options.on_event.clone();
+        let ended = ended.clone();
+        options.on_event = Rc::new(move |event| {
+            let finished = matches!(&event, SessionEvent::Job(status) if status.state.ended());
+            forward(event);
+            if finished {
+                ended.notify_one();
+            }
+        });
+    });
+    h.session.start().await.unwrap();
+    h.session.submit("research the vocals", None).await.unwrap();
+    first_seen.notified().await;
+    assert_eq!((h.last(1).unwrap().state, h.last(1).unwrap().tokens()), (JobState::Running, Some(800)));
+    assert_eq!(h.last(1).unwrap().usage, Some(first));
+    // Foreground turns don't reset the running worker's count.
+    h.session.submit("and carry on with the drums", None).await.unwrap();
+    assert_eq!(h.last(1).unwrap().tokens(), Some(800));
+    next_call.notify_one();
+    second_seen.notified().await;
+    assert_eq!((h.last(1).unwrap().state, h.last(1).unwrap().tokens()), (JobState::Running, Some(1500)));
+    assert_eq!(h.last(1).unwrap().usage, Some(total.clone()));
+    finish.notify_one();
+    ended.notified().await;
+    assert_eq!(h.last(1).unwrap().state, JobState::Done);
+    assert_eq!(h.last(1).unwrap().usage, Some(total));
+    h.session.close().await.unwrap();
+});
+
+local_test!(completed_worker_calls_keep_their_tokens_when_a_later_call_fails_or_the_worker_is_stopped, {
+    for stopped in [false, true] {
+        let seen = Rc::new(Notify::new());
+        let fail = Rc::new(Notify::new());
+        let ended = Rc::new(Notify::new());
+        let usage = Usage { input_tokens: 700., output_tokens: 100., cache_read_tokens: 200., cache_write_tokens: 50. };
+        let worker: Script = {
+            let (seen, fail, usage) = (seen.clone(), fail.clone(), usage.clone());
+            Rc::new(move |turn| {
+                let (seen, fail, usage) = (seen.clone(), fail.clone(), usage.clone());
+                async move {
+                    (turn.emit)(KernelEvent::Usage(usage))?;
+                    seen.notify_one();
+                    tokio::select! {
+                        _ = fail.notified() => Err(RuntimeError::plain("the next model call failed")),
+                        _ = turn.signal.cancelled() => Err(RuntimeError::Aborted),
+                    }
+                }
+                .boxed_local()
+            })
+        };
+        let h = harness(starts_a_worker("tell"), worker, |options| {
+            let forward = options.on_event.clone();
+            let ended = ended.clone();
+            options.on_event = Rc::new(move |event| {
+                let finished = matches!(&event, SessionEvent::Job(status) if status.state.ended());
+                forward(event);
+                if finished {
+                    ended.notify_one();
+                }
+            });
+        });
+        h.session.start().await.unwrap();
+        h.session.submit("research the vocals", None).await.unwrap();
+        seen.notified().await;
+        assert_eq!(h.last(1).unwrap().tokens(), Some(800));
+        if stopped {
+            assert!(h.session.stop_job(1));
+        } else {
+            fail.notify_one();
+        }
+        ended.notified().await;
+        assert_eq!(h.last(1).unwrap().state, if stopped { JobState::Stopped } else { JobState::Failed });
+        assert_eq!(h.last(1).unwrap().usage, Some(usage));
+        h.session.close().await.unwrap();
+    }
+});

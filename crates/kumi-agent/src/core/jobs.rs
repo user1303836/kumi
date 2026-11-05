@@ -164,6 +164,7 @@ pub struct JobStatus {
     pub steps: u32,
     /// Pages read and videos watched.
     pub sources: u32,
+    /// Completed model calls so far while running; the authoritative aggregate once finished, when one is returned.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub usage: Option<Usage>,
     /// Its report's first line once done; why, once it failed, stopped or was interrupted.
@@ -214,6 +215,7 @@ pub struct JobDetail {
 #[derive(Debug, Clone, Default)]
 pub struct JobOutcome {
     pub report: String,
+    /// The job's complete aggregate: replaces, rather than adds to, any usage its calls reported while running.
     pub usage: Option<Usage>,
     /// Why it couldn't finish, when it couldn't.
     pub failed: Option<String>,
@@ -491,6 +493,7 @@ impl Jobs {
                 }
                 (None, Ok(outcome)) => {
                     if let Some(usage) = outcome.usage {
+                        // The turn total includes the per-call events already shown while it ran.
                         job.status.usage = Some(usage);
                     }
                     let most = if outcome.whole { RESULT_BYTES } else { REPORT_BYTES };
@@ -704,9 +707,22 @@ impl JobHandle {
         });
     }
 
+    /// Replaces the job's running total with an authoritative aggregate, rather than adding it again.
     pub fn usage(&self, usage: &Usage) {
         let usage = usage.clone();
         self.update(|job| job.status.usage = Some(usage));
+    }
+
+    /// A completed model call's own usage, added while the worker still runs. If it later fails or is cancelled,
+    /// these completed calls remain visible even when no final turn total is returned.
+    fn call_usage(&self, usage: &Usage) {
+        self.update(|job| {
+            let total = job.status.usage.get_or_insert_with(Usage::default);
+            total.input_tokens += usage.input_tokens;
+            total.output_tokens += usage.output_tokens;
+            total.cache_read_tokens += usage.cache_read_tokens;
+            total.cache_write_tokens += usage.cache_write_tokens;
+        });
     }
 
     /// Where the job's own tools send their events: what they're doing and what they read become the job's.
@@ -743,7 +759,8 @@ impl JobHandle {
                 KernelEvent::ModelSwitch { model, back, .. } => {
                     handle.doing(&if back { "back on its own model".to_string() } else { format!("carrying on with {model}") })
                 }
-                KernelEvent::Steer { .. } | KernelEvent::Reasoning { .. } | KernelEvent::Usage(_) => {}
+                KernelEvent::Usage(usage) => handle.call_usage(&usage),
+                KernelEvent::Steer { .. } | KernelEvent::Reasoning { .. } => {}
             }
             Ok(())
         })
