@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use logic_kumi::ax::strings::Strings;
 use logic_kumi::fixtures::{Scene, SceneHands};
-use logic_kumi::helper::Launch;
+use logic_kumi::helper::{Helper, HelperError, Launch};
 use logic_kumi::scenes;
 use serde_json::{json, Value};
 
@@ -34,11 +34,143 @@ fn run(name: &str) -> (Vec<Value>, Vec<(String, Value)>) {
     let hands = SceneHands::new(&scene);
     let mut helper = Launch::launch(&mut hands.clone()).unwrap();
     let cases = scenes::run(helper.as_mut(), pid, Strings::english(), status, (id.as_deref(), path.as_deref(), &pname));
+    for (op, params) in hands.calls() {
+        assert!(["tree", "get", "windows", "action"].contains(&op.as_str()), "a native read wrote through {op}: {params}");
+        if op == "action" {
+            assert_eq!(params["name"], "AXPress");
+            assert!(
+                ["5.17", "5.19", "8.0", "8.1", "8.2", "8.3"].contains(&params["path"].as_str().unwrap()),
+                "a read pressed outside the recorded pane/tab controls: {params}"
+            );
+        }
+    }
     (cases, hands.unrecorded())
 }
 
 fn result(case: &Value) -> &Value {
     &case["response"]["result"]
+}
+
+/// Only the producer's recorded region-selection responses change in these derived scenarios. The original
+/// recording and all navigation replies remain intact, so the test still refuses unrecorded native helper calls.
+fn with_region_selection(reply: &mut Value, selected: bool, multiple: bool) {
+    let lanes = reply["node"]["c"].as_array_mut().unwrap();
+    let mut changed = 0;
+    for lane in lanes {
+        for region in lane.get_mut("c").and_then(Value::as_array_mut).into_iter().flatten() {
+            if region["role"] == "AXLayoutItem" && region["help"].as_str().is_some_and(|help| help.contains("Region starts")) {
+                assert_eq!(region["selected"], true, "the original recording's sole region is already selected");
+                region["selected"] = selected.into();
+                changed += 1;
+            }
+        }
+        if multiple {
+            if let Some(regions) = lane.get_mut("c").and_then(Value::as_array_mut).filter(|regions| !regions.is_empty()) {
+                let mut extra = regions[0].clone();
+                extra["i"] = "7.1.0.1.1.0.1.1".into();
+                extra["desc"] = "Another region".into();
+                regions.push(extra);
+            }
+        }
+    }
+    assert_eq!(changed, 1, "only the recorded region selection is adapted");
+}
+
+struct StoppedList {
+    inner: Box<dyn Helper>,
+    error: Option<HelperError>,
+    scenario: &'static str,
+    contents_reads: usize,
+}
+
+impl Helper for StoppedList {
+    fn call(&mut self, op: &str, params: Value) -> Result<Value, HelperError> {
+        if op == "tree" && params["path"] == "9" && params["depth"] == 7 {
+            if let Some(error) = self.error.take() {
+                return Err(error);
+            }
+        }
+        let contents = op == "tree" && params["path"] == "7.1.0.1.1.0" && params["depth"] == 3;
+        let mut reply = self.inner.call(op, params)?;
+        if contents && self.scenario != "prime" {
+            self.contents_reads += 1;
+            with_region_selection(
+                &mut reply,
+                self.scenario != "unselected" && (self.scenario != "changed" || self.contents_reads < 4),
+                self.scenario == "multiple",
+            );
+        }
+        Ok(reply)
+    }
+    fn event(&mut self, wait: std::time::Duration) -> Option<Value> {
+        self.inner.event(wait)
+    }
+    fn alive(&self) -> bool {
+        self.inner.alive()
+    }
+    fn quit(&mut self) {
+        self.inner.quit();
+    }
+}
+
+#[test]
+fn notes_never_select_a_region_on_success_refusal_helper_failure_or_cancellation() {
+    use logic_kumi::{project::Project, serve};
+    let original = Scene::load(&fixtures().join("scratch")).unwrap();
+    for scenario in ["selected", "unselected", "multiple", "changed", "failed", "cancelled"] {
+        for (method, params) in [
+            ("read", json!({"kind":"note", "parent":"1:region:1"})),
+            ("read", json!({"ref":"1:note:1.1"})),
+            ("focus_body", json!({"kind":"notes", "ref":"1:region:1"})),
+            ("focus_body", json!({"kind":"notes"})),
+        ] {
+            let pid = original.logic["pid"].as_u64().unwrap() as u32;
+            let hands = SceneHands::new(&original);
+            let inner = Launch::launch(&mut hands.clone()).unwrap();
+            let error = match scenario {
+                "failed" => Some(HelperError::Timeout),
+                "cancelled" => Some(HelperError::Gone("the bridge is stopping".into())),
+                _ => None,
+            };
+            let mut helper = StoppedList { inner, error: None, scenario: "prime", contents_reads: 0 };
+            let mut project = Project::new(Strings::english());
+            // Follow the original fixed request sequence through its first note read: the Mixer and list pane
+            // recordings then describe the same state. This is not a substitute simulator for navigation.
+            for (method, params) in scenes::fixed_requests().into_iter().take(8).skip(1) {
+                let answer = serve::answer(&mut project, &mut helper, pid, method, &params);
+                if params == json!({"kind":"note"}) {
+                    assert_eq!(answer.unwrap_err().0, "bad-params");
+                } else {
+                    assert!(answer.is_ok(), "priming {method} {params}: {answer:?}");
+                }
+            }
+            let primed_calls = hands.calls().len();
+            helper.error = error;
+            helper.scenario = scenario;
+            let answer = serve::answer(&mut project, &mut helper, pid, method, &params);
+            match scenario {
+                "selected" => assert!(answer.is_ok(), "{method} {params}: {answer:?}"),
+                "failed" | "cancelled" => assert!(answer.is_err(), "{scenario}: {answer:?}"),
+                _ => {
+                    let (code, message) = answer.unwrap_err();
+                    assert_eq!(code, "failed");
+                    assert!(message.contains("select only that region") && message.contains("selection unchanged"), "{message}");
+                }
+            }
+            let calls = hands.calls();
+            assert!(calls.iter().all(|(op, _)| op != "set" && op != "click" && !op.starts_with("midi.")), "{scenario}: {calls:?}");
+            // The only AX writes reachable by reads press the recorded pane/tab buttons. None targets a track,
+            // region or event selection. Errors and stop cannot invoke a selection-restoration write either.
+            for (_, params) in calls[primed_calls..].iter().filter(|(op, _)| op == "action") {
+                assert_eq!(params["name"], "AXPress");
+                assert!(["5.19", "8.0", "8.1"].contains(&params["path"].as_str().unwrap()), "{params}");
+            }
+            if matches!(scenario, "unselected" | "multiple") {
+                assert!(calls[primed_calls..].iter().all(|(op, _)| op != "action"), "an unselected notes refusal doesn't navigate panes");
+            }
+            assert!(hands.unrecorded().is_empty(), "{scenario} {method}: {:?}", hands.unrecorded());
+        }
+    }
 }
 
 #[test]

@@ -15,6 +15,7 @@ use std::time::{Duration, Instant};
 use daw_bridge::auth::Secret;
 use daw_bridge::files::{self, Discovery, DISCOVERY_SCHEMA};
 use daw_bridge::handshake::{ClientHandshake, ClientStep};
+use daw_bridge::paths::BridgePaths;
 use daw_bridge::wire::{Frame, Project, Request, PROTOCOL};
 use daw_bridge::{loopback, Daw};
 use logic_kumi::bridge::{self, Config, Outcome};
@@ -69,11 +70,17 @@ struct Lab {
 impl Lab {
     /// The bridge on `hands`, with short intervals, in a fresh Kumi folder.
     fn start(hands: &MockHands) -> Lab {
+        Self::start_with_reference(hands, false)
+    }
+
+    fn start_with_reference(hands: &MockHands, reference: bool) -> Lab {
         let dir = tempfile::tempdir().unwrap();
-        let mut config = Config::development(&dir.path().join("kumi"))
-            .unwrap()
-            .with_timing(Duration::from_millis(40), Duration::from_millis(120))
-            .without_mcu();
+        let home = dir.path().join("kumi");
+        let mut config = Config::development(&home).unwrap();
+        if reference {
+            config = Config::from_reference(&files::Reference::new(Daw::Logic, &BridgePaths::new(&home, Daw::Logic)));
+        }
+        config = config.with_timing(Duration::from_millis(40), Duration::from_millis(120));
         config.bundle = Some(dir.path().join("No Logic.app"));
         let secret = files::read_secret(&config.server.secret_file).unwrap();
         let discovery_dir = config.server.discovery_dir.clone();
@@ -221,6 +228,36 @@ impl Client {
                 return frame;
             }
         }
+    }
+}
+
+#[test]
+fn observing_a_project_never_opens_midi_or_answers_control_surface_queries_without_opt_in() {
+    for reference in [false, true] {
+        let hands = hands_showing(json!([tracks_window("Song - Tracks", Some(&format!("file://{SONG}")))]));
+        // MockHands returns this tree at every path. Its selected item makes a completed focus refresh observable;
+        // its empty Tracks area supplies the two groups the reader locates before that refresh.
+        hands.set_tree(json!({"role": "AXWindow", "c": [
+            {"i": "0", "role": "AXGroup", "desc": "Control Bar"},
+            {"i": "1", "role": "AXGroup", "desc": "Tracks", "c": [
+                {"i": "1.0", "role": "AXSplitGroup", "c": [
+                    {"role": "AXScrollArea", "c": [{"i": "1.0.0.0", "role": "AXGroup"}]},
+                    {"role": "AXScrollArea", "c": [{"i": "1.0.1.0", "role": "AXGroup"}]}
+                ]}
+            ]},
+            {"role": "AXLayoutItem", "desc": "Track 1 “Fixture”", "selected": true}
+        ]}));
+        let lab = Lab::start_with_reference(&hands, reference);
+        let mut client = lab.client();
+        wait_for("a completed focus refresh", || client.call("focus")["result"]["selection"]["trackRef"] == "1:track:1");
+        let before = hands.calls_of("apps");
+        hands.emit(json!({"event": "midi", "hex": "F0 00 00 66 14 00 F7"}));
+        // The app listing happens after the run loop drains helper events, so this proves the unsolicited query
+        // was processed without relying on how long a native tick takes.
+        wait_for("the next app listing after the MIDI query", || hands.calls_of("apps") > before);
+        assert_eq!(lab.finish(), Outcome::Stopped);
+        let midi: Vec<_> = hands.calls().into_iter().filter(|(op, _)| op.starts_with("midi.")).collect();
+        assert!(midi.is_empty(), "ordinary observation called the MIDI helper: {midi:?}");
     }
 }
 

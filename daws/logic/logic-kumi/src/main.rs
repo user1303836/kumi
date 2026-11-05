@@ -21,7 +21,7 @@ const HELPER_PREFIX: &str = "kumi-logic-hands";
 const HELPER_ENV: &str = "KUMI_LOGIC_HANDS";
 
 const USAGE: &str = "\
-usage: logic-kumi [--hosted] [--kumi-home <dir>] [--helper <path>] [--reference <path>]
+usage: logic-kumi [--hosted] [--mcu] [--kumi-home <dir>] [--helper <path>] [--reference <path>]
        logic-kumi --version | --help
 
 Kumi's Logic Pro bridge: finds the running Logic Pro through its helper, serves Kumi's bridge on 127.0.0.1
@@ -30,6 +30,8 @@ Kumi's Logic Pro bridge: finds the running Logic Pro through its helper, serves 
   --kumi-home <dir>    Kumi's folder (default: KUMI_HOME, else ~/.kumi)
   --hosted             stop when stdin ends (the host that started this bridge has gone); without this,
                        a development run stays until Logic quits or the bridge is signalled
+  --mcu                opt in to virtual Mackie Control MIDI ports (off by default); Logic may save a control
+                       surface for them, which stopping this bridge does not undo
   --helper <path>      the kumi-logic-hands helper (default: KUMI_LOGIC_HANDS, else a kumi-logic-hands-* file
                        beside this binary, else target/logic-hands/ in the checkout)
   --reference <path>   the reference file naming the secret, the discovery and log folders and the first port
@@ -43,6 +45,7 @@ struct Args {
     helper: Option<PathBuf>,
     reference: Option<PathBuf>,
     hosted: bool,
+    mcu: bool,
     version: bool,
     help: bool,
 }
@@ -57,6 +60,7 @@ fn parse_args(args: impl IntoIterator<Item = String>) -> Result<Args, String> {
             "--helper" => parsed.helper = Some(value("--helper")?),
             "--reference" => parsed.reference = Some(value("--reference")?),
             "--hosted" => parsed.hosted = true,
+            "--mcu" => parsed.mcu = true,
             "--version" | "-V" => parsed.version = true,
             "--help" | "-h" => parsed.help = true,
             other => return Err(format!("unknown argument {other:?}")),
@@ -166,7 +170,7 @@ fn main() -> ExitCode {
         Some(path) => Some(path.clone()),
         None => exe_dir.as_ref().map(|dir| dir.join(REFERENCE)).filter(|path| path.is_file()),
     };
-    let config = match reference {
+    let mut config = match reference {
         Some(path) => match Reference::read(&path) {
             Ok(reference) if reference.daw == Daw::Logic.id() => Config::from_reference(&reference),
             Ok(reference) => {
@@ -186,7 +190,11 @@ fn main() -> ExitCode {
             }
         },
     };
+    config.mcu = args.mcu;
     log::set_dir(Some(config.server.log_dir.clone().unwrap_or_else(|| bridge_paths.logs())));
+    if config.mcu {
+        log::line("--mcu opted in: Logic Pro may save a Mackie Control surface; closing the MIDI ports does not remove that configuration");
+    }
     let checkout = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..").join("..");
     let Some(helper) = find_helper(args.helper, std::env::var(HELPER_ENV).ok(), exe_dir.as_deref(), &checkout) else {
         log::line("no helper: build kumi-logic-hands (python3 scripts/build-logic-hands.py), or name it with --helper or KUMI_LOGIC_HANDS");
@@ -234,12 +242,14 @@ mod tests {
                 helper: Some("/h/hands".into()),
                 reference: Some("/r.json".into()),
                 hosted: false,
+                mcu: false,
                 version: false,
                 help: false
             }
         );
         assert!(parse_args(strings(&["--version"])).unwrap().version);
         assert!(parse_args(strings(&["--hosted", "--kumi-home", "/k"])).unwrap().hosted);
+        assert!(parse_args(strings(&["--mcu"])).unwrap().mcu);
         assert!(parse_args(strings(&["-h"])).unwrap().help);
         assert!(parse_args(strings(&["--helper"])).is_err());
         assert!(parse_args(strings(&["--port", "1"])).is_err());

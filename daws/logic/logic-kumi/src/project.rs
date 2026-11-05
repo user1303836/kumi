@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -117,6 +118,8 @@ pub struct Project {
     pub selection: Selection,
     pub key_signature: String,
     pub sample_rate: Option<u32>,
+    sample_rate_pending: Option<(String, Receiver<Option<u32>>)>,
+    sample_rate_probed: Option<String>,
     /// How many helper calls the last full-window walk took and how long: the lab's number.
     pub last_walk_ms: Option<u64>,
 }
@@ -139,6 +142,8 @@ impl Project {
             selection: Selection::default(),
             key_signature: String::new(),
             sample_rate: None,
+            sample_rate_pending: None,
+            sample_rate_probed: None,
             last_walk_ms: None,
         }
     }
@@ -152,7 +157,47 @@ impl Project {
         if changed {
             self.forget();
             self.layout = Layout::default();
-            self.sample_rate = path.and_then(sample_rate_of);
+            self.sample_rate = None;
+            self.sample_rate_probed = None;
+        }
+        self.poll_sample_rate();
+    }
+
+    /// Optional disk metadata never holds up the helper's sole run loop. At most one probe is outstanding, including
+    /// across project changes; a late answer belongs only to the exact path that was asked for.
+    fn poll_sample_rate(&mut self) {
+        if let Some((path, answer)) = &self.sample_rate_pending {
+            let result = match answer.try_recv() {
+                Ok(rate) => Some(rate),
+                Err(TryRecvError::Disconnected) => Some(None),
+                Err(TryRecvError::Empty) => None,
+            };
+            if let Some(rate) = result {
+                if self.path.as_ref() == Some(path) {
+                    self.sample_rate = rate;
+                    self.sample_rate_probed = Some(path.clone());
+                }
+                self.sample_rate_pending = None;
+            }
+        }
+        if self.sample_rate_pending.is_none() && self.path != self.sample_rate_probed {
+            if let Some(path) = self.path.clone() {
+                let (send, receive) = mpsc::channel();
+                let probe_path = path.clone();
+                // A slow filesystem can stall this one disposable worker, never status or hosted shutdown. It is
+                // not joined on exit, and no further worker is launched until this one ends.
+                if std::thread::Builder::new()
+                    .name("logic-metadata".into())
+                    .spawn(move || {
+                        let _ = send.send(sample_rate_of(&probe_path));
+                    })
+                    .is_ok()
+                {
+                    self.sample_rate_pending = Some((path, receive));
+                } else {
+                    self.sample_rate_probed = Some(path);
+                }
+            }
         }
     }
 
@@ -431,25 +476,28 @@ impl Project {
         Ok(paths::rows(&table).iter().filter_map(|row| rows::signature_of(row, &columns, &self.strings)).collect())
     }
 
-    /// The notes of a region: the Event List shows the selected region's events, so the region is selected first
-    /// (through its item in the Tracks area) when it isn't.
+    /// The Event List shows the producer's selection, which a read must never change. More than one selected region
+    /// would mix their events, so require the requested region alone and check again after reading the list.
     pub fn read_notes(&mut self, ax: &mut Ax, region_place: usize, beats_per_bar: u32) -> Result<Vec<Note>, AxError> {
+        let region = self.notes_selection(ax, region_place)?;
+        let (columns, table) = self.read_list(ax, "Event")?;
+        if self.notes_selection(ax, region_place)? != region {
+            return Err(AxError::NotesSelection);
+        }
+        Ok(paths::rows(&table).iter().filter_map(|row| Note::of(row, &columns, beats_per_bar, &self.strings)).collect())
+    }
+
+    fn notes_selection(&self, ax: &mut Ax, region_place: usize) -> Result<(usize, Region), AxError> {
         let contents = self.contents(ax)?;
         let area = TracksArea { contents: Some(&contents), ..TracksArea::default() };
         let regions = focus::regions(&area, &self.strings);
-        let (_, region) = regions.get(region_place - 1).ok_or_else(|| AxError::Missing("that region".into()))?;
-        if !region.selected {
-            let items: Vec<&Node> = contents
-                .children
-                .iter()
-                .filter(|c| c.role == "AXLayoutArea")
-                .flat_map(|lane| lane.children.iter().filter(|c| c.role == "AXLayoutItem"))
-                .collect();
-            let item = items.get(region_place - 1).ok_or_else(|| AxError::Missing("that region".into()))?;
-            ax.set(&self.root, &item.path, "AXSelected", json!(true), SETTLE_MS)?;
+        let region = regions
+            .get(region_place.checked_sub(1).ok_or_else(|| AxError::Missing("that region".into()))?)
+            .ok_or_else(|| AxError::Missing("that region".into()))?;
+        if !region.1.selected || regions.iter().filter(|(_, region)| region.selected).count() != 1 {
+            return Err(AxError::NotesSelection);
         }
-        let (columns, table) = self.read_list(ax, "Event")?;
-        Ok(paths::rows(&table).iter().filter_map(|row| Note::of(row, &columns, beats_per_bar, &self.strings)).collect())
+        Ok(region.clone())
     }
 
     /// Selects a track (by its place, from 1) as a producer would: a click on its header's name field, which selects
@@ -501,6 +549,7 @@ impl Project {
 
     /// One focus refresh: the transport from the control bar, the selected header and region, which panes are open.
     pub fn look(&mut self, ax: &mut Ax, busy: Option<&'static str>) -> Result<(Look, Vec<Header>, Vec<(usize, Region)>), AxError> {
+        self.poll_sample_rate();
         if self.root != Root::Main && self.layout.control_bar.is_some() {
             self.check_project_chooser(ax)?;
         }
@@ -649,6 +698,7 @@ impl Project {
 
     /// A region's note rows, read unless read a moment ago.
     pub fn notes_rows(&mut self, ax: &mut Ax, region_place: usize, beats_per_bar: u32) -> Result<Vec<Value>, AxError> {
+        self.notes_selection(ax, region_place)?;
         if let Some((at, rows)) = self.notes.get(&region_place) {
             if at.elapsed() < LISTS_FOR {
                 return Ok(rows.clone());
@@ -706,35 +756,210 @@ impl Marker {
     }
 }
 
-/// The project's sample rate from its package's `MetaData.plist` (`SampleRate`), when the package can be read: macOS
-/// keeps `~/Music/Logic` from processes without the Files and Folders permission, and then it is unknown.
+/// The optional sample rate from the one expected metadata file. No directory enumeration or external process is
+/// needed: unsupported binary plists, inaccessible packages and uncertain metadata leave the rate unknown.
 pub fn sample_rate_of(path: &str) -> Option<u32> {
-    let package = Path::new(path);
-    let alternatives = package.join("Alternatives");
-    let mut candidates = vec![package.join("Alternatives/000/MetaData.plist")];
-    if let Ok(entries) = std::fs::read_dir(&alternatives) {
-        for entry in entries.flatten() {
-            candidates.push(entry.path().join("MetaData.plist"));
-        }
+    use std::io::Read;
+    const MOST_BYTES: u64 = 65_536;
+    if path.len() > 4096 || !Path::new(path).is_absolute() {
+        return None;
     }
-    for candidate in candidates {
-        let Ok(output) =
-            std::process::Command::new("/usr/bin/plutil").args(["-extract", "SampleRate", "raw", "-o", "-"]).arg(&candidate).output()
-        else {
-            continue;
-        };
-        if output.status.success() {
-            if let Ok(rate) = String::from_utf8_lossy(&output.stdout).trim().parse::<f64>() {
-                return Some(rate as u32);
-            }
-        }
+    let file = metadata_file(&Path::new(path).join("Alternatives/000/MetaData.plist"))?;
+    let metadata = file.metadata().ok()?;
+    if !metadata.is_file() || metadata.len() > MOST_BYTES {
+        return None;
     }
+    let mut bytes = Vec::new();
+    file.take(MOST_BYTES + 1).read_to_end(&mut bytes).ok()?;
+    if bytes.len() > MOST_BYTES as usize {
+        return None;
+    }
+    sample_rate_xml(std::str::from_utf8(&bytes).ok()?)
+}
+
+/// Open each component relative to the already opened directory. A symlink (including a replaced ancestor), FIFO,
+/// device or socket cannot turn an optional metadata read into an arbitrary file read or blocking stream.
+#[cfg(unix)]
+fn metadata_file(path: &Path) -> Option<std::fs::File> {
+    use std::ffi::CString;
+    use std::os::fd::{AsRawFd, FromRawFd};
+    use std::os::unix::ffi::OsStrExt;
+    use std::path::Component;
+    let mut directory = std::fs::File::open("/").ok()?;
+    let mut parts = path.components().peekable();
+    if parts.next()? != Component::RootDir {
+        return None;
+    }
+    let mut count = 0;
+    while let Some(part) = parts.next() {
+        if count >= 256 {
+            return None;
+        }
+        count += 1;
+        let Component::Normal(name) = part else { return None };
+        let name = CString::new(name.as_bytes()).ok()?;
+        let last = parts.peek().is_none();
+        let flags = libc::O_RDONLY | libc::O_CLOEXEC | libc::O_NOFOLLOW | libc::O_NONBLOCK | if last { 0 } else { libc::O_DIRECTORY };
+        let fd = unsafe { libc::openat(directory.as_raw_fd(), name.as_ptr(), flags) };
+        if fd < 0 {
+            return None;
+        }
+        directory = unsafe { std::fs::File::from_raw_fd(fd) };
+    }
+    directory.metadata().ok()?.is_file().then_some(directory)
+}
+
+#[cfg(not(unix))]
+fn metadata_file(_path: &Path) -> Option<std::fs::File> {
     None
+}
+
+/// Accept only a small, unambiguous XML plist dictionary with a numeric SampleRate. This deliberately does not
+/// interpret entities, nested dictionaries, binary objects, fractional rates or nonfinite numbers.
+fn sample_rate_xml(text: &str) -> Option<u32> {
+    let mut text = text.trim_start_matches('\u{feff}').trim();
+    if text.starts_with("<?xml ") {
+        text = text.split_once("?>")?.1.trim();
+    }
+    if text.starts_with("<!DOCTYPE plist ") {
+        let (declaration, rest) = text.split_once('>')?;
+        if declaration.contains('[') {
+            return None;
+        }
+        text = rest.trim();
+    }
+    let text = text.strip_prefix("<plist version=\"1.0\">").or_else(|| text.strip_prefix("<plist>"))?;
+    let text = text.trim().strip_prefix("<dict>")?;
+    let mut text = text.trim().strip_suffix("</plist>")?.trim().strip_suffix("</dict>")?.trim();
+    let mut rate = None;
+    while !text.is_empty() {
+        let (key, rest) = text.strip_prefix("<key>")?.split_once("</key>")?;
+        if key.contains(['<', '&']) {
+            return None;
+        }
+        let rest = rest.trim_start();
+        if let Some(rest) = rest.strip_prefix("<true/>").or_else(|| rest.strip_prefix("<false/>")) {
+            if key == "SampleRate" {
+                return None;
+            }
+            text = rest.trim_start();
+            continue;
+        }
+        let (kind, number, rest) = ["integer", "real", "string", "date", "data"].into_iter().find_map(|kind| {
+            let rest = rest.strip_prefix(&format!("<{kind}>"))?;
+            let (value, rest) = rest.split_once(&format!("</{kind}>"))?;
+            Some((kind, value, rest))
+        })?;
+        if number.contains(['<', '&']) {
+            return None;
+        }
+        if key == "SampleRate" {
+            if rate.is_some() || !matches!(kind, "integer" | "real") {
+                return None;
+            }
+            let value = number.trim().parse::<f64>().ok()?;
+            if !value.is_finite() || value.fract() != 0.0 || !(8_000.0..=768_000.0).contains(&value) {
+                return None;
+            }
+            rate = Some(value as u32);
+        }
+        text = rest.trim_start();
+    }
+    rate
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn uncertain_sample_rate_metadata_is_unknown_without_running_a_program() {
+        let plist = |body: &str| format!("<plist version=\"1.0\"><dict>{body}</dict></plist>");
+        assert_eq!(sample_rate_xml(&plist("<key>SampleRate</key><real>48000.0</real>")), Some(48_000));
+        assert_eq!(
+            sample_rate_xml(&plist("<key>Other</key><string>value</string><key>SampleRate</key><integer>44100</integer>")),
+            Some(44_100)
+        );
+        for body in [
+            "<key>SampleRate</key><real>NaN</real>",
+            "<key>SampleRate</key><real>48000.5</real>",
+            "<key>SampleRate</key><integer>0</integer>",
+            "<key>SampleRate</key><string>48000</string>",
+            "<key>SampleRate</key><integer>48000</integer><key>SampleRate</key><integer>44100</integer>",
+            "<key>Other</key><dict><key>SampleRate</key><integer>48000</integer></dict>",
+            "<key>Other</key><string>&entity;</string><key>SampleRate</key><integer>48000</integer>",
+            "<key>SampleRate</key><integer>48000</integer>broken",
+        ] {
+            assert_eq!(sample_rate_xml(&plist(body)), None, "{body}");
+        }
+        assert_eq!(sample_rate_xml("bplist00"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_optional_probe_reads_only_one_bounded_regular_file_without_following_symlinks() {
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        let package = root.join("Saved.logicx");
+        let alternative = package.join("Alternatives/000");
+        std::fs::create_dir_all(&alternative).unwrap();
+        let metadata = alternative.join("MetaData.plist");
+        let xml = b"<plist><dict><key>SampleRate</key><integer>48000</integer></dict></plist>";
+        std::fs::write(&metadata, xml).unwrap();
+        assert_eq!(sample_rate_of(package.to_str().unwrap()), Some(48_000));
+        for bytes in [vec![b'x'; 65_537], b"bplist00unsupported".to_vec()] {
+            std::fs::write(&metadata, bytes).unwrap();
+            assert_eq!(sample_rate_of(package.to_str().unwrap()), None);
+        }
+        std::fs::write(&metadata, xml).unwrap();
+        let link = root.join("Linked.logicx");
+        symlink(&package, &link).unwrap();
+        assert_eq!(sample_rate_of(link.to_str().unwrap()), None, "the package is a symlink");
+        let original = root.join("Metadata.plist");
+        std::fs::rename(&metadata, &original).unwrap();
+        symlink(&original, &metadata).unwrap();
+        assert_eq!(sample_rate_of(package.to_str().unwrap()), None, "the final file is a symlink");
+        std::fs::remove_file(&metadata).unwrap();
+        std::fs::rename(&original, &metadata).unwrap();
+        let alternatives = package.join("Alternatives");
+        let moved = root.join("Alternatives");
+        std::fs::rename(&alternatives, &moved).unwrap();
+        symlink(&moved, &alternatives).unwrap();
+        assert_eq!(sample_rate_of(package.to_str().unwrap()), None, "an ancestor is a symlink");
+        std::fs::remove_file(&alternatives).unwrap();
+        std::fs::rename(&moved, &alternatives).unwrap();
+        std::fs::rename(&alternative, alternatives.join("001")).unwrap();
+        assert_eq!(sample_rate_of(package.to_str().unwrap()), None, "other alternatives aren't enumerated");
+        std::fs::create_dir(&alternative).unwrap();
+        let fifo = std::ffi::CString::new(metadata.to_str().unwrap()).unwrap();
+        assert_eq!(unsafe { libc::mkfifo(fifo.as_ptr(), 0o600) }, 0);
+        assert_eq!(sample_rate_of(package.to_str().unwrap()), None, "a FIFO isn't opened as a blocking stream");
+    }
+
+    #[test]
+    fn a_pending_metadata_probe_never_blocks_or_populates_an_unsaved_project() {
+        let mut project = Project::new(Strings::english());
+        let path = "/fixture/Saved.logicx".to_string();
+        let (send, answer) = mpsc::channel();
+        project.path = Some(path.clone());
+        project.sample_rate_pending = Some((path, answer));
+        project.poll_sample_rate();
+        assert!(project.sample_rate_pending.is_some(), "an unanswered worker stays the only probe");
+        project.set_identity(None, None, "Unsaved");
+        assert!(project.sample_rate_pending.is_some(), "changing projects doesn't launch another worker");
+        send.send(Some(48_000)).unwrap();
+        project.poll_sample_rate();
+        assert_eq!(project.sample_rate, None, "a saved project's late metadata doesn't survive an unsaved snapshot");
+        assert!(project.sample_rate_pending.is_none());
+        let (send, answer) = mpsc::channel();
+        project.path = Some("/fixture/Current.logicx".into());
+        project.sample_rate_pending = Some(("/fixture/Current.logicx".into(), answer));
+        send.send(Some(44_100)).unwrap();
+        project.poll_sample_rate();
+        assert_eq!(project.sample_rate, Some(44_100));
+        assert!(project.sample_rate_pending.is_none());
+    }
 
     #[test]
     fn the_epoch_moves_when_a_header_or_region_appears_vanishes_moves_or_is_renamed() {

@@ -29,6 +29,8 @@ pub enum AxError {
     Missing(String),
     /// Logic's stable AXIdentifier identifies its project chooser, even though macOS reports a standard window.
     ChoosingProject,
+    /// Event List notes are ambiguous unless the producer selected only the requested region.
+    NotesSelection,
 }
 
 impl std::fmt::Display for AxError {
@@ -37,6 +39,9 @@ impl std::fmt::Display for AxError {
             AxError::Helper(error) => write!(f, "{error}"),
             AxError::Missing(what) => write!(f, "Logic Pro's window doesn't show {what}"),
             AxError::ChoosingProject => f.write_str(crate::logic::Busy::ChoosingProject.reason()),
+            AxError::NotesSelection => {
+                f.write_str("select only that region in Logic Pro before reading its notes; Kumi leaves the producer's selection unchanged")
+            }
         }
     }
 }

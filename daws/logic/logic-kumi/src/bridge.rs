@@ -47,7 +47,7 @@ pub struct Config {
     pub apps_every: Duration,
     /// How often the focus is refreshed.
     pub refresh: Duration,
-    /// Whether to open the Mackie Control's ports (tests over a mock helper don't).
+    /// Explicit opt-in to Mackie Control ports: Logic may persist a control-surface configuration for them.
     pub mcu: bool,
     /// Where Logic's app bundle is, for its string tables; found from the running app when None.
     pub bundle: Option<std::path::PathBuf>,
@@ -60,7 +60,7 @@ impl Config {
             poll: POLL,
             apps_every: APPS_EVERY,
             refresh: REFRESH,
-            mcu: true,
+            mcu: false,
             bundle: None,
         }
     }
@@ -81,7 +81,7 @@ impl Config {
             poll: POLL,
             apps_every: APPS_EVERY,
             refresh: REFRESH,
-            mcu: true,
+            mcu: false,
             bundle: None,
         })
     }
@@ -94,7 +94,7 @@ impl Config {
         self
     }
 
-    /// No Mackie Control ports: tests, and a Logic whose control surfaces mustn't be touched.
+    /// No Mackie Control ports, as in an ordinary observation run.
     pub fn without_mcu(mut self) -> Config {
         self.mcu = false;
         self
@@ -405,6 +405,9 @@ impl Attached {
     }
 
     fn on_midi(&mut self, event: &Value, helper: &mut dyn Helper) {
+        if !self.mcu.open {
+            return;
+        }
         let reaction = self.mcu.on_event(event, helper);
         if reaction.transport_changed {
             // The LEDs say before the control bar does: the next refresh carries the detail; the event goes now.
