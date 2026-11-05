@@ -25,8 +25,9 @@ pub struct PluginStep {
     /// it has one: allowed though it's called `path`, its value still never a file's path.
     pub browser_field: Option<&'static str>,
     /// Values of its input it refuses, by field name, wherever in the input the field is: `("action", &["delete-return"])`.
-    /// A true or false, or a number, is matched by how JSON writes it (`("clear", &["true"])`); `"*"` refuses the field
-    /// whatever it holds (`("remove", &["*"])`).
+    /// A text is matched whatever its case and the spaces around it ("main" is refused as "Main"); a true or false, or a
+    /// number, by how JSON writes it (`("clear", &["true"])`); `"*"` refuses the field whatever it holds
+    /// (`("remove", &["*"])`).
     pub refused: &'static [(&'static str, &'static [&'static str])],
     /// Why it refuses a field, by the field's name, said when it does: `("arm", "…is for recording…")`. A refused field
     /// without one is refused as deleting or not undoable.
@@ -239,7 +240,10 @@ fn walk(step: &PluginStep, field: &str, value: &Value) -> Result<(), String> {
     if NEVER.contains(&plain.as_str()) && step.browser_field != Some(field) {
         return Err(format!("{}'s {field} names a file or holds raw data or code, which Kumi for Hermes doesn't change.", step.tool));
     }
-    let refused = |text: &str| step.refused.iter().any(|(name, values)| *name == field && values.contains(&text));
+    let refused = |text: &str| {
+        let text = text.trim();
+        step.refused.iter().any(|(name, values)| *name == field && values.iter().any(|value| value.eq_ignore_ascii_case(text)))
+    };
     if refused("*") {
         return Err(refusal(step, field, None));
     }
@@ -376,6 +380,7 @@ mod tests {
         assert!(why(json!({"arm": false})).ends_with("arm: it's for recording."), "whatever it holds");
         assert!(why(json!({"inputType": "Main"})).ends_with("inputType Main: it crashes."), "that value");
         assert!(why(json!({"monitoring": "in"})).contains("deletes, or can't be undone"), "a field without a reason");
+        assert!(check(&ROUTING, "set_routing", &json!({"inputType": " main "})).is_err(), "whatever its case and spaces");
         assert!(check(&ROUTING, "set_routing", &json!({"inputType": "Bass"})).is_ok());
     }
 

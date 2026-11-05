@@ -19,14 +19,18 @@ pub static PLUGIN_STEPS: &[PluginStep] = &[
     PluginStep::new("set_locators", "locators"),
     PluginStep::new("set_track_color", "color"),
     PluginStep::new("set_mixer_options", "mixer"),
-    // Where a track's sound comes from and goes, only: arming and monitoring are for recording, and Live crashes when a
-    // track's input is Main (Live's host refuses that too).
+    // Where a track's sound comes from and goes, only: arming and monitoring are for recording, and Live 12.4 crashed,
+    // losing unsaved work, when Kumi set a track's input to Main (#195; Live's host refuses that too).
     PluginStep::new("set_routing", "mixer")
         .refusing(&[("arm", &["*"]), ("monitoring", &["*"]), ("inputType", &["Main", "Master"])])
         .because(&[
             ("arm", "arming a track is for recording, which Kumi for Hermes doesn't do."),
             ("monitoring", "a track's monitoring is for recording, which Kumi for Hermes doesn't do."),
-            ("inputType", "Live crashes when a track's input is Main (Live 11 called it Master); \"Resampling\" takes the mix."),
+            (
+                "inputType",
+                "Live crashes when a track's input is Main (Live 11 called it Master); \"Resampling\" takes the mix. A track \
+                 named Main or Master can't be told from it: rename that track to take it as an input.",
+            ),
         ])
         .described(
             "Route a track: its input (inputType and inputSubRouting, such as another track and \"Post FX\", or \
@@ -167,13 +171,15 @@ mod tests {
         for tool in ["move_clip", "load_sample_to_pad", "capture_midi", "use_looper", "delete_track", "record"] {
             assert!(check(PLUGIN_STEPS, tool, &json!({})).is_err(), "{tool}");
         }
-        // Routing, but nothing that records, and never Main as an input: Live crashes.
+        // Routing, but nothing that records, and never Main as an input, however it's written: Live crashes (#195).
         for input in [
             json!({"trackRef":"t1","arm":true}),
             json!({"trackRef":"t1","arm":false}),
             json!({"trackRef":"t1","outputType":"Drum Bus","monitoring":"in"}),
             json!({"trackRef":"t1","inputType":"Main"}),
             json!({"trackRef":"t1","inputType":"Master"}),
+            json!({"trackRef":"t1","inputType":"main"}),
+            json!({"trackRef":"t1","inputType":" MASTER "}),
         ] {
             assert!(check(PLUGIN_STEPS, "set_routing", &input).is_err(), "{input}");
         }
