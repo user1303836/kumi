@@ -1,0 +1,278 @@
+"""`hermes kumi doctor` and `/kumi doctor`: what Kumi needs in this Hermes profile, item by item, each with what to do.
+
+Read only. Hermes's settings come through the host (`Host.hermes_config`, Hermes's documented config reader, and the
+plugin's own settings); Kumi's state from its plugin data: setup's records, what the runtime last published, and its job
+records. It never opens Hermes's .env or auth.json, starts no runtime, writes nothing and asks nothing. Hermes Desktop
+keeps its plugin switches itself, so they're the one item it can only describe. Nothing it prints names a folder on
+this computer: `/kumi doctor`'s answer stays in a chat's transcript.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+from . import listening, policy, schemas, setup, snapshots, tools
+
+OK, FIX, CHECK, OFF = "ok", "fix", "check", "off"
+_MARKS = {OK: "OK   ", FIX: "FIX  ", CHECK: "CHECK", OFF: "OFF  "}
+_WIDTH = 400  # one item's words, as one line
+
+
+def checks(host: tools.Host, **chat: Any) -> list[dict]:
+    """Every item, in the order the report shows them. `chat` is a chat's call context (`/kumi doctor`): a chat's own
+    /yolo is then read too, which a terminal can't see."""
+    data = Path(host.data_dir())
+    state = data / "state"
+    daw = host.daw()
+    app = schemas.DAW_NAMES.get(daw, daw)
+    config = host.hermes_config()
+    report = setup.status(daw=daw, data_dir=data, plugin_dir=host.plugin_dir)
+    shown = setup.for_model(report)  # setup's words naming no path on this computer
+    status = snapshots.status(state)
+    items = [_approvals(host, config, chat=bool(chat.get("session_id"))), _isolation(config), _hook(host),
+             _listening(host, config), _hermes(), _runtime(report, shown), _part(report, shown, app),
+             _connection(status, report, app), _project(status, app), _library(host, state), _audio(shown)]
+    mirelo = getattr(host, "mirelo_status", None)  # Mirelo's readiness, where this version of Kumi has it
+    if callable(mirelo):
+        items.append(_mirelo(mirelo()))
+    items.append(_desktop())
+    return items
+
+
+def report(items: list[dict]) -> str:
+    """The items as the terminal and the chat show them, then what's left to do."""
+    lines = ["Kumi doctor: what Kumi needs in this profile (read only: nothing was changed)."]
+    for item in items:
+        lines.append(f"{_MARKS.get(item['state'], 'CHECK')} {_said(item['name'], 60)}: {_said(item['detail'])}")
+        if item.get("fix"):
+            lines.append(f"      To do: {_said(item['fix'])}")
+    fix = sum(item["state"] == FIX for item in items)
+    check = sum(item["state"] == CHECK for item in items)
+    if not fix and not check:
+        lines.append("Everything Kumi needs is in place.")
+    else:
+        lines.append(f"{fix} to fix, {check} to check.")
+    return "\n".join(lines)
+
+
+def needs_fixing(items: list[dict]) -> bool:
+    return any(item["state"] == FIX for item in items)
+
+
+def _item(name: str, state: str, detail: str, fix: str = "") -> dict:
+    return {"name": name, "state": state, "detail": detail, "fix": fix}
+
+
+def _said(text: Any, limit: int = _WIDTH) -> str:
+    return policy.one_line(text, limit) if text is not None else ""
+
+
+def _section(config: dict, name: str) -> dict:
+    value = config.get(name)
+    return value if isinstance(value, dict) else {}
+
+
+# ---- Hermes's settings ----------------------------------------------------------------------------------------------
+
+def _approvals(host: tools.Host, config: dict, *, chat: bool) -> dict:
+    name = "Approvals"
+    bypassed = tools.approvals_bypassed(host, chat=chat)
+    if bypassed:
+        return _item(name, FIX, tools.NO_APPROVALS,
+                     "Set approvals.mode: manual in Hermes's config.yaml, run Hermes without --yolo, and turn /yolo off.")
+    gaps = tools.approval_gaps(host)
+    if gaps:
+        return _item(name, FIX, " ".join(gaps),
+                     "Set approvals.single_query_mode: deny and delegation.subagent_auto_approve: false in config.yaml.")
+    mode = _section(config, "approvals").get("mode", "manual")
+    if isinstance(mode, str) and mode.strip().lower() == "smart":
+        return _item(name, CHECK, "Hermes's approvals are smart (its default): Hermes's guardian approves some calls "
+                                  "itself, so a Kumi change may run without asking you.",
+                     "For Hermes to ask you before each Kumi change, set approvals.mode: manual in config.yaml.")
+    if bypassed is None:
+        return _item(name, CHECK, tools.UNKNOWN_APPROVALS, "Check that /yolo is off in this chat.")
+    seen = "" if chat else " A terminal can't see a chat's /yolo: check that it's off where you use Kumi."
+    return _item(name, OK, f"Hermes asks before each Kumi change (approvals.mode: manual).{seen}")
+
+
+def _isolation(config: dict) -> dict:
+    isolation = _section(config, "plugins").get("isolation", "in_process")
+    if isinstance(isolation, str) and isolation.strip().lower() == "host":
+        return _item("Plugin isolation", FIX,
+                     "Hermes runs plugins in its plugin host (plugins.isolation: host): the hermes kumi commands aren't "
+                     "there (/kumi is), and Kumi can't see a chat's /yolo.",
+                     "Set plugins.isolation: in_process (Hermes's default) in config.yaml, then restart Hermes.")
+    return _item("Plugin isolation", OK, "Kumi runs in Hermes's own process (plugins.isolation: in_process).")
+
+
+def _hook(host: tools.Host) -> dict:
+    timeout = host.hook_timeout()
+    budget = policy.preview_timeout(timeout)
+    if budget < policy.PREVIEW_TIMEOUT:
+        return _item("Hook time", FIX, f"plugins.hook_callback_timeout is {timeout:g} s, so Kumi has only {budget:g} s "
+                                       "to read the project and prepare a change's approval.",
+                     "Set plugins.hook_callback_timeout to 30 (Hermes's default) or more in config.yaml.")
+    setting = "no limit" if timeout is None or timeout <= 0 else f"{timeout:g} s"
+    return _item("Hook time", OK, f"Kumi has {budget:g} s to prepare each approval (plugins.hook_callback_timeout: "
+                                  f"{setting}).")
+
+
+def _listening(host: tools.Host, config: dict) -> dict:
+    name = "Listening model"
+    if not host.listen_interpretation():
+        return _item(name, OFF, "Interpret measurements with a model is off: Kumi measures audio itself, and no model "
+                                "reads the measurements.")
+    auxiliary = _section(config, "auxiliary")
+    task = auxiliary.get(listening.AUX_TASK_KEY) if isinstance(auxiliary.get(listening.AUX_TASK_KEY), dict) else {}
+    vision = auxiliary.get("vision") if isinstance(auxiliary.get("vision"), dict) else {}
+    model = task.get("model") or vision.get("model")
+    which = f"{_said(model, 80)}" if model else "the model Hermes's Vision slot uses"
+    return _item(name, CHECK, f"Interpret measurements with a model is on, with {which}. Kumi can't tell from here "
+                              "whether it takes images: if it doesn't, the reading fails and the measurements still "
+                              "come back.",
+                 "In Hermes's model settings, choose an image-capable model for Kumi's listening task.")
+
+
+def _hermes() -> dict:
+    return _item("Hermes", OK, "Hermes loaded Kumi, so it's 0.22.7 or later (what Kumi requires).")
+
+
+# ---- Kumi's setup and runtime ---------------------------------------------------------------------------------------
+
+_SET_UP = "Run hermes kumi setup in a terminal, or ask Hermes to set Kumi up."
+
+
+def _runtime(report: dict, shown: dict) -> dict:
+    name = "Kumi's runtime"
+    state = report.get("state")
+    if state in ("no_pin", "unsupported_platform"):
+        return _item(name, FIX, shown.get("message") or "This copy of the plugin can't set Kumi up here.",
+                     "Update the plugin (hermes plugins update kumi).")
+    if state in ("needs_runtime", "outdated_runtime", "damaged_runtime"):
+        return _item(name, FIX, shown.get("message") or "Kumi's runtime isn't set up.", _SET_UP)
+    version = (report.get("runtime") or {}).get("version")
+    return _item(name, OK, f"Kumi {_said(version, 40)}'s runtime is installed, the version this plugin pins.")
+
+
+def _part(report: dict, shown: dict, app: str) -> dict:
+    name = f"Kumi's part in {app}"
+    if report.get("state") in ("no_pin", "unsupported_platform", "needs_runtime", "outdated_runtime",
+                               "damaged_runtime"):
+        return _item(name, OFF, "Set up Kumi's runtime first.")
+    component = shown.get("daw_component") or {}
+    existing = shown.get("existing_kumi") or {}
+    if component.get("state") == "not_installed":
+        return _item(name, FIX, f"Kumi's part in {app} isn't set up in this profile.", _SET_UP)
+    if component.get("state") == "unknown" or existing.get("adopted"):
+        return _item(name, OK, f"Kumi uses another Kumi installation's part in {app}: set up and updated there.")
+    parts = [part for part in component.get("parts") or [] if isinstance(part, dict)]
+    behind = [_said(part.get("name"), 60) for part in parts if part.get("state") not in (None, "same")]
+    version = _said(component.get("version"), 40)
+    if behind:
+        return _item(name, FIX, f"Kumi's part in {app} ({version}) isn't complete: {', '.join(behind)}.", _SET_UP)
+    return _item(name, OK, f"Kumi's part in {app} is set up ({_said(component.get('name'), 60)} {version}).")
+
+
+def _connection(status: dict, report: dict, app: str) -> dict:
+    name = "Connection"
+    if status.get("connected"):
+        project = status.get("project") if isinstance(status.get("project"), dict) else {}
+        return _item(name, OK, f"Connected to {app}: {_said(project.get('name') or 'a project', 80)}.")
+    if report.get("state") != "ready":
+        return _item(name, OFF, f"Set Kumi up for {app} first.")
+    if report.get("next_step") == "choose_control_surface":
+        return _item(name, FIX, "Live doesn't run Kumi's Remote Script yet.",
+                     "In Live, choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI).")
+    running = "Kumi's runtime isn't running now (it runs while a chat uses Kumi)." if status.get("stale") else \
+        f"Kumi's runtime is running, but not connected to {app}."
+    return _item(name, CHECK, running, f"Open {app}, then ask Hermes to connect to it.")
+
+
+def _project(status: dict, app: str) -> dict:
+    name = "Project"
+    if not status.get("connected"):
+        return _item(name, OFF, f"Connect to {app} first: then the open project's key and epoch show here.")
+    project = status.get("project") if isinstance(status.get("project"), dict) else {}
+    if not project.get("key"):
+        return _item(name, FIX, "The open project has no key yet, so Kumi can't keep its changes apart from another "
+                                "project's.",
+                     f"Save the project in {app} (an unsaved Live Set has no key), then ask Hermes to look at it.")
+    return _item(name, OK, f"{_said(project.get('name') or 'The project', 80)} has a key and epoch "
+                           f"{_said(project.get('epoch'), 40)}.")
+
+
+def _library(host: tools.Host, state: Path) -> dict:
+    name = "Sound map"
+    folders = host.library_folders()
+    if not folders:
+        return _item(name, CHECK, "No sample folders are approved, so the sound map is empty.",
+                     "Ask Hermes to add a sample folder, then scan it.")
+    scan = _last_scan(state)
+    progress = scan.get("progress") if isinstance(scan.get("progress"), dict) else {}
+    sounds = (snapshots.map_revision(state) or {}).get("sounds")
+    count = len(sounds) if isinstance(sounds, dict) else 0
+    approved = f"{len(folders)} approved folder{'s' if len(folders) != 1 else ''}"
+    if scan.get("state") == "running":
+        done, total = progress.get("done"), progress.get("total")
+        so_far = f" ({_said(done, 12)} of {_said(total, 12)})" if done is not None and total is not None else ""
+        return _item(name, CHECK, f"A scan of the {approved} is running{so_far}.", "Wait until it shows done.")
+    if scan.get("state") in ("failed", "cancelled", "interrupted"):
+        return _item(name, FIX, f"The last scan was {_said(scan['state'], 20)}; the map has {count} sounds.",
+                     "Ask Hermes to scan the folders again.")
+    if not count:
+        return _item(name, FIX, f"The {approved} haven't been scanned yet.", "Ask Hermes to scan them.")
+    return _item(name, OK, f"{count} sounds on the map, from the {approved}.")
+
+
+def _last_scan(state: Path) -> dict:
+    """The newest scan job's record, from the runtime's own job files (`jobs/<id>.json`)."""
+    newest: dict = {}
+    folder = state / "jobs"
+    for path in folder.glob("*.json") if folder.is_dir() else ():
+        record = snapshots.read(state, f"jobs/{path.stem}")
+        if not isinstance(record, dict) or record.get("kind") != "scan":
+            continue
+        if not newest or _at(record) >= _at(newest):
+            newest = record
+    return newest
+
+
+def _at(record: dict) -> float:
+    at = record.get("at")
+    return float(at) if isinstance(at, (int, float)) and not isinstance(at, bool) else 0.0
+
+
+def _audio(shown: dict) -> dict:
+    name = "Compressed audio"
+    audio = shown.get("compressed_audio") or {}
+    message = _said(str(audio.get("message") or "").removeprefix("Compressed audio (MP3, FLAC…): "))
+    if audio.get("state") == "available":
+        return _item(name, OK, message)
+    if audio.get("state") in ("changed", "gone"):
+        return _item(name, FIX, message, "Run hermes kumi setup to allow an ffmpeg again.")
+    offer = "" if "hermes kumi setup" in message else \
+        "Only if your sample folders hold MP3, FLAC or other compressed audio: install ffmpeg, then run hermes kumi setup."
+    return _item(name, OFF, message, offer)
+
+
+def _mirelo(ready: Any) -> dict:
+    """Mirelo's readiness as the host reports it: the key held (never shown), the onboarding acknowledged, a task on,
+    and a credit cap above 0."""
+    name = "Mirelo"
+    ready = ready if isinstance(ready, dict) else {}
+    if not ready.get("key"):
+        return _item(name, OFF, "No Mirelo key is set, so Kumi never contacts Mirelo.",
+                     "Only if you use Mirelo: enter its key in Kumi's plugin settings.")
+    missing = [words for flag, words in (("acknowledged", "acknowledge Mirelo's onboarding"),
+                                         ("task", "switch on the task you'll use (sound effects, or audio to MIDI)"),
+                                         ("cap", "set mirelo_credit_cap above 0"))
+               if not ready.get(flag)]
+    if missing:
+        return _item(name, FIX, "Mirelo's key is set, but paid generations aren't ready.",
+                     "In Kumi's plugin settings: " + "; ".join(missing) + ".")
+    return _item(name, OK, "Mirelo is ready: key set, onboarding acknowledged, a task on, and a credit cap above 0.")
+
+
+def _desktop() -> dict:
+    return _item("Hermes Desktop", CHECK, "Kumi can't see Hermes Desktop's plugin switches from here.",
+                 "In Hermes Desktop, turn on Kumi's Agent and Desktop switches under Capabilities → Plugins.")
