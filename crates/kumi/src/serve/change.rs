@@ -312,6 +312,8 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
         ids.push(audit);
         ctx.link().note_unsure("change", &reason, "unsure");
     }
+    // Every row this call recorded, its audit row included, is one change (CC-3 A2).
+    history.one_change(&ids, ctx.snapshots());
     history.call_came_to(&ids, outcome.state, ctx.snapshots());
     // Whatever ran, the refs an earlier look gave may no longer hold: the next plan is made on a fresh look.
     if outcome.state != "refused" {
@@ -789,6 +791,7 @@ mod tests {
             tool_call_id: None,
             digest: None,
             call_outcome: None,
+            change_id: None,
             sources: None,
         }
     }

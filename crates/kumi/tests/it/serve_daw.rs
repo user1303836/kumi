@@ -612,6 +612,7 @@ case!(serve_changes_reaper_once_per_host_call_over_mcp_and_undoes_it, async {
         (first["history_ids"][0].clone(), json!("mixer"), key.clone())
     );
     assert!(row.get("tool_call_id").is_none() && row.get("digest").is_none(), "{row}");
+    assert!(row["change_id"].is_string(), "the change it's part of, for an undo of it whole: {row}");
     let kept = lab.state("history.json");
     assert_eq!(kept["items"][0]["tool_call_id"], "tc-1");
     assert_eq!(kept["items"][0]["digest"].as_str().map(str::len), Some(64));
@@ -678,7 +679,13 @@ case!(serve_says_a_change_reaper_didnt_confirm_is_unsure_until_the_next_look, as
     let kept = lab.state("history.json");
     let audit = kept["items"].as_array().unwrap().iter().find(|row| row["family"] == "unsure").unwrap().clone();
     assert_eq!((audit["undo_available"].clone(), audit["tool_call_id"].clone()), (json!(false), json!("tc-1")));
-    assert!(changed["history_ids"].as_array().unwrap().contains(&audit["id"]));
+    let ids = changed["history_ids"].as_array().unwrap();
+    assert!(ids.contains(&audit["id"]));
+    // What the call recorded, its audit row among it, is one change.
+    let mut changes: Vec<Value> =
+        kept["items"].as_array().unwrap().iter().filter(|row| ids.contains(&row["id"])).map(|row| row["change_id"].clone()).collect();
+    changes.dedup();
+    assert!(changes.len() == 1 && changes[0].is_string(), "{changes:?}");
     assert_eq!(lab.state("status.json")["unsure"]["op"], "change");
     let (stale, _) = wire.call("change", plan(&key, epoch, down), Some("tc-2")).await;
     assert_eq!(stale["code"], "stale");

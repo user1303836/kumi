@@ -510,7 +510,12 @@ impl Server {
         self.ctx.link().note_unsure(op, &reason, "unsure");
         self.ctx.link().advance();
         super::core::publish_status(&self.ctx, false).await;
+        // Only a `change` collects rows: one that broke part way recorded them, and with its audit row they're one change.
+        let made = !rows.is_empty();
         let ids: Vec<String> = rows.into_iter().map(|row| row.id).chain([audit.id]).collect();
+        if made {
+            history.one_change(&ids, self.ctx.snapshots());
+        }
         history.call_came_to(&ids, "unsure", self.ctx.snapshots());
         json!({"state": "unsure", "reason": reason, "history_ids": ids, "undo_available": false})
     }
