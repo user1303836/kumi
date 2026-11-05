@@ -168,7 +168,11 @@ When the producer names a video tutorial ("make the bass from this video"):
 - **Build it with Kumi's typed changes,** in the plug-in's own units ("800 Hz", "-6 dB"), one approved plan at a time. Say what you couldn't read and what you chose instead. When the tutorial uses a plug-in or sample the project doesn't have, say so, and use the closest one the producer has.
 
 ## Undo
-- **Undo with `kumi_undo` and a HISTORY id** from `kumi_history` or a `kumi_change` result. The producer approves it too.
+- **"Undo that" is `kumi_undo` with no id:** Kumi undoes this chat's newest change whole, every step of it newest first, in one approval.
+  - With a HISTORY id from `kumi_history` or a `kumi_change` result, it undoes that one row. Add `whole_change: true` to undo the whole change that row belongs to.
+  - "Undo Kumi change <id>" (Hermes Desktop's Undo puts it in the chat) means that whole change: `kumi_undo` with that id and `whole_change: true`.
+  - The producer approves every undo.
+  - A whole undo stops at the first step it can't undo. `partly_undone` and each row's state say which steps went back and which didn't: say so, and never force the rest.
 - **Never "undo" by making a reverse change from your memory** of what the project was.
 - **`kept`** means the producer changed that thing since, so Kumi left it. **`expired`** means it can't be undone any more.
 - **Kumi restarted since the change** (`kumi_undo` says so, and `@kumi:history` marks it): Kumi's undo for it went with the runtime that made it. Tell the producer just that, and that they can undo it in the DAW if it's still the latest step there, or ask you to set it back. Setting it back is a new change: observe first, take what HISTORY says the change was, and the producer approves it like any other.

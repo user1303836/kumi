@@ -247,6 +247,48 @@ class Approvals(unittest.TestCase):
         self.assertEqual((decision["action"], decision["message"]),
                          ("block", "Kumi didn't undo anything: It can't be undone any more."), "words, never a code")
 
+    def test_undo_that_undoes_this_chats_newest_change_whole_under_a_key_no_single_undo_covers(self):
+        """CC-3 amendment A2: kumi_undo with no id is this chat's newest change, every step of it, newest first, in one
+        approval that lists every row (rgzm's A2-b), keyed by the families it spans, which no single-row undo's key
+        (and so no "Always" given to one) covers (A2-a)."""
+        sample = {"tool": "replace_sample", "input": {"deviceRef": "t1/d1/p38/d1",
+                                                      "sample": {"sound_id": "s-r1-1", "map_revision": "r1"}}}
+        single = support.call(self.host, "kumi_change", change(volume("t1", -6)), session_id="s1")
+        self.assertEqual(self.hook("kumi_undo", {"history_id": single["history_ids"][0]})["rule_key"],
+                         "kumi:write:undo:s1")
+        both = support.call(self.host, "kumi_change", change(sample, volume("t2", -10), title="Darker kit"),
+                            session_id="s1")
+        self.assertEqual(len(both["history_ids"]), 2, "a row for each family it touched")
+        asked = self.hook("kumi_undo", {})
+        self.assertEqual(asked["rule_key"], "kumi:write:undo:device+mixer:s1",
+                         "its own key: an Always for single-row undos, or for another set, doesn't cover it")
+        self.assertTrue(asked["message"].startswith("Kumi: undo a whole change, 2 steps, newest first\n"))
+        self.assertIn("Undo Darker kit (mixer)", asked["message"])
+        self.assertIn("Undo Darker kit (device)", asked["message"])
+        undone = support.call(self.host, "kumi_undo", {}, session_id="s1")
+        self.assertEqual((undone["state"], [row["state"] for row in undone["rows"]]), ("undone", ["undone", "undone"]))
+        rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual([rows[ident] for ident in both["history_ids"]], ["undone", "undone"])
+        self.assertEqual(rows[single["history_ids"][0]], "applied", "the earlier change stays")
+
+    def test_undo_that_is_only_ever_this_chats_change_and_refused_when_it_moved_since_the_approval(self):
+        decision = policy.pre_tool_call(self.host, tool_name="kumi_undo", args={}, session_id="s2", tool_call_id="u0")
+        self.assertEqual((decision["action"], decision["message"]), ("block", tools.NOTHING_TO_UNDO),
+                         "a chat that made no change undoes nothing, least of all another chat's")
+        mine = support.call(self.host, "kumi_change", change(volume("t1", -6)), session_id="s1")
+        theirs = support.call(self.host, "kumi_change", change(volume("t2", -3)), session_id="s2")
+        approved = policy.pre_tool_call(self.host, tool_name="kumi_undo", args={}, session_id="s1",
+                                        tool_call_id="u1")
+        self.assertEqual(approved["action"], "approve")
+        self.assertIn("Undo Louder drums (mixer) on Drums", approved["message"], "mine, though theirs is newer")
+        policy.post_approval_response(self.host, tool_call_id="u1", choice="once")
+        support.call(self.host, "kumi_change", change(volume("t1", -9), title="Quieter still"), session_id="s1")
+        moved = support.handle(self.host, "kumi_undo", {}, session_id="s1")
+        self.assertEqual((moved["state"], moved["code"]), ("refused", "stale"),
+                         "this chat changed something newer since: nothing is undone on the old approval")
+        rows = {row["id"]: row["state"] for row in support.call(self.host, "kumi_history", {})["items"]}
+        self.assertEqual((rows[mine["history_ids"][0]], rows[theirs["history_ids"][0]]), ("applied", "applied"))
+
     def test_a_change_from_before_kumi_restarted_says_why_it_cant_be_undone_and_what_to_do(self):
         applied = support.call(self.host, "kumi_change", change(), session_id="s1")
         undo = {"history_id": applied["history_ids"][0]}

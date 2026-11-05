@@ -56,6 +56,27 @@ class Host:
         self._media_roots = media_roots
         self._stops: dict[str, float] = {}  # a session's key → when the producer last stopped its turn
         self._stops_lock = threading.Lock()
+        # A chat's session id → the HISTORY ids its newest kumi_change made, as that change answered them, in this
+        # Hermes process: what kumi_undo with no id undoes, whole (CC-3 amendment A2). Never another chat's.
+        self._changes: dict[str, list[str]] = {}
+        self._changes_lock = threading.Lock()
+
+    def remember_change(self, kwargs: dict, answer: Any) -> None:
+        """Keep a chat's kumi_change answer that changed the project (applied or partial) as its newest change."""
+        if not isinstance(answer, dict) or answer.get("state") not in ("applied", "partial"):
+            return
+        session, ids = kwargs.get("session_id"), answer.get("history_ids")
+        if (isinstance(session, str) and session and isinstance(ids, list) and ids
+                and all(isinstance(each, str) and each for each in ids)):
+            with self._changes_lock:
+                self._changes[session] = list(ids)
+
+    def latest_change(self, kwargs: dict) -> str | None:
+        """A HISTORY id of this chat's newest change (its last row), or None when this chat made none here."""
+        session = kwargs.get("session_id")
+        with self._changes_lock:
+            ids = self._changes.get(session) if isinstance(session, str) else None
+        return ids[-1] if ids else None
 
     def on_loop_stopped(self, session_key: Any = "", **kwargs: Any) -> None:
         """Hermes's public `agent_loop_stopped` hook: the producer stopped a turn (the TUI's or Desktop's Stop, a
@@ -607,11 +628,44 @@ def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
     change = {key: value for key, value in args.items() if key != "preview"}  # previews are the approval hook's (CC-3)
     if "expected_epoch" in change:
         change["expected_epoch"] = str(change["expected_epoch"])
-    return _write(host, "change", change, kwargs)
+    answer = _write(host, "change", change, kwargs)
+    host.remember_change(kwargs, answer)
+    return answer
+
+
+# kumi_undo with no id, where this chat made no change Kumi remembers (CC-3 amendment A2).
+NOTHING_TO_UNDO = ("Kumi didn't undo anything: this chat made no change Kumi remembers since Hermes started. "
+                   "kumi_history lists Kumi's changes; undo one by its id.")
+
+
+def undo_target(host: Host, args: dict, kwargs: dict) -> tuple[dict | None, str | None]:
+    """What a kumi_undo call undoes: with a history_id, that row (or its whole change, with whole_change: true);
+    without one, this chat's newest change, whole (CC-3 amendment A2). The runtime's undo arguments, or a refusal."""
+    asked = {key: value for key, value in args.items() if key in ("history_id", "whole_change")}
+    if "history_id" in asked:
+        return asked, None
+    target = host.latest_change(kwargs)
+    if target is None:
+        return None, NOTHING_TO_UNDO
+    return {"history_id": target, "whole_change": True}, None
 
 
 def kumi_undo(host: Host, args: dict, **kwargs: Any) -> dict:
-    return _write(host, "undo", {key: value for key, value in args.items() if key != "preview"}, kwargs)
+    """An undo, as the producer approved it (CC-3, A2): the row or change the hook previewed. A whole change is sent with
+    the preview's rows digest (`expect_rows`), so the runtime refuses a set that changed since; and kumi_undo with no
+    id is refused when this chat's newest change is no longer the one approved."""
+    asked, refusal = undo_target(host, args, kwargs)
+    if refusal is not None:
+        return {"error": {"code": "nothing_to_undo", "reason": refusal}}
+    if asked.get("whole_change") is True:
+        call = kwargs.get("kumi_call")
+        approved = call.extra if isinstance(call, calls.Entry) else {}
+        if approved.get("history_id") != asked["history_id"] or not isinstance(approved.get("rows_digest"), str):
+            return {"state": "refused", "code": "stale",
+                    "reason": "Kumi didn't undo anything: what this chat would undo isn't what was approved (a newer "
+                              "change came since). Ask again."}
+        asked = {**asked, "expect_rows": approved["rows_digest"]}
+    return _write(host, "undo", asked, kwargs)
 
 
 # What a HISTORY row may say outside Kumi (C1, CC-12's 12a), live or published: never CC-5's internals or the runtime's

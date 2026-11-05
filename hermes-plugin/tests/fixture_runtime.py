@@ -401,52 +401,100 @@ def change(fixture: Fixture, args: dict, host: dict) -> dict:
                 "project": {"key": fixture.set["key"], "epoch": fixture.epoch},
                 "steps": [describe(fixture, step) for step in args["steps"]]}
     steps = args["steps"]
-    before = copy.deepcopy(fixture.set)
-    for step in steps:
-        target = step["input"]
-        if step["tool"] == "set_track_volume":
-            fixture.track(target["track_ref"])["volume_db"] = float(target["volume_db"])
-        else:
-            fixture.simpler(target["deviceRef"])[1]["sample"] = source_name(target["sample"])
     first = steps[0]["input"]
     track = fixture.track(first["track_ref"]) if "track_ref" in first else fixture.simpler(first["deviceRef"])[0]
-    ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
-    # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note), CC-5's
-    # (tool_call_id, digest, call_outcome) and CC-3 A2's change_id, which the plugin never passes on.
-    fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
-                            "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
-                            "family": STEPS[steps[0]["tool"]], "at": now(), "state": "applied",
-                            "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
-                            "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
-                            "call_outcome": "applied", "change_id": f"x-{fixture.generation}-{len(fixture.history) + 1}",
-                            "before": before})
+    # As kumi serve records a change: a HISTORY row per family its steps touch, in plan order, each with the state
+    # before it, and one serve-made change_id on all of them (CC-3 amendment A2).
+    change_id = f"ch-{len(fixture.history) + 1}"
+    ids = []
+    for family in dict.fromkeys(STEPS[step["tool"]] for step in steps):
+        before = copy.deepcopy(fixture.set)
+        for step in (step for step in steps if STEPS[step["tool"]] == family):
+            target = step["input"]
+            if step["tool"] == "set_track_volume":
+                fixture.track(target["track_ref"])["volume_db"] = float(target["volume_db"])
+            else:
+                fixture.simpler(target["deviceRef"])[1]["sample"] = source_name(target["sample"])
+        ident = f"h-{fixture.set['key']}-{fixture.generation}-c{len(fixture.history) + 1}"
+        # As kumi serve's Row: C1's fields, plus its own (label, project_key, runtime_generation, note, change_id)
+        # and CC-5's (tool_call_id, digest, call_outcome), which the plugin never passes on.
+        fixture.history.append({"id": ident, "label": f"c{len(fixture.history) + 1}", "project_key": fixture.set["key"],
+                                "runtime_generation": fixture.generation, "title": args.get("title") or "Kumi change",
+                                "family": family, "at": now(), "state": "applied",
+                                "undo_available": True, "track": track["name"], "note": "kept at /Users/someone/Set.als",
+                                "tool_call_id": host.get("tool_call_id"), "digest": "sha256:" + "0" * 64,
+                                "call_outcome": "applied", "before": before, "change_id": change_id})
+        ids.append(ident)
     fixture.publish("history", "focus")
     done = [{"step": index + 1, "tool": step["tool"]} for index, step in enumerate(steps)]
-    return {"state": "applied", "history_ids": [ident],
+    return {"state": "applied", "history_ids": ids,
             "steps": {"done": done, "refused": [], "held_back": [], "stopped": None, "skipped": 0},
             "summary": args.get("title") or "Applied.", "undo_available": True, "project_key": fixture.set["key"],
             "epoch": fixture.epoch}
 
 
+def why_not(fixture: Fixture, row: dict) -> tuple[str, str, str] | None:
+    """Why a row can't be undone from here, as serve/change.rs says it: CC-3's reason, C1's state and the words."""
+    if row["runtime_generation"] != fixture.generation:
+        return "restarted", "expired", RESTARTED
+    if not row["undo_available"] and row["state"] != "undone":
+        return "expired", "expired", "It can't be undone any more."
+    return None
+
+
 def undo(fixture: Fixture, args: dict, host: dict) -> dict:
     row = next((row for row in fixture.history if row["id"] == args.get("history_id")), None)
-    # Why it can't be undone from here, as serve/change.rs says it: CC-3's reason, C1's state and the words.
-    why_not = (("restarted", "expired", RESTARTED) if row and row["runtime_generation"] != fixture.generation
-               else ("expired", "expired", "It can't be undone any more.") if row and not row["undo_available"]
-               else None)
-    if args.get("preview"):
-        if row is None:
-            return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
-        preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": not why_not}
-        return {**preview, "reason": why_not[0]} if why_not else preview
     if row is None:
         return {"state": "refused", "reason": "No such change in this runtime's HISTORY."}
-    if why_not:
-        return {"state": why_not[1], "reason": why_not[2].format(daw=DAW_NAMES[fixture.daw])}
+    if args.get("whole_change") is True:
+        return undo_whole(fixture, args, row)
+    refused = why_not(fixture, row) if row["state"] != "undone" else ("expired", "expired", "It can't be undone any more.")
+    if args.get("preview"):
+        preview = {"state": "preview", "text": f"Undo {row['title']} on {row['track']}", "undo_available": not refused}
+        return {**preview, "reason": refused[0]} if refused else preview
+    if refused:
+        return {"state": refused[1], "reason": refused[2].format(daw=DAW_NAMES[fixture.daw])}
     fixture.set = row.pop("before")
     row.update(state="undone", undo_available=False)
     fixture.publish("history", "focus")
     return {"state": "undone", "reason": f"Undid {row['title']}."}
+
+
+def undo_whole(fixture: Fixture, args: dict, row: dict) -> dict:
+    """CC-3 amendment A2: every row of that row's change, newest first. Its preview lists them with their families and
+    a digest of the set; the real call needs that digest back (`expect_rows`), undoes under one lease, and stops at
+    the first row it can't undo."""
+    rows = [each for each in reversed(fixture.history)
+            if each is row or (row.get("change_id") and each.get("change_id") == row["change_id"])]
+    digest = hashlib.sha256("".join(f"{each['id']}:{each['state']};" for each in rows).encode()).hexdigest()
+    if args.get("preview"):
+        listed = [{"history_id": each["id"], "title": each["title"], "family": each["family"],
+                   "text": f"Undo {each['title']} ({each['family']}) on {each['track']}",
+                   "undo_available": each["state"] == "undone" or why_not(fixture, each) is None,
+                   **({"state": "undone"} if each["state"] == "undone" else {})} for each in rows]
+        pending = [each for each in listed if each.get("state") != "undone"]
+        return {"state": "preview", "rows": listed, "rows_digest": digest,
+                "undo_available": bool(pending) and all(each["undo_available"] for each in pending),
+                "text": f"Undo {len(pending)} steps: " + "; ".join(each["text"] for each in pending)}
+    if args.get("expect_rows") != digest:
+        return error("stale", "That change's steps aren't the ones approved: preview it again.")
+    answered, stopped = [], None
+    for each in rows:
+        if stopped is not None:
+            answered.append({"history_id": each["id"], "state": "not_tried"})
+        elif each["state"] == "undone":
+            answered.append({"history_id": each["id"], "state": "undone"})
+        elif (refused := why_not(fixture, each)) is not None:
+            stopped = refused[1]
+            answered.append({"history_id": each["id"], "state": refused[1], "reason": refused[2]})
+        else:
+            fixture.set = each.pop("before")
+            each.update(state="undone", undo_available=False)
+            answered.append({"history_id": each["id"], "state": "undone"})
+    fixture.publish("history", "focus")
+    done = [each for each in answered if each["state"] == "undone"]
+    state = "undone" if stopped is None else ("partly_undone" if done else stopped)
+    return {"state": state, "rows": answered}
 
 
 def history(fixture: Fixture, args: dict, host: dict) -> dict:

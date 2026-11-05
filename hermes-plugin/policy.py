@@ -160,7 +160,7 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
     if tool == "kumi_change":
         return _change(host, args, kwargs), {}
     if tool == "kumi_undo":
-        return _undo(host, args, kwargs), {}
+        return _undo(host, args, kwargs)
     if tool == "kumi_library":
         return _library(host, args, kwargs), {}
     if tool == "kumi_setup":
@@ -354,18 +354,41 @@ UNDO_REFUSED = {
 }
 
 
-def _undo(host: Any, args: dict, kwargs: dict) -> dict:
+# How many of a whole change's rows its approval lists one by one; the rest are counted (CC-3 A2, rgzm's A2-b).
+UNDO_ROWS = 6
+
+
+def _undo(host: Any, args: dict, kwargs: dict) -> tuple[dict, dict]:
+    """An undo, asked in the runtime's own words (CC-3). A whole change (kumi_undo with no id: this chat's newest; or
+    whole_change) lists every row the runtime will undo, newest first, and asks under a key naming the families it
+    spans, which no single-row undo's "Always" covers (A2-a). The approval binds the row and the rows' digest, which
+    the handler sends back, so a set that moved is refused (A2-c)."""
+    asked, refusal = tools.undo_target(host, args, kwargs)
+    if refusal is not None:
+        return block(refusal), {}
     try:
-        answer = _ask(host, "undo", {key: value for key, value in args.items() if key != "preview"} | {"preview": True},
-                      kwargs)
+        answer = _ask(host, "undo", {**asked, "preview": True}, kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
-        return block(f"Kumi didn't undo anything: {_reason(failure)}")
+        return block(f"Kumi didn't undo anything: {_reason(failure)}"), {}
     if answer.get("state") != "preview" or not answer.get("undo_available"):
         reason = answer.get("reason") if isinstance(answer.get("reason"), str) else ""
         words = (UNDO_REFUSED[reason].format(daw=setup.DAWS.get(host.daw(), "the DAW")) if reason in UNDO_REFUSED
                  else reason or "that change can no longer be undone.")
-        return block(f"Kumi didn't undo anything: {words}")
-    return approve([f"Kumi: {answer.get('text') or 'undo a Kumi change'}"], "kumi:write:undo")
+        return block(f"Kumi didn't undo anything: {words}"), {}
+    if asked.get("whole_change") is not True:
+        return approve([f"Kumi: {answer.get('text') or 'undo a Kumi change'}"], "kumi:write:undo"), {}
+    rows = [row for row in answer.get("rows") or [] if isinstance(row, dict)]
+    digest = answer.get("rows_digest")
+    families = sorted({one_line(row.get("family"), 40) for row in rows if isinstance(row.get("family"), str)})
+    if not rows or not isinstance(digest, str) or not digest or not families:
+        return block("Kumi didn't undo anything: its runtime couldn't say which steps that change made."), {}
+    pending = [row for row in rows if row.get("state") != "undone"]
+    shown = [f"• {one_line(row.get('text') or row.get('title'), STEP_LINE)}" for row in pending[:UNDO_ROWS]]
+    more = len(pending) - len(shown)
+    lines = [f"Kumi: undo a whole change, {len(pending)} step{'s' if len(pending) != 1 else ''}, newest first",
+             *shown, *([f"• …and {more} more step{'s' if more != 1 else ''}"] if more > 0 else [])]
+    bound = {"history_id": asked["history_id"], "rows_digest": digest}
+    return approve(lines, f"kumi:write:undo:{'+'.join(families)}"), bound
 
 
 def _library(host: Any, args: dict, kwargs: dict) -> dict | None:
