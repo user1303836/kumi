@@ -88,6 +88,8 @@ struct State {
     item_part: Option<(f64, f64, f64, bool)>,
     /// Renders' files don't say how long they are (a bridge that leaves `seconds` out).
     renders_unmeasured: bool,
+    /// The actual rendered audio length, when exercising a short or overlong native result.
+    render_seconds: Option<f64>,
     /// A copy's parameters (its device's place, the parameter's) whose scratch set is refused, and why: a batch holding
     /// one is refused whole, nothing in it set.
     refused_params: Vec<(u64, u64, String)>,
@@ -188,6 +190,7 @@ impl SimListening {
                 capture_marks: None,
                 item_part: None,
                 renders_unmeasured: false,
+                render_seconds: None,
                 refused_params: vec![],
             })),
         }
@@ -243,6 +246,11 @@ impl SimListening {
     /// Renders' files leave out how long they are, so Kumi measures them by the tempo.
     pub fn leave_out_render_seconds(&self) {
         self.state.lock().unwrap().renders_unmeasured = true;
+    }
+
+    /// Render this many seconds without changing the requested window or its preflight.
+    pub fn set_render_seconds(&self, seconds: Option<f64>) {
+        self.state.lock().unwrap().render_seconds = seconds;
     }
 
     /// What the next render tells of the tempo it played into the transport ({before: {bpm, lpb}, bpm, lpb}): Renoise's
@@ -559,7 +567,7 @@ impl SimListening {
         let range = &params["range"];
         let (from, beats) = (range["fromBeat"].as_f64().unwrap_or(0.), range["beats"].as_f64().unwrap_or(0.));
         let pre_roll = params["preRollBeats"].as_f64().unwrap_or(0.).min(from);
-        let seconds = (beats + pre_roll) * 60. / state.tempo;
+        let seconds = state.render_seconds.unwrap_or((beats + pre_roll) * 60. / state.tempo);
         let start = pre_roll * 60. / state.tempo;
         let sources = params["sources"].as_array().cloned().unwrap_or_default();
         let mut files = vec![];

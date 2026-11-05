@@ -20,12 +20,19 @@ const CALL_DEADLINE_SECONDS: u64 = 300;
 #[derive(Debug, PartialEq)]
 struct CaptureState {
     identity: String,
+    epoch: f64,
     tempo: f64,
     transport: Value,
     song: Value,
     tracks: Vec<Value>,
     selection: Value,
     devices: Vec<String>,
+}
+
+enum CaptureTransport {
+    Seek { position: f64, looped: bool },
+    Continue,
+    Stop,
 }
 
 struct Ready {
@@ -66,7 +73,7 @@ fn window(request: &HearRequest) -> Result<Window, RuntimeError> {
     let beats = request.beats.filter(|n| n.is_finite() && *n > 0.0 && *n <= 256.0);
     let source_ok = if request.mix == Some(true) { request.tracks.is_empty() } else { request.tracks.len() == 1 };
     match (from, beats) {
-        (Some(from), Some(beats)) if source_ok && (from + beats).is_finite() && request.seconds.is_none() && request.whole != Some(true) => {
+        (Some(from), Some(beats)) if source_ok && (from + beats).is_finite() && from + beats > from && request.seconds.is_none() && request.whole != Some(true) => {
             Ok(Window { from, beats })
         }
         _ => Err(refused("invalid_window", "Give one fresh track ref or the mix, from_beat and beats (at most 256); there is no implicit range.")),
@@ -77,7 +84,10 @@ impl LiveRenderer {
     /// The same pure preflight is used by the approval preview and again under the write lease.
     pub(super) async fn preview_restricted_hear(&self, request: &HearRequest, signal: Signal) -> Result<HearPreview, RuntimeError> {
         let ready = self.restricted_preflight(request, signal).await?;
-        Ok(HearPreview { label: ready.label, seconds: ready.seconds, method: HearMethod::Ears, deadline_seconds: CALL_DEADLINE_SECONDS })
+        Ok(HearPreview {
+            label: ready.label, seconds: ready.seconds, method: HearMethod::Ears, deadline_seconds: CALL_DEADLINE_SECONDS,
+            disclosure: "Live captures Arrangement audio. The Set may look modified, and Live's own Undo history includes the temporary device steps (Undo in Live can bring the Ears device back).",
+        })
     }
 
     async fn restricted_preflight(&self, request: &HearRequest, signal: Signal) -> Result<Ready, RuntimeError> {
@@ -107,23 +117,87 @@ impl LiveRenderer {
             return Err(refused("window_too_long", "The approved beat window must be at most 60 seconds at the current tempo."));
         }
         if self.ears_disabled || std::env::var("KUMI_EARS").ok().as_deref() == Some("0") {
-            return Err(refused("ears_missing", "Kumi Ears is unavailable. Set up Kumi for Live again; Kumi Ears requires Max for Live."));
+            return Err(refused("ears_missing", "Kumi Ears is unavailable. It requires Max for Live; listening never installs it."));
         }
         // A caller-provided link is a trusted integration/test dependency, not a model argument.
         if self.open_ears.is_none() {
             if !self.connection().has("live_browser_inspect") { return Err(unreadable()); }
             let found = self.connection().call("live_browser_inspect", object(json!({"itemId":EARS_ITEM})), signal).await?;
             if found.is_error == Some(true) {
-                return Err(refused("ears_missing", "Set up Kumi for Live again to add Kumi Ears. It requires Max for Live; listening never installs it."));
+                return Err(refused("ears_missing", "The preinstalled Kumi Ears device is missing. It requires Max for Live; listening never installs it."));
             }
         }
         Ok(Ready { state, target, label, window, seconds })
     }
 
+    /// Validate the exact observed Set before any rows from this response enter the ref book.
+    async fn capture_set_at(&self, epoch: f64, identity: &str, signal: Signal) -> Result<JsonObject, RuntimeError> {
+        let args = crate::context::discovery_args(&object(json!({"kind":"set","fields":["objectIdentity","tempo"]})))?;
+        let answer = self.connection().call("live_discover", args, signal).await?;
+        let mut page = crate::context::discovery_payload(&answer, "set", epoch)
+            .map_err(|_| refused("stale", "Live did not confirm the observed Set epoch; observe again before listening."))?;
+        if page["truncated"] != false || page.contains_key("nextCursor") { return Err(unreadable()); }
+        let Some(Value::Array(mut rows)) = page.remove("items") else { return Err(unreadable()) };
+        if rows.len() != 1 { return Err(unreadable()); }
+        let Some(Value::Object(set)) = rows.pop() else { return Err(unreadable()) };
+        if !set.get("objectIdentity").and_then(Value::as_str).is_some_and(|id| !id.is_empty()) { return Err(unreadable()); }
+        if crate::context::set_identity(&set)? != identity {
+            return Err(refused("stale", "The observed Set identity changed; observe again before listening."));
+        }
+        Ok(set)
+    }
+
+    /// Only these transport steps belong to a capture. Native transactions fence the preview
+    /// through apply; never accept a preview from a newer Set or fall back to an emergency stop.
+    async fn capture_transport(&self, state: &CaptureState, step: CaptureTransport, signal: Signal) -> Result<(), RuntimeError> {
+        let needs_stopped = !matches!(step, CaptureTransport::Stop);
+        let (preview_name, apply_name, input) = match step {
+            CaptureTransport::Seek { position, looped } => ("live_transport_preview", "live_transport_apply", json!({"position":position,"loopEnabled":looped})),
+            CaptureTransport::Continue => ("live_transport_action_preview", "live_transport_action_apply", json!({"action":"continue"})),
+            CaptureTransport::Stop => ("live_transport_action_preview", "live_transport_action_apply", json!({"action":"stop"})),
+        };
+        signal.check()?;
+        let prepared = self.connection().call(preview_name, object(input), signal.clone()).await?;
+        if prepared.is_error == Some(true) { return Err(unsure()); }
+        let preview = payload(&prepared)?;
+        if preview.get("epoch").and_then(Value::as_f64) != Some(state.epoch) {
+            return Err(refused("stale", "The transport preview belongs to another Set epoch; no transport action was applied."));
+        }
+        let transaction = preview.get("transactionId").and_then(Value::as_str).filter(|id| !id.is_empty()).ok_or_else(unreadable)?;
+        if preview.get("confirmation").and_then(Value::as_str) != Some("apply") { return Err(unreadable()); }
+        self.capture_set_at(state.epoch, &state.identity, signal.clone()).await?;
+        // Read AFTER preview: the native playback revision advances when recording/playing
+        // state changes, and apply fences that revision again on Live's main thread.
+        let (playback, song) = futures::try_join!(
+            self.rows("session-playback", json!({}), signal.clone()),
+            async { payload(&self.connection().call("live_song_state", JsonObject::new(), signal.clone()).await?).map_err(RuntimeError::from) },
+        )?;
+        let playback = only(playback)?;
+        let transport = playback.get("transport").and_then(Value::as_object).ok_or_else(unreadable)?;
+        if flag(transport, "arrangementRecord")? || flag(transport, "sessionRecord")?
+            || (needs_stopped && flag(transport, "playing")?) || flag(&song, "backToArranger")?
+        {
+            return Err(refused("transport_changed", "Live's playback or recording state changed; the capture transport step was not applied."));
+        }
+        signal.check()?;
+        let applied = self.connection().call(apply_name,
+            object(json!({"transactionId":transaction,"confirmation":"apply","idempotencyKey":uuid::Uuid::new_v4().to_string()})),
+            self.history.change_signal(),
+        ).await?;
+        if applied.is_error == Some(true) || payload(&applied)?.get("state").and_then(Value::as_str) != Some("applied") {
+            return Err(unsure());
+        }
+        Ok(())
+    }
+
     async fn capture_state(&self, request: &HearRequest, signal: Signal) -> Result<(CaptureState, String, String), RuntimeError> {
+        let epoch = request.expected_native_epoch.as_deref().and_then(|value| value.parse::<f64>().ok())
+            .filter(|epoch| epoch.is_finite() && self.connection().epoch.get() == Some(*epoch))
+            .ok_or_else(|| refused("stale", "The current Live connection is not the request's observed Set epoch; observe again."))?;
+        let identity = self.connection().set.borrow().clone().ok_or_else(|| refused("stale", "Observe the current Set before listening."))?;
+        let set = self.capture_set_at(epoch, &identity, signal.clone()).await?;
         let light = json!({"fields":["objectIdentity","name","armed","monitoringState"]});
-        let (set, playback, regular, returns, main, selection, song) = futures::try_join!(
-            self.rows("set", json!({"fields":["objectIdentity","tempo"]}), signal.clone()),
+        let (playback, regular, returns, main, selection, song) = futures::try_join!(
             self.rows("session-playback", json!({}), signal.clone()),
             self.rows("track", light.clone(), signal.clone()),
             self.rows("return-track", light.clone(), signal.clone()),
@@ -131,9 +205,6 @@ impl LiveRenderer {
             self.rows("selection", json!({}), signal.clone()),
             async { payload(&self.connection().call("live_song_state", JsonObject::new(), signal.clone()).await?).map_err(RuntimeError::from) },
         )?;
-        let set = only(set)?;
-        let identity = object_identity(&set);
-        if identity.is_empty() { return Err(unreadable()); }
         let tempo = number(&set, "tempo")?;
         if tempo <= 0.0 { return Err(unreadable()); }
         let playback = only(playback)?;
@@ -167,6 +238,8 @@ impl LiveRenderer {
         let label = if request.mix == Some(true) { "The whole mix".to_owned() } else {
             target.get("name").and_then(Value::as_str).ok_or_else(unreadable)?.to_owned()
         };
+        let native = self.connection().references.borrow().lengthen(&json!({"trackRef":reference}));
+        let reference = native["trackRef"].as_str().ok_or_else(unreadable)?.to_owned();
         let mut tracks = Vec::with_capacity(all.len());
         for row in &all {
             let identity = object_identity(row);
@@ -179,15 +252,15 @@ impl LiveRenderer {
         }
         let selected = object(self.connection().references.borrow().lengthen(&Value::Object(selection)));
         let selection = json!({"track":selected.get("selectedTrackRef"),"device":selected.get("selectedDeviceRef")});
-        let devices = self.rows("device", json!({"parent":reference,"fields":["objectIdentity"]}), signal).await?;
+        let devices = self.rows("device", json!({"parent":reference,"fields":["objectIdentity"]}), signal.clone()).await?;
         let devices: Vec<_> = devices.iter().map(object_identity).collect();
         if devices.iter().any(String::is_empty) { return Err(unreadable()); }
-        Ok((CaptureState { identity, tempo, transport, song, tracks, selection, devices }, reference, label))
+        self.capture_set_at(epoch, &identity, signal).await?;
+        Ok((CaptureState { identity, epoch, tempo, transport, song, tracks, selection, devices }, reference, label))
     }
 
-    async fn capture_set_matches(&self, identity: &str, signal: Signal) -> bool {
-        self.rows("set", json!({"fields":["objectIdentity"]}), signal).await
-            .ok().and_then(|rows| only(rows).ok()).is_some_and(|row| object_identity(&row) == identity)
+    async fn capture_set_matches(&self, state: &CaptureState, signal: Signal) -> bool {
+        self.capture_set_at(state.epoch, &state.identity, signal).await.is_ok()
     }
 
     pub(super) async fn hear_restricted(
@@ -221,24 +294,26 @@ impl LiveRenderer {
             let tap = self.place_tap(link.clone(), &ready.target, signal.clone()).await.map_err(|e| e.error)?;
             rig.ears.as_mut().expect("per-call Ears").taps.insert(ready.label.clone(), tap.clone());
             if !tap.version.is_finite() || tap.version < EARS_VERSION as f64 {
-                return Err(refused("ears_missing", "The installed Kumi Ears is too old to verify this window. Set up Kumi for Live again; Max for Live is required."));
+                return Err(refused("ears_missing", "The installed Kumi Ears is too old to verify this window. Max for Live is required."));
             }
             self.capture_window(&ready, &link, &tap, &directory, &mut started, &mut transport_touched, signal.clone()).await
         }).await;
         rig.steps.extend(steps);
-        if transport_touched {
-            rig.transport = Transport { position: ready.state.transport["position"].as_f64(),
-                looped: ready.state.transport["loop"]["enabled"].as_bool() };
-        }
         // Never restore a different Set after the producer changed documents.
         let cleanup = abort::any([self.connection().lifetime.clone(), abort::timeout(90_000)]);
-        let same_set = self.capture_set_matches(&ready.state.identity, cleanup.clone()).await;
+        let same_set = self.capture_set_matches(&ready.state, cleanup.clone()).await;
         if same_set {
             for tap in rig.ears.as_ref().expect("per-call Ears").taps.values() { link.stop(tap); }
             if started {
-                let _ = self.history.quietly(None, self.step("play", json!({"action":"stop"}), cleanup.clone())).await;
+                let _ = self.capture_transport(&ready.state, CaptureTransport::Stop, cleanup.clone()).await;
             }
             self.close_rig(&mut rig).await;
+            if transport_touched {
+                let _ = self.capture_transport(&ready.state, CaptureTransport::Seek {
+                    position: ready.state.transport["position"].as_f64().expect("validated position"),
+                    looped: ready.state.transport["loop"]["enabled"].as_bool().expect("validated loop state"),
+                }, cleanup.clone()).await;
+            }
         }
         link.close().await;
         let restored = same_set && self.capture_state(request, cleanup).await.is_ok_and(|(after, _, _)| after == ready.state);
@@ -274,13 +349,13 @@ impl LiveRenderer {
             return Err(refused("capture_too_large", "This window at Live's sample rate would exceed the private audio size limit."));
         }
         *transport_touched = true;
-        self.step("set_transport", json!({"position":ready.window.from,"loopEnabled":false}), signal.clone()).await?;
+        self.capture_transport(&ready.state, CaptureTransport::Seek { position: ready.window.from, looped: false }, signal.clone()).await?;
         link.arm(tap, cap, false, Some(signal.clone())).await.map_err(|_| refused("ears_unavailable", "Kumi Ears did not arm."))?;
         *started = true;
         let deadline = Instant::now() + Duration::from_secs_f64(cap);
         let end = ready.window.from + ready.window.beats;
         let played = tokio::time::timeout_at(deadline, async {
-            self.step("play", json!({"action":"continue"}), signal.clone()).await?;
+            self.capture_transport(&ready.state, CaptureTransport::Continue, signal.clone()).await?;
             loop {
                 signal.check()?;
                 if let Some(now) = link.transport(tap, Some(signal.clone())).await.map_err(|_| unreadable())? {
@@ -291,9 +366,9 @@ impl LiveRenderer {
             Ok::<_, RuntimeError>(())
         }).await;
         let stop_signal = abort::any([self.connection().lifetime.clone(), abort::timeout(5_000)]);
-        if !self.capture_set_matches(&ready.state.identity, stop_signal.clone()).await { return Err(unsure()); }
+        if !self.capture_set_matches(&ready.state, stop_signal.clone()).await { return Err(unsure()); }
         // Keep `started` true until the independent after-read proves a stopped transport.
-        self.step("play", json!({"action":"stop"}), stop_signal).await?;
+        self.capture_transport(&ready.state, CaptureTransport::Stop, stop_signal).await?;
         played.map_err(|_| refused("capture_deadline", "The capture reached its independent deadline."))??;
         let raw = RawFile(directory.join(format!("{}.raw", uuid::Uuid::new_v4())));
         let written = link.write(tap, &raw.0.to_string_lossy().replace('\\', "/"), Some(signal.clone())).await

@@ -4,7 +4,7 @@
 use daw_bridge::auth::Secret;
 use daw_bridge::{files::ensure_secret, paths::BridgePaths, Daw};
 use daw_mcp_server::client::BridgeClient;
-use daw_mcp_server::host::{Host, Pick};
+use daw_mcp_server::host::{Host, ListeningMode, Pick};
 use daw_mcp_server::reaper::simulator::ReaperScript;
 use daw_mcp_server::renoise::simulator::RenoiseScript;
 use daw_mcp_server::simulator::Simulator;
@@ -45,14 +45,14 @@ async fn reaper_has_its_projects_id_written_only_while_a_host_made_to_keep_it_is
     let simulator = Simulator::start(config).await.unwrap();
 
     // The plugin's runtime's host: no ask, nothing written, and the status says what the bridge can do.
-    let plain = Host::new(Daw::Reaper, home.path());
+    let plain = Host::new(Daw::Reaper, home.path(), ListeningMode::Restricted);
     let status = plain.status(&Pick::default()).await;
     assert_eq!((&status["connected"], &status["keep_identity"]), (&json!(true), &json!(true)), "{status}");
     assert!(!simulator.keeps_identity());
     assert_eq!(script.ids_written(), Vec::<String>::new());
 
     // Standalone Kumi's host asks: the project has its id written while it is connected.
-    let keeping = Host::new(Daw::Reaper, home.path()).with_keep_identity(true);
+    let keeping = Host::new(Daw::Reaper, home.path(), ListeningMode::Standalone).with_keep_identity(true);
     assert_eq!(keeping.status(&Pick::default()).await["connected"], true);
     assert!(simulator.keeps_identity());
     assert_eq!(script.ids_written(), ["/lab/Song.rpp"]);

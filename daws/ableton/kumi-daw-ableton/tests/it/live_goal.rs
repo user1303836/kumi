@@ -302,7 +302,7 @@ impl Set {
     fn discover(&self, args: &JsonObject) -> Value {
         if let Some(state) = self.bounded.borrow().as_ref() {
             if let Some(items) = state.discover(self, args) {
-                return json!({"epoch":7,"kind":args["kind"],"items":items,"revision":"r1","truncated":false});
+                return json!({"epoch":state.epoch(),"kind":args["kind"],"items":items,"revision":"r1","truncated":false});
             }
         }
         let tracks = self.tracks.borrow();
@@ -388,10 +388,14 @@ impl Set {
             Some(tracks) => tracks.iter().map(|track| json!({"kind":"track","name":track["name"],"trackKind":track["kind"]})).collect(),
             None => vec![],
         };
-        Ok(json!({"transactionId":transaction,"epoch":7,"confirmation":"apply","prior":{"tracks":prior,"scenes":[]},"proposed":proposed}))
+        let epoch = self.bounded.borrow().as_ref().map_or(7., |state| state.prepared(&transaction));
+        Ok(json!({"transactionId":transaction,"epoch":epoch,"confirmation":"apply","prior":{"tracks":prior,"scenes":[]},"proposed":proposed}))
     }
     fn apply(&self, args: &JsonObject) -> Value {
         let transaction = text(&args["transactionId"]).to_owned();
+        if self.bounded.borrow().as_ref().is_some_and(|state| !state.transaction_matches(&transaction)) {
+            return json!({"transactionId":transaction,"state":"refused","reason":"Set epoch changed"});
+        }
         let (tool, asked) = self.previews.borrow_mut().remove(&transaction).unwrap();
         let mut answer = json!({"transactionId":transaction,"state":"applied"});
         if let Some(state) = self.bounded.borrow().as_ref() {
@@ -483,6 +487,9 @@ impl Set {
     }
     fn undo(&self, args: &JsonObject) -> Value {
         let transaction = text(&args["transactionId"]);
+        if self.bounded.borrow().as_ref().is_some_and(|state| !state.transaction_matches(transaction)) {
+            return json!({"transactionId":transaction,"state":"kept","reason":"Set epoch changed"});
+        }
         let mut tracks = self.tracks.borrow_mut();
         match self.undos.borrow_mut().remove(transaction) {
             Some(Undo::Remove(made)) => tracks.retain(|track| !made.contains(&track.id)),
@@ -529,7 +536,7 @@ impl McpEndpoint for Set {
             "live_song_state" if self.bounded.borrow().is_some() => self.bounded.borrow().as_ref().unwrap().song_state(),
             "live_undo" => self.undo(&args),
             "live_run_python" => self.python(&args),
-            "live_status" => json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":7}),
+            "live_status" => json!({"connected":true,"adapter":"remote-script","provenance":"fake-live","epoch":self.bounded.borrow().as_ref().map_or(7., |state| state.epoch())}),
             "live_transaction_release" => json!({}),
             _ => match (name.strip_suffix("_preview"), name.strip_suffix("_apply")) {
                 (Some(tool), _) => self.preview(tool, &args)?,

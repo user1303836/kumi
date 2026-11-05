@@ -216,6 +216,9 @@ pub struct HearRequest {
     /// Host-owned output for a restricted capture. Never accepted from or exposed on a tool's wire.
     #[serde(skip)]
     pub scratch_dir: Option<PathBuf>,
+    /// The native epoch of the host's exact observation, not a fresh probe or a model argument.
+    #[serde(skip)]
+    pub expected_native_epoch: Option<String>,
 }
 
 /// A read-only preflight for hearing a bounded part; it starts no capture and creates no files.
@@ -223,6 +226,8 @@ pub struct HearRequest {
 pub struct HearPreview {
     pub label: String,
     pub seconds: f64,
+    /// Host-visible caveats supplied by the DAW, without file paths or untrusted project text.
+    pub disclosure: &'static str,
     pub method: HearMethod,
     /// Total native call budget, including capture or rendering, restoration and measurement.
     /// Does not include a host's subsequent model interpretation.

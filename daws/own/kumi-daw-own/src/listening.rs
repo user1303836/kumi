@@ -2554,6 +2554,9 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         bounded_hear_transport(&focus["transport"])?;
         let epoch = focus["epoch"].as_str().filter(|epoch| !epoch.is_empty())
             .ok_or_else(|| hear_refused("stale_ref", "The bridge did not establish the current project epoch."))?.to_owned();
+        if matches!(self.policy, ListeningPolicy::Restricted { .. }) && request.expected_native_epoch.as_deref() != Some(epoch.as_str()) {
+            return Err(hear_refused("stale", "The capture is not bound to this observed project epoch; observe again before listening."));
+        }
         let (label, source) = if let Some(reference) = request.tracks.first() {
             let long = renderer.plan.lengthen(reference).map_err(|why| hear_refused("stale_ref", why))?;
             if renderer.link.book.borrow().scheme.kind_of(&long) != Some("track") {
@@ -2584,7 +2587,10 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         let seconds = exact_render_seconds(&read)?;
         signal.check()?;
         Ok(RestrictedPreflight {
-            preview: HearPreview { label, seconds, method: HearMethod::Offline, deadline_seconds: (seconds * 4.).max(120.).ceil() as u64 + 120 },
+            preview: HearPreview {
+                label, seconds, method: HearMethod::Offline, deadline_seconds: (seconds * 4.).max(120.).ceil() as u64 + 120,
+                disclosure: if self.renderer.daw == Daw::Reaper { "REAPER may show the project as modified after a listen." } else { "" },
+            },
             window, source, epoch, state: read.get_mut("render_state").expect("validated preflight state").take(), focus,
         })
     }
@@ -2663,9 +2669,15 @@ impl<S: RefScheme + 'static> OwnListening<S> {
         let _listening = self.renderer.flag.begin();
         // Do not cancel the start RPC with the caller: retain its job identity so a cancellation
         // during dispatch can still stop and settle that exact job. There is no busy retry.
-        let started = match self.renderer.ask("render", json!({
+        let mut args = json!({
             "sources": [before.source], "range": {"fromBeat": before.window.from, "beats": before.window.beats}, "preRollBeats": 0,
-        }), abort::timeout(10_000)).await {
+        });
+        // Preserve the normal layout placement, but never let the focus watcher's mutable
+        // bookkeeping replace the exact observation epoch that this capture validated.
+        let input = args.as_object().expect("render arguments are an object").clone();
+        self.renderer.plan.place_request(&mut args, &input);
+        args["epoch"] = json!(before.epoch);
+        let started = match self.renderer.link.call("render", args, abort::timeout(10_000)).await {
             Ok(Ok(started)) => started,
             _ => return Err(HearFailure::Unsure { reason: "The render start could not be resolved; its effects and restoration are unknown. Observe again.".into() }.into()),
         };
@@ -3393,6 +3405,13 @@ mod restricted_staging {
         call: &CStr,
         claim: impl FnOnce(&File, &CStr, &File, &CStr) -> std::io::Result<()>,
     ) -> Result<Option<String>, RuntimeError> {
+        let left = |why: &str| {
+            let raw = leaf.to_string_lossy();
+            let mut chars = raw.chars();
+            let mut name: String = chars.by_ref().take(48).map(|c| if c == '"' { '\'' } else { c }).collect();
+            if chars.next().is_some() { name.push('…'); }
+            Some(format!("Source \"{name}\" remains in the owning Kumi listening cache: {why}."))
+        };
         let current = open_at(cache, leaf).and_then(|file| file.metadata())
             .map_err(|_| unsafe_file("The returned staging file disappeared or became unsafe before cleanup."))?;
         if !stable(original, &current) {
@@ -3400,28 +3419,24 @@ mod restricted_staging {
         }
         let root = match directory(quarantine_root) {
             Ok(root) => root,
-            Err(_) => return Ok(Some("The private quarantine is unavailable; the verified bridge source was left in place.".into())),
+            Err(_) => return Ok(left("private quarantine unavailable")),
         };
         if unsafe { libc::mkdirat(root.as_raw_fd(), call.as_ptr(), 0o700) } != 0 {
-            return Ok(Some("The call's private quarantine could not be created; the verified bridge source was left in place.".into()));
+            return Ok(left("private quarantine could not be created"));
         }
         let fd = unsafe {
             libc::openat(root.as_raw_fd(), call.as_ptr(), libc::O_RDONLY | libc::O_DIRECTORY | libc::O_NOFOLLOW | libc::O_CLOEXEC)
         };
         if fd < 0 {
             unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR); }
-            return Ok(Some("The call's private quarantine could not be opened; the verified source was left in place.".into()));
+            return Ok(left("private quarantine could not be opened"));
         }
         let claimed = unsafe { File::from_raw_fd(fd) };
         let slot = c"source";
         let kept_at = quarantine_root.join(std::ffi::OsStr::from_bytes(call.to_bytes())).join("source");
         if let Err(error) = claim(cache, leaf, &claimed, slot) {
             unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR); }
-            return Ok(Some(if error.raw_os_error() == Some(libc::EXDEV) {
-                "The bridge cache is on another filesystem; the verified source was left in place after copying.".into()
-            } else {
-                "The verified bridge source could not be claimed for cleanup; it was left in place.".into()
-            }));
+            return Ok(left(if error.raw_os_error() == Some(libc::EXDEV) { "another filesystem" } else { "cleanup claim failed" }));
         }
         // The permanent private quarantine is never auto-deleted on cancellation or restart.
         // In particular, a crash before this comparison cannot make Scratch delete a replacement.
@@ -3438,11 +3453,13 @@ mod restricted_staging {
             return Err(unsafe_file(if restored {
                 "The staging file changed during cleanup; its replacement was put back and nothing was deleted.".into()
             } else {
-                format!("The staging file changed during cleanup; its replacement was preserved at {}.", kept_at.display())
+                eprintln!("kumi listen: a substituted staging file was preserved at {}", kept_at.display());
+                "The staging file changed during cleanup; its replacement remains in this profile's permanent quarantine.".into()
             }));
         }
         if unsafe { libc::unlinkat(claimed.as_raw_fd(), slot.as_ptr(), 0) } != 0 {
-            return Ok(Some(format!("The verified staging inode could not be deleted and remains at {}.", kept_at.display())));
+            eprintln!("kumi listen: the verified staging inode remains at {}", kept_at.display());
+            return Ok(Some("The verified source remains in this profile's permanent quarantine because deletion failed.".into()));
         }
         if unsafe { libc::unlinkat(root.as_raw_fd(), call.as_ptr(), libc::AT_REMOVEDIR) } != 0 {
             return Ok(Some("The render source was removed, but its empty private quarantine directory remains.".into()));
@@ -3482,11 +3499,16 @@ mod restricted_staging {
             return Err(unsafe_file("The render changed before it could be discarded."));
         }
         let call = name(Path::new(scratch.file_name().ok_or_else(|| unsafe_file("The call scratch has no name."))?))?;
-        remove_exact(&cache, &leaf, &before, quarantine_root, &call, rename_new)
+        let warning = remove_exact(&cache, &leaf, &before, quarantine_root, &call, rename_new)?;
+        if let Some(warning) = &warning { eprintln!("kumi listen: {warning} Source: {}", returned.display()); }
+        Ok(warning)
     }
 
     pub(super) fn copy(cache: &Path, scratch: &Path, quarantine_root: &Path, returned: &Path, signal: &Signal) -> Result<Staged, RuntimeError> {
-        signal.check()?;
+        copy_after_open(cache, scratch, quarantine_root, returned, signal, || {})
+    }
+
+    fn copy_after_open(cache: &Path, scratch: &Path, quarantine_root: &Path, returned: &Path, signal: &Signal, after_open: impl FnOnce()) -> Result<Staged, RuntimeError> {
         let (cache_handle, leaf, mut source, before) = verified_source(cache, returned)?;
         let scratch_handle = directory(scratch)?;
         let scratch_named = std::fs::symlink_metadata(scratch).map_err(|_| unsafe_file("The scratch directory disappeared."))?;
@@ -3494,6 +3516,7 @@ mod restricted_staging {
         if !same_inode(&scratch_named, &scratch_opened) {
             return Err(unsafe_file("The scratch directory was replaced while it was being opened."));
         }
+        let call = name(Path::new(scratch.file_name().ok_or_else(|| unsafe_file("The call scratch has no name."))?))?;
         let target = CString::new(format!("render-{}.wav", uuid::Uuid::new_v4())).expect("UUID has no NUL");
         let fd = unsafe {
             libc::openat(scratch_handle.as_raw_fd(), target.as_ptr(),
@@ -3501,6 +3524,7 @@ mod restricted_staging {
         };
         if fd < 0 { return Err(unsafe_file("A private scratch copy could not be created.")); }
         let mut output = unsafe { File::from_raw_fd(fd) };
+        after_open();
         let result = (|| {
             let mut buffer = [0u8; 64 * 1024];
             let mut copied = 0u64;
@@ -3528,13 +3552,20 @@ mod restricted_staging {
                 return Err(unsafe_file("The scratch copy was replaced before it could be returned."));
             }
             let seconds = wav_seconds(&mut output).map_err(|_| unsafe_file("The rendered file is not a complete PCM WAV."))?;
-            let call = name(Path::new(scratch.file_name().ok_or_else(|| unsafe_file("The call scratch has no name."))?))?;
             let warning = remove_exact(&cache_handle, &leaf, &before, quarantine_root, &call, rename_new)?;
+            if let Some(warning) = &warning { eprintln!("kumi listen: {warning} Source: {}", returned.display()); }
             if !seconds.is_finite() || seconds > 65. {
                 return Err(HearFailure::Unsure { reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into() }.into());
             }
             Ok(Staged { path: scratch.join(target.to_str().expect("UUID filename is UTF-8")), seconds, warning })
         })();
+        if matches!(result, Err(RuntimeError::Aborted)) {
+            match remove_exact(&cache_handle, &leaf, &before, quarantine_root, &call, rename_new) {
+                Ok(None) => {}
+                Ok(Some(warning)) => eprintln!("kumi listen: {warning} Source: {}", returned.display()),
+                Err(error) => eprintln!("kumi listen: cancelled staging left its source untouched: {error}; source: {}", returned.display()),
+            }
+        }
         if result.is_err() {
             unsafe { libc::unlinkat(scratch_handle.as_raw_fd(), target.as_ptr(), 0); }
         }
@@ -3581,6 +3612,31 @@ mod restricted_staging {
             assert!(!source.exists());
             assert!(neighbor.is_file());
             assert_eq!(std::fs::metadata(&staged.path).unwrap().mode() & 0o077, 0);
+        }
+
+        #[test]
+        fn cancellation_after_open_cleans_only_the_verified_source() {
+            for replaced in [false, true] {
+                let (home, cache, scratch) = lab();
+                let source = cache.join("this-call.wav");
+                wav(&source, 1);
+                let signal = Signal::new();
+                let result = super::copy_after_open(&cache, &scratch, &home.path().join("quarantine"), &source, &signal, || {
+                    if replaced {
+                        std::fs::rename(&source, cache.join("original.wav")).unwrap();
+                        wav(&source, 2);
+                    }
+                    signal.cancel();
+                });
+                assert!(matches!(result, Err(RuntimeError::Aborted)));
+                assert_eq!(source.exists(), replaced, "a replacement is never discarded");
+                if replaced {
+                    let mut survivor = File::open(&source).unwrap();
+                    assert_eq!(wav_seconds(&mut survivor).unwrap(), 2.);
+                }
+                assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
+                assert_eq!(std::fs::read_dir(home.path().join("quarantine")).unwrap().count(), 0);
+            }
         }
 
         #[test]
@@ -3679,7 +3735,8 @@ mod restricted_staging {
                 &directory(&cache).unwrap(), c"this-call.wav", &before, &home.path().join("quarantine"), c"call-id",
                 |_, _, _, _| Err(std::io::Error::from_raw_os_error(libc::EXDEV)),
             ).unwrap().unwrap();
-            assert!(warning.contains("another filesystem"));
+            assert!(warning.contains("this-call.wav"), "the notice identifies the remaining source");
+            assert!(!warning.contains('/') && !warning.contains('\\'), "only a basename, never a local path: {warning}");
             assert!(same_inode(&before, &std::fs::metadata(&source).unwrap()));
             assert_eq!(std::fs::read_dir(home.path().join("quarantine")).unwrap().count(), 0);
         }
@@ -3910,13 +3967,29 @@ mod restricted_staging {
         Ok((cache_handle, source, before))
     }
 
+    fn source_warning(warning: Option<String>, returned: &Path) -> Option<String> {
+        warning.map(|mut warning| {
+            let raw = returned.file_name().expect("verified source has a basename").to_string_lossy();
+            let mut chars = raw.chars();
+            warning.push_str(" Source \"");
+            warning.extend(chars.by_ref().take(48).map(|c| if c == '"' { '\'' } else { c }));
+            if chars.next().is_some() { warning.push('…'); }
+            warning.push_str("\".");
+            eprintln!("kumi listen: {warning} Source: {}", returned.display());
+            warning
+        })
+    }
+
     pub(super) fn discard(cache: &Path, _scratch: &Path, _quarantine_root: &Path, returned: &Path) -> Result<Option<String>, RuntimeError> {
         let (_cache, source, before) = verified_source(cache, returned)?;
-        remove_handle(&source, &before)
+        remove_handle(&source, &before).map(|warning| source_warning(warning, returned))
     }
 
     pub(super) fn copy(cache: &Path, scratch: &Path, _quarantine_root: &Path, returned: &Path, signal: &Signal) -> Result<Staged, RuntimeError> {
-        signal.check()?;
+        copy_after_open(cache, scratch, returned, signal, || {})
+    }
+
+    fn copy_after_open(cache: &Path, scratch: &Path, returned: &Path, signal: &Signal, after_open: impl FnOnce()) -> Result<Staged, RuntimeError> {
         let (_cache, mut source, before) = verified_source(cache, returned)?;
         let _scratch = open(scratch, true)?;
         let length = (u64::from(before.nFileSizeHigh) << 32) | u64::from(before.nFileSizeLow);
@@ -3924,6 +3997,7 @@ mod restricted_staging {
         let mut output = OpenOptions::new().read(true).write(true).access_mode(GENERIC_READ | GENERIC_WRITE | DELETE).create_new(true).share_mode(0)
             .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT).open(&target)
             .map_err(|_| unsafe_file("A private scratch copy could not be created."))?;
+        after_open();
         let result = (|| {
             if final_path(&output)?.parent() != Some(final_path(&_scratch)?.as_path()) {
                 return Err(unsafe_file("The scratch path changed before its copy could be written."));
@@ -3946,12 +4020,18 @@ mod restricted_staging {
                 return Err(unsafe_file("The scratch directory changed during the copy."));
             }
             let seconds = wav_seconds(&mut output).map_err(|_| unsafe_file("The rendered file is not a complete PCM WAV."))?;
-            let warning = remove_handle(&source, &before)?;
+            let warning = source_warning(remove_handle(&source, &before)?, returned);
             if !seconds.is_finite() || seconds > 65. {
                 return Err(HearFailure::Unsure { reason: "The offline render exceeded the 65-second audio cap; it was discarded.".into() }.into());
             }
             Ok(Staged { path: copied_path, seconds, warning })
         })();
+        if matches!(result, Err(RuntimeError::Aborted)) {
+            match remove_handle(&source, &before) {
+                Ok(warning) => { source_warning(warning, returned); }
+                Err(error) => eprintln!("kumi listen: cancelled staging left its source untouched: {error}; source: {}", returned.display()),
+            }
+        }
         if result.is_err() {
             if let Ok(info) = information(&output) { let _ = remove_handle(&output, &info); }
         }
@@ -3980,6 +4060,25 @@ mod restricted_staging {
             assert!(!source.exists());
             assert_eq!(std::fs::read(&neighbor).unwrap(), wav);
             assert_eq!(std::fs::read(&staged.path).unwrap(), wav);
+        }
+
+        #[test]
+        fn cancellation_after_open_discards_by_handle_without_removing_a_neighbor() {
+            let home = tempfile::tempdir().unwrap();
+            let cache = home.path().join("cache");
+            let scratch = home.path().join("scratch");
+            for path in [&cache, &scratch] { daw_bridge::owner::create_owner_only_dir(path).unwrap(); }
+            let source = cache.join("this-call.wav");
+            let neighbor = cache.join("neighbor.wav");
+            let wav = kumi_media::audio::decode::float_wav(&[vec![0.; 10]], 10);
+            daw_bridge::owner::write_owner_only(&source, &wav).unwrap();
+            daw_bridge::owner::write_owner_only(&neighbor, b"leave this alone").unwrap();
+            let signal = Signal::new();
+            let result = copy_after_open(&cache, &scratch, &source, &signal, || signal.cancel());
+            assert!(matches!(result, Err(RuntimeError::Aborted)));
+            assert!(!source.exists());
+            assert_eq!(std::fs::read(&neighbor).unwrap(), b"leave this alone");
+            assert_eq!(std::fs::read_dir(&scratch).unwrap().count(), 0);
         }
 
         #[test]

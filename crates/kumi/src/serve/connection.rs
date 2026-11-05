@@ -257,6 +257,11 @@ impl Link {
         self.native_epoch.borrow().clone()
     }
 
+    /// The native epoch retained with the last observation, never refreshed by a capture preview.
+    pub(super) fn observed_native_epoch(&self) -> Option<String> {
+        self.page_epoch.borrow().clone()
+    }
+
     /// Whether an own bridge's page with this epoch is of the state of the project the last look saw: both known, and
     /// the same.
     pub fn page_is_looked(&self, epoch: Option<&str>) -> bool {
@@ -398,7 +403,10 @@ pub async fn connect(ctx: &Ctx, signal: kumi_common::abort::Signal) -> Result<Rc
         })
     };
     let mut context = IntegrationContext::new(on_connection);
-    context.policy = HostPolicy::plugin(ctx.paths().state_dir.join("scratch").join("listen"));
+    context.policy = HostPolicy::plugin(
+        ctx.paths().state_dir.join("scratch").join("listen"),
+        ctx.paths().state_dir.join("quarantine"),
+    );
     // Polled about once a second: nothing draws it as it moves.
     context.focus_drawn = false;
     context.on_focus = Some({
@@ -594,6 +602,7 @@ pub fn transport_value(transport: &Transport) -> Value {
         "line": transport.line,
     })
 }
+
 
 /// Whether `path` is inside `folder` on disk (links resolved); false when either isn't there.
 pub(super) fn inside(path: &Path, folder: &Path) -> bool {

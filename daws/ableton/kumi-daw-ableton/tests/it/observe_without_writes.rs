@@ -124,7 +124,8 @@ async fn look(policy: HostPolicy) -> (kumi_agent::core::contracts::Observation, 
 async fn a_host_that_keeps_nothing_in_the_set_looks_at_it_without_writing_and_still_knows_the_project() {
     tokio::task::LocalSet::new()
         .run_until(async {
-            let (observation, file, calls) = look(HostPolicy::plugin(std::env::temp_dir())).await;
+            let home = tempfile::tempdir().unwrap();
+            let (observation, file, calls) = look(HostPolicy::plugin(home.path().join("listen"), home.path().join("quarantine"))).await;
             let identity = observation.identity.expect("the saved Set has a project");
             assert_eq!(identity.id.as_deref(), Some(project_id_of(&file).as_str()), "the project its path gives");
             assert_eq!(observation.project.map(|p| p.id), Some(project_id_of(&file)));

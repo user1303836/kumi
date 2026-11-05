@@ -2,7 +2,7 @@
 //! Both sides of a comparison must measure successfully before either becomes a registered artifact.
 
 use super::artifacts::StagedArtifact;
-use super::ctx::{reads, Call, Ctx, OpError, OpFuture, Operation};
+use super::ctx::{Call, Ctx, OpError, OpFuture, Operation};
 use kumi_common::abort::Signal;
 use kumi_media::audio::{self, Analysis, AnalyzeOptions, DecodeOptions};
 use serde_json::{json, Value};
@@ -10,9 +10,9 @@ use std::path::{Path, PathBuf};
 
 pub const LISTEN: Operation = Operation {
     name: "listen",
-    description: "Measure approved audio by file, revision-scoped sound, or retained artifact. Optionally compare it with a reference. Returns measured loudness, spectrum, dynamics and retained audio; changes nothing in the DAW.",
-    schema: file_schema,
-    effect: reads,
+    description: "Measure approved audio by file, revision-scoped sound, retained artifact, or an explicitly approved bounded track window. Optionally compare it with a reference. Track captures restore their temporary DAW state before returning measurements.",
+    schema: super::listen_track::schema,
+    effect: super::listen_track::effect,
     run,
 };
 
@@ -92,6 +92,9 @@ pub async fn stage_source(ctx: &Ctx, value: &Value, signal: &Signal) -> Result<S
 }
 
 fn run(ctx: &Ctx, call: Call) -> OpFuture<'_> {
+    if super::listen_track::is_track(&call.args) {
+        return super::listen_track::run(ctx, call);
+    }
     Box::pin(async move {
         check(&call.signal)?;
         if call.args.keys().any(|key| !matches!(key.as_str(), "source" | "compare_to")) {
