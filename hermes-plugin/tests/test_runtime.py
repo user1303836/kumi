@@ -188,6 +188,23 @@ class Runtimes(unittest.TestCase):
         self.assertTrue(eventually(lambda: runtimes.get(self.data) is None), "then, idle, it stopped")
         self.assertTrue(eventually(lambda: not live.client.running), "and its process ended")
 
+    def test_a_chats_end_mid_call_returns_at_once_and_the_runtime_settles_holding_the_profile(self):
+        live = self.start("--slow", "history=3")  # a call that takes a while to settle, as a cancelled render does
+        answers = []
+        caller = threading.Thread(target=lambda: answers.append(live.call("history", {}, self.host(), timeout=30)))
+        caller.start()
+        self.assertTrue(eventually(lambda: live.in_flight == 1), "the call is in flight")
+        self.runtimes.stop_session("s1")
+        self.assertTrue(live.client.running, "the stop returned without waiting for the call to settle")
+        with self.assertRaises(runtime.Unavailable) as busy:
+            self.runtimes.start(self.data, live.install, "ableton", "s2", profile="studio")
+        self.assertEqual(busy.exception.code, "busy", "nothing starts over a runtime still settling")
+        caller.join()
+        self.assertEqual(len(answers), 1, "the call in flight was answered as the runtime settled")
+        self.assertTrue(eventually(lambda: not live.client.running and self.runtimes.get(self.data) is None))
+        self.assertTrue(eventually(lambda: live.gone.is_set()), "then it exited and was retired")
+        self.start(session="s2")  # and the profile came free with its exit
+
     def test_a_second_hermes_process_on_the_profile_starts_no_runtime(self):
         live = self.start()
         with self.assertRaises(runtime.Unavailable) as other:

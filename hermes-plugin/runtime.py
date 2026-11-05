@@ -43,9 +43,13 @@ LAUNCH_VARIABLES = frozenset({
 })
 MAX_LINE = 16 * 1024 * 1024  # the longest message the runtime may send; a longer line is skipped
 IDLE_AFTER = 15 * 60.0  # RESEARCH.md §3.1
-# How long a stop waits for the runtime to settle before ending it: within the 10 s Hermes's gateway gives a chat's
+# How long a stop waits for an idle runtime to exit before ending it: within the 10 s Hermes's gateway gives a chat's
 # finalization, with the terminate's own wait after it.
 STOP_WAIT = 5.0
+# How long a runtime stopped with a call in flight may take to settle it before it's ended: W1's bound for settling
+# after its stdin ends (a cancelled render puts the project back: at most 360 s), plus time to exit. A reaper waits,
+# never the stop, which returns at once within Hermes's 10 s.
+SETTLE_WAIT = 390.0
 
 
 class Unavailable(Exception):
@@ -366,10 +370,14 @@ class Client:
             if self._gone is None:
                 self._outbox.put(_line({"jsonrpc": "2.0", "method": method, "params": params or {}}))
 
-    def close(self, timeout: float = STOP_WAIT) -> None:
-        """End the runtime's stdin once what's queued is written: it settles what's in flight and exits. One still
-        running after `timeout` seconds is terminated, then killed."""
+    def end_input(self) -> None:
+        """End the runtime's stdin once what's queued is written: it settles what's in flight, then exits."""
         self._outbox.put(None)
+
+    def close(self, timeout: float = STOP_WAIT) -> None:
+        """End the runtime's stdin, and wait for it to exit. One still running after `timeout` seconds is terminated,
+        then killed."""
+        self.end_input()
         try:
             self._process.wait(timeout)
         except subprocess.TimeoutExpired:
@@ -582,6 +590,11 @@ class Runtimes:
                 if running.daw != daw:
                     raise Unavailable("other_daw", f"Kumi's runtime in this profile works in {running.daw}, not {daw}.")
                 return running
+            with self._lock:
+                settling = self._running.get(key)
+            if settling is not None:  # stopped, and still settling what it was doing: it holds the profile till it exits
+                raise Unavailable("busy", "Kumi's runtime is still finishing what it was doing when its chat ended "
+                                          "(putting the project back after a listen, say): try again in a moment.")
             state = data_dir / "state"
             lock = StateLock(state / "runtime.lock")
             lock.acquire()
@@ -623,15 +636,32 @@ class Runtimes:
         return runtime
 
     def stop(self, data_dir: Path, *, wait: float = STOP_WAIT) -> None:
+        """Stop the profile's runtime: its stdin ends, and it settles what's in flight, then exits. An idle one is
+        waited for (`wait` seconds, then ended). One with a call in flight may take minutes to settle it (a cancelled
+        render puts the project back), so the stop returns at once, within Hermes's 10 s for a chat's end, and a
+        reaper waits up to SETTLE_WAIT before ending it; the profile stays held until it has exited."""
         key = data_dir.resolve()
         with self._lock:
             runtime = self._running.get(key)
             if key in self._pending:
                 self._cancelled.add(key)
-        if runtime is not None:
-            runtime.closing = True
-            runtime.client.close(timeout=wait)
-            self._retire(runtime)
+        if runtime is None:
+            return
+        with runtime._lock:
+            stopping, runtime.closing = runtime.closing, True
+            settling = runtime.in_flight > 0
+        if stopping:  # another stop, or the idle watch, is already ending it
+            return
+        if settling:
+            runtime.client.end_input()
+            _thread(self._settle, "kumi-runtime-settling", runtime).start()
+            return
+        runtime.client.close(timeout=wait)
+        self._retire(runtime)
+
+    def _settle(self, runtime: Runtime) -> None:
+        runtime.client.close(timeout=SETTLE_WAIT)
+        self._retire(runtime)
 
     def stop_session(self, session_id: str | None) -> None:
         """Stop the runtimes `session_id` owns (its chat ended), a start of its own under way included."""
