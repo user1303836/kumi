@@ -86,6 +86,7 @@ pub async fn get(ctx: &Ctx) -> Result<Rc<Library>, OpError> {
         dir: text(&ctx.paths().state_dir.join("library"))?.to_owned(),
         sources: Some(SourceOptions { approved_folders: Some(folders), ..Default::default() }),
         decode: DecodeOptions { installed_only: true, ffmpeg: ctx.media().tool("ffmpeg").map(Path::to_path_buf) },
+        audio_only: true,
         fork: Some(false),
         workers: Some(1),
         find_sets: Some(false),
@@ -417,6 +418,35 @@ mod tests {
             bytes.extend_from_slice(&sample.to_le_bytes());
         }
         std::fs::write(path, bytes).unwrap();
+    }
+
+    #[tokio::test]
+    async fn mixed_folder_scan_measures_only_audio() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let dir = tempfile::tempdir().unwrap();
+                let root = dir.path().join("Mixed");
+                std::fs::create_dir(&root).unwrap();
+                wav(&root.join("Tone.wav"), 220.);
+                // Both parsers reject these if the scan ever reaches them.
+                let mut invalid = [b'x'; 256];
+                invalid[..2].copy_from_slice(&[0x1f, 0x8b]);
+                std::fs::write(root.join("Broken.adv"), invalid).unwrap();
+                std::fs::write(root.join("Broken.als"), invalid).unwrap();
+                let ctx = context(dir.path(), vec![root.canonicalize().unwrap()]);
+                let result = scan(&ctx).await;
+                assert_eq!(result["sounds"], 1);
+                assert_eq!(result["measured"], 1);
+                assert_eq!(result["failed"], 0);
+                let library = get(&ctx).await.unwrap();
+                assert_eq!((library.status().presets, library.status().sets), (0, 0));
+                let logs = kumi_library::learn::library_logs(ctx.paths().state_dir.join("library").to_str().unwrap());
+                assert!(logs.presets.load().await.is_empty());
+                assert!(logs.sets.load().await.is_empty());
+                assert_eq!(std::fs::read(root.join("Broken.adv")).unwrap(), invalid);
+                assert_eq!(std::fs::read(root.join("Broken.als")).unwrap(), invalid);
+            })
+            .await;
     }
 
     #[test]

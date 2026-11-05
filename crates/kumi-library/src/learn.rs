@@ -118,6 +118,9 @@ pub struct LearnPlan {
     /// Canonical roots captured by restricted planning. `Some([])` denies every source, including auxiliary walks.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub approved_folders: Option<Vec<String>>,
+    /// Limit learning to audio, leaving existing preset and project records untouched.
+    #[serde(default)]
+    pub audio_only: bool,
     #[serde(default, skip_serializing_if = "kumi_media::audio::DecodeOptions::is_default")]
     pub decode: kumi_media::audio::DecodeOptions,
     #[serde(default)]
@@ -395,7 +398,7 @@ async fn walk(
                 continue;
             }
             let ext = extension(&lower);
-            if set_extension(daws, &ext) && skipped_set(daws, &full) {
+            if kinds.sets && set_extension(daws, &ext) && skipped_set(daws, &full) {
                 continue;
             }
             let list = if daw_library {
@@ -584,18 +587,33 @@ async fn gated(options: &LearnOptions) -> Result<(), RuntimeError> {
 /// Learns changed files in source order, persisting partial progress before measuring the next batch.
 pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError> {
     let plan = &options.plan;
+    let kinds = Kinds { sounds: true, presets: !plan.audio_only, sets: !plan.audio_only };
     let approved_roots = plan.approved_folders.as_ref().map(|roots| Arc::new(roots.clone()));
     let approved_folders = approved_roots.as_ref();
     let logs = library_logs(&plan.dir);
     if options.rebuild {
         tokio::try_join!(
             logs.sounds.write(std::iter::empty()),
-            logs.presets.write(std::iter::empty()),
-            logs.sets.write(std::iter::empty())
+            async {
+                if kinds.presets {
+                    logs.presets.write(std::iter::empty()).await?;
+                }
+                Ok::<_, io::Error>(())
+            },
+            async {
+                if kinds.sets {
+                    logs.sets.write(std::iter::empty()).await?;
+                }
+                Ok::<_, io::Error>(())
+            }
         )
         .map_err(io_error)?;
     }
-    let (mut sounds, mut presets, mut sets) = tokio::join!(logs.sounds.load(), logs.presets.load(), logs.sets.load());
+    let (mut sounds, mut presets, mut sets) = tokio::join!(
+        logs.sounds.load(),
+        async { if kinds.presets { logs.presets.load().await } else { Entries::default() } },
+        async { if kinds.sets { logs.sets.load().await } else { Entries::default() } }
+    );
     let progress = Progress {
         value: RefCell::new(LearnProgress {
             sounds: Counts { known: sounds.len(), ..Default::default() },
@@ -634,7 +652,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             source,
             layout,
             options.daws,
-            Kinds { sounds: true, presets: true, sets: own },
+            Kinds { sets: kinds.sets && own, ..kinds },
             &mut found,
             &options.signal,
             16,
@@ -645,14 +663,16 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         .await?
         {
             walked_sounds.push(source.path.clone());
-            walked_presets.push(source.path.clone());
-            if own {
+            if kinds.presets {
+                walked_presets.push(source.path.clone());
+            }
+            if kinds.sets && own {
                 walked_sets.push(source.path.clone());
             }
         }
     }
     let source_paths = sources.iter().map(|s| s.path.clone()).collect();
-    for path in &plan.set_folders {
+    for path in plan.set_folders.iter().filter(|_| kinds.sets) {
         if sources.iter().any(|s| *path == s.path || below(path, &s.path).is_some()) {
             continue;
         }
@@ -674,7 +694,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             walked_sets.push(path.clone());
         }
     }
-    for path in &plan.set_files {
+    for path in plan.set_files.iter().filter(|_| kinds.sets) {
         if found.seen.contains(path) || !set_extension(options.daws, &extension(&path.to_lowercase())) || skipped_set(options.daws, path) {
             continue;
         }
@@ -690,7 +710,7 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
             relative: basename(path),
         });
     }
-    for path in &plan.plugin_presets {
+    for path in plan.plugin_presets.iter().filter(|_| kinds.presets) {
         let source = Source { path: path.clone(), label: "Plug-in presets".into(), kind: SourceKind::Folder };
         if walk(
             &source,
@@ -710,8 +730,12 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         }
     }
     gone(&mut sounds, &found.sounds, &logs.sounds, &walked_sounds, None).await?;
-    gone(&mut presets, &found.presets, &logs.presets, &walked_presets, None).await?;
-    gone(&mut sets, &found.sets, &logs.sets, &walked_sets, Some(&|path| skipped_set(options.daws, path))).await?;
+    if kinds.presets {
+        gone(&mut presets, &found.presets, &logs.presets, &walked_presets, None).await?;
+    }
+    if kinds.sets {
+        gone(&mut sets, &found.sets, &logs.sets, &walked_sets, Some(&|path| skipped_set(options.daws, path))).await?;
+    }
     let todo_sounds: Vec<_> = found
         .sounds
         .into_iter()
@@ -728,7 +752,9 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         p.presets = Counts { known: presets.len(), todo: todo_presets.len(), done: 0 };
         p.sets = Counts { known: sets.len(), todo: todo_sets.len(), done: 0 };
     }
-    progress.phase(LearnPhase::Presets);
+    if kinds.presets {
+        progress.phase(LearnPhase::Presets);
+    }
     let mut preset_writer = Writer::new(logs.presets.clone());
     for file in &todo_presets {
         gated(&options).await?;
@@ -783,8 +809,12 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         }
         progress.tell(false);
     }
-    preset_writer.flush().await;
-    progress.phase(LearnPhase::Sets);
+    if kinds.presets {
+        preset_writer.flush().await;
+    }
+    if kinds.sets {
+        progress.phase(LearnPhase::Sets);
+    }
     let mut set_writer = Writer::new(logs.sets.clone());
     for file in &todo_sets {
         gated(&options).await?;
@@ -813,10 +843,12 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
         progress.tell(false);
         tokio::task::yield_now().await;
     }
-    set_writer.flush().await;
     // The producer's habits are learned from Live's Sets: another DAW's projects don't count towards them yet.
-    let live_sets = sets.values().filter(|entry| entry.set.as_ref().is_some_and(|set| set.daw.is_none()));
-    write_json(&Path::new(&plan.dir).join("taste.json"), &build_taste(&songs_of(live_sets), None)).await.map_err(io_error)?;
+    if kinds.sets {
+        set_writer.flush().await;
+        let live_sets = sets.values().filter(|entry| entry.set.as_ref().is_some_and(|set| set.daw.is_none()));
+        write_json(&Path::new(&plan.dir).join("taste.json"), &build_taste(&songs_of(live_sets), None)).await.map_err(io_error)?;
+    }
     progress.phase(LearnPhase::Sounds);
     let size = plan
         .workers
@@ -904,6 +936,61 @@ pub async fn learn(options: LearnOptions) -> Result<LearnProgress, RuntimeError>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn audio_only_skips_mixed_and_auxiliary_inputs_and_preserves_old_non_audio_records() {
+        tokio::task::LocalSet::new()
+            .run_until(async {
+                let dir = tempfile::tempdir().unwrap();
+                let root = dir.path().canonicalize().unwrap();
+                let mixed = root.join("mixed");
+                let auxiliary = root.join("auxiliary");
+                let plugins = root.join("plugins");
+                for folder in [&mixed, &auxiliary, &plugins] {
+                    std::fs::create_dir(folder).unwrap();
+                }
+                let mut invalid = [b'x'; 256];
+                invalid[..2].copy_from_slice(&[0x1f, 0x8b]);
+                for file in [
+                    mixed.join("Broken.adv"),
+                    mixed.join("Broken.als"),
+                    auxiliary.join("Auxiliary.als"),
+                    plugins.join("Plugin.adv"),
+                    root.join("Explicit.als"),
+                ] {
+                    std::fs::write(file, invalid).unwrap();
+                }
+                // Old persisted plans omit the selection and must retain all-kind behavior.
+                let mut plan: LearnPlan = serde_json::from_value(serde_json::json!({
+                    "dir": root.join("index"),
+                    "sources": [{"path": mixed, "label": "Mixed", "kind": "folder"}],
+                    "approvedFolders": [root],
+                    "setFolders": [auxiliary],
+                    "setFiles": [root.join("Explicit.als")],
+                    "pluginPresets": [plugins],
+                    "workers": 0
+                }))
+                .unwrap();
+                let all = learn(LearnOptions::new(plan.clone(), Signal::new())).await.unwrap();
+                assert_eq!((all.presets.known, all.sets.known, all.failed), (2, 3, 5));
+                let index = Path::new(&plan.dir);
+                let preserved: Vec<_> = ["presets.jsonl", "sets.jsonl", "taste.json"]
+                    .into_iter()
+                    .map(|name| (index.join(name), std::fs::read(index.join(name)).unwrap()))
+                    .collect();
+                plan.audio_only = true;
+                let cancelled = Signal::new();
+                cancelled.cancel();
+                assert!(learn(LearnOptions::new(plan.clone(), cancelled)).await.is_err());
+                // A rebuild must neither load/count nor erase old non-audio records.
+                let audio = learn(LearnOptions { rebuild: true, ..LearnOptions::new(plan, Signal::new()) }).await.unwrap();
+                assert_eq!((audio.presets, audio.sets, audio.failed), (Counts::default(), Counts::default(), 0));
+                for (path, bytes) in preserved {
+                    assert_eq!(std::fs::read(path).unwrap(), bytes);
+                }
+            })
+            .await;
+    }
 
     #[tokio::test]
     async fn restricted_walking_reports_discovered_audio_and_keeps_other_files_untouched() {
