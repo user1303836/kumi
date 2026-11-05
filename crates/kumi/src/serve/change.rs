@@ -107,24 +107,27 @@ fn refusal(error: OpError) -> Value {
 }
 
 /// A plan's steps as checked: each one's HISTORY family, its file field when it places a file (CC-11), whether it's a
-/// change only the DAW's own Undo takes back (CC-20), and the reasons such steps give, with the DAW's name to say them.
+/// change only the DAW's own Undo takes back (CC-20), how the DAW's Undo holds those, and the reasons such steps give,
+/// with the DAW's name to say them.
 struct Checked {
     families: Vec<&'static str>,
     files: Vec<(usize, &'static str)>,
     daw_undo: Vec<bool>,
+    undo_steps: Vec<kumi_daw::plugin::DawUndoSteps>,
     because: Vec<&'static str>,
     app: &'static str,
 }
 
 impl Checked {
     /// What Kumi says of the change when a step of it is one only the DAW's own Undo takes back, on the system `os`
-    /// names: CC-20's words, then each reason such steps give, once (twelve pad loads give theirs once).
+    /// names: CC-20's words with how many presses of the DAW's Undo take it back, then each reason such steps give, once
+    /// (twelve pad loads give theirs once).
     fn undo_note(&self, os: &str) -> Option<String> {
-        use kumi_daw::plugin::{daw_undo_said, DAW_UNDO_NOTE};
+        use kumi_daw::plugin::{daw_undo_note, daw_undo_presses, daw_undo_said};
         if !self.daw_undo.contains(&true) {
             return None;
         }
-        let mut said = vec![daw_undo_said(DAW_UNDO_NOTE, self.app, os)];
+        let mut said = vec![daw_undo_note(daw_undo_presses(self.undo_steps.iter().copied()), self.app, os)];
         for why in &self.because {
             let why = daw_undo_said(why, self.app, os);
             if !said.contains(&why) {
@@ -161,8 +164,14 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
         return Err(refused("unsupported", "This runtime's DAW isn't one this build integrates."));
     };
     let offered = offered_steps(&plan.input_schema());
-    let mut checked =
-        Checked { families: Vec::new(), files: Vec::new(), daw_undo: Vec::new(), because: Vec::new(), app: provider.profile().words.app };
+    let mut checked = Checked {
+        families: Vec::new(),
+        files: Vec::new(),
+        daw_undo: Vec::new(),
+        undo_steps: Vec::new(),
+        because: Vec::new(),
+        app: provider.profile().words.app,
+    };
     for (n, step) in steps.iter().enumerate() {
         let tool = step.get("tool").and_then(Value::as_str).unwrap_or_default();
         let input = step.get("input").cloned().unwrap_or_else(|| json!({}));
@@ -174,6 +183,7 @@ fn checked(ctx: &Ctx, plan: &Rc<dyn KernelTool>, steps: &[Value]) -> Result<Chec
         checked.families.push(allowed.family);
         checked.daw_undo.push(daw_undo);
         if daw_undo {
+            checked.undo_steps.push(allowed.daw_undo_steps);
             checked.because.extend(allowed.daw_undo_because);
         }
     }
@@ -1066,7 +1076,7 @@ fn on_track(words: &str, track: Option<&str>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use kumi_daw::plugin::{daw_undo_said, DAW_UNDO_NOTE};
+    use kumi_daw::plugin::{daw_undo_note, DawUndoSteps};
     use kumi_types::contracts::ToolResult;
 
     /// An undo's words say the track once: not again when the change's title names it, and not for a name that's only
@@ -1196,17 +1206,27 @@ mod tests {
             json!({"tool": "set_mixer", "input": {"trackRef": "7:track:1", "volume": 0.5}}),
             json!({"tool": "edit_rack", "input": {"rackRef": "7:device:1", "action": "add-chain"}}),
         ];
-        let checked =
-            Checked { families: vec!["mixer", "device"], files: Vec::new(), daw_undo: vec![false, true], because: Vec::new(), app: "Live" };
+        let checked = Checked {
+            families: vec!["mixer", "device"],
+            files: Vec::new(),
+            daw_undo: vec![false, true],
+            undo_steps: vec![DawUndoSteps::PLAN],
+            because: Vec::new(),
+            app: "Live",
+        };
         let lines = preview_steps(&HashMap::new(), &steps, &checked);
         assert_eq!(lines.iter().map(|line| line.get("undo").cloned()).collect::<Vec<_>>(), [None, Some(json!("daw"))]);
         // The key the note names is the one on the machine Kumi runs on.
-        let note = daw_undo_said(DAW_UNDO_NOTE, "Live", "macos");
+        let note = daw_undo_note(1, "Live", "macos");
         assert_eq!(checked.undo_note("macos"), Some(note.clone()));
         assert!(checked.undo_note("windows").unwrap().contains("Live's own Undo (Ctrl+Z)"));
         // CC-20's words come first, then each reason the marked steps give, once.
-        let pads = Checked { because: vec!["Kumi can't tell.", "Kumi can't tell."], ..checked };
-        assert_eq!(pads.undo_note("macos"), Some(format!("{note} Kumi can't tell.")));
+        let reasons = Checked { because: vec!["Kumi can't tell.", "Kumi can't tell."], ..checked };
+        assert_eq!(reasons.undo_note("macos"), Some(format!("{note} Kumi can't tell.")));
+        // The note counts the presses: two pads, each a step of its own besides the plan's, are three.
+        let pad = DawUndoSteps { in_plan: true, own: 1 };
+        let pads = Checked { daw_undo: vec![true, true], undo_steps: vec![pad, pad], ..reasons };
+        assert!(pads.undo_note("macos").unwrap().starts_with(&daw_undo_note(3, "Live", "macos")));
         assert_eq!(Checked { daw_undo: vec![false, false], ..pads }.undo_note("macos"), None, "no marked step, no note");
     }
 
