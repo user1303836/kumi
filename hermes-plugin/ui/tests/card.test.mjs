@@ -402,6 +402,7 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
     items: [
       { id: 'h-g2-u1', label: '', title: 'Raise the Drums fader', family: 'unsure', state: 'unsure', undo_available: false, note: 'Live stopped answering mid-change.', runtime_generation: 'g2' },
       { id: 'h-g2-c3', label: 'c3', title: 'Bass muted', family: 'mixer', state: 'kept', undo_available: false, track: 'Bass', note: 'Bass was changed by hand since, so Kumi kept it.', runtime_generation: 'g2' },
+      { id: 'h-g2-c2', label: 'c2', title: 'Script: Name the tracks', family: 'script', state: 'applied', undo_available: false, script: { sha256: 'a'.repeat(64), language: 'python' }, runtime_generation: 'g2' },
       { id: 'h-g1-c9', label: 'c9', title: 'Tempo 120 → 124', family: 'tempo', state: 'applied', undo_available: false, runtime_generation: 'g1' }
     ]
   }
@@ -415,6 +416,10 @@ test("HISTORY shows the runtime's own note: why an unsure row is unsure, and why
   const live = renderToStaticMarkup(createElement(HistoryView, { history, now: 0, live: true, daw: 'ableton' }))
   assert.ok(live.includes(restarted) && live.includes(english('history.expired').replaceAll("'", '&#x27;')), live)
   assert.ok(!html.includes(restarted))
+  // A script's row has no undo from the start (Kumi never undoes one, CC-19): applied, saying so, never "restarted".
+  assert.equal(live.split(restarted).length - 1, 1, live)
+  assert.ok(live.includes(english('history.scriptUndo', 'Live').replaceAll("'", '&#x27;')), live)
+  assert.ok(live.includes(`aria-label="${english('history.applied')}"`), live)
 })
 
 test('a Japanese window reads FOCUS and HISTORY in Japanese; the rows keep their own names', async () => {

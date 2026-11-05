@@ -126,7 +126,8 @@
       dawUndo: (daw) => `Next in ${daw}'s Undo, if nothing has changed there since`,
       dawUndoTitle: (daw, keys) => `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
       byHand: (daw) => `Remove it by hand in ${daw}, or undo the later changes first.`,
-      byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
+      byHandTitle: (daw) => `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`,
+      scriptUndo: (daw) => `Kumi doesn't undo a script: ${daw}'s own Undo may, if its step is still the latest there.`
     },
     job: {
       scanning: "Scanning",
@@ -436,7 +437,8 @@
       dawUndo: (daw) => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
       dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
       byHand: (daw) => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
-      byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
+      byHandTitle: (daw) => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`,
+      scriptUndo: (daw) => `Kumi はスクリプトを取り消しません。${daw} でまだ最後の操作なら、${daw} の取り消しで戻せることがあります。`
     },
     job: {
       scanning: "スキャン中",
@@ -745,7 +747,8 @@
       dawUndo: (daw) => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
       dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
       byHand: (daw) => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
-      byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
+      byHandTitle: (daw) => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`,
+      scriptUndo: (daw) => `Kumi 不会撤销脚本：如果它仍是 ${daw} 中的最后一步，${daw} 自己的撤销也许可以。`
     },
     job: {
       scanning: "正在扫描",
@@ -1320,7 +1323,7 @@
     failed: { mark: "✕", tone: "bad", word: "history.failed" }
   };
   function restartedSince(item, live) {
-    if (item.note) return false;
+    if (item.note || item.family === "script") return false;
     return item.state === "expired" || live && item.state === "applied" && item.undo_available === false;
   }
   function stateOf(item, t = english, live = false) {
@@ -1402,8 +1405,9 @@
             /* @__PURE__ */ jsx("span", { style: { ...S.faint, ...S.ellipsis }, children: [track && clean(track, 24), item.family && clean(item.family, 16), item.label && clean(item.label, 12), ago(item.at, now, t)].filter(Boolean).join(" · ") })
           ] }),
           item.state === "unsure" || item.state === "partial" ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, color: T.warn, whiteSpace: "normal" }, children: [clean(item.reason ?? item.note ?? t("history.unconfirmed"), 200), cleanupWords(item.cleanup, t), t("history.lookFirst")].filter(Boolean).join(" ") }) : (
-            // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
-            item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
+            // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi
+            // never undoes one, CC-19), or why a restart's can't.
+            item.note ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: clean(item.note, 400) }) : item.family === "script" ? /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.scriptUndo", dawName(daw, t)) }) : restartedSince(item, live) && /* @__PURE__ */ jsx("span", { style: { ...S.muted, whiteSpace: "normal" }, children: t("history.restartedSince", dawName(daw, t)) })
           ),
           dawUndo && /* @__PURE__ */ jsx(DawUndo, { daw, how: dawUndo, keys: undoKeys(target) }),
           detail?.(item)

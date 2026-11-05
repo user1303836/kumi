@@ -23,9 +23,9 @@ const STATE: Record<string, { mark: string; tone: 'bad' | 'good' | 'muted' | 'wa
 
 /** A row Kumi restarted since, so it can't undo it safely: `expired`, or an earlier runtime's `applied` row (no undo
  *  while a live runtime answers). A stale snapshot sets every row's undo false, so only a live one says so. A row
- *  with the runtime's own note keeps its note. */
+ *  with the runtime's own note keeps its note, and a script's has no undo from the start (Kumi never undoes one). */
 export function restartedSince(item: HistoryItem, live: boolean): boolean {
-  if (item.note) return false
+  if (item.note || item.family === 'script') return false
   return item.state === 'expired' || (live && item.state === 'applied' && item.undo_available === false)
 }
 
@@ -169,9 +169,12 @@ export function HistoryView({
                     .join(' ')}
                 </span>
               ) : (
-                // The runtime's own words for any other row (why an undo didn't happen, say), or why a restart's can't.
+                // The runtime's own words for any other row (why an undo didn't happen, say), why a script's can't (Kumi
+                // never undoes one, CC-19), or why a restart's can't.
                 item.note ? (
                   <span style={{ ...S.muted, whiteSpace: 'normal' }}>{clean(item.note, 400)}</span>
+                ) : item.family === 'script' ? (
+                  <span style={{ ...S.muted, whiteSpace: 'normal' }}>{t('history.scriptUndo', dawName(daw, t))}</span>
                 ) : (
                   restartedSince(item, live) && <span style={{ ...S.muted, whiteSpace: 'normal' }}>{t('history.restartedSince', dawName(daw, t))}</span>
                 )

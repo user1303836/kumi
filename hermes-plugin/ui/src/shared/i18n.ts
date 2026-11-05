@@ -97,7 +97,8 @@ const en = {
       `No later Kumi change sits above it in ${daw}'s Undo. If nothing has changed there since, press ${keys} as this row says, right away.`,
     byHand: (daw: string) => `Remove it by hand in ${daw}, or undo the later changes first.`,
     byHandTitle: (daw: string) =>
-      `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`
+      `${daw}'s undo would take back what came after first. Remove it by hand instead, or undo the later changes first.`,
+    scriptUndo: (daw: string) => `Kumi doesn't undo a script: ${daw}'s own Undo may, if its step is still the latest there.`
   },
   job: {
     scanning: 'Scanning',
@@ -413,7 +414,8 @@ const ja: Shape<typeof en> = {
     dawUndo: daw => `${daw} の取り消しで次の操作（その後 ${daw} で何も変えていなければ）`,
     dawUndoTitle: (daw, keys) => `${daw} の取り消しで、この上に Kumi の後の変更はありません。その後 ${daw} で何も変えていなければ、この行の説明のとおり、すぐに ${keys} を押してください。`,
     byHand: daw => `${daw} で手動で削除するか、後の変更を先に取り消してください。`,
-    byHandTitle: daw => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`
+    byHandTitle: daw => `${daw} の取り消しは、その後の変更を先に戻してしまいます。手動で削除するか、後の変更を先に取り消してください。`,
+    scriptUndo: daw => `Kumi はスクリプトを取り消しません。${daw} でまだ最後の操作なら、${daw} の取り消しで戻せることがあります。`
   },
   job: {
     scanning: 'スキャン中',
@@ -725,7 +727,8 @@ const zh: Shape<typeof en> = {
     dawUndo: daw => `${daw} 撤销中的下一步，前提是之后那里没有任何改动`,
     dawUndoTitle: (daw, keys) => `在 ${daw} 的撤销中，它上面没有 Kumi 之后的改动。如果之后在 ${daw} 中没有任何改动，请按这一行的说明立即按 ${keys}。`,
     byHand: daw => `在 ${daw} 中手动删除，或先撤销之后的改动。`,
-    byHandTitle: daw => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`
+    byHandTitle: daw => `${daw} 的撤销会先撤回之后的改动。请手动删除，或先撤销之后的改动。`,
+    scriptUndo: daw => `Kumi 不会撤销脚本：如果它仍是 ${daw} 中的最后一步，${daw} 自己的撤销也许可以。`
   },
   job: {
     scanning: '正在扫描',
