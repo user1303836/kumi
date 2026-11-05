@@ -267,9 +267,12 @@ def _inside(path: str, roots: list[Path]) -> bool:
 # a sample folder the producer approved is usually a plain drive path (`C:\…`): both are compared in the plain form.
 # A network or device path (`\\server\share`, `\\?\UNC\…`, `\\.\…`, `\\?\GLOBALROOT\…`) is refused before anything
 # touches the filesystem, since even resolving one can reach another machine. So is a path that isn't drive-absolute
-# (`C:x`, `\x`), which depends on the process's own drive and folder.
+# (`C:x`, `\x`), which depends on the process's own drive and folder, and one Windows would read as something else: a
+# reserved device name (`NUL`, `COM1.wav`), a name ending in a dot or space (Windows drops them, so `a.wav.` is
+# `a.wav`), or an alternate data stream (`a.wav:hidden`). Network folders therefore can't be auditioned on Windows.
 _VERBATIM_DRIVE = re.compile(r"^[\\/]{2}\?[\\/](?=[A-Za-z]:[\\/])")
 _DRIVE_ABSOLUTE = re.compile(r"^[A-Za-z]:[\\/]")
+_RESERVED = re.compile(r"^(?:CON|PRN|AUX|NUL|COM[0-9¹²³]|LPT[0-9¹²³]|CONIN\$|CONOUT\$) *(?:\..*)?$", re.IGNORECASE)
 
 
 def _local(path: str, windows: bool = os.name == "nt") -> str | None:
@@ -278,7 +281,20 @@ def _local(path: str, windows: bool = os.name == "nt") -> str | None:
     if not windows:
         return path
     plain = _VERBATIM_DRIVE.sub("", path, count=1)
-    return plain if _DRIVE_ABSOLUTE.match(plain) else None
+    if not _DRIVE_ABSOLUTE.match(plain) or ":" in plain[2:]:
+        return None
+    for part in re.split(r"[\\/]+", plain[3:]):
+        if part in ("", ".", ".."):
+            continue
+        if part[-1] in ". " or _RESERVED.match(part.rstrip(". ")):
+            return None
+    return plain
+
+
+def _resolved(path: str, windows: bool = os.name == "nt") -> str | None:
+    """`path` (already through `_local`) with its links resolved, checked again: a link inside an approved folder, or a
+    folder that is one, can lead to a network share, and a long path can come back in the verbatim form."""
+    return _local(os.path.realpath(path), windows)
 
 
 # The keys every snapshot carries around its own data.
@@ -300,10 +316,10 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
     an artifact (artifacts.json) whose real path is inside `<state>/artifacts` or an approved sample folder, and a
     sound of the current map revision whose real path is inside an approved sample folder. Nothing else in the plugin
     data (Kumi's home, the runtime, setup) is ever served. The file must be a regular one, at most 50 MiB."""
-    approved = [Path(os.path.realpath(local)) for local in (_local(os.path.expanduser(f)) for f in library_folders or [] if isinstance(f, str) and f) if local]
+    approved = [Path(real) for real in (_resolved(local) for local in (_local(os.path.expanduser(f)) for f in library_folders or [] if isinstance(f, str) and f) if local) if real]
     entry: dict | None = _artifacts(state).get(media_id)
     if entry is not None:
-        roots = [Path(os.path.realpath(state / "artifacts")), *approved]
+        roots = [Path(real) for real in [_resolved(str(state / "artifacts"))] if real] + approved
     else:
         found = sound(state, media_id)
         if found is None:
@@ -312,9 +328,9 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
         roots = approved
     path = entry.get("path")
     local = _local(path) if isinstance(path, str) and path else None
-    if local is None:
+    real = _resolved(local) if local is not None else None
+    if real is None:
         return None
-    real = os.path.realpath(local)
     if not _inside(real, roots) or not os.path.isfile(real):
         return None
     size = os.path.getsize(real)

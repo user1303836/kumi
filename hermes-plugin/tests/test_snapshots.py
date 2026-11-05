@@ -232,9 +232,25 @@ class Media(StateTest):
         self.assertEqual(local(r"C:\Samples\Snare.wav", windows=True), r"C:\Samples\Snare.wav")
         for refused in (r"\\server\share\Snare.wav", "//server/share/Snare.wav", r"\\?\UNC\server\share\Snare.wav",
                         r"\\.\PhysicalDrive0", r"\\?\GLOBALROOT\Device\HarddiskVolume1\Snare.wav", "C:Snare.wav",
-                        r"\Samples\Snare.wav"):
+                        r"\Samples\Snare.wav",
+                        # Names Windows reads as something else: a device, a dropped trailing dot or space, a stream.
+                        r"C:\Samples\NUL", r"C:\Samples\com1.wav", r"C:\Samples\CON .wav", r"C:\Samples\Snare.wav.",
+                        "C:\\Samples\\Snare.wav ", r"C:\Samples\Snare.wav:hidden", r"C:\Samples.\Snare.wav"):
             self.assertIsNone(local(refused, windows=True), refused)
+        self.assertEqual(local(r"C:\Samples\Console Snare.wav", windows=True), r"C:\Samples\Console Snare.wav")
         self.assertEqual(local("/Users/me/Samples/Snare.wav", windows=False), "/Users/me/Samples/Snare.wav")
+
+    def test_a_resolved_path_is_checked_again_so_a_link_to_a_share_is_refused_and_a_long_path_compares_plainly(self) -> None:
+        # realpath's answer goes through the same check: a link inside an approved folder, or a folder that is one, can
+        # lead to a network share, and a long path can come back in the verbatim form (rgzm, #999).
+        real_realpath = snapshots.os.path.realpath
+        try:
+            snapshots.os.path.realpath = lambda path, *args, **kwargs: r"\\server\share\Snare.wav"
+            self.assertIsNone(snapshots._resolved(r"C:\Samples\link.wav", windows=True))
+            snapshots.os.path.realpath = lambda path, *args, **kwargs: "\\\\?\\C:\\" + "Long\\" * 60 + "Snare.wav"
+            self.assertEqual(snapshots._resolved(r"C:\Samples\link.wav", windows=True), "C:\\" + "Long\\" * 60 + "Snare.wav")
+        finally:
+            snapshots.os.path.realpath = real_realpath
 
     @unittest.skipUnless(os.name == "nt", "Windows path forms")
     def test_on_windows_a_sound_named_verbatim_is_served_from_a_plain_folder_and_a_network_path_is_never_resolved(self) -> None:
