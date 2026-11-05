@@ -106,6 +106,27 @@ test("the pane warns while Kumi isn't sure of the project and offers no Undo, un
   assert.ok(cleared.includes('>Undo<'))
 })
 
+test("while Kumi is connected, the pane doesn't ask to install the DAW's part it's connected through; otherwise it still does", async () => {
+  const { KumiPane } = await load('src/desktop/pane.tsx', { react: 'real' })
+  const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
+  const setup = { state: 'needs_daw_component', daw: 'ableton', message: "Kumi's runtime is ready; next, install Kumi's part in Live." }
+  const render = async (status, answer = setup) => {
+    const store = new KumiStore(async path => {
+      if (path.startsWith('/status')) return { stale: false, daw: 'ableton', revisions: {}, ...status }
+      if (path.startsWith('/setup')) return answer
+      throw Object.assign(new Error('not here'), { status: 404 })
+    })
+    await store.refreshStatus()
+    return renderToStaticMarkup(createElement(KumiPane, { ctx: {}, store, onOpenMap() {} }))
+  }
+  // Connected through an install setup didn't make (an adopted Kumi's): that part evidently works.
+  const connected = await render({ connected: true, owner: { session_id: 's1' } })
+  assert.ok(!connected.includes('Set up Kumi for Live') && !connected.includes("install Kumi's part"), connected)
+  // Not connected, or missing the runtime itself, setup is still the next step.
+  assert.ok((await render({ connected: false })).includes('Set up Kumi for Live'))
+  assert.ok((await render({ connected: true }, { ...setup, state: 'needs_runtime' })).includes('Set up Kumi for Live'))
+})
+
 test('"Last heard" counts from when the runtime was last heard, so it keeps moving while nothing new is read', async () => {
   const { FocusView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
   const heardAt = 1_000_000_000

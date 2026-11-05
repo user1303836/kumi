@@ -1327,6 +1327,11 @@ var KumiStore = class {
     });
   }
 };
+function dawPartWorks(state) {
+  const setup = state.setup;
+  const onlyDawPart = setup?.state === "needs_daw_component" || setup?.state === "ready" && setup.next_step === "install_daw_component";
+  return Boolean(onlyDawPart && state.status?.connected);
+}
 function jobOf(result) {
   let value = result;
   if (typeof value === "string") {
@@ -1877,7 +1882,7 @@ var NEEDS_SETUP = { needs_runtime: true, outdated_runtime: true, damaged_runtime
 function nextStep(state, t = english) {
   const setup = state.setup;
   const daw = state.status?.daw ?? setup?.daw;
-  if (setup && (NEEDS_SETUP[setup.state ?? ""] || setup.next_step === "install_runtime" || setup.next_step === "install_daw_component")) {
+  if (setup && !dawPartWorks(state) && (NEEDS_SETUP[setup.state ?? ""] || setup.next_step === "install_runtime" || setup.next_step === "install_daw_component")) {
     return { label: t("step.setup", dawName(daw, t)), request: setupRequest(daw) };
   }
   if (setup?.state === "ready" && !state.status?.connected) return { label: t("step.connect", dawName(daw, t)), request: connectRequest(daw) };
@@ -1902,7 +1907,7 @@ function KumiPane({ ctx, store, onOpenMap }) {
   const session = ownerSession(state);
   const connected = Boolean(state.status?.connected);
   const setupState = state.setup?.state;
-  const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" ? state.setup.message : null;
+  const setupMessage = typeof state.setup?.message === "string" && setupState && setupState !== "ready" && setupState !== "unknown" && !dawPartWorks(state) ? state.setup.message : null;
   const undoable = (state.history?.items ?? []).filter((item) => canUndo(state.status, item)).length;
   return /* @__PURE__ */ jsxs5("div", { style: { height: "100%", overflowY: "auto", overflowX: "hidden", color: T.text }, children: [
     /* @__PURE__ */ jsxs5("div", { style: { ...S.section, gap: 8 }, children: [
@@ -2380,10 +2385,7 @@ function MapCanvas({ map, found, playing, selected, onPick, actions, empty }) {
           value: query
         }
       ),
-      /* @__PURE__ */ jsxs9("span", { style: S.faint, children: [
-        shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)),
-        model.revision ? ` · ${t("map.revision", model.revision)}` : ""
-      ] })
+      /* @__PURE__ */ jsx9("span", { style: S.faint, title: model.revision ? t("map.revision", model.revision) : void 0, children: shown === model.points.length ? t("map.count", num(model.points.length, 0)) : t("map.countOf", num(shown, 0), num(model.points.length, 0)) })
     ] }),
     /* @__PURE__ */ jsx9("div", { style: { ...S.row, flexWrap: "wrap", gap: 4, padding: "6px 10px" }, children: model.groups.map((group) => {
       const off = hidden.has(group.key);

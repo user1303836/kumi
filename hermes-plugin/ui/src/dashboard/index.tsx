@@ -9,7 +9,7 @@ import { Audition, useKumi, usePlaying, useWant } from '../shared/hooks.ts'
 import { FocusView, HistoryView } from '../shared/HistoryView.tsx'
 import { translator } from '../shared/i18n.ts'
 import { MapCanvas } from '../shared/MapCanvas.tsx'
-import { KumiStore } from '../shared/store.ts'
+import { dawPartWorks, KumiStore } from '../shared/store.ts'
 import type { AudioReply } from '../shared/types.ts'
 import { Dot, I18n, S, Section, TextButton, useT } from '../shared/ui.tsx'
 import { SDK } from './react.ts'
@@ -95,7 +95,7 @@ function Dashboard() {
         <Dot color={tone} size={9} />
         <span style={{ fontSize: 15, fontWeight: 600 }}>{words.text}</span>
         {state.status?.runtime?.version && <span style={S.faint}>Kumi {state.status.runtime.version}</span>}
-        {state.setup?.message && state.setup.state && state.setup.state !== 'ready' && state.setup.state !== 'unknown' && (
+        {state.setup?.message && state.setup.state && state.setup.state !== 'ready' && state.setup.state !== 'unknown' && !dawPartWorks(state) && (
           <span style={S.muted}>{state.setup.message}</span>
         )}
       </div>

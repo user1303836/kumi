@@ -255,6 +255,15 @@ export class KumiStore {
   }
 }
 
+/** Whether setup only lacks the DAW's part while Kumi is connected through one. An install setup didn't make (an
+ *  adopted Kumi's, say) evidently works, so no surface asks to install it then, or shows setup's "install Kumi's part"
+ *  as the word of the moment. The settings page still lists what setup knows. */
+export function dawPartWorks(state: KumiState): boolean {
+  const setup = state.setup
+  const onlyDawPart = setup?.state === 'needs_daw_component' || (setup?.state === 'ready' && setup.next_step === 'install_daw_component')
+  return Boolean(onlyDawPart && state.status?.connected)
+}
+
 /** The job a tool's result started or reports (`{job_id}`), however the event carried the result. */
 export function jobOf(result: unknown): string | null {
   let value = result
