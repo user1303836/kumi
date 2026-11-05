@@ -4,6 +4,8 @@
 - `hermes kumi status` in a terminal: the same from what the runtime last published (C3), since the runtime belongs to
   whichever Hermes process started it, never to this short-lived one.
 - `hermes kumi setup` in a terminal: setup, asking before each step (C8).
+- `hermes kumi doctor` and `/kumi doctor`: what Kumi needs in this profile, each item with what to do (`doctor`). It
+  only reads.
 """
 from __future__ import annotations
 
@@ -11,13 +13,16 @@ import argparse
 from pathlib import Path
 from typing import Any, TextIO
 
-from . import policy, runtime, schemas, setup, snapshots, tools
+from . import doctor, policy, runtime, schemas, setup, snapshots, tools
 
-DESCRIPTION = "Kumi's state: setup, its runtime, the DAW connection and the open project"
-CLI_HELP = "Kumi in this Hermes profile: where it stands, and setting it up"
+DESCRIPTION = "Kumi's state: setup, its runtime, the DAW connection and the open project (`doctor`: what Kumi needs)"
+ARGS_HINT = "[doctor]"
+CLI_HELP = "Kumi in this Hermes profile: where it stands, what it needs, and setting it up"
 
 
 def kumi(host: tools.Host, raw_args: str = "", **kwargs: Any) -> str:
+    if raw_args.strip().lower() == "doctor":
+        return doctor.report(doctor.checks(host, **kwargs))
     try:
         status = tools.kumi_status(host, {}, **kwargs)
     except (runtime.Unavailable, runtime.Refused) as failure:
@@ -94,6 +99,7 @@ def register_cli(ctx: Any, host: tools.Host) -> None:
 def cli_parser(parser: argparse.ArgumentParser) -> None:
     actions = parser.add_subparsers(dest="kumi_action")
     actions.add_parser("status", help="where Kumi stands in this profile (what `hermes kumi` alone shows)")
+    actions.add_parser("doctor", help="what Kumi needs in this profile, each item with what to do (it only reads)")
     setup_parser = actions.add_parser("setup", help="set Kumi up in this profile, asking before each step")
     setup_parser.add_argument("--daw", choices=schemas.DAWS, help="the DAW to set up for (default: the DAW setting)")
     setup_parser.add_argument("--use", action="store_true",
@@ -103,6 +109,10 @@ def cli_parser(parser: argparse.ArgumentParser) -> None:
 def cli(host: tools.Host, args: argparse.Namespace) -> int:
     if getattr(args, "kumi_action", None) == "setup":
         return cli_setup(host, getattr(args, "daw", None) or host.daw(), use=getattr(args, "use", False) is True)
+    if getattr(args, "kumi_action", None) == "doctor":
+        items = doctor.checks(host)
+        print(doctor.report(items))
+        return 1 if doctor.needs_fixing(items) else 0
     print(status_text(host))  # `status`, or no action at all
     return 0
 
