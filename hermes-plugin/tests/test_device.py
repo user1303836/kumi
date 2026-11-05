@@ -170,6 +170,7 @@ class Devices(unittest.TestCase):
         self.assertEqual(built["artifact_id"], "a-device-1")
         self.assertIn("load_device", built["next"])
         self.assertIn(built["item"], built["next"])
+        self.assertIn("first kumi_observe", built["next"])
         self.assertIn("move_device", built["next"])
         [build] = self.sent("build")
         self.assertEqual((build["spec_json"], build["sha256"]), (devices.canonical(SPEC), digest()))
