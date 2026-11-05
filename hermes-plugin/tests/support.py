@@ -83,6 +83,7 @@ class Context:
         self.skills: dict[str, Path] = {}
         self.prompt: dict[str, str] = {}
         self.aux_tasks: dict[str, dict] = {}
+        self.blueprints: dict[str, dict] = {}
         self.settings = dict(settings or {})
         self.profile_name = profile_name
         self.cron_execution: Any = None  # what ctx.current_cron_execution() answers: the cron run executing now
@@ -130,6 +131,10 @@ class Context:
     def register_auxiliary_task(self, key, *, display_name, description, defaults=None, inherit_from=None):
         self.aux_tasks[key] = {"display_name": display_name, "description": description, "defaults": defaults,
                                "inherit_from": inherit_from}
+
+    def register_automation_blueprint(self, key, *, title, description, schedule_template, prompt_template,
+                                      category="general", slots=(), deliver_default="origin", skills=(), tags=()):
+        self.blueprints[key] = {"title": title, "schedule_template": schedule_template, "slots": list(slots)}
 
     def get_config(self, key: str, default: Any = None) -> Any:
         return self.settings.get(key, default)

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import commands, context, listening, policy, references, runtime, tools
+from . import blueprints, commands, context, listening, policy, references, runtime, tools
 
 SKILLS = Path(__file__).resolve().parent / "skills"
 # What every chat's system prompt says of Kumi (cache-safe: the same each turn). Kumi's tools may be behind tool
@@ -58,4 +58,5 @@ def register(ctx) -> None:
     for skill in ("daw", "sounds", "listening"):
         ctx.register_skill(skill, SKILLS / skill / "SKILL.md")
     ctx.register_system_prompt_section("kumi", PROMPT)
+    blueprints.register(ctx)
     ctx.on_unload(runtimes.stop_all)
