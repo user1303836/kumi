@@ -351,7 +351,9 @@ class Installed(unittest.TestCase):
         support.install(self.data)
         tools = tempfile.TemporaryDirectory()
         self.addCleanup(tools.cleanup)
-        ffmpeg = Path(tools.name) / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
+        folder = Path(os.path.realpath(tools.name)) / "bin"  # setup records the canonical path
+        folder.mkdir()
+        ffmpeg = folder / ("ffmpeg.exe" if os.name == "nt" else "ffmpeg")
         ffmpeg.write_bytes(b"#!/bin/sh\n")
         ffmpeg.chmod(stat.S_IRWXU)
         found = ffmpeg.stat()
@@ -368,6 +370,16 @@ class Installed(unittest.TestCase):
             with self.subTest(record=record):
                 self.receipt(tools={"ffmpeg": record})
                 self.assertNotIn("--tool", argv())
+        moved = folder.with_name("moved")  # the folder becomes a link to another one with the very same file
+        folder.rename(moved)
+        try:
+            folder.symlink_to(moved, target_is_directory=True)
+        except OSError:  # Windows, without the right to make links
+            return
+        found = (moved / ffmpeg.name).stat()
+        self.receipt(tools={"ffmpeg": {**allowed, "size": found.st_size, "mtime_ns": found.st_mtime_ns,
+                                       "ino": found.st_ino}})
+        self.assertNotIn("--tool", argv(), "an allowed path that now leads through a link is changed")
 
 
 if __name__ == "__main__":

@@ -125,14 +125,15 @@ def installed(data_dir: Path, pinned: str | None, target: str | None = None) -> 
 
 
 def allowed_tool(record: dict | None) -> str | None:
-    """The program setup recorded (CC-10), while it's still the one the producer allowed: an absolute path to a regular,
-    executable file whose size, modification time and inode are as recorded. Anything else is None: a program that was
-    upgraded, swapped or removed since needs setup again, and Kumi never looks for another."""
+    """The program setup recorded (CC-10), while it's still the one the producer allowed: the absolute, canonical path
+    setup recorded (none of its folders since swapped for a link, to a share or anywhere else), naming a regular,
+    executable file whose size, modification time and inode are as recorded. Anything else is None: a program that
+    was upgraded, swapped, moved behind a link or removed since needs setup again, and Kumi never looks for another."""
     path = record.get("path") if isinstance(record, dict) else None
-    if not isinstance(path, str) or not os.path.isabs(path):
+    if not isinstance(path, str) or not os.path.isabs(path) or os.path.realpath(path) != path:
         return None
     try:
-        found = os.stat(path)
+        found = os.stat(path, follow_symlinks=False)
     except OSError:
         return None
     same = all(isinstance(record.get(key), int) and record[key] == getattr(found, f"st_{key}")
