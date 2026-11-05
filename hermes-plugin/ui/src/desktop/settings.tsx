@@ -98,9 +98,10 @@ export function SettingsPage({ ctx, store, onOpenMap }: { ctx: PluginContext; st
           <div>
             <span style={{ ...S.heading, display: 'block', marginBottom: 4 }}>Connection</span>
             <Line label="Now">
-              <Chip tone={state.status?.connected ? 'good' : state.status?.stale && state.status?.owner ? 'warn' : undefined}>
-                {chipWords(state.status, state.focus?.transport?.tempo).text}
-              </Chip>
+              {(() => {
+                const words = chipWords(state.status, state.focus?.transport?.tempo)
+                return <Chip tone={words.tone === 'muted' ? undefined : words.tone}>{words.text}</Chip>
+              })()}
             </Line>
             {state.status?.owner?.session_id && <Line label="Kumi's chat">{clean(state.status.owner.session_id, 80)}</Line>}
           </div>

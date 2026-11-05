@@ -327,7 +327,8 @@
   }
   var TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
   function FocusView({ focus, now }) {
-    if (!focus || !focus.focus && !focus.project) {
+    const catchUp = catchUpLines(focus);
+    if (!focus || !focus.focus && !focus.project && !catchUp.lines.length) {
       return /* @__PURE__ */ jsx("span", { style: S.muted, children: "Nothing in focus yet. Kumi shows what you select in your DAW once it's connected." });
     }
     const transport = focus.transport;
@@ -335,7 +336,6 @@
     const parameter = focusParameter(focus);
     const busy = nameOf(focus.focus?.busy ?? void 0);
     const meter = nameOf(transport?.meter ?? void 0);
-    const catchUp = catchUpLines(focus);
     return /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 6, opacity: focus.stale ? 0.6 : 1 }, children: [
       /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 7 }, children: [
         /* @__PURE__ */ jsx(Dot, { color: colorOf(focus.focus?.track) ?? T.faint, size: 9 }),
@@ -344,7 +344,7 @@
       parameter && /* @__PURE__ */ jsx("span", { style: { ...S.muted, ...S.ellipsis }, children: parameter }),
       /* @__PURE__ */ jsxs("div", { style: { ...S.row, gap: 4, flexWrap: "wrap" }, children: [
         focus.project?.name && /* @__PURE__ */ jsx(Chip, { title: "The open project", children: clean(focus.project.name, 40) }),
-        focusPlace(focus).map((place) => /* @__PURE__ */ jsx(Chip, { children: place }, place)),
+        focusPlace(focus).map((place, index) => /* @__PURE__ */ jsx(Chip, { children: place }, index)),
         typeof transport?.playing === "boolean" && /* @__PURE__ */ jsx(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
         bpm(transport?.tempo) && /* @__PURE__ */ jsx(Chip, { children: bpm(transport?.tempo) }),
         meter && /* @__PURE__ */ jsx(Chip, { children: clean(meter, 12) }),
@@ -801,7 +801,7 @@
         const before = this.state.status;
         const after = status.revisions ?? {};
         const first = this.state.available !== true;
-        const liveness = !before || before.connected !== status.connected || before.stale !== status.stale;
+        const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running;
         this.set({ available: true, error: null, status: heard(status) });
         const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null };
         const moved = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];

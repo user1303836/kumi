@@ -321,7 +321,7 @@ var KumiStore = class {
       const before = this.state.status;
       const after = status.revisions ?? {};
       const first = this.state.available !== true;
-      const liveness = !before || before.connected !== status.connected || before.stale !== status.stale;
+      const liveness = !before || before.connected !== status.connected || before.stale !== status.stale || before.running !== status.running;
       this.set({ available: true, error: null, status: heard(status) });
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null };
       const moved = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
@@ -758,7 +758,8 @@ function stateOf(item) {
 }
 var TONE = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint };
 function FocusView({ focus, now }) {
-  if (!focus || !focus.focus && !focus.project) {
+  const catchUp = catchUpLines(focus);
+  if (!focus || !focus.focus && !focus.project && !catchUp.lines.length) {
     return /* @__PURE__ */ jsx3("span", { style: S.muted, children: "Nothing in focus yet. Kumi shows what you select in your DAW once it's connected." });
   }
   const transport = focus.transport;
@@ -766,7 +767,6 @@ function FocusView({ focus, now }) {
   const parameter = focusParameter(focus);
   const busy = nameOf(focus.focus?.busy ?? void 0);
   const meter = nameOf(transport?.meter ?? void 0);
-  const catchUp = catchUpLines(focus);
   return /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 6, opacity: focus.stale ? 0.6 : 1 }, children: [
     /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 7 }, children: [
       /* @__PURE__ */ jsx3(Dot, { color: colorOf(focus.focus?.track) ?? T.faint, size: 9 }),
@@ -775,7 +775,7 @@ function FocusView({ focus, now }) {
     parameter && /* @__PURE__ */ jsx3("span", { style: { ...S.muted, ...S.ellipsis }, children: parameter }),
     /* @__PURE__ */ jsxs3("div", { style: { ...S.row, gap: 4, flexWrap: "wrap" }, children: [
       focus.project?.name && /* @__PURE__ */ jsx3(Chip, { title: "The open project", children: clean(focus.project.name, 40) }),
-      focusPlace(focus).map((place) => /* @__PURE__ */ jsx3(Chip, { children: place }, place)),
+      focusPlace(focus).map((place, index) => /* @__PURE__ */ jsx3(Chip, { children: place }, index)),
       typeof transport?.playing === "boolean" && /* @__PURE__ */ jsx3(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
       bpm(transport?.tempo) && /* @__PURE__ */ jsx3(Chip, { children: bpm(transport?.tempo) }),
       meter && /* @__PURE__ */ jsx3(Chip, { children: clean(meter, 12) }),
@@ -1463,7 +1463,10 @@ function SettingsPage({ ctx, store, onOpenMap }) {
       ] }),
       /* @__PURE__ */ jsxs9("div", { children: [
         /* @__PURE__ */ jsx9("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Connection" }),
-        /* @__PURE__ */ jsx9(Line, { label: "Now", children: /* @__PURE__ */ jsx9(Chip, { tone: state.status?.connected ? "good" : state.status?.stale && state.status?.owner ? "warn" : void 0, children: chipWords(state.status, state.focus?.transport?.tempo).text }) }),
+        /* @__PURE__ */ jsx9(Line, { label: "Now", children: (() => {
+          const words = chipWords(state.status, state.focus?.transport?.tempo);
+          return /* @__PURE__ */ jsx9(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
+        })() }),
         state.status?.owner?.session_id && /* @__PURE__ */ jsx9(Line, { label: "Kumi's chat", children: clean(state.status.owner.session_id, 80) })
       ] }),
       /* @__PURE__ */ jsxs9("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [

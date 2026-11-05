@@ -24,7 +24,9 @@ export function stateOf(item: HistoryItem): { mark: string; tone: 'bad' | 'good'
 const TONE: Record<'bad' | 'good' | 'muted' | 'warn', string> = { good: T.good, warn: T.warn, bad: T.bad, muted: T.faint }
 
 export function FocusView({ focus, now }: { focus: Focus | null; now?: number }) {
-  if (!focus || (!focus.focus && !focus.project)) {
+  const catchUp = catchUpLines(focus)
+  // With the DAW closed, focus.json keeps the project and what changed: show those, not "nothing yet".
+  if (!focus || (!focus.focus && !focus.project && !catchUp.lines.length)) {
     return <span style={S.muted}>Nothing in focus yet. Kumi shows what you select in your DAW once it's connected.</span>
   }
   const transport = focus.transport
@@ -32,7 +34,6 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
   const parameter = focusParameter(focus)
   const busy = nameOf(focus.focus?.busy ?? undefined)
   const meter = nameOf(transport?.meter ?? undefined)
-  const catchUp = catchUpLines(focus)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 6, opacity: focus.stale ? 0.6 : 1 }}>
       <div style={{ ...S.row, gap: 7 }}>
@@ -42,8 +43,8 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
       {parameter && <span style={{ ...S.muted, ...S.ellipsis }}>{parameter}</span>}
       <div style={{ ...S.row, gap: 4, flexWrap: 'wrap' }}>
         {focus.project?.name && <Chip title="The open project">{clean(focus.project.name, 40)}</Chip>}
-        {focusPlace(focus).map(place => (
-          <Chip key={place}>{place}</Chip>
+        {focusPlace(focus).map((place, index) => (
+          <Chip key={index}>{place}</Chip>
         ))}
         {typeof transport?.playing === 'boolean' && <Chip tone={transport.playing ? 'good' : undefined}>{transport.playing ? '▶ playing' : '■ stopped'}</Chip>}
         {bpm(transport?.tempo) && <Chip>{bpm(transport?.tempo)}</Chip>}

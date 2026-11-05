@@ -302,3 +302,23 @@ test('a second play, even one made while the first still loads, leaves one sound
     delete globalThis.Audio
   }
 })
+
+test('a runtime that went quiet and then stopped has FOCUS read again, so the chip and FOCUS agree', async () => {
+  const reads = []
+  let status = { connected: true, stale: false, running: true, revisions: { focus: 1, history: 1 } }
+  const kumi = new store.KumiStore(async path => {
+    reads.push(path)
+    if (path === '/status') return status
+    if (path === '/focus') return { seq: 1, stale: status.stale, running: status.running }
+    if (path === '/setup') return { state: 'ready' }
+    return { seq: 1, items: [] }
+  })
+  await kumi.refreshStatus()
+  status = { ...status, connected: false, stale: true }
+  await kumi.refreshStatus()
+  reads.length = 0
+  status = { ...status, running: false }
+  await kumi.refreshStatus()
+  assert.ok(reads.includes('/focus'), reads.join(' '))
+  assert.equal(kumi.get().focus.running, false)
+})

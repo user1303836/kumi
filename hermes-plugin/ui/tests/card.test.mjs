@@ -180,3 +180,16 @@ test('FOCUS reads Kumi\'s own shape: Live\'s fields and the neutral ones, the pa
     assert.ok(neutral.includes(text), `${text} in ${neutral}`)
   }
 })
+
+test('FOCUS says Kumi stopped (not "not answering") once it stopped, and keeps the catch-up when the DAW reports no focus', async () => {
+  const { FocusView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
+  const stopped = renderToStaticMarkup(createElement(FocusView, { focus: { stale: true, running: false, focus: { track: { name: 'Drums' } } }, now: 0 }))
+  assert.ok(stopped.includes('Kumi stopped') && !stopped.includes('not answering'), stopped)
+  const closed = { project: { name: 'Night Drive' }, focus: null, catch_up: [{ set: 'Night Drive', lines: ['Bass muted'], more: 0 }] }
+  const html = renderToStaticMarkup(createElement(FocusView, { focus: closed, now: 0 }))
+  for (const text of ['Nothing selected', 'Night Drive', 'Since Kumi last looked', 'Bass muted']) assert.ok(html.includes(text), `${text} in ${html}`)
+  const reaper = { focus: { track: { name: 'Vox' }, mainView: { kind: 'timeline', label: 'Arrange' }, section: { kind: 'marker', name: 'Arrange' } }, transport: { playing: true, line: 12 } }
+  const neutral = renderToStaticMarkup(createElement(FocusView, { focus: reaper, now: 0 }))
+  assert.ok(!/>[^<]*\b12\b[^<]*</.test(neutral), 'the line a snapshot was written at is never shown')
+  assert.equal(neutral.split('Arrange').length - 1, 2, 'a view and a section of the same name are both shown')
+})

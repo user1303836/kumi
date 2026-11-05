@@ -96,6 +96,10 @@ class Liveness(StateTest):
         path.write_text(json.dumps(last), encoding="utf-8")
         quiet = snapshots.status(self.state, now_ms=NOW + 60_000)
         self.assertEqual((quiet["stale"], quiet["running"]), (True, True))
+        # An older runtime that doesn't say: neither running nor stopped, judged by its heartbeat alone.
+        path.write_text(json.dumps({key: value for key, value in last.items() if key != "running"}), encoding="utf-8")
+        unsaid = snapshots.status(self.state, now_ms=NOW + 1_000)
+        self.assertEqual((unsaid["connected"], unsaid["stale"], unsaid["running"]), (True, False, None))
 
     def test_no_state_folder_reads_as_disconnected_never_as_an_error(self) -> None:
         empty = Path(self.tmp.name) / "nothing" / "state"
