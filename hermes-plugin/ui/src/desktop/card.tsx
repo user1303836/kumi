@@ -77,10 +77,13 @@ function Rows({ view }: { view: ListenView }) {
   const compared = view.referenceTitle !== undefined
   const cell = { padding: '2px 6px', textAlign: 'right', fontVariantNumeric: 'tabular-nums', whiteSpace: 'nowrap' } as const
   return (
-    <table style={{ borderCollapse: 'collapse', fontSize: 12, color: T.text, width: '100%' }}>
+    // The card sits in the chat's markdown, whose prose styles reach any table in it: a 2em margin above and below,
+    // a taller line, and a bright line under each row and the header. The table sets its own, so only its rows' quiet
+    // lines show.
+    <table style={{ borderCollapse: 'collapse', fontSize: 12, lineHeight: 1.45, color: T.text, width: '100%', margin: 0 }}>
       {compared && (
-        <thead>
-          <tr style={{ color: T.muted, fontSize: 11 }}>
+        <thead style={{ border: 'none' }}>
+          <tr style={{ color: T.muted, fontSize: 11, border: 'none' }}>
             <th style={{ ...cell, textAlign: 'left', fontWeight: 400 }} />
             <th style={{ ...cell, fontWeight: 400 }}>{t('listen.this')}</th>
             <th style={{ ...cell, fontWeight: 400 }}>{t('listen.reference')}</th>
@@ -90,7 +93,7 @@ function Rows({ view }: { view: ListenView }) {
       )}
       <tbody>
         {view.rows.map(row => (
-          <tr key={row.label} style={{ borderTop: `1px solid ${T.border}` }}>
+          <tr key={row.label} style={{ border: 'none', borderTop: `1px solid ${T.border}` }}>
             <td style={{ ...cell, textAlign: 'left', color: T.muted }}>{row.label}</td>
             <td style={cell}>{row.mine}</td>
             {compared && <td style={{ ...cell, color: T.muted }}>{row.reference ?? '—'}</td>}
