@@ -704,6 +704,34 @@ def listen_refusal(args: dict) -> str | None:
     return None
 
 
+def source_kind(source: Any) -> str | None:
+    """A listen source's kind, as kumi_release.json's `listen_sources` names them (CC-16)."""
+    if not isinstance(source, dict):
+        return None
+    for key, kind in (("track", "track"), ("file", "file"), ("sound_id", "sound"), ("artifact_id", "artifact")):
+        if key in source:
+            return kind
+    return None
+
+
+def listen_unsupported(host: Host, args: dict) -> str | None:
+    """Why the pinned runtime can't take this listen in the producer's DAW, or None (CC-16: the pin records what each
+    DAW's runtime listens to; one that doesn't say listens to files alone). Refused before anything is asked or
+    played, in the hook and again here."""
+    daw = host.daw()
+    kinds = setup.listen_sources(daw, host.plugin_dir)
+    name = schemas.DAW_NAMES.get(daw, daw)
+    for field in ("source", "compare_to"):
+        kind = source_kind(args.get(field))
+        if kind is None or kind in kinds:
+            continue
+        if kind == "track":
+            return (f"this version of Kumi can't listen to a track or the mix in {name}. Measure a file instead: "
+                    "a bounce of the part, or the sample it plays.")
+        return f"this version of Kumi can't measure a {kind} in {name}."
+    return None
+
+
 def _file_source(source: Any) -> bool:
     return isinstance(source, dict) and bool(source) and set(source) <= SOURCE_KEYS
 
@@ -759,6 +787,9 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
     refusal = listen_refusal(args)  # the approval hook checks this too; a dispatch without it mustn't play the DAW
     if refusal:
         return {"error": {"code": "invalid", "reason": refusal}}
+    unsupported = listen_unsupported(host, args)
+    if unsupported:
+        return {"error": {"code": "unsupported", "reason": f"Kumi didn't listen: {unsupported}"}}
     if not is_track_listen(args):
         result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=WRITE_TIMEOUT)
         return interpreted(host, kept_media(host, result))
