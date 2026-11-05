@@ -312,7 +312,7 @@ def observe(fixture: Fixture, args: dict, host: dict) -> dict:
     fixture.seen_at = now()
     fixture.publish("focus")  # written on each look (CC-7)
     published = fixture.focus()
-    return {"text": text[:int(args.get("max_chars") or 4000)], "project_key": fixture.set["key"], "epoch": fixture.epoch,
+    return {"text": text[:int(args.get("max_chars") or 12000)], "project_key": fixture.set["key"], "epoch": fixture.epoch,
             "project": published["project"], "focus": published["focus"], "transport": published["transport"],
             "catch_up": [], "age_ms": 0,
             "refs": [{"label": track["name"], "kind": "track", "detail": f"{track['volume_db']:g} dB",
