@@ -87,7 +87,8 @@ Hermes runs Kumi's changes, track listens and setup steps without asking; `/kumi
   part in that DAW: when Kumi says so, run setup again and restart the DAW. Renoise listens only to a window that
   starts and ends on whole pattern lines inside the song, and refuses any other rather than play more than you
   approved. REAPER may show the project as modified after a track listen, since only saving clears that flag; Kumi
-  never saves.
+  never saves. After a track listen in Live, Live may show the Set as modified, and its own Undo history includes the
+  listen's temporary device steps (pressing Undo in Live can bring the Ears device back).
 - Kumi in Hermes never uses Kumi's own sign-in, model providers or updater, and sends no telemetry.
 
 ## Limits

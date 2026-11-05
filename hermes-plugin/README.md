@@ -116,7 +116,9 @@ that owns their component, and Kumi copies the file it asked for and removes exa
 or Renoise track needs Kumi's newer part in that DAW: when Kumi says so, run setup again and restart the DAW. Renoise
 listens only to a window that starts and ends on whole pattern lines inside the song, and refuses any other rather than
 play more than you approved. REAPER may show the project as modified after a track listen, since only saving clears
-that flag; Kumi never saves. Kumi's REAPER extension keeps an id for each saved project in the project (ext state),
+that flag; Kumi never saves. After a track listen in Live, Live may show the Set as modified, and its own Undo history
+includes the listen's temporary device steps (pressing Undo in Live can bring the Ears device back). Kumi's REAPER
+extension keeps an id for each saved project in the project (ext state),
 and its Renoise tool one for each song in the song's tool data, saved with them. With your approval at setup, Kumi's
 runtime runs an ffmpeg already on this computer to decode compressed audio; Kumi never downloads one, and checks the
 ffmpeg file you allowed before each start (not the libraries it loads, which an upgrade can change). Audio is measured
