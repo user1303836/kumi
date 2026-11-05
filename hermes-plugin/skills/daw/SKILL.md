@@ -66,42 +66,73 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
   - A Renoise `#Send` device's own `amount` is 0–1, not dB, so set it by `valueString`.
 
 ## Notes (MIDI)
-- **Read before you rewrite:** read the clip's notes first with `kumi_read` (Live's reader is `read_notes`), and keep the producer's meter and key unless they ask otherwise. Say what you wrote: bars, notes, and anything cut.
-- **Live takes Kumi's notation.** `write_midi_clip` and `write_arrangement_clip` take it as `notation`, and `read_notes` gives it back. A line is settings, a sequence, a lane, a copy or a key.
+- **Read first,** and keep the producer's meter and key unless they ask otherwise:
+  - Live: `read_notes` (`format: "json"` gives note ids);
+  - REAPER: `reaper_read` with `kind: "note"`;
+  - Renoise: `renoise_read` with `kind: "line"`.
+
+  Say what you wrote: bars, notes, and anything cut.
+- **Kumi never deletes notes or clips here.** The plugin refuses Live's `delete_clip`, `clear_range`, `delete_notes` and `edit_notes` `delete-range`, REAPER's `notes_delete`, and Renoise's clearing.
+- **Live: new notes go in a new clip, where there's room.**
+  - `write_midi_clip` writes into an empty Session slot: `trackRef`, `sceneIndex`, `name`, and `length` in beats (1024 at most). A new Session clip takes the Set's meter.
+  - `write_arrangement_clip` writes only where the Arrangement is empty: `trackRef`, with `start` and `length` (a `length` without a `start` is dropped), or `clips: [...]` for several.
+  - A slot or a stretch that holds a clip is refused.
+  - **To change notes already there, use `change_notes`,** by the ids `read_notes` gives with `format: "json"`, in the clip's own time.
+- **Live's notes are in Kumi's notation** (the write steps' `notation`, and what `read_notes` gives). A line is settings, a sequence, a lane, a copy or a key.
   - **Settings stay until changed:**
-    - `v100`: velocity (`v80-110` adds Live's velocity deviation);
-    - `p0.8`: probability;
-    - `l/8`: length (`/8`, `/8.` dotted, `/8t` triplet, `3/8`, or beats as `0.37b`).
+    - `v100`: velocity, a whole number (100 when left out). `v80-110` adds Live's velocity deviation.
+    - `p0.8`: probability.
+    - `l/8`: length (`/8`, `/8.` dotted, `/8t` triplet, `3/8`, or beats as `0.37b`; a quarter note when left out).
   - **A sequence starts at `bar|beat` and lays items one after another,** each taking the length.
     - The time is song time in the Arrangement, and the clip's own time in Session. Beats are in the meter's unit: `3|2.5`, `3|1+1/3`.
     - An item is a pitch (`C3` is middle C, `F#2`, or a MIDI number), a chord `[C3 E3 G3]`, or a chord symbol `{Cm7}` or `{Cm7/G}`. A roman numeral like `{IV}` works in the Set's scale when Scale Mode is on (Live's default C Major isn't), or after a key line like `key D dorian`.
     - `.` is a rest, and `_` holds the item before.
     - `C3/8` or `C3:3/8` gives one item its own length, `C3~` glides it into the next, and `(C3)` is muted. A position mid-line jumps there.
-  - **A lane is one drum on a grid:** `kick /16 1|1 x..x..x...x..x.. *`.
+  - **A lane is one drum on a grid:** `kick /16 1|1 x..x..x...x..x.. *4`.
     - Hits: `x` a hit, `X` an accent, `o` a ghost, `-` holds, and `2`–`9` ratchets that many hits into the step.
-    - The step is a note value: `/16`, `/16t`, `/8t` or `/32`.
-    - Repeats: `*` to the clip's end, `*8` eight times, `*to 17|1` until there.
+    - The step is a note value: `/16` (when left out), `/16t`, `/8t` or `/32`.
+    - Repeats:
+      - `*8`: eight times;
+      - `*to 17|1`: until there;
+      - `*` alone: to the clip's end. It needs the clip's length: give `length` (Session), or `start` and `length` (Arrangement).
     - Velocities: `x` plays at `v`'s velocity, `X` at 127 and `o` at 60; `x=`, `X=` and `o=` set them for the line.
     - Timing: `+12t` or `-12t` shifts the lane in ticks (960 to a quarter), or `-8ms`.
-    - Name a drum by the track's pads, by a kind (`kick`, `snare`, `clap`, `hat`, `openhat`…, which finds the pad that holds one), or by pitch.
+    - Naming a drum:
+      - by the track's pads;
+      - by a kind (`kick`, `snare`, `clap`, `hat`, `openhat`…), which finds the pad that holds one, or the General MIDI key without one;
+      - or by pitch.
   - **`copy 1-2 3-16`** lays bars 1–2 again over bars 3–16.
-  - **Mistakes come back at once,** each with its line and column. Of several clips, those that read are written: resend only the ones that came back. Notes past a clip's end are cut or left out, and a pitch without its octave takes the one before. The answer says so.
-  - **JSON notes are for exact edits by id** (`change_notes`).
-- **REAPER takes note objects** on a MIDI take.
-  - `item_add` makes an empty MIDI item on a track, at `positionBeats` (quarter notes from the project's start) or `position` (seconds), with `lengthBeats`/`length` or `endBeats`/`end`. Its answer's ref names its take.
-  - `notes_add` takes `{ref: the take or item, notes: [{pitch 0–127, start, length, velocity 1–127 (100 when left out), channel 1–16}]}`.
+  - **Mistakes come back at once,** each with its line and column. Of several clips, those that read are written: resend only the ones that came back.
+  - **Notes past a clip's end are cut or left out,** and a pitch without its octave takes the one before. The answer says so.
+  - `edit_notes` also quantizes and duplicates, and `transform_midi` humanizes, swings or fits notes to a scale.
+- **REAPER takes note objects** on a MIDI item.
+  - **`item_add`** makes an empty MIDI item.
+    - The track is `ref`.
+    - It starts at `positionBeats` (quarter notes from the project's start) or `position` (seconds), and its length is `lengthBeats`/`length`, or `endBeats`/`end`.
+    - Make it long enough for every note: a note past its end is refused.
+    - Name it with `as`, and pass `@name` to `notes_add`.
+  - **`notes_add`** takes `{ref: the item or its take, notes: [{pitch 0–127, start, length, velocity 1–127 (100 when left out), channel 1–16}]}`.
     - `start` and `length` are quarter notes from the item's start: not ticks, and not bars.
     - At most 10,000 notes, none overlapping a note of the same pitch and channel.
-  - `notes_change` changes notes by their index in the take (from 0, as read), so read the take first. Only the fields you give change.
-  - `notes_quantize` and `notes_humanize` change notes in place. There's no step that deletes notes.
+  - **`notes_change`** changes notes by their index in the take (from 0, as read), so read the take first. Only the fields you give change.
+  - **`item_variation_set`** replaces a take's whole note list (`notes: []` empties it): that's how to rewrite one.
+  - `notes_quantize` (its grid counts from the project's start) and `notes_humanize` change notes in place.
 - **Renoise takes pattern lines.** `notes_write` takes `{patternRef, trackRef, merge?, lines: [{line, notes: [...], effects: [...]}]}`.
-  - `line` is Renoise's line number, from 0. The grid is the pattern's lines at the song's lines per beat.
-  - A note cell is `{col 1–12, note: "C-4" or "OFF", instrument, volume, panning, delay, fx}`.
+  - **The pattern:**
+    - `patternRef` is a pattern, or a sequence slot's ref.
+    - A pattern that several slots play changes in all of them: make it the slot's own first (`slot_unique`).
+    - The pattern must exist (`slot_insert`; `pattern_length` sets its lines).
+  - **`line`** is Renoise's line number, in decimal from 0. The grid is the pattern's lines at the song's lines per beat.
+  - **A note cell is `{col 1–12, note, instrument, volume, panning, delay, fx}`.**
+    - `note` is `C-5` for middle C (MIDI 60): Renoise names octaves one higher than Live's `C3`.
+    - Write sharps (`C#5`), never flats. `OFF` ends a note, and `---` empties one.
     - `instrument` is a number (decimal from 0: 10 is `0A`), a hex string, or an `instrumentRef`.
-    - `volume` and `panning` are hex strings. `delay` is 0–255 or hex, where 128 is half a line.
-  - An effect cell is `{col 1–8, number, amount}`.
-  - Without `merge`, a named cell is written whole, and fields you leave out are blanked. `merge: true` changes only what you give.
-  - At most about 3,000 note cells a step: split a bigger write. `phrase_write` writes a phrase's lines with the same cells, and clearing isn't allowed in either.
+    - `volume` and `panning` are hex strings or column commands. `delay` is 0–255 or hex, where 128 is half a line.
+  - **An effect cell** is `{col 1–8, number, amount}`.
+  - **`merge`:** without it, a named cell is written whole, and fields you leave out are blanked. `merge: true` changes only what you give.
+  - **Limits:** about 3,000 note cells a step for `notes_write`, and about 2,000 for `phrase_write`, which writes a phrase's lines with the same cells.
+  - **Undo:** Kumi's undo of a pattern write is refused once anything in that pattern has changed since, another Kumi change included. So write a pattern in one step where you can.
+  - `notes_transpose` and `notes_humanize` change notes in place.
 
 ## Undo
 - **Undo with `kumi_undo` and a HISTORY id** from `kumi_history` or a `kumi_change` result. The producer approves it too.
