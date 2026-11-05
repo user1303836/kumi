@@ -1159,6 +1159,9 @@ fn a_best_the_producer_worked_on_stays() {
     for (what, work, why) in works {
         on_a_paused_clock(async {
             let live = Live::new(&[("Candidate", &["Synth"])]).await;
+            // These four cases test ownership, not a long reference: hear only the
+            // one-second part each goal uses, keeping its real audio path in CI.
+            noise(&live.reference, 1);
             let goal = live.goal(&["Candidate"]).await;
             let slot = slot_named(&goal, "Candidate");
             goal.close().await.unwrap();

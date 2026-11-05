@@ -70,7 +70,7 @@ done
 #[tokio::test(flavor = "current_thread")]
 async fn helpers_are_reused_and_each_operation_has_source_fields_and_results() {
     let folder = tempfile::tempdir().unwrap();
-    let hands = persistent(helper(folder.path()), vec![], Some(1000));
+    let hands = persistent(helper(folder.path()), vec![], Some(30_000));
     assert!(hands.trusted(false).await.unwrap());
     let menus = hands.menus(None).await.unwrap();
     assert_eq!(
@@ -163,7 +163,8 @@ async fn a_request_never_answered_ends_at_the_limit_and_says_what_to_check() {
 #[tokio::test(flavor = "current_thread")]
 async fn names_past_ascii_go_to_the_helper_as_escapes() {
     let folder = tempfile::tempdir().unwrap();
-    let hands = persistent(helper(folder.path()), vec![], Some(1000));
+    let hands = persistent(helper(folder.path()), vec![], Some(30_000));
+    // Wait for the helper response, allowing a busy runner to start it; this tests encoding, not startup speed.
     // As the helper reads them, whatever its code page: ASCII.
     let tracks = hands.tracks(&[Track { name: "Caf\u{e9} \u{65e5}\u{672c} \u{1f3b9}".into(), nth: None }], None).await.unwrap();
     assert_eq!(tracks.fields["request"]["tracks"][0]["name"], "Caf\u{e9} \u{65e5}\u{672c} \u{1f3b9}");
@@ -176,7 +177,7 @@ async fn names_past_ascii_go_to_the_helper_as_escapes() {
 #[tokio::test(flavor = "current_thread")]
 async fn a_line_that_isnt_utf8_doesnt_stop_the_answers() {
     let folder = tempfile::tempdir().unwrap();
-    let hands = persistent(helper(folder.path()), vec![], Some(1000));
+    let hands = persistent(helper(folder.path()), vec![], Some(30_000));
     // A line in a console's code page (Latin-1) before the answer: the answer still comes, and so do the next ones.
     assert_eq!(hands.answer("latin1", None).await.unwrap().fields["after"], true);
     assert!(hands.trusted(false).await.unwrap());
@@ -186,7 +187,7 @@ async fn a_line_that_isnt_utf8_doesnt_stop_the_answers() {
 #[tokio::test(flavor = "current_thread")]
 async fn exited_helpers_restart_and_missing_helpers_report_failure() {
     let folder = tempfile::tempdir().unwrap();
-    let hands = persistent(helper(folder.path()), vec![], Some(1000));
+    let hands = persistent(helper(folder.path()), vec![], Some(30_000));
     assert!(hands.trusted(false).await.unwrap());
     assert_eq!(hands.answer("exit", None).await.unwrap().error.as_deref(), Some("helper-ended"));
     assert!(hands.trusted(true).await.unwrap());
