@@ -7,8 +7,18 @@ in it through Hermes's approval, records every change in its HISTORY, measures a
 maps the sample folders you choose so you can find, audition and place sounds. Hermes stays the agent: Kumi gives it
 a DAW to work in.
 
-- **Ask in plain words, from any Hermes surface.** "Put a darker snare on pad 2", "bring the bass up 2 dB",
-  "undo the snare change". The TUI, Hermes Desktop, the web dashboard and messaging all use the same tools.
+- **Master your mix like a reference track.** "Listen to my mix and master it like this reference track."
+  - Kumi listens to the mix in your DAW and measures it beside the reference: loudness, true peak, spectral balance,
+    stereo width and dynamics.
+  - It proposes EQ, glue compression and a limiter on the master track as one approved change.
+  - It listens again, for at most three rounds.
+- **Write a beat or a bassline.** "Write a four-on-the-floor kick with offbeat hats on a new track", "now a bassline in
+  A minor", "play it".
+- **Find a sample and put it on a pad.** "Find me a dusty 90 BPM snare in A minor", then "put it on pad 2". Kumi
+  searches your own sample folders by sound, tempo and key, says why each result matches, and places it, on an empty
+  pad too.
+- **Ask in plain words, from any Hermes surface.** The TUI, Hermes Desktop, the web dashboard and messaging all use the
+  same tools.
 - **Every change is approved by Hermes (unless its approvals are off) and undoable while Kumi runs.** Hermes asks
   before Kumi changes your project and shows exactly what will change; Kumi records the result in its HISTORY, with an
   undo while the Kumi runtime that made the change is running.
@@ -31,8 +41,9 @@ a DAW to work in.
 | `kumi_change` | One typed change of one or more steps, recorded in HISTORY | yes |
 | `kumi_undo` | Undoes a HISTORY entry while it can still be undone | yes |
 | `kumi_history` | Lists recent changes and whether each can be undone | no |
-| `kumi_listen` | Measures an audio file, a library sound or a result Kumi made. It doesn't listen to a track or the mix yet: it refuses, and plays nothing | no |
-| `kumi_sounds` | Searches your sound library | no |
+| `kumi_listen` | Listens to a track or the mix (in the DAWs this Kumi release can; elsewhere it says so and plays nothing), or measures an audio file, a library sound or a result Kumi made, optionally beside a reference | for a track or the mix |
+| `kumi_transport` | Plays and stops the project (in Live, a Session clip or scene too), with no HISTORY row | "play" asks; "stop" never does |
+| `kumi_sounds` | Searches your sound library by sound, tempo and key, and says why each result matches | no |
 | `kumi_library` | Adds a sample folder and scans it | yes |
 | `kumi_job` | Reports a long job (a library scan, a Mirelo generation) | no |
 | `kumi_generate` | Optional Mirelo integration: sound effects from a prompt and MIDI notes from an audio file (see Integrations) | yes: each paid generation, and each file sent |
@@ -158,21 +169,35 @@ project as…** with **Copy all media into project directory**), or they'll miss
 - **Reads:** the open project; the audio files in the sample folders you list (never a whole drive or volume, your
   home folder or above, or inside or above HERMES_HOME; links never lead it outside them); and finished audio other
   Hermes plugins saved in `<HERMES_HOME>/cache/generated/audio` (which Kumi never creates), to place or measure it.
-- **Approvals:** changes to your project go through Hermes's approval. Allowing a Kumi call for the session or always
-  covers that kind of call (changes, undos, sample-folder adds and scans) in this chat only, including a one-shot run
-  that resumes it (`hermes chat -q --resume`); another chat, a new one-shot run or a scheduled job asks again or is
-  refused. A setup step's approval covers its own plan; with Mirelo, an upload's covers its one file in this chat, and
-  a paid generation's only its own estimate, once. Choosing Always leaves an entry in Hermes's `command_allowlist` (the
-  profile's config.yaml) that Kumi never edits; to remove it, delete the `plugin_rule:kumi:` entries there. When
-  Hermes's approvals are off (`--yolo`, a chat's `/yolo` or `approvals.mode: off`), Hermes runs Kumi's changes, undos,
-  sample-folder adds and scans, setup steps, and, with Mirelo set up, its paid generations and uploads (up to your
-  credit cap) without asking, and `/kumi` says so; a one-shot `hermes -z` turn is yolo too, and Kumi can't tell it
-  apart.
+- **Approvals:** changes, listens and play go through Hermes's approval; "stop" never asks.
+  - **Allowing for the session or always** covers that kind of call (changes, undos, listens, play, sample-folder adds
+    and scans) in this chat only, including a one-shot run that resumes it (`hermes chat -q --resume`). Another chat,
+    a new one-shot run or a scheduled job asks again or is refused.
+  - **Narrower approvals:** a setup step's approval covers its own plan. With Mirelo, an upload's covers its one file in
+    this chat, and a paid generation's only its own estimate, once.
+  - **"Always"** leaves an entry in Hermes's `command_allowlist` (the profile's config.yaml) that Kumi never edits; to
+    remove it, delete the `plugin_rule:kumi:` entries there.
+  - **When Hermes's approvals are off** (`--yolo`, a chat's `/yolo` or `approvals.mode: off`), Hermes runs all of these
+    without asking (Mirelo's up to your credit cap), and `/kumi` says so. A one-shot `hermes -z` turn is yolo too, and
+    Kumi can't tell it apart.
 - **HISTORY and undo:** HISTORY records what actually happened, including when an outcome is uncertain. Kumi can undo
   a change only while the runtime that made it is still running; after that, use your DAW's own Undo. In Live, an undo
   refuses to touch a value you've changed by hand since; in REAPER and Renoise, it puts the value back anyway.
-- **Listening:** Kumi for Hermes doesn't listen to a track or the mix yet, in any DAW: it refuses and plays nothing.
-  It measures audio files, library sounds and its own results.
+- **Listening to a track or the mix** happens only in the DAWs this Kumi release can (elsewhere it says so and plays
+  nothing).
+  - **The window:** it plays only the window you approve (60 seconds at most), starting with the DAW stopped, and puts
+    routing and transport back after.
+  - **How each DAW hears it:** in Live, Kumi's Ears device captures the window as Live plays it. REAPER and Renoise
+    render it into the listening folder of the Kumi installation that owns their part; Kumi copies that one file and
+    removes it.
+  - **Renoise:** it listens only to a window that starts and ends on whole pattern lines inside the song, and refuses
+    any other. Rendering can leave its BPM and lines per beat at the values the song's own tempo commands reach by the
+    window's end. Kumi sets both back if they still have exactly those values; otherwise it leaves both and says it
+    couldn't restore the tempo.
+  - **REAPER** may show the project as modified after a listen (only saving clears that; Kumi never saves).
+- **Play and stop** start and stop the DAW's transport (or launch a Live Session clip or scene) after approval. They
+  change nothing in the project but where play starts, and write no HISTORY row. "Play" is refused while a listen
+  runs, while the DAW records, or while record is armed.
 - **Project ids:** Kumi's REAPER extension keeps an id for each saved project in the project (ext state), and its
   Renoise tool one for each song in the song's tool data, saved with them.
 - **ffmpeg:** with your approval at setup, Kumi's runtime runs an ffmpeg already on this computer to decode compressed
