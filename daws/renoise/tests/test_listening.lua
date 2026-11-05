@@ -670,6 +670,7 @@ test("listening: status gives the listening flags", function()
   eq(s.listening.grid, false)
   eq(s.listening.scratch, true)
   eq(s.listening.version, 1)
+  eq(s.listening.render_preflight, true)
   H.no_dialogs()
 end)
 
@@ -921,6 +922,300 @@ test("listening: a render stops an audition playing; another song ends it too", 
 end)
 
 -- Reads: spans, grid
+
+local function timing_command(text)
+  local digits = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+  return 256 + (digits:find(text:sub(1, 1), 1, true) - 1) * 36 + (digits:find(text:sub(2, 2), 1, true) - 1)
+end
+
+local function preflight(peer, range)
+  local epoch = place(peer)
+  return call(peer, "read", { kind = "render_preflight", range = range or { fromBeat = 0, beats = 4 }, epoch = epoch, limit = 1 })
+end
+
+test("listening: render_preflight reads exact planning and full track state without writes, folders or render jobs", function()
+  local env, peer = setup()
+  mock.solo_write(2, true)
+  track(3).mute_state = MUTED
+  local epoch = place(peer)
+  local before, writes, changed = states(), mock.api_writes, bridge().changed
+  local answer = result(preflight(peer))
+  eq(answer.schema, 1)
+  eq(answer.epoch, epoch)
+  eq(answer.seconds, 2)
+  eq(answer.offset, 0)
+  eq(answer.aligned, true)
+  eq(answer.irregular, false)
+  eq(answer.clipped, false)
+  eq(answer.items, nil, "the schema object is not wrapped in a row")
+  eq(answer.nextCursor, nil)
+  eq(answer.render_state.bpm, 120)
+  eq(answer.render_state.lpb, 4)
+  eq(#answer.render_state.tracks, 5, "all non-master tracks, including the send, despite limit=1")
+  local indices = { 1, 2, 3, 4, 6 }
+  for k, index in ipairs(indices) do
+    T.same(answer.render_state.tracks[k], {
+      ref = track_ref(epoch, index), mute = track(index).mute_state, solo = track(index).solo == true,
+    })
+  end
+  eq(mock.api_writes, writes, "no API property writes, including writes later put back")
+  eq(bridge().changed, changed)
+  eq(states(), before)
+  eq(#mock.data.undo.stack, 0)
+  eq(#mock.renders, 0)
+  eq(bridge().listen.job, nil)
+  eq(next(bridge().listen.ended), nil)
+  ok(not exists(env.listening), "preflight did not create the listening folder")
+  failure(call(peer, "read", { kind = "render_preflight", range = { fromBeat = 0, beats = 4 }, epoch = "not-current" }), "stale")
+  H.no_dialogs()
+end)
+
+test("listening: render_preflight follows ZT and ZL timing, including the renderer's first-command chase", function()
+  local env, peer = setup()
+  mock.ops.set_effect(1, 2, 1, 1, timing_command("ZT"), 120)
+  mock.ops.set_effect(2, 4, 1, 1, timing_command("ZT"), 60)
+  mock.ops.set_effect(1, 2, 1, 2, timing_command("ZL"), 8)
+  -- The second effect column must be visible for Renoise to play it.
+  mock.data.song:track(2).visible_effect_columns = 2
+  local answer = result(preflight(peer, { fromBeat = 0, beats = 4 }))
+  eq(answer.seconds, 3, "2 beats at 120 then 2 at 60, LPB 8")
+  eq(answer.offset, 0)
+  eq(answer.aligned, true)
+  eq(answer.render_state.bpm, 120, "snapshot is transport state, not chased state")
+  eq(answer.render_state.lpb, 4)
+  local started = result((start(peer, "jpf1", { { id = "mix", what = "master" } }, { fromBeat = 0, beats = 4 }, { maxSeconds = 60 })))
+  eq(started.seconds, answer.seconds)
+  eq(mock.renders[1].seconds, answer.seconds)
+  mock.finish_render()
+  eq(mock.data.transport_fields.bpm, 60, "native render does not restore tempo a second time")
+  eq(mock.data.transport_fields.lpb, 8)
+  env, peer = setup()
+  mock.ops.set_effect(2, 4, 9, 1, timing_command("ZT"), 60)
+  answer = result(preflight(peer, { fromBeat = 0, beats = 4 }))
+  eq(answer.seconds, 4, "Renoise chases its first ZT even before that command")
+  eq(answer.render_state.bpm, 120)
+  H.no_dialogs()
+end)
+
+test("listening: render_preflight reports both fractional endpoints and clipped song ends", function()
+  local env, peer = setup()
+  local cases = {
+    { 0.125, 0.875, false, false, 0.0625, 0.5 },
+    { 0, 1.125, false, false, 0, 0.625 },
+    { 11, 1, true, false, 0, 0.5 },
+    { 11, 2, false, true, 0, 0.5 },
+  }
+  for _, c in ipairs(cases) do
+    local answer = result(preflight(peer, { fromBeat = c[1], beats = c[2] }))
+    eq(answer.aligned, c[3])
+    eq(answer.clipped, c[4])
+    eq(answer.offset, c[5])
+    eq(answer.seconds, c[6], "actual full-line span, not requested fractional span")
+  end
+  eq(#mock.renders, 0)
+  ok(not exists(env.listening))
+  H.no_dialogs()
+end)
+
+test("listening: guarded render rejects fractional, clipped, irregular and preroll ranges before mutation", function()
+  local cases = {
+    { range = { fromBeat = 0.125, beats = 0.875 } },
+    { range = { fromBeat = 0, beats = 1.125 } },
+    { range = { fromBeat = 11, beats = 2 } },
+    { command = "ZB" },
+    { command = "ZD" },
+    { speed = true },
+    { preroll = 1 },
+  }
+  for _, c in ipairs(cases) do
+    local env, peer = setup()
+    if c.command then mock.ops.set_effect(1, 1, 1, 1, timing_command(c.command), 1) end
+    if c.speed then mock.data.transport_fields.timing_model = renoise.Transport.TIMING_MODEL_SPEED end
+    local range = c.range or { fromBeat = 0, beats = 4 }
+    local read = result(preflight(peer, range))
+    if c.command or c.speed then eq(read.irregular, true) end
+    local before, writes = states(), mock.api_writes
+    failure((start(peer, "jpf2", { { id = "kick", what = "track", ref = track_ref(place(peer), 1) } },
+      range, { maxSeconds = 60, preRollBeats = c.preroll or 0 })), "bad-params")
+    eq(states(), before)
+    eq(mock.api_writes, writes)
+    eq(#mock.renders, 0)
+    eq(bridge().listen.job, nil)
+    ok(not exists(env.listening))
+    H.no_dialogs()
+  end
+end)
+
+test("listening: guarded render validates cap and actual seconds while standalone retains longer renders", function()
+  local env, peer = setup(nil, { pattern_lines = 256, patterns = 1, sequence_length = 1, sequence = { 1 }, bpm = 60 })
+  local range = { fromBeat = 0, beats = 64 }
+  eq(result(preflight(peer, range)).seconds, 64)
+  failure((start(peer, "jpf3", { { id = "mix", what = "master" } }, range, { maxSeconds = 60 })), "bad-params", "maxSeconds")
+  for _, cap in ipairs({ 0, -1, 60.01, "60", true, json.null }) do
+    failure((start(peer, "jpf3", { { id = "mix", what = "master" } }, { fromBeat = 0, beats = 1 }, { maxSeconds = cap })),
+      "bad-params", "maxSeconds")
+  end
+  failure((start(peer, "jpf3", { { id = "mix", what = "master" } }, { fromBeat = 0, beats = 2 }, { maxSeconds = 1 })),
+    "bad-params", "maxSeconds")
+  eq(#mock.renders, 0)
+  ok(not exists(env.listening))
+  local boundary = result((start(peer, "jpf60", { { id = "mix", what = "master" } },
+    { fromBeat = 0, beats = 60 }, { maxSeconds = 60 })))
+  eq(boundary.seconds, 60, "the exact limit is allowed")
+  mock.finish_render({ no_file = true })
+  local answer = result((start(peer, "jpf3", { { id = "mix", what = "master" } }, range)))
+  eq(answer.seconds, 64, "standalone keeps its existing 3600-second limit")
+  mock.finish_render({ no_file = true })
+  H.no_dialogs()
+end)
+
+test("listening: preflight and guarded render refuse live playback, recording and rendering without stopping them", function()
+  for _, field in ipairs({ "playing", "edit_mode", "rendering" }) do
+    local env, peer = setup()
+    local target = field == "rendering" and mock.impl(mock.data.song) or mock.data.transport_fields
+    target[field] = true
+    local before, writes = states(), mock.api_writes
+    failure(preflight(peer), "busy")
+    failure((start(peer, "jpf4", { { id = "mix", what = "master" } }, nil, { maxSeconds = 60 })), "busy")
+    eq(target[field], true)
+    eq(states(), before)
+    eq(mock.api_writes, writes)
+    eq(#mock.renders, 0)
+    ok(not exists(env.listening))
+    target[field] = false
+    H.no_dialogs()
+  end
+end)
+
+-- Exercise the real plan/launch boundary without the bridge dispatch running launch immediately after plan.
+local function queued_plan(peer, range, cap)
+  local listening = T.load_payload_module("listening")
+  local state = {}
+  listening.init(state)
+  local epoch, layout = place(peer)
+  local env = {
+    cfg = function() return bridge().cfg end,
+    epoch = function() return epoch end, layout = function() return layout end,
+    document = function() return bridge().document end,
+    busy = function() return nil end, quiet = function(fn) return fn() end,
+    shifted = function(t) return t end,
+    -- Deliberately stale: actual launch must not trust a cached pattern mark.
+    pattern_mark = function() return 1 end,
+    before_render = function() error("guarded refusal reached before_render") end,
+  }
+  local params = { jobId = "jqueued", epoch = epoch, sources = { { id = "kick", what = "track", ref = track_ref(epoch, 1) } },
+    range = range, maxSeconds = cap, preRollBeats = 0 }
+  return listening, listening.plan(params, env, "render"), env, state
+end
+
+test("listening: native guarded planning rejects nonfinite caps before folder or API writes", function()
+  for _, cap in ipairs({ math.huge, -math.huge, 0 / 0 }) do
+    local env, peer = setup()
+    local writes = mock.api_writes
+    local fine, err = pcall(queued_plan, peer, { fromBeat = 0, beats = 4 }, cap)
+    ok(not fine)
+    eq(type(err), "table")
+    eq(err.code, "bad-params")
+    ok(err.message:find("maxSeconds", 1, true))
+    eq(mock.api_writes, writes)
+    eq(#mock.renders, 0)
+    ok(not exists(env.listening))
+    H.no_dialogs()
+  end
+end)
+
+test("listening: guarded rendering never repairs an existing listening root's permissions", function()
+  for _, mode in ipairs({ 33152, 33188, "unknown" }) do
+    local env, peer = setup()
+    ok(os.mkdir(env.listening))
+    mock.stat_modes[env.listening] = mode
+    local chmod, calls = io.chmod, {}
+    io.chmod = function(path, bits) calls[#calls + 1] = { path, bits } return true end
+    local fine, response = pcall(start, peer, "jprivate", { { id = "mix", what = "master" } }, nil, { maxSeconds = 60 })
+    io.chmod = chmod
+    ok(fine)
+    eq(#calls, 0, "guarded planning must not chmod a pre-existing root")
+    eq(mock.stat_modes[env.listening], mode)
+    if mode == 33152 then
+      result(response)
+      mock.finish_render({ no_file = true })
+    else
+      failure(response, "failed", "not verifiably private")
+      eq(#mock.renders, 0)
+      eq(bridge().listen.job, nil)
+    end
+    H.no_dialogs()
+  end
+end)
+
+test("listening: guarded queued launch rechecks tempo, commands, fractional bounds and live transport before writes", function()
+  local cases = {
+    { change = function() mock.data.transport_fields.bpm = 60 end, code = "bad-params" },
+    { change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60) end, code = "bad-params" },
+    { change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZB"), 1) end, code = "bad-params" },
+    { change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZD"), 1) end, code = "bad-params" },
+    { change = function() mock.data.transport_fields.timing_model = renoise.Transport.TIMING_MODEL_SPEED end, code = "bad-params" },
+    { change = function() mock.data.patterns[1].lines = 64 end, code = "bad-params" },
+    { change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZL"), 8) end, code = "bad-params" },
+    { range = { fromBeat = 0, beats = 1.25 },
+      change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZL"), 3) end, code = "bad-params" },
+    { range = { fromBeat = 0.25, beats = 1 },
+      change = function() mock.ops.set_effect(1, 1, 1, 1, timing_command("ZL"), 3) end, code = "bad-params" },
+    { change = function() mock.data.transport_fields.playing = true end, code = "busy" },
+    { change = function() mock.data.transport_fields.edit_mode = true end, code = "busy" },
+    { change = function() mock.impl(mock.data.song).rendering = true end, code = "busy" },
+  }
+  for _, c in ipairs(cases) do
+    local setup_env, peer = setup(nil, { pattern_lines = 256, patterns = 1, sequence_length = 1, sequence = { 1 } })
+    local listening, job, env, state = queued_plan(peer, c.range or { fromBeat = 0, beats = 64 }, 60)
+    c.change()
+    local before, writes, undos = states(), mock.api_writes, #mock.data.undo.stack
+    local fine, err = pcall(listening.launch, job, env)
+    ok(not fine)
+    eq(type(err), "table")
+    eq(err.code, c.code)
+    eq(mock.api_writes, writes)
+    eq(states(), before)
+    eq(#mock.data.undo.stack, undos)
+    eq(#mock.renders, 0)
+    eq(state.listen.job, nil)
+    eq(job.snapshot, nil)
+    eq(job.tempo_before, nil)
+    ok(not exists(setup_env.listening .. "/jqueued-kick.wav"))
+    mock.impl(mock.data.song).rendering = false
+    mock.data.transport_fields.playing, mock.data.transport_fields.edit_mode = false, false
+    H.no_dialogs()
+  end
+end)
+
+test("listening: guarded queued launch uses fresh permissible timing rather than stale planned seconds", function()
+  local setup_env, peer = setup()
+  local listening, job, env = queued_plan(peer, { fromBeat = 0, beats = 4 }, 60)
+  eq(job.range.seconds, 2)
+  mock.ops.set_effect(1, 1, 1, 1, timing_command("ZT"), 60)
+  env.before_render = nil
+  listening.launch(job, env)
+  eq(job.range.seconds, 4)
+  eq(job.sources[1].seconds, 4)
+  eq(mock.renders[1].seconds, 4)
+  mock.finish_render()
+  eq(job.state, "done")
+  eq(mock.data.transport_fields.bpm, 60, "no native tempo restoration")
+  H.no_dialogs()
+end)
+
+test("listening: standalone still renders fractional clipped ranges and stops existing playback", function()
+  local env, peer = setup()
+  mock.data.transport_fields.playing = true
+  local answer = result((start(peer, "jpf5", { { id = "mix", what = "master" } },
+    { fromBeat = 10.125, beats = 3 }, { preRollBeats = 1 })))
+  eq(answer.seconds, 1.5)
+  eq(mock.renders[1].was_playing, true)
+  mock.finish_render()
+  eq(status(peer, "jpf5").state, "done")
+  eq(mock.data.transport_fields.playing, false)
+  H.no_dialogs()
+end)
 
 test("listening: read spans says where each track plays, in beats: muted columns and slots left out, aliases followed, merged", function()
   local env, peer = setup({}, { patterns = 3, sequence_length = 4, sequence = { 1, 2, 3, 1 } })

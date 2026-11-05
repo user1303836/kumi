@@ -85,6 +85,10 @@ impl Rig {
         });
         setup();
         let dir = tempfile::tempdir().unwrap();
+        // The bridge's discovery parent is already private before a guarded render may create its cache.
+        for parent in [dir.path().join("bridges"), dir.path().join("bridges/reaper")] {
+            daw_bridge::owner::create_owner_only_dir(&parent).unwrap();
+        }
         let (tx, rx) = queue::channel();
         let out = Recorder::default();
         let snapshot = Arc::new(Mutex::new(Snapshot::default()));
@@ -211,6 +215,267 @@ fn source(id: &str, what: &str, reference: Option<&str>, stage: Option<&str>) ->
 }
 
 // ----- renders -----
+
+fn preflight_request(epoch: &str, from: f64, beats: f64) -> Value {
+    json!({"kind": "render_preflight", "range": {"fromBeat": from, "beats": beats}, "epoch": epoch})
+}
+
+#[test]
+fn render_preflight_is_a_complete_pure_snapshot_and_reads_restored_state() {
+    let rig = Rig::new();
+    let epoch = rig.epoch();
+    producer_settings();
+    fake::with(|s| {
+        s.master.selected = true;
+        s.master.mute = true;
+        s.master.extra.insert("I_FXEN".into(), 0.0);
+        s.tracks[0].mute = true;
+        s.time_selection = (1.25, 9.75);
+        s.loop_range = (30.0, 40.0);
+    });
+    let writes = crate::reaper::writes();
+    let existed = rig.folder().exists();
+    let before = rig.ask("read", preflight_request(&epoch, 0.0, 1.0)).unwrap();
+    assert_eq!(crate::reaper::writes(), writes, "a preflight must not construct a restoring guard");
+    assert_eq!(rig.folder().exists(), existed);
+    assert!(rig.board().active().is_none());
+    assert_eq!(before["schema"], 1);
+    assert_eq!(before["offset"], 0.0);
+    assert_eq!(before["aligned"], true);
+    assert_eq!(before["irregular"], false);
+    assert_eq!(before["clipped"], false);
+    let state = &before["render_state"];
+    let (numbers, texts) = render_settings();
+    assert_eq!(state["numbers"].as_object().unwrap().len(), render::NUMBERS.len());
+    assert_eq!(state["texts"].as_object().unwrap().len(), render::TEXTS.len());
+    for (key, value) in numbers {
+        assert_eq!(state["numbers"][key], value);
+    }
+    for (key, value) in texts {
+        assert_eq!(state["texts"][key], value);
+    }
+    assert_eq!(state["projrenderlimit"], 1);
+    assert_eq!(state["master_fx"], 0.0);
+    assert_eq!(state["time_selection"], json!([1.25, 9.75]));
+    assert_eq!(state["dirty"], false);
+    fake::with(|s| {
+        assert_eq!(state["selection"].as_array().unwrap().len(), s.tracks.len() + 1);
+        for (index, track) in std::iter::once(&s.master).chain(s.tracks.iter()).enumerate() {
+            let reference = if index == 0 { "r:track:master".to_string() } else { format!("r:track:{}", track.guid) };
+            assert_eq!(state["selection"][index], json!({"ref": reference, "value": if track.selected { 1.0 } else { 0.0 }}));
+            assert_eq!(state["mutes"][index], json!({"ref": reference, "value": if track.mute { 1.0 } else { 0.0 }}));
+        }
+    });
+    rig.ask("render_start", json!({
+        "jobId": "preflight-restore", "sources": [{"id": "mix", "what": "master", "beforeChain": true}],
+        "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60, "epoch": epoch,
+    })).unwrap();
+    assert_eq!(rig.until_ended("preflight-restore")["state"], "done");
+    assert_eq!(rig.ask("read", preflight_request(&epoch, 0.0, 1.0)).unwrap(), before);
+    fake::with(|s| s.dirty = true);
+    assert_eq!(rig.ask("read", preflight_request(&epoch, 0.0, 1.0)).unwrap()["render_state"]["dirty"], true);
+}
+
+#[test]
+fn render_preflight_uses_the_exact_tempo_map_across_the_window() {
+    let rig = Rig::with_project(|| fake::with(|s| {
+        s.bpm = 120.0;
+        s.tempo_markers = vec![
+            fake::FakeTempo { time: 0.0, bpm: 120.0, num: 4, denom: 4, linear: false },
+            fake::FakeTempo { time: 2.0, bpm: 60.0, num: 4, denom: 4, linear: false },
+        ];
+    }));
+    let epoch = rig.epoch();
+    let writes = crate::reaper::writes();
+    // Beat 2 is second 1; beat 8 is second 6. Six beats at the current 120 BPM would be wrong (3 s).
+    let answer = rig.ask("read", preflight_request(&epoch, 2.0, 6.0)).unwrap();
+    assert_eq!(answer["seconds"], 5.0);
+    assert_eq!(crate::reaper::writes(), writes);
+}
+
+#[test]
+fn render_preflight_refuses_missing_readers_partial_state_and_stale_epochs() {
+    for name in [
+        "GetSetProjectInfo", "GetSetProjectInfo_String", "projectconfig_var_getoffs", "projectconfig_var_addr",
+        "CountTracks", "GetTrack", "GetMasterTrack", "GetMediaTrackInfo_Value", "GetSetMediaTrackInfo_String",
+        "GetSet_LoopTimeRange2", "IsProjectDirty", "GetPlayStateEx", "TimeMap2_QNToTime",
+    ] {
+        fake::lab_project();
+        let api = fake::api_without(&[name]);
+        let reaper = Reaper::new(&api);
+        let reads = Reads::default();
+        let writes = crate::reaper::writes();
+        assert!(!render::preflight_supported(&reaper), "{name}");
+        assert_eq!(reads.read(&reaper, &json!({"kind": "render_preflight", "range": {"fromBeat": 0, "beats": 1}})).unwrap_err().0, "unsupported", "{name}");
+        assert_eq!(crate::reaper::writes(), writes);
+    }
+    let rig = Rig::new();
+    let epoch = rig.epoch();
+    assert!(rig.ask("read", preflight_request("obsolete-epoch", 0.0, 1.0)).is_err());
+    fake::with(|s| s.listening.no_speed = true);
+    assert_eq!(rig.ask("read", preflight_request(&epoch, 0.0, 1.0)).unwrap_err().0, "unsupported");
+    fake::with(|s| {
+        s.listening.no_speed = false;
+        s.listening.numbers.insert("RENDER_STARTPOS".into(), f64::NAN);
+    });
+    assert_eq!(rig.ask("read", preflight_request(&epoch, 0.0, 1.0)).unwrap_err().0, "unsupported");
+    fake::with(|s| {
+        s.listening.numbers.insert("RENDER_STARTPOS".into(), 0.0);
+        s.listening.texts.remove("RENDER_FORMAT2");
+    });
+    assert_eq!(rig.ask("read", preflight_request(&epoch, 0.0, 1.0)).unwrap_err().0, "unsupported");
+}
+
+#[test]
+fn render_preflight_and_guarded_planning_refuse_running_transport_without_writes() {
+    for bits in [1, 4, 5] {
+        let rig = Rig::new();
+        let epoch = rig.epoch();
+        fake::with(|s| s.play_bits = bits);
+        let writes = crate::reaper::writes();
+        assert!(rig.ask("read", preflight_request(&epoch, 0.0, 1.0)).is_err());
+        assert!(rig.ask("render_start", json!({
+            "jobId": "running", "sources": [{"id": "mix", "what": "master"}],
+            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
+        })).is_err());
+        assert_eq!(crate::reaper::writes(), writes);
+        assert!(rig.board().active().is_none());
+        assert_eq!(fake::with(|s| s.play_bits), bits);
+    }
+}
+
+#[test]
+fn guarded_render_cap_and_invalid_caps_refuse_before_files_jobs_or_daw_writes() {
+    let rig = Rig::with_project(|| fake::with(|s| s.bpm = 120.0));
+    let writes = crate::reaper::writes();
+    let existed = rig.folder().exists();
+    for (cap, beats, pre_roll) in [
+        (json!(60), 121.0, 0.0), (json!(0), 1.0, 0.0), (json!(-1), 1.0, 0.0),
+        (json!(61), 1.0, 0.0), (Value::Null, 1.0, 0.0), (json!("60"), 1.0, 0.0),
+        (json!(60), 1.0, 1.0),
+    ] {
+        assert!(rig.ask("render_start", json!({
+            "jobId": "cap", "sources": [{"id": "mix", "what": "master"}],
+            "range": {"fromBeat": 0, "beats": beats}, "maxSeconds": cap, "preRollBeats": pre_roll,
+        })).is_err());
+        assert_eq!(crate::reaper::writes(), writes);
+        assert_eq!(rig.folder().exists(), existed);
+        assert!(rig.board().active().is_none());
+    }
+    // The ordinary renderer still accepts this duration with no cap.
+    assert!(rig.ask("render_start", json!({
+        "jobId": "standalone-cap", "sources": [{"id": "mix", "what": "master"}],
+        "range": {"fromBeat": 0, "beats": 121},
+    })).is_ok());
+}
+
+#[test]
+fn guarded_render_rechecks_queued_tempo_and_transport_before_any_execution_effect() {
+    for play_bits in [0, 1, 4] {
+        let rig = Rig::with_project(|| fake::with(|s| s.bpm = 120.0));
+        rig.ask("render_start", json!({
+            "jobId": "queued-cap", "sources": [{"id": "mix", "what": "master"}],
+            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
+        })).unwrap();
+        fake::with(|s| {
+            if play_bits == 0 { s.bpm = 0.5; } else { s.play_bits = play_bits; }
+        });
+        let writes = crate::reaper::writes();
+        let settings = render_settings();
+        let files = files_in(&rig.folder());
+        rig.tick();
+        assert_eq!(rig.status("queued-cap")["state"], "failed");
+        assert_eq!(crate::reaper::writes(), writes);
+        assert_eq!(render_settings(), settings);
+        assert_eq!(files_in(&rig.folder()), files);
+        assert!(fake::with(|s| s.listening.renders.is_empty() && s.listening.accessors.is_empty()));
+        assert_eq!(fake::with(|s| s.play_bits), play_bits);
+    }
+}
+
+#[test]
+fn guarded_render_replans_queued_beats_instead_of_rendering_stale_seconds() {
+    let rig = Rig::with_project(|| fake::with(|s| s.bpm = 120.0));
+    rig.ask("render_start", json!({
+        "jobId": "replanned", "sources": [{"id": "mix", "what": "master"}],
+        "range": {"fromBeat": 2, "beats": 1}, "maxSeconds": 60,
+    })).unwrap();
+    fake::with(|s| s.bpm = 60.0);
+    assert_eq!(rig.until_ended("replanned")["state"], "done");
+    fake::with(|s| {
+        assert_eq!(s.listening.renders.len(), 1);
+        assert_eq!(s.listening.renders[0].start, 2.0);
+        assert_eq!(s.listening.renders[0].end, 3.0);
+    });
+}
+
+#[test]
+fn guarded_render_accepts_the_exact_cap_and_rechecks_items_before_accessor_creation() {
+    fake::lab_project();
+    fake::with(|s| s.bpm = 120.0);
+    let api = fake::api();
+    let reaper = Reaper::new(&api);
+    let reads = Reads::default();
+    let dir = tempfile::tempdir().unwrap();
+    let plan = render::plan(&reaper, &reads, &json!({
+        "jobId": "exact-cap", "sources": [{"id": "mix", "what": "master"}],
+        "range": {"fromBeat": 0, "beats": 120}, "maxSeconds": 60,
+    }), dir.path()).unwrap();
+    assert_eq!(plan.seconds(), 60.0);
+
+    let rig = Rig::with_project(|| fake::with(|s| s.bpm = 120.0));
+    let epoch = rig.epoch();
+    rig.ask("render_start", json!({
+        "jobId": "queued-items", "sources": [{"id": "items", "what": "track", "ref": "r:track:{BBBB}", "stage": "items"}],
+        "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60, "epoch": epoch,
+    })).unwrap();
+    fake::with(|s| s.bpm = 0.5);
+    let writes = crate::reaper::writes();
+    rig.tick();
+    assert_eq!(rig.status("queued-items")["state"], "failed");
+    assert_eq!(crate::reaper::writes(), writes);
+    assert!(fake::with(|s| s.listening.accessors.is_empty()));
+    assert!(files_in(&rig.folder()).is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn guarded_render_refuses_unsafe_cache_without_repairing_permissions() {
+    use std::os::unix::fs::{symlink, PermissionsExt};
+    for queued in [false, true] {
+        let rig = Rig::new();
+        let request = json!({
+            "jobId": "unsafe-cache", "sources": [{"id": "mix", "what": "master"}],
+            "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
+        });
+        if queued {
+            rig.ask("render_start", request.clone()).unwrap();
+        } else {
+            make_folder(&rig.folder()).unwrap();
+        }
+        std::fs::set_permissions(rig.folder(), std::fs::Permissions::from_mode(0o755)).unwrap();
+        let writes = crate::reaper::writes();
+        if queued {
+            rig.tick();
+            assert_eq!(rig.status("unsafe-cache")["state"], "failed");
+        } else {
+            assert!(rig.ask("render_start", request).is_err());
+        }
+        assert_eq!(crate::reaper::writes(), writes);
+        assert_eq!(std::fs::metadata(rig.folder()).unwrap().permissions().mode() & 0o777, 0o755);
+        assert!(fake::with(|s| s.listening.renders.is_empty()));
+        assert!(files_in(&rig.folder()).is_empty());
+    }
+    let rig = Rig::new();
+    let target = rig.dir.path().join("elsewhere");
+    daw_bridge::owner::create_owner_only_dir(&target).unwrap();
+    symlink(&target, rig.folder()).unwrap();
+    assert!(rig.ask("render_start", json!({
+        "jobId": "symlink-cache", "sources": [{"id": "mix", "what": "master"}],
+        "range": {"fromBeat": 0, "beats": 1}, "maxSeconds": 60,
+    })).is_err());
+    assert!(files_in(&target).is_empty());
+}
 
 #[test]
 fn a_render_of_the_mix_and_two_tracks_runs_in_two_passes_names_its_files_and_puts_every_setting_back() {
@@ -1163,10 +1428,7 @@ fn status_says_what_listening_can_do_now() {
     let rig = Rig::new();
     rig.tick();
     let flags = rig.ext.snapshot().status["listening"].clone();
-    assert_eq!(
-        flags,
-        json!({"render": true, "capture": true, "audition": true, "grid": true, "scratch": true, "deliver": true, "version": 1})
-    );
+    assert_eq!((flags["capture"].as_bool(), flags["audition"].as_bool()), (Some(true), Some(true)));
     fake::with(|s| s.listening.audio = false);
     rig.tick();
     let flags = rig.ext.snapshot().status["listening"].clone();

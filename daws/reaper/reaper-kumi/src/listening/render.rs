@@ -134,6 +134,8 @@ pub struct Plan {
     pub sources: Vec<Source>,
     pub passes: Vec<Pass>,
     pub folder: PathBuf,
+    /// Original beat request for the restricted start-time guard; absent for standalone renders.
+    guarded_range: Option<(f64, f64, f64)>,
 }
 
 /// A job id or a source id as the host gives them: it names files, so only letters, digits, `-` and `_`.
@@ -154,6 +156,127 @@ fn number(value: &Value, name: &str) -> Result<Option<f64>, Fault> {
         None | Some(Value::Null) => Ok(None),
         Some(v) => v.as_f64().filter(|n| n.is_finite()).map(Some).ok_or_else(|| bad(format!("{name} must be a number"))),
     }
+}
+
+fn unsupported(message: impl Into<String>) -> Fault {
+    ("unsupported".into(), message.into())
+}
+
+/// Required readers, checked before using getters whose standalone fallback is zero.
+pub fn preflight_supported(reaper: &Reaper) -> bool {
+    let api = reaper.api();
+    api.GetSetProjectInfo().is_some()
+        && api.GetSetProjectInfo_String().is_some()
+        && api.projectconfig_var_getoffs().is_some()
+        && api.projectconfig_var_addr().is_some()
+        && api.CountTracks().is_some()
+        && api.GetTrack().is_some()
+        && api.GetMasterTrack().is_some()
+        && api.GetMediaTrackInfo_Value().is_some()
+        && api.GetSetMediaTrackInfo_String().is_some()
+        && api.GetSet_LoopTimeRange2().is_some()
+        && api.IsProjectDirty().is_some()
+        && api.GetPlayStateEx().is_some()
+        && api.TimeMap2_QNToTime().is_some()
+}
+
+fn stopped(reaper: &Reaper, proj: Project) -> Result<(), Fault> {
+    if reaper.api().GetPlayStateEx().is_none() {
+        return Err(unsupported("REAPER can't read the live transport"));
+    }
+    let state = reaper.play_state(proj);
+    if state.playing || state.recording {
+        return Err(failed("guarded rendering requires stopped transport; nothing changed"));
+    }
+    Ok(())
+}
+
+fn beat_range(params: &Value) -> Result<(f64, f64), Fault> {
+    let range = params.get("range").filter(|r| r.is_object()).ok_or_else(|| bad("range: {fromBeat, beats}"))?;
+    let from = number(range, "fromBeat")?
+        .filter(|from| *from >= 0.0)
+        .ok_or_else(|| bad("range.fromBeat: 0 or more (quarter notes from the start)"))?;
+    let beats = number(range, "beats")?.filter(|beats| *beats > 0.0).ok_or_else(|| bad("range.beats: more than 0"))?;
+    if !(from + beats).is_finite() {
+        return Err(bad("range endpoint must be finite"));
+    }
+    Ok((from, beats))
+}
+
+fn beat_times(reaper: &Reaper, proj: Project, from: f64, beats: f64, pre_roll: f64) -> Result<(f64, f64, f64), Fault> {
+    let time = |qn: f64| {
+        reaper.time_at_quarter_notes(proj, qn).filter(|n| n.is_finite())
+            .ok_or_else(|| failed("this REAPER can't place beats in time"))
+    };
+    let start = time((from - pre_roll).max(0.0))?;
+    let at = time(from)?;
+    let end = time(from + beats)?;
+    if !(end - start).is_finite() || end <= start {
+        return Err(bad("that stretch has no length in time"));
+    }
+    Ok((start, at, end))
+}
+
+fn render_settings(reaper: &Reaper, proj: Project) -> (Vec<(&'static str, f64)>, Vec<(&'static str, String)>) {
+    (
+        NUMBERS.iter().filter_map(|key| reaper.project_number(proj, key).map(|value| (*key, value))).collect(),
+        TEXTS.iter().filter_map(|key| reaper.project_text_long(proj, key).map(|value| (*key, value))).collect(),
+    )
+}
+
+/// A fixed, complete read-only snapshot. In particular this never constructs PutBack: its Drop writes.
+pub fn preflight(reaper: &Reaper, proj: Project, params: &Value) -> Result<Value, Fault> {
+    if !preflight_supported(reaper) {
+        return Err(unsupported("REAPER lacks a required render preflight reader"));
+    }
+    stopped(reaper, proj)?;
+    let (from, beats) = beat_range(params)?;
+    let (start, _, end) = beat_times(reaper, proj, from, beats, 0.0).map_err(|(_, message)| unsupported(message))?;
+    let missing = || unsupported("REAPER returned incomplete or nonfinite render state");
+    let finite = |n: f64| if n.is_finite() { Ok(n) } else { Err(missing()) };
+    let (numbers, texts) = render_settings(reaper, proj);
+    if numbers.len() != NUMBERS.len() || texts.len() != TEXTS.len() || numbers.iter().any(|(_, n)| !n.is_finite()) {
+        return Err(missing());
+    }
+    let speed = reaper.project_config_int(proj, SPEED).ok_or_else(missing)?;
+    let master = reaper.master_track(proj).ok_or_else(missing)?;
+    let count = reaper.track_count(proj);
+    if count < 0 {
+        return Err(missing());
+    }
+    let mut selection = Vec::with_capacity(count as usize + 1);
+    let mut mutes = Vec::with_capacity(count as usize + 1);
+    let mut refs = std::collections::HashSet::with_capacity(count as usize + 1);
+    for index in -1..count {
+        let track = if index == -1 { master } else { reaper.track_at(proj, index).ok_or_else(missing)? };
+        let reference = if index == -1 {
+            "r:track:master".to_string()
+        } else {
+            let reference = format!("r:track:{}", reaper.track_guid(track));
+            if !matches!(Ref::parse(&reference), Ok(Ref::Track(TrackId::Guid(_)))) {
+                return Err(missing());
+            }
+            reference
+        };
+        if !refs.insert(reference.clone()) {
+            return Err(missing());
+        }
+        selection.push(json!({"ref": reference, "value": finite(reaper.track_value(track, "I_SELECTED"))?}));
+        mutes.push(json!({"ref": reference, "value": finite(reaper.track_value(track, "B_MUTE"))?}));
+    }
+    let (time_start, time_end) = reaper.time_selection(proj);
+    Ok(json!({
+        "schema": 1, "seconds": end - start, "offset": 0.0,
+        "aligned": true, "irregular": false, "clipped": false,
+        "render_state": {
+            "numbers": numbers.into_iter().map(|(key, n)| (key.to_string(), json!(n))).collect::<serde_json::Map<_, _>>(),
+            "texts": texts.into_iter().map(|(key, text)| (key.to_string(), json!(text))).collect::<serde_json::Map<_, _>>(),
+            "projrenderlimit": speed, "selection": selection, "mutes": mutes,
+            "master_fx": finite(reaper.track_value(master, "I_FXEN"))?,
+            "time_selection": [finite(time_start)?, finite(time_end)?],
+            "dirty": reaper.is_dirty(proj),
+        }
+    }))
 }
 
 /// The track a source names, by its GUID: refused as gone when it isn't in the project.
@@ -254,14 +377,21 @@ pub fn plan(reaper: &Reaper, reads: &Reads, params: &Value, folder: &Path) -> Re
     if sources.iter().any(|source| source.stage == Stage::Items) && sources.len() > 1 {
         return Err(bad("a track's items (stage items) are read on their own: one source"));
     }
-    let range = params.get("range").filter(|r| r.is_object()).ok_or_else(|| bad("range: {fromBeat, beats}"))?;
-    let from = number(range, "fromBeat")?
-        .filter(|from| *from >= 0.0)
-        .ok_or_else(|| bad("range.fromBeat: 0 or more (quarter notes from the start)"))?;
-    let beats = number(range, "beats")?.filter(|beats| *beats > 0.0).ok_or_else(|| bad("range.beats: more than 0"))?;
+    let (from, beats) = beat_range(params)?;
     let pre_roll = number(params, "preRollBeats")?.unwrap_or(0.0);
     if pre_roll < 0.0 {
         return Err(bad("preRollBeats: 0 or more"));
+    }
+    let max_seconds = match params.get("maxSeconds") {
+        None => None,
+        Some(value) => Some(value.as_f64().filter(|n| n.is_finite() && *n > 0.0 && *n <= 60.0)
+            .ok_or_else(|| bad("maxSeconds: a finite number greater than 0 and at most 60"))?),
+    };
+    if max_seconds.is_some() {
+        if pre_roll != 0.0 {
+            return Err(bad("guarded rendering requires preRollBeats: 0"));
+        }
+        stopped(reaper, proj)?;
     }
     let rate = match params.get("sampleRate") {
         None | Some(Value::Null) => None,
@@ -273,17 +403,14 @@ pub fn plan(reaper: &Reaper, reads: &Reads, params: &Value, folder: &Path) -> Re
                 .ok_or_else(|| bad("sampleRate: 44100, 48000, 88200 or 96000"))?,
         ),
     };
-    let time = |qn: f64| reaper.time_at_quarter_notes(proj, qn).ok_or_else(|| failed("this REAPER can't place beats in time"));
-    let start = time((from - pre_roll).max(0.0))?;
-    let at = time(from)?;
-    let end = time(from + beats)?;
+    let (start, at, end) = beat_times(reaper, proj, from, beats, pre_roll)?;
     if end - start > MAX_SECONDS {
         return Err(bad(format!("that stretch is {:.0} s of music: Kumi renders at most {MAX_SECONDS:.0} s at a time", end - start)));
     }
-    if end <= start {
-        return Err(bad("that stretch has no length in time"));
-    }
     let seconds = end - start;
+    if max_seconds.is_some_and(|cap| seconds > cap) {
+        return Err(bad("that stretch exceeds maxSeconds; nothing changed"));
+    }
     if let Some(free) = params.get("freeBytes").and_then(Value::as_u64) {
         let needed = (seconds * rate.unwrap_or(48_000) as f64 * 8.0 * sources.len() as f64 * 1.5) as u64;
         if needed > free {
@@ -306,6 +433,7 @@ pub fn plan(reaper: &Reaper, reads: &Reads, params: &Value, folder: &Path) -> Re
         passes: passes(&sources),
         sources,
         folder: folder.to_path_buf(),
+        guarded_range: max_seconds.map(|cap| (from, beats, cap)),
     };
     for source in &plan.sources {
         let file = plan.file(source);
@@ -378,6 +506,25 @@ pub fn passes_for_test(sources: &[Source], quiet: &[usize]) -> Vec<(i32, usize, 
 }
 
 impl Plan {
+    /// Called on the execution tick before previews, accessors, files or render settings are touched.
+    pub(super) fn recheck_start(&mut self, reaper: &Reaper, reads: &Reads) -> Result<(), Fault> {
+        let Some((from, beats, cap)) = self.guarded_range else { return Ok(()) };
+        if reaper.current_project().is_none_or(|info| info.ptr != self.proj)
+            || !(reads.epoch() == self.epoch || reads.epoch_is_of(&self.epoch, self.proj)) {
+            return Err(stale("the project changed before guarded rendering began"));
+        }
+        stopped(reaper, self.proj)?;
+        let (start, at, end) = beat_times(reaper, self.proj, from, beats, 0.0)?;
+        if end - start > cap {
+            return Err(bad("that stretch now exceeds maxSeconds; nothing changed"));
+        }
+        super::guarded_folder(&self.folder, false)?;
+        self.start = start;
+        self.end = end;
+        self.part = at - start;
+        Ok(())
+    }
+
     /// A source's file: `<jobId>-<sourceId>.wav`.
     pub fn file(&self, source: &Source) -> PathBuf {
         self.folder.join(format!("{}-{}.wav", self.job, source.id))
@@ -446,8 +593,7 @@ pub(super) struct PutBack<'a, 'r> {
 
 impl<'a, 'r> PutBack<'a, 'r> {
     pub(super) fn note(reaper: &'a Reaper<'r>, proj: Project) -> PutBack<'a, 'r> {
-        let numbers = NUMBERS.iter().filter_map(|key| reaper.project_number(proj, key).map(|value| (*key, value))).collect();
-        let texts = TEXTS.iter().filter_map(|key| reaper.project_text_long(proj, key).map(|value| (*key, value))).collect();
+        let (numbers, texts) = render_settings(reaper, proj);
         let master = reaper.master_track(proj);
         let mut selection: Vec<(Track, f64)> = master.iter().map(|m| (*m, reaper.track_value(*m, "I_SELECTED"))).collect();
         for index in 0..reaper.track_count(proj) {
