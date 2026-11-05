@@ -215,10 +215,16 @@ fn fill_focus(focus: &Value) -> DawFocus {
         name: selection.get("itemName").and_then(Value::as_str).map(str::to_owned),
     });
     let fx = selection.get("fxName").and_then(Value::as_str).filter(|name| !name.is_empty()).map(str::to_owned);
+    // FOCUS shows a parameter as the plug-in prints it (`formatted`, "-1.00"), the way HISTORY does, never the
+    // extension's normalized 0..1 value (P14: a ReaLimit ceiling read "0.9583333730697632"). The number stands in only
+    // when the plug-in prints nothing.
     let parameter = selection.get("param").and_then(|param| {
+        let formatted = param.get("formatted").and_then(Value::as_str).map(str::trim).filter(|text| !text.is_empty());
         Some(FocusParameter {
             name: param.get("name")?.as_str()?.to_owned(),
-            value: param.get("value").map(|value| value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string())),
+            value: formatted
+                .map(str::to_owned)
+                .or_else(|| param.get("value").map(|value| value.as_str().map(str::to_owned).unwrap_or_else(|| value.to_string()))),
             owner: fx.clone(),
         })
     });
@@ -488,5 +494,21 @@ mod tests {
         assert_eq!((same.track_ref.as_deref(), same.track.map(|t| t.name)), (Some("r:track:{A}"), Some("Lead".into())));
         let arrange = fill_focus(&json!({"view": "arrange", "selection": selection}));
         assert_eq!(arrange.track_ref.as_deref(), Some("r:track:{A}"), "outside the routing view, the selected track");
+    }
+
+    #[test]
+    fn a_focused_parameter_reads_as_the_plug_in_prints_it() {
+        let focus =
+            |param: Value| fill_focus(&json!({"view": "fx", "selection": {"fxName": "ReaLimit", "fxRef": "r:fx:{A}", "param": param}}));
+        // P14 on REAPER: the extension sends the normalized value and the plug-in's own text; FOCUS shows the text.
+        let printed = focus(json!({"name": "Ceiling", "value": 0.9583333730697632, "formatted": "-1.00", "fxRef": "r:fx:{A}"}));
+        let parameter = printed.parameter.expect("a parameter");
+        assert_eq!(
+            (parameter.name.as_str(), parameter.value.as_deref(), parameter.owner.as_deref()),
+            ("Ceiling", Some("-1.00"), Some("ReaLimit"))
+        );
+        // A plug-in that prints nothing for it: the number, as before, rather than nothing.
+        let bare = focus(json!({"name": "Ceiling", "value": 0.5, "formatted": " "}));
+        assert_eq!(bare.parameter.and_then(|p| p.value).as_deref(), Some("0.5"));
     }
 }
