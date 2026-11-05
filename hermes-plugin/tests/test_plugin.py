@@ -228,6 +228,27 @@ class Tools(unittest.TestCase):
         started = json.loads((self.data / "state" / "fixture-start.json").read_text(encoding="utf-8"))
         self.assertEqual(started["argv"][-2:], ["--library-root", support.DRUMS])
 
+    def test_the_runtime_may_read_finished_media_only_from_hermess_generated_audio(self):
+        generated = os.path.join(str(support.ROOT), "hermes", "cache", "generated", "audio")
+        host, _, data = support.host(self, media_roots=[generated])
+        support.call(host, "kumi_connect", {}, session_id="s1")
+        started = json.loads((data / "state" / "fixture-start.json").read_text(encoding="utf-8"))["argv"]
+        self.assertEqual([started[i + 1] for i, arg in enumerate(started) if arg == "--media-root"], [generated])
+
+    def test_hermess_generated_audio_folder_is_this_profiles_and_is_made_for_the_runtime(self):
+        try:
+            import hermes_constants  # noqa: F401  (only where Hermes is importable: CI's Hermes job)
+        except ImportError:
+            self.skipTest("Hermes isn't importable here")
+        import tempfile
+        home = tempfile.TemporaryDirectory()
+        self.addCleanup(home.cleanup)
+        host = support.module("tools").Host(support.Context(), None)
+        with mock.patch.dict("os.environ", {"HERMES_HOME": home.name}):
+            [root] = host.media_roots()
+        self.assertEqual(Path(root), Path(home.name) / "cache" / "generated" / "audio")
+        self.assertTrue(Path(root).is_dir(), "made, so a file generated after the runtime starts is in reach")
+
     def test_sounds_reach_the_model_by_id_never_by_path(self):
         support.call(self.host, "kumi_connect", {}, session_id="s1")
         found = support.call(self.host, "kumi_sounds", {"query": "snare"})

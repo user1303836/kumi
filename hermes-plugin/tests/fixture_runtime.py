@@ -544,6 +544,7 @@ def main() -> None:
     parser.add_argument("--library-root", action="append", default=[])
     parser.add_argument("--hermes-home", help="the profile's Hermes home, as kumi serve takes it (#985)")
     parser.add_argument("--hermes-root", help="the root holding every Hermes profile, as kumi serve takes it (#985)")
+    parser.add_argument("--media-root", action="append", default=[])
     parser.add_argument("--listen-outcome", default="measured",
                         choices=["measured", "refused", "cancelled", "unsure", "unsure-with-media"])
     parser.add_argument("--listen-deadline", type=int, default=75,
