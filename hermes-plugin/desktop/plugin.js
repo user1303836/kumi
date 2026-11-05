@@ -3066,7 +3066,8 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
         }
       )
     ] }),
-    selected && chosen && /* @__PURE__ */ jsxs9("div", { style: { ...S.row, justifyContent: "space-between", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
+    selected && chosen && // Beside the chat the map can be narrow: the name and the actions wrap rather than push actions out of view.
+    /* @__PURE__ */ jsxs9("div", { style: { ...S.row, justifyContent: "space-between", flexWrap: "wrap", gap: 8, padding: "8px 10px", borderTop: `1px solid ${T.border}` }, children: [
       /* @__PURE__ */ jsxs9("div", { style: { display: "flex", flexDirection: "column", minWidth: 0 }, children: [
         /* @__PURE__ */ jsx9("span", { style: { ...S.text, ...S.ellipsis, fontWeight: 600 }, children: clean(chosen.name, 80) }),
         /* @__PURE__ */ jsxs9("span", { style: { ...S.row, gap: 4, marginTop: 2 }, children: [
@@ -3076,7 +3077,7 @@ function MapCanvas({ map, found, playing, selected, onPick, onSelect, actions, e
           chosen.folder && /* @__PURE__ */ jsx9("span", { style: { ...S.faint, ...S.ellipsis }, children: clean(chosen.folder, 60) })
         ] })
       ] }),
-      /* @__PURE__ */ jsx9("div", { style: { ...S.row, gap: 6 }, children: actions?.(selected, chosen) })
+      /* @__PURE__ */ jsx9("div", { style: { ...S.row, gap: 6, flexWrap: "wrap", justifyContent: "flex-end", marginLeft: "auto" }, children: actions?.(selected, chosen) })
     ] })
   ] });
 }
