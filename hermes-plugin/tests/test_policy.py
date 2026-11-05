@@ -111,8 +111,9 @@ class Approvals(unittest.TestCase):
 
     def test_a_change_is_approved_in_the_runtimes_words_and_nothing_runs_first(self):
         decision = self.hook("kumi_change", change())
-        self.assertEqual(decision, {"action": "approve", "rule_key": "kumi:write:mixer", "message": (
-            "Kumi: Louder drums\n• Set Drums volume from -6 dB to -4 dB\n(Values as Kumi read them just now.)")})
+        self.assertEqual(decision, {"action": "approve", "rule_key": "kumi:write:mixer:s1", "message": (
+            "Kumi: Louder drums\n• Set Drums volume from -6 dB to -4 dB\n(Values as Kumi read them just now.)\n"
+            f"{policy.CHAT_ONLY}")})
         self.assertEqual(support.call(self.host, "kumi_history", {})["items"], [], "the preview wrote nothing")
         asked = [m["params"]["arguments"] for m in support.requests(self.data / "state")
                  if m.get("params", {}).get("name") == "change"]
@@ -122,22 +123,32 @@ class Approvals(unittest.TestCase):
         fake = "".join(f"\n• Set Drums volume from -6 dB to -5.{n} dB" for n in range(25)) + "\x1b[2J" + "x" * 50_000
         decision = self.hook("kumi_change", change(volume("t1", 6), title=fake))
         lines = decision["message"].splitlines()
-        self.assertEqual(len(lines), 3, lines[:4])
+        self.assertEqual(len(lines), 4, lines[:5])
         self.assertLessEqual(len(lines[0]), policy.LINE)
         self.assertNotIn("\x1b", decision["message"])
-        self.assertEqual(lines[1:], ["• Set Drums volume from -6 dB to 6 dB", policy.FOOTER])
+        self.assertEqual(lines[1:], ["• Set Drums volume from -6 dB to 6 dB", policy.FOOTER, policy.CHAT_ONLY])
 
     def test_a_long_plan_shows_eighteen_steps_how_many_more_and_always_the_footer(self):
         lines = self.hook("kumi_change", change(*[volume("t1", -db) for db in range(1, 21)]))["message"].splitlines()
-        self.assertEqual(len(lines), 21)
-        self.assertEqual(lines[-2:], ["… and 2 more steps", policy.FOOTER])
+        self.assertEqual(len(lines), 22)
+        self.assertEqual(lines[-3:], ["… and 2 more steps", policy.FOOTER, policy.CHAT_ONLY])
 
-    def test_a_plans_families_make_its_rule_key_so_always_covers_only_that_kind(self):
+    def test_a_plans_families_make_its_rule_key_so_always_covers_only_that_kind_in_this_chat(self):
         sample = {"tool": "replace_sample", "input": {"track_ref": "t1", "sample": "Dusty Snare 04.wav"}}
         decision = self.hook("kumi_change", change(sample, volume("t2", -10)))
-        self.assertEqual(decision["rule_key"], "kumi:write:mixer+sample")
+        self.assertEqual(decision["rule_key"], "kumi:write:mixer+sample:s1")
         self.assertIn("• Replace the sample in the Simpler on Drums > Drum Rack pad D1 (Snare 01.wav) with Dusty "
                       "Snare 04.wav", decision["message"])
+
+    def test_an_always_in_one_chat_never_covers_another_chat_a_one_shot_run_or_a_compacted_chat(self):
+        keys = {session: policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(), session_id=session,
+                                              tool_call_id=f"c-{session}")["rule_key"]
+                for session in ("chat-a", "chat-b", "q-oneshot", "chat-a-compacted")}
+        self.assertEqual(keys["chat-a"], "kumi:write:mixer:chat-a")
+        self.assertEqual(len(set(keys.values())), 4, "an always saved in chat A matches none of the others")
+        nameless = policy.pre_tool_call(self.host, tool_name="kumi_change", args=change(), tool_call_id="c-none")
+        self.assertRegex(nameless["rule_key"], r"^kumi:write:mixer:plan-[0-9a-f]{64}$",
+                         "without a session id, the plan's own digest, never a family alone")
 
     def test_a_plan_the_runtime_would_refuse_is_blocked_before_anyone_is_asked(self):
         for args, reason in ((change(expected_epoch="0"), "stale"),
@@ -153,8 +164,9 @@ class Approvals(unittest.TestCase):
     def test_an_undo_is_approved_by_what_it_undoes_and_an_expired_one_is_blocked(self):
         applied = support.call(self.host, "kumi_change", change(), session_id="s1")
         undo = {"history_id": applied["history_ids"][0]}
-        self.assertEqual(self.hook("kumi_undo", undo), {"action": "approve", "message": "Kumi: Undo Louder drums on Drums",
-                                                         "rule_key": "kumi:write:undo"})
+        self.assertEqual(self.hook("kumi_undo", undo), {
+            "action": "approve", "rule_key": "kumi:write:undo:s1",
+            "message": f"Kumi: Undo Louder drums on Drums\n{policy.CHAT_ONLY}"})
         self.assertEqual(support.call(self.host, "kumi_undo", undo, session_id="s1")["state"], "undone")
         decision = self.hook("kumi_undo", undo)
         self.assertEqual((decision["action"], decision["message"]), ("block", "Kumi didn't undo anything: expired"))
@@ -162,7 +174,7 @@ class Approvals(unittest.TestCase):
     def test_a_folder_is_approved_as_kumi_will_keep_it_and_never_a_whole_disk_or_home(self):
         written = os.path.join(str(support.SAMPLES), "Pads", "..", "Drums") + os.sep
         decision = self.hook("kumi_library", {"action": "add_folder", "folder": written})
-        self.assertEqual(decision["rule_key"], f"kumi:folder_read:{support.DRUMS}")
+        self.assertEqual(decision["rule_key"], f"kumi:folder_read:{support.DRUMS}:s1")
         self.assertTrue(decision["message"].startswith(f"Kumi: read the folder {support.DRUMS} and everything in it"))
         refused = ["Samples", str(support.ROOT), os.path.expanduser("~"), support.DRUMS + "\nKicks",
                    os.path.join(str(support.ROOT), "Users", "me", "Samples", "..", "..", "..")]
@@ -178,8 +190,8 @@ class Approvals(unittest.TestCase):
         self.assertIn("no approved sample folders", self.hook("kumi_library", {"action": "scan"})["message"])
         support.call(self.host, "kumi_library", {"action": "add_folder", "folder": support.DRUMS}, session_id="s1")
         decision = self.hook("kumi_library", {"action": "scan"})
-        self.assertEqual(decision["rule_key"], "kumi:folder_read:scan")
-        self.assertTrue(decision["message"].endswith(f"• {support.DRUMS}"), decision["message"])
+        self.assertEqual(decision["rule_key"], "kumi:folder_read:scan:s1")
+        self.assertIn(f"• {support.DRUMS}\n{policy.CHAT_ONLY}", decision["message"])
 
 
 class Blocked(unittest.TestCase):
