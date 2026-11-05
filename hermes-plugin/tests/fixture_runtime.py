@@ -71,6 +71,8 @@ class Fixture:
         self.ledger_busy_said = False  # --generate-create ledger_busy_once: whether its one busy answer was given
         self.previews: dict[tuple, str] = {}  # an upload preview's file identity, by the host call it was for (A1)
         self.bounces = 0  # file listens with compare_to so far: each mastering pass comes closer to its reference
+        self.devices: set[str] = set()  # the .amxd names in the User Library's Kumi folder (CC-22)
+        self.device_files: dict[str, str] = {}  # a preview's file, by its spec's SHA-256 (W1-B)
         self.seq = 0
         self.connected = False
         self.playing = False  # whether transport's play started it (CC-17)
@@ -625,6 +627,57 @@ def script(fixture: Fixture, args: dict, host: dict) -> dict:
             "project": {"key": fixture.set["key"], "epoch": fixture.epoch}}
 
 
+# CC-22's device op, as the P9 interface has serve answer it: `spec_json` is hashed as received and parsed, never
+# re-encoded; a preview is pure and names a free file; a build refuses another spec (`stale`) or a file that's no
+# longer free (W1-B), and writes under a new name only.
+DEVICE_FOLDER = "User Library/Kumi/Audio Effects"
+
+
+def device_findings(spec: dict) -> list[str]:
+    """A few of the builder's refusals (22b, 22-r1, 22-r2), each worded as `check_gen_code` words a finding."""
+    code, found = spec.get("code") or "", []
+    if re.search(r"\b(while|do)\b", code):
+        found.append("code: `while` and `do` aren't allowed: a loop on Live's audio thread must end (a `for` with "
+                     "literal bounds, at most 64).")
+    if re.search(r"\bBuffer\b", code):
+        found.append("code: Buffer reads a buffer~ anything in the Set can fill: use Data.")
+    for control in spec.get("controls") or []:
+        if control.get("type") in ("number", "integer") and not control.get("min", 0) < control.get("max", 1):
+            found.append(f"{control.get('name')}: min isn't below max.")
+    return found
+
+
+def device(fixture: Fixture, args: dict, host: dict) -> dict:
+    spec_json = args["spec_json"]
+    digest = hashlib.sha256(spec_json.encode("utf-8")).hexdigest()
+    spec = json.loads(spec_json)
+    findings = device_findings(spec)
+    if findings:
+        return {"error": {"code": "refused", "reason": "Kumi won't build this device as it is: fix what's listed and "
+                                                       "ask again.", "findings": findings}}
+    free = next(name for name in (spec["name"], *(f"{spec['name']} {n}" for n in range(2, 100)))
+                if name not in fixture.devices)
+    file = f"{DEVICE_FOLDER}/{free}.amxd"
+    code = spec["code"]
+    lines = len(code[:-1].split("\n")) if code.endswith("\n") else len(code.split("\n"))
+    if args["action"] == "preview":
+        fixture.device_files[digest] = file
+        shown = "0" * 64 if fixture.options.device_wrong_sha else digest
+        return {"state": "preview", "name": free, "file": file, "controls": spec["controls"], "code": code,
+                "lines": lines, "sha256": shown}
+    if args["action"] != "build":
+        return error("invalid", "action is preview or build")
+    if args.get("sha256") != digest:
+        return error("stale", "The device's spec changed since it was approved, so Kumi didn't build it.")
+    if fixture.options.device_file_appears:  # a file with the previewed name appeared since
+        fixture.devices.add(free)
+    if fixture.device_files.get(digest) != f"{DEVICE_FOLDER}/{free}.amxd" or free in fixture.devices:
+        return error("stale", "A file took the name the approval showed, so Kumi didn't build it: ask again.")
+    fixture.devices.add(free)
+    return {"name": free, "item": f"query:UserLibrary#Kumi:Audio%20Effects:{free}.amxd", "file": file,
+            "artifact_id": f"a-device-{len(fixture.devices)}", "sha256": digest, "listed": True}
+
+
 # Each with the file's path, which a map has (CC-4) and the plugin must never pass to the model.
 SOUNDS = [{"sound_id": "s-r1-1", "name": "Dusty Snare 04.wav", "kind": "snare", "class": "drum", "folder": "Drums",
            "duration": 0.42, "path": "/Samples/Drums/Dusty Snare 04.wav"},
@@ -1055,7 +1108,7 @@ def variation_rows(fixture: Fixture, names: list[str], host: dict) -> list[str]:
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
          "setup_daw": setup_daw, "generate": generate, "transport": transport, "script": script,
-         "variations": variations}
+         "variations": variations, "device": device}
 
 
 def main() -> None:
@@ -1104,6 +1157,10 @@ def main() -> None:
     parser.add_argument("--generate-actual", type=int, default=12, help="a finished job's charge (-1: unknown)")
     parser.add_argument("--generate-expires-ms", type=int, default=300_000,
                         help="how long a quote lasts from now, in milliseconds (negative: already expired)")
+    parser.add_argument("--device-wrong-sha", action="store_true",
+                        help="a device preview answers another SHA-256, as a serve that re-encoded the spec would")
+    parser.add_argument("--device-file-appears", action="store_true",
+                        help="a file takes the previewed device's name before its build")
     Fixture(parser.parse_args()).serve()
 
 
