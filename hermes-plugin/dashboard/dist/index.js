@@ -165,6 +165,8 @@
       playTitle: "Play it here (nothing changes in your DAW)",
       use: "Use…",
       useTitle: "Put a request to use this sound in the chat, to finish and send",
+      moreLike: "More like this",
+      moreLikeTitle: "Put a request for sounds like this one in the chat, to send when you like",
       playFailed: (error) => `Kumi couldn't play that sound: ${error}`
     },
     measurements: {
@@ -438,6 +440,8 @@
       playTitle: "ここで再生（DAW は何も変わりません）",
       use: "使う…",
       useTitle: "このサウンドを使う依頼をチャットに入れます。仕上げて送信してください",
+      moreLike: "似たサウンド",
+      moreLikeTitle: "これに似たサウンドを探す依頼をチャットに入れます。送信はご自身で",
       playFailed: (error) => `Kumi はそのサウンドを再生できませんでした: ${error}`
     },
     measurements: {
@@ -710,6 +714,8 @@
       playTitle: "在这里播放（DAW 不会有任何改动）",
       use: "使用…",
       useTitle: "把使用这个声音的请求放进对话，补充完整后发送",
+      moreLike: "更多类似的",
+      moreLikeTitle: "把寻找类似声音的请求放进对话，由你决定何时发送",
       playFailed: (error) => `Kumi 无法播放这个声音：${error}`
     },
     measurements: {

@@ -246,6 +246,17 @@ export function soundRequest(soundId: string, name?: string, revision?: string |
   return said ? `Use “${said}” (${which}) on the selected track` : `Use ${which} on the selected track`
 }
 
+/** Left unsent, like Use…: the map's "More like this" asks the model for the sounds nearest this one (a `near`
+ *  search), naming it and its map revision the same way; null for an id the runtime doesn't write. */
+export function nearRequest(soundId: string, name?: string, revision?: string | null): string | null {
+  const id = plainId(soundId)
+  if (!id) return null
+  const from = revision ? plainId(revision) : null
+  const said = quotable(name)
+  const which = `sound ${id}${from ? ` from map ${from}` : ''}`
+  return said ? `Find more sounds like “${said}” (${which})` : `Find more sounds like ${which}`
+}
+
 export function setupRequest(daw: unknown): string {
   return `Set up Kumi for ${dawName(daw)}`
 }
