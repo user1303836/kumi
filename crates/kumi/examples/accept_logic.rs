@@ -176,7 +176,7 @@ fn seconds(ms: f64) -> String {
 }
 
 /// One of an observation's tools, by name.
-fn tool_named(observation: &Observation, name: &str) -> Option<Rc<dyn kumi_agent::core::contracts::KernelTool>> {
+fn tool_named(observation: &Observation, name: &str) -> Option<Rc<dyn kumi_types::contracts::KernelTool>> {
     observation.tools.iter().find(|tool| tool.name() == name).cloned()
 }
 
