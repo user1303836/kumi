@@ -247,6 +247,11 @@ fn pictures_draw_in_the_pages_own_colours_and_load_nothing() {
     let values: ChangePicture =
         serde_json::from_value(json!({"kind": "values", "values": [{"name": "Drive", "from": 1, "to": 2}]})).unwrap();
     assert_eq!(svg_of(&values), None, "values read as words on the page");
+    let combined = kumi_types::picture::across(&[("Drums <&>".into(), eq), ("Keys".into(), notes)]).unwrap();
+    let svg = svg_of(&combined).unwrap();
+    assert!(svg.contains("Drums &lt;&amp;&gt;") && svg.contains(">Keys</text>"), "labels remain attached: {svg}");
+    assert_eq!(svg.matches("class=\"now\"").count(), 2, "both the EQ curve and the new note are drawn");
+    assert!(!svg.contains("Drums <&>"), "labels are escaped");
 }
 
 #[derive(Default)]

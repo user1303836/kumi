@@ -112,7 +112,13 @@ impl TuiApp {
         let mut state = self.0.state.borrow_mut();
         if let Some(image) = drawn.image.take() {
             let id = state.images.id(&name, |id| kitty::transmit(id, &image, cols, rows));
-            drawn.rows = kitty::cells(id, cols, rows);
+            // Combined pictures have text headings between panels. Retag only the placeholders, keeping their
+            // original image row/column marks and the headings in place.
+            for span in drawn.rows.iter_mut().flatten() {
+                if span.text.starts_with(kitty::PLACEHOLDER) {
+                    span.style = Rc::new(crate::tui::style::Style::fg(kitty::id_color(id)));
+                }
+            }
         }
         if state.images.drawn.len() >= DRAWN_KEPT {
             state.images.drawn.clear();
@@ -144,10 +150,10 @@ impl TuiApp {
         }
     }
 
-    /// How tall a change's picture is in HISTORY: curves, notes and lanes take 6 rows; values and levels are lines.
-    pub(super) fn picture_height(&self, change: &ChangeRecord) -> usize {
+    /// How tall a change's picture is in HISTORY: six rows for a scene, or a labelled panel for every track in a run.
+    pub(super) fn picture_height(&self, change: &ChangeRecord, cols: usize) -> usize {
         match &change.picture {
-            Some(picture) if self.0.graphics != Graphics::Words && pictures::scene_of(picture).is_some() => 6,
+            Some(picture) if self.0.graphics != Graphics::Words => pictures::height(picture, cols),
             _ => 0,
         }
     }

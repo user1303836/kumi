@@ -17,6 +17,7 @@ use serde_json::Value;
 /// The most one change's picture takes as JSON: past it, lists are thinned until it fits.
 pub const MAX_BYTES: usize = 4096;
 const MAX_VALUES: usize = 16;
+const MAX_PARTS: usize = 16;
 const MAX_BANDS: usize = 16;
 const MAX_NOTES: usize = 200;
 const MAX_POINTS: usize = 128;
@@ -38,6 +39,13 @@ pub const MAX_PEAKS: usize = 240;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum ChangePicture {
+    /// Several tracks' pictures in one entry, each kept beside its track's name. `more` parts did not fit; their
+    /// changes still belong to the entry and its undo. Parts do not contain other `Across` pictures.
+    Across {
+        parts: Vec<PicturePart>,
+        #[serde(default, skip_serializing_if = "is_zero")]
+        more: usize,
+    },
     /// Each value that moved: a device's parameters, the tempo.
     Values { values: Vec<PictureValue> },
     /// An equaliser's bands, before and after, with the values that moved.
@@ -144,6 +152,14 @@ pub enum ChangePicture {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         values: Vec<PictureValue>,
     },
+}
+
+/// One track's part of a combined picture. The name travels with the whole before/after picture, never with just
+/// one of its lists, so notes, curves and lanes on different tracks cannot be mistaken for one another.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct PicturePart {
+    pub name: String,
+    pub picture: ChangePicture,
 }
 
 /// What a change did to a track: made it, or took it away.
@@ -339,19 +355,31 @@ impl ChangePicture {
     /// One shown as it's made then reads as the same one read back from disk, and a note restated with fewer decimals
     /// (Live's triplet start 2.6666666666666665 against a patch's 2.6667) is the note it was.
     pub fn as_kept(mut self) -> ChangePicture {
-        if let ChangePicture::Notes { before, after, .. } = &mut self {
-            for note in before.iter_mut().chain(after.iter_mut()) {
-                *note = compact_notes::kept(note);
+        match &mut self {
+            ChangePicture::Notes { before, after, .. } => {
+                for note in before.iter_mut().chain(after.iter_mut()) {
+                    *note = compact_notes::kept(note);
+                }
             }
+            ChangePicture::Across { parts, .. } => {
+                for part in parts {
+                    part.picture = part.picture.clone().as_kept();
+                }
+            }
+            _ => {}
         }
         self
     }
     /// The picture within its bounds: lists capped, names and texts cut, numbers finite, and thinned until its JSON
     /// is at most [`MAX_BYTES`]. None when nothing drawable is left.
     pub fn bounded(self) -> Option<ChangePicture> {
+        self.bounded_to(MAX_BYTES)
+    }
+
+    fn bounded_to(self, bytes: usize) -> Option<ChangePicture> {
         let mut picture = self.capped()?;
-        for _ in 0..8 {
-            if serde_json::to_vec(&picture).map_or(usize::MAX, |json| json.len()) <= MAX_BYTES {
+        for _ in 0..MAX_PARTS + 8 {
+            if serde_json::to_vec(&picture).map_or(usize::MAX, |json| json.len()) <= bytes {
                 return Some(picture);
             }
             picture = picture.halved()?;
@@ -363,6 +391,25 @@ impl ChangePicture {
         let values = |values: Vec<PictureValue>| values.into_iter().take(MAX_VALUES).filter_map(PictureValue::bounded).collect::<Vec<_>>();
         let bands = |bands: Vec<EqBand>| bands.into_iter().filter(EqBand::finite).take(MAX_BANDS).collect::<Vec<_>>();
         let picture = match self {
+            ChangePicture::Across { parts, more } => {
+                let total = parts.len();
+                let parts: Vec<PicturePart> = parts
+                    .into_iter()
+                    .take(MAX_PARTS)
+                    .filter_map(|part| {
+                        // No recursive groups, and room for the outer name and shape even when only one part fits.
+                        if matches!(part.picture, ChangePicture::Across { .. }) {
+                            return None;
+                        }
+                        Some(PicturePart {
+                            name: cut(&part.name, MAX_NAME),
+                            picture: part.picture.bounded_to(MAX_BYTES - MAX_NAME * 4 - 128)?,
+                        })
+                    })
+                    .collect();
+                let more = more.saturating_add(total - parts.len());
+                ChangePicture::Across { parts, more }
+            }
             ChangePicture::Values { values: list } => ChangePicture::Values { values: values(list) },
             ChangePicture::Eq { before, after, values: list } => {
                 ChangePicture::Eq { before: bands(before), after: bands(after), values: values(list) }
@@ -494,6 +541,12 @@ impl ChangePicture {
     fn halved(self) -> Option<ChangePicture> {
         let half = |n: usize| (n / 2).max(1);
         let picture = match self {
+            ChangePicture::Across { mut parts, more } => {
+                // Keep each retained picture intact: dropping EQ bands, for example, invents a different response.
+                // Omission is explicit, while the original records and the run's undo retain every member.
+                parts.pop()?;
+                ChangePicture::Across { parts, more: more.saturating_add(1) }
+            }
             ChangePicture::Values { values } => ChangePicture::Values { values: values.iter().take(half(values.len())).cloned().collect() },
             ChangePicture::Eq { before, after, values } => {
                 ChangePicture::Eq { before, after, values: values.iter().take(values.len() / 2).cloned().collect() }
@@ -561,6 +614,7 @@ impl ChangePicture {
 
     fn is_empty(&self) -> bool {
         match self {
+            ChangePicture::Across { parts, .. } => parts.is_empty(),
             ChangePicture::Values { values } => values.is_empty(),
             ChangePicture::Eq { before, after, .. } => before.is_empty() && after.is_empty(),
             ChangePicture::Dynamics { .. } => false,
@@ -837,9 +891,16 @@ mod compact_notes {
 }
 
 /// One picture for a change made alike on several tracks, from each track's name and its own picture: the routes made
-/// when each is a route, else each value that moved, named by its track ("Drums · Volume"). None when a part is drawn
-/// as more than values (a curve, notes, a lane).
+/// when each is a route, else each value that moved, named by its track ("Drums · Volume"). Curves, notes, lanes and
+/// other pictures stay whole in labelled panels, so the same change on different tracks keeps its own before/after.
 pub fn across(parts: &[(String, ChangePicture)]) -> Option<ChangePicture> {
+    let panels = || {
+        ChangePicture::Across {
+            parts: parts.iter().map(|(name, picture)| PicturePart { name: name.clone(), picture: picture.clone() }).collect(),
+            more: 0,
+        }
+        .bounded()
+    };
     if parts.iter().all(|(_, picture)| matches!(picture, ChangePicture::Routes { .. })) {
         let routes = parts
             .iter()
@@ -848,7 +909,10 @@ pub fn across(parts: &[(String, ChangePicture)]) -> Option<ChangePicture> {
                 _ => Vec::new(),
             })
             .collect();
-        let more = parts.iter().map(|(_, picture)| if let ChangePicture::Routes { more, .. } = picture { *more } else { 0 }).sum();
+        let more = parts.iter().fold(0usize, |more, (_, picture)| match picture {
+            ChangePicture::Routes { more: past, .. } => more.saturating_add(*past),
+            _ => more,
+        });
         return ChangePicture::Routes { routes, more }.bounded();
     }
     let mut values = Vec::new();
@@ -856,16 +920,17 @@ pub fn across(parts: &[(String, ChangePicture)]) -> Option<ChangePicture> {
         let named = |value: &PictureValue| PictureValue { name: format!("{track} · {}", value.name), ..value.clone() };
         match picture {
             ChangePicture::Values { values: list } => values.extend(list.iter().map(named)),
-            ChangePicture::Routes { routes, .. } => {
-                for route in routes {
-                    values.extend(route.values.iter().map(named));
-                }
-            }
             ChangePicture::Mix { before, after } => values.extend(mix_values(before, after).iter().map(named)),
-            _ => return None,
+            _ => return panels(),
         }
     }
-    ChangePicture::Values { values }.bounded()
+    let count = values.len();
+    let merged = ChangePicture::Values { values }.bounded();
+    // A long batch must say what did not fit, rather than quietly losing tracks at the values limit.
+    match &merged {
+        Some(ChangePicture::Values { values }) if values.len() == count => merged,
+        _ => panels(),
+    }
 }
 
 /// A channel's levels that moved, as values: the fader and pan in their ranges, mute and solo, each send.
@@ -1321,8 +1386,38 @@ mod tests {
         ];
         let ChangePicture::Routes { routes, .. } = across(&routes).unwrap() else { panic!() };
         assert_eq!(routes.len(), 2, "routes stay routes");
-        let notes = ChangePicture::Notes { length: 4., before: vec![], after: vec![note(0.)], partial: false };
-        assert_eq!(across(&[("Keys".to_string(), notes)]), None, "notes aren't values");
+        let notes = ChangePicture::Notes { length: 4., before: vec![note(0.)], after: vec![note(1.)], partial: false };
+        let parts = [("Keys".to_string(), notes.clone()), ("Bass".to_string(), notes)];
+        let combined = across(&parts).unwrap();
+        let ChangePicture::Across { parts: panels, more } = &combined else { panic!() };
+        assert_eq!(*more, 0);
+        for (panel, (name, picture)) in panels.iter().zip(&parts) {
+            assert_eq!((&panel.name, &panel.picture), (name, picture), "a track keeps its whole before/after");
+        }
+        let kept = combined.as_kept();
+        assert_eq!(serde_json::from_slice::<ChangePicture>(&serde_json::to_vec(&kept).unwrap()).unwrap(), kept);
+
+        // The whole picture remains bounded, and each retained curve stays intact: never invent a response by
+        // dropping some bands to fit more tracks. The count tells the producer which limit was reached.
+        let band = EqBand { shape: EqShape::Bell, freq: 1000., gain_db: 4., q: 1., on: true, slope: None };
+        let eq = ChangePicture::Eq { before: vec![band.clone(); MAX_BANDS], after: vec![band; MAX_BANDS], values: vec![] };
+        let many: Vec<_> = (0..40).map(|at| (format!("Track {at}"), eq.clone())).collect();
+        let bounded = across(&many).unwrap();
+        assert!(serde_json::to_vec(&bounded).unwrap().len() <= MAX_BYTES);
+        let ChangePicture::Across { parts, more } = bounded else { panic!() };
+        assert!(!parts.is_empty());
+        assert_eq!(parts.len() + more, many.len());
+        for (at, part) in parts.iter().enumerate() {
+            assert_eq!(part.name, many[at].0);
+            assert_eq!(part.picture, eq, "both complete curves, still on their own track");
+        }
+        let many: Vec<_> = (0..40)
+            .map(|at| {
+                (format!("Track {at}"), ChangePicture::Mix { before: mix(0.8, "0 dB", Some(false)), after: mix(0.7, "-3 dB", Some(true)) })
+            })
+            .collect();
+        let ChangePicture::Across { parts, more } = across(&many).unwrap() else { panic!() };
+        assert_eq!(parts.len() + more, many.len(), "a value limit cannot silently hide a track");
     }
 
     #[test]

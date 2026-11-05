@@ -206,6 +206,36 @@ fn bars_of(from: f64, to: f64, [min, max]: [f64; 2]) -> Option<String> {
 /// A change's picture as an `<svg>` the page colours itself, light or dark: curves as lines, notes as boxes. None for a
 /// picture that reads as values (the page writes those out), or one with nothing to draw.
 pub fn svg_of(picture: &ChangePicture) -> Option<String> {
+    if let ChangePicture::Across { parts, more } = picture {
+        if parts.is_empty() {
+            return None;
+        }
+        let columns = parts.len().min(3);
+        let width = WIDTH / columns as f64;
+        let height = parts.len().div_ceil(columns) as f64 * (HEIGHT + 24.) + if *more > 0 { 24. } else { 0. };
+        let mut panels = String::new();
+        for (at, part) in parts.iter().enumerate() {
+            let (x, y) = ((at % columns) as f64 * width, (at / columns) as f64 * (HEIGHT + 24.));
+            panels.push_str(&format!(
+                "<svg x=\"{x:.1}\" y=\"{y:.1}\" width=\"{width:.1}\" height=\"{:.1}\" viewBox=\"0 0 {width:.1} {:.1}\"><title>{}</title><text x=\"0\" y=\"16\" fill=\"currentColor\">{}</text>",
+                HEIGHT + 24., HEIGHT + 24., html_text(&part.name), html_text(&part.name)
+            ));
+            if let Some(child) = svg_of(&part.picture) {
+                panels.push_str(&child.replacen(
+                    "<svg ",
+                    &format!("<svg x=\"0\" y=\"24\" width=\"{:.1}\" height=\"{HEIGHT}\" ", width - 4.),
+                    1,
+                ));
+            }
+            panels.push_str("</svg>");
+        }
+        if *more > 0 {
+            panels.push_str(&format!("<text x=\"0\" y=\"{:.1}\" fill=\"currentColor\">and {more} more track pictures</text>", height - 4.));
+        }
+        return Some(format!(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {WIDTH} {height}\" aria-hidden=\"true\">{panels}</svg>"
+        ));
+    }
     let scene = scene_of(picture)?;
     let mut shapes = String::new();
     for shape in &scene.shapes {

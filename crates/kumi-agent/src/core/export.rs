@@ -970,73 +970,87 @@ fn redacted_change(change: &ChangeRecord, redact: &dyn Fn(&str) -> String) -> Ch
         }
     }
     if let Some(picture) = &mut change.picture {
-        let values = |values: &mut Vec<PictureValue>| {
-            for value in values {
-                value.name = redact(&value.name);
-                for text in [&mut value.from_text, &mut value.to_text, &mut value.asked] {
-                    *text = text.as_deref().map(|text| redact(text));
-                }
-            }
-        };
-        let levels = |levels: &mut MixLevels| {
-            for text in [&mut levels.volume_text, &mut levels.pan_text] {
-                *text = text.as_deref().map(|text| redact(text));
-            }
-            for send in &mut levels.sends {
-                send.name = redact(&send.name);
-                send.text = send.text.as_deref().map(|text| redact(text));
-            }
-        };
-        match picture {
-            ChangePicture::Values { values: list }
-            | ChangePicture::Eq { values: list, .. }
-            | ChangePicture::Dynamics { values: list, .. } => values(list),
-            ChangePicture::Automation { parameter, .. } => *parameter = redact(parameter),
-            ChangePicture::Mix { before, after } => {
-                levels(before);
-                levels(after);
-            }
-            ChangePicture::Notes { .. } => {}
-            ChangePicture::Lines { lines, .. } => {
-                for line in lines {
-                    line.before = redact(&line.before);
-                    line.after = redact(&line.after);
-                }
-            }
-            ChangePicture::Routes { routes, .. } => {
-                for route in routes {
-                    route.from = redact(&route.from);
-                    route.to = redact(&route.to);
-                    values(&mut route.values);
-                }
-            }
-            ChangePicture::Zones { before, after, values: list } => {
-                for zone in before.iter_mut().chain(after.iter_mut()) {
-                    zone.name = redact(&zone.name);
-                }
-                values(list);
-            }
-            ChangePicture::Items { before, after, values: list } => {
-                for item in before.iter_mut().chain(after.iter_mut()) {
-                    item.name = redact(&item.name);
-                }
-                values(list);
-            }
-            ChangePicture::Tracks { tracks, .. } => {
-                for track in tracks {
-                    track.name = redact(&track.name);
-                }
-            }
-            ChangePicture::Marks { before, after, values: list } => {
-                for mark in before.iter_mut().chain(after.iter_mut()) {
-                    mark.name = redact(&mark.name);
-                }
-                values(list);
-            }
-            ChangePicture::Warp { values: list, .. } | ChangePicture::Wave { values: list, .. } => values(list),
-        }
+        redact_picture(picture, redact);
     }
     change
+}
+
+/// Each track label and every word inside its picture passes through the same redactor.
+fn redact_picture(picture: &mut ChangePicture, redact: &dyn Fn(&str) -> String) {
+    let values = |values: &mut Vec<PictureValue>| {
+        for value in values {
+            value.name = redact(&value.name);
+            for text in [&mut value.from_text, &mut value.to_text, &mut value.asked] {
+                *text = text.as_deref().map(|text| redact(text));
+            }
+        }
+    };
+    let levels = |levels: &mut MixLevels| {
+        for text in [&mut levels.volume_text, &mut levels.pan_text] {
+            *text = text.as_deref().map(|text| redact(text));
+        }
+        for send in &mut levels.sends {
+            send.name = redact(&send.name);
+            send.text = send.text.as_deref().map(|text| redact(text));
+        }
+    };
+    match picture {
+        ChangePicture::Across { parts, .. } => {
+            for part in parts {
+                part.name = redact(&part.name);
+                redact_picture(&mut part.picture, redact);
+            }
+        }
+        ChangePicture::Values { values: list } | ChangePicture::Eq { values: list, .. } | ChangePicture::Dynamics { values: list, .. } => {
+            values(list)
+        }
+        ChangePicture::Automation { parameter, words, .. } => {
+            *parameter = redact(parameter);
+            *words = words.as_deref().map(redact);
+        }
+        ChangePicture::Mix { before, after } => {
+            levels(before);
+            levels(after);
+        }
+        ChangePicture::Notes { .. } => {}
+        ChangePicture::Lines { lines, .. } => {
+            for line in lines {
+                line.before = redact(&line.before);
+                line.after = redact(&line.after);
+            }
+        }
+        ChangePicture::Routes { routes, .. } => {
+            for route in routes {
+                route.from = redact(&route.from);
+                route.to = redact(&route.to);
+                values(&mut route.values);
+            }
+        }
+        ChangePicture::Zones { before, after, values: list } => {
+            for zone in before.iter_mut().chain(after.iter_mut()) {
+                zone.name = redact(&zone.name);
+            }
+            values(list);
+        }
+        ChangePicture::Items { before, after, values: list } => {
+            for item in before.iter_mut().chain(after.iter_mut()) {
+                item.name = redact(&item.name);
+            }
+            values(list);
+        }
+        ChangePicture::Tracks { tracks, .. } => {
+            for track in tracks {
+                track.name = redact(&track.name);
+            }
+        }
+        ChangePicture::Marks { before, after, values: list } => {
+            for mark in before.iter_mut().chain(after.iter_mut()) {
+                mark.name = redact(&mark.name);
+            }
+            values(list);
+        }
+        ChangePicture::Warp { values: list, .. } | ChangePicture::Wave { values: list, .. } => values(list),
+    }
 }
 
 /// What's known of a conversation, as labels and values: its id, its Set, when it began and was last saved (when it was),
@@ -1131,6 +1145,23 @@ fn values_of(picture: &ChangePicture) -> Vec<String> {
         _ => None,
     };
     match picture {
+        ChangePicture::Across { parts, more } => {
+            let mut lines: Vec<String> = parts
+                .iter()
+                .flat_map(|part| {
+                    let words = values_of(&part.picture);
+                    if words.is_empty() {
+                        vec![one_line(&part.name)]
+                    } else {
+                        words.into_iter().map(|words| one_line(&format!("{} · {words}", part.name))).collect()
+                    }
+                })
+                .collect();
+            if *more > 0 {
+                lines.push(format!("and {more} more track pictures"));
+            }
+            lines
+        }
         ChangePicture::Values { values }
         | ChangePicture::Eq { values, .. }
         | ChangePicture::Dynamics { values, .. }

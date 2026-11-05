@@ -3,6 +3,7 @@
 //! elsewhere, words on a basic console; and under it, each value that moved, with what was asked when the DAW set
 //! something else. A tracker's lines and a route are words everywhere: the DAW's own text says them best.
 
+mod across;
 pub mod cells;
 pub mod kitty;
 pub mod raster;
@@ -60,6 +61,9 @@ pub fn draw(picture: &ChangePicture, cols: usize, rows: usize, graphics: Graphic
     let lines = lines_of(picture, cols);
     if graphics == Graphics::Words {
         return Drawn { rows: Vec::new(), lines, image: None };
+    }
+    if let ChangePicture::Across { parts, .. } = picture {
+        return across::draw(parts, picture, cols, rows, graphics, id, ground);
     }
     let Some(scene) = scene_of(picture) else {
         // Values and levels are bars, the same everywhere.
@@ -277,9 +281,36 @@ fn tracks_lines(tracks: &[PictureTrack], more: usize, cols: usize) -> Vec<Vec<Sp
     lines
 }
 
+/// How many rows an open HISTORY picture needs at this width, with six rows for each panel's scene.
+pub fn height(picture: &ChangePicture, cols: usize) -> usize {
+    if scene_of(picture).is_none() {
+        return 0;
+    }
+    match picture {
+        ChangePicture::Across { parts, .. } => across::height(parts, cols),
+        _ => 6,
+    }
+}
+
 /// The words of a picture: each value that moved, or what changed in notes and lanes.
 pub fn lines_of(picture: &ChangePicture, cols: usize) -> Vec<Vec<Span>> {
     match picture {
+        ChangePicture::Across { parts, more } => {
+            let mut lines = Vec::new();
+            for part in parts {
+                let prefix = format!("{} · ", part.name);
+                let child = lines_of(&part.picture, cols.saturating_sub(text_width(&prefix) as usize));
+                if child.is_empty() {
+                    lines.push(fit(vec![styled(&part.name, palette::TEXT)], cols));
+                } else {
+                    lines.extend(child.into_iter().map(|line| fit([vec![styled(&prefix, palette::TEXT)], line].concat(), cols)));
+                }
+            }
+            if *more > 0 {
+                lines.push(fit(vec![styled(format!("and {more} more track pictures"), palette::FAINT)], cols));
+            }
+            lines
+        }
         ChangePicture::Values { values }
         | ChangePicture::Eq { values, .. }
         | ChangePicture::Dynamics { values, .. }
@@ -491,6 +522,98 @@ mod tests {
 
     fn text(rows: &[Vec<Span>]) -> Vec<String> {
         rows.iter().map(|row| row.iter().map(|span| span.text.as_str()).collect()).collect()
+    }
+
+    #[test]
+    fn a_combined_picture_has_named_panels_and_one_image_of_every_scene() {
+        use kumi_types::picture::{across, Dynamics, PictureItem, PictureMark, PictureZone};
+        let band = |gain_db| EqBand { shape: EqShape::Bell, freq: 1000., gain_db, q: 1., on: true, slope: None };
+        let note = |pitch| kumi_types::contracts::ClipNote { start: 0., duration: 1., pitch, velocity: 100. };
+        let dynamics = |threshold_db| Dynamics { threshold_db, ratio: 4., knee_db: 6., makeup_db: 0. };
+        let parts = vec![
+            ("Drums".into(), ChangePicture::Eq { before: vec![band(0.)], after: vec![band(-4.)], values: vec![] }),
+            ("低音 Bass".into(), ChangePicture::Dynamics { before: dynamics(-10.), after: dynamics(-20.), values: vec![] }),
+            ("Keys".into(), ChangePicture::Notes { length: 4., before: vec![note(60.)], after: vec![note(64.)], partial: false }),
+            (
+                "Pad".into(),
+                ChangePicture::Automation {
+                    parameter: "Cutoff".into(),
+                    min: 0.,
+                    max: 1.,
+                    before: vec![[0., 0.2]],
+                    after: vec![[0., 0.8]],
+                    words: None,
+                },
+            ),
+            (
+                "Sampler".into(),
+                ChangePicture::Zones {
+                    before: vec![],
+                    after: vec![PictureZone { name: "Zone".into(), notes: [48, 71], velocities: None, base: None }],
+                    values: vec![],
+                },
+            ),
+            (
+                "Audio".into(),
+                ChangePicture::Items {
+                    before: vec![],
+                    after: vec![PictureItem { name: "Take".into(), start: 0., length: 4., fade_in: 0., fade_out: 0., muted: false }],
+                    values: vec![],
+                },
+            ),
+            (
+                "Cues".into(),
+                ChangePicture::Marks { before: vec![], after: vec![PictureMark { name: "Drop".into(), at: 16. }], values: vec![] },
+            ),
+            ("Warp".into(), ChangePicture::Warp { before: vec![[0., 0.], [4., 2.]], after: vec![[0., 0.], [6., 2.]], values: vec![] }),
+            (
+                "Sample".into(),
+                ChangePicture::Wave {
+                    seconds: 4.,
+                    peaks: vec![0.2, 0.8, 0.4],
+                    before: Some([0., 4.]),
+                    after: Some([1., 3.]),
+                    values: vec![],
+                },
+            ),
+        ];
+        let picture = across(&parts).unwrap();
+        let ChangePicture::Across { parts: kept, more } = &picture else { panic!() };
+        assert_eq!((*more, kept.len()), (0, parts.len()));
+        for cols in [23, 48, 90] {
+            let rows = height(&picture, cols);
+            let image = draw(&picture, cols, rows, Graphics::Kitty, 17, palette::GROUND);
+            let raster = image.image.as_ref().expect("one combined image");
+            assert_eq!(image.rows.len(), rows);
+            assert!(image.rows.iter().all(|row| row.iter().map(|s| text_width(&s.text) as usize).sum::<usize>() <= cols));
+            let columns = (cols / 24).clamp(1, 3).min(kept.len());
+            for (at, part) in kept.iter().enumerate() {
+                let tier = at / columns;
+                let heading = text(&image.rows)[tier * 7].clone();
+                assert!(heading.contains(&part.name), "{cols} columns: {heading:?}");
+                // Every panel has pixels in its own rectangle; later panels cannot replace an earlier track.
+                let (left, right) = ((at % columns) * cols / columns, ((at % columns) + 1) * cols / columns);
+                let scale = |row| row * raster.height as usize / rows;
+                assert!(
+                    (scale(tier * 7 + 1)..scale((tier + 1) * 7))
+                        .any(|y| { (left * 8..right * 8).any(|x| raster.at(x as u32, y as u32)[3] > 0) }),
+                    "{} has its own image panel",
+                    part.name
+                );
+            }
+            let cells = draw(&picture, cols, rows, Graphics::Cells, 0, palette::GROUND);
+            assert!(cells.image.is_none());
+            assert!(
+                text(&cells.rows).iter().any(|line| line.chars().any(|c| ('\u{2801}'..='\u{28ff}').contains(&c))),
+                "curves stay braille"
+            );
+            assert!(text(&cells.rows).iter().any(|line| line.contains('▀')), "notes stay areas");
+        }
+        let words = draw(&picture, 90, 0, Graphics::Words, 0, palette::GROUND);
+        assert!(words.rows.is_empty() && words.image.is_none());
+        for (name, _) in &parts {
+            assert!(text(&words.lines).iter().any(|line| line.starts_with(name)));
+        }
     }
 
     #[test]

@@ -348,4 +348,66 @@ case!(a_plans_change_across_tracks_is_one_entry_with_one_picture_and_one_undo, a
     let undone: Vec<String> = h.calls().into_iter().filter(|call| call.starts_with("undo:")).collect();
     assert_eq!(undone, ["undo:c3", "undo:c2", "undo:c1"]);
     h.close().await;
+
+    // Each graphical family now has the same one-entry, one-image, whole-run undo behaviour as mixer values.
+    for kind in ["eq", "dynamics", "notes", "automation"] {
+        let graphics = if kind == "eq" { Graphics::Kitty } else { Graphics::Cells };
+        let h = Harness::with(160, 72, Rc::new(Control::default()), |o| o.graphics = Some(graphics));
+        h.start().await;
+        h.connect();
+        for (at, track) in ["Drums", "Bass", "Keys"].into_iter().enumerate() {
+            let picture = match kind {
+                "eq" => eq_change("", -4.)["change"]["picture"].clone(),
+                "dynamics" => {
+                    json!({"kind":"dynamics","before":{"thresholdDb":-10.0,"ratio":2.0},"after":{"thresholdDb":-20.0,"ratio":4.0},
+                    "values":[{"name":"Threshold","fromText":"-10 dB","toText":"-20 dB"}]})
+                }
+                "notes" => json!({"kind":"notes","length":4.0,"before":[[0,60,1,100]],"after":[[0,60,1,100],[2,64,1,100]]}),
+                "automation" => {
+                    json!({"kind":"automation","parameter":"Cutoff","min":0.0,"max":1.0,"before":[[0,0.2]],"after":[[0,0.2],[4,0.8]]})
+                }
+                _ => unreachable!(),
+            };
+            h.emit(json!({"type":"change","change":{"id":format!("c{}",at+1),"family":"parameter","title":format!("{track}: edited"),
+                "state":"applied","at":at+1,"track":{"name":track},"batch":"p1:edit","picture":picture}}));
+        }
+        h.screen(); // Flush NOW's image before measuring the one HISTORY upload.
+        let before = h.output.text.borrow().len();
+        h.type_text("\x1b[Z").await;
+        h.type_text("\r").await;
+        let lines = h.screen();
+        let row = history_row(&lines, "Drums, Bass and Keys: edited");
+        for track in ["Drums", "Bass", "Keys"] {
+            assert!(
+                lines[row + 1..].iter().any(|line| framed(line).trim() == track),
+                "{kind}: a heading for {track}:\n{}",
+                lines.join("\n")
+            );
+            let detail = match kind {
+                "eq" => "3 Gain A 0.00 dB → -4.00 dB",
+                "dynamics" => "Threshold -10 dB → -20 dB",
+                "notes" => "1 note → 2 notes",
+                "automation" => "Cutoff · 1 → 2 points",
+                _ => unreachable!(),
+            };
+            assert!(
+                lines[row + 1..].iter().any(|line| line.contains(&format!("{track} · {detail}"))),
+                "{kind}: each track's before/after:\n{}",
+                lines.join("\n")
+            );
+        }
+        if graphics == Graphics::Kitty {
+            let written = h.output.text.borrow();
+            assert_eq!(written[before..].matches("\x1b_Ga=T,U=1,i=").count(), 1, "one image for the whole batch");
+        } else {
+            assert!(
+                lines[row + 1..].iter().any(|line| braille(std::slice::from_ref(line)) || line.contains('▀')),
+                "{kind}: the combined picture is drawn"
+            );
+        }
+        h.type_text("u").await;
+        h.wait_for_call("undo:c1").await;
+        assert_eq!(h.calls().into_iter().filter(|call| call.starts_with("undo:")).collect::<Vec<_>>(), ["undo:c3", "undo:c2", "undo:c1"]);
+        h.close().await;
+    }
 });

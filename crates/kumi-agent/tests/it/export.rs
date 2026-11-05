@@ -795,6 +795,23 @@ fn a_tracker_route_keyzone_and_items_picture_say_their_words_and_pass_the_redact
         "id": "d4", "family": "clip", "title": "Moved an item", "state": "applied", "at": NOW - 60,
         "picture": {"kind": "items", "before": [{"name": format!("vox {PLANTED}"), "start": 8.0, "length": 4.0}], "after": [], "values": [value("Start")]}
     }]);
+    // A combined picture must redact both the track label and every word inside the original child picture.
+    let mut changes = changes;
+    let mut parts: Vec<Value> = changes
+        .as_array()
+        .unwrap()
+        .iter()
+        .enumerate()
+        .map(|(at, change)| json!({"name": format!("Track {at} {PLANTED}"), "picture": change["picture"]}))
+        .collect();
+    parts.push(json!({"name": format!("Lane {PLANTED}"), "picture": {
+        "kind": "automation", "parameter": format!("Cutoff {PLANTED}"), "min": 0, "max": 1,
+        "before": [[0, 0.2]], "after": [[0, 0.8]], "words": format!("Up {PLANTED}")
+    }}));
+    changes.as_array_mut().unwrap().push(json!({
+        "id": "d5", "family": "parameter", "title": "Across tracks", "state": "applied", "at": NOW - 50,
+        "picture": {"kind": "across", "parts": parts, "more": 2}
+    }));
     conversation.changes = Some(serde_json::from_value(changes).unwrap());
     let source =
         Source { id: "k3x9a1b2", conversation: &conversation, title: "Pictures", place: None, words: ("REAPER", "project"), created: NOW };
@@ -805,7 +822,7 @@ fn a_tracker_route_keyzone_and_items_picture_say_their_words_and_pass_the_redact
     let said =
         ["9: E-4 01 40 .. .. → OFF [secret]", "and 1 more line", "Drums [secret] → Reverb (new)", "Keys [secret]: bar 5 → bar 6 [secret]"];
     for out in [&page, &words] {
-        for words in said {
+        for words in said.into_iter().chain(["Track 0 [secret] · 9:", "and 2 more track pictures"]) {
             assert!(out.contains(words), "{words:?} is missing:\n{out}");
         }
     }
