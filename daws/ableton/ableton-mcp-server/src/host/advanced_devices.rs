@@ -194,7 +194,7 @@ impl McpHost {
         }
         let result=async{
             self.begin_undo_recovery(&record,p["idempotencyKey"].as_str().unwrap_or(""))?;let status=self.require_connected(Some("session.read"))?;if json!(status.epoch)!=t["epoch"]{return Ok(transaction_error(id,"Live connection epoch changed; undo refused"))}let adapter=self.async_adapter();let context=self.transaction_context(p,signal,AUDITION_DEADLINE_MS);record.borrow_mut()["undoKey"]=p["idempotencyKey"].clone();if reconcile{self.replay_undo_recovery(&record,adapter.as_ref(),&context).await?;}
-            if action=="insert-chain"{record.borrow_mut()["state"]=json!("undoing");self.delete_owned_device_async(adapter.as_ref(),created["ref"].as_str().unwrap(),created["objectIdentity"].as_str().unwrap(),&context,created["createdFingerprint"].as_str(),Some(&record),reconcile).await?;}
+            if action=="insert-chain"{record.borrow_mut()["state"]=json!("undoing");self.delete_owned_device_async(adapter.as_ref(),created["ref"].as_str().unwrap(),created["objectIdentity"].as_str().unwrap(),&context,created["createdFingerprint"].as_str(),Some(&record),reconcile,None).await?;}
             else{
                 let snapshot=self.views.view_for(Some(&context),&[created["ref"].clone(),t["prior"]["ownerRef"].clone()],None,&[]).await?;
                 if !is_non_empty_string(&created["ref"],256)||!is_non_empty_string(&created["objectIdentity"],256){return Ok(transaction_error(id,"device move lacks exact applied identity"))}let row=self.device_row(&snapshot,created["ref"].as_str().unwrap())?;if row.device["objectIdentity"]!=created["objectIdentity"]{return Ok(transaction_error(id,"the moved device changed after apply; undo refused"))}

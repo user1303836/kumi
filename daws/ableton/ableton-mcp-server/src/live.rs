@@ -448,6 +448,10 @@ pub struct SessionTransport {
     pub arrangement_record: Option<bool>,
     pub session_record: Option<bool>,
     pub position: Option<f64>,
+    /// Where play starts (Live's `start_time`): a playhead write moves it, so only one written after it stays apart.
+    /// Absent from a Remote Script that predates it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_time: Option<f64>,
     pub launch_quantization: LaunchQuantization,
     #[serde(rename = "loop")]
     pub loop_: TransportLoop,
@@ -4549,7 +4553,7 @@ impl DeterministicLiveSimulator {
                 {
                     return Err(LiveError::error("transport Set identity or state changed since preview"));
                 }
-                for key in ["position", "loopStart", "loopLength"] {
+                for key in ["position", "startTime", "loopStart", "loopLength"] {
                     if let Some(value) = args.get(key).filter(|v| !v.is_null()) {
                         if !value.as_f64().is_some_and(|v| v.is_finite() && v >= 0.0) {
                             return Err(LiveError::type_error(format!("{key} is invalid")));
@@ -4566,11 +4570,16 @@ impl DeterministicLiveSimulator {
                 if args.get("loopLength").and_then(Value::as_f64).is_some_and(|v| v <= 0.0) {
                     return Err(LiveError::range_error("loopLength is invalid"));
                 }
-                for key in ["position", "metronome", "punchIn", "punchOut"] {
+                // As Live does: a playhead write moves where play starts with it, and a start time written after
+                // the playhead is the one that stays. (A state without startTime, as the recorded ones are, keeps none.)
+                for key in ["position", "startTime", "metronome", "punchIn", "punchOut"] {
                     if let Some(value) = args.get(key).filter(|v| !v.is_null()) {
                         state["playback"]["transport"][key] = value.clone();
                         if key == "position" {
                             state["set"][key] = value.clone();
+                            if state["playback"]["transport"].get("startTime").is_some() {
+                                state["playback"]["transport"]["startTime"] = value.clone();
+                            }
                         }
                     }
                 }

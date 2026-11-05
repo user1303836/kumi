@@ -2,7 +2,7 @@
 use super::*;
 use kumi_common::abort::{Signal, SignalExt};
 use retention::TransactionRecord;
-const FIELDS: &[&str] = &["position", "loopEnabled", "loopStart", "loopLength", "metronome", "punchIn", "punchOut"];
+const FIELDS: &[&str] = &["position", "startTime", "loopEnabled", "loopStart", "loopLength", "metronome", "punchIn", "punchOut"];
 const PARTS: &[LiveSnapshotPart] = &[LiveSnapshotPart::Set, LiveSnapshotPart::Playback];
 fn field_is(transport: &Value, field: &str, value: &Value) -> bool {
     if field == "position" {
@@ -66,7 +66,9 @@ impl McpHost {
             let snapshot=serde_json::to_value(self.views.view(None,LiveViewScope::Indices(vec![]),Some(PARTS)).await?).unwrap();
             let transport=&snapshot["playback"]["transport"];
             if transport.is_null()||transport["loop"].is_null()||!is_non_empty_string(&snapshot["set"]["objectIdentity"],256){return Ok(transaction_error(id,"authoritative transport Set identity is unavailable"));}
-            let prior=project_fields(transport,&["position","loop","punchIn","punchOut","metronome"]);
+            // Where play starts is only set where Live says where it is: it's put back by that reading.
+            if proposed.get("startTime").is_some()&&!transport["startTime"].is_number(){return Ok(transaction_error(id,"this Live doesn't say where play starts (startTime), so it can't be set"));}
+            let prior=project_fields(transport,&["position","startTime","loop","punchIn","punchOut","metronome"]);
             let t=json!({
 "id":tempo::transaction_id("transport"),
 "epoch":status.epoch,

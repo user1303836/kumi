@@ -1760,6 +1760,7 @@ class LiveObjectMapper:
             "arrangementRecord": getattr(self.song, "record_mode", None) if isinstance(getattr(self.song, "record_mode", None), bool) else None,
             "sessionRecord": getattr(self.song, "session_record", None) if isinstance(getattr(self.song, "session_record", None), bool) else None,
             "position": float(getattr(self.song, "current_song_time", getattr(self.song, "song_time", 0))) if isinstance(getattr(self.song, "current_song_time", getattr(self.song, "song_time", None)), (int, float)) and not isinstance(getattr(self.song, "current_song_time", getattr(self.song, "song_time", None)), bool) and math.isfinite(float(getattr(self.song, "current_song_time", getattr(self.song, "song_time", 0)))) and float(getattr(self.song, "current_song_time", getattr(self.song, "song_time", 0))) >= 0 else None,
+            "startTime": float(self._read_attr(self.song, "start_time")) if isinstance(self._read_attr(self.song, "start_time"), (int, float)) and not isinstance(self._read_attr(self.song, "start_time"), bool) and math.isfinite(float(self._read_attr(self.song, "start_time"))) and float(self._read_attr(self.song, "start_time")) >= 0 else None,
             "launchQuantization": self._quantization(getattr(self.song, "clip_trigger_quantization", getattr(self.song, "launch_quantization", None))),
             "loop": {
                 "enabled": self._read_attr(self.song, "loop") if isinstance(self._read_attr(self.song, "loop"), bool) else None,
@@ -3960,7 +3961,7 @@ class LiveObjectMapper:
         expected = args.get("expectedRevision"); set_ref = args.get("setRef"); expected_identity = args.get("expectedObjectIdentity"); set_target = self.refs.get(set_ref) if isinstance(set_ref, str) else None
         if not isinstance(expected, str) or not 1 <= len(expected) <= 256 or not isinstance(set_ref, str) or not isinstance(expected_identity, str) or not self._capture_same_object(set_target, self.song, expected_identity) or not hmac.compare_digest(self._capture_object_identity(self.song), expected_identity):
             raise ValueError("transport Set identity or revision authority is invalid")
-        allowed = {"position", "loopEnabled", "loopStart", "loopLength", "metronome", "punchIn", "punchOut", "expectedRevision", "setRef", "expectedObjectIdentity"}
+        allowed = {"position", "startTime", "loopEnabled", "loopStart", "loopLength", "metronome", "punchIn", "punchOut", "expectedRevision", "setRef", "expectedObjectIdentity"}
         if set(args) - allowed:
             raise ValueError("transport fields are invalid")
         playback = self._playback()
@@ -3984,6 +3985,7 @@ class LiveObjectMapper:
             return value
 
         position = number("position", 1_000_000_000)
+        start_time = number("startTime", 1_000_000_000)
         loop_enabled = flag("loopEnabled")
         loop_start = number("loopStart", 1_000_000_000)
         loop_length = number("loopLength", 1_000_000_000)
@@ -3994,7 +3996,9 @@ class LiveObjectMapper:
         # transport row but never written here.
         if loop_length is not None and loop_length <= 0:
             raise ValueError("loopLength is invalid")
-        proposed = [("current_song_time", position), ("loop", loop_enabled), ("loop_start", loop_start), ("loop_length", loop_length), ("metronome", metronome), ("punch_in", punch_in), ("punch_out", punch_out)]; assignments = []
+        # The playhead first, then where play starts: Live moves start_time with a playhead write, and applies the
+        # playhead on its next tick, so an explicit start_time written after it is the one that stays.
+        proposed = [("current_song_time", position), ("start_time", start_time), ("loop", loop_enabled), ("loop_start", loop_start), ("loop_length", loop_length), ("metronome", metronome), ("punch_in", punch_in), ("punch_out", punch_out)]; assignments = []
         for attribute, value in proposed:
             if value is None: continue
             prior = self._read_attr(self.song, attribute)
@@ -4015,6 +4019,7 @@ class LiveObjectMapper:
                 if isinstance(requested, bool): return observed is requested or observed is priors[attribute]
                 return isinstance(observed, (int, float)) and not isinstance(observed, bool) and (_same_number(observed, requested) or _same_number(observed, priors[attribute]))
             if position is not None: checks.append(settled(transport["position"], position, "current_song_time"))
+            if start_time is not None: checks.append(settled(transport["startTime"], start_time, "start_time"))
             if loop_enabled is not None: checks.append(settled(loop["enabled"], loop_enabled, "loop"))
             if loop_start is not None: checks.append(settled(loop["start"], loop_start, "loop_start"))
             if loop_length is not None: checks.append(settled(loop["length"], loop_length, "loop_length"))
@@ -11448,10 +11453,32 @@ class LiveObjectMapper:
 
     def _device_delete(self, args: dict[str, Any]) -> dict[str, Any]:
         reference = args.get("ref")
+        keep = args.get("keepSelection")
+        keys = sorted(key for key, _, _ in self._SELECTION_KINDS)
+        def selection_row(row: Any) -> bool: return isinstance(row, dict) and sorted(row) == keys and all(value is None or isinstance(value, str) for value in row.values())
+        if keep is not None and not (isinstance(keep, dict) and sorted(keep) == ["left", "previous"] and all(selection_row(row) for row in keep.values())):
+            raise ValueError("keepSelection is invalid")
         owner, device, _, _, _ = self._device_location(str(reference), args.get("expectedObjectIdentity"), args.get("expectedOwnerRef"), args.get("expectedOwnerIdentity"), args.get("expectedSiblings"), args.get("expectedTrackRef"), args.get("expectedTrackIdentity"))
         deleter = getattr(owner, "delete_device", None)
         if not callable(deleter):
             raise ValueError("device deletion is unavailable")
+        # Live selects the deleted device's neighbour, its track, slot and clip with it. With keepSelection the selection
+        # survives the delete: what was selected before Kumi's change (previous) while what's selected is still exactly
+        # what that change left (left), else what the producer has selected since, as they left it. Every part of it is
+        # found first, so a selection that can't come back deletes nothing.
+        targets: dict[str, Any] = {}; target: dict[str, Any] = {}; previous = False
+        if keep is not None:
+            held = dict(self._selection_row_targeted()); previous = held == keep["left"]; target = dict(keep["previous"]) if previous else held
+            if target["parameterRef"] is not None: raise ValueError(f"a parameter is selected, and Live doesn't let a script select one again (Song.View.selected_parameter can only be read){UNRUN_SUFFIX}")
+            for key, kind, _ in self._SELECTION_KINDS:
+                value = target[key]
+                if value is None or key == "parameterRef": continue
+                try:
+                    if not value.startswith(f"{self.refs.epoch}:{kind}:"): raise KeyError(value)
+                    found = self.refs.get(value); inside = self._within(found, device)
+                except BaseException as error: raise ValueError(f"what was selected ({key}) is gone, so it can't be selected again{UNRUN_SUFFIX}") from error
+                if inside: raise ValueError(f"what's selected ({key}) is in the device being removed, so it can't be selected again{UNRUN_SUFFIX}")
+                targets[key] = found
         # Its siblings were checked device by device above, and are checked again after: the one
         # device goes, the rest stay in their order.
         devices_before = self._items(getattr(owner, "devices", []))
@@ -11461,7 +11488,39 @@ class LiveObjectMapper:
         try: deleter(index)
         except BaseException as error: deletion_error = error
         if [self._capture_object_identity(candidate) for candidate in self._items(getattr(owner, "devices", []))] != expected_order: raise ValueError("device deletion did not preserve the exact authorized siblings") from deletion_error
-        self.refs.delete(str(reference)); return {"deleted": reference}
+        self.refs.delete(str(reference))
+        if keep is None: return {"deleted": reference}
+        # The device is gone: from here every outcome says so, the selection back or not.
+        try: self._put_selection_back(targets)
+        except BaseException: pass
+        after = dict(self._selection_row_targeted())
+        return {"deleted": reference, "selection": {"before": target, "after": after, "restored": after == target, "previous": previous}}
+
+    def _within(self, value: Any, device: Any) -> bool:
+        """Whether value is the device or lives in it (a parameter, a chain, a device in a chain), up Live's canonical_parent."""
+        identity = self._capture_object_identity(device)
+        for _ in range(64):
+            if value is None: return False
+            if self._capture_object_identity(value) == identity: return True
+            value = getattr(value, "canonical_parent", None)
+        return False
+
+    def _put_selection_back(self, held: dict[str, Any]) -> None:
+        """Selects again what was selected: the track first (Live moves the rest with it), then the scene, slot, clip
+        shown, device and chain. A parameter can only be read (Song.View.selected_parameter), so it is compared, not set."""
+        view = getattr(self.song, "view", None)
+        if view is None: return
+        for key, attribute in (("trackRef", "selected_track"), ("sceneRef", "selected_scene"), ("slotRef", "highlighted_clip_slot"), ("detailClipRef", "detail_clip")):
+            value = held.get(key)
+            if value is not None or key == "detailClipRef":
+                try: setattr(view, attribute, value)
+                except BaseException: pass
+        if held.get("deviceRef") is not None and callable(getattr(view, "select_device", None)):
+            try: view.select_device(held["deviceRef"])
+            except BaseException: pass
+        if held.get("chainRef") is not None:
+            try: view.selected_chain = held["chainRef"]
+            except BaseException: pass
 
     def _device_on_parameter(self, device: Any) -> Any | None:
         """Name-independent structural probe for the conventional first
@@ -11883,7 +11942,10 @@ class LiveObjectMapper:
                 raise ValueError("browser load result mapping failed and exact transaction-owned cleanup failed") from error
             self.refs.restore(registry_checkpoint)
             raise ValueError("browser load result mapping failed without a residual device") from error
-        return {"loaded": True, "deviceRef": created_ref, "deviceObjectIdentity": device_identity, "createdFingerprint": fingerprint}
+        result = {"loaded": True, "deviceRef": created_ref, "deviceObjectIdentity": device_identity, "createdFingerprint": fingerprint}
+        # What the load left selected, read in the same step: an undo keeping the selection tells it from the producer's.
+        if args.get("reportSelection") is True: result["selection"] = dict(self._selection_row_targeted())
+        return result
 
     # The native device that holds a chain's place for each kind of item, by Live's device type: its name and that type.
     _CHAIN_PLACEHOLDERS = {1: ("Simpler", 1), 2: ("Utility", 2), 4: ("Velocity", 4)}
@@ -12012,7 +12074,9 @@ class LiveObjectMapper:
             raise ValueError(f"browser load into the chain failed: {where}; nothing was left behind") from failure
         device_index, device = created[0]
         created_ref = self.refs.put("device", device, f"{chain_path}:{device_index}")
-        return {"loaded": True, "deviceRef": created_ref, "deviceObjectIdentity": self._capture_object_identity(device), "createdFingerprint": self._mapped_fingerprint(created_ref)}
+        result = {"loaded": True, "deviceRef": created_ref, "deviceObjectIdentity": self._capture_object_identity(device), "createdFingerprint": self._mapped_fingerprint(created_ref)}
+        if args.get("reportSelection") is True: result["selection"] = dict(self._selection_row_targeted())
+        return result
 
     @staticmethod
     def _capture_object_identity(value: Any) -> str:

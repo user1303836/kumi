@@ -57,6 +57,12 @@ pub(super) fn unique_ref(rows: &Value, wanted: String) -> String {
 fn device_fingerprint(device: &Value) -> Result<String, LiveError> {
     Ok(simulator_revision(&owned_device_fingerprint_row(device)))
 }
+/// What Live has selected, field by field.
+const SELECTION_FIELDS: &[&str] = &["trackRef", "sceneRef", "slotRef", "detailClipRef", "deviceRef", "parameterRef", "chainRef"];
+fn selection_row(selection: &Value) -> Value {
+    Value::Object(SELECTION_FIELDS.iter().map(|key| ((*key).into(), selection.get(*key).cloned().unwrap_or(Value::Null))).collect())
+}
+
 impl DeterministicLiveSimulator {
     pub(super) fn invoke_devices(&self, operation: &str, args: &Map<String, Value>) -> Result<Value, LiveError> {
         match operation {
@@ -128,6 +134,35 @@ impl DeterministicLiveSimulator {
                 let identity = string_arg(args, "expectedObjectIdentity")?;
                 let owner_ref = string_arg(args, "expectedOwnerRef")?;
                 let owner_identity = string_arg(args, "expectedOwnerIdentity")?;
+                // The simulator's selection doesn't move with a delete. keepSelection keeps what was selected before
+                // Kumi's change while the selection is still what that change left, else what's selected now: checked
+                // first, as the Remote Script checks it.
+                let keep = args.get("keepSelection").filter(|v| !v.is_null()).cloned();
+                let (mut target, mut previous) = (Value::Null, false);
+                if let Some(keep) = &keep {
+                    let valid = |row: &Value| {
+                        row.as_object().is_some_and(|row| {
+                            row.len() == SELECTION_FIELDS.len()
+                                && SELECTION_FIELDS.iter().all(|key| row.get(*key).is_some_and(|v| v.is_null() || v.is_string()))
+                        })
+                    };
+                    if !keep.as_object().is_some_and(|keep| keep.len() == 2) || !valid(&keep["previous"]) || !valid(&keep["left"]) {
+                        return Err(LiveError::error("keepSelection is invalid"));
+                    }
+                    let held = selection_row(&self.state.borrow()["selection"]);
+                    previous = held == keep["left"];
+                    target = if previous { keep["previous"].clone() } else { held };
+                    if !target["parameterRef"].is_null() {
+                        return Err(LiveError::error(
+                            "a parameter is selected, and Live doesn't let a script select one again; nothing changed",
+                        ));
+                    }
+                    if target["deviceRef"] == reference {
+                        return Err(LiveError::error(
+                            "what's selected (deviceRef) is in the device being removed, so it can't be selected again; nothing changed",
+                        ));
+                    }
+                }
                 let mut state = self.state.borrow_mut();
                 for ti in 0..array(&state["tracks"]).len() {
                     let tp = format!("/tracks/{ti}");
@@ -162,6 +197,15 @@ impl DeterministicLiveSimulator {
                             let owner_ref = owner["ref"].as_str().unwrap().to_string();
                             drop(state);
                             self.emit(LiveEventType::Object, Some(owner_ref.into()), json!({"operation":operation,"ref":reference}));
+                            if keep.is_some() {
+                                let mut state = self.state.borrow_mut();
+                                for key in SELECTION_FIELDS {
+                                    state["selection"][*key] = target[*key].clone();
+                                }
+                                return Ok(
+                                    json!({"deleted":reference,"selection":{"before":target,"after":target,"restored":true,"previous":previous}}),
+                                );
+                            }
                             return Ok(json!({"deleted":reference}));
                         }
                     }
@@ -313,9 +357,12 @@ impl DeterministicLiveSimulator {
                 };
                 drop(state);
                 let inserted = self.invoke_operation("device.insert", insert.as_object().unwrap())?;
-                Ok(
-                    json!({"loaded":true,"deviceRef":inserted["ref"],"deviceObjectIdentity":inserted["objectIdentity"],"createdFingerprint":inserted["createdFingerprint"]}),
-                )
+                let mut loaded = json!({"loaded":true,"deviceRef":inserted["ref"],"deviceObjectIdentity":inserted["objectIdentity"],"createdFingerprint":inserted["createdFingerprint"]});
+                // What the load left selected (the simulator's load leaves it as it was).
+                if args.get("reportSelection") == Some(&json!(true)) {
+                    loaded["selection"] = selection_row(&self.state.borrow()["selection"]);
+                }
+                Ok(loaded)
             }
             _ => unreachable!("device dispatcher routes only implemented operations"),
         }

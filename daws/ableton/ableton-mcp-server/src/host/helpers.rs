@@ -250,11 +250,12 @@ pub fn valid_transaction_params(params: &Value, confirmation: &str) -> bool {
     has_only(
         params,
         if confirmation == "undo" {
-            &["transactionId", "confirmation", "idempotencyKey", "discard"]
+            &["transactionId", "confirmation", "idempotencyKey", "discard", "preserveSelection"]
         } else {
             &["transactionId", "confirmation", "idempotencyKey"]
         },
     ) && params.get("discard").is_none_or(Value::is_boolean)
+        && params.get("preserveSelection").is_none_or(Value::is_boolean)
         && is_non_empty_string(&params["transactionId"], 128)
         && params["confirmation"] == confirmation
         && is_idempotency_key(&params["idempotencyKey"])

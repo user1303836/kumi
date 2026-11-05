@@ -134,22 +134,26 @@ impl McpHost {
         _fingerprint: Option<&str>,
         record: Option<&TransactionRecord>,
         allow_absent: bool,
-    ) -> Result<(), LiveError> {
+        keep_selection: Option<&Value>,
+    ) -> Result<Option<Value>, LiveError> {
         let snapshot = self.views.view_for(Some(context), &[json!(reference)], None, &[]).await?;
         let located = match self.device_row(&snapshot, reference) {
             Ok(row) => row,
-            Err(_) if allow_absent => return Ok(()),
+            Err(_) if allow_absent => return Ok(None),
             Err(e) => return Err(e),
         };
         if located.device["objectIdentity"] != identity {
             return Err(LiveError::error("owned device identity changed before cleanup"));
         }
-        let args = json!({"ref":reference,"expectedObjectIdentity":identity,"expectedOwnerRef":located.owner_ref,"expectedOwnerIdentity":located.owner_identity,"expectedSiblings":located.siblings,"expectedTrackRef":located.track["ref"],"expectedTrackIdentity":located.track["objectIdentity"]});
-        if let Some(record) = record {
-            self.invoke_undo_recovery(record, adapter, "device.delete", &args, context).await?;
-        } else {
-            adapter.invoke_async(&LiveInvocation::new("device.delete", args), Some(context)).await?;
+        let mut args = json!({"ref":reference,"expectedObjectIdentity":identity,"expectedOwnerRef":located.owner_ref,"expectedOwnerIdentity":located.owner_identity,"expectedSiblings":located.siblings,"expectedTrackRef":located.track["ref"],"expectedTrackIdentity":located.track["objectIdentity"]});
+        if let Some(selection) = keep_selection {
+            args["keepSelection"] = selection.clone();
         }
+        let result = if let Some(record) = record {
+            self.invoke_undo_recovery(record, adapter, "device.delete", &args, context).await?
+        } else {
+            adapter.invoke_async(&LiveInvocation::new("device.delete", args), Some(context)).await?
+        };
         let remains = async {
             let snapshot = self.views.view_for(Some(context), &[located.track["ref"].clone()], None, &[]).await?;
             Ok::<_, LiveError>(self.device_row(&snapshot, reference)?.device["objectIdentity"] == identity)
@@ -158,7 +162,8 @@ impl McpHost {
         if remains.unwrap_or(false) {
             return Err(LiveError::error("owned device cleanup was not confirmed"));
         }
-        Ok(())
+        // What the delete kept selected, and whether it held (the Remote Script's own reading).
+        Ok(result.get("selection").filter(|selection| selection.is_object()).cloned())
     }
     pub async fn dispatch_device_lifecycle_tool(
         &self,
@@ -173,7 +178,8 @@ impl McpHost {
         }))
     }
     pub async fn live_browser_load_preview_async(&self, id: &Value, p: &Value) -> Value {
-        if !has_only(p, &["itemId", "trackRef", "chainRef"])
+        if !has_only(p, &["itemId", "trackRef", "chainRef", "preserveSelection"])
+            || p.get("preserveSelection").is_some_and(|v| !v.is_boolean())
             || !is_non_empty_string(&p["itemId"], 256)
             || (p.get("trackRef").is_none() && p.get("chainRef").is_none())
             || ["trackRef", "chainRef"].iter().any(|k| p.get(*k).is_some_and(|v| !is_non_empty_string(v, 256)))
@@ -195,11 +201,23 @@ impl McpHost {
             let Some(track)=track.filter(|t|["regular","group","audio","midi","return","main"].contains(&t["kind"].as_str().unwrap_or("")))else{return Err(LiveError::error("browser loading is limited to the Set's tracks"));};
             let authority=if let Some(t)=&target{self.chain_device_authority(track,&t.chain)?}else{self.track_device_authority(track)?};
             let mut payload=json!({"itemId":p["itemId"],"trackRef":reference,"expectedName":item["name"],"expectedItemIdentity":item["objectIdentity"]});payload.as_object_mut().unwrap().extend(authority.as_object().unwrap().clone());
-            let transaction=json!({"id":tempo::transaction_id("browserload"),"epoch":status.epoch,"kind":"browser-load","fence":track_fence(&reference,&authority),"clipRef":reference,"payload":payload,"expiresAt":now_ms_f64()+TRANSACTION_TTL_MS,"state":"previewed"});
+            // What's selected now is what its undo selects again (while the selection is still what the load left), so
+            // it's read before anything loads, and refused if a script couldn't select it: Live lets a script read the
+            // selected parameter, never set it. The load reports what it left selected, in the same step.
+            let selection=if p.get("preserveSelection")==Some(&json!(true)){
+                let view=self.selection_view(None).await?;
+                if !view["selection"].is_object(){return Ok(transaction_error(id,"This Live doesn't say what's selected, so a load's undo can't keep the selection. Nothing was loaded."));}
+                let selection=super::selection::selected(&view);
+                if !selection["parameterRef"].is_null(){return Ok(transaction_error(id,"A parameter is selected in Live, and Kumi can't select it again after removing the device: select something else in Live, then try again. Nothing was loaded."));}
+                Some(selection)
+            }else{None};
+            let mut transaction=json!({"id":tempo::transaction_id("browserload"),"epoch":status.epoch,"kind":"browser-load","fence":track_fence(&reference,&authority),"clipRef":reference,"payload":payload,"expiresAt":now_ms_f64()+TRANSACTION_TTL_MS,"state":"previewed"});
+            if let Some(selection)=&selection{transaction["payload"]["reportSelection"]=json!(true);transaction["keepSelection"]=json!({"previous":selection});}
             self.retain_bounded_transaction(&self.clip_lifecycle_transactions,transaction.clone(),"browser load")?;
             let mut item=fields(&item,&["id","name","path","category"]);item["isDevice"]=json!(true);
             let mut reply=json!({"transactionId":transaction["id"],"epoch":transaction["epoch"],"item":item,"trackRef":reference});
             if let Some(target)=target{reply["chainRef"]=target.chain["ref"].clone();reply["chainName"]=target.chain["name"].as_str().map(|s|json!(s)).unwrap_or(Value::Null);reply["rackName"]=target.device["name"].as_str().map(|s|json!(s)).unwrap_or(Value::Null);}
+            if let Some(selection)=selection{reply["selection"]=selection;}
             reply["impact"]=json!("loads-browser-device");reply["confirmation"]=json!("apply");reply["expiresAt"]=transaction["expiresAt"].clone();Ok(success_text(id,&reply))
         }.await;
         result.unwrap_or_else(|e| adapter_tool_error(id, &e, "Browser-load preview requires fresh authoritative state."))
@@ -265,6 +283,7 @@ impl McpHost {
                     if recorded["settled"]!=true||recorded["fingerprint"]!=fingerprint{return Err(LiveError::error("browser-loaded device settled state was not recorded"));}
                 }
             }
+            if t["keepSelection"].is_object()&&loaded["selection"].is_object(){record.borrow_mut()["keepSelection"]["left"]=loaded["selection"].clone();}
             record.borrow_mut()["created"]=json!({"deviceRef":loaded["deviceRef"],"objectIdentity":loaded["deviceObjectIdentity"],"fingerprint":fingerprint});record.borrow_mut()["applyKey"]=p["idempotencyKey"].clone();record.borrow_mut()["state"]=json!("applied");
             // The created device's identity goes back too: what a client may remove in its place if the undo can't run.
             Ok(success_text(id,&json!({"transactionId":t["id"],"state":"applied","deviceRef":loaded["deviceRef"],"deviceObjectIdentity":loaded["deviceObjectIdentity"],"placement":self.device_placement(&snapshot,&created)?,"idempotent":false})))
@@ -283,7 +302,12 @@ impl McpHost {
         };
         let t = record.borrow().clone();
         if t["state"] == "undone" && t["undoKey"] == p["idempotencyKey"] {
-            return success_text(id, &json!({"transactionId":t["id"],"state":"undone","idempotent":true}));
+            let mut answer = json!({"transactionId":t["id"],"state":"undone","idempotent":true});
+            if t["undoSelection"].is_object() {
+                answer["deleted"] = json!(true);
+                answer["selection"] = t["undoSelection"].clone();
+            }
+            return success_text(id, &answer);
         }
         let reconciliation = t["state"] == "uncertain" && t["undoKey"] == p["idempotencyKey"];
         if (t["state"] != "applied" && !reconciliation)
@@ -291,6 +315,17 @@ impl McpHost {
             || !is_non_empty_string(&t["created"]["objectIdentity"], 256)
         {
             return transaction_error(id, "Browser load lacks exact created device identity");
+        }
+        // Keeping the selection is for a load previewed to keep it, whose apply recorded what it left selected.
+        let keep = (p.get("preserveSelection") == Some(&json!(true))).then(|| t["keepSelection"].clone());
+        if keep.as_ref().is_some_and(|keep| !keep["previous"].is_object()) {
+            return transaction_error(
+                id,
+                "This Browser load wasn't previewed with preserveSelection, so its undo can't keep the selection",
+            );
+        }
+        if keep.as_ref().is_some_and(|keep| !keep["left"].is_object()) {
+            return transaction_error(id, "This Browser load didn't say what it left selected, so its undo can't keep the selection");
         }
         let result = async {
             self.begin_undo_recovery(&record, p["idempotencyKey"].as_str().unwrap())?;
@@ -305,18 +340,28 @@ impl McpHost {
                 self.replay_undo_recovery(&record, adapter.as_ref(), &context).await?;
             }
             record.borrow_mut()["state"] = json!("undoing");
-            self.delete_owned_device_async(
-                adapter.as_ref(),
-                t["created"]["deviceRef"].as_str().unwrap(),
-                t["created"]["objectIdentity"].as_str().unwrap(),
-                &context,
-                t["created"]["fingerprint"].as_str(),
-                Some(&record),
-                reconciliation,
-            )
-            .await?;
+            let selection = self
+                .delete_owned_device_async(
+                    adapter.as_ref(),
+                    t["created"]["deviceRef"].as_str().unwrap(),
+                    t["created"]["objectIdentity"].as_str().unwrap(),
+                    &context,
+                    t["created"]["fingerprint"].as_str(),
+                    Some(&record),
+                    reconciliation,
+                    keep.as_ref(),
+                )
+                .await?;
             record.borrow_mut()["state"] = json!("undone");
-            Ok(success_text(id, &json!({"transactionId":t["id"],"state":"undone","idempotent":false})))
+            let mut answer = json!({"transactionId":t["id"],"state":"undone","idempotent":false});
+            if keep.is_some() {
+                // Deleted either way: what the delete kept selected, and whether it held, are the Remote Script's reading.
+                let kept = selection.unwrap_or_else(|| json!({"before":null,"after":null,"restored":false,"previous":false}));
+                answer["deleted"] = json!(true);
+                answer["selection"] = kept.clone();
+                record.borrow_mut()["undoSelection"] = kept;
+            }
+            Ok(success_text(id, &answer))
         }
         .await;
         result.unwrap_or_else(|e| {

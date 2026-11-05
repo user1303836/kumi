@@ -971,7 +971,7 @@ var require_dist = __commonJS({
   }
 });
 
-// apps/live-extension/src/extension.ts
+// daws/ableton/live-extension/src/extension.ts
 var extension_exports = {};
 __export(extension_exports, {
   activate: () => activate,
@@ -983,12 +983,12 @@ var import_node_os = require("node:os");
 var import_node_path2 = require("node:path");
 var import_sdk4 = __toESM(require_dist());
 
-// apps/live-extension/src/operations.ts
+// daws/ableton/live-extension/src/operations.ts
 var import_node_fs2 = require("node:fs");
 var import_node_path = require("node:path");
 var import_sdk2 = __toESM(require_dist());
 
-// apps/live-extension/src/audio-info.ts
+// daws/ableton/live-extension/src/audio-info.ts
 var import_node_fs = require("node:fs");
 function head(path, length) {
   const fd = (0, import_node_fs.openSync)(path, "r");
@@ -1050,7 +1050,7 @@ function audioInfo(path) {
   throw new Error("the render is neither WAV nor AIFF");
 }
 
-// apps/live-extension/src/refs.ts
+// daws/ableton/live-extension/src/refs.ts
 var import_sdk = __toESM(require_dist());
 function parseRef(reference) {
   const parts = reference.split(":");
@@ -1131,7 +1131,7 @@ function locate(context, target) {
   return void 0;
 }
 
-// apps/live-extension/src/wire.ts
+// daws/ableton/live-extension/src/wire.ts
 var import_node_crypto = require("node:crypto");
 var LOOPBACK_PROTOCOL = "ableton-loopback/v1";
 var LIVE_PROTOCOL = "ableton-live/v1";
@@ -1187,7 +1187,7 @@ function token(bytes = 18) {
   return (0, import_node_crypto.randomBytes)(bytes).toString("base64url");
 }
 
-// apps/live-extension/src/operations.ts
+// daws/ableton/live-extension/src/operations.ts
 var str = (value) => typeof value === "string" ? value : void 0;
 var expected = (args) => {
   const name = str(args.expectedName);
@@ -1360,10 +1360,10 @@ function transactionGroup(validate2) {
   };
 }
 
-// apps/live-extension/src/registry.ts
+// daws/ableton/live-extension/src/registry.ts
 var import_node_crypto2 = require("node:crypto");
 
-// protocol/ableton-live-v1.operations.json
+// daws/ableton/protocol/ableton-live-v1.operations.json
 var ableton_live_v1_operations_default = {
   version: 1,
   protocol: "ableton-live/v1",
@@ -3952,6 +3952,9 @@ var ableton_live_v1_operations_default = {
               ],
               additionalProperties: false
             }
+          },
+          reportSelection: {
+            type: "boolean"
           }
         },
         required: [
@@ -3992,6 +3995,77 @@ var ableton_live_v1_operations_default = {
             minLength: 32,
             maxLength: 128,
             pattern: "^[A-Za-z0-9_-]{32,128}$"
+          },
+          selection: {
+            type: "object",
+            properties: {
+              trackRef: {
+                type: [
+                  "string",
+                  "null"
+                ],
+                minLength: 1,
+                maxLength: 256
+              },
+              sceneRef: {
+                type: [
+                  "string",
+                  "null"
+                ],
+                minLength: 1,
+                maxLength: 256
+              },
+              slotRef: {
+                type: [
+                  "string",
+                  "null"
+                ],
+                minLength: 1,
+                maxLength: 256
+              },
+              detailClipRef: {
+                type: [
+                  "string",
+                  "null"
+                ],
+                minLength: 1,
+                maxLength: 256
+              },
+              deviceRef: {
+                type: [
+                  "string",
+                  "null"
+                ],
+                minLength: 1,
+                maxLength: 256
+              },
+              parameterRef: {
+                type: [
+                  "string",
+                  "null"
+                ],
+                minLength: 1,
+                maxLength: 256
+              },
+              chainRef: {
+                type: [
+                  "string",
+                  "null"
+                ],
+                minLength: 1,
+                maxLength: 256
+              }
+            },
+            required: [
+              "trackRef",
+              "sceneRef",
+              "slotRef",
+              "detailClipRef",
+              "deviceRef",
+              "parameterRef",
+              "chainRef"
+            ],
+            additionalProperties: false
           }
         },
         required: [
@@ -6239,6 +6313,158 @@ var ableton_live_v1_operations_default = {
           explicitDeletion: {
             type: "boolean",
             const: true
+          },
+          keepSelection: {
+            type: "object",
+            properties: {
+              previous: {
+                type: "object",
+                properties: {
+                  trackRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  sceneRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  slotRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  detailClipRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  deviceRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  parameterRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  chainRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  }
+                },
+                required: [
+                  "trackRef",
+                  "sceneRef",
+                  "slotRef",
+                  "detailClipRef",
+                  "deviceRef",
+                  "parameterRef",
+                  "chainRef"
+                ],
+                additionalProperties: false
+              },
+              left: {
+                type: "object",
+                properties: {
+                  trackRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  sceneRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  slotRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  detailClipRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  deviceRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  parameterRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  chainRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  }
+                },
+                required: [
+                  "trackRef",
+                  "sceneRef",
+                  "slotRef",
+                  "detailClipRef",
+                  "deviceRef",
+                  "parameterRef",
+                  "chainRef"
+                ],
+                additionalProperties: false
+              }
+            },
+            required: [
+              "previous",
+              "left"
+            ],
+            additionalProperties: false
           }
         },
         required: [
@@ -6259,6 +6485,166 @@ var ableton_live_v1_operations_default = {
             type: "string",
             minLength: 1,
             maxLength: 256
+          },
+          selection: {
+            type: "object",
+            properties: {
+              before: {
+                type: "object",
+                properties: {
+                  trackRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  sceneRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  slotRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  detailClipRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  deviceRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  parameterRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  chainRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  }
+                },
+                required: [
+                  "trackRef",
+                  "sceneRef",
+                  "slotRef",
+                  "detailClipRef",
+                  "deviceRef",
+                  "parameterRef",
+                  "chainRef"
+                ],
+                additionalProperties: false
+              },
+              after: {
+                type: "object",
+                properties: {
+                  trackRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  sceneRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  slotRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  detailClipRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  deviceRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  parameterRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  },
+                  chainRef: {
+                    type: [
+                      "string",
+                      "null"
+                    ],
+                    minLength: 1,
+                    maxLength: 256
+                  }
+                },
+                required: [
+                  "trackRef",
+                  "sceneRef",
+                  "slotRef",
+                  "detailClipRef",
+                  "deviceRef",
+                  "parameterRef",
+                  "chainRef"
+                ],
+                additionalProperties: false
+              },
+              restored: {
+                type: "boolean"
+              },
+              previous: {
+                type: "boolean"
+              }
+            },
+            required: [
+              "before",
+              "after",
+              "restored",
+              "previous"
+            ],
+            additionalProperties: false
           }
         },
         required: [
@@ -13889,6 +14275,14 @@ var ableton_live_v1_operations_default = {
                 minimum: 0,
                 maximum: 1e9
               },
+              startTime: {
+                type: [
+                  "number",
+                  "null"
+                ],
+                minimum: 0,
+                maximum: 1e9
+              },
               launchQuantization: {
                 type: "object",
                 properties: {
@@ -14295,6 +14689,14 @@ var ableton_live_v1_operations_default = {
                     ]
                   },
                   position: {
+                    type: [
+                      "number",
+                      "null"
+                    ],
+                    minimum: 0,
+                    maximum: 1e9
+                  },
+                  startTime: {
                     type: [
                       "number",
                       "null"
@@ -16485,6 +16887,14 @@ var ableton_live_v1_operations_default = {
             minimum: 0,
             maximum: 1e9
           },
+          startTime: {
+            type: [
+              "number",
+              "null"
+            ],
+            minimum: 0,
+            maximum: 1e9
+          },
           loopEnabled: {
             type: [
               "boolean",
@@ -17777,7 +18187,7 @@ var ableton_live_v1_operations_default = {
   ]
 };
 
-// apps/live-extension/src/registry.ts
+// daws/ableton/live-extension/src/registry.ts
 var registry = ableton_live_v1_operations_default;
 var byId = new Map(registry.operations.map((operation) => [operation.id, operation]));
 function canonicalRegistry(value) {
@@ -17837,7 +18247,7 @@ function validateResult(id, value) {
   validate(operation.result, value, `${id}.result`);
 }
 
-// apps/live-extension/src/pointing.ts
+// daws/ableton/live-extension/src/pointing.ts
 var import_sdk3 = __toESM(require_dist());
 var OBJECT_SCOPES = ["AudioClip", "MidiClip", "AudioTrack", "MidiTrack", "ClipSlot", "Scene", "Simpler", "Sample", "DrumRack"];
 var SELECTION_SCOPES = ["ClipSlotSelection", "AudioTrack.ArrangementSelection", "MidiTrack.ArrangementSelection"];
@@ -17885,7 +18295,7 @@ async function registerPointing(context, onPointed, log2 = () => void 0) {
   for (const scope of SELECTION_SCOPES) await context.ui.registerContextMenuAction(scope, "Ask Kumi about this selection", POINT_SELECTION);
 }
 
-// apps/live-extension/src/server.ts
+// daws/ableton/live-extension/src/server.ts
 var import_node_net = require("node:net");
 var REQUIRED = ["version", "id", "method", "nonce", "sequence", "bridgeEpoch", "connectionChallenge", "deadlineMs", "mac"];
 var OPTIONAL = ["operation", "args", "ref", "transactionId", "idempotencyKey", "stateDigest", "ownershipToken"];
@@ -18045,7 +18455,7 @@ var ExtensionServer = class {
   }
 };
 
-// apps/live-extension/src/extension.ts
+// daws/ableton/live-extension/src/extension.ts
 var VERSION = true ? "1.0.0" : "0.0.0";
 var OPERATION_IDS = ["status", ...Object.keys(OPERATIONS), "transaction.group"];
 function log(line) {

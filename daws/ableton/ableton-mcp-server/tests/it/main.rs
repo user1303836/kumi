@@ -25,6 +25,7 @@ mod host_audio;
 mod host_audio_clip;
 mod host_audio_import;
 mod host_automation;
+mod host_browser_load;
 mod host_browser_render;
 mod host_clip_duplicate;
 mod host_clip_move;

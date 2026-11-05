@@ -322,3 +322,46 @@ async fn transport_apply_and_exact_key_undo_match_source() {
         same(&adapter.sim.state.borrow(), &row["state"], &format!("{label} state"));
     }
 }
+
+fn body(answer: &Value) -> Value {
+    serde_json::from_str(answer["result"]["content"][0]["text"].as_str().unwrap()).unwrap()
+}
+
+/// Where play starts goes with the playhead (listening plays the approved window from it) and comes back on undo
+/// apart from the playhead, as the Set had it: 28.1456 and 0, the Set the real-Live proof used.
+#[tokio::test]
+async fn where_play_starts_is_set_with_the_playhead_and_comes_back_apart_from_it() {
+    let adapter = Rc::new(Adapter::new());
+    {
+        let mut state = adapter.sim.state.borrow_mut();
+        state["playback"]["transport"]["position"] = json!(28.1456);
+        state["playback"]["transport"]["startTime"] = json!(0.0);
+    }
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let preview = body(&host.live_transport_preview_async(&json!(1), &json!({"position": 8.0, "startTime": 8.0})).await);
+    let number = |value: &Value| value.as_f64();
+    assert_eq!((number(&preview["prior"]["position"]), number(&preview["prior"]["startTime"])), (Some(28.1456), Some(0.0)), "{preview}");
+    let tx = preview["transactionId"].as_str().unwrap().to_owned();
+    let apply = json!({"transactionId": tx, "confirmation": "apply", "idempotencyKey": "start-apply-1"});
+    let applied = body(&host.live_transport_apply_async(&json!(2), &apply, None).await.unwrap());
+    assert_eq!(applied["state"], "applied", "{applied}");
+    let transport = |key: &str| adapter.sim.state.borrow()["playback"]["transport"][key].as_f64();
+    assert_eq!((transport("position"), transport("startTime")), (Some(8.0), Some(8.0)));
+    let undo = json!({"transactionId": tx, "confirmation": "undo", "idempotencyKey": "start-undo-1"});
+    let undone =
+        host.with_undo_watch(&json!(3), &undo, async { Ok(host.undo_transport_async(&json!(3), &undo, None).await) }).await.unwrap();
+    assert_eq!(body(&undone)["state"], "undone", "{undone}");
+    assert_eq!((transport("position"), transport("startTime")), (Some(28.1456), Some(0.0)), "the start time apart from the playhead again");
+}
+
+/// A Live that doesn't say where play starts (a Remote Script before it, or the simulator's recorded state) can't have it
+/// set: refused at preview, before anything is asked of Live.
+#[tokio::test]
+async fn a_start_time_live_doesnt_report_is_refused_before_anything_changes() {
+    let adapter = Rc::new(Adapter::new());
+    let host = McpHost::new(adapter.clone(), McpHostOptions::default()).unwrap();
+    let before = adapter.sim.state.borrow()["playback"].clone();
+    let refused = host.live_transport_preview_async(&json!(1), &json!({"position": 0.0, "startTime": 0.0})).await;
+    assert!(refused.to_string().contains("where play starts"), "{refused}");
+    assert_eq!(adapter.sim.state.borrow()["playback"], before);
+}
