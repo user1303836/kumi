@@ -69,6 +69,7 @@ class Fixture:
         self.bounces = 0  # file listens with compare_to so far: each mastering pass comes closer to its reference
         self.seq = 0
         self.connected = False
+        self.playing = False  # whether transport's play started it (CC-17)
         self.daw = options.daw
         self.epoch = "1"
         self.set = copy.deepcopy(SET)
@@ -767,9 +768,30 @@ def generation_job(fixture: Fixture, job_id: object) -> dict:
                        "credit_unit": "mirelo_credits"}}
 
 
+def transport(fixture: Fixture, args: dict, host: dict) -> dict:
+    """Playback as serve's `transport` (CC-17): a pure preview in words; play refused while the DAW records (the
+    fixture's --recording) or the project changed; stop always. No HISTORY row either way."""
+    if args.get("action") == "stop":
+        if args.get("preview"):
+            return {"state": "preview", "text": f"Stop {fixture.set['name']}"}
+        fixture.playing = False
+        return {"state": "stopped", "position_beats": 0}
+    if fixture.options.recording:
+        return error("recording", f"{DAW_NAMES[fixture.daw]} is recording, or record is armed: Kumi never starts "
+                                  "playback that would record.")
+    if args.get("expected_project_key") != fixture.set["key"]:
+        return error("stale", "That isn't the project open now: observe it again.")
+    where = next((f" from {name.replace('_', ' ')} {args[name]}" for name in
+                  ("from_bar", "from_beat", "from_slot", "clip_ref", "scene_index") if name in args), "")
+    if args.get("preview"):
+        return {"state": "preview", "text": f"Play {fixture.set['name']}{where}"}
+    fixture.playing = True
+    return {"state": "playing", "position_beats": 0}
+
+
 TOOLS = {"status": status, "connect": connect, "observe": observe, "read": read, "change": change, "undo": undo,
          "history": history, "library": library, "sounds": sounds, "listen": listen, "job": job,
-         "setup_daw": setup_daw, "generate": generate}
+         "setup_daw": setup_daw, "generate": generate, "transport": transport}
 
 
 def main() -> None:
@@ -784,6 +806,7 @@ def main() -> None:
     parser.add_argument("--exit-on")
     parser.add_argument("--slow", action="append", default=[])
     parser.add_argument("--leased-by", help="refuse changes as another chat's lease would")
+    parser.add_argument("--recording", action="store_true", help="the DAW records, so transport refuses play")
     parser.add_argument("--stderr-flood", type=int, default=0, help="bytes written to stderr on start")
     parser.add_argument("--close-stdout", action="store_true", help="close stdout after initialize, and stay")
     parser.add_argument("--ignore-eof", action="store_true", help="stay after stdin ends")

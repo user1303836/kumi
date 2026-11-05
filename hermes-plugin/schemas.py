@@ -212,6 +212,25 @@ KUMI_JOB = _tool(
     "that started it returned. Reads only: it never creates or pays for anything.",
     {"job_id": {"type": "string"}}, ("job_id",))
 
+KUMI_TRANSPORT = _tool(
+    "kumi_transport",
+    "Start or stop playback in the producer's DAW. play asks the producer first (once, or for this chat): it plays "
+    "from where the playhead is; in REAPER from a bar (from_bar) or beat (from_beat); in Renoise from a sequence slot "
+    "and line (from_slot, from_line); in Live by launching a Session clip (clip_ref) or scene (scene_index), since "
+    "Live plays the Arrangement from its own start marker. stop stops playback, and the clips playing; it's never "
+    "asked. It changes nothing in the project but where play starts, and writes no HISTORY. play is refused while "
+    "Kumi listens or captures, while the DAW records or record is armed, and in a turn with nobody in it. For play, "
+    "pass kumi_observe's project_key.",
+    {"action": {"type": "string", "enum": ["play", "stop"]},
+     "from_bar": {"type": "integer", "minimum": 1, "description": "play, REAPER: the bar to start at, as shown."},
+     "from_beat": {"type": "number", "minimum": 0, "description": "play, REAPER: beats from the song's start."},
+     "from_slot": {"type": "integer", "minimum": 0, "description": "play, Renoise: the sequence slot (0 is the first)."},
+     "from_line": {"type": "integer", "minimum": 0, "description": "play, Renoise: the line in that slot's pattern."},
+     "clip_ref": {"type": "string", "description": "play, Live: a Session clip to launch, by its ref."},
+     "scene_index": {"type": "integer", "minimum": 0, "description": "play, Live: a scene to launch (0 is the first)."},
+     "expected_project_key": {"type": "string", "description": "play: kumi_observe's project_key."}},
+    ("action",))
+
 KUMI_GENERATE = _tool(
     "kumi_generate",
     "Paid generation with Mirelo, only when the producer switched it on in Kumi's settings: a sound effect from a "

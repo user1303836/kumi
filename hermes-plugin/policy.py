@@ -178,7 +178,28 @@ def _decide(host: Any, tool: str, args: dict, kwargs: dict) -> tuple[dict | None
         return _setup(host, args)
     if tool == "kumi_generate":
         return _generate(host, args, kwargs)
+    if tool == "kumi_transport":
+        return _transport(host, args, kwargs), {}
     return block(f"{tool} isn't a Kumi tool this plugin knows how to approve, so it didn't run."), {}
+
+
+def _transport(host: Any, args: dict, kwargs: dict) -> dict | None:
+    """Playback (CC-17): stop is never asked; play is asked in the words of the runtime's own preview, under the
+    chat-scoped playback class (once, or for this chat), and refused unasked where the runtime would refuse it: while
+    Kumi listens or captures, while the DAW records or record is armed, or on a project that changed."""
+    refusal = tools.transport_refusal(host, args)
+    if refusal is not None:
+        return block(f"Kumi didn't play anything: {refusal}")
+    if args["action"] == "stop":
+        return None
+    try:
+        answer = _ask(host, "transport", {**args, "preview": True}, kwargs)
+    except (runtime.Unavailable, runtime.Refused) as failure:
+        return block(f"Kumi didn't play anything: {_reason(failure)}")
+    text = answer.get("text")
+    if answer.get("state") != "preview" or not isinstance(text, str) or not text.strip():
+        return block(f"Kumi didn't play anything: {answer.get('reason') or 'its runtime refused to play.'}")
+    return approve([f"Kumi: {one_line(text, LINE)}"], "kumi:playback:transport")
 
 
 def preview_timeout(hook_timeout: float | None) -> float:
