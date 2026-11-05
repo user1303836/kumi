@@ -345,6 +345,8 @@ fn runtime(root: &Path, state: &str, home: &Path, daw: DawId, env: Env, answers:
     let args = Args {
         state_dir: root.join(state),
         kumi_home: home.to_path_buf(),
+        hermes_home: None,
+        hermes_root: None,
         daw,
         library_roots: vec![],
         media_roots: vec![],
