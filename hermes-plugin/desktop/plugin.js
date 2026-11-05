@@ -144,6 +144,7 @@ var en = {
   },
   script: {
     waiting: "Script waiting for your approval",
+    deviceWaiting: "Device waiting for your approval",
     says: (purpose) => `Hermes says: ${purpose}`,
     python: "Python",
     lua: "Lua",
@@ -158,6 +159,7 @@ var en = {
     sha: (short) => `SHA-256 ${short}…`,
     shaTitle: (sha) => `SHA-256 ${sha}: the hash of the code the approval names`,
     code: "The script’s code",
+    deviceCode: "The device’s GenExpr code",
     codeTitle: "Every line of the code as it will run. Nothing runs from here.",
     reading: "Reading the code Kumi saved…",
     unreadable: "Kumi couldn't read the saved code, or it's no longer what the approval names: read it in the approval, or reject it.",
@@ -462,6 +464,7 @@ var ja = {
   },
   script: {
     waiting: "承認待ちのスクリプト",
+    deviceWaiting: "承認待ちのデバイス",
     says: (purpose) => `Hermes の説明: ${purpose}`,
     python: "Python",
     lua: "Lua",
@@ -476,6 +479,7 @@ var ja = {
     sha: (short) => `SHA-256 ${short}…`,
     shaTitle: (sha) => `SHA-256 ${sha}（承認が示すコードのハッシュ）`,
     code: "スクリプトのコード",
+    deviceCode: "デバイスの GenExpr コード",
     codeTitle: "実行されるとおりのコードの全行です。ここからは何も実行されません。",
     reading: "Kumi が保存したコードを読み込み中…",
     unreadable: "保存されたコードを読めないか、承認が示すコードではなくなっています。承認で確認するか、拒否してください。",
@@ -779,6 +783,7 @@ var zh = {
   },
   script: {
     waiting: "等待你批准的脚本",
+    deviceWaiting: "等待你批准的设备",
     says: (purpose) => `Hermes 说：${purpose}`,
     python: "Python",
     lua: "Lua",
@@ -793,6 +798,7 @@ var zh = {
     sha: (short) => `SHA-256 ${short}…`,
     shaTitle: (sha) => `SHA-256 ${sha}：批准所指代码的哈希`,
     code: "脚本代码",
+    deviceCode: "设备的 GenExpr 代码",
     codeTitle: "将要运行的完整代码。这里不会运行任何东西。",
     reading: "正在读取 Kumi 保存的代码…",
     unreadable: "Kumi 无法读取保存的代码，或它已不是批准所指的代码：请在批准中查看，或拒绝它。",
@@ -2474,8 +2480,9 @@ function PendingScriptView({ script, daw }) {
     typeof pending.lines === "number" ? t("script.lines", pending.lines) : "",
     t("script.sha", pending.sha256.slice(0, 12))
   ].filter(Boolean);
-  return /* @__PURE__ */ jsxs6("section", { "aria-label": t("script.waiting"), style: { ...S.section, borderLeft: `2px solid ${T.warn}` }, children: [
-    /* @__PURE__ */ jsx6("span", { style: S.heading, children: t("script.waiting") }),
+  const heading = t(pending.language === "device" ? "script.deviceWaiting" : "script.waiting");
+  return /* @__PURE__ */ jsxs6("section", { "aria-label": heading, style: { ...S.section, borderLeft: `2px solid ${T.warn}` }, children: [
+    /* @__PURE__ */ jsx6("span", { style: S.heading, children: heading }),
     pending.purpose && /* @__PURE__ */ jsx6("span", { style: S.text, children: t("script.says", clean(pending.purpose, 200)) }),
     /* @__PURE__ */ jsx6("span", { style: S.faint, title: t("script.shaTitle", pending.sha256), children: facts.join(" · ") }),
     pending.warning && /* @__PURE__ */ jsx6("span", { style: { ...S.muted, color: T.warn }, children: clean(pending.warning, 300) }),
@@ -2484,7 +2491,7 @@ function PendingScriptView({ script, daw }) {
       return spec ? /* @__PURE__ */ jsxs6(Fragment, { children: [
         spec.name && /* @__PURE__ */ jsx6("span", { style: { ...S.text, fontWeight: 600 }, children: clean(spec.name, 32) }),
         /* @__PURE__ */ jsx6(Controls, { spec }),
-        /* @__PURE__ */ jsx6(CodeBlock, { code: spec.code, label: t("script.code") })
+        /* @__PURE__ */ jsx6(CodeBlock, { code: spec.code, label: t("script.deviceCode") })
       ] }) : /* @__PURE__ */ jsx6("span", { style: S.muted, children: t("script.unreadable") });
     })() : /* @__PURE__ */ jsx6(CodeBlock, { code: code.code, label: t("script.code") }) : code === false ? /* @__PURE__ */ jsx6("span", { style: S.muted, children: t("script.unreadable") }) : /* @__PURE__ */ jsx6("span", { style: S.faint, children: t("script.reading") })
   ] });

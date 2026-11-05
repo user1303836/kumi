@@ -70,9 +70,10 @@ export function PendingScriptView({ script, daw }: { script: { pending: PendingS
     typeof pending.lines === 'number' ? t('script.lines', pending.lines) : '',
     t('script.sha', pending.sha256.slice(0, 12))
   ].filter(Boolean)
+  const heading = t(pending.language === 'device' ? 'script.deviceWaiting' : 'script.waiting')
   return (
-    <section aria-label={t('script.waiting')} style={{ ...S.section, borderLeft: `2px solid ${T.warn}` }}>
-      <span style={S.heading}>{t('script.waiting')}</span>
+    <section aria-label={heading} style={{ ...S.section, borderLeft: `2px solid ${T.warn}` }}>
+      <span style={S.heading}>{heading}</span>
       {pending.purpose && <span style={S.text}>{t('script.says', clean(pending.purpose, 200))}</span>}
       <span style={S.faint} title={t('script.shaTitle', pending.sha256)}>
         {facts.join(' · ')}
@@ -86,7 +87,7 @@ export function PendingScriptView({ script, daw }: { script: { pending: PendingS
               <>
                 {spec.name && <span style={{ ...S.text, fontWeight: 600 }}>{clean(spec.name, 32)}</span>}
                 <Controls spec={spec} />
-                <CodeBlock code={spec.code} label={t('script.code')} />
+                <CodeBlock code={spec.code} label={t('script.deviceCode')} />
               </>
             ) : (
               <span style={S.muted}>{t('script.unreadable')}</span>
