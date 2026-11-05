@@ -22,6 +22,9 @@ export interface KumiState {
   found: { revision: string | null; ids: string[]; at: number } | null
   /** Background jobs this window was told of (a library scan), by id: read while they run, kept a minute after. */
   jobs: Record<string, TrackedJob>
+  /** The latest `kumi_listen` result a `listen.done` event brought when the transcript showed none (CC-9); `result`
+   *  is null when the event left it out for its size. */
+  measured: { tool_call_id: string; result: unknown; at: number } | null
 }
 
 export interface TrackedJob extends Job {
@@ -33,7 +36,7 @@ export interface TrackedJob extends Job {
 export const JOB_KEPT_MS = 60_000
 export const MOST_JOBS = 20
 
-const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {} }
+const EMPTY: KumiState = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null }
 
 function finished(job: Job): boolean {
   return typeof job.state === 'string' && job.state !== 'running'
@@ -176,11 +179,16 @@ export class KumiStore {
     this.set({ found: { revision, ids: ids.slice(0, 200), at: Date.now() } })
   }
 
+  /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
+  measure(toolCallId: string, result: unknown): void {
+    this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } })
+  }
+
   /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
   trackJob(id: unknown): void {
     const jobId = plainId(id)
-    // Shown only once this profile's backend answers for it (`job.progress` names no profile: a job of another
-    // profile 404s and never shows), and at most MOST_JOBS at a time.
+    // Shown only once this profile's backend answers for it (another profile's job 404s and never shows, even from an
+    // event that names no profile), and at most MOST_JOBS at a time.
     if (!jobId || this.state.jobs[jobId] || Object.keys(this.state.jobs).length >= MOST_JOBS) return
     void this.refreshJob(jobId)
   }

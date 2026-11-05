@@ -120,7 +120,9 @@ declare module '@hermes/plugin-sdk' {
     openSession?: (id: string, options?: { intent?: 'in-place' | 'stack' | 'tab' | 'window'; profile?: string }) => unknown
     paneVisibility?: (paneId: string) => ReadableAtom<boolean>
     state: {
-      profile: ReadableAtom<string>
+      profile?: ReadableAtom<string>
+      /** The profile of the chat in front (Desktop's `normalizeProfileKey` form). */
+      focusedSessionProfile?: ReadableAtom<string>
       connectionId?: ReadableAtom<null | string>
       focusedSessionId?: ReadableAtom<null | string>
       /** The durable id of the chat whose composer is focused (the id `owner.session_id` holds). */

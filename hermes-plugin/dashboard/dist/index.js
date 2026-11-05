@@ -709,7 +709,7 @@
   // src/shared/store.ts
   var JOB_KEPT_MS = 6e4;
   var MOST_JOBS = 20;
-  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {} };
+  var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null };
   function finished(job) {
     return typeof job.state === "string" && job.state !== "running";
   }
@@ -835,6 +835,10 @@
     /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision. */
     found(revision, ids) {
       this.set({ found: { revision, ids: ids.slice(0, 200), at: Date.now() } });
+    }
+    /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
+    measure(toolCallId, result) {
+      this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
     }
     /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
     trackJob(id) {

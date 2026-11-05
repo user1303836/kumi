@@ -2,7 +2,7 @@
 
 // src/desktop/plugin.tsx
 import * as sdk from "@hermes/plugin-sdk";
-import { host as host5, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from "@hermes/plugin-sdk";
+import { host as host6, PALETTE_AREA, PANES_AREA, STATUSBAR_AREAS } from "@hermes/plugin-sdk";
 
 // src/shared/format.ts
 var DAWS = { ableton: "Live", live: "Live", reaper: "REAPER", renoise: "Renoise", soundcraft: "SoundCraft" };
@@ -247,10 +247,106 @@ function usePlaying(audition) {
   return useSyncExternalStore(audition.subscribe, () => audition.playing, () => audition.playing);
 }
 
+// src/shared/listen.ts
+var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
+function parseListen(result) {
+  let value = result;
+  if (typeof value === "string") {
+    try {
+      value = JSON.parse(value);
+    } catch {
+      return null;
+    }
+  }
+  if (!value || typeof value !== "object" || !("metrics" in value) || !value.metrics || typeof value.metrics !== "object") return null;
+  const state = "state" in value ? value.state : void 0;
+  if (typeof state === "string" && NOT_MEASURED[state]) return null;
+  return value;
+}
+var CAPTURED_BY = { ears: "Kumi Ears", offline: "an offline render" };
+function captureWords(capture) {
+  if (!capture || typeof capture !== "object") return void 0;
+  const parts = [];
+  const from = capture.from_beat;
+  const beats = capture.beats;
+  if (finite(from) && finite(beats)) parts.push(`Beats ${num(from, 2)}–${num(from + beats, 2)}`);
+  if (finite(capture.seconds)) parts.push(`${num(capture.seconds, 1)} s measured`);
+  const by = typeof capture.method === "string" ? CAPTURED_BY[capture.method] ?? clean(capture.method, 20) : "";
+  const said = [parts.join(" · "), by && `through ${by}`].filter(Boolean).join(", ");
+  if (!said) return void 0;
+  return capture.cleanup === "restored" ? `${said} · your project put back as it was` : said;
+}
+var finite = (value) => typeof value === "number" && Number.isFinite(value);
+function fileName(analysis, fallback) {
+  const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
+  return clean(file || fallback, 60);
+}
+function row(label, mine, reference, show, delta, deltaShow) {
+  if (!finite(mine) && !finite(reference)) return null;
+  const out = { label, mine: finite(mine) ? show(mine) : "—", direction: 0 };
+  if (reference !== void 0) {
+    out.reference = finite(reference) ? show(reference) : "—";
+    const difference = finite(delta) ? delta : finite(mine) && finite(reference) ? mine - reference : void 0;
+    if (difference !== void 0) {
+      out.delta = (deltaShow ?? show)(difference);
+      out.direction = difference < 0 ? -1 : difference > 0 ? 1 : 0;
+    }
+  }
+  return out;
+}
+function listenView(result) {
+  const mine = result.metrics ?? {};
+  const compare = result.compare;
+  const reference = compare?.metrics;
+  const differences = compare?.differences;
+  const theirs = (value) => compare ? value ?? null : void 0;
+  const rows = [
+    row("Loudness", mine.loudness?.integratedLufs, theirs(reference?.loudness?.integratedLufs), (v) => `${num(v)} LUFS`, differences?.loudness?.differenceLu, (v) => `${signed(v)} LU`),
+    row("True peak", mine.loudness?.truePeakDbtp, theirs(reference?.loudness?.truePeakDbtp), (v) => `${num(v)} dBTP`, void 0, (v) => `${signed(v)} dB`),
+    row("Brightness (centroid)", mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
+    row("Loudness range", mine.loudness?.rangeLu, theirs(reference?.loudness?.rangeLu), (v) => `${num(v)} LU`, void 0, (v) => `${signed(v)} LU`),
+    row("Crest", mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
+    row("Tempo", mine.tempo?.bpm, theirs(reference?.tempo?.bpm), (v) => `${num(v)} BPM`, void 0, (v) => `${signed(v)} BPM`)
+  ].filter((value) => value !== null);
+  const key = mine.key?.name;
+  if (typeof key === "string" && key) {
+    const otherKey = reference?.key?.name;
+    rows.push({ label: "Key", mine: clean(key, 20), ...compare ? { reference: typeof otherKey === "string" && otherKey ? clean(otherKey, 20) : "—" } : {}, direction: 0 });
+  }
+  const differenceBands = (Array.isArray(differences?.balance) ? differences.balance : []).flatMap(
+    (band) => band && finite(band.difference) ? [{ name: clean(band.band ?? band.hz ?? "", 16), value: band.difference }] : []
+  );
+  const levelBands = (Array.isArray(mine.balance?.bands) ? mine.balance.bands : []).flatMap(
+    (band) => band && finite(band.db) ? [{ name: clean(band.name ?? band.hz ?? "", 16), value: band.db }] : []
+  );
+  const view = {
+    title: fileName(mine, "Measured audio"),
+    mineId: typeof result.artifact_id === "string" ? result.artifact_id : void 0,
+    rows,
+    bands: differenceBands.length ? differenceBands : levelBands,
+    bandsAre: differenceBands.length ? "difference" : "level",
+    headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [],
+    verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0,
+    capture: captureWords(result.capture)
+  };
+  if (compare) {
+    view.referenceTitle = fileName(reference, "Reference");
+    view.referenceId = typeof compare.artifact_id === "string" ? compare.artifact_id : void 0;
+  }
+  const interpretation = result.interpretation;
+  if (interpretation && typeof interpretation.text === "string" && interpretation.text.trim()) {
+    const model = typeof interpretation.model === "string" && interpretation.model ? ` · ${clean(interpretation.model, 40)}` : "";
+    view.interpretation = { label: `Interpretation${model}`, text: interpretation.text.trim().slice(0, 4e3) };
+  } else if (typeof result.interpretation_error === "string" && result.interpretation_error) {
+    view.interpretationError = clean(result.interpretation_error, 200);
+  }
+  return view;
+}
+
 // src/shared/store.ts
 var JOB_KEPT_MS = 6e4;
 var MOST_JOBS = 20;
-var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {} };
+var EMPTY = { available: null, error: null, status: null, focus: null, history: null, map: null, setup: null, found: null, jobs: {}, measured: null };
 function finished(job) {
   return typeof job.state === "string" && job.state !== "running";
 }
@@ -376,6 +472,10 @@ var KumiStore = class {
   /** The sounds a `kumi_sounds` call found, to light up on the map of the same revision. */
   found(revision, ids) {
     this.set({ found: { revision, ids: ids.slice(0, 200), at: Date.now() } });
+  }
+  /** A `kumi_listen` result to show in the Measurements tab (CC-9: the transcript showed none). */
+  measure(toolCallId, result) {
+    this.set({ measured: { tool_call_id: toolCallId, result: result ?? null, at: Date.now() } });
   }
   /** Follow job `id` (from a tool's result or a `job.progress` event): read it now, then while it runs. */
   trackJob(id) {
@@ -509,102 +609,6 @@ var CANVAS = {
 
 // src/desktop/card.tsx
 import { useEffect as useEffect2, useState } from "react";
-
-// src/shared/listen.ts
-var NOT_MEASURED = { preview: true, refused: true, cancelled: true, unsure: true };
-function parseListen(result) {
-  let value = result;
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value);
-    } catch {
-      return null;
-    }
-  }
-  if (!value || typeof value !== "object" || !("metrics" in value) || !value.metrics || typeof value.metrics !== "object") return null;
-  const state = "state" in value ? value.state : void 0;
-  if (typeof state === "string" && NOT_MEASURED[state]) return null;
-  return value;
-}
-var CAPTURED_BY = { ears: "Kumi Ears", offline: "an offline render" };
-function captureWords(capture) {
-  if (!capture || typeof capture !== "object") return void 0;
-  const parts = [];
-  const from = capture.from_beat;
-  const beats = capture.beats;
-  if (finite(from) && finite(beats)) parts.push(`Beats ${num(from, 2)}–${num(from + beats, 2)}`);
-  if (finite(capture.seconds)) parts.push(`${num(capture.seconds, 1)} s measured`);
-  const by = typeof capture.method === "string" ? CAPTURED_BY[capture.method] ?? clean(capture.method, 20) : "";
-  const said = [parts.join(" · "), by && `through ${by}`].filter(Boolean).join(", ");
-  if (!said) return void 0;
-  return capture.cleanup === "restored" ? `${said} · your project put back as it was` : said;
-}
-var finite = (value) => typeof value === "number" && Number.isFinite(value);
-function fileName(analysis, fallback) {
-  const file = typeof analysis?.file === "string" ? analysis.file.split(/[\\/]/).pop() : void 0;
-  return clean(file || fallback, 60);
-}
-function row(label, mine, reference, show, delta, deltaShow) {
-  if (!finite(mine) && !finite(reference)) return null;
-  const out = { label, mine: finite(mine) ? show(mine) : "—", direction: 0 };
-  if (reference !== void 0) {
-    out.reference = finite(reference) ? show(reference) : "—";
-    const difference = finite(delta) ? delta : finite(mine) && finite(reference) ? mine - reference : void 0;
-    if (difference !== void 0) {
-      out.delta = (deltaShow ?? show)(difference);
-      out.direction = difference < 0 ? -1 : difference > 0 ? 1 : 0;
-    }
-  }
-  return out;
-}
-function listenView(result) {
-  const mine = result.metrics ?? {};
-  const compare = result.compare;
-  const reference = compare?.metrics;
-  const differences = compare?.differences;
-  const theirs = (value) => compare ? value ?? null : void 0;
-  const rows = [
-    row("Loudness", mine.loudness?.integratedLufs, theirs(reference?.loudness?.integratedLufs), (v) => `${num(v)} LUFS`, differences?.loudness?.differenceLu, (v) => `${signed(v)} LU`),
-    row("True peak", mine.loudness?.truePeakDbtp, theirs(reference?.loudness?.truePeakDbtp), (v) => `${num(v)} dBTP`, void 0, (v) => `${signed(v)} dB`),
-    row("Brightness (centroid)", mine.balance?.centroidHz, theirs(reference?.balance?.centroidHz), hz, void 0, (v) => `${signed(v, 0)} Hz`),
-    row("Loudness range", mine.loudness?.rangeLu, theirs(reference?.loudness?.rangeLu), (v) => `${num(v)} LU`, void 0, (v) => `${signed(v)} LU`),
-    row("Crest", mine.dynamics?.crestDb, theirs(reference?.dynamics?.crestDb), (v) => `${num(v)} dB`, void 0, (v) => `${signed(v)} dB`),
-    row("Tempo", mine.tempo?.bpm, theirs(reference?.tempo?.bpm), (v) => `${num(v)} BPM`, void 0, (v) => `${signed(v)} BPM`)
-  ].filter((value) => value !== null);
-  const key = mine.key?.name;
-  if (typeof key === "string" && key) {
-    const otherKey = reference?.key?.name;
-    rows.push({ label: "Key", mine: clean(key, 20), ...compare ? { reference: typeof otherKey === "string" && otherKey ? clean(otherKey, 20) : "—" } : {}, direction: 0 });
-  }
-  const differenceBands = (Array.isArray(differences?.balance) ? differences.balance : []).flatMap(
-    (band) => band && finite(band.difference) ? [{ name: clean(band.band ?? band.hz ?? "", 16), value: band.difference }] : []
-  );
-  const levelBands = (Array.isArray(mine.balance?.bands) ? mine.balance.bands : []).flatMap(
-    (band) => band && finite(band.db) ? [{ name: clean(band.name ?? band.hz ?? "", 16), value: band.db }] : []
-  );
-  const view = {
-    title: fileName(mine, "Measured audio"),
-    mineId: typeof result.artifact_id === "string" ? result.artifact_id : void 0,
-    rows,
-    bands: differenceBands.length ? differenceBands : levelBands,
-    bandsAre: differenceBands.length ? "difference" : "level",
-    headlines: Array.isArray(differences?.headlines) ? differences.headlines.filter((line) => typeof line === "string").map((line) => clean(line, 140)) : [],
-    verdict: typeof result.verdict_text === "string" && result.verdict_text ? clean(result.verdict_text, 400) : void 0,
-    capture: captureWords(result.capture)
-  };
-  if (compare) {
-    view.referenceTitle = fileName(reference, "Reference");
-    view.referenceId = typeof compare.artifact_id === "string" ? compare.artifact_id : void 0;
-  }
-  const interpretation = result.interpretation;
-  if (interpretation && typeof interpretation.text === "string" && interpretation.text.trim()) {
-    const model = typeof interpretation.model === "string" && interpretation.model ? ` · ${clean(interpretation.model, 40)}` : "";
-    view.interpretation = { label: `Interpretation${model}`, text: interpretation.text.trim().slice(0, 4e3) };
-  } else if (typeof result.interpretation_error === "string" && result.interpretation_error) {
-    view.interpretationError = clean(result.interpretation_error, 200);
-  }
-  return view;
-}
 
 // src/shared/ui.tsx
 import { jsx, jsxs } from "react/jsx-runtime";
@@ -772,8 +776,12 @@ function Interpretation({ view }) {
   ] });
 }
 function ListenCard({ media, audition }) {
-  const parsed = parseListen(media.result);
-  if (!parsed || media.file?.kind !== "audio") return media.fallback;
+  if (media.file?.kind !== "audio") return media.fallback;
+  return /* @__PURE__ */ jsx2(ListenResultCard, { audition, fallback: media.fallback, result: media.result });
+}
+function ListenResultCard({ result, audition, fallback }) {
+  const parsed = parseListen(result);
+  if (!parsed) return fallback;
   const view = listenView(parsed);
   return /* @__PURE__ */ jsxs2(
     "div",
@@ -798,7 +806,7 @@ function ListenCard({ media, audition }) {
         view.mineId ? /* @__PURE__ */ jsxs2("div", { style: { ...S.row, gap: 12, flexWrap: "wrap", alignItems: "flex-start" }, children: [
           /* @__PURE__ */ jsx2(Wave, { audition, id: view.mineId, label: view.title }),
           view.referenceId && /* @__PURE__ */ jsx2(Wave, { audition, id: view.referenceId, label: view.referenceTitle ?? "Reference" })
-        ] }) : media.fallback,
+        ] }) : fallback,
         /* @__PURE__ */ jsx2(Rows, { view }),
         /* @__PURE__ */ jsx2(Bands, { view }),
         view.headlines.length > 0 && /* @__PURE__ */ jsx2("ul", { style: { margin: 0, paddingLeft: 16, display: "flex", flexDirection: "column", gap: 1 }, children: view.headlines.map((line, index) => /* @__PURE__ */ jsx2("li", { style: S.muted, children: line }, index)) }),
@@ -1109,8 +1117,50 @@ function StatusChip({
   ] });
 }
 
-// src/desktop/map.tsx
+// src/desktop/events.ts
 import { host as host3 } from "@hermes/plugin-sdk";
+function profileKey(value) {
+  return value.trim() || "default";
+}
+function forThisProfile(payload) {
+  const own = host3.state.profile?.get();
+  return typeof payload.profile === "string" && typeof own === "string" && profileKey(payload.profile) === profileKey(own);
+}
+function forAnotherProfile(payload) {
+  const own = host3.state.profile?.get();
+  return typeof payload.profile === "string" && typeof own === "string" && profileKey(payload.profile) !== profileKey(own);
+}
+function forChatInFront(payload) {
+  if (!forThisProfile(payload) || typeof payload.session_id !== "string" || !payload.session_id) return false;
+  return host3.state.focusedStoredSessionId?.get() === payload.session_id;
+}
+function callId(value) {
+  return typeof value === "string" && value.length > 0 && value.length <= 200 ? value : null;
+}
+var Calls = class {
+  constructor(most = 200) {
+    this.most = most;
+  }
+  most;
+  seen = [];
+  has(id) {
+    return this.seen.includes(id);
+  }
+  add(id) {
+    if (this.has(id)) return;
+    this.seen.push(id);
+    if (this.seen.length > this.most) this.seen.shift();
+  }
+  clear() {
+    this.seen = [];
+  }
+};
+function payloadOf(event) {
+  return event.payload && typeof event.payload === "object" ? event.payload : {};
+}
+
+// src/desktop/map.tsx
+import { host as host4 } from "@hermes/plugin-sdk";
 import { useState as useState4 } from "react";
 
 // src/shared/MapCanvas.tsx
@@ -1460,7 +1510,7 @@ function MapWorkspace({ ctx, store, audition }) {
   const playing = usePlaying(audition);
   const [selected, setSelected] = useState4(null);
   const play = (id) => {
-    audition.play(id).catch((error) => host3.notify({ kind: "warning", message: `Kumi couldn't play that sound: ${errorText(error)}` }));
+    audition.play(id).catch((error) => host4.notify({ kind: "warning", message: `Kumi couldn't play that sound: ${errorText(error)}` }));
   };
   const map = state.map;
   const empty = state.available === false ? "Kumi's agent half is off in this profile, so there's no map to show." : map === null ? "Reading the sound map…" : "No sound map yet. Add a sample folder in Kumi's settings and ask Kumi to scan it; the map is made from what it finds there.";
@@ -1495,10 +1545,21 @@ function MapWorkspace({ ctx, store, audition }) {
   );
 }
 
-// src/desktop/settings.tsx
-import { host as host4 } from "@hermes/plugin-sdk";
-import { useState as useState5 } from "react";
+// src/desktop/measurements.tsx
 import { Fragment as Fragment3, jsx as jsx10, jsxs as jsxs10 } from "react/jsx-runtime";
+function MeasurementsWorkspace({ store, audition }) {
+  const { measured } = useKumi(store);
+  const note = (text) => /* @__PURE__ */ jsx10("span", { style: S.muted, children: text });
+  return /* @__PURE__ */ jsx10("div", { style: { display: "flex", flexDirection: "column", gap: 10, padding: 16, color: T.text, overflowY: "auto", height: "100%" }, children: measured === null ? note("Nothing measured yet. When Kumi measures audio in your chat, its numbers show here as well.") : measured.result === null ? note("Kumi measured it, but there's too much to show here: the numbers are in its reply in the chat.") : /* @__PURE__ */ jsxs10(Fragment3, { children: [
+    /* @__PURE__ */ jsx10("span", { style: S.faint, children: `Measured ${ago(measured.at)}` }),
+    /* @__PURE__ */ jsx10(ListenResultCard, { audition, fallback: note("Kumi measured it: the numbers are in its reply in the chat."), result: measured.result })
+  ] }) });
+}
+
+// src/desktop/settings.tsx
+import { host as host5 } from "@hermes/plugin-sdk";
+import { useState as useState5 } from "react";
+import { Fragment as Fragment4, jsx as jsx11, jsxs as jsxs11 } from "react/jsx-runtime";
 var OPEN_MAP_ON_FIND = "openMapOnFind";
 var STATE_WORDS = {
   ready: "Ready",
@@ -1511,9 +1572,9 @@ var STATE_WORDS = {
   unknown: "Unknown"
 };
 function Line({ label, children }) {
-  return /* @__PURE__ */ jsxs10("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
-    /* @__PURE__ */ jsx10("span", { style: S.muted, children: label }),
-    /* @__PURE__ */ jsx10("span", { style: { ...S.text, minWidth: 0 }, children })
+  return /* @__PURE__ */ jsxs11("div", { style: { display: "grid", gridTemplateColumns: "9rem 1fr", gap: 8, alignItems: "baseline", padding: "5px 0", borderTop: `1px solid ${T.border}` }, children: [
+    /* @__PURE__ */ jsx11("span", { style: S.muted, children: label }),
+    /* @__PURE__ */ jsx11("span", { style: { ...S.text, minWidth: 0 }, children })
   ] });
 }
 function megabytes(bytes) {
@@ -1528,60 +1589,60 @@ function SettingsPage({ ctx, store, onOpenMap }) {
   const daw = state.status?.daw ?? setup?.daw;
   const runtime = setup?.runtime;
   const component = setup?.daw_component;
-  return /* @__PURE__ */ jsxs10("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
-    /* @__PURE__ */ jsxs10("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
-      /* @__PURE__ */ jsx10("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
-      /* @__PURE__ */ jsxs10("span", { style: S.muted, children: [
+  return /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 18, maxWidth: 640, color: T.text }, children: [
+    /* @__PURE__ */ jsxs11("div", { style: { display: "flex", flexDirection: "column", gap: 4 }, children: [
+      /* @__PURE__ */ jsx11("span", { style: { fontSize: 15, fontWeight: 600 }, children: "Kumi" }),
+      /* @__PURE__ */ jsxs11("span", { style: S.muted, children: [
         "Kumi reads and changes your ",
         dawName(daw),
         " project through typed changes you approve, keeps HISTORY with undo, measures audio on this computer, and maps the sample folders you allow."
       ] })
     ] }),
-    state.available === false ? /* @__PURE__ */ jsx10("span", { style: S.text, children: "Kumi's agent half is off in this profile. Turn on the kumi plugin's Agent switch in Capabilities → Plugins and restart the gateway; its settings form appears under Agent settings." }) : /* @__PURE__ */ jsxs10(Fragment3, { children: [
-      /* @__PURE__ */ jsxs10("div", { children: [
-        /* @__PURE__ */ jsx10("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Setup" }),
-        /* @__PURE__ */ jsx10(Line, { label: "State", children: STATE_WORDS[setup?.state ?? "unknown"] ?? clean(setup?.state ?? "", 40) }),
-        setup?.message && /* @__PURE__ */ jsx10(Line, { label: "Next", children: clean(setup.message, 300) }),
-        runtime && /* @__PURE__ */ jsxs10(Line, { label: "Kumi runtime", children: [
+    state.available === false ? /* @__PURE__ */ jsx11("span", { style: S.text, children: "Kumi's agent half is off in this profile. Turn on the kumi plugin's Agent switch in Capabilities → Plugins and restart the gateway; its settings form appears under Agent settings." }) : /* @__PURE__ */ jsxs11(Fragment4, { children: [
+      /* @__PURE__ */ jsxs11("div", { children: [
+        /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Setup" }),
+        /* @__PURE__ */ jsx11(Line, { label: "State", children: STATE_WORDS[setup?.state ?? "unknown"] ?? clean(setup?.state ?? "", 40) }),
+        setup?.message && /* @__PURE__ */ jsx11(Line, { label: "Next", children: clean(setup.message, 300) }),
+        runtime && /* @__PURE__ */ jsxs11(Line, { label: "Kumi runtime", children: [
           runtime.installed ? `Kumi ${clean(runtime.version ?? "", 20)}` : "Not installed",
-          setup?.pinned_version && /* @__PURE__ */ jsxs10("span", { style: S.faint, children: [
+          setup?.pinned_version && /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
             " · pinned ",
             clean(setup.pinned_version, 20)
           ] }),
-          setup?.target && /* @__PURE__ */ jsxs10("span", { style: S.faint, children: [
+          setup?.target && /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
             " · ",
             clean(setup.target, 40)
           ] })
         ] }),
-        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs10(Line, { label: "Download", children: [
+        runtime && !runtime.installed && megabytes(setup?.download_bytes) && /* @__PURE__ */ jsxs11(Line, { label: "Download", children: [
           megabytes(setup?.download_bytes),
-          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs10("span", { style: S.faint, children: [
+          megabytes(setup?.unpacked_bytes) && /* @__PURE__ */ jsxs11("span", { style: S.faint, children: [
             " (",
             megabytes(setup?.unpacked_bytes),
             " unpacked)"
           ] })
         ] }),
-        component && /* @__PURE__ */ jsxs10(Line, { label: `${dawName(daw)} part`, children: [
+        component && /* @__PURE__ */ jsxs11(Line, { label: `${dawName(daw)} part`, children: [
           clean(component.name ?? "DAW component", 40),
           ": ",
           clean(component.state ?? "unknown", 20).replace("_", " "),
-          component.path && /* @__PURE__ */ jsx10("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
+          component.path && /* @__PURE__ */ jsx11("div", { style: { ...S.faint, marginTop: 2 }, children: clean(component.path, 200) })
         ] }),
-        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs10(Line, { label: "Standalone Kumi", children: [
+        setup?.existing_kumi?.path && /* @__PURE__ */ jsxs11(Line, { label: "Standalone Kumi", children: [
           clean(setup.existing_kumi.path, 120),
-          /* @__PURE__ */ jsx10("span", { style: S.faint, children: setup.existing_kumi.adopted ? " · adopted" : " · left as it is" })
+          /* @__PURE__ */ jsx11("span", { style: S.faint, children: setup.existing_kumi.adopted ? " · adopted" : " · left as it is" })
         ] })
       ] }),
-      /* @__PURE__ */ jsxs10("div", { children: [
-        /* @__PURE__ */ jsx10("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Connection" }),
-        /* @__PURE__ */ jsx10(Line, { label: "Now", children: (() => {
+      /* @__PURE__ */ jsxs11("div", { children: [
+        /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "Connection" }),
+        /* @__PURE__ */ jsx11(Line, { label: "Now", children: (() => {
           const words = chipWords(state.status, state.focus?.transport?.tempo);
-          return /* @__PURE__ */ jsx10(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
+          return /* @__PURE__ */ jsx11(Chip, { tone: words.tone === "muted" ? void 0 : words.tone, children: words.text });
         })() }),
-        state.status?.owner?.session_id && /* @__PURE__ */ jsx10(Line, { label: "Kumi's chat", children: clean(state.status.owner.session_id, 80) })
+        state.status?.owner?.session_id && /* @__PURE__ */ jsx11(Line, { label: "Kumi's chat", children: clean(state.status.owner.session_id, 80) })
       ] }),
-      /* @__PURE__ */ jsxs10("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
-        step && /* @__PURE__ */ jsx10(
+      /* @__PURE__ */ jsxs11("div", { style: { ...S.row, gap: 8, flexWrap: "wrap" }, children: [
+        step && /* @__PURE__ */ jsx11(
           TextButton,
           {
             onClick: () => void ask(ctx, step.request, { send: true, session: state.status?.connected ? ownerSession(state) : null }),
@@ -1589,14 +1650,14 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             children: step.label
           }
         ),
-        /* @__PURE__ */ jsx10(TextButton, { onClick: onOpenMap, children: "Open the sound map" }),
-        /* @__PURE__ */ jsx10(TextButton, { onClick: () => host4.navigate("/settings?tab=plugins&agent=kumi"), children: "Agent settings" })
+        /* @__PURE__ */ jsx11(TextButton, { onClick: onOpenMap, children: "Open the sound map" }),
+        /* @__PURE__ */ jsx11(TextButton, { onClick: () => host5.navigate("/settings?tab=plugins&agent=kumi"), children: "Agent settings" })
       ] })
     ] }),
-    /* @__PURE__ */ jsxs10("div", { children: [
-      /* @__PURE__ */ jsx10("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "This window" }),
-      /* @__PURE__ */ jsxs10("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
-        /* @__PURE__ */ jsx10(
+    /* @__PURE__ */ jsxs11("div", { children: [
+      /* @__PURE__ */ jsx11("span", { style: { ...S.heading, display: "block", marginBottom: 4 }, children: "This window" }),
+      /* @__PURE__ */ jsxs11("label", { style: { ...S.row, gap: 8, padding: "5px 0", borderTop: `1px solid ${T.border}`, cursor: "pointer" }, children: [
+        /* @__PURE__ */ jsx11(
           "input",
           {
             checked: openOnFind,
@@ -1607,16 +1668,18 @@ function SettingsPage({ ctx, store, onOpenMap }) {
             type: "checkbox"
           }
         ),
-        /* @__PURE__ */ jsx10("span", { style: S.text, children: "Open the sound map when Kumi finds sounds" })
+        /* @__PURE__ */ jsx11("span", { style: S.text, children: "Open the sound map when Kumi finds sounds" })
       ] })
     ] })
   ] });
 }
 
 // src/desktop/plugin.tsx
-import { jsx as jsx11 } from "react/jsx-runtime";
+import { jsx as jsx12 } from "react/jsx-runtime";
 var PLUGIN_ID = "kumi";
 var MAP_WORKSPACE = "kumi-sound-map";
+var MEASUREMENTS_WORKSPACE = "kumi-measurements";
+var LISTEN_FALLBACK_MS = 2e3;
 var POLL_MS = 5e3;
 var JOB_POLL_MS = 2e3;
 var plugin = {
@@ -1629,11 +1692,11 @@ var plugin = {
     let closeMap = null;
     let mapPane = null;
     const openMap = () => {
-      if (typeof host5.openWorkspace === "function") {
-        closeMap = host5.openWorkspace(MAP_WORKSPACE, {
+      if (typeof host6.openWorkspace === "function") {
+        closeMap = host6.openWorkspace(MAP_WORKSPACE, {
           title: "Sound map",
           minWidth: "26rem",
-          render: () => /* @__PURE__ */ jsx11(MapWorkspace, { audition, ctx, store }),
+          render: () => /* @__PURE__ */ jsx12(MapWorkspace, { audition, ctx, store }),
           onClose: () => {
             closeMap = null;
           }
@@ -1645,45 +1708,108 @@ var plugin = {
         area: PANES_AREA,
         title: "Sound map",
         data: { placement: "main" },
-        render: () => /* @__PURE__ */ jsx11(MapWorkspace, { audition, ctx, store })
+        render: () => /* @__PURE__ */ jsx12(MapWorkspace, { audition, ctx, store })
       });
     };
-    const openSettings = () => host5.navigate(typeof sdk.pluginSettingsHref === "function" ? sdk.pluginSettingsHref(PLUGIN_ID) : "/settings?tab=plugins");
+    let closeMeasurements = null;
+    let measurementsPane = null;
+    const openMeasurements = () => {
+      const render = () => /* @__PURE__ */ jsx12(MeasurementsWorkspace, { audition, store });
+      if (typeof host6.openWorkspace === "function") {
+        closeMeasurements = host6.openWorkspace(MEASUREMENTS_WORKSPACE, {
+          title: "Measurements",
+          minWidth: "24rem",
+          render,
+          onClose: () => {
+            closeMeasurements = null;
+          }
+        });
+        return;
+      }
+      measurementsPane ??= ctx.register({ id: "measurements-pane", area: PANES_AREA, title: "Measurements", data: { placement: "main" }, render });
+    };
+    const openSettings = () => host6.navigate(typeof sdk.pluginSettingsHref === "function" ? sdk.pluginSettingsHref(PLUGIN_ID) : "/settings?tab=plugins");
     const refresh = () => void store.refreshStatus();
     refresh();
     ctx.setInterval(() => {
       if (document.visibilityState !== "hidden") refresh();
     }, POLL_MS);
-    ctx.onEvent(`plugin.${PLUGIN_ID}.status.changed`, refresh);
-    ctx.onEvent(`plugin.${PLUGIN_ID}.focus.changed`, () => void store.refresh("focus"));
-    ctx.onEvent(`plugin.${PLUGIN_ID}.history.changed`, () => void store.refresh("history"));
-    ctx.onEvent(`plugin.${PLUGIN_ID}.map.changed`, () => void store.refresh("map"));
+    const ours = (act) => (event) => {
+      const payload = payloadOf(event);
+      if (!forAnotherProfile(payload)) act(payload);
+    };
+    ctx.onEvent(`plugin.${PLUGIN_ID}.status.changed`, ours(refresh));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.focus.changed`, ours(() => void store.refresh("focus")));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.history.changed`, ours(() => void store.refresh("history")));
+    ctx.onEvent(`plugin.${PLUGIN_ID}.map.changed`, ours(() => void store.refresh("map")));
     ctx.setInterval(() => {
       if (document.visibilityState !== "hidden") void store.refreshJobs();
     }, JOB_POLL_MS);
-    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, (event) => {
-      const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
-      store.trackJob("job_id" in payload ? payload.job_id : void 0);
+    ctx.onEvent(`plugin.${PLUGIN_ID}.job.progress`, ours((payload) => store.trackJob(payload.job_id)));
+    ctx.onEvent(
+      `plugin.${PLUGIN_ID}.settings.changed`,
+      ours(() => {
+        refresh();
+        void store.refresh("setup");
+      })
+    );
+    const calls = new Calls();
+    const waiting = /* @__PURE__ */ new Map();
+    const showFound = (id, revision, ids) => {
+      if (id) {
+        if (calls.has(id)) return;
+        calls.add(id);
+      }
+      if (!ids.length) return;
+      store.found(revision, ids);
+      if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap();
+    };
+    ctx.onEvent(`plugin.${PLUGIN_ID}.sounds.found`, (event) => {
+      const payload = payloadOf(event);
+      const id = callId(payload.tool_call_id);
+      if (!id || !forChatInFront(payload)) return;
+      const ids = Array.isArray(payload.sound_ids) ? payload.sound_ids.filter((value) => typeof value === "string") : [];
+      showFound(id, typeof payload.map_revision === "string" ? payload.map_revision : null, ids.slice(0, 200));
     });
-    ctx.onEvent(`plugin.${PLUGIN_ID}.settings.changed`, () => {
-      refresh();
-      void store.refresh("setup");
+    ctx.onEvent(`plugin.${PLUGIN_ID}.listen.done`, (event) => {
+      const payload = payloadOf(event);
+      const id = callId(payload.tool_call_id);
+      if (!id || !forChatInFront(payload) || calls.has(id) || waiting.has(id)) return;
+      const result = payload.result ?? null;
+      if (result !== null && !parseListen(result)) return;
+      waiting.set(
+        id,
+        ctx.setTimeout(() => {
+          waiting.delete(id);
+          if (calls.has(id)) return;
+          calls.add(id);
+          store.measure(id, result);
+          openMeasurements();
+        }, LISTEN_FALLBACK_MS)
+      );
     });
     ctx.onEvent("tool.complete", (event) => {
-      const payload = event.payload && typeof event.payload === "object" ? event.payload : {};
-      const name = "name" in payload && typeof payload.name === "string" ? payload.name : "";
+      const payload = payloadOf(event);
+      const name = typeof payload.name === "string" ? payload.name : "";
       if (!name.startsWith("kumi_")) return;
       refresh();
-      const result = "result" in payload ? payload.result : void 0;
-      store.trackJob(jobOf(result));
+      store.trackJob(jobOf(payload.result));
+      const id = callId(payload.tool_id);
+      if (name === "kumi_listen" && id) {
+        calls.add(id);
+        waiting.get(id)?.();
+        waiting.delete(id);
+        return;
+      }
       if (name !== "kumi_sounds") return;
-      const found = foundSounds(result);
-      if (!found?.ids.length) return;
-      store.found(found.revision, found.ids);
-      if (ctx.storage.get(OPEN_MAP_ON_FIND, true)) openMap();
+      const found = foundSounds(payload.result);
+      if (found) showFound(id, found.revision, found.ids);
     });
-    for (const atom of [host5.state.profile, host5.state.connectionId]) {
+    for (const atom of [host6.state.profile, host6.state.connectionId]) {
       const stop = atom?.listen?.(() => {
+        for (const cancel of waiting.values()) cancel();
+        waiting.clear();
+        calls.clear();
         store.reset();
         audition.reset();
         refresh();
@@ -1691,7 +1817,9 @@ var plugin = {
       if (stop) ctx.onDispose(stop);
     }
     ctx.onDispose(() => {
+      for (const cancel of waiting.values()) cancel();
       closeMap?.();
+      closeMeasurements?.();
       audition.dispose();
     });
     const contributions = [
@@ -1700,13 +1828,13 @@ var plugin = {
         area: PANES_AREA,
         title: "Kumi",
         data: { placement: "right", width: "320px" },
-        render: () => /* @__PURE__ */ jsx11(KumiPane, { ctx, onOpenMap: openMap, store })
+        render: () => /* @__PURE__ */ jsx12(KumiPane, { ctx, onOpenMap: openMap, store })
       },
       {
         id: "status",
         area: STATUSBAR_AREAS.right,
         order: 60,
-        render: () => /* @__PURE__ */ jsx11(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store })
+        render: () => /* @__PURE__ */ jsx12(StatusChip, { ctx, onOpenMap: openMap, onOpenSettings: openSettings, store })
       },
       {
         id: "open-map",
@@ -1725,7 +1853,7 @@ var plugin = {
             const last = state.history?.items.find((item) => item.state !== "undone");
             if (!last || !canUndo(state.status, last)) {
               const unsure = Boolean(state.status?.unsure) || last?.state === "unsure" || last?.state === "partial";
-              host5.notify({
+              host6.notify({
                 kind: "info",
                 message: unsure ? "Kumi isn't sure of its last change: ask it to look at your project again first." : "Kumi has no change it can undo right now."
               });
@@ -1747,26 +1875,28 @@ var plugin = {
         area: sdk.TOOL_MEDIA_RENDERER_AREA,
         data: {
           tools: ["kumi_listen"],
-          render: (props) => /* @__PURE__ */ jsx11(ListenCard, { audition, media: props })
+          render: (props) => /* @__PURE__ */ jsx12(ListenCard, { audition, media: props })
         }
       });
     }
     if (typeof sdk.COMPOSER_AREAS?.underside === "string") {
-      contributions.push({ id: "focus-hint", area: sdk.COMPOSER_AREAS.underside, render: () => /* @__PURE__ */ jsx11(FocusHint, { store }) });
+      contributions.push({ id: "focus-hint", area: sdk.COMPOSER_AREAS.underside, render: () => /* @__PURE__ */ jsx12(FocusHint, { store }) });
     }
     ctx.registerMany(contributions);
     ctx.registerSettingsPage?.({
       id: "kumi",
       title: "Kumi",
       icon: "pulse",
-      render: () => /* @__PURE__ */ jsx11(SettingsPage, { ctx, onOpenMap: openMap, store })
+      render: () => /* @__PURE__ */ jsx12(SettingsPage, { ctx, onOpenMap: openMap, store })
     });
   }
 };
 var plugin_default = plugin;
 export {
   JOB_POLL_MS,
+  LISTEN_FALLBACK_MS,
   MAP_WORKSPACE,
+  MEASUREMENTS_WORKSPACE,
   PLUGIN_ID,
   POLL_MS,
   plugin_default as default

@@ -206,3 +206,17 @@ test('the pane shows a running scan with how far it got, and how a finished one 
   }
   assert.equal(renderToStaticMarkup(createElement(JobsView, { jobs: {} })), '')
 })
+
+test('the Measurements tab draws the latest measurement an event brought, or says where the numbers are', async () => {
+  const { MeasurementsWorkspace } = await load('src/desktop/measurements.tsx', { react: 'real' })
+  const { KumiStore } = await load('src/shared/store.ts', { react: 'real' })
+  const store = new KumiStore(async () => ({}))
+  const audition = new Audition(async () => ({ data_url: 'data:audio/wav;base64,' }))
+  const draw = () => renderToStaticMarkup(createElement(MeasurementsWorkspace, { store, audition }))
+  assert.ok(draw().includes('Nothing measured yet'))
+  store.measure('call-4', JSON.stringify(result))
+  const drawn = draw()
+  assert.ok(drawn.includes('Dusty Snare 04.wav') && drawn.includes('−14.2 LUFS'), drawn)
+  store.measure('call-5', null)
+  assert.ok(draw().includes('the numbers are in its reply in the chat'))
+})

@@ -149,9 +149,16 @@ function Interpretation({ view }: { view: ListenView }) {
 }
 
 export function ListenCard({ media, audition }: { media: ToolMediaRendererProps; audition: Audition }): ReactNode {
-  const parsed = parseListen(media.result)
   // Anything this card can't draw keeps Desktop's own player, so the audio always plays.
-  if (!parsed || media.file?.kind !== 'audio') return media.fallback
+  if (media.file?.kind !== 'audio') return media.fallback
+  return <ListenResultCard audition={audition} fallback={media.fallback} result={media.result} />
+}
+
+/** The card for a `kumi_listen` result, wherever it's drawn: in the transcript's tool part, or in the Measurements tab
+ *  when the transcript shows no tool parts (CC-9). `fallback` stands in for what it can't draw. */
+export function ListenResultCard({ result, audition, fallback }: { result: unknown; audition: Audition; fallback: ReactNode }): ReactNode {
+  const parsed = parseListen(result)
+  if (!parsed) return fallback
   const view = listenView(parsed)
   return (
     <div
@@ -177,7 +184,7 @@ export function ListenCard({ media, audition }: { media: ToolMediaRendererProps;
           {view.referenceId && <Wave audition={audition} id={view.referenceId} label={view.referenceTitle ?? 'Reference'} />}
         </div>
       ) : (
-        media.fallback
+        fallback
       )}
       <Rows view={view} />
       <Bands view={view} />

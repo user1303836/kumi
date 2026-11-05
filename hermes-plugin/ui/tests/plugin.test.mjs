@@ -207,10 +207,11 @@ test('a call that starts a job, or a job.progress event, has the pane follow tha
   plugin.register(h.ctx)
   await settle()
   h.events.get('tool.complete')({ payload: { name: 'kumi_library', result: JSON.stringify({ job_id: 'j-scan-1', state: 'running' }) } })
-  h.events.get('plugin.kumi.job.progress')({ payload: { job_id: 'j-scan-2', state: 'running', progress: { done: 3 } } })
+  h.events.get('plugin.kumi.job.progress')({ payload: { profile: 'default', job_id: 'j-scan-2', state: 'running', progress: { done: 3 } } })
+  h.events.get('plugin.kumi.job.progress')({ payload: { profile: 'work', job_id: 'j-work-1', state: 'running' } })
   h.events.get('plugin.kumi.job.progress')({ payload: { job_id: '../owner' } })
   await settle()
-  assert.deepEqual(h.calls.rest.filter(path => path.startsWith('/job')).sort(), ['/job?id=j-scan-1', '/job?id=j-scan-2'])
+  assert.deepEqual(h.calls.rest.filter(path => path.startsWith('/job')).sort(), ['/job?id=j-scan-1', '/job?id=j-scan-2'], "another profile's job is never read")
 })
 
 test('the built Desktop file uses only the SDK and React, and none of the doors rule 8 closes', () => {
@@ -230,4 +231,110 @@ test('the built Desktop file uses only the SDK and React, and none of the doors 
   ]) {
     assert.ok(!pattern.test(bundle), `desktop/plugin.js contains ${why}`)
   }
+})
+
+// CC-9: the plugin's own events for the chat in front, when Hermes sends no tool.complete (tool progress off).
+// The window's own profile is `host.state.profile` ('default' here); a Desktop without workspace tabs knows no
+// focusedSessionProfile, which the gate doesn't need.
+function inFront(h, { chat = SESSION, focusedProfile } = {}) {
+  globalThis.__kumiTestHost.state = { ...globalThis.__kumiTestHost.state, focusedStoredSessionId: atom(chat) }
+  if (focusedProfile !== undefined) globalThis.__kumiTestHost.state.focusedSessionProfile = atom(focusedProfile)
+  return h
+}
+
+const found = (over = {}) => ({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-1', map_revision: 'r7', sound_ids: ['s-r7-0091'], ...over } })
+
+test('a sounds.found event opens the map for the chat in front, once with its tool.complete, and never for another profile or chat', async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  const h = inFront(harness())
+  plugin.register(h.ctx)
+  await settle()
+  const event = h.events.get('plugin.kumi.sounds.found')
+  event(found({ profile: 'work' }))
+  event(found({ session_id: 'another-chat' }))
+  event(found({ profile: undefined }))
+  event(found({ tool_call_id: 'call-0', sound_ids: [] }))
+  assert.equal(h.calls.workspaces.length, 0)
+  event(found())
+  h.events.get('tool.complete')({ payload: { name: 'kumi_sounds', tool_id: 'call-1', result: { map_revision: 'r7', items: [{ sound_id: 's-r7-0091' }] } } })
+  assert.equal(h.calls.workspaces.length, 1, 'the event and the same call\'s tool.complete open the map once')
+  h.events.get('tool.complete')({ payload: { name: 'kumi_sounds', tool_id: 'call-2', result: { map_revision: 'r7', items: [{ sound_id: 's-r7-0092' }] } } })
+  event(found({ tool_call_id: 'call-2', sound_ids: ['s-r7-0092'] }))
+  assert.equal(h.calls.workspaces.length, 2, 'in either order')
+})
+
+test('a listen.done event opens Measurements only when its call\'s tool.complete doesn\'t come within 2 s, and only for the chat in front', async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  const h = inFront(harness())
+  const timers = []
+  h.ctx.setTimeout = (fn, ms) => {
+    const timer = { fn, ms, cancelled: false }
+    timers.push(timer)
+    return () => (timer.cancelled = true)
+  }
+  plugin.register(h.ctx)
+  await settle()
+  const done = h.events.get('plugin.kumi.listen.done')
+  const result = { metrics: { file: 'Dusty Snare 04.wav', loudness: { integratedLufs: -14.2 } }, artifact_id: 'a-1' }
+  done({ payload: { profile: 'work', session_id: SESSION, tool_call_id: 'call-3', result } })
+  done({ payload: { profile: 'default', session_id: 'another-chat', tool_call_id: 'call-3', result } })
+  assert.equal(timers.filter(timer => timer.ms === 2000).length, 0)
+  done({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-3', result } })
+  h.events.get('tool.complete')({ payload: { name: 'kumi_listen', tool_id: 'call-3', result } })
+  const waited = timers.filter(timer => timer.ms === 2000)
+  assert.deepEqual(waited.map(timer => timer.cancelled), [true])
+  waited[0].fn()
+  assert.ok(!h.calls.workspaces.some(([id]) => id === 'kumi-measurements'), 'the transcript shows the card: no tab')
+  done({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-4', result } })
+  timers.filter(timer => timer.ms === 2000 && !timer.cancelled).at(-1).fn()
+  assert.deepEqual(h.calls.workspaces.filter(([id]) => id === 'kumi-measurements'), [['kumi-measurements', 'Measurements']])
+})
+
+test("events follow the profile this window's Kumi reads from, even when Bot Mode puts another profile's chat in front", async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  const h = inFront(harness(), { focusedProfile: 'work' })
+  plugin.register(h.ctx)
+  await settle()
+  const event = h.events.get('plugin.kumi.sounds.found')
+  event(found({ profile: 'work' }))
+  assert.equal(h.calls.workspaces.length, 0, "the focused chat's profile isn't the one whose map this window reads")
+  event(found())
+  assert.deepEqual(h.calls.workspaces, [['kumi-sound-map', 'Sound map']])
+  // Another profile's change moves nothing here; one that names no profile (a runtime before #966) still re-reads.
+  const reads = () => h.calls.rest.filter(path => path === '/focus').length
+  const before = reads()
+  h.events.get('plugin.kumi.focus.changed')({ payload: { profile: 'work', seq: 9 } })
+  await settle()
+  assert.equal(reads(), before)
+  h.events.get('plugin.kumi.focus.changed')({ payload: { seq: 9 } })
+  await settle()
+  assert.equal(reads(), before + 1)
+})
+
+test('a profile switch drops the measurement waiting on the old one, and a result that is no measurement opens nothing', async () => {
+  const { default: plugin } = await load('src/desktop/plugin.tsx')
+  const listeners = new Set()
+  let current = 'default'
+  const profile = { get: () => current, subscribe: fn => (fn(current), listeners.add(fn), () => listeners.delete(fn)), listen: fn => (listeners.add(fn), () => listeners.delete(fn)) }
+  const h = inFront(harness())
+  globalThis.__kumiTestHost.state.profile = profile
+  const timers = []
+  h.ctx.setTimeout = (fn, ms) => {
+    const timer = { fn, ms, cancelled: false }
+    timers.push(timer)
+    return () => (timer.cancelled = true)
+  }
+  plugin.register(h.ctx)
+  await settle()
+  const done = h.events.get('plugin.kumi.listen.done')
+  done({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-5', result: 'not a measurement' } })
+  assert.equal(timers.filter(timer => timer.ms === 2000).length, 0)
+  done({ payload: { profile: 'default', session_id: SESSION, tool_call_id: 'call-6', result: { metrics: { file: 'Kick.wav', loudness: { integratedLufs: -9 } } } } })
+  current = 'work'
+  for (const fn of listeners) fn(current)
+  assert.deepEqual(timers.filter(timer => timer.ms === 2000).map(timer => timer.cancelled), [true])
+  // The same call id on the new profile is a new call: it isn't taken for one already acted on.
+  done({ payload: { profile: 'work', session_id: SESSION, tool_call_id: 'call-6' } })
+  timers.filter(timer => timer.ms === 2000 && !timer.cancelled).at(-1).fn()
+  assert.deepEqual(h.calls.workspaces.filter(([id]) => id === 'kumi-measurements'), [['kumi-measurements', 'Measurements']], 'a result too large to carry still opens the tab')
 })
