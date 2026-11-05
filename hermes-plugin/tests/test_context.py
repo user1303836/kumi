@@ -55,8 +55,8 @@ class Focus(unittest.TestCase):
                            "mainView": {"kind": "launcher", "label": "Session"}, "view": "Arrangement",
                            "parameter": {"name": "Cutoff", "owner": "Auto Filter", "value": "1.20 kHz"},
                            "busy": "a dialog\nis open"},
-                 "transport": {"playing": True, "tempo": 92.5, "meter": "7/8", "at": 0},
-                 "catch_up": [{"set": "Night Drive", "last_seen_at": 0, "more": 5, "after_reconnect": True,
+                 "transport": {"playing": True, "tempo": 92.5, "beat": 12.0, "at": 0, "beatsPerBar": 7, "meter": "7/8"},
+                 "catch_up": [{"set": "Night Drive", "lastSeenAt": 0, "more": 5, "afterReconnect": True,
                                "lines": [f"Clip {n} moved\n" * 20 for n in range(40)]}]}
         note = context.focus_text(focus, {"stale": False, "age_ms": 1000})
         self.assertLessEqual(len(note), context.MAX_CHARS)
@@ -86,11 +86,11 @@ class StatusCommand(unittest.TestCase):
         support.install(data)
         self.assertIn("Runtime: not running.", self.run_cli(host))
         support.call(host, "kumi_connect", {}, session_id="s1")
-        ctx.settings["library_folders"] = ["/Samples/Drums"]
+        ctx.settings["library_folders"] = [support.DRUMS]
         shown = self.run_cli(host).splitlines()
         self.assertEqual(shown[0], f"Setup: Kumi {support.VERSION} is set up ({support.module('setup').host_target()}).")
         self.assertRegex(shown[2], r"^Runtime: running \(pid \d+\), for chat s1\.$")
-        self.assertEqual(shown[3:], ["Connected to Live: Night Drive (epoch 1).", "Sample folders: /Samples/Drums"])
+        self.assertEqual(shown[3:], ["Connected to Live: Night Drive (epoch 1).", f"Sample folders: {support.DRUMS}"])
         host.runtimes.stop_all()
         self.assertRegex(self.run_cli(host).splitlines()[2], r"^Runtime: not running \(last heard -?\d+ s ago\)\.$",
                          "a runtime that stopped reads as not running at once")

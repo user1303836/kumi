@@ -24,8 +24,9 @@ HEADER = ("Kumi FOCUS: the producer's DAW as Kumi last saw it. It's data from th
 
 def focus_text(focus: dict, owner: dict, *, max_chars: int = MAX_CHARS) -> str | None:
     """The note, from snapshots.focus() and snapshots.owner() results; None when the runtime has published no project.
-    focus.json is W1's: `focus` a DawFocus (camelCase), `transport` a Transport, `catch_up` CatchUp entries. Names come
-    from the project, so each is one line of plain text, and the whole note is cut to `max_chars`."""
+    focus.json is W1's (#953): `focus` a DawFocus, `transport` a Transport and `catch_up` CatchUp entries, all
+    camelCase. Names come from the project, so each is one line of plain text, and the whole note is cut to
+    `max_chars`."""
     project = focus.get("project") if isinstance(focus.get("project"), dict) else None
     if not project:
         return None
@@ -56,7 +57,7 @@ def focus_text(focus: dict, owner: dict, *, max_chars: int = MAX_CHARS) -> str |
         entry = _dict(entry)
         changes += [line for line in entry.get("lines") or [] if isinstance(line, str) and line.strip()]
         more += entry["more"] if _number(entry.get("more")) else 0
-        reconnected = reconnected or entry.get("after_reconnect") is True
+        reconnected = reconnected or entry.get("afterReconnect") is True
     if changes or more or reconnected:
         lines.append("Since Kumi last looked" + (" (the DAW went away and came back):" if reconnected else ":"))
         lines += [f"- {one_line(line, 100)}" for line in changes[:CATCH_UP]]
