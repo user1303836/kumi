@@ -544,6 +544,18 @@ impl Ctx {
         self.jobs.start(ctx, kind, secrets, work)
     }
 
+    /// Runs `work` again as the job `id` of `kind` ([`super::jobs::Jobs::resume`]), with the calling call's secrets kept
+    /// as [`Ctx::start_job`] keeps them: true when it runs, false when it was running already.
+    pub fn resume_job<W, F>(&self, id: &str, kind: &'static str, work: W) -> Result<bool, OpError>
+    where
+        W: FnOnce(Rc<Ctx>, JobHandle) -> F + 'static,
+        F: Future<Output = Result<Value, OpError>> + 'static,
+    {
+        let ctx = self.me.upgrade().ok_or_else(|| OpError::Failed { reason: "the runtime is stopping".into() })?;
+        let secrets = CALL_PRIVATE.try_with(Private::secrets).unwrap_or_default();
+        self.jobs.resume(ctx, id, kind, secrets, work)
+    }
+
     /// A scratch folder for one call of `op`: `<state>/scratch/<op>/<id>/`, the id the runtime's own (never anything
     /// the host sent), made the owner's alone; removed when the returned [`Scratch`] drops.
     pub fn scratch(&self, op: &str) -> Result<Scratch, OpError> {
