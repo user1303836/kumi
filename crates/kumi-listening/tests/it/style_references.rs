@@ -464,10 +464,15 @@ async fn musicbrainz_is_asked_again_when_busy_and_a_failed_genre_list_isnt_kept(
             // Once read, it's kept.
             sources.resolve("dub techno", 2, Signal::new()).await.unwrap();
             assert_eq!(asked.get(), 3);
-            // Nobody answering: an error that says so, not a hang.
-            let held = tokio::net::TcpSocket::new_v4().unwrap();
-            held.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-            let closed = format!("http://{}", held.local_addr().unwrap());
+            // Nobody answering: an error that says so, not a hang. Keep the port while dropping its connections:
+            // dropping the listener too would let another test's server take it.
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let closed = format!("http://{}", listener.local_addr().unwrap());
+            tokio::task::spawn_local(async move {
+                while let Ok((socket, _)) = listener.accept().await {
+                    drop(socket);
+                }
+            });
             let offline = Sources::new(&closed, &closed, &closed).unpaced();
             let failed = offline.resolve("Burial", 6, Signal::new()).await.unwrap_err();
             assert!(failed.contains("didn't answer"), "{failed}");
