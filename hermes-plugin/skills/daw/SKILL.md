@@ -133,6 +133,22 @@ These are the steps for everyday changes. `kumi_read` with `action: schema` give
   - **Limits:** about 3,000 note cells a step for `notes_write`, and about 2,000 for `phrase_write`, which writes a phrase's lines with the same cells.
   - **Undo:** Kumi's undo of a pattern write is refused once anything in that pattern has changed since, another Kumi change included. So write a pattern in one step where you can.
   - `notes_transpose` and `notes_humanize` change notes in place.
+- **"Write me a drum beat", on a new track, in Live:**
+  1. Look first (`kumi_observe` with `scope: focus`) for the project key, the epoch and the Set's tempo and meter, and ask what's missing: style, tempo feel, how many bars.
+  2. Plan one `kumi_change` with three steps:
+     - `add_tracks_and_scenes` adds a MIDI track (`as: "drums"`);
+     - `load_device` puts a drum kit on `@drums`: one the producer names, or `instruments/Drum Rack`. An empty Drum Rack plays nothing until its pads hold sounds; fill them with skill `kumi:sounds`.
+     - `write_midi_clip` writes into its first empty Session slot (`trackRef: "@drums"`, `sceneIndex`, `name`, and `length`), with lanes such as:
+
+       ```
+       kick /16 1|1 x...x...x...x... *4
+       snare /16 1|1 ....x.......x... *4
+       hat /16 1|1 x.x.x.x.x.x.x.x. *4
+       ```
+  3. The producer approves it as one change. Report the track, the clip, its bars and the pattern in words, and the HISTORY id.
+  4. To hear it, the producer plays the clip in Live. Offer variations as new clips in empty slots, never by deleting this one.
+
+  REAPER builds the same with `track_add`, `fx_add` (a drum instrument), `item_add` and `notes_add`. Renoise uses an instrument with a drum kit and `notes_write` on a pattern's track.
 
 ## Undo
 - **Undo with `kumi_undo` and a HISTORY id** from `kumi_history` or a `kumi_change` result. The producer approves it too.
