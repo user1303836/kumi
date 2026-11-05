@@ -102,9 +102,15 @@ where
     };
     // Every call's signal has the runtime's shutdown in it.
     server.ctx.shutdown().cancel();
-    if tokio::time::timeout(SETTLE, server.all_settled()).await.is_err() {
-        say(&format!("kumi serve: {} call(s) still settling after {} s; stopping", server.calls.borrow().len(), SETTLE.as_secs()));
+    let settling = async {
+        server.all_settled().await;
+        server.ctx.jobs().all_settled().await;
+    };
+    if tokio::time::timeout(SETTLE, settling).await.is_err() {
+        let (calls, jobs) = (server.calls.borrow().len(), server.ctx.jobs().running());
+        say(&format!("kumi serve: {calls} call(s) and {jobs} job(s) still settling after {} s; stopping", SETTLE.as_secs()));
     }
+    server.ctx.jobs().interrupt_running(server.ctx.snapshots());
     heartbeat.abort();
     core::publish_stopped(&server.ctx).await;
     let _ = server.outbox.send(Out::Close);
@@ -639,7 +645,7 @@ mod tests {
             };
             let given = Env::from([("HOME".into(), state.path().display().to_string()), ("KUMI_PROCESSES".into(), "none".into())]);
             let env = environment(&args, given);
-            let ctx = Rc::new(Ctx::new(args, env).unwrap());
+            let ctx = Ctx::new(args, env).unwrap();
             // A pipe each way: dropping the host's end of its input ends the runtime's.
             let (to, server_in) = tokio::io::duplex(1 << 16);
             let (server_out, from) = tokio::io::duplex(1 << 16);

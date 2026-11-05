@@ -2,6 +2,7 @@
 //! arguments, the host's identity for it, its cancel signal and its progress) and the runtime it runs in ([`Ctx`]).
 //! Every stream's operations are written against these; each module adds its own to [`super::registry`].
 
+use super::jobs::{JobHandle, Jobs};
 use super::snapshots::Snapshots;
 use super::Args;
 use futures::future::LocalBoxFuture;
@@ -12,8 +13,9 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use tokio::sync::mpsc::UnboundedSender;
 
 pub type JsonObject = Map<String, Value>;
@@ -265,6 +267,8 @@ impl Drop for Scratch {
 
 /// The runtime every operation runs in. One per process, shared by its calls (on one thread).
 pub struct Ctx {
+    /// Itself, for work that outlasts a call (a job).
+    me: Weak<Ctx>,
     daw: DawId,
     paths: Paths,
     env: Env,
@@ -272,6 +276,7 @@ pub struct Ctx {
     media_roots: Vec<PathBuf>,
     media: Media,
     snapshots: Snapshots,
+    jobs: Jobs,
     shutdown: Signal,
     /// The operations the runtime offers (`status`'s capabilities).
     offered: Cell<&'static [&'static Operation]>,
@@ -283,13 +288,17 @@ pub struct Ctx {
 impl Ctx {
     /// The runtime for these arguments: its state folder made when it isn't there and the owner's alone either way,
     /// and resolved on disk, so every path under it (scratch included) compares as the library's roots do.
-    pub fn new(args: Args, env: Env) -> Result<Ctx, String> {
+    pub fn new(args: Args, env: Env) -> Result<Rc<Ctx>, String> {
         let unmade = |error: std::io::Error| format!("can't make {}: {error}", args.state_dir.display());
         make_private_dir(&args.state_dir).map_err(unmade)?;
         let state_dir = std::fs::canonicalize(&args.state_dir).map_err(unmade)?;
-        let ctx = Ctx {
+        let snapshots = Snapshots::new(state_dir.clone());
+        let jobs = Jobs::new(&snapshots, &state_dir);
+        let ctx = Rc::new_cyclic(|me| Ctx {
+            me: me.clone(),
             daw: args.daw,
-            snapshots: Snapshots::new(state_dir.clone()),
+            snapshots,
+            jobs,
             paths: Paths { state_dir, kumi_home: args.kumi_home },
             env,
             library_roots: RefCell::new(granted("library", args.library_roots)),
@@ -299,7 +308,7 @@ impl Ctx {
             offered: Cell::new(super::registry::OPERATIONS),
             scratches: Cell::new(0),
             started: kumi_common::time::now_ms(),
-        };
+        });
         ctx.project_library_roots();
         Ok(ctx)
     }
@@ -358,6 +367,22 @@ impl Ctx {
 
     pub fn snapshots(&self) -> &Snapshots {
         &self.snapshots
+    }
+
+    pub fn jobs(&self) -> &Jobs {
+        &self.jobs
+    }
+
+    /// Starts `work` as a background job of `kind` (`scan`, say): its id at once, for the call to answer with. `work`
+    /// gets the runtime and the job's handle (its signal fires when the runtime stops; its progress goes to
+    /// `jobs/<id>.json`); what it returns is the job's result. Refused `busy` while [`super::jobs::RUNNING`] jobs run.
+    pub fn start_job<W, F>(&self, kind: &'static str, work: W) -> Result<String, OpError>
+    where
+        W: FnOnce(Rc<Ctx>, JobHandle) -> F + 'static,
+        F: Future<Output = Result<Value, OpError>> + 'static,
+    {
+        let ctx = self.me.upgrade().ok_or_else(|| OpError::Failed { reason: "the runtime is stopping".into() })?;
+        self.jobs.start(ctx, kind, work)
     }
 
     /// A scratch folder for one call of `op`: `<state>/scratch/<op>/<id>/`, the id the runtime's own (never anything

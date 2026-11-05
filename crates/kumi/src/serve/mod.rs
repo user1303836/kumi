@@ -8,6 +8,7 @@
 //! The operations it offers are in [`registry`]; [`ctx`] is what each is given; [`mcp`] is the wire.
 
 pub mod ctx;
+pub mod jobs;
 pub mod mcp;
 pub mod registry;
 pub mod snapshots;
@@ -18,7 +19,6 @@ use kumi_types::daw::DawId;
 use kumi_types::system::Env;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::rc::Rc;
 use std::time::Duration;
 
 /// The runtime's own protocol, which `status` names: the host refuses another major version before any write.
@@ -156,7 +156,7 @@ pub fn main(args: &[String]) -> i32 {
     let local = tokio::task::LocalSet::new();
     let code = local.block_on(&runtime, async move {
         let ctx = match ctx::Ctx::new(args, env) {
-            Ok(ctx) => Rc::new(ctx),
+            Ok(ctx) => ctx,
             Err(why) => {
                 say(&format!("kumi serve: {why}"));
                 return 1;
