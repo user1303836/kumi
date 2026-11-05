@@ -101,9 +101,11 @@ export function parseGeneration(value: unknown): Generation | null {
 }
 
 /** Whether an ended job was never sent to Mirelo (CC-13's `not_submitted`): the one case nothing was charged. A running
- *  job's `not_submitted` isn't that: it may still submit. */
+ *  job's `not_submitted` isn't that: it may still submit. The result's own `submission` decides when it's there; the
+ *  error's code only stands in when it isn't (rgzm), so `unknown` beside a `not_submitted` code is still unknown. */
 function neverSent(made: Generation): boolean {
-  return made.state !== 'running' && (made.submission === 'not_submitted' || made.error?.code === 'not_submitted')
+  if (made.state === 'running') return false
+  return made.submission ? made.submission === 'not_submitted' : made.error?.code === 'not_submitted'
 }
 
 /** What it cost: `12 credits (est. 15)` once the charge is known; while it runs, what's reserved; after it ended

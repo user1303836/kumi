@@ -1685,7 +1685,8 @@ function parseGeneration(value) {
   };
 }
 function neverSent(made) {
-  return made.state !== "running" && (made.submission === "not_submitted" || made.error?.code === "not_submitted");
+  if (made.state === "running") return false;
+  return made.submission ? made.submission === "not_submitted" : made.error?.code === "not_submitted";
 }
 function costWords(made, t = english) {
   const amount = (n) => t("generate.credits", n, num(n, 0));

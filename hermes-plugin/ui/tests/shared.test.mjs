@@ -487,6 +487,12 @@ test('an unknown charge is never a number, a frozen ledger warns, and notes neve
 test('only a job that ended never sent says nothing was charged; a raw overrun is amber, and the kept card says the ledger froze', () => {
   const neverSent = { ...fixtures.FAILED_UNKNOWN, error: { code: 'not_submitted', reason: 'Mirelo turned the key down' }, result: { ...fixtures.FAILED_UNKNOWN.result, submission: 'not_submitted' } }
   assert.equal(generate.generationJobWords(neverSent).detail, 'Mirelo turned the key down · never sent to Mirelo · nothing charged')
+  // The result's own `submission` decides: a `not_submitted` code beside `submission: unknown` is still an unknown charge,
+  // and the code stands in only when the result says nothing about submission (rgzm).
+  const codeOnly = { ...neverSent, result: { ...neverSent.result, submission: 'unknown' } }
+  assert.equal(generate.costWords(generate.parseGeneration(codeOnly)), 'charge not known yet · 15 credits reserved')
+  const { submission: _absent, ...silent } = neverSent.result
+  assert.equal(generate.costWords(generate.parseGeneration({ ...neverSent, result: silent })), 'never sent to Mirelo · nothing charged')
   // While it runs, `not_submitted` isn't that: it may still submit.
   assert.equal(generate.costWords(generate.parseGeneration({ ...fixtures.RUNNING, result: { ...fixtures.RUNNING.result, submission: 'not_submitted' } })), '15 credits reserved')
   // The `/job` route's raw snapshot has no ledger: a charge over the reservation is amber, but frozen only once a card says so.
