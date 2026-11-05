@@ -133,6 +133,8 @@
     cached = 0;
     loading = /* @__PURE__ */ new Map();
     generation = 0;
+    /** Moves on with every play and stop: a play whose turn has passed never starts its sound. */
+    turn = 0;
     listeners = /* @__PURE__ */ new Set();
     playing = null;
     subscribe = (fn) => {
@@ -182,23 +184,28 @@
       this.cached = 0;
       this.loading.clear();
     }
+    /** Play `id` (stopping whatever plays). A later `play` or `stop` takes over even while this one still loads, so
+     *  there's never more than one sound playing, and never one that can't be stopped. */
     async play(id) {
       this.stop();
+      const turn = this.turn;
       this.changed(id);
       try {
-        const audio = new Audio(await this.url(id));
-        if (this.playing !== id) return;
+        const url = await this.url(id);
+        if (turn !== this.turn) return;
+        const audio = new Audio(url);
         this.audio = audio;
         audio.onended = () => {
           if (this.audio === audio) this.stop();
         };
         await audio.play();
       } catch (error) {
-        if (this.playing === id) this.stop();
+        if (turn === this.turn) this.stop();
         throw error;
       }
     }
     stop() {
+      this.turn += 1;
       if (this.audio) {
         this.audio.pause();
         this.audio.onended = null;
@@ -316,17 +323,13 @@
         transport?.playing !== void 0 && /* @__PURE__ */ jsx(Chip, { tone: transport.playing ? "good" : void 0, children: transport.playing ? "▶ playing" : "■ stopped" }),
         bpm(transport?.tempo) && /* @__PURE__ */ jsx(Chip, { children: bpm(transport?.tempo) }),
         typeof transport?.position === "string" && /* @__PURE__ */ jsx(Chip, { children: clean(transport.position, 16) }),
-        focus.stale && /* @__PURE__ */ jsx(Chip, { tone: "warn", children: typeof focus.at === "number" ? `not answering · seen ${ago(focus.at, now)}` : "not answering" })
+        focus.stale && /* @__PURE__ */ jsx(Chip, { tone: "warn", children: "not answering" })
       ] }),
       catchUp.length > 0 && /* @__PURE__ */ jsxs("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
         /* @__PURE__ */ jsx("span", { style: S.faint, children: "Since Kumi last looked" }),
         catchUp.slice(0, 4).map((line, index) => /* @__PURE__ */ jsx("span", { style: { ...S.muted, ...S.ellipsis }, children: clean(line, 120) }, index))
       ] }),
-      now !== void 0 && typeof focus.age_ms === "number" && focus.stale && /* @__PURE__ */ jsxs("span", { style: S.faint, children: [
-        "Last heard ",
-        ago(now - focus.age_ms, now),
-        "."
-      ] })
+      focus.stale && typeof focus.heard_at === "number" && /* @__PURE__ */ jsx("span", { style: S.faint, children: `Last heard ${ago(focus.heard_at, now)}.` })
     ] });
   }
   function HistoryView({ history, now, action }) {
@@ -694,6 +697,11 @@
       }
     };
   }
+  function heard(reply) {
+    if (!reply || typeof reply !== "object" || !("age_ms" in reply)) return reply;
+    const age = reply.age_ms;
+    return { ...reply, heard_at: typeof age === "number" && Number.isFinite(age) ? Date.now() - age : null };
+  }
   var KumiStore = class {
     constructor(fetch, historyLimit = 50) {
       this.fetch = fetch;
@@ -767,7 +775,7 @@
         const after = status.revisions ?? {};
         const first = this.state.available !== true;
         const liveness = !before || before.connected !== status.connected || before.stale !== status.stale;
-        this.set({ available: true, error: null, status });
+        this.set({ available: true, error: null, status: heard(status) });
         const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null };
         const moved = (part) => this.state[part] === null || (after[part] ?? null) !== held[part];
         const reads = [];
@@ -784,7 +792,7 @@
         const path = part === "history" ? `/history?limit=${this.historyLimit}` : `/${part}`;
         try {
           const value = await this.fetch(path);
-          if (generation === this.generation) this.set({ [part]: value });
+          if (generation === this.generation) this.set({ [part]: heard(value) });
         } catch (error) {
           if (generation !== this.generation) return;
           if (statusOf(error) === 404 && part !== "setup") this.set({ available: false });

@@ -224,7 +224,7 @@ def write_state(plugin_data: Path, library: Path, *, audio: str = "some", now_ms
             },
         },
     )
-    _write_json(state / "jobs" / "j-scan-1.json", {**_envelope(30, now), "state": "running", "progress": {"done": 412, "total": 1200, "label": "Scanning Drums"}})
+    _write_json(state / "jobs" / "j-scan-1.json", {**_envelope(30, now), "state": "running", "progress": {"done": 412, "total": 1200, "message": "Scanning Drums"}})
     return state
 
 

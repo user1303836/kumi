@@ -106,7 +106,7 @@ class Routes(unittest.TestCase):
         with self.assertRaises(HTTPException):
             self.api.audio(id="s-r7-0091")
 
-    def test_audio_is_served_only_as_audio_or_png_whatever_the_runtime_says(self) -> None:
+    def test_only_audio_or_png_is_served_and_sound_says_what_can_play_the_same_way(self) -> None:
         from fastapi import HTTPException
 
         listing = self.state / "artifacts.json"
@@ -114,9 +114,15 @@ class Routes(unittest.TestCase):
         for entry in artifacts["artifacts"].values():
             entry["mime"] = "text/html"
         listing.write_text(json.dumps(artifacts), encoding="utf-8")
-        with self.assertRaises(HTTPException) as refused:
-            self.api.audio(id="a-7f32")
-        self.assertEqual(refused.exception.status_code, 415)
+        current = self.state / "map" / "r7.json"
+        sound_map = json.loads(current.read_text(encoding="utf-8"))
+        sound_map["sounds"]["s-r7-0091"]["mime"] = "text/html"
+        current.write_text(json.dumps(sound_map), encoding="utf-8")
+        for media_id in ("a-7f32", "s-r7-0091"):
+            with self.assertRaises(HTTPException) as refused:
+                self.api.audio(id=media_id)
+            self.assertEqual(refused.exception.status_code, 404)
+        self.assertFalse(self.api.sound(id="s-r7-0091")["playable"])
 
     def test_an_unknown_sound_is_404(self) -> None:
         from fastapi import HTTPException

@@ -30,6 +30,8 @@ MEDIA_MAX_BYTES = 50 * 1024 * 1024
 SNAPSHOT_MAX_BYTES = 64 * 1024 * 1024
 # Ids that also name files (map revisions, jobs): no separators, no leading dot.
 _FILE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
+# The media types a media id is served as: audio, and the listen card's spectrogram.
+_MEDIA_TYPE = re.compile(r"audio/[a-z0-9][a-z0-9.+-]{0,40}|image/png")
 
 
 def state_dir() -> Path:
@@ -43,6 +45,13 @@ def _now_ms() -> int:
     return int(time.time() * 1000)
 
 
+# What the runtime writes is never wider or deeper than this: a file that is isn't one of its snapshots.
+_WHOLE_MAX = 2**64
+_DEPTH_MAX = 64
+# A time in ms the UI can do arithmetic with (JavaScript's exact integers).
+_MS_MAX = 2**53
+
+
 def _no_constant(name: str) -> Any:
     raise ValueError(f"{name} is no number the runtime writes")
 
@@ -54,16 +63,49 @@ def _finite(text: str) -> float:
     return value
 
 
+def _whole(text: str) -> int:
+    value = int(text)
+    if not -_WHOLE_MAX < value < _WHOLE_MAX:
+        raise ValueError("a number wider than the runtime writes")
+    return value
+
+
+def _shallow(value: Any) -> bool:
+    """Whether `value` nests no deeper than `_DEPTH_MAX`, checked without recursion (a deeper document would parse,
+    then fail whatever encodes it again)."""
+    stack = [(value, 1)]
+    while stack:
+        node, depth = stack.pop()
+        children = node.values() if isinstance(node, dict) else node if isinstance(node, list) else ()
+        for child in children:
+            if isinstance(child, (dict, list)):
+                if depth >= _DEPTH_MAX:
+                    return False
+                stack.append((child, depth + 1))
+    return True
+
+
 def _load(path: Path) -> Any:
-    """A JSON file, or None when it's missing, too big or not what the runtime writes (NaN, Infinity and numbers too
-    big to be finite included: no route could answer with them)."""
+    """A JSON file, or None when it's missing, too big or not what the runtime writes: NaN, Infinity, numbers too big
+    to be finite or wider than 64 bits, and nesting deeper than `_DEPTH_MAX` included (no route could answer with
+    them)."""
     try:
         if path.stat().st_size > SNAPSHOT_MAX_BYTES:
             return None
         with path.open("rb") as file:
-            return json.load(file, parse_constant=_no_constant, parse_float=_finite)
+            data = json.load(file, parse_constant=_no_constant, parse_float=_finite, parse_int=_whole)
     except (OSError, ValueError, RecursionError):
         return None
+    return data if _shallow(data) else None
+
+
+def _ms(value: object) -> int | None:
+    """A time or duration in ms, when `value` is one the UI can count with."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    return int(value) if -_MS_MAX < value < _MS_MAX else None
 
 
 def read(state: Path, name: str) -> dict | None:
@@ -90,10 +132,9 @@ def owner(state: Path, now_ms: int | None = None) -> dict:
     data = read(state, "owner")
     if data is None:
         return {"stale": True, "age_ms": None}
-    beat = data.get("heartbeat", data.get("at"))
+    beat = _ms(data.get("heartbeat", data.get("at")))
     now = _now_ms() if now_ms is None else now_ms
-    finite = isinstance(beat, (int, float)) and not isinstance(beat, bool) and math.isfinite(beat)
-    age = now - int(beat) if finite else None
+    age = now - beat if beat is not None else None
     quiet = age is None or not -STALE_AFTER_S * 1000 <= age <= STALE_AFTER_S * 1000
     return {**_public(data), "stale": quiet or data.get("running") is False, "age_ms": age}
 
@@ -259,6 +300,9 @@ def media(state: Path, media_id: str, library_folders: list[str] | None = None) 
     if size > MEDIA_MAX_BYTES:
         return None
     mime = entry.get("mime") if isinstance(entry.get("mime"), str) else _mime_of(real)
+    # Only what the players and the listen card use: never a type a browser would render as a page.
+    if not isinstance(mime, str) or not _MEDIA_TYPE.fullmatch(mime):
+        return None
     return {"id": media_id, "path": real, "kind": entry.get("kind") or "audio", "mime": mime, "bytes": size}
 
 

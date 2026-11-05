@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -67,16 +68,22 @@ class Liveness(StateTest):
     def test_a_heartbeat_from_the_future_is_stale_too(self) -> None:
         self.assertTrue(snapshots.owner(self.state, now_ms=NOW - 60_000)["stale"])
 
-    def test_a_heartbeat_or_number_that_isnt_finite_reads_as_a_missing_file(self) -> None:
+    def test_a_heartbeat_or_number_the_runtime_cant_have_written_reads_as_stale_never_as_a_crash(self) -> None:
         path = self.state / "owner.json"
         last = path.read_text(encoding="utf-8")
-        for bad in ("NaN", "Infinity", "-Infinity", "1e400"):
-            with self.subTest(bad=bad):
+        for bad in ("NaN", "Infinity", "-Infinity", "1e400", "1" + "0" * 400, str(2**64), "1e300"):
+            with self.subTest(bad=bad[:12]):
                 path.write_text(last.replace(f'"heartbeat": {NOW}', f'"heartbeat": {bad}'), encoding="utf-8")
                 status = snapshots.status(self.state, now_ms=NOW)
-                self.assertEqual((status["connected"], status["stale"]), (False, True))
-        (self.state / "focus.json").write_text("[" * 100_000, encoding="utf-8")
-        self.assertIsNone(snapshots.read(self.state, "focus"))
+                self.assertEqual((status["connected"], status["stale"], status["age_ms"]), (False, True, None))
+
+    def test_nesting_deeper_than_a_snapshot_ever_is_reads_as_a_missing_file_even_when_it_parses(self) -> None:
+        focus = self.state / "focus.json"
+        for depth in (70, 900, 100_000):
+            with self.subTest(depth=depth):
+                focus.write_text('{"schema": 1, "focus": ' + "[" * depth + "]" * depth + "}", encoding="utf-8")
+                self.assertIsNone(snapshots.read(self.state, "focus"))
+                self.assertEqual(snapshots.focus(self.state, now_ms=NOW)["connected"], False)
 
     def test_a_runtime_that_says_it_stopped_is_stale_at_once(self) -> None:
         path = self.state / "owner.json"
@@ -224,6 +231,20 @@ class PublicViews(StateTest):
         self.assertNotIn("path", sound)
         self.assertIsNone(snapshots.public_sound(self.state, "s-r6-0091"))
         self.assertIsNone(snapshots.public_map(self.state, "r6"))
+
+
+class Imports(StateTest):
+    def test_the_module_loads_and_reads_state_with_the_standard_library_alone(self) -> None:
+        # `-S` leaves out every site-packages folder (FastAPI, Hermes's own packages) and `-I` the environment: what's
+        # left is the standard library, as when Hermes's validate probe imports the plugin with only Hermes around it.
+        code = (
+            "import importlib.util, sys; from pathlib import Path; "
+            f"spec = importlib.util.spec_from_file_location('snapshots', {str(HERE.parent / 'snapshots.py')!r}); "
+            "module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module); "
+            "print(module.focus(Path(sys.argv[1]))['focus']['track']['name'], 'plugins' in sys.modules)"
+        )
+        done = subprocess.run([sys.executable, "-I", "-S", "-c", code, str(self.state)], capture_output=True, text=True, timeout=60)
+        self.assertEqual((done.returncode, done.stdout.strip()), (0, "Drums False"), done.stderr)
 
 
 if __name__ == "__main__":

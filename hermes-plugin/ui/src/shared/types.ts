@@ -12,8 +12,8 @@ export interface Liveness {
   stale?: boolean
   age_ms?: number | null
   owner?: Owner | null
-  /** When the runtime wrote this snapshot (ms). */
-  at?: number
+  /** When the runtime was last heard, in this window's clock (ms): the store sets it from `age_ms` on receipt. */
+  heard_at?: number | null
 }
 
 export interface Project {

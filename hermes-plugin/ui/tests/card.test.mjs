@@ -105,3 +105,12 @@ test("the pane warns while Kumi isn't sure of the project and offers no Undo, un
   assert.ok(!cleared.includes('Ask Kumi to look again'))
   assert.ok(cleared.includes('>Undo<'))
 })
+
+test('"Last heard" counts from when the runtime was last heard, so it keeps moving while nothing new is read', async () => {
+  const { FocusView } = await load('src/shared/HistoryView.tsx', { react: 'real' })
+  const heardAt = 1_000_000_000
+  const focus = { stale: true, heard_at: heardAt, focus: { track: { name: 'Drums' } } }
+  const at = now => renderToStaticMarkup(createElement(FocusView, { focus, now }))
+  assert.ok(at(heardAt + 60_000).includes('Last heard 1 min ago.'))
+  assert.ok(at(heardAt + 3 * 3_600_000).includes('Last heard 3 h ago.'))
+})

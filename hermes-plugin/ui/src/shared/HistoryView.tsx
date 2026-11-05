@@ -46,7 +46,7 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
         {transport?.playing !== undefined && <Chip tone={transport.playing ? 'good' : undefined}>{transport.playing ? '▶ playing' : '■ stopped'}</Chip>}
         {bpm(transport?.tempo) && <Chip>{bpm(transport?.tempo)}</Chip>}
         {typeof transport?.position === 'string' && <Chip>{clean(transport.position, 16)}</Chip>}
-        {focus.stale && <Chip tone="warn">{typeof focus.at === 'number' ? `not answering · seen ${ago(focus.at, now)}` : 'not answering'}</Chip>}
+        {focus.stale && <Chip tone="warn">not answering</Chip>}
       </div>
       {catchUp.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -58,7 +58,7 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
           ))}
         </div>
       )}
-      {now !== undefined && typeof focus.age_ms === 'number' && focus.stale && <span style={S.faint}>Last heard {ago(now - focus.age_ms, now)}.</span>}
+      {focus.stale && typeof focus.heard_at === 'number' && <span style={S.faint}>{`Last heard ${ago(focus.heard_at, now)}.`}</span>}
     </div>
   )
 }

@@ -44,6 +44,14 @@ function notLive(state: KumiState): Partial<KumiState> {
   }
 }
 
+/** A reply with `heard_at` added: when the runtime was last heard, in this window's clock (the backend's `age_ms`
+ *  counted back from now), so "last heard" keeps moving while nothing new is read, whatever the backend's clock. */
+function heard<T>(reply: T): T {
+  if (!reply || typeof reply !== 'object' || !('age_ms' in reply)) return reply
+  const age = (reply as { age_ms?: unknown }).age_ms
+  return { ...reply, heard_at: typeof age === 'number' && Number.isFinite(age) ? Date.now() - age : null }
+}
+
 export class KumiStore {
   private state: KumiState = EMPTY
   private listeners = new Set<() => void>()
@@ -120,7 +128,7 @@ export class KumiStore {
       const after = status.revisions ?? {}
       const first = this.state.available !== true
       const liveness = !before || before.connected !== status.connected || before.stale !== status.stale
-      this.set({ available: true, error: null, status })
+      this.set({ available: true, error: null, status: heard(status) })
       const held = { focus: this.state.focus?.seq ?? null, history: this.state.history?.seq ?? null, map: this.state.map?.revision ?? null }
       const moved = (part: 'focus' | 'history' | 'map'): boolean => this.state[part] === null || (after[part] ?? null) !== held[part]
       const reads: Promise<void>[] = []
@@ -138,7 +146,7 @@ export class KumiStore {
       const path = part === 'history' ? `/history?limit=${this.historyLimit}` : `/${part}`
       try {
         const value = await this.fetch<unknown>(path)
-        if (generation === this.generation) this.set({ [part]: value } as Partial<KumiState>)
+        if (generation === this.generation) this.set({ [part]: heard(value) } as Partial<KumiState>)
       } catch (error) {
         if (generation !== this.generation) return
         if (statusOf(error) === 404 && part !== 'setup') this.set({ available: false })

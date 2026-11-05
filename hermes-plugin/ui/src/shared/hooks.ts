@@ -28,6 +28,8 @@ export class Audition {
   private cached = 0
   private loading = new Map<string, Promise<string>>()
   private generation = 0
+  /** Moves on with every play and stop: a play whose turn has passed never starts its sound. */
+  private turn = 0
   private listeners = new Set<() => void>()
   playing: string | null = null
 
@@ -88,24 +90,29 @@ export class Audition {
     this.loading.clear()
   }
 
+  /** Play `id` (stopping whatever plays). A later `play` or `stop` takes over even while this one still loads, so
+   *  there's never more than one sound playing, and never one that can't be stopped. */
   async play(id: string): Promise<void> {
     this.stop()
+    const turn = this.turn
     this.changed(id)
     try {
-      const audio = new Audio(await this.url(id))
-      if (this.playing !== id) return
+      const url = await this.url(id)
+      if (turn !== this.turn) return
+      const audio = new Audio(url)
       this.audio = audio
       audio.onended = () => {
         if (this.audio === audio) this.stop()
       }
       await audio.play()
     } catch (error) {
-      if (this.playing === id) this.stop()
+      if (turn === this.turn) this.stop()
       throw error
     }
   }
 
   stop(): void {
+    this.turn += 1
     if (this.audio) {
       this.audio.pause()
       this.audio.onended = null

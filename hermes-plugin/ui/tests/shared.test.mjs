@@ -257,3 +257,47 @@ test("a track listen that didn't complete is Desktop's to show; a completed one 
   assert.equal(listen.listenView({ ...compared, capture: { method: 'offline', seconds: 4 } }).capture, '4 s measured, through an offline render')
   assert.equal(listen.listenView(compared).capture, undefined)
 })
+
+test("the store notes when the runtime was last heard in this window's clock, from the backend's age", async () => {
+  const kumi = new store.KumiStore(async path => {
+    if (path === '/status') return { connected: false, stale: true, age_ms: 90_000, revisions: {} }
+    if (path === '/focus') return { stale: true, age_ms: 90_000, focus: { track: 'Drums' } }
+    return { items: [] }
+  })
+  const before = Date.now()
+  await kumi.refreshStatus()
+  const heardAt = kumi.get().focus.heard_at
+  assert.ok(heardAt >= before - 90_000 && heardAt <= Date.now() - 90_000, String(heardAt))
+})
+
+test('a second play, even one made while the first still loads, leaves one sound playing, and stop stops it', async () => {
+  const { Audition } = await load('src/shared/hooks.ts', { react: 'real' })
+  const made = []
+  globalThis.Audio = class {
+    constructor(url) {
+      this.url = url
+      this.paused = false
+      made.push(this)
+    }
+    play() {
+      return Promise.resolve()
+    }
+    pause() {
+      this.paused = true
+    }
+  }
+  try {
+    const audition = new Audition(async id => ({ data_url: `data:audio/wav;base64,${id}` }))
+    await Promise.all([audition.play('s-1'), audition.play('s-1')])
+    assert.equal(made.filter(audio => !audio.paused).length, 1)
+    audition.stop()
+    assert.ok(made.every(audio => audio.paused))
+    const late = audition.play('s-2')
+    audition.stop()
+    await late
+    assert.equal(made.length, 1, 'a play stopped while loading never starts')
+    assert.equal(audition.playing, null)
+  } finally {
+    delete globalThis.Audio
+  }
+})

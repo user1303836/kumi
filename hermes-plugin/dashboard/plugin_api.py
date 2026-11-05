@@ -11,7 +11,6 @@ from __future__ import annotations
 import base64
 import importlib.util
 import logging
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -112,23 +111,17 @@ def sound(id: str = Query(..., min_length=1, max_length=128)) -> dict:  # noqa: 
     return {**found, "playable": snapshots.media(state, id, _library_folders()) is not None}
 
 
-# What `/audio` hands over: the audio players and the listen card's spectrogram, nothing a browser would render.
-_MEDIA_TYPE = re.compile(r"audio/[a-z0-9][a-z0-9.+-]{0,40}|image/png")
-
-
 @router.get("/audio")
 def audio(id: str = Query(..., min_length=1, max_length=128)) -> dict:  # noqa: A002 - the query parameter is `id`
     """An artifact's or a current map sound's bytes, as a data URL. Only ids the runtime published are served, only
-    from the state folder's artifacts or an approved sample folder, up to 50 MiB (CC-4), and only as audio or PNG."""
+    from the state folder's artifacts or an approved sample folder, up to 50 MiB, and only as audio or PNG (CC-4,
+    `snapshots.media`: `/sound`'s `playable` asks the same)."""
     read = snapshots.read_media(snapshots.state_dir(), id, _library_folders())
     if read is None:
         raise HTTPException(status_code=404, detail="Kumi has no audio for that id here.")
     found, data = read
-    mime = found.get("mime")
-    if not isinstance(mime, str) or not _MEDIA_TYPE.fullmatch(mime):
-        raise HTTPException(status_code=415, detail="Kumi serves only audio and PNG images here.")
     encoded = base64.b64encode(data).decode("ascii")
-    return {"id": id, "mime": mime, "bytes": len(data), "data_url": f"data:{mime};base64,{encoded}"}
+    return {"id": id, "mime": found["mime"], "bytes": len(data), "data_url": f"data:{found['mime']};base64,{encoded}"}
 
 
 @router.get("/setup")
