@@ -127,11 +127,13 @@ When no change Kumi knows fits, Hermes can write code for it.
   code, and its **Show code** shows it again.
 - **A Max for Live audio effect:** "Build a Max for Live soft clipper with drive and tone, and put it after the bass's
   EQ." Kumi writes a new device from GenExpr code into `User Library/Kumi/Audio Effects`, with up to 16 controls of
-  its own, plus Mix and Output. Its output is held under −0.3 dBFS. Hermes Desktop shows its controls and code while
-  you decide. Putting it in your Set is a second change Hermes asks about. The file stays in your User Library after
-  an undo.
-- **Asked every time, once a chat has read outside content:** web pages, transcripts, files from the internet,
-  another plugin's results, or any terminal command or code run. In such a chat, each script and device is asked
+  its own, plus Mix and Output. What it adds is held under −0.3 dBFS; the track's own signal passes through
+  untouched. Hermes Desktop shows its controls and code while you decide. Putting it in your Set is a second change
+  Hermes asks about: Kumi can undo loading it at the end of the chain, but moving it elsewhere only Live's own Undo
+  takes back. The file stays in your User Library after an undo.
+- **Asked every time, once a chat has read outside content:** web pages, transcripts, files Hermes fetched from the
+  internet, another plugin's results, or any terminal command or code run. Files already on your disk, installed
+  skills, and the names in your library and projects don't count. In such a chat, each script and device is asked
   with its code, and none runs while Hermes's approvals are off. In a chat that hasn't, allowing a script for the
   session covers that chat's scripts; each new device is still asked.
 - **Refused before anyone is asked:** a script, or a device's code, over 400 lines or 32 KB; a script with a hidden or

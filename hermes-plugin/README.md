@@ -194,8 +194,9 @@ project as…** with **Copy all media into project directory**), or they'll miss
     asks under its own kind. With Mirelo, an upload's covers its one file in this chat, and a paid generation's only
     its own estimate, once.
   - **Scripts and devices:** each shows its code (a device, its controls too) before you decide. In a chat that has
-    read outside content (web pages, transcripts, files from the internet, another plugin's results, or any terminal
-    command or code run), each is asked every time. A messaging chat runs none unless `scripts_in_messaging` is on;
+    read outside content (web pages, transcripts, files Hermes fetched from the internet, another plugin's results, or
+    any terminal command or code run), each is asked every time; files already on your disk, installed skills, and the
+    names in your library and projects don't count. A messaging chat runs none unless `scripts_in_messaging` is on;
     scheduled jobs, webhooks, `hermes chat -q` and Hermes's API server never run one.
   - **"Always"** leaves an entry in Hermes's `command_allowlist` (the profile's config.yaml) that Kumi never edits; to
     remove it, delete the `plugin_rule:kumi:` entries there.
