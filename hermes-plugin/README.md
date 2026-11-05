@@ -132,8 +132,10 @@ audio or file paths) through Hermes's own model access: to the auxiliary model y
 Hermes (it must accept images), or to the fallback providers Hermes is configured to try for that task. Hermes retries
 a failed attempt and may fall back, which can add time and token cost. If you let Kumi use an existing Kumi
 installation, its runtime reads that installation's DAW connection files and writes its own connection state there,
-never its sign-in or settings. Kumi's own sign-in, model providers, account files and updater are never used. No
-telemetry.
+never its sign-in or settings. A scheduled job (Hermes cron) reads only Kumi's status and HISTORY as last published;
+its answer (change titles, track names) leaves this computer only through where that job delivers, and Kumi's job
+blueprints deliver locally by default. Kumi's own sign-in, model providers, account files and updater are never used.
+No telemetry.
 
 ## Compatibility
 

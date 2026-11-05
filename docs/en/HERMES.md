@@ -89,6 +89,9 @@ Hermes runs Kumi's changes, track listens and setup steps without asking; `/kumi
   approved. REAPER may show the project as modified after a track listen, since only saving clears that flag; Kumi
   never saves. After a track listen in Live, Live may show the Set as modified, and its own Undo history includes the
   listen's temporary device steps: Undo in Live can bring Kumi Ears back.
+- **Scheduled jobs** (Hermes cron) read only Kumi's status and HISTORY as last published. Their answer (change titles,
+  track names) leaves your computer only through where the job delivers; Kumi's job blueprints deliver locally by
+  default.
 - Kumi in Hermes never uses Kumi's own sign-in, model providers or updater, and sends no telemetry.
 
 ## Limits
