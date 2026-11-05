@@ -11,6 +11,8 @@ export interface Liveness {
   connected?: boolean
   stale?: boolean
   age_ms?: number | null
+  /** False once the runtime's last word was that it stopped (a stop, not a silence); null when it hasn't said. */
+  running?: boolean | null
   owner?: Owner | null
   /** When the runtime was last heard, in this window's clock (ms): the store sets it from `age_ms` on receipt. */
   heard_at?: number | null

@@ -53,7 +53,7 @@ export function FocusView({ focus, now }: { focus: Focus | null; now?: number })
             {clean(busy, 40)}
           </Chip>
         )}
-        {focus.stale && <Chip tone="warn">not answering</Chip>}
+        {focus.stale && (focus.running === false ? <Chip>Kumi stopped</Chip> : <Chip tone="warn">not answering</Chip>)}
       </div>
       {catchUp.lines.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>

@@ -43,6 +43,7 @@ test('numbers carry a true minus and the chip says what is connected, stale or m
   const live = { connected: true, daw: 'ableton', project: { name: 'Night Drive' } }
   assert.deepEqual(format.chipWords(live, 124), { tone: 'good', text: 'Live · Night Drive · 124 BPM' })
   assert.deepEqual(format.chipWords({ ...live, connected: false, stale: true, owner: { pid: 1 } }), { tone: 'warn', text: 'Live · Night Drive · not answering' })
+  assert.deepEqual(format.chipWords({ ...live, connected: false, stale: true, running: false, owner: { pid: 1 } }), { tone: 'muted', text: 'Live · Night Drive · Kumi stopped' })
   assert.deepEqual(format.chipWords({ connected: false, stale: true, daw: 'reaper' }), { tone: 'muted', text: 'Kumi · REAPER not connected' })
   assert.equal(format.ago(Date.now() - 4 * 60_000), '4 min ago')
 })

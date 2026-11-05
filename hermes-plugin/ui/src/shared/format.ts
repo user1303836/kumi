@@ -157,6 +157,8 @@ export function chipWords(status: Status | null, tempo?: unknown): { tone: 'bad'
     const parts = [daw, project, bpm(tempo)].filter(Boolean)
     return { tone: 'good', text: parts.join(' · ') }
   }
+  // Its last word was that it stopped (its chat ended, or it sat idle): nothing's wrong, it just isn't running.
+  if (status.stale && status.running === false) return { tone: 'muted', text: project ? `${daw} · ${project} · Kumi stopped` : `${daw} · Kumi stopped` }
   if (status.stale && status.owner) return { tone: 'warn', text: project ? `${daw} · ${project} · not answering` : `${daw} · not answering` }
   return { tone: 'muted', text: `Kumi · ${daw} not connected` }
 }

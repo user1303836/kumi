@@ -140,9 +140,11 @@ def owner(state: Path, now_ms: int | None = None) -> dict:
 
 
 def _liveness(state: Path, now_ms: int | None) -> dict:
-    """How fresh the runtime is, from owner.json; its `owner` too when it names one (a snapshot keeps its own else)."""
+    """How fresh the runtime is, from owner.json: stale or not, its heartbeat's age, and `running: false` once its last
+    word was that it stopped (a stop, not a silence); its `owner` too when it names one (a snapshot keeps its own
+    else)."""
     own = owner(state, now_ms)
-    live = {"stale": own["stale"], "age_ms": own["age_ms"]}
+    live = {"stale": own["stale"], "age_ms": own["age_ms"], "running": own.get("running") if isinstance(own.get("running"), bool) else None}
     if isinstance(own.get("owner"), dict):
         live["owner"] = own["owner"]
     return live

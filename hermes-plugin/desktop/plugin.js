@@ -110,6 +110,7 @@ function chipWords(status, tempo) {
     const parts = [daw, project, bpm(tempo)].filter(Boolean);
     return { tone: "good", text: parts.join(" · ") };
   }
+  if (status.stale && status.running === false) return { tone: "muted", text: project ? `${daw} · ${project} · Kumi stopped` : `${daw} · Kumi stopped` };
   if (status.stale && status.owner) return { tone: "warn", text: project ? `${daw} · ${project} · not answering` : `${daw} · not answering` };
   return { tone: "muted", text: `Kumi · ${daw} not connected` };
 }
@@ -779,7 +780,7 @@ function FocusView({ focus, now }) {
       bpm(transport?.tempo) && /* @__PURE__ */ jsx3(Chip, { children: bpm(transport?.tempo) }),
       meter && /* @__PURE__ */ jsx3(Chip, { children: clean(meter, 12) }),
       busy && /* @__PURE__ */ jsx3(Chip, { tone: "warn", title: "The DAW answers late while this lasts, so what's shown may be behind", children: clean(busy, 40) }),
-      focus.stale && /* @__PURE__ */ jsx3(Chip, { tone: "warn", children: "not answering" })
+      focus.stale && (focus.running === false ? /* @__PURE__ */ jsx3(Chip, { children: "Kumi stopped" }) : /* @__PURE__ */ jsx3(Chip, { tone: "warn", children: "not answering" }))
     ] }),
     catchUp.lines.length > 0 && /* @__PURE__ */ jsxs3("div", { style: { display: "flex", flexDirection: "column", gap: 2 }, children: [
       /* @__PURE__ */ jsx3("span", { style: S.faint, children: "Since Kumi last looked" }),
