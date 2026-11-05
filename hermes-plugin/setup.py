@@ -53,6 +53,13 @@ _OS = {"darwin": "apple-darwin", "windows": "pc-windows-msvc", "linux": "unknown
 _PLATFORM_NAMES = {"aarch64-apple-darwin": "macOS (Apple silicon)", "x86_64-apple-darwin": "macOS (Intel)",
                    "aarch64-pc-windows-msvc": "Windows (Arm)", "x86_64-pc-windows-msvc": "Windows (x64)",
                    "aarch64-unknown-linux-gnu": "Linux (Arm)", "x86_64-unknown-linux-gnu": "Linux (x64)"}
+
+
+def platform_name(target: Any) -> str:
+    """A build target as a producer knows it: "macOS (Apple silicon)" for aarch64-apple-darwin."""
+    return _PLATFORM_NAMES.get(target, str(target))
+
+
 _COMPONENT_STATES = {"missing", "same", "older", "newer", "other_owner"}
 # Setup shows the producer its lines verbatim, in the chat's approval and in the terminal, so it refuses text it
 # couldn't show as it is: longer than a path can be, more lines than an approval should hold, or characters that hide,
@@ -119,7 +126,7 @@ def pin_for(pin: dict, target: str) -> dict:
     SHA-256, and sizes."""
     record = pin["targets"].get(target)
     if not isinstance(record, dict):
-        raise SetupError("unsupported_platform", f"Kumi {pin['kumi']} has no build for {_PLATFORM_NAMES.get(target, target)}.")
+        raise SetupError("unsupported_platform", f"Kumi {pin['kumi']} has no build for {platform_name(target)}.")
     url = f"https://github.com/{REPOSITORY}/releases/download/v{pin['kumi']}/kumi-{target}.tar.xz"
     if record.get("url") != url:
         raise SetupError("bad_pin", f"The pin's download for {target} isn't {url}.")
@@ -365,7 +372,7 @@ def _audio_line(state: str, path: str | None, offer: str | None, *, paths: bool 
     if state == "available":
         return f"Compressed audio (MP3, FLAC…): yes, with the ffmpeg {f'at {path}' if paths else 'you allowed'}."
     why = {"changed": f"The ffmpeg at {path} changed since you allowed it" if paths else
-           "The ffmpeg you allowed has changed since you allowed it",
+           "The ffmpeg you allowed has changed since",
            "gone": f"The ffmpeg you allowed ({path}) is gone" if paths else "The ffmpeg you allowed is gone"
            }.get(state, "Kumi reads WAV and AIFF only")
     if offer:
@@ -373,9 +380,9 @@ def _audio_line(state: str, path: str | None, offer: str | None, *, paths: bool 
         allow = "allow it again" if offer == path else other
         message = f"{why}; to {allow}, run hermes kumi setup (or ask Hermes to set up Kumi)."
     elif state == "not_allowed":
-        message = f"{why}: there's no ffmpeg on this computer."
+        message = f"{why}: setup found no ffmpeg on this computer."
     else:
-        message = f"{why}, and there's no other ffmpeg on this computer; Kumi reads WAV and AIFF only."
+        message = f"{why}, and setup found no other ffmpeg on this computer; Kumi reads WAV and AIFF only."
     return f"Compressed audio (MP3, FLAC…): no. {message}"
 
 
@@ -422,7 +429,7 @@ def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: 
     if state != "ready":
         label = {"missing": "needs_runtime", "outdated": "outdated_runtime", "damaged": "damaged_runtime"}[state]
         sentence = {"missing": f"Kumi needs its runtime: {_mb(record['size'])} from github.com/{REPOSITORY}.",
-                    "outdated": f"This plugin pins Kumi {pin['kumi']}; set up its runtime ({_mb(record['size'])}).",
+                    "outdated": f"This plugin needs Kumi {pin['kumi']}; setup downloads it ({_mb(record['size'])}).",
                     "damaged": "Kumi's runtime is incomplete or was changed; set it up again."}[state]
         result.update(state=label, next_step="install_runtime", message=sentence)
         return result
@@ -436,7 +443,7 @@ def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: 
         result["daw_component"]["state"] = "unknown"
     if result["daw_component"]["state"] == "not_installed":
         result.update(state="needs_daw_component", next_step="install_daw_component",
-                      message=f"Kumi's runtime is ready; next, install Kumi's part in {DAWS[daw]}.")
+                      message=f"Kumi's runtime is ready; next, setup installs Kumi's part in {DAWS[daw]}.")
         return result
     connected = (_read_json(data_dir / "state" / "status.json") or {}).get("connected") is True
     after = component.get("after") if isinstance(component, dict) else None
@@ -444,9 +451,11 @@ def status(*, daw: str | None = None, data_dir: Path | None = None, plugin_dir: 
         result.update(state="ready", message=f"Kumi is set up and connected to {DAWS[daw]}.")
     elif after == "choose_control_surface":
         result.update(state="ready", next_step="choose_control_surface",
-                      message="In Live, choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI), then connect.")
+                      message="In Live, choose AbletonMcpBridge as a Control Surface (Settings → Link, Tempo & MIDI), "
+                              "then ask Hermes to connect to it.")
     else:
-        result.update(state="ready", next_step="connect", message=f"Kumi is set up; open {DAWS[daw]} and connect.")
+        result.update(state="ready", next_step="connect",
+                      message=f"Kumi is set up: open {DAWS[daw]}, then ask Hermes to connect to it.")
     return result
 
 
@@ -580,7 +589,7 @@ def _compute_plan(daw: str, setup_daw: Callable[[dict], Any] | None, data_dir: P
         plan.update(step="runtime", paths=[str(destination)],
                     download={"url": record["url"], "sha256": record["sha256"], "bytes": record["size"],
                               "unpacked_bytes": record["unpacked_bytes"]},
-                    effects=[f"Download Kumi {pin['kumi']} for {_PLATFORM_NAMES.get(target, target)} "
+                    effects=[f"Download Kumi {pin['kumi']} for {platform_name(target)} "
                              f"({_mb(record['size'])}) from {record['url']}",
                              "Check it against the SHA-256 this plugin pins, and stop if it differs",
                              f"Unpack it ({_mb(record['unpacked_bytes'])}) into {destination}", _RESTART])
@@ -643,9 +652,9 @@ _TAGGING = {
 # does, but a standalone Kumi connected to the same DAW still can (8b), and the id is then saved with the project.
 _TAGGING_WHEN_ASKED = {
     "reaper": ("REAPER: Kumi's extension keeps an id in a saved project only when a standalone Kumi connected to REAPER "
-               "asks it to; Kumi in Hermes never asks. Once kept, the id is saved with the project (ext state).",),
+               "asks it to; Kumi for Hermes never asks. Once kept, the id is saved with the project (ext state).",),
     "renoise": ("Renoise: Kumi's tool keeps an id in a song only when a standalone Kumi connected to Renoise asks it to; "
-                "Kumi in Hermes never asks. Once kept, the id is saved with the song (its tool data).",),
+                "Kumi for Hermes never asks. Once kept, the id is saved with the song (its tool data).",),
 }
 
 
@@ -723,16 +732,17 @@ def _approval_lines(plan: Mapping[str, Any], daw: str, action: str) -> list[str]
         home = _owner_home(plan)
         if plan.get("step") != "owned_elsewhere" or home is None:
             return None
-        component = plan["component"].get("component") or "DAW component"
+        component = plan["component"].get("component")
+        kept = f"The {component} it installed" if component else f"Its part in {DAWS[daw]}"
         return [f"Kumi: use the existing Kumi installation at {home} for {DAWS[daw]}",
                 "Kumi's runtime will read that installation's DAW connection files and write its own connection state "
                 "there (never its sign-in, settings or account)",
-                f"The {component} it installed stays as it is", _RESTART, *_tagging(daw, plan["component"]), *using]
+                f"{kept} stays as it is", _RESTART, *_tagging(daw, plan["component"]), *using]
     if action != "install" or plan.get("step") not in ("runtime", "daw_component", "ffmpeg", "use_daw"):
         return None
     if plan["step"] == "use_daw" and not using:
         return None
-    title = {"runtime": f"Kumi: set up Kumi {plan['version']}'s runtime",
+    title = {"runtime": f"Kumi: download and install Kumi {plan['version']}",
              "daw_component": f"Kumi: install Kumi's part in {DAWS[daw]}",
              "ffmpeg": "Kumi: let Kumi's runtime run the ffmpeg already on this computer",
              "use_daw": f"Kumi: make {DAWS[daw]} Kumi's DAW in this profile"}[plan["step"]]
@@ -913,7 +923,8 @@ def _download(url: str, expect_size: int, expect_sha256: str, into: Path,
                 if progress:
                     progress(done, expect_size)
     except (urllib.error.URLError, http.client.HTTPException, OSError, TimeoutError) as error:
-        raise SetupError("download_failed", f"Downloading Kumi failed: {error}") from None
+        raise SetupError("download_failed", f"Downloading Kumi failed ({error}). Check your internet connection and run "
+                                            "setup again; nothing was installed.") from None
     if done != expect_size or digest.hexdigest() != expect_sha256:
         raise SetupError("checksum_mismatch", "The downloaded bundle doesn't match the SHA-256 this plugin pins; "
                                               "nothing was installed.")

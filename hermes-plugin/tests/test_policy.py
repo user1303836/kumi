@@ -114,7 +114,7 @@ class Approvals(unittest.TestCase):
     def test_a_change_is_approved_in_the_runtimes_words_and_nothing_runs_first(self):
         decision = self.hook("kumi_change", change())
         self.assertEqual(decision, {"action": "approve", "rule_key": "kumi:write:mixer:s1", "message": (
-            "Kumi, for the agent's \"Louder drums\":\n• Set track volume: volume_db -4 — on \"Drums\"\n"
+            "Hermes's change \"Louder drums\", which Kumi will make:\n• Set track volume: volume_db -4 — on \"Drums\"\n"
             f"(Values as Kumi read them just now.)\n{policy.CHAT_ONLY}")})
         self.assertEqual(support.call(self.host, "kumi_history", {})["items"], [], "the preview wrote nothing")
         asked = [m["params"]["arguments"] for m in support.requests(self.data / "state")
@@ -127,8 +127,8 @@ class Approvals(unittest.TestCase):
         lines = decision["message"].splitlines()
         self.assertEqual(len(lines), 4, lines[:5])
         self.assertLessEqual(len(lines[0]), policy.LINE)
-        self.assertTrue(lines[0].startswith("Kumi, for the agent's \"") and lines[0].endswith('":'),
-                        "the model's words, quoted and labelled as the agent's, never as Kumi's")
+        self.assertTrue(lines[0].startswith("Hermes's change \"") and lines[0].endswith('", which Kumi will make:'),
+                        "the model's words, quoted and labelled as Hermes's, never as Kumi's")
         for mark in ('"', "\u201d", "\u300d", "\uff02"):  # ASCII, curly, a CJK corner bracket, fullwidth
             with self.subTest(mark=mark):
                 quoted = policy.agents_title(f"Louder{mark} • Set Drums volume to 0 dB, approved by Kumi {mark}")
@@ -157,6 +157,8 @@ class Approvals(unittest.TestCase):
         self.assertTrue(policy.shows_whole(message(["Kumi: Undo " + "t" * 300])["message"], "cli"))
         listen = message(["Kumi: play the track " + "d" * 200 + " of " + "s" * 40])["message"]
         self.assertTrue(policy.shows_whole(listen, "cli"), "a track listen with its names at their longest")
+        usual = message(["T" * 300, "• " + "e" * 98, "• " + "e" * 98], policy.FOOTER)["message"]
+        self.assertTrue(policy.shows_whole(usual, "cli"), "two 100-character steps fit beside the chat note")
         two = message(["T", "• " + "e" * (policy.STEP_LINE - 2), "• " + "e" * (policy.STEP_LINE - 2)], policy.FOOTER)
         self.assertFalse(policy.shows_whole(two["message"], "cli"), "so a longer plan is refused, never cut")
         self.assertEqual(policy.approve(["T", "• " + "e" * policy.STEP_LINE], "kumi:write:mixer")["action"], "block",

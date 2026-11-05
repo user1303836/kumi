@@ -25,7 +25,7 @@ import threading
 import time
 from typing import Any, Callable, Iterable, Mapping
 
-from .setup import host_target
+from .setup import DAWS, host_target
 
 log = logging.getLogger(__name__)
 
@@ -424,8 +424,9 @@ class Client:
                 self._pending.pop(ident, None)
         if pending.gone is not None:
             raise Unavailable("stopped", pending.gone)
-        if pending.error is not None:
-            raise Unavailable("protocol", f"Kumi refused {method}: {pending.error.get('message') or pending.error}")
+        if pending.error is not None:  # unsure, not refused (tools.UNSURE_CODES): it may have done something
+            raise Unavailable("protocol", f"Kumi's runtime answered {method} with an error "
+                                          f"({pending.error.get('message') or pending.error}); what it did is unknown.")
         return pending.result
 
     def notify(self, method: str, params: dict | None = None) -> None:
@@ -692,7 +693,9 @@ class Runtimes:
             running = self.get(data_dir)
             if running is not None:
                 if running.daw != daw:
-                    raise Unavailable("other_daw", f"Kumi's runtime in this profile works in {running.daw}, not {daw}.")
+                    raise Unavailable("other_daw", f"Kumi is running for {DAWS.get(running.daw, running.daw)} in this "
+                                                   f"profile. To use {DAWS.get(daw, daw)}, end the chat using Kumi, then "
+                                                   "connect again.")
                 return running
             if self.settling(data_dir) is not None:  # stopping, it holds the profile until it exits
                 raise Unavailable("busy", BUSY)
