@@ -8,6 +8,8 @@ import logging
 import math
 import os
 from pathlib import Path
+import threading
+import time
 from typing import Any, Callable
 import uuid
 
@@ -25,6 +27,9 @@ WRITE_TIMEOUT = 120.0
 SETUP_TIMEOUT = 300.0
 UNSURE_HINT = ("What it did is unknown. Don't send it again: check kumi_history and the project (kumi_observe) "
                "first.")
+# How a write that was sent can end with its outcome unknown: no answer in time, the producer's Stop (both cancelled),
+# the runtime gone, or an answer that couldn't be read.
+UNSURE_CODES = ("timeout", "interrupted", "stopped", "protocol")
 
 
 class Host:
@@ -34,7 +39,7 @@ class Host:
     def __init__(self, ctx: Any, runtimes: runtime.Runtimes, *, data_dir: Callable[[], Path] | None = None,
                  pinned: Callable[[], str | None] = setup.pinned_version,
                  hook_timeout: Callable[[], float | None] | None = None, plugin_dir: Path | None = None,
-                 hermes_config: Callable[[], dict] | None = None):
+                 hermes_config: Callable[[], dict] | None = None, session_key: Callable[[], str] | None = None):
         self._ctx = ctx
         self.runtimes = runtimes
         self.calls = calls.CallIds()
@@ -43,6 +48,32 @@ class Host:
         self._hook_timeout = hook_timeout
         self.plugin_dir = plugin_dir  # where setup reads kumi_release.json (None: this plugin's own folder)
         self._hermes_config = hermes_config
+        self._session_key = session_key
+        self._stops: dict[str, float] = {}  # a session's key → when the producer last stopped its turn
+        self._stops_lock = threading.Lock()
+
+    def on_loop_stopped(self, session_key: Any = "", **kwargs: Any) -> None:
+        """Hermes's public `agent_loop_stopped` hook: the producer stopped a turn (the TUI's or Desktop's Stop, a
+        messaging gateway's /stop), named by its session key. A Kumi call of that turn still waiting on the runtime is
+        cancelled (`stop_watch`; research-1's review, item 7). Hermes's classic CLI doesn't fire it."""
+        if isinstance(session_key, str) and session_key:
+            with self._stops_lock:
+                self._stops[session_key] = time.monotonic()
+
+    def stop_watch(self) -> Callable[[], bool] | None:
+        """For a call starting now, whether its turn has been stopped since (`on_loop_stopped`), asked while it waits on
+        the runtime; None where Hermes doesn't name the calling session's key (`HERMES_SESSION_KEY`, its public
+        session variable), and then nothing is cancelled."""
+        key = self._session_key() if self._session_key is not None else _session_values("HERMES_SESSION_KEY")[0]
+        if not key:
+            return None
+        started = time.monotonic()
+
+        def stopped() -> bool:
+            with self._stops_lock:
+                return self._stops.get(key, float("-inf")) >= started
+
+        return stopped
 
     def hermes_config(self) -> dict:
         """Hermes's own settings (its config.yaml, as Hermes reads it), for the few Kumi follows; read on each use."""
@@ -439,14 +470,16 @@ def _forward(tool: str, timeout: float) -> Callable[..., dict]:
 
 def _write(host: Host, tool: str, args: dict, kwargs: dict) -> dict:
     """A write (C2): sent once. An answer that never came, or can't be read, means the outcome is unknown: reported as
-    unsure, never resent, and never called unchanged."""
+    unsure, never resent, and never called unchanged. The producer's Stop cancels it while it waits (`notifications/
+    cancelled`), so its remaining steps don't go on applying after Hermes has given the call up (research-1's review,
+    item 7); that's unsure too."""
     live = host.live()
     try:
-        return live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT)
+        return live.call(tool, args, host.identity(kwargs), timeout=WRITE_TIMEOUT, interrupted=host.stop_watch())
     except runtime.Unavailable as failure:
-        if failure.code not in ("timeout", "stopped", "protocol"):
+        if failure.code not in UNSURE_CODES:
             raise
-        return {"state": "unsure", "reason": failure.reason, "hint": UNSURE_HINT}
+        return {"state": "unsure", "code": failure.code, "reason": failure.reason, "hint": UNSURE_HINT}
 
 
 def kumi_change(host: Host, args: dict, **kwargs: Any) -> dict:
@@ -616,9 +649,10 @@ def kumi_listen(host: Host, args: dict, **kwargs: Any) -> dict:
                                                             "its runtime's deadline."}}
     timeout = deadline + runtime.TRACK_MARGIN
     try:
-        result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout)
+        result = host.live().call("listen", listen_args(args), host.identity(kwargs), timeout=timeout,
+                                  interrupted=host.stop_watch())
     except runtime.Unavailable as failure:
-        if failure.code not in ("timeout", "stopped", "protocol"):
+        if failure.code not in UNSURE_CODES:
             raise
         return {"state": "unsure", "code": failure.code, "reason": failure.reason, "cleanup": "unsure",
                 "hint": UNSURE_HINT}
