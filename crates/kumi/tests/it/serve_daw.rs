@@ -1065,11 +1065,19 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     let mut previewed = unapproved.clone();
     previewed["preview"] = json!(true);
     wire.call("change", previewed, Some("tc-5")).await;
-    let mut other = unapproved;
+    let mut other = unapproved.clone();
     other["title"] = json!("Something else");
     let (switched, _) = wire.call("change", other, Some("tc-5")).await;
     assert_eq!((switched["state"].clone(), switched["code"].clone()), (json!("refused"), json!("stale")), "{switched}");
     assert_eq!(lab.given.borrow().len(), 2);
+    // A preview that came with no call id (a hook that had none) binds its dispatch by the plan alone.
+    let mut unnamed = unapproved.clone();
+    unnamed["preview"] = json!(true);
+    wire.call("change", unnamed, None).await;
+    let (bound, _) = wire.call("change", unapproved, Some("tc-6")).await;
+    assert_eq!(bound["state"], "applied", "{bound}");
+    assert_eq!(lab.given.borrow().len(), 3);
+    let epoch = bound["epoch"].as_u64().unwrap();
 
     // 11b: the file changes between the approval and the dispatch: stale, and nothing runs.
     let kick = json!({"file": media.join("Kick.wav").display().to_string(), "provenance": provenance});
@@ -1079,7 +1087,7 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     std::fs::write(media.join("Kick.wav"), b"RIFF and something else entirely").unwrap();
     let (stale, _) = wire.call("change", sample_plan(&key, epoch, kick), Some("tc-3")).await;
     assert_eq!((stale["state"].clone(), stale["code"].clone()), (json!("refused"), json!("stale")), "{stale}");
-    assert_eq!(lab.given.borrow().len(), 2);
+    assert_eq!(lab.given.borrow().len(), 3);
 
     // 11d, the demo's step: a sound from a scanned library folder, found by its words, placed as it is.
     let (scan, _) = wire.call("library", json!({"action": "scan"}), Some("tc-scan")).await;
@@ -1102,7 +1110,7 @@ case!(serve_places_a_file_in_lives_simpler_only_from_a_source_it_resolves_and_pi
     let (from_library, _) = wire.call("change", sample_plan(&key, epoch, from_map), Some("tc-map")).await;
     assert_eq!(from_library["state"], "applied", "{from_library}");
     let library_file = std::fs::canonicalize(lab.library.path().join("Snare Tone.wav")).unwrap();
-    assert_eq!(lab.given.borrow()[2]["steps"][0]["input"]["sample"], json!(library_file.display().to_string()), "in place");
+    assert_eq!(lab.given.borrow()[3]["steps"][0]["input"]["sample"], json!(library_file.display().to_string()), "in place");
     let row = lab.ctx.history().row(from_library["history_ids"][0].as_str().unwrap()).unwrap();
     let source = &row.sources.unwrap()[0];
     assert_eq!((source["sound_id"].clone(), source["step"].clone()), (sound["sound_id"].clone(), json!(1)));

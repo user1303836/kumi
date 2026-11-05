@@ -230,7 +230,10 @@ async fn change(ctx: &Ctx, call: Call) -> Result<Value, OpError> {
     let dispatch = if previewed || checked.files.is_empty() {
         None
     } else {
-        match ctx.link().take_pin(&pin) {
+        // Its own call's preview, or one that came with no call id (bound by its plan alone).
+        let by_plan = pin_key(&super::ctx::Host::default(), &approved);
+        let found = ctx.link().take_pin(&pin).or_else(|| if pin == by_plan { None } else { ctx.link().take_pin(&by_plan) });
+        match found {
             Some((plan, files)) if plan == approved => Some(files),
             Some(_) => return Ok(refused("stale", "This plan isn't the one approved: preview it again.")),
             None => {
